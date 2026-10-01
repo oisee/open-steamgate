@@ -35,6 +35,61 @@ const MAX_CARGO = "src/l2demo/ship_max_cargo.l2.yaml";
 const RECENT = "src/l2demo/recent_voyage.l2.yaml";
 const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW, MIN_CAPTAINS, CARGO_LIMIT, MAX_CARGO, RECENT];
 
+const escapePattern = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// The recipe uses values, filters and inline sections. Fixed text must survive
+// rendering; an inline section's text may be omitted when its condition is false.
+function templateLinePattern(source) {
+  const tags = /\{\{\{[^{}]*\}\}\}|\{\{[^{}]*\}\}/g;
+  const parts = [];
+  let from = 0;
+  for (const match of source.matchAll(tags)) {
+    parts.push({text: source.slice(from, match.index)});
+    parts.push({tag: match[0].startsWith("{{{") ? match[0].slice(3, -3).trim() : match[0].slice(2, -2).trim()});
+    from = match.index + match[0].length;
+  }
+  parts.push({text: source.slice(from)});
+  if (parts.some((part) => part.tag !== undefined) &&
+      parts.every((part) => part.tag === undefined ? !part.text.trim() : /^[#^/!>]/.test(part.tag))) {
+    return null; // standalone control tags have no output line to compare
+  }
+
+  const render = (start, close) => {
+    let pattern = "";
+    for (let i = start; i < parts.length; i++) {
+      const part = parts[i];
+      if (part.text !== undefined) {
+        pattern += escapePattern(part.text);
+      } else if (part.tag.startsWith("/") && part.tag.slice(1) === close) {
+        return {pattern, next: i + 1, closed: true};
+      } else if (part.tag.startsWith("#") || part.tag.startsWith("^")) {
+        const name = part.tag.slice(1);
+        const body = render(i + 1, name);
+        if (body.closed) {
+          pattern += `(?:${body.pattern})?`;
+          i = body.next - 1;
+        } else {
+          pattern += ".*"; // a section continuing on another source line
+        }
+      } else {
+        // Values (including filtered/raw values), partials and unmatched tags.
+        pattern += ".*";
+      }
+    }
+    return {pattern, next: parts.length, closed: false};
+  };
+  return new RegExp(`^${render(0).pattern}$`);
+}
+
+function traceLineMismatch(entry, template, output) {
+  const source = template[entry.template_line - 1];
+  const rendered = output[entry.line - 1];
+  if (source === undefined || rendered === undefined) return "line out of range";
+  const pattern = templateLinePattern(source);
+  if (pattern === null) return null; // a standalone control tag emits no text of its own
+  return pattern.test(rendered) ? null : `output ${JSON.stringify(rendered)} does not match template ${JSON.stringify(source)}`;
+}
+
 describe("DSL L2: a rule, its generated check, its examples and its derived cases", function () {
   this.timeout(180000);
   let scratch, registry;
@@ -61,22 +116,48 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
       });
     }
 
-    it("old and parameterized rules trace every output line to the current templates", () => {
-      for (const name of ["zcl_l2_ship_captain", "zcl_l2_recent_voyage"]) {
+    it("every rule's class and test class trace to their current template lines", () => {
+      const counts = {exact: 0, pattern: 0, tagOnly: 0};
+      for (const rule of DEMO_RULES) {
+        const name = compileRule(rule, {registry}).class;
         for (const kind of ["clas", "clas.testclasses"]) {
           const prefix = join(OUT, `${name}.${kind}`);
           const sidecar = JSON.parse(readFileSync(`${prefix}.trace.json`, "utf8"));
           const template = readFileSync(sidecar.template, "utf8").split("\n");
           const output = readFileSync(`${prefix}.abap`, "utf8").split("\n");
-          for (const entry of sidecar.lines) {
+          expect(sidecar.rule, `${name}.${kind} belongs to ${rule}`).to.equal(rule);
+          expect(sidecar.lines.length, `${name}.${kind} traces every output line`).to.equal(output.length - 1);
+          for (const [index, entry] of sidecar.lines.entries()) {
+            expect(entry.line, `${name}.${kind} trace entry ${index + 1}`).to.equal(index + 1);
             const source = template[entry.template_line - 1];
             const rendered = output[entry.line - 1];
             expect(source, `${name}.${kind} output line ${entry.line} names template line ${entry.template_line}`).to.be.a("string");
             expect(rendered, `${name}.${kind} output line ${entry.line} exists`).to.be.a("string");
-            if (!source.includes("{{")) expect(rendered, `${name}.${kind} output line ${entry.line} from template line ${entry.template_line}`).to.equal(source);
+            const pattern = templateLinePattern(source);
+            if (pattern === null) counts.tagOnly++;
+            else if (source.includes("{{")) counts.pattern++;
+            else counts.exact++;
+            expect(traceLineMismatch(entry, template, output),
+              `${name}.${kind} output line ${entry.line} from template line ${entry.template_line}`).to.equal(null);
           }
         }
       }
+      expect(counts.exact).to.be.greaterThan(0);
+      expect(counts.pattern).to.be.greaterThan(0);
+      console.log(`L2 template trace: ${counts.exact} exact, ${counts.pattern} pattern, ${counts.tagOnly} tag-only lines`);
+    });
+
+    it("a sidecar template line shifted by one is rejected in memory", () => {
+      const prefix = join(OUT, `${CLASS}.clas`);
+      const sidecar = JSON.parse(readFileSync(`${prefix}.trace.json`, "utf8"));
+      const template = readFileSync(sidecar.template, "utf8").split("\n");
+      const output = readFileSync(`${prefix}.abap`, "utf8").split("\n");
+      const original = sidecar.lines[1]; // the rule/title line has two value holes
+      expect(original).to.include({line: 2, template_line: 2});
+      const mutant = {...original, template_line: original.template_line + 1};
+      expect(traceLineMismatch(original, template, output)).to.equal(null);
+      expect(traceLineMismatch(mutant, template, output),
+        `shifted ${CLASS} output line ${original.line} to template line ${mutant.template_line}`).to.not.equal(null);
     });
 
     it("and the check notices one changed byte", async () => {
