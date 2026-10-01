@@ -38,6 +38,13 @@ describe("static narrow SUBMIT lowering", () => {
     expect(after).to.contain("( name = 'P_COUNT' value = CONV string( 2 ) )");
     expect(after.split("\n").length).to.equal(before.split("\n").length);
   });
+  it("keeps repeated select-option clauses in source order for the called report", () => {
+    const after = lowerNarrowSubmit(source("SUBMIT zosd_sub_sem WITH s_text = 'q1' WITH s_text = 'q2' WITH s_text IN lt_ranges AND RETURN."), file, core);
+    expect(after).to.contain("zcl_osd_submit_semantics=>combine( VALUE #(");
+    expect(after.match(/name = 'S_TEXT'/g)).to.have.length(3);
+    expect(after.indexOf("'q1'")).to.be.lessThan(after.indexOf("'q2'"));
+    expect(after.indexOf("'q2'")).to.be.lessThan(after.indexOf("for_submit( lt_ranges )"));
+  });
 
   it("lowers static VIA JOB with bounded scalar selections", () => {
     const before = source("SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_count WITH p_date = lv_date AND RETURN.");
@@ -67,8 +74,20 @@ ENDCLASS.`;
     const before = source("DATA lv_job TYPE c LENGTH 32.\n    DATA lv_count TYPE c LENGTH 8.\n    SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_count WITH p_date = '20251231' AND RETURN.");
     const after = lowerNarrowSubmit(before, file, core);
     const config = core.Config.getDefault();
+    // the lowered call wraps WITH rows in zcl_osd_submit_semantics=>combine( )
+    const semantics = `CLASS zcl_osd_submit_semantics DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS combine IMPORTING it_input TYPE zcl_osd_batch_report=>ty_values
+      RETURNING VALUE(rt_input) TYPE zcl_osd_batch_report=>ty_values.
+ENDCLASS.
+CLASS zcl_osd_submit_semantics IMPLEMENTATION.
+  METHOD combine.
+    rt_input = it_input.
+  ENDMETHOD.
+ENDCLASS.`;
     const registry = new core.Registry(config).addFile(new core.MemoryFile(file, after))
-      .addFile(new core.MemoryFile("zcl_osd_batch_report.clas.abap", stub)).parse();
+      .addFile(new core.MemoryFile("zcl_osd_batch_report.clas.abap", stub))
+      .addFile(new core.MemoryFile("zcl_osd_submit_semantics.clas.abap", semantics)).parse();
     const syntax = registry.findIssues().filter((issue) => issue.getKey() === "check_syntax").map((issue) => issue.getMessage());
     expect(syntax).to.deep.equal([]);
   });
@@ -95,7 +114,7 @@ ENDCLASS.`;
   it("keeps a comment on the first line of the statement", () => {
     const before = source("SUBMIT zgg_ex_012 \" first\n      WITH p_date = lv_date AND RETURN.");
     const after = lowerNarrowSubmit(before, file, core);
-    expect(after).to.match(/submit\( iv_program = 'ZGG_EX_012'.*\). " first/);
+    expect(after).to.match(/submit\( iv_program = 'ZGG_EX_012'.*\). sy-subrc = lv_osd_submit_subrc_\d+_\d+\. " first/);
     expect(unknownStatements(after)).to.deep.equal([]);
   });
 
@@ -138,7 +157,7 @@ ENDCLASS.`;
   it("passes WITH sel IN range as selection ranges on a synchronous SUBMIT", () => {
     const before = source("SUBMIT zgg_ex_012 WITH s_date IN lt_range WITH p_count EQ 2 AND RETURN.");
     const after = lowerNarrowSubmit(before, file, core);
-    expect(after).to.contain("( name = 'S_DATE' ranges = zcl_osd_submit_ranges=>of( lt_range ) )");
+    expect(after).to.contain("( name = 'S_DATE' ranges = zcl_osd_submit_ranges=>for_submit( lt_range ) )");
     expect(after).to.contain("( name = 'P_COUNT' value = CONV string( 2 ) )");
     expect(after).to.contain("iv_batch = sy-batch");
     expect(unknownStatements(after)).to.deep.equal([]);
@@ -148,7 +167,7 @@ ENDCLASS.`;
     const form = source("SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_number WITH s_date IN lt_range AND RETURN.");
     const after = lowerNarrowSubmit(form, file, core);
     expect(after).to.contain("submit_via_job( iv_program = 'ZGG_EX_012'");
-    expect(after).to.contain("( name = 'S_DATE' ranges = zcl_osd_submit_ranges=>of( lt_range ) )");
+    expect(after).to.contain("( name = 'S_DATE' ranges = zcl_osd_submit_ranges=>for_submit( lt_range ) )");
     expect(unknownStatements(after)).to.deep.equal([]);
   });
 
@@ -163,7 +182,6 @@ ENDCLASS.`;
     "SUBMIT zgg_ex_012 VIA JOB lv_job NUMBER lv_a VIA JOB lv_job NUMBER lv_b AND RETURN.",
     "SUBMIT /OSDNS/ZREPORT_WITH_A_NAME_LONGER_THAN_FORTY AND RETURN.",
     "SUBMIT zgg_ex_012 WITH p_date = lv_date AND RETURN WITH p_count = 2.",
-    "SUBMIT zgg_ex_012 WITH p_date = lv_date WITH p_date = lv_other AND RETURN.",
   ]) {
     it(`refuses ${form}`, () => {
       expect(() => lowerNarrowSubmit(source(form), file, core)).to.throw("supported SUBMIT form");

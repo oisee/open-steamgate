@@ -15,6 +15,9 @@ CLASS zcl_osd_submit_ranges DEFINITION
         it_range         TYPE ANY TABLE
       RETURNING
         VALUE(rt_ranges) TYPE zif_gg_selection_screen_types=>ty_ranges.
+    CLASS-METHODS for_submit
+      IMPORTING it_range TYPE ANY TABLE
+      RETURNING VALUE(rt_ranges) TYPE zif_gg_selection_screen_types=>ty_ranges.
   PRIVATE SECTION.
     CLASS-METHODS check_line_type
       IMPORTING
@@ -76,6 +79,16 @@ CLASS zcl_osd_submit_ranges IMPLEMENTATION.
       ls_range-high = <lv_high>.
       APPEND ls_range TO rt_ranges.
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD for_submit.
+    rt_ranges = of( it_range ).
+    IF rt_ranges IS INITIAL.
+* Keep an empty IN distinct from a scalar WITH = '' until the registry.
+* A range row with this sign is invalid input, so it cannot denote a real
+* selection. The registry removes it before calling the report host.
+      APPEND VALUE #( sign = '#' option = '  ' ) TO rt_ranges.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

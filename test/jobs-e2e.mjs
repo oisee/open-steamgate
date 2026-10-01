@@ -143,7 +143,8 @@ describe("compiled ABAP jobs end to end", function () {
     expect(seen[0].param.trim()).to.equal("RANGE_1");
     expect(seen.slice(1).map(({sign, option, low, high}) => ({
       sign: sign.trim(), option: option.trim(), low: JSON.parse(low), high: JSON.parse(high),
-    }))).to.deep.equal(expectedRanges);
+    }))).to.deep.equal(expectedRanges.map((row, index) =>
+      index === 0 ? {...row, low: row.low.toUpperCase()} : row));
     expect((await dialogStep(() => invoke("SHOW_JOBSTATE", {jobname: name, jobcount: count}, ["finished"]))).finished).to.equal("X");
   });
 

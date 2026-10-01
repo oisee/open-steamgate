@@ -8,6 +8,7 @@
     "test/job-tail-events.mjs",
     "test/job-tail-after-commit.mjs",
     "test/job-status-snapshot.mjs",
+    "test/submit-semantics.mjs",
     "test/osd-queue-check.mjs"
   ]
 }
