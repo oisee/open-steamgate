@@ -172,6 +172,13 @@ function controllerContext() {
 }
 
 describe("editors/vscode: the extension's logic", function () {
+  it("registers .abap as a breakpoint-capable language in a fresh profile", () => {
+    const {contributes} = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
+    expect(contributes.languages).to.deep.include({id: "abap", aliases: ["ABAP"], extensions: [".abap"]});
+    expect(contributes.breakpoints).to.deep.include({language: "abap"});
+    expect(contributes.debuggers ?? [], "Node attach uses VS Code's built-in debugger").to.deep.equal([]);
+  });
+
   it("uses paused debug state for ABAP run and stepping keys", () => {
     const bindings = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8")).contributes.keybindings;
     for (const [key, command] of [["f8", "osd.run"], ["f9", "osd.classrun"]]) {
@@ -862,7 +869,10 @@ describe("editors/vscode: the extension's logic", function () {
       releaseDebugger: async () => { calls.push(["release"]); return true; },
     };
     debugOnDemand({subscriptions: []}, () => controller);
-    const abap = new api.SourceBreakpoint("/w/src/zcl_osd_fleet_report.clas.abap");
+    const document = {uri: {fsPath: "/w/src/zcl_osd_fleet_report.clas.abap"}, languageId: "abap"};
+    expect(document.languageId).to.equal(JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"))
+      .contributes.breakpoints[0].language);
+    const abap = new api.SourceBreakpoint(document.uri.fsPath);
     handler({added: [new api.SourceBreakpoint("/w/tools/x.mjs")], removed: [], changed: []});
     expect(calls, "not an .abap file").to.deep.equal([]);
     handler({added: [abap], removed: [], changed: []});
@@ -1854,6 +1864,78 @@ describe("editors/vscode: the extension's logic", function () {
 });
 
 describe("editors/vscode: Test Explorer grouping (Project / Packs / Workspace layers / System)", function () {
+  it("rebuilds the workspace test tree and refreshes its count lens when Start reaches serving", async () => {
+    const folder = mkdtempSync(path.join(tmpdir(), "osd-serving-layer-"));
+    const source = path.join(folder, "src/zcl_layer_test.clas.testclasses.abap");
+    mkdirSync(path.dirname(source), {recursive: true});
+    writeFileSync(source, "CLASS ltcl_test DEFINITION FOR TESTING.\n  PRIVATE SECTION.\n    METHODS check_it FOR TESTING.\nENDCLASS.\n");
+    const api = vscodeStub({home: ROOT, "tests.showSystem": false});
+    const state = new api.EventEmitter();
+    const systemController = {launcher: {osdHome: ROOT, state: "stopped", layers: []}, onDidChange: state.event};
+    const collection = (parent) => {
+      const items = new Map();
+      return {get: (id) => items.get(id), get size() { return items.size; },
+        add(item) { item.parent = parent; items.set(item.id, item); },
+        replace(next) { items.clear(); next.forEach((item) => this.add(item)); },
+        [Symbol.iterator]: () => items[Symbol.iterator]()};
+    };
+    const tree = {items: collection(undefined),
+      createTestItem(id, label, uri) { const item = {id, label, uri}; item.children = collection(item); return item; },
+      createRunProfile() {}, dispose() {}};
+    api.tests = {createTestController: () => tree};
+    api.TestRunProfileKind = {Run: 1, Debug: 2};
+    api.workspace.findFiles = async (pattern) => pattern instanceof api.RelativePattern ? [api.Uri.file(source)] : [];
+    api.workspace.getWorkspaceFolder = () => undefined;
+    api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange() {}, dispose() {}});
+    api.workspace.onDidSaveTextDocument = () => ({dispose() {}});
+    api.commands.registerCommand = () => ({dispose() {}});
+    api.RelativePattern = class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } };
+    api.CodeLens = class { constructor(range, command) { this.range = range; this.command = command; } };
+    let lensProvider;
+    api.languages = {registerCodeLensProvider: (_selector, provider) => { lensProvider = provider; return {dispose() {}}; }};
+    const {testExplorer, readersLensProvider} = loadExtension(api);
+    const oldReaders = Osd.prototype.readers;
+    Osd.prototype.readers = async () => ({counts: {readers: 0, tests: systemController.launcher.state === "running" ? 1 : 0,
+      services: 0}, readers: []});
+    const document = {fileName: path.join(folder, "src/zcl_layer_test.clas.abap"), getText: () => "CLASS zcl_layer_test DEFINITION PUBLIC.\nENDCLASS."};
+    let explorer;
+    let lens;
+    try {
+      explorer = testExplorer(controllerContext(), {appendLine() {}}, {systemController});
+      lens = readersLensProvider({appendLine() {}}, systemController);
+      const titles = async () => (await lensProvider.provideCodeLenses(document)).map((item) => item.command.title);
+      let lensRefreshes = 0;
+      const subscription = lensProvider.onDidChangeCodeLenses(() => lensRefreshes++);
+      await tree.resolveHandler();
+      expect(tree.items.get("group:workspace")).to.equal(undefined);
+      expect(await titles()).to.deep.equal(["read by 0 · tests 0 · services 0"]);
+
+      systemController.launcher.state = "building";
+      state.fire();
+      systemController.launcher.layers = [{folder, srcDir: path.join(folder, "src")}];
+      systemController.launcher.state = "starting";
+      state.fire();
+      systemController.launcher.state = "running";
+      state.fire();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(tree.items.get("group:workspace").children.get(`group:workspace:${path.basename(folder)}`)
+        .children.get("CLAS:ZCL_LAYER_TEST")).to.not.equal(undefined);
+      expect(await titles()).to.deep.equal(["read by 0 · tests 1 · services 0"]);
+      expect(lensRefreshes).to.be.greaterThan(0);
+
+      systemController.launcher.layers = [];
+      state.fire();
+      await new Promise((resolve) => setTimeout(resolve, 350));
+      expect(tree.items.get("group:workspace")).to.equal(undefined);
+      subscription.dispose();
+    } finally {
+      lens?.dispose();
+      explorer?.dispose();
+      Osd.prototype.readers = oldReaders;
+      rmSync(folder, {recursive: true, force: true});
+    }
+  });
+
   it("indexes a class's tests by its main file while keeping child locations in testclasses", async () => {
     const api = vscodeStub({home: ROOT, "tests.showSystem": false});
     const include = path.join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
