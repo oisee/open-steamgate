@@ -256,7 +256,10 @@ The captured file contains only `S` and `R`. Activity `C` is SAP's "receive via
 APC WebSocket": a `bind_amc_message_consumer` call (application and channel ids
 resolved like a producer's, program from the enclosing object, message type from
 the channel's other uses or the call site's overlay) derives it from code, and
-an unresolvable id is refused with file:line unless `callSites` names the call. Local test class calls count and belong to
+an unresolvable id is refused with file:line unless `callSites` names the call.
+That a bind needs `C` and that `R` does not authorise it (the runtime's APC bind
+subscribes with `C`, and a test refuses `R` for it) is taken from SAP's
+documentation and not measured on A4H; a probe there may overturn it. Local test class calls count and belong to
 their global class, as SAP's `PROGRAM_ID` does. The capture shows that abapGit
 preserves configured `NR` order rather than sorting it.
 
