@@ -26,7 +26,7 @@ import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions, parseCookies, CONTEXT_COOKIE, SESSION_COOKIE} from "./adt-session.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
-import {ObjectStore, TYPES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
+import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
 import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
@@ -2177,21 +2177,30 @@ export function adtRouter(options = {}) {
       res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", `unknown action ${action || "(none)"}`));
     });
 
-    // WRITE. The file only: the transpile belongs to activation, where the
-    // verdict is what the client waits for and the modules follow after.
-    const writeSource = (req, res) => {
+    // Whether this request may change the object: writable, and the handle
+    // in lockHandle held by this session for this object. Answers the
+    // refusal itself and returns false when not.
+    const mayWrite = (req, res) => {
       const {session} = req.adt;
       const handle = String(req.query.lockHandle ?? "");
       const lock = session.locks.get(handle);
       const entry = store.find(type, req.params.name);
       if (entry !== undefined && entry.writable === false) {
         res.status(405).type("application/xml").send(exceptionDocument("ExceptionResourceNoAccess", `${entry.type} ${entry.name} is a library object and cannot be changed here`));
-        return;
+        return false;
       }
       if (lock === undefined || lock.type !== (entry?.type ?? type) || lock.name !== (entry?.name ?? String(req.params.name).toUpperCase())) {
         // the handle is the client's proof it owns the object right now, and
         // a handle from another session or another object is neither
         res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked", handle === "" ? "no lock handle was given" : `lock handle ${handle} does not hold this object in this session`));
+        return false;
+      }
+      return true;
+    };
+    // WRITE. The file only: the transpile belongs to activation, where the
+    // verdict is what the client waits for and the modules follow after.
+    const writeSource = (req, res) => {
+      if (mayWrite(req, res) === false) {
         return;
       }
       rawBody(req).then((body) => {
@@ -2233,6 +2242,34 @@ export function adtRouter(options = {}) {
     if (type === "CLAS") {
       router.put(`${BASE}/${adt}/:name/includes/:include`, writeSource);
       router.put(`${BASE}/${adt}/:name/includes/:include/source/main`, writeSource);
+      // CREATE of a class include (a client's "new test class" makes the
+      // testclasses one this way): a POST on the class's includes with the
+      // include named in the body, under the class's lock like a PUT,
+      //   <class:abapClassInclude adtcore:name="..." class:includeType="testclasses"/>
+      // and the answer 201 with the include's URI. The include starts
+      // empty; its source is the client's next PUT.
+      router.post(`${BASE}/${adt}/:name/includes`, async (req, res) => {
+        const body = (await rawBody(req)).toString("utf8");
+        if (mayWrite(req, res) === false) {
+          return;
+        }
+        answer(res, () => {
+          const include = attribute(body, undefined, "class:includeType") ?? "";
+          if (include === "" || include === "main" || Object.hasOwn(CLASS_INCLUDES, include) === false) {
+            res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest",
+              include === "" ? "the create body names no include type" : `${include} is not a class include`));
+            return;
+          }
+          const current = store.read(type, req.params.name, include);
+          if (current.empty !== true) {
+            throw new Conflict(type, `${current.name} include ${include}`);
+          }
+          store.write(type, req.params.name, "", include);
+          res.status(201)
+            .set("Location", `${BASE}/${adt}/${encodeURIComponent(current.name.toLowerCase())}/includes/${include}`)
+            .end();
+        });
+      });
     }
   }
 

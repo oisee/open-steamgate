@@ -1275,6 +1275,35 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     });
   });
 
+  it("POST on a class's includes creates the test include, under the class's lock", async () => {
+    const made = await call("/oo/classes", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("CLAS", "ZCL_MADE_INCL", "gets tests", "$STG_DEMO")});
+    expect(made.status).to.equal(201);
+    const body = `<?xml version="1.0" encoding="UTF-8"?>
+<class:abapClassInclude xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core"
+  adtcore:name="ZCL_MADE_INCL" class:includeType="testclasses"/>`;
+    const include = "/oo/classes/zcl_made_incl/includes";
+    // no lock, no include
+    const unlocked = await call(include, {method: "POST", headers: {"content-type": "application/*"}, body});
+    expect(unlocked.status).to.equal(409);
+    expect(existsSync(join(root, "src/demo/zcl_made_incl.clas.testclasses.abap"))).to.equal(false);
+
+    const locked = await call("/oo/classes/zcl_made_incl?_action=LOCK&accessMode=MODIFY", {method: "POST"});
+    const handle = (await locked.text()).match(/<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/)?.[1];
+    const res = await call(`${include}?lockHandle=${handle}`, {method: "POST", headers: {"content-type": "application/*"}, body});
+    expect(res.status, await res.text()).to.equal(201);
+    expect(res.headers.get("location")).to.equal("/sap/bc/adt/oo/classes/zcl_made_incl/includes/testclasses");
+    expect(readFileSync(join(root, "src/demo/zcl_made_incl.clas.testclasses.abap"), "utf8")).to.equal("");
+    // the next move is the PUT of its source, which the same handle carries
+    const put = await call(`${include}/testclasses?lockHandle=${handle}`, {method: "PUT", body: "* tests\n"});
+    expect(put.status).to.equal(200);
+    const again = await call(`${include}?lockHandle=${handle}`, {method: "POST", headers: {"content-type": "application/*"}, body});
+    expect(again.status, "an include that is there is not created twice").to.equal(409);
+    const bogus = await call(`${include}?lockHandle=${handle}`, {method: "POST", headers: {"content-type": "application/*"},
+      body: body.replace("testclasses", "nonsense")});
+    expect(bogus.status).to.equal(400);
+    await call(`/oo/classes/zcl_made_incl?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
+  });
+
   it("what abapGit writes on disk, the façade serves without a restart", async () => {
     expect((await call("/oo/interfaces/zif_from_git")).status).to.equal(404);
     writeFileSync(join(root, "src/demo/zif_from_git.intf.abap"), "INTERFACE zif_from_git PUBLIC.\nENDINTERFACE.\n");
