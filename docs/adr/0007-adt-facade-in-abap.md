@@ -11,8 +11,8 @@ no ADT. The lock side of this decision is ADR 0008.
 ## Context
 
 The ADT façade is `tools/adt-facade.mjs` (3000 lines on `main`, 2026-10-01)
-plus seven helper modules (`tools/adt-session.mjs`, `adt-versions.mjs`,
-`adt-cds.mjs`, `adt-documents.mjs`, `adt-source-properties.mjs`, ...). It runs
+plus five helper modules (`tools/adt-session.mjs`, `adt-versions.mjs`,
+`adt-cds.mjs`, `adt-documents.mjs`, `adt-source-properties.mjs`). It runs
 only in the Node host (OSG-JS, `test/start.mjs`):
 
 | host | ADT today |
@@ -77,11 +77,17 @@ was one more rule added to it by hand. A system answers these questions with
    repository: the interfaces we implement are the contract, the
    implementation is ours.
 
-5. **Migration by diff.** An endpoint group moves to ABAP when its answers
-   diff equal against OSG-JS (the Node façade) on vsp's scenarios. Until then
-   the Node façade serves it. The A4H diff harness from vsp-i7 is the
-   oracle's oracle: it checks the Node façade against a real system, and it
-   runs occasionally, not on every change.
+5. **Migration by diff, two gates.** An endpoint group moves to ABAP only when
+   both hold:
+   - **Gate 1, every change:** its answers diff equal against OSG-JS (the Node
+     façade) on vsp's scenarios. Until then the Node façade serves it.
+   - **Gate 2, before the switch:** the A4H diff harness from vsp-i7 shows no
+     difference for that group that is not already a recorded, accepted entry
+     in ANORMALIES. It is the oracle's oracle: it checks what OSG-JS answers
+     against a real system, so it runs before each group switches and
+     occasionally otherwise, not on every change. A known difference from the
+     system is fixed in OSG-JS first (where Gate 1 then carries it over), never
+     copied into the ABAP façade.
 
 6. **Ownership.** dell builds the skeleton: router, CSRF, session, and locks
    through ENQ (ADR 0008). After that the endpoint groups run in parallel:
