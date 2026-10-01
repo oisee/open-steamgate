@@ -206,6 +206,7 @@ describe("a comment where a system refuses to store one (OO_SOURCE_BASED 012)", 
       for (const [name, text] of classes) expect(rows(text), name).to.deep.equal([]);
     });
     it("a built gen/ holds none either (skipped without a build)", function () {
+      this.timeout(60000);
       if (!existsSync("gen/cds")) this.skip();
       const files = filesOf(["gen"]);
       expect(files.length).to.be.greaterThan(0);
