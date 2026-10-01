@@ -78,6 +78,20 @@ describe("tools/rfc-proxy: CALL FUNCTION without DESTINATION for a module that i
     expect(allowMatcher("")("ANY")).to.equal(false);
   });
 
+  it("refuses an allow entry that names every module (*, **)", () => {
+    for (const a of ["*", "Z_ONE,*", " ** "]) expect(() => allowMatcher(a), a).to.throw(/every module/);
+  });
+
+  it("a blank DESTINATION asks for local execution: the proxy does not answer it", async () => {
+    installed = await installFunctionProxy(abap, {destination: "SYN", allow: "Z_PROXY_*", mode: "replay", folder: FOLDER});
+    const error = await dump(() => abap.statements.callFunction({name: "Z_PROXY_PROBE_FM", destination: "   ",
+      exporting: {iv_key: key("A1")}, importing: {ev_text: new abap.types.Character(5)}}));
+    expect(error).to.be.instanceOf(illegal);
+    expect(proxyJournal()).to.have.length(0);
+    // and the same name without DESTINATION is still forwarded afterwards
+    expect(abap.FunctionModules["Z_PROXY_PROBE_FM"]).to.be.a("function");
+  });
+
   it("answers an allowed, non-transpiled module from a replay capture", async () => {
     installed = await installFunctionProxy(abap, {destination: "SYN", allow: "Z_PROXY_PROBE_FM", mode: "replay", folder: FOLDER});
     const text = await probe.run_static({iv_key: key("A1")});

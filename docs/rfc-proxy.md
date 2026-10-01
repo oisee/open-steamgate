@@ -18,6 +18,11 @@ the client `clientFor` builds for the destination, so live, record and replay
 use the one client and the one capture format of `docs/rfc-channel.md` /
 `tools/rfc-replay.mjs`; any other name stays `undefined`.
 
+The allow list is bounded on purpose: a bare `*` (every module) is refused.
+A blank `DESTINATION` asks for local execution, so the proxy does not answer
+it (nor `STARTING NEW TASK`): the runtime's `callFunction` reads the plain
+table, and an absent module dumps there as before.
+
 A call without DESTINATION has no EXCEPTIONS map in its parameters (the caller
 catches a classic error and switches on its name), so the forwarder gives the
 client a `raise(key)` that throws one; a captured or live classic exception

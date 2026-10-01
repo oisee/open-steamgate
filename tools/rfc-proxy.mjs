@@ -24,10 +24,14 @@ import {ORIGINAL_FUNCTION_MODULES, clientFor, loadDestinations, localClient} fro
 
 const JOURNAL = Symbol.for("osd.rfc.proxyJournal");
 
-/** `NAME` exact or `PREFIX*`, case-insensitive, as a predicate */
+/** `NAME` exact or `PREFIX*`, case-insensitive, as a predicate; a bare `*` (every name) is refused */
 export function allowMatcher(allow) {
   const entries = (Array.isArray(allow) ? allow : String(allow ?? "").split(","))
     .map((e) => e.trim().toUpperCase()).filter((e) => e !== "");
+  const unbounded = entries.find((e) => /^\**$/.test(e));
+  if (unbounded !== undefined) {
+    throw new Error(`function proxy: allow entry '${unbounded}' names every module; give exact names or a non-empty PREFIX*`);
+  }
   const exact = new Set(entries.filter((e) => !e.endsWith("*")));
   const prefixes = entries.filter((e) => e.endsWith("*")).map((e) => e.slice(0, -1));
   return (name) => exact.has(name) || prefixes.some((p) => name.startsWith(p));
@@ -91,11 +95,28 @@ export async function installFunctionProxy(abap, options = {}) {
     }
     return forwarders.get(name);
   };
+  // the runtime's callFunction (only reached with DESTINATION, and for
+  // STARTING NEW TASK) reads the table for a blank DESTINATION, which asks
+  // for local execution: there the proxy answers nothing. The read happens
+  // before the statement's first await, so a counter held over the
+  // synchronous part of the call is exact.
+  let local = 0;
+  const statements = abap.statements;
+  const hadOwnCall = Object.prototype.hasOwnProperty.call(statements, "callFunction");
+  const ownCall = statements.callFunction;
+  statements.callFunction = function (options) {
+    local += 1;
+    try {
+      return ownCall.call(this, options);
+    } finally {
+      local -= 1;
+    }
+  };
   abap[ORIGINAL_FUNCTION_MODULES] = original;
   abap.FunctionModules = new Proxy(original, {
     get: (target, key, receiver) => {
       const value = Reflect.get(target, key, receiver);
-      if (value !== undefined || typeof key !== "string") {
+      if (value !== undefined || typeof key !== "string" || local > 0) {
         return value;
       }
       const name = key.trimEnd().toUpperCase();
@@ -105,6 +126,8 @@ export async function installFunctionProxy(abap, options = {}) {
   return {
     uninstall() {
       abap.FunctionModules = original;
+      if (hadOwnCall) statements.callFunction = ownCall;
+      else delete statements.callFunction;
       delete abap[ORIGINAL_FUNCTION_MODULES];
       delete abap[JOURNAL];
     },
