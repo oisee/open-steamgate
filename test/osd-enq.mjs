@@ -11,7 +11,7 @@
 // steps run and are not checked.
 import {readFileSync} from "node:fs";
 import {expect} from "chai";
-import {LockServer, garg} from "../tools/osd-enq.mjs";
+import {LockServer, collide, garg, locks} from "../tools/osd-enq.mjs";
 
 const contract = JSON.parse(readFileSync(new URL("./fixtures/enq/contract.json", import.meta.url), "utf8"));
 const CLIENT = "001";
@@ -233,11 +233,53 @@ describe("the lock server's own rules beyond the fixtures", function () {
     expect(rows[0]).to.include({dialogs: 1, update: ended});
   });
 
+  it("takes a blank or 0 _SCOPE as the default 2", async () => {
+    for (const scope of [" ", "0", "", undefined, "2"]) {
+      const srv = new LockServer("i");
+      const a = srv.open("U");
+      await srv.enqueue(a, lockOn("A", "E", scope));
+      const rows = srv.read();
+      expect(rows, `scope ${JSON.stringify(scope)}`).to.have.length(1);
+      expect(rows[0]).to.include({dialogs: 0, updates: 1});
+    }
+  });
+
+  it("keys a lock on table, argument and mode, not the lock object (as Go)", async () => {
+    const srv = new LockServer("i");
+    const a = srv.open("U");
+    const r2 = {...lockOn("A", "E", 2), object: "ET2"};
+    await srv.enqueue(a, lockOn("A", "E", 2));
+    await srv.enqueue(a, r2);
+    expect(srv.read()).to.have.length(1);
+    expect(srv.read()[0].updates).to.equal(2);
+    srv.dequeue(a, r2);
+    srv.dequeue(a, lockOn("A", "E", 2));
+    expect(srv.read()).to.have.length(0);
+  });
+
+  it("collides position by position (as Go's TestCollide)", () => {
+    const g = garg("001", [{value: "A", length: 3}, {generic: true, length: 3}]);
+    const cases = [
+      [g, garg("001", [{value: "A", length: 3}, {value: "B", length: 3}]), true],
+      [g, garg("001", [{value: "B", length: 3}, {value: "B", length: 3}]), false],
+      [garg("001", [{value: "A", length: 3}]), garg("001", [{value: "B", length: 3}, {value: "X", length: 3}]), false],
+      [garg("001", [{value: "A", length: 3}]), garg("001", [{value: "A", length: 3}, {value: "X", length: 3}]), false],
+      [garg("001", [{value: "A", length: 3}]), garg("001", [{value: "A", length: 3}, {value: "", length: 3}]), true],
+    ];
+    for (const [a, b, want] of cases) expect(collide(a, b), `${a} / ${b}`).to.equal(want);
+  });
+
+  it("is one table per globalThis", () => {
+    expect(locks()).to.equal(locks());
+    expect(globalThis.__osdLocks).to.equal(locks());
+  });
+
   it("answers SYSTEM_FAILURE after close", async () => {
     const srv = new LockServer("i");
     const a = srv.open("U");
     srv.close();
     expect((await srv.enqueue(a, lockOn("A", "E", 2))).subrc).to.equal(2);
+    expect(srv.commit(a, true)).to.equal("");
   });
 
   it("lets one of many concurrent sessions have an E lock", async () => {

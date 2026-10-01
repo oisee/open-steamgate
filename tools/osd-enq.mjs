@@ -34,9 +34,16 @@
 //                            before it returns)
 //   rollback(sid)            at ROLLBACK WORK and when a dialog step ends in a
 //                            dump (tools/osd-dialog-step.mjs rolls back)
+//   updateDone(sid, ended)   also when that update fails or dumps, or the
+//                            update task's half stays for good
 //   end(sid)                 when the session ends: logoff, expiry, the end of
 //                            a stateless request, a closed WebSocket, the end
 //                            of a job
+// The implicit database commit at the end of a dialog step is not COMMIT
+// WORK: it touches no lock. An ENQUEUE with _WAIT waits between attempts
+// and must give up the work process meanwhile, as WAIT UP TO does in
+// tools/osd-dialog-step.mjs: holding it, the session that holds the lock
+// could never run its DEQUEUE.
 // locks() is the one table of the process.
 
 const WAIT_INTERVAL_MS = 1000;
@@ -73,7 +80,12 @@ export function collide(a, b) {
   return true;
 }
 
-const scopeOf = (r) => (r.scope ? Number(r.scope) : 2);
+/** _SCOPE 1, 2 or 3; anything else -- unsupplied, a blank or "0" of an
+ * ABAP CHAR1 -- is the default 2 */
+const scopeOf = (r) => {
+  const n = Number(String(r.scope ?? "").trim());
+  return n === 1 || n === 3 ? n : 2;
+};
 
 export class LockServer {
   /** instance names the server in owner ids, as an application server's
@@ -134,7 +146,7 @@ export class LockServer {
     }
     if (!same) {
       same = {client: r.client, table: r.table, object: r.object, arg, mode: r.mode, user: s.user,
-        dialog: "", update: "", dialogs: 0, updates: 0, taken: this.now(), session: sid};
+        dialog: "", update: "", dialogs: 0, updates: 0, taken: new Date(this.now()), session: sid};
       this.rows.push(same);
     }
     const scope = scopeOf(r);
@@ -163,7 +175,7 @@ export class LockServer {
   /** releases one count of a lock the session holds with exactly this
    * argument, mode and scope; anything else is a silent no-op */
   dequeue(sid, r) {
-    const s = this.sessions.get(sid);
+    const s = this.live(sid);
     if (!s) return;
     const arg = garg(r.client, r.fields);
     const scope = scopeOf(r);
@@ -183,6 +195,12 @@ export class LockServer {
     this.sweep();
   }
 
+  /** the session, unless the server is closed (then every call is a no-op,
+   * as in Go) */
+  live(sid) {
+    return this.closed ? undefined : this.sessions.get(sid);
+  }
+
   /** drops the rows no half holds any more and blanks a released half */
   sweep() {
     this.rows = this.rows.filter((w) => {
@@ -198,7 +216,7 @@ export class LockServer {
   }
 
   release(sid) {
-    const s = this.sessions.get(sid);
+    const s = this.live(sid);
     if (!s) return;
     for (const w of this.rows) {
       if (w.session !== sid) continue;
@@ -210,7 +228,7 @@ export class LockServer {
 
   /** ROLLBACK WORK: the update halves go and a new update owner starts */
   rollback(sid) {
-    const s = this.sessions.get(sid);
+    const s = this.live(sid);
     if (!s) return;
     this.releaseUpdate(sid, s.update);
     s.update = this.ownerId();
@@ -228,7 +246,7 @@ export class LockServer {
    * update owner; with an update it starts a new one at once and returns the
    * one that ended, whose locks go at updateDone */
   commit(sid, updated) {
-    const s = this.sessions.get(sid);
+    const s = this.live(sid);
     if (!s || !updated) return "";
     const ended = s.update;
     s.update = this.ownerId();
@@ -237,6 +255,7 @@ export class LockServer {
 
   /** the update has run: the locks of the owner commit ended go */
   updateDone(sid, owner) {
+    if (this.closed) return;
     this.releaseUpdate(sid, owner);
   }
 
@@ -255,7 +274,7 @@ export class LockServer {
   read({client = "", table = "", user = ""} = {}) {
     return this.rows
       .filter((w) => (!client || w.client === client) && (!table || w.table === table) && (!user || w.user === user))
-      .map((w) => ({...w}));
+      .map((w) => ({...w, taken: new Date(w.taken)}));
   }
 
   close() {
@@ -263,10 +282,12 @@ export class LockServer {
   }
 }
 
-let processLocks;
-
-/** the lock table of this process, as there is one enqueue server per system */
+/** the lock table of this process, as there is one enqueue server per
+ * system. It hangs on globalThis, so a module loaded twice (a bundle chunk,
+ * a path a compiled binary resolves on its own) still finds the one table;
+ * a worker thread has a globalThis of its own and so a table of its own --
+ * share one across threads through E2, the socket */
 export function locks() {
-  processLocks ??= new LockServer("osd");
-  return processLocks;
+  globalThis.__osdLocks ??= new LockServer("osd");
+  return globalThis.__osdLocks;
 }
