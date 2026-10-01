@@ -4779,6 +4779,12 @@ function selectStatement(node, ctx, text) {
   const lowered = lowerOrRefuse("SELECT", rel);
   const appending = isTok(into.getFirstChild(), "APPENDING");
   if (fae) {
+    // The empty-driver query below is the bare column list, and the driver
+    // path replaces the target: a FOR ALL ENTRIES that also appends, limits
+    // or orders would lose rows or return too many, so it is refused.
+    if (appending || up || order.length > 0) {
+      throw new Unsupported(`FOR ALL ENTRIES with ${appending ? "APPENDING" : up ? "UP TO" : "ORDER BY"}: ${text}`);
+    }
     // the same columns without the WHERE, for an empty driving table
     const accAll = {hosts: [], ranges: []};
     let relAll = RIR.scan(lowName(tb.name));

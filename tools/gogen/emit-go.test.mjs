@@ -47,6 +47,47 @@ ENDCLASS.
   }
 });
 
+test("FOR ALL ENTRIES with APPENDING, UP TO or ORDER BY is refused, not run without the clause", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-select-fae-"));
+  try {
+    copyFileSync(join(here, "testdata", "zgogen_t_dbw.tabl.xml"), join(sourceDir, "zgogen_t_dbw.tabl.xml"));
+    const method = (name, statement) => `  METHOD ${name}.
+    TYPES: BEGIN OF ty_key, id TYPE c LENGTH 10, END OF ty_key.
+    DATA lt TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lt_keys TYPE STANDARD TABLE OF ty_key WITH DEFAULT KEY.
+    ${statement}
+    rv = lines( lt ).
+  ENDMETHOD.`;
+    const fae = "FOR ALL ENTRIES IN lt_keys WHERE id = lt_keys-id";
+    writeFileSync(join(sourceDir, "zcl_gogen_select_fae.clas.abap"), `
+CLASS zcl_gogen_select_fae DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS plain RETURNING VALUE(rv) TYPE i.
+    CLASS-METHODS appending RETURNING VALUE(rv) TYPE i.
+    CLASS-METHODS upto RETURNING VALUE(rv) TYPE i.
+    CLASS-METHODS ordered RETURNING VALUE(rv) TYPE i.
+ENDCLASS.
+CLASS zcl_gogen_select_fae IMPLEMENTATION.
+${method("plain", `SELECT id FROM zgogen_t_dbw INTO TABLE lt ${fae}.`)}
+${method("appending", `SELECT id FROM zgogen_t_dbw APPENDING TABLE lt ${fae}.`)}
+${method("upto", `SELECT id FROM zgogen_t_dbw INTO TABLE lt UP TO 3 ROWS ${fae}.`)}
+${method("ordered", `SELECT id FROM zgogen_t_dbw INTO TABLE lt ${fae} ORDER BY id.`)}
+ENDCLASS.
+`);
+    const program = compileProgram({folders: [sourceDir], objects: ["ZCL_GOGEN_SELECT_FAE"]});
+    const generated = emitGo(program);
+    const cls = program.classes.find((c) => c.name === "ZCL_GOGEN_SELECT_FAE");
+    const compiled = (name) => cls.methods.some((m) => m.name === name && m.body.some((st) => st.s === "select_table" && st.fae));
+    assert.ok(compiled("PLAIN"), "a plain FOR ALL ENTRIES still compiles");
+    for (const [name, clause] of [["APPENDING", "APPENDING"], ["UPTO", "UP TO"], ["ORDERED", "ORDER BY"]]) {
+      assert.ok(!compiled(name), `${name} must not compile`);
+      assert.match(generated, new RegExp(`ZCL_GOGEN_SELECT_FAE=>${name}[^\n]*(FOR ALL ENTRIES with ${clause}|${clause})`), `${name} is refused, and the reason names ${clause}`);
+    }
+  } finally {
+    rmSync(sourceDir, {recursive: true, force: true});
+  }
+});
+
 test("a source literal naming datearith does not add an unused Go import", () => {
   const sourceDir = mkdtempSync(join(tmpdir(), "gogen-import-source-"));
   const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-import-test-"));
