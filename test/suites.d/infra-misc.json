@@ -24,6 +24,7 @@
     "test/ci-wait-tests.mjs",
     "test/preflight.mjs",
     "test/lift-r1.mjs",
+    "test/lift-r2.mjs",
     "test/dsl-mpc.mjs",
     "test/dsl-abap.mjs",
     "test/dsl-regions.mjs",

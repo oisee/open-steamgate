@@ -29,14 +29,14 @@ describe("dsl build: recipes as build units", function () {
   const manifest = (base, patch) => ({...JSON.parse(readFileSync(join("recipes", base, "recipe.json"), "utf8")), ...patch});
 
   describe("the recipes of the repository", () => {
-    it("are found, all eight, each with a manifest", () => {
-      expect(recipeNames()).to.deep.equal(["abap-constants", "abap-methods", "r1-lookup-enrich", "report-args-go", "report-help", "report-manpage", "samc-xml", "sapc-xml"]);
+    it("are found, all nine, each with a manifest", () => {
+      expect(recipeNames()).to.deep.equal(["abap-constants", "abap-methods", "r1-lookup-enrich", "r2-select-table-per-row", "report-args-go", "report-help", "report-manpage", "samc-xml", "sapc-xml"]);
     });
 
     it("build clean: compiled, linked, rendered through the engine, schema in step", async () => {
       const results = await buildAll(undefined, {check: true});
       expect(results.map((r) => [r.recipe, r.errors.map(format), r.samples])).to.deep.equal([
-        ["abap-constants", [], 1], ["abap-methods", [], 1], ["r1-lookup-enrich", [], 2],
+        ["abap-constants", [], 1], ["abap-methods", [], 1], ["r1-lookup-enrich", [], 2], ["r2-select-table-per-row", [], 1],
         ["report-args-go", [], 1], ["report-help", [], 1], ["report-manpage", [], 1],
         ["samc-xml", [], 1], ["sapc-xml", [], 1],
       ]);
@@ -245,7 +245,7 @@ describe("dsl build: recipes as build units", function () {
       expect(bad.stdout).to.include("FAIL copy: 1 error(s)").and.include("copy/template.tpl:1: section classes not closed");
       const good = run("--static");
       expect(good.status).to.equal(0);
-      expect(good.stdout.trim().split("\n")).to.have.length(8);
+      expect(good.stdout.trim().split("\n")).to.have.length(9);
       expect(good.stdout).to.include("ok   abap-constants: compiled and linked");
     });
 

@@ -3,10 +3,10 @@
 // docs/verified-lift.md on the research/verified-lift branch).
 //
 //   node tools/lift.mjs find <folder>...          database work inside loops, counted
-//   node tools/lift.mjs model <file.abap> <method> [--ddic <folder>]...
-//                                                 the R1 model of that method's loop, or why not
+//   node tools/lift.mjs model <file.abap> <method> [--recipe r1|r2] [--ddic <folder>]...
+//                                                 the R1/R2 model of that method's loop, or why not
 //   node tools/lift.mjs survey <folder> [--ddic <folder>]... [--list]
-//                                                 R1 over every method with SELECT SINGLE in a loop:
+//                                                 R1/R2 over lookup SELECTs inside loops:
 //                                                 how many are accepted, and the refusals by obligation
 //
 // `find` counts two things abaplint's db_operation_in_loop does not tell
@@ -33,6 +33,12 @@ const {Structures, Statements, Expressions} = abaplint;
 const DB = [Statements.Select, Statements.SelectLoop, Statements.InsertDatabase,
   Statements.UpdateDatabase, Statements.ModifyDatabase, Statements.DeleteDatabase];
 const isDb = (statement) => DB.some((c) => statement.get() instanceof c);
+const isSelectIntoTablePerRow = (statement) => {
+  if (!(statement.get() instanceof Statements.Select)) return false;
+  const select = statement.findDirectExpression(Expressions.Select);
+  return Boolean(select?.findDirectExpression(Expressions.SQLIntoTable)
+    && !select.findDirectExpression(Expressions.SQLForAllEntries));
+};
 
 function walk(dir, pattern) {
   const out = [];
@@ -99,7 +105,8 @@ function ownCalls(loop) {
 
 export function find(folder) {
   const files = walk(folder, /\.abap$/);
-  const result = {folder, files: files.length, loops: 0, loops_with_db: 0, loops_with_select_single: 0, loops_via_own_method: 0};
+  const result = {folder, files: files.length, loops: 0, loops_with_db: 0, loops_with_select_single: 0,
+    loops_with_select_into_table: 0, loops_via_own_method: 0};
   for (const file of parse(files)) {
     const structure = file.getStructure();
     if (!structure) continue;
@@ -113,6 +120,9 @@ export function find(folder) {
           result.loops_with_db++;
           if (statements.some((s) => s.get() instanceof Statements.Select && /^SELECT SINGLE /i.test(s.concatTokens()))) {
             result.loops_with_select_single++;
+          }
+          if (statements.some(isSelectIntoTablePerRow)) {
+            result.loops_with_select_into_table++;
           }
           continue;
         }
@@ -131,6 +141,16 @@ function sameType(a, b) {
     && a.getLength?.() === b.getLength?.()
     && a.getDecimals?.() === b.getDecimals?.();
 }
+function keyTypeProven(registry, column, component) {
+  if (!sameType(column.type, component)) return false;
+  if (!(component instanceof abaplint.BasicTypes.IntegerType)) return true;
+  // abaplint represents INT1, INT2 and INT4 with the same type. A data
+  // element that resolves to INT4 is the only evidence of equal width.
+  const element = [component.getDDICName?.(), component.getQualifiedName?.()]
+    .filter((n) => n && !BUILTIN_TYPES.has(n.toUpperCase()))
+    .map((n) => registry.getObject("DTEL", n.toUpperCase())).find(Boolean);
+  return column.ddic === "INT4" && element?.getDataType(registry)?.toUpperCase() === "INT4";
+}
 const describe = (type) => `${type.constructor.name.replace(/Type$/, "")}${type.getLength ? `(${type.getLength()})` : ""}`;
 
 // The R1 model of the one loop in `method`, or a Refusal naming the obligation.
@@ -138,10 +158,20 @@ export function modelR1(path, method, ddicFolders = DEFAULT_DDIC) {
   return modelR1FromSource(basename(path), readFileSync(path, "utf8"), method, ddicFolders);
 }
 
+export function modelR2(path, method, ddicFolders = DEFAULT_DDIC) {
+  return modelR2FromSource(basename(path), readFileSync(path, "utf8"), method, ddicFolders);
+}
+
 const LOOKUP = "lt_lookup";
 const BUILTIN_TYPES = new Set(["B", "S", "I", "INT8", "P", "F", "C", "N", "D", "T", "X", "STRING", "XSTRING",
   "DECFLOAT16", "DECFLOAT34", "UTCLONG"]);
 const HIT = "<ls_lookup>";
+const ALL_ROWS = "lt_all";
+const ALL_ROW = "<ls_all>";
+const R2_WORK = "ls_lift_r2";
+const SAVED_SUBRC = "lv_lift_saved_subrc";
+const SAVED_DBCNT = "lv_lift_saved_dbcnt";
+const SAVED_TABIX = "lv_lift_saved_tabix";
 
 const children = (node) => node?.getChildren() ?? [];
 const direct = (node, type) => children(node).filter((child) => child.get() instanceof type);
@@ -179,9 +209,9 @@ function selectParts(statement, row) {
   // flag, so compare the direct children rather than re-reading SQL text.
   const clauses = children(select).filter((child) => ![fields, from, into, cond].includes(child));
   if (clauses.length !== 3 || clauses.map(word).join(" ") !== "select single where") throw shape();
-  const source = from.findAllExpressions(Expressions.SQLFromSource);
-  const tables = source[0]?.findAllExpressions(Expressions.DatabaseTable) ?? [];
-  if (source.length !== 1 || tables.length !== 1 || source[0].getTokens().length !== 1) throw shape();
+  const fromSources = from.findAllExpressions(Expressions.SQLFromSource);
+  const tables = fromSources[0]?.findAllExpressions(Expressions.DatabaseTable) ?? [];
+  if (fromSources.length !== 1 || tables.length !== 1 || fromSources[0].getTokens().length !== 1) throw shape();
   const dbtab = word(tables[0]);
   const columnNodes = fields.findAllExpressions(Expressions.SQLField);
   if (!columnNodes.length || columnNodes.some((f) => direct(f, Expressions.SQLFieldName).length !== 1
@@ -236,28 +266,56 @@ function selectParts(statement, row) {
   return {dbtab, fields: mapped, keys};
 }
 
-export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DDIC) {
+// Shared parser, method, loop and generated-name context for the R1 and R2
+// models. Both recipes make their decisions from the same abaplint tree.
+function methodContext(name, source, method, ddicFolders, recipe, allowNestedLoops = false) {
   const registry = registryFor(ddicFolders, [{name, source}]);
-  const object = registry.getObjects().find((o) => o instanceof abaplint.ABAPObject && o.getABAPFiles().some((f) => f.getFilename() === name));
+  const object = registry.getObjects().find((o) => o instanceof abaplint.ABAPObject
+    && o.getABAPFiles().some((f) => f.getFilename() === name));
   const file = object?.getABAPFiles().find((f) => f.getFilename() === name);
   if (!file) throw new Refusal("shape/parse", `${name} does not parse as an ABAP object`);
   if (!file.getStructure()) throw new Refusal("shape/parse", `${name} does not parse: ${file.getStatements().find((st) => st.get() instanceof abaplint.Unknown)?.concatTokens().slice(0, 80) ?? "no structure"}`);
-  const m = file.getStructure()?.findAllStructures(Structures.Method).find((s) => methodName(s) === method.toLowerCase());
+  const m = file.getStructure().findAllStructures(Structures.Method).find((s) => methodName(s) === method.toLowerCase());
   if (!m) throw new Refusal("shape", `no method ${method} in ${name}`);
-  const loops = m.findAllStructures(Structures.Loop);
-  if (loops.length !== 1) throw new Refusal("shape/loops", `${loops.length} loops in ${method}, R1 takes one`);
+  const foundLoops = m.findAllStructures(Structures.Loop);
+  if (allowNestedLoops) {
+    const topLoops = foundLoops.filter((candidate) => !candidate.findParent(Structures.Loop));
+    const candidates = topLoops.filter((candidate) => candidate.findAllStatementNodes().some(isSelectIntoTablePerRow));
+    if (candidates.length === 1) {
+      const targetLoop = candidates[0];
+      const targetTable = targetLoop.getFirstStatement().getTokens()[2]?.getStr().toLowerCase();
+      for (const candidate of topLoops) {
+        if (candidate === targetLoop || !candidate.getFirstToken().getStart().isBefore(targetLoop.getFirstToken().getStart())) continue;
+        const tokens = candidate.getFirstStatement().getTokens().map((token) => token.getStr().toLowerCase());
+        if (tokens[0] === "loop" && tokens[1] === "at" && tokens[2] === targetTable
+          && (tokens.includes("assigning") || (tokens.includes("reference") && tokens.includes("into")))) {
+          throw new Refusal("loop table alias", `${candidate.getFirstStatement().concatTokens()} may retain a row alias of ${targetTable} before the selected loop`);
+        }
+      }
+    }
+  }
+  const loops = allowNestedLoops ? foundLoops.filter((candidate) => !candidate.findParent(Structures.Loop)) : foundLoops;
+  if (loops.length !== 1) throw new Refusal("shape/loops", `${loops.length} loops in ${method}, ${recipe} takes one${allowNestedLoops ? " outer" : ""}`);
   const loop = loops[0];
-  // The method sees its own body and its signature; a parameter of that name
-  // counts as much as a local declaration.
+  const {table, row} = loopHead(loop.getFirstStatement());
   const signature = file.getStructure().findAllStatements(Statements.MethodDef)
     .filter((st) => st.findDirectExpression(Expressions.MethodName)?.concatTokens().toLowerCase() === method.toLowerCase());
   const used = new Set([...m.findAllStatementNodes(), ...signature]
     .flatMap((st) => st.getTokens().map((t) => t.getStr().toLowerCase())));
-  for (const generated of [LOOKUP, HIT]) {
-    if (used.has(generated)) throw new Refusal("names", `${generated} is already used in ${name}; the rewrite would declare it again`);
-  }
+  return {registry, object, file, method: m, signature, loop, table, row, used};
+}
 
-  const {table, row} = loopHead(loop.getFirstStatement());
+function requireNamesFree(used, names, name) {
+  for (const generated of names) {
+    if (used.has(generated.toLowerCase())) throw new Refusal("names", `${generated} is already used in ${name}; the rewrite would declare it again`);
+  }
+}
+
+export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DDIC) {
+  const {registry, object, file, method: m, loop, table, row, used} = methodContext(name, source, method, ddicFolders, "R1");
+  // The method sees its own body and its signature; a parameter of that name
+  // counts as much as a local declaration.
+  requireNamesFree(used, [LOOKUP, HIT], name);
 
   const body = loop.findAllStatementNodes().slice(1, -1);
   const selects = body.map((st, i) => st.get() instanceof Statements.Select ? i : -1).filter((i) => i >= 0);
@@ -393,23 +451,7 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
     if (!sameType(column.type, component)) {
       throw new Refusal("key types", `${table}-${k.component} is ${describe(component)}, ${dbtab}-${k.column} is ${describe(column.type)}`);
     }
-    // abaplint gives INT1, INT2 and INT4 one IntegerType with no width, so
-    // equal constructors do not prove equal types there. Only INT4 on both
-    // sides counts, and on the row's side only a data element proves it: a
-    // component without a DDIC name may be TYPE i, or an INT1 field of a
-    // DDIC structure, and the type does not say which
-    if (component instanceof abaplint.BasicTypes.IntegerType) {
-      // abaplint names a data element-typed component by the element, in
-      // the qualified name rather than the DDIC name; it counts only if that
-      // element is there
-      // a built-in integer answers its own name ("I") as qualified name,
-      // which a data element of that name must not be mistaken for
-      const dtel = [component.getDDICName?.(), component.getQualifiedName?.()]
-        .filter((n) => n && !BUILTIN_TYPES.has(n.toUpperCase()))
-        .map((n) => registry.getObject("DTEL", n.toUpperCase())).find(Boolean);
-      const theirs = dtel?.getDataType(registry)?.toUpperCase();
-      if (column.ddic !== "INT4" || theirs !== "INT4") keysOpen = true;
-    }
+    if (!keyTypeProven(registry, column, component)) keysOpen = true;
   }
   if (keysOpen) open.unshift("key types equal column types");
 
@@ -429,27 +471,390 @@ export function modelR1FromSource(name, source, method, ddicFolders = DEFAULT_DD
   };
 }
 
-// Every method of every class in `folder` whose loop holds a SELECT SINGLE,
-// put through R1: what a recipe can take today, and what stops the rest.
+function sourceCorrelation(compare, row) {
+  const parts = children(compare);
+  if (parts.length !== 5) return undefined;
+  const [column, operator, rhs, dash, component] = parts;
+  const chain = rhs?.findAllExpressions(Expressions.FieldChain) ?? [];
+  const fs = chain[0]?.findAllExpressions(Expressions.FieldSymbol) ?? [];
+  if (!(column.get() instanceof Expressions.SQLFieldName)
+    || !(operator.get() instanceof Expressions.SQLCompareOperator) || !["=", "eq"].includes(word(operator))
+    || !(rhs.get() instanceof Expressions.SQLSource) || chain.length !== 1 || fs.length !== 1
+    || word(fs[0]) !== row || chain[0].getTokens().length !== 1
+    || rhs.getTokens().filter((t) => word(t) !== "@").length !== 1
+    || !(dash.get() instanceof abaplint.Tokens.Dash)
+    || !(component.get() instanceof Expressions.SQLFieldName)) return undefined;
+  return {column: word(column), component: word(component)};
+}
+
+// Conditions kept in the bulk SELECT are only a conjunction of loop-row key
+// equalities and simple D-column comparisons with literals. An OR, host value,
+// expression, subquery or other dynamic source changes that closed vocabulary.
+function r2Conditions(cond, row) {
+  const keys = [], constants = [];
+  function visit(node) {
+    for (const part of children(node)) {
+      if (part.get() instanceof Expressions.SQLCompare) {
+        const correlation = sourceCorrelation(part, row);
+        if (correlation) {
+          keys.push(correlation);
+          continue;
+        }
+        const pieces = children(part);
+        const [column, operator, rhs] = pieces;
+        const literal = rhs?.findAllExpressions(Expressions.Constant) ?? [];
+        if (pieces.length === 3 && column?.get() instanceof Expressions.SQLFieldName
+          && operator?.get() instanceof Expressions.SQLCompareOperator
+          && rhs?.get() instanceof Expressions.SQLSource && literal.length === 1
+          && rhs.getTokens().length === literal[0].getTokens().length
+          && !(rhs.findAllExpressions(Expressions.FieldChain) ?? []).length) {
+          constants.push({column: word(column), text: part.concatTokens()});
+          continue;
+        }
+        throw new Refusal("conditions", `condition "${part.concatTokens()}" is not a correlation equality or a D-field comparison with a constant`);
+      }
+      if (part.get() instanceof Expressions.SQLCond) {
+        visit(part);
+      } else if (part.get() instanceof abaplint.Tokens.Identifier && word(part) === "and") {
+        continue;
+      } else if (["WParenLeftW", "WParenRightW", "ParenRightW"].includes(part.get().constructor.name)) {
+        continue;
+      } else {
+        throw new Refusal("conditions", `condition "${node.concatTokens()}" is not a conjunction of supported comparisons`);
+      }
+    }
+  }
+  visit(cond);
+  if (!keys.length) throw new Refusal("correlation", "WHERE has no equality from the loop row");
+  const seen = new Set();
+  for (const key of keys) {
+    if (seen.has(key.column)) throw new Refusal("correlation", `WHERE correlates ${key.column} more than once`);
+    seen.add(key.column);
+  }
+  return {keys, constants};
+}
+
+function structureComponents(type) {
+  return type instanceof abaplint.BasicTypes.StructureType
+    ? new Map(type.getComponents().map((c) => [c.name.toLowerCase(), c.type])) : undefined;
+}
+
+function sourceTextRange(source, startPosition, endPosition, baseIndent = startPosition.getCol() - 1) {
+  const starts = [0];
+  for (let at = source.indexOf("\n"); at >= 0; at = source.indexOf("\n", at + 1)) starts.push(at + 1);
+  const offset = (position) => starts[position.getRow() - 1] + position.getCol() - 1;
+  const text = source.slice(offset(startPosition), offset(endPosition)).trim();
+  return text.split("\n").map((line, index) => {
+    if (index === 0) return line.startsWith("*") ? `"${line}` : line;
+    let leading = 0;
+    while (leading < line.length && line[leading] === " ") leading++;
+    const content = line.slice(Math.min(baseIndent, leading));
+    return `  ${content.startsWith("*") ? `"${content}` : content}`;
+  }).join("\n");
+}
+
+function isChainedBodyStatement(statements) {
+  const owners = new Map();
+  for (const statement of statements) {
+    for (const token of statement.getTokens()) {
+      if (token.getStr() === ":") return statement;
+      const owner = owners.get(token);
+      if (owner && owner !== statement) return statement;
+      owners.set(token, statement);
+    }
+  }
+  return undefined;
+}
+
+function methodCall(statement) {
+  const tokens = statement.getTokens().map((token) => token.getStr().toLowerCase());
+  return statement.findAllExpressions(Expressions.MethodCall).length > 0
+    || (tokens[0] === "call" && tokens[1] === "method");
+}
+
+function dynamicAssign(tokens) {
+  return tokens[0] === "assign" && tokens[1] === "(";
+}
+
+function refHash(tokens) {
+  return tokens.some((token, i) => token === "ref" && (tokens[i + 1] === "#" || tokens[i + 1] === "#("));
+}
+
+function getReferenceOf(tokens) {
+  return tokens.some((token, i) => token === "get" && tokens[i + 1] === "reference" && tokens[i + 2] === "of");
+}
+
+function referencesRowOrTable(tokens, row, table) {
+  return (tokens.includes(row) || tokens.includes(table)) && (refHash(tokens) || getReferenceOf(tokens));
+}
+
+function tableType(scope, name, obligation) {
+  const type = scope?.findVariable(name)?.getType();
+  if (!(type instanceof abaplint.BasicTypes.TableType) || type.isGeneric?.() || type.isWithHeader?.()) {
+    throw new Refusal(obligation, `${name} is not a resolved table without a header line`);
+  }
+  return type;
+}
+
+// R2: gather one row per database key across T, then rebuild the original
+// INTO TABLE target at the SELECT's position. The generated body preserves
+// the old result table and its statement order while keeping the bulk query
+// outside the row loop.
+export function modelR2FromSource(name, source, method, ddicFolders = DEFAULT_DDIC) {
+  const {registry, object, method: m, signature, loop, table, row, used} = methodContext(name, source, method, ddicFolders, "R2", true);
+  requireNamesFree(used, [ALL_ROWS, ALL_ROW, R2_WORK, SAVED_SUBRC, SAVED_DBCNT, SAVED_TABIX], name);
+  const items = children(loop.findDirectStructure(Structures.Body));
+  const bodyStatements = items.flatMap((item) => item.findAllStatementNodes());
+  const chain = isChainedBodyStatement(bodyStatements);
+  if (chain) throw new Refusal("chain/body", `the loop body contains an ABAP chain: ${chain.concatTokens()}`);
+  const selects = bodyStatements.filter((st) => st.get() instanceof Statements.Select);
+  if (selects.length !== 1) throw new Refusal("shape/select", `the loop body has ${selects.length} SELECT statements; R2 takes one`);
+  const selectStatement = selects[0];
+  if (bodyStatements.some((st) => isDb(st) && st !== selectStatement)) {
+    throw new Refusal("no other database statement in the loop", "the loop body has a database statement besides its SELECT INTO TABLE");
+  }
+  const position = items.findIndex((item) => item.findAllStatementNodes().includes(selectStatement));
+  if (position < 0 || items[position].getFirstStatement() !== selectStatement
+    || items[position].findAllStatementNodes().length !== 1) {
+    throw new Refusal("shape/select-position", "SELECT INTO TABLE must be a top-level statement of the loop body");
+  }
+  const select = selectStatement.findDirectExpression(Expressions.Select);
+  const fieldsNode = select?.findDirectExpression(Expressions.SQLFieldList);
+  const from = select?.findDirectExpression(Expressions.SQLFrom);
+  const into = select?.findDirectExpression(Expressions.SQLIntoTable);
+  const cond = select?.findDirectExpression(Expressions.SQLCond);
+  const order = select?.findDirectExpression(Expressions.SQLOrderBy);
+  const shape = () => new Refusal("shape/select", `not SELECT columns FROM one table INTO TABLE lt_x WHERE ... ORDER BY PRIMARY KEY: ${selectStatement.concatTokens()}`);
+  if (!select || !fieldsNode || !from || !into || !cond || word(select.getTokens()[1]) === "single") throw shape();
+  // No JOIN, alias, aggregate, DISTINCT, limit, GROUP BY or other clause is
+  // represented in the model. The order check is deliberately exact.
+  if (!order || order.getTokens().map(word).join(" ") !== "order by primary key") {
+    throw new Refusal("order", "R2 requires ORDER BY PRIMARY KEY so each row's result order can be restored");
+  }
+  const clauses = children(select);
+  const known = new Set([fieldsNode, from, into, cond, order]);
+  const extras = clauses.filter((part) => !known.has(part)
+    && !(part.get() instanceof abaplint.Tokens.Identifier && ["select", "where"].includes(word(part))));
+  if (extras.length) throw shape();
+  const fromSources = from.findAllExpressions(Expressions.SQLFromSource);
+  const tables = fromSources[0]?.findAllExpressions(Expressions.DatabaseTable) ?? [];
+  if (fromSources.length !== 1 || tables.length !== 1 || fromSources[0].getTokens().length !== 1) throw shape();
+  const dbtab = word(tables[0]);
+  const selectFields = fieldsNode.findAllExpressions(Expressions.SQLField);
+  if (!selectFields.length || selectFields.some((f) => direct(f, Expressions.SQLFieldName).length !== 1 || f.getTokens().length !== 1)) {
+    throw new Refusal("shape/select", "the SELECT list must contain simple database columns only");
+  }
+  const columns = selectFields.map((f) => word(direct(f, Expressions.SQLFieldName)[0]));
+  if (new Set(columns).size !== columns.length) throw new Refusal("shape/select", "the SELECT list repeats a column");
+  const targets = direct(into, Expressions.SQLTarget);
+  const intoExtra = children(into).find((child) => !(child.get() instanceof Expressions.SQLTarget)
+    && !["into", "table"].includes(word(child)));
+  if (targets.length !== 1 || intoExtra || targets[0].getTokens().length !== 1
+    || !targets[0].findDirectExpression(Expressions.Target)?.findDirectExpression(Expressions.TargetField)) throw shape();
+  const resultTable = word(targets[0].findDirectExpression(Expressions.Target)?.findDirectExpression(Expressions.TargetField));
+  const {keys, constants} = r2Conditions(cond, row);
+  const resolved = abapKeyModel(registry, dbtab);
+  if (!resolved) throw new Refusal("full key", `no provider knows ${dbtab} (DDIC from ${ddicFolders.join(", ")})`);
+  const primary = resolved.keys;
+  const primaryNames = primary.map((k) => k.column);
+  for (const key of keys) {
+    if (!primaryNames.includes(key.column)) throw new Refusal("correlation", `${key.column} is not a key field of ${dbtab}`);
+  }
+  const tableObject = registry.getObject("TABL", dbtab.toUpperCase());
+  const dbType = tableObject?.parseType(registry);
+  const dbFields = structureComponents(dbType);
+  if (!dbFields) throw new Refusal("full key", `${dbtab} does not resolve to a table structure`);
+  for (const condition of constants) {
+    if (!dbFields.has(condition.column)) throw new Refusal("conditions", `${dbtab} has no field ${condition.column}`);
+  }
+  const projected = columns.map((column, i) => ({column, component: i}));
+  const sourceColumns = [...new Set([...primaryNames, ...columns])];
+  const keyList = keys.map((key) => ({...key}));
+  const keyTypes = new Map(primary.map((key) => [key.column, key]));
+
+  const syntax = new abaplint.SyntaxLogic(registry, object).run();
+  const scope = syntax.spaghetti.lookupPosition(selectStatement.getStart(), name);
+  const preLoopStatements = m.findAllStatementNodes().filter((st) => st.getStart().isBefore(loop.getFirstToken().getStart()));
+  const tableVariable = scope?.findVariable(table);
+  const bodyWritePositions = syntax.spaghetti.listWritePositions(name);
+  const inStatement = (ref, st) => !ref.getStart().isBefore(st.getStart()) && !ref.getStart().isAfter(st.getEnd());
+  for (const st of preLoopStatements) {
+    const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
+    if (dynamicAssign(tokens)) {
+      throw new Refusal("dynamic ASSIGN", `${st.concatTokens()} uses a dynamic ASSIGN before the loop`);
+    }
+    const namesTableWithAliasOperation = tokens.includes(table) && (
+      tokens.includes("assigning")
+      || tokens.includes("assign")
+      || (tokens.includes("reference") && tokens.includes("into"))
+      || refHash(tokens)
+      || getReferenceOf(tokens));
+    if (namesTableWithAliasOperation) {
+      throw new Refusal("loop table alias", `${st.concatTokens()} may retain a row alias of ${table} before the loop`);
+    }
+  }
+  const formalByReferenceTable = signature.some((st) => {
+    const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
+    const at = tokens.indexOf(table);
+    if (at < 0 || tokens[at - 2] === "value" || tokens[at - 1] === "value") return false;
+    const direction = tokens.slice(0, at).reverse().find((token) => ["importing", "changing", "exporting", "returning"].includes(token));
+    return direction === "importing" || direction === "changing";
+  });
+  if ((tableVariable?.constructor?.name !== "TypedIdentifier" || formalByReferenceTable) && bodyStatements.some(methodCall)) {
+    const call = bodyStatements.find(methodCall);
+    throw new Refusal("loop table method call", `${call.concatTokens()} may change nonlocal loop table ${table}`);
+  }
+  for (const st of bodyStatements) {
+    const tokens = st.getTokens().map((token) => token.getStr().toLowerCase());
+    if (dynamicAssign(tokens)) {
+      throw new Refusal("dynamic ASSIGN", `${st.concatTokens()} uses a dynamic ASSIGN in the loop body`);
+    }
+    if (referencesRowOrTable(tokens, row, table)) {
+      throw new Refusal("loop row reference", `${st.concatTokens()} may retain a reference to ${row} or ${table}`);
+    }
+    if (tokens.includes("->") && bodyWritePositions.some((ref) => inStatement(ref, st))) {
+      throw new Refusal("dereference write", `${st.concatTokens()} writes through a dereference`);
+    }
+    for (const ref of bodyWritePositions.filter((candidate) => inStatement(candidate, st)
+      && candidate.getName().startsWith("<") && candidate.getName().toLowerCase() !== row)) {
+      throw new Refusal("field-symbol write", `${st.concatTokens()} writes through field symbol ${ref.getName()}`);
+    }
+  }
+  const loopType = tableType(scope, table, "shape/loop-table");
+  const lineType = loopType.getRowType();
+  const line = structureComponents(lineType);
+  const symbolType = scope?.findVariable(row)?.getType();
+  const symbol = structureComponents(symbolType);
+  if (!line || !symbol || symbolType.isGeneric?.()) {
+    throw new Refusal("shape/row", `${row} and ${table} must resolve to structured rows`);
+  }
+  const lineEntries = [...line.keys()], symbolEntries = [...symbol.keys()];
+  if (lineEntries.length !== symbolEntries.length || lineEntries.some((component, i) => component !== symbolEntries[i])) {
+    throw new Refusal("shape/row", `${row} is not laid out like a line of ${table}: ${symbolEntries.join(", ")} against ${lineEntries.join(", ")}`);
+  }
+  for (const [component, type] of line) {
+    const own = symbol.get(component);
+    if (unresolved(type) || unresolved(own) || !sameType(type, own)) {
+      throw new Refusal("shape/row", `${row}-${component} does not resolve to the same type as ${table}-${component}`);
+    }
+  }
+  for (const key of keyList) {
+    const keyColumn = keyTypes.get(key.column);
+    const component = line.get(key.component), rowComponent = symbol.get(key.component);
+    if (!component || !rowComponent) throw new Refusal("key types", `${table} or ${row} has no component ${key.component}`);
+    if (unresolved(component) || !keyTypeProven(registry, keyColumn, component)) {
+      throw new Refusal("key types", `${table}-${key.component} cannot be proven to match ${dbtab}-${key.column}`);
+    }
+  }
+
+  const targetType = tableType(scope, resultTable, "shape/result-table");
+  if (targetType.getAccessType() !== "STANDARD") {
+    throw new Refusal("shape/result-table", `${resultTable} must be a standard table so APPEND preserves SELECT order`);
+  }
+  const resultLine = targetType.getRowType();
+  const resultFields = structureComponents(resultLine);
+  if (!resultFields || resultFields.size !== columns.length) {
+    throw new Refusal("shape/result-table", `${resultTable} must have a structured line with one component per selected column`);
+  }
+  const resultComponents = [...resultFields.keys()];
+  const assignments = columns.map((column, i) => {
+    const dbField = dbFields.get(column), targetComponent = resultComponents[i], targetField = resultFields.get(targetComponent);
+    if (!dbField || unresolved(dbField) || unresolved(targetField) || !sameType(dbField, targetField)) {
+      throw new Refusal("shape/result-types", `${resultTable}-${targetComponent} must resolve to the same type as ${dbtab}-${column}`);
+    }
+    return {column, component: targetComponent};
+  });
+  for (const key of keys) {
+    const component = line.get(key.component), symbolComponent = symbol.get(key.component);
+    if (!component || !symbolComponent) throw new Refusal("key types", `${row} has no component ${key.component}`);
+    if (!sameType(component, symbolComponent)) throw new Refusal("key types", `${row}-${key.component} and ${table}-${key.component} differ`);
+  }
+
+  const reads = syntax.spaghetti.listReadPositions(name).filter((ref) => ref.getName().toLowerCase() === resultTable);
+  const writes = syntax.spaghetti.listWritePositions(name).filter((ref) => ref.getName().toLowerCase() === resultTable);
+  const insideLoop = (ref) => !ref.getStart().isBefore(loop.getFirstToken().getStart())
+    && !ref.getStart().isAfter(loop.getLastToken().getStart());
+  if (writes.some((ref) => insideLoop(ref) && !inStatement(ref, selectStatement))) {
+    throw new Refusal("result written only by SELECT", `${resultTable} is written by a loop statement besides the SELECT`);
+  }
+  const afterStatements = items.slice(position + 1).flatMap((item) => item.findAllStatementNodes());
+  if (!reads.some((ref) => afterStatements.some((st) => inStatement(ref, st)))) {
+    throw new Refusal("result read after SELECT", `${resultTable} is not read after the SELECT inside the iteration`);
+  }
+  if (reads.some((ref) => ref.getStart().isAfter(loop.getLastToken().getStart())
+    && ref.getStart().isBefore(m.getLastToken().getStart()))) {
+    throw new Refusal("result read after loop", `${resultTable} is read after the loop`);
+  }
+  for (const [index, item] of items.entries()) {
+    if (index === position) continue;
+    for (const st of item.findAllStatementNodes()) {
+      const tokens = st.getTokens().map((t) => t.getStr().toLowerCase());
+      if (tokens.includes(table)) throw new Refusal("key not written before the read", `${st.concatTokens()} touches loop table ${table} outside the SELECT`);
+      if (index < position && st.get() instanceof Statements.Assign && tokens.includes(row)) {
+        throw new Refusal("key not written before the read", `${st.concatTokens()} may alias ${row} before the SELECT`);
+      }
+      if (index >= position) continue;
+      const rowRefs = syntax.spaghetti.listWritePositions(name).filter((ref) => inStatement(ref, st) && ref.getName().toLowerCase() === row);
+      for (const ref of rowRefs) {
+        const at = st.getTokens().indexOf(ref.getToken());
+        const component = tokens[at + 1] === "-" ? tokens[at + 2] : undefined;
+        if (!component || keys.some((key) => key.component === component)) {
+          throw new Refusal("key not written before the read", `${st.concatTokens()} writes ${row}${component ? `-${component}` : ""}`);
+        }
+      }
+      if (st.findAllExpressions(Expressions.MethodCall).length && tokens.includes(row)) {
+        throw new Refusal("key not written before the read", `${st.concatTokens()} passes ${row} to a method`);
+      }
+    }
+  }
+
+  const before = position === 0 ? [] : [{text: sourceTextRange(source, items[0].getFirstToken().getStart(),
+    selectStatement.getFirstToken().getStart(), items[0].getFirstToken().getStart().getCol() - 1)}];
+  const after = position === items.length - 1 ? [] : [{text: sourceTextRange(source, selectStatement.getLastToken().getEnd(),
+    items[items.length - 1].getLastToken().getEnd(), items[position + 1].getFirstToken().getStart().getCol() - 1)}];
+  const sort = [...keys.map((key) => key.column), ...primaryNames].filter((column, i, all) => all.indexOf(column) === i);
+  return {
+    recipe: "R2",
+    position,
+    before,
+    after,
+    loop: {table: table.toLowerCase(), row: row.toLowerCase()},
+    source: {table: dbtab, keys: keyList, primary: primary.map((key) => ({column: key.column})),
+      fields: sourceColumns.map((column) => ({column})), conditions: constants,
+      sort: sort.map((column) => ({column}))},
+    result: {table: resultTable, assignments},
+    names: {all: ALL_ROWS, all_row: ALL_ROW, work: R2_WORK, saved_subrc: SAVED_SUBRC, saved_dbcnt: SAVED_DBCNT, saved_tabix: SAVED_TABIX},
+    order: "ORDER BY PRIMARY KEY",
+    open: ["no concurrent writes to the database table during the loop",
+      "reads confined to one client", "prefetch may read keys whose loop iteration skips the SELECT"],
+  };
+}
+
+// Every method of every class in `folder` whose loop holds an R1 or R2 lookup,
+// put through the corresponding model: what it accepts and what stops the rest.
 export function survey(folder, ddicFolders = DEFAULT_DDIC) {
   const result = {folder, candidates: 0, accepted: 0, refused: {}, cases: []};
   for (const path of walk(folder, /\.clas\.abap$/)) {
     const source = readFileSync(path, "utf8");
     const [file] = parseSources([{name: basename(path), source}]);
     for (const method of file?.getStructure()?.findAllStructures(Structures.Method) ?? []) {
-      const hit = loopsOf(method).some((l) => l.findAllStatementNodes()
-        .some((st) => st.get() instanceof Statements.Select && /^SELECT SINGLE /i.test(st.concatTokens())));
-      if (!hit) continue;
+      const selects = loopsOf(method).flatMap((l) => l.findAllStatementNodes()
+        .filter((st) => st.get() instanceof Statements.Select));
+      const candidate = selects.find(isSelectIntoTablePerRow)
+        ?? selects.find((st) => /^SELECT SINGLE /i.test(st.concatTokens()));
+      if (!candidate) continue;
+      const recipe = candidate.findDirectExpression(Expressions.Select)?.findDirectExpression(Expressions.SQLIntoTable) ? "R2" : "R1";
       result.candidates++;
       const where = `${basename(path)}:${methodName(method)}`;
       try {
-        modelR1FromSource(basename(path), source, methodName(method), ddicFolders);
+        if (recipe === "R2") modelR2FromSource(basename(path), source, methodName(method), ddicFolders);
+        else modelR1FromSource(basename(path), source, methodName(method), ddicFolders);
         result.accepted++;
-        result.cases.push({where, accepted: true});
+        result.cases.push({where, recipe, accepted: true});
       } catch (e) {
         if (!(e instanceof Refusal)) throw e;
         result.refused[e.obligation] = (result.refused[e.obligation] ?? 0) + 1;
-        result.cases.push({where, refused: e.message});
+        result.cases.push({where, recipe, refused: e.message});
       }
     }
   }
@@ -475,20 +880,24 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     if (list) for (const c of cases) console.log(`  ${c.where}  ${c.accepted ? "ACCEPTED" : c.refused}`);
   } else if (command === "model") {
     const ddic = [];
+    let recipe = "r1";
     const rest = [];
     for (let i = 0; i < args.length; i++) {
       if (args[i] === "--ddic") ddic.push(args[++i]);
+      else if (args[i] === "--recipe") recipe = (args[++i] ?? "").toLowerCase();
       else rest.push(args[i]);
     }
     try {
-      console.log(JSON.stringify(modelR1(rest[0], rest[1], ddic.length ? ddic : DEFAULT_DDIC), null, 2));
+      if (!["r1", "r2"].includes(recipe)) throw new Refusal("recipe", `unknown recipe ${recipe}`);
+      const model = recipe === "r2" ? modelR2 : modelR1;
+      console.log(JSON.stringify(model(rest[0], rest[1], ddic.length ? ddic : DEFAULT_DDIC), null, 2));
     } catch (e) {
       if (!(e instanceof Refusal)) throw e;
-      console.error(`R1 refused -- ${e.message}`);
+      console.error(`${recipe.toUpperCase()} refused -- ${e.message}`);
       process.exit(1);
     }
   } else {
-    console.error("usage: node tools/lift.mjs find <folder>... | model <file.abap> <method> [--ddic <folder>]... | survey <folder> [--ddic <folder>]... [--list]");
+    console.error("usage: node tools/lift.mjs find <folder>... | model <file.abap> <method> [--recipe r1|r2] [--ddic <folder>]... | survey <folder> [--ddic <folder>]... [--list]");
     process.exit(2);
   }
 }

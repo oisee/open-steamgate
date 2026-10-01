@@ -1,0 +1,7 @@
+{
+  "template": "template.tpl",
+  "partials": {},
+  "model": "lift-r2",
+  "profile": "abap",
+  "schema": "schema.json"
+}

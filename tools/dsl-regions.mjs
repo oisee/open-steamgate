@@ -23,7 +23,7 @@ import {readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, Refusal} from "./dsl-ddic.mjs";
-import {modelR1FromSource} from "./lift.mjs";
+import {modelR1FromSource, modelR2FromSource} from "./lift.mjs";
 
 const abaplint = createRequire(import.meta.url)("@abaplint/core");
 const {Structures, Expressions} = abaplint;
@@ -73,6 +73,14 @@ export const RECIPES = {
     model: ({file, source, region, ddic}) => {
       methodOfClassAt(file, source, region.begin, region.params.from);
       return modelR1FromSource(basename(file), source, region.params.from, ddic);
+    },
+  },
+  "r2-select-table-per-row": {
+    template: join(ROOT, "recipes/r2-select-table-per-row/template.tpl"),
+    params: ["from"],
+    model: ({file, source, region, ddic}) => {
+      methodOfClassAt(file, source, region.begin, region.params.from);
+      return modelR2FromSource(basename(file), source, region.params.from, ddic);
     },
   },
 };

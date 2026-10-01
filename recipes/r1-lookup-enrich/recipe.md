@@ -54,6 +54,8 @@ same rows. In OSG since the transpiler pin of #280 (`FOR ALL ENTRIES` in blocks 
 equalities, a loop over `INTO` a work area, a SELECT reached through a method
 call (the finder counts those; R1 does not rewrite them).
 
+Follow-up: R1/R1b do not yet refuse pre-loop aliases of loop-table rows or method calls that may mutate a class-attribute loop table.
+
 ## Where the shape occurs
 
 `node tools/lift.mjs find <folder>`, 2026-09-30, over the loops inside class
