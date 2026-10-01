@@ -3,6 +3,8 @@ package abap
 import (
 	"reflect"
 	"sync"
+
+	"osg/gogen/session"
 )
 
 // Class events: EVENTS / CLASS-EVENTS, SET HANDLER and RAISE EVENT, as A4H
@@ -93,6 +95,15 @@ var (
 	allHandlers    = map[string]*handlerTable{}
 	staticHandlers = map[string]*handlerTable{}
 )
+
+func init() {
+	session.Register(func() {
+		eventMu.Lock()
+		defer eventMu.Unlock()
+		allHandlers = map[string]*handlerTable{}
+		staticHandlers = map[string]*handlerTable{}
+	})
+}
 
 // IsInitialRef: an initial object reference, typed pointer or interface.
 func IsInitialRef(v any) bool {

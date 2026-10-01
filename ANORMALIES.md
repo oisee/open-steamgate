@@ -2869,11 +2869,11 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Regression-test location: upstream `test/database.ts` ("FOR ALL ENTRIES, UP TO counts the whole result, not each driving row": 3 rows; 6 without the fix)
 - Upstream version containing a fix: none yet
 
-### ANOMALY-2026-09-30-unit-statics-across-test-classes — both ABAP Unit runners keep class statics from one test class to the next
+### ANOMALY-2026-09-30-unit-statics-across-test-classes — Node ABAP Unit keeps class statics from one test class to the next
 
-- Status: `open` (recorded; the fix is a runner change on both hosts, not started)
+- Status: `open` for Node; Go fixed on `feat/gogen-unit-statics-per-class` (this commit)
 - Discovery date: `2026-09-30`
-- Affected versions: the Node runner (the transpiler's generated unit runner in `output/index.mjs`, run by `npm run unit`, pin `oisee/transpiler` e97e82c7) and the Go runner (`tools/gogen/unit.mjs`) as of main 7b5921e5
+- Affected versions: the Node runner (the transpiler's generated unit runner in `output/index.mjs`, run by `npm run unit`, pin `oisee/transpiler` e97e82c7) and the Go runner (`tools/gogen/unit.mjs`) before this commit
 - Affected ABAP statement, runtime API or adapter: ABAP Unit test isolation, i.e. `CLASS-DATA` and the class constructor of a class under test across test classes
 - Minimal ABAP reproducer: `test/fixtures/unit-statics/` (`ZCL_OSD_STATICS_TEST`: a counter in CLASS-DATA and a class constructor that counts its runs; two test classes `LTC_A` and `LTC_B`, each with `M1_FIRST`, which expects the counter at 1 and one construction, and `M2_SECOND`, which expects the counter at 2)
 - Exact command used to run it:
@@ -2886,15 +2886,16 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
   |---|---|---|
   | A4H | 1 / 2 | 1 / 2 |
   | Node | 1 / 2 | **3** (`Expected '1', got '3'`, and the plain runner stops there) |
-  | Go | 1 / 2 | **3 / 4** |
+  | Go before fix | 1 / 2 | **3 / 4** |
+  | Go after fix | 1 / 2 | 1 / 2 |
 
-  The class constructor runs once per process and the statics carry on across test classes. On Go the fixture observes the single construction directly: a variant expecting 3/4 passes with one construction. On Node it follows from the constructor running at module import.
-- Impact on open-steamgate: a test class can pass or fail depending on which test class ran before it, and the same suite can disagree with a system. The Go/Node parity comparison does not show it, because both runners share the flaw. It is also the precondition for running test classes in parallel (U4), where each test class gets its own session anyway.
-- Smallest safe workaround: none in the runners. In tests, reset the statics a class under test keeps in `setup`/`class_setup`, or read them relative to their value at the start.
+  Before the Go fix, the class constructor ran once per process and the statics carried on across test classes. On Node the constructor runs at module import. Go now resets generated class statics (including VALUE initializers) and constructor flags before each test class. Its runtime also clears global event registrations and gives each class a fresh `abap.Session`. Database state is outside this reset; U4 step 2 handles database copies. EXPORT/IMPORT TO MEMORY ID and SET/GET PARAMETER have no Go runtime store yet.
+- Impact on open-steamgate: Node test classes can pass or fail depending on which test class ran before them. The parity harness identifies the fixture's reviewed Node failures as `nodeAnomaly` when Go agrees with A4H. Parallel class execution still needs U4's session and database isolation.
+- Smallest safe workaround on Node: reset the statics a class under test keeps in `setup`/`class_setup`, or read them relative to their value at the start.
 - Also found: the Go generator refuses to read another class's public static attribute in an expression (`zcl_x=>gv_attr`) and reports it NOT_COMPILED. That is a gap in the generator, not a difference from SAP, so it lives in `docs/backlog/gogen-osgo.md`. The fixture reads the attribute through a method so the two findings stay apart.
 - Upstream: the Node runner is the transpiler's generated unit runner, so abaplint/transpiler needs an issue (per test class: re-initialise the statics and re-run the class constructor). The Go runner is ours (foreman-dell).
-- Regression-test location: `test/fixtures/unit-statics/`; it moves to `test/unit/` when both runners pass it
-- Upstream version containing a fix: none yet
+- Regression-test location: `test/fixtures/unit-statics/` and `tools/gogen/unit.test.mjs`; the fixture moves to `test/unit/` when Node also passes it
+- Upstream version containing a Node fix: none yet
 
 ### ANOMALY-2026-09-30-fae-leftovers — four FOR ALL ENTRIES shapes the transpiled code gets wrong, older than the blocking change
 
