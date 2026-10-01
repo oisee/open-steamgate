@@ -51,6 +51,7 @@
 // and of a table function here is ours, not read off a system.
 import {mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
+import {randomInt} from "node:crypto";
 import {measure} from "./sqlscript/coverage.mjs";
 import {resolveType} from "./osd-type-graph.mjs";
 import {connection} from "./amdp-run.mjs";
@@ -63,10 +64,35 @@ const upper = (v) => String(v ?? "").toUpperCase().trim();
 const quote = (name) => `"${String(name).replace(/"/g, '""')}"`;
 const HANA_NAME_MAX = 127;
 
-/** a short upper-case run id: base36 of the time, of the pid, two random characters */
-export function newRunId(now = Date.now(), pid = process.pid, random = Math.random) {
-  const rnd = Math.floor(random() * 36 * 36).toString(36).toUpperCase().padStart(2, "0");
-  return `${Math.floor(now).toString(36)}${Number(pid).toString(36)}${rnd}`.toUpperCase();
+/**
+ * a run id of one fixed shape, R + nine base36 digits of the time + eight
+ * random ones: 36^8 tails per millisecond, so two runs do not meet, and a
+ * name of this shape is one this tool made (RUN_ID_SHAPE), which a lookalike
+ * such as OSD_CORPUS_BACKUP is not
+ */
+export function newRunId(now = Date.now(), random = () => randomInt(36)) {
+  const time = Math.floor(now).toString(36).toUpperCase().padStart(9, "0").slice(-9);
+  let tail = "";
+  for (let i = 0; i < 8; i += 1) tail += random().toString(36).toUpperCase();
+  return `R${time}${tail}`;
+}
+export const RUN_ID_SHAPE = /^R[0-9A-Z]{17}$/;
+/** the table every run's schema carries, written right after CREATE SCHEMA: what the sweep reads as ownership */
+export const RUN_MARKER = "OSD_CORPUS_RUN";
+
+/** drop() runs the drop at most once, and only after created(): a schema whose CREATE did not answer is not ours */
+export function ownership(drop) {
+  let owned = false;
+  let done = false;
+  return {
+    created() { owned = true; },
+    async drop() {
+      if (!owned || done) return false;
+      done = true;
+      await Promise.resolve().then(drop).catch(() => undefined);
+      return true;
+    },
+  };
 }
 
 /** OSD_CORPUS_<runid>, within HANA's length limit and [A-Z0-9_] */
@@ -87,16 +113,21 @@ export function refuseSchema(theirs) {
 }
 
 /**
- * which of the catalogue's schemas a sweep drops: only OSD_CORPUS_<id>
- * (not the bare prefix, not a lookalike), and only those created more than
- * `olderThanHours` ago. rows: [{SCHEMA_NAME, CREATE_TIME}]
+ * which of the catalogue's schemas a sweep drops: only OSD_CORPUS_<run id>
+ * of the shape newRunId makes, carrying the run marker table, created more
+ * than `olderThanHours` ago. The age is HANA's own (AGE_SECONDS, from
+ * SECONDS_BETWEEN(CREATE_TIME, CURRENT_TIMESTAMP), both in the database's
+ * clock), so the Node process's time zone plays no part.
+ * rows: [{SCHEMA_NAME, AGE_SECONDS, MARKED}]
  */
-export function sweepSelection(rows, now = Date.now(), olderThanHours = 6) {
-  const limit = now - olderThanHours * 3600 * 1000;
-  return rows.filter((row) => /^OSD_CORPUS_[A-Z0-9_]+$/.test(String(row.SCHEMA_NAME))
-    && row.CREATE_TIME !== null && row.CREATE_TIME !== undefined
-    && new Date(row.CREATE_TIME).getTime() < limit)
-    .map((row) => String(row.SCHEMA_NAME));
+export function sweepSelection(rows, olderThanHours = 6) {
+  return rows.filter((row) => {
+    const name = String(row.SCHEMA_NAME);
+    if (!name.startsWith(`${SCHEMA_PREFIX}_`) || !RUN_ID_SHAPE.test(name.slice(SCHEMA_PREFIX.length + 1))) return false;
+    if (Number(row.MARKED) !== 1) return false;
+    const age = Number(row.AGE_SECONDS);
+    return row.AGE_SECONDS !== null && row.AGE_SECONDS !== undefined && Number.isFinite(age) && age > olderThanHours * 3600;
+  }).map((row) => String(row.SCHEMA_NAME));
 }
 
 /** --sweep: list (dry run) or, with `yes`, drop the leftover schemas of crashed runs */
@@ -106,8 +137,10 @@ export async function sweep({olderThanHours = 6, yes = false, log = console.log}
   await new Promise((resolve, reject) => client.connect((e) => (e ? reject(e) : resolve())));
   const exec = (sql) => new Promise((resolve, reject) => client.exec(sql, (e, rows) => (e ? reject(e) : resolve(rows))));
   try {
-    const rows = await exec("SELECT SCHEMA_NAME, CREATE_TIME FROM SYS.SCHEMAS WHERE SCHEMA_NAME LIKE 'OSD\\_CORPUS\\_%' ESCAPE '\\'");
-    const names = sweepSelection(rows, Date.now(), olderThanHours);
+    const rows = await exec("SELECT S.SCHEMA_NAME, SECONDS_BETWEEN(S.CREATE_TIME, CURRENT_TIMESTAMP) AS AGE_SECONDS,"
+      + ` (SELECT COUNT(*) FROM SYS.TABLES T WHERE T.SCHEMA_NAME = S.SCHEMA_NAME AND T.TABLE_NAME = '${RUN_MARKER}') AS MARKED`
+      + " FROM SYS.SCHEMAS S WHERE S.SCHEMA_NAME LIKE 'OSD\\_CORPUS\\_%' ESCAPE '\\'");
+    const names = sweepSelection(rows, olderThanHours);
     for (const name of names) {
       if (yes) { await exec(`DROP SCHEMA ${quote(name)} CASCADE`); log(`amdp-corpus-oracle: dropped ${name}`); }
       else log(`amdp-corpus-oracle: would drop ${name}`);
@@ -701,17 +734,16 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
   try { refuseSchema(process.env.HXE_SCHEMA ?? process.env.HANA_SCHEMA ?? ""); }
   catch (error) { client.end(); throw error; }
   const SCHEMA = schemaName(newRunId());
-  let dropped = false;
-  const dropOwn = async () => {
-    if (dropped) return;
-    dropped = true;
-    await exec(`DROP SCHEMA ${quote(SCHEMA)} CASCADE`).catch(() => undefined);
-  };
-  const onSignal = (signal) => { dropOwn().finally(() => process.exit(signal === "SIGINT" ? 130 : 143)); };
+  // ours only once our CREATE SCHEMA has answered: a CREATE that fails (the
+  // name exists) or a signal before it answers drops nothing
+  const own = ownership(() => exec(`DROP SCHEMA ${quote(SCHEMA)} CASCADE`));
+  const onSignal = (signal) => { own.drop().finally(() => process.exit(signal === "SIGINT" ? 130 : 143)); };
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
   try {
   await exec(`CREATE SCHEMA ${quote(SCHEMA)}`);
+  own.created();
+  await exec(`CREATE COLUMN TABLE ${quote(SCHEMA)}.${quote(RUN_MARKER)} ("RUN_ID" NVARCHAR(32))`);
   await exec(`SET SCHEMA ${quote(SCHEMA)}`);
   console.log(`amdp-corpus-oracle: schema ${SCHEMA}`);
 
@@ -796,7 +828,7 @@ export async function runOracle({exportDir, ddic, passes = 12, timeoutMs = 60000
   } finally {
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
-    await dropOwn();
+    await own.drop();
     client.end();
   }
 
