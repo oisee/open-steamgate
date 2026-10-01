@@ -662,10 +662,14 @@ export class ObjectStore {
       const target = type === "DEVC" ? file : file.slice(0, -meta.ext.length) + suffix;
       writeFileSync(join(this.root, target), content);
     }
-    const packages = this.#packagesOf(file, root);
+    // filed the way build() files it, so the entry a create makes is the
+    // entry the next rebuild makes: a package sits in the package above it,
+    // and its own chain stops there
+    const chain = this.#packagesOf(file, root);
+    const packages = type === "DEVC" ? chain.slice(0, -1) : chain;
     const entry = {type, name: upper, file, root: root.path, writable: true, library: false,
                    imported: root.imported === true, description,
-                   package: type === "DEVC" ? parent : packages[packages.length - 1], packages};
+                   package: packages[packages.length - 1], packages};
     this.#entries().set(`${type} ${upper}`, entry);
     if (type !== "DEVC") {
       this.inactive.add(`${type} ${upper}`);
@@ -810,6 +814,22 @@ export class ObjectStore {
           }
         }
       });
+      // A package object is the package, even when nothing sits in it yet.
+      // Its own chain stops at its parent (build() files a package under
+      // the package above it), so a package folder that holds only its
+      // package.devc.xml -- what a create makes -- was named by no chain at
+      // all and vanished from the tree, the search and nodestructure on the
+      // first rebuild after the create, while find() still knew it.
+      if (entry.type === "DEVC" && entry.name !== entry.package) {
+        const node = ensure(entry.name, entry.package);
+        if (entry.library === false) {
+          node.library = false;
+        }
+        const parent = packages.get(entry.package);
+        if (parent !== undefined && parent.subpackages.includes(entry.name) === false) {
+          parent.subpackages.push(entry.name);
+        }
+      }
       // a root package's own object is the package, not something in it
       if (entry.type === "DEVC" && entry.name === entry.package) {
         continue;

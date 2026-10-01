@@ -2130,7 +2130,9 @@ export function adtRouter(options = {}) {
     });
   }
 
-  for (const {type, adt} of SOURCE_TYPES) {
+  // a package locks like a source object (a client locks it before it
+  // deletes it), and has no source to write
+  for (const {type, adt} of [...SOURCE_TYPES, {type: "DEVC", adt: "packages"}]) {
     // LOCK and UNLOCK arrive on the object's own URI, told apart by _action
     router.post(`${BASE}/${adt}/:name`, (req, res) => {
       const action = String(req.query._action ?? "").toUpperCase();
@@ -2176,6 +2178,9 @@ export function adtRouter(options = {}) {
 
       res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", `unknown action ${action || "(none)"}`));
     });
+    if (type === "DEVC") {
+      continue;
+    }
 
     // Whether this request may change the object: writable, and the handle
     // in lockHandle held by this session for this object. Answers the

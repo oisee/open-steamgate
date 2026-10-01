@@ -1120,7 +1120,13 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     // a temporary system, so a created object never lands in this repo
     root = mkdtempSync(join(tmpdir(), "osd-adt-"));
     mkdirSync(join(root, "src", "demo"), {recursive: true});
+    mkdirSync(join(root, "src", "zosd_test"), {recursive: true});
     writeFileSync(join(root, "abaplint.jsonc"), readFileSync("abaplint.jsonc", "utf8"));
+    writeFileSync(join(root, "src", "zosd_test", "package.devc.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_DEVC" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DEVC><CTEXT>test packages</CTEXT></DEVC></asx:values></asx:abap>
+</abapGit>
+`);
     writeFileSync(join(root, "src", "demo", "package.devc.xml"), `<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0" serializer="LCL_OBJECT_DEVC" serializer_version="v1.0.0">
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DEVC><CTEXT>demo</CTEXT></DEVC></asx:values></asx:abap>
@@ -1302,6 +1308,53 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       body: body.replace("testclasses", "nonsense")});
     expect(bogus.status).to.equal(400);
     await call(`/oo/classes/zcl_made_incl?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
+  });
+
+  // vsp's repro: a package created stateless was there for the create and
+  // gone for the nodestructure right after it -- and for quick search, ever.
+  it("a created package stays in the tree, the search, lock and delete, after a rebuild too", async () => {
+    const stateless = {"x-sap-adt-sessiontype": "stateless"};
+    const res = await call("/packages?sap-client=001&sap-language=EN", {method: "POST", headers: {"content-type": "application/*", ...stateless},
+      body: `<?xml version="1.0" encoding="UTF-8"?>
+<pack:package xmlns:pack="http://www.sap.com/adt/packages" xmlns:adtcore="http://www.sap.com/adt/core"
+  adtcore:description="vsp ci probe" adtcore:name="$ZOSD_TEST_VSPCI" adtcore:type="DEVC/K" adtcore:responsible="DEVELOPER">
+  <pack:attributes pack:packageType="development"/>
+  <pack:superPackage adtcore:name="$ZOSD_TEST"/>
+  <pack:applicationComponent/>
+  <pack:transport>
+    <pack:softwareComponent pack:name="LOCAL"/>
+    <pack:transportLayer pack:name=""/>
+  </pack:transport>
+  <pack:subPackages/>
+</pack:package>`});
+    expect(res.status, await res.text()).to.equal(201);
+    expect(res.headers.get("location")).to.equal("/sap/bc/adt/packages/%24zosd_test_vspci");
+    expect(existsSync(join(root, "src/zosd_test/vspci/package.devc.xml"))).to.equal(true);
+
+    const visible = async (when) => {
+      const tree = await call("/repository/nodestructure?parent_name=%24ZOSD_TEST_VSPCI&parent_type=DEVC%2FK&withShortDescriptions=true",
+        {method: "POST", headers: stateless});
+      expect(tree.status, `${when}: nodestructure ${await tree.clone().text()}`).to.equal(200);
+      const parent = await (await call("/repository/nodestructure?parent_name=%24ZOSD_TEST&parent_type=DEVC%2FK&withShortDescriptions=true",
+        {method: "POST", headers: stateless})).text();
+      expect(parent, `${when}: listed under its parent`).to.contain("$ZOSD_TEST_VSPCI");
+      const found = await (await call("/repository/informationsystem/search?operation=quickSearch&query=%24ZOSD_TEST*&maxResults=51&objectType=DEVC%2FK",
+        {headers: stateless})).text();
+      expect(found, `${when}: quick search`).to.contain('adtcore:name="$ZOSD_TEST_VSPCI"');
+    };
+    await visible("right after the create");
+    // what the disk watcher does after the create's own write
+    store.build();
+    await visible("after a rebuild");
+
+    const locked = await call("/packages/%24zosd_test_vspci?_action=LOCK&accessMode=MODIFY", {method: "POST"});
+    expect(locked.status).to.equal(200);
+    const handle = (await locked.text()).match(/<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/)?.[1];
+    expect(handle).to.have.length.greaterThan(8);
+    await call(`/packages/%24zosd_test_vspci?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
+    const gone = await call("/packages/%24zosd_test_vspci", {method: "DELETE"});
+    expect(gone.status, await gone.text()).to.equal(200);
+    expect(existsSync(join(root, "src/zosd_test/vspci/package.devc.xml"))).to.equal(false);
   });
 
   it("what abapGit writes on disk, the façade serves without a restart", async () => {
