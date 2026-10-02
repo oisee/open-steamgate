@@ -9,18 +9,20 @@
 // an object is said once, by the lock server, and the Node session map keeps
 // only the handles, which are ADT values (port-map section 2, step 8).
 //
-// The ENQ key of an ADT session is "adt:<session id>"; the argument is built
-// by tools/osd-enq-host.mjs from the dictionary, as an ENQUEUE_ from ABAP
-// builds it, so the two sides cannot disagree on it.
-import {randomUUID} from "node:crypto";
-import {bindEnqSession, endEnqSession, enqDrop, enqHolder, enqTake} from "./osd-enq-host.mjs";
+// The ENQ key of an ADT session is "adt:<instance>:<session id>", the
+// instance being this owner table's, so a holder this table does not know is
+// told apart: under its own prefix it is a session that has ended (dead, and
+// ended on sight), under another prefix it is another façade's on the same
+// lock server (alive, its user quoted). The argument is built by
+// tools/osd-enq-host.mjs from the dictionary, as an ENQUEUE_ from ABAP builds
+// it, so the two sides cannot disagree on it.
+import {randomBytes, randomUUID} from "node:crypto";
+import {bindEnqSession, endEnqSession, enqDrop, enqHolder, enqTake, onEnqContextEnded} from "./osd-enq-host.mjs";
+import {refuseToken} from "./adt-session.mjs";
 
 export const LOCK_TABLE = "ZOSD_ADT_LOCK";
 export const LOCK_OBJECT = "EZOSD_ADT_OBJ";
 const PREFIX = "adt:";
-
-/** the ENQ session key of an ADT session */
-export const enqKey = (id) => `${PREFIX}${id}`;
 
 /** the exporting parameters ZCL_OSD_ADT_LOCK passes, said for the host */
 const argument = (type, name) => ({
@@ -29,19 +31,30 @@ const argument = (type, name) => ({
 });
 
 export class EnqOwners {
+  constructor() {
+    this.prefix = `${PREFIX}${randomBytes(6).toString("hex")}:`;
+  }
+
+  /** the ENQ session key of an ADT session of this table */
+  key(id) {
+    return `${this.prefix}${id}`;
+  }
+
+  // {id, user, mine}: mine when the key is this table's, so that an id the
+  // sessions do not know is one that ended, not somebody else's
   holder(type, name) {
     const held = enqHolder(LOCK_TABLE, argument(type, name));
     if (held === undefined) {
       return undefined;
     }
-    const id = typeof held.key === "string" && held.key.startsWith(PREFIX) ? held.key.slice(PREFIX.length) : undefined;
-    return {id, user: held.user};
+    const mine = typeof held.key === "string" && held.key.startsWith(this.prefix);
+    return {id: mine ? held.key.slice(this.prefix.length) : undefined, user: held.user, mine};
   }
 
   // the Node LOCK route, which serves only when the ABAP route table could
   // not be read: the same lock, taken from the host
   take(session, type, name) {
-    const res = enqTake(enqKey(session.id), session.user, LOCK_TABLE, LOCK_OBJECT, argument(type, name));
+    const res = enqTake(this.key(session.id), session.user, LOCK_TABLE, LOCK_OBJECT, argument(type, name));
     // 602: the session's own lock, which LOCK answers with its handle
     if (res.subrc === 0 || res.msgno === "602") {
       return {};
@@ -53,11 +66,11 @@ export class EnqOwners {
   }
 
   drop(session, type, name) {
-    enqDrop(enqKey(session.id), LOCK_TABLE, LOCK_OBJECT, argument(type, name));
+    enqDrop(this.key(session.id), LOCK_TABLE, LOCK_OBJECT, argument(type, name));
   }
 
   end(id) {
-    endEnqSession(enqKey(id));
+    endEnqSession(this.key(id));
   }
 }
 
@@ -72,16 +85,34 @@ export class EnqOwners {
  *   session that never asked for state binds nothing: its step is its ENQ
  *   session, as a stateless request is on a system. A stateless request of a
  *   stateful session is bound like any other, so it clears nothing.
+ * - ended: a session that ended while its step waited for the work process
+ *   (a LOCK queued behind its own logoff) cannot be bound again
+ *   (EnqSessionEnded); the request is answered as one from a session that
+ *   is gone, the CSRF refusal (refuseToken), and no ABAP runs for it.
  * - system: SYSTEM LOCK_HANDLE and LOCK_RELEASE, the session's handle map,
- *   which stays in the Node session until the session moves into ABAP; any
- *   other kind goes to `other` (the façade's IDENTITY).
+ *   SESSION (stateful or not) and LOCK_HOLDER (Sessions#holderOf, which
+ *   ends a holder whose session is gone), all of which stay in the Node
+ *   session until it moves into ABAP; any other kind goes to `other` (the
+ *   façade's IDENTITY).
  */
 export function abapSession(sessions, other) {
+  // A dump ends the bound ENQ context (#433) and its locks with it, but not
+  // the key: the session's next step opens a new context, as on a system.
+  // The handles that context gave out go too, so none of them looks alive.
+  // The logon session itself stays (its token, its cookies): a write with an
+  // old handle is then the 409 of a handle that holds nothing, not a CSRF
+  // refusal, and the client locks again.
+  onEnqContextEnded((key) => {
+    const prefix = sessions.owners.prefix;
+    if (typeof key !== "string" || prefix === undefined || key.startsWith(prefix) === false) return;
+    sessions.byId.get(key.slice(prefix.length))?.locks.clear();
+  });
   return {
     enter(req) {
       const session = req.adt?.session;
-      if (session?.stateful === true) bindEnqSession(enqKey(session.id), {user: session.user});
+      if (session?.stateful === true) bindEnqSession(sessions.owners.key(session.id), {user: session.user});
     },
+    ended: refuseToken,
     system(kind, name, req) {
       const session = req.adt?.session;
       if (kind === "LOCK_HANDLE" && session !== undefined) {
@@ -92,7 +123,21 @@ export function abapSession(sessions, other) {
         const lock = sessions.forget(session, String(name));
         return lock === undefined ? {} : {type: lock.type, name: lock.name};
       }
+      if (kind === "SESSION" && session !== undefined) {
+        return {stateful: session.stateful === true};
+      }
+      if (kind === "LOCK_HOLDER") {
+        const [type, ...rest] = String(name).split(" ");
+        return {alive: sessions.holderOf(type, rest.join(" ")) !== undefined};
+      }
       return other(kind, name, req);
     },
   };
 }
+
+/** The refusal of a LOCK outside a stateful session, said once for the Node
+ *  route; ZCL_OSD_ADT_LOCK writes the same words. Without state the ENQ
+ *  session is the request's, and the lock would be gone before its handle
+ *  was used. Unmeasured on A4H (docs/adt-abap-port/abap-skeleton.md). */
+export const statelessLock = (entry) =>
+  `${entry.type} ${entry.name} cannot be locked outside a stateful session; send x-sap-adt-sessiontype: stateful`;

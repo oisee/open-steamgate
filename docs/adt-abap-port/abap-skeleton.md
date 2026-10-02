@@ -178,9 +178,9 @@ front: that move is slice 3.
 | `ZOSD_ADT_LOCK` | Table: `MANDT`, `OBJTYPE` CHAR 4, `OBJNAME` CHAR 40. It holds no rows. It exists to be the lock object's primary table. |
 | `EZOSD_ADT_OBJ` | Lock object over it (ENQU). The transpiler generates `ENQUEUE_` / `DEQUEUE_EZOSD_ADT_OBJ`, and `tools/osd-enq-host.mjs` serves them. |
 | `ZCL_OSD_ADT_TYPES` | The lockable types and their collections: the six source types in `TYPES` order, then DEVC. `type_of_path( )`. |
-| `ZCL_OSD_ADT_LOCK` | `POST <collection>/:name`: `_action` LOCK, UNLOCK, else 400; a missing object 404; a library object an empty handle. |
+| `ZCL_OSD_ADT_LOCK` | `POST <collection>/:name`: `_action` LOCK, UNLOCK, else 400; a missing object 404; a library object an empty handle; a LOCK outside a stateful session 400. |
 | `ZCX_OSD_ADT` | Two new factories: `invalid_request` (400) and `locked_by_other` (403, EU 510, V1 user, V2 object). |
-| `ZCL_OSD_ADT_HOST` | `object( )` (store command OBJECT), `lock_handle( )` and `lock_release( )` (SYSTEM kinds). |
+| `ZCL_OSD_ADT_HOST` | `object( )` (store command OBJECT); `lock_handle( )`, `lock_release( )`, `session_stateful( )` and `holder_alive( )` (SYSTEM kinds LOCK_HANDLE, LOCK_RELEASE, SESSION, LOCK_HOLDER). |
 
 The router generates seven POST rows from `ZCL_OSD_ADT_TYPES=>LOCKABLE`. None is written by hand.
 
@@ -191,11 +191,17 @@ E, the second LOCK would count 2 and one UNLOCK would leave the object held. MC 
 is that owner's user: the route renders it as `lockedByOtherDocument`. The ADT refusal is ENQ's `FOREIGN_LOCK`, drawn
 in the ADT format, as ADR 0008 says.
 
+Before it refuses a 601, the route asks the host once whether the holder is alive (`LOCK_HOLDER`, which is
+`Sessions#holderOf`). A holder that is dead is ended by being asked, and the ENQUEUE is tried once more. When
+LOCK_HANDLE fails after the ENQUEUE, the route gives the lock back only if this call granted it (subrc 0). A relock
+(602) found the lock already the session's, and a failed relock keeps it, with the handle the session has.
+
 ### Session binding
 
 The front gets an `enter(req)` hook, which `abapRunner` runs first inside the step, before the shim. The façade's
-hook (`abapSession` in `tools/adt-enq.mjs`) binds the step with `bindEnqSession("adt:" + id, {user})` when the
-request's session is stateful:
+hook (`abapSession` in `tools/adt-enq.mjs`) binds the step with `bindEnqSession(key, {user})` when the request's
+session is stateful. The key is `"adt:<instance>:<id>"`; the instance belongs to the owner table, as explained under
+"One source of truth" below.
 
 - **The session is the middleware's choice.** `req.adt.session` is what `sessionIdOf` named. No second reading of
   the cookies exists, so the one precedence rule stays the one rule.
@@ -203,11 +209,26 @@ request's session is stateful:
   `sy-uname`, which is the process's user, and the EU 510 refusal names the wrong holder.
 - **"Stateful" is the session's flag,** which the middleware sets and never clears. A stateless request of a
   stateful session is bound like any other, so it never clears the session's locks (the #395 fix, by construction).
-  A session that never asked for state binds nothing: its step is its ENQ session, and a lock taken there goes when
-  the request ends. That is how a stateless request behaves on a system. The Node façade keeps such a lock, so this
-  is the one place the two modes answer differently; no client in the suites locks without state.
+- **A LOCK outside a stateful session is refused,** with 400 `ExceptionInvalidRequest` and the message "<TYPE> <NAME>
+  cannot be locked outside a stateful session; send x-sap-adt-sessiontype: stateful". Without state the step is the
+  ENQ session, so the lock would be gone before its handle was used. A dead handle is the worse answer. ABAP asks the
+  host (SYSTEM SESSION), and the Node route checks `session.stateful`. The text is said once (`statelessLock` in
+  `tools/adt-enq.mjs`), so gate 1 compares the two byte for byte. **This is unmeasured on A4H:** what a system answers
+  to a LOCK in a stateless request was not captured. Measure it before the Node façade is retired.
 - **The end** is `Sessions#end`, which logoff, `DELETE core/http/sessions/:id` and expiry already go through. With
-  the ABAP front it ends with `endEnqSession("adt:" + id)`.
+  the ABAP front it ends with `endEnqSession(key)`. Since #433 an ended key stays ended (`tools/osd-enq-host.mjs`).
+- **A session that ended while its step waited.** A LOCK can queue for the work process behind another step while
+  the same session's logoff, a Node route that takes no step, ends the session. `enter` then finds the key ended:
+  `bindEnqSession` throws `EnqSessionEnded` before any ABAP runs. The front answers it with `options.ended`, which
+  is the answer the façade gives any request from a session that is gone: the CSRF refusal (403 `text/plain`
+  "CSRF token validation failed", `x-csrf-token: Required`, `refuseToken` in `tools/adt-session.mjs`, which the
+  middleware now uses too). Eclipse logs on again when it gets this answer. No lock is taken.
+- **A step that dumps** ends its bound ENQ context and that context's locks, but not the key (#433). The host
+  hears of it through `onEnqContextEnded(key)`. `abapSession` registers there and clears the handles of that
+  session, so no handle outlives its lock. The logon session itself stays: its token still works, a write with an old
+  handle gets the 409 for a handle that holds nothing (not a CSRF refusal), and the next LOCK opens a new context.
+  `enqTake` and `enqDrop` throw `EnqSessionEnded` for an ended key, through #433's `isEnded`, as
+  `bindEnqSession` does.
 
 The slice-1 plan proposed SYSTEM kinds `ENQ_BIND` and `ENQ_END` called from the handler. That plan assumed the
 session id was decided in ABAP. It is not decided there yet, and the front already has the session, so `enter`
@@ -227,6 +248,12 @@ decision splits the state by what it is:
   argument built from the dictionary by the same `request()` the generated modules use (`enqHolder`, `enqTake` and
   `enqDrop` in `tools/osd-enq-host.mjs`). `holderOf`, `holds( )`, `release` and the expiry sweep all read from
   there. No copy of the owner table exists to drift.
+- **A holder this table does not know.** Each `EnqOwners` keys its sessions under its own prefix
+  (`adt:<instance>:`). A holder under that prefix whose id `Sessions` no longer carries is a session that ended
+  without its lock going. `holderOf` counts it as dead, ends it (`endEnqSession`) and lets the caller proceed. Since
+  #433 nothing should make one, so this is defence in depth. A holder under another prefix belongs to another façade
+  on the same lock server and is quoted, not ended. Without the prefix, two façades in one process (the inline
+  server and a suite's own router) would end each other's locks.
 - **The handle is the session's,** as port-map step 8 says: an ADT value, not an ENQ one. It stays in
   `session.locks`, and ABAP writes it through two SYSTEM kinds bound per request like IDENTITY. `LOCK_HANDLE "TYPE
   NAME"` returns the session's handle for the object (`Sessions#adopt`: the one it has, or a new UUID).
@@ -235,8 +262,8 @@ decision splits the state by what it is:
 
 A write is allowed when `Sessions#holds(session, handle, type, name)` is true: the handle is the session's for that
 object, **and** the lock server says this session holds it. `stillHeld`, which every write route runs right before it
-writes, now asks exactly that. So a handle left in the map after its lock went (a session without state, whose ENQ
-session ended with the request) writes nothing.
+writes, now asks exactly that. So a handle left in the map after its lock went writes nothing. A dumped step can
+leave such a handle, because since #433 it ends its bound ENQ session.
 
 When the ABAP route table cannot be read, the Node LOCK route serves. With `EnqOwners` it takes the same lock from
 the host (`enqTake`), so the fallback does not split the table either.
@@ -272,27 +299,43 @@ checking that the ETag is Express's tag of that body. The sequences:
    UNLOCK of an unknown handle.
 
 Each sequence also asserts the reference statuses, so two sides failing alike cannot pass. It asserts that every
-LOCK and UNLOCK was served by ABAP and nothing else was, and that the lock table is empty afterwards. Three more
-cases cover the rest:
+LOCK and UNLOCK was served by ABAP and nothing else was, and that the lock table is empty afterwards. A ninth
+sequence covers a LOCK outside a stateful session (400) followed by one inside it (200). Six more cases cover the
+rest:
 
 - CSRF;
 - the ENQ row: user, mode X, one count after a relock, gone at logoff;
-- a session without state: its lock goes with the request, and the handle left in the map writes nothing (PUT and
-  POST include 409).
+- a handle whose lock the lock server lost: PUT and POST include both answer 409;
+- a LOCK queued behind its own session's logoff: it gets the gone-session answer, the same as the middleware's for
+  that request afterwards, no lock is left, and another session then locks;
+- a holder this table issued and no longer knows gives way, while another table's holder is quoted (EU 510);
+- a failed LOCK_HANDLE: a relock keeps the lock and the old handle still writes, and a first lock goes again.
+- a step that dumps in a stateful session: no handle and no lock left, the old handle gets 409, another session
+  locks, and the dumped session locks again.
 
 Each case was checked failing with its fix taken out:
 
 | fix taken out | fails |
 |---|---|
-| no `bindEnqSession` | 8 of 11 |
-| binding sessions without state too | the session-without-state case |
+| no `bindEnqSession` | 10 of 15 |
 | binding without the ADT user | 7 (EU 510 names `sy-uname`) |
-| `EnqOwners#end` a no-op | 8 (logoff, DELETE session) |
+| `EnqOwners#end` a no-op | 12 (logoff, DELETE session) |
 | the in-memory owner table with ABAP on | 9 |
 | every empty answer ended | 4 (UNLOCK's ETag) |
-| `stillHeld` without the lock-server check | the session-without-state case |
+| `stillHeld` without the lock-server check | the lost-lock case |
 | 601 read as "your own" in ABAP | 5 |
 | mode E instead of X | 3 (relock counts 2) |
+| no `ended` answer in the front | the queued-LOCK case (500 instead) |
+| `holderOf` treating an unknown own id as alive | the dead-holder case (and the next, behind its lock) |
+| no LOCK_HOLDER retry in ABAP | the same two |
+| a failed LOCK_HANDLE always dequeues | the failed-LOCK_HANDLE case |
+| no stateful check, Node or ABAP | the stateless sequence |
+| no `onEnqContextEnded` handler | the dump case |
+| `enqDrop` without the ended check | the dead-holder case |
+
+The rows for binding, the user, `#end`, the in-memory table, the empty answer, 601 and mode E were measured before
+this round's cases were added. A mutation that leaks a lock also fails the cases after it, which is why some counts
+are higher than the cases each targets.
 
 `test/adt-devloop.mjs` now mounts its own routers with the ABAP front, unless `OSD_ADT=js`
 (`test/helpers/adt-abap.mjs`). That covers the locking section, "locks across requests and sessions" and the DEVC
@@ -303,17 +346,18 @@ Measured on one process, 25 rounds of LOCK, PUT, UNLOCK on one stateful session,
 
 | request | Node only | with the ABAP front |
 |---|---|---|
-| LOCK (ABAP) | 0.72 / 0.82 ms | 2.14 / 2.31 ms |
-| PUT (Node, asks ENQ) | 0.98 / 1.15 ms | 1.14 / 1.23 ms |
-| UNLOCK (ABAP) | 0.69 / 0.71 ms | 2.11 / 2.22 ms |
+| LOCK (ABAP) | 0.65 / 0.67 ms | 2.50 / 2.63 ms |
+| PUT (Node, asks ENQ) | 0.94 / 0.92 ms | 1.11 / 1.05 ms |
+| UNLOCK (ABAP) | 0.64 / 0.59 ms | 2.20 / 1.94 ms |
 
-A LOCK makes two host calls (OBJECT, LOCK_HANDLE) and an ENQUEUE inside one step. A PUT pays one `ENQUEUE_READ`-style
-scan of the lock table.
+A LOCK makes three host calls (OBJECT, SESSION, LOCK_HANDLE) and an ENQUEUE inside one step; LOCK_HOLDER is a fourth
+only on a refusal. A PUT pays one `ENQUEUE_READ`-style scan of the lock table. Before SESSION was added, LOCK measured
+2.14 / 2.31 ms.
 
 ### Open questions for slice 3
 
-1. **A lock without state.** Under ABAP it lives only as long as its request, and the Node façade keeps it. A4H was
-   not measured for this case, and it should be before the Node façade is retired.
+1. **A lock without state** is refused by both modes (above). That is our choice; A4H was not measured. Capture it
+   before the Node façade is retired.
 2. **The session into ABAP.** `ZCL_OSD_ADT_SESSION`, the tables `ZOSD_ADT_SESS` and `ZOSD_ADT_HNDL`, and CSRF in
    `ZCL_OSD_ADT_CSRF`. Then `LOCK_HANDLE` and `LOCK_RELEASE` go, the handle map becomes a table, the binding moves
    into the handler, and the front moves to the top of `adtRouter`. The binding then needs a host call per stateful
@@ -324,4 +368,6 @@ scan of the lock table.
    and two such names would collide. No object in the tree comes near 40 characters.
 5. **Release at the end of a session is synchronous here,** and asynchronous on a system (ADR 0008: gone within a
    second). Nothing in the façade depends on it.
-6. The slice-1 questions on HEAD over ICF, the child-mode parent and the IDENTITY cache stay open.
+6. **One file, two arguments.** `INCL X` and `PROG X` are one file in the store but two lock arguments, so two
+   sessions can each lock one and both write. This is in the backlog as A.11 (lock by the store file).
+7. The slice-1 questions on HEAD over ICF, the child-mode parent and the IDENTITY cache stay open.

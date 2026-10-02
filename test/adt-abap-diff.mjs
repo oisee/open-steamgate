@@ -23,6 +23,8 @@ import {abapRunner, matchRoute, routeRows} from "../tools/adt-abap-front.mjs";
 import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
+import {Sessions} from "../tools/adt-session.mjs";
+import {EnqOwners} from "../tools/adt-enq.mjs";
 
 const output = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
 
@@ -506,6 +508,16 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
         await logoff(one);
         return answers;
       },
+      // A4H unmeasured: without state the ENQ session is the request's, so a
+      // lock would be gone before its handle was used; both refuse it
+      "a LOCK outside a stateful session is refused, and one inside is not": async (server) => {
+        const one = await logon(server);
+        const refused = await lock(one, LOCKED, {"x-sap-adt-sessiontype": "stateless"});
+        const locked = await lock(one);
+        const unlocked = await unlock(one, locked.handle);
+        await logoff(one);
+        return [refused, locked, unlocked];
+      },
     };
 
     // express's weak entity tag, which covers the handle: checked against the
@@ -521,6 +533,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       "the same user in another session is refused, because the lock is the session's": [200, 403, 200],
       "a package locks like a source object": [200, 403, 200],
       "the refusals: no object, no action, another action; the dataname a client asks for": [404, 400, 400, 200, 200],
+      "a LOCK outside a stateful session is refused, and one inside is not": [400, 200, 200],
     };
 
     const answered = (answers) => answers.map(({handle, ...rest}) => {
@@ -597,27 +610,157 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       expect(rows().filter((r) => r.arg.includes(LOCKED))).to.deep.equal([]);
     });
 
-    it("a lock taken in a session that never asked for state lives as long as its request", async () => {
-      // A4H: a stateless request is its own session, so what it enqueues goes
-      // when it ends; the ENQ session is the step's, nothing is bound
-      const ported = await mount(withAbap({store: tree()}));
-      const res = await fetch(`http://127.0.0.1:${ported.address().port}/sap/bc/adt/core/discovery`, {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
-      const id = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
-      const plain = {cookie: `sap-contextid=${id}`, "x-csrf-token": res.headers.get("x-csrf-token")};
-      const url = `http://127.0.0.1:${ported.address().port}${at(LOCKED)}`;
-      const locked = await fetch(`${url}?_action=LOCK&accessMode=MODIFY`, {method: "POST", headers: plain});
-      expect(locked.status).to.equal(200);
-      const handle = /<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
-      const other = await logon(ported, "DEVTWO");
-      expect((await lock(other)).status, "nobody holds it once the request is over").to.equal(200);
-      const put = await fetch(`${url}/source/main?lockHandle=${handle}`, {method: "PUT", headers: plain, body: "* no\n"});
+    // a façade with its sessions in hand, so a test can reach behind the wire
+    const withSessions = async (adopt) => {
+      const sessions = new Sessions({owners: new EnqOwners()});
+      if (adopt !== undefined) {
+        const own = sessions.adopt.bind(sessions);
+        sessions.adopt = (...args) => adopt(own, ...args);
+      }
+      return {sessions, server: await mount(withAbap({store: tree(), sessions}))};
+    };
+    const rows = async () => {
+      const {locks} = await import("../tools/osd-enq.mjs");
+      return locks().read({table: "ZOSD_ADT_LOCK"});
+    };
+
+    it("a handle whose lock the lock server no longer has writes nothing", async () => {
+      // holds( ) asks the lock server, not only the session's handle map: the
+      // lock can go behind the map's back (the lock server ending the ENQ
+      // session, which a dumped step will do), and the handle must go with it
+      const {sessions, server} = await withSessions();
+      const one = await logon(server);
+      const {handle} = await lock(one);
+      sessions.owners.end(one.id);
+      expect(sessions.get(one.id).locks.has(handle), "the handle is still in the map").to.equal(true);
+      const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${handle}`, {headers: {"content-type": "text/plain"}, body: "* no\n"});
       expect(put.status).to.equal(409);
-      // the handle is still in the session's map, and a write route that
-      // checked only the map would take it (holds( ) asks the lock server)
-      const include = await fetch(`${url}/includes?lockHandle=${handle}`, {method: "POST", headers: plain,
-        body: `<class:abapClassInclude adtcore:name="${LOCKED}" class:includeType="testclasses"/>`});
+      const include = await send(one, "POST", `${at(LOCKED)}/includes?lockHandle=${handle}`,
+        {body: `<class:abapClassInclude adtcore:name="${LOCKED}" class:includeType="testclasses"/>`});
       expect(include.status).to.equal(409);
-      await logoff(other);
+      await logoff(one);
+    });
+
+    it("a step that dumps in a stateful session leaves no handle, and the object goes free", async () => {
+      // #433: a dump ends the bound ENQ context and tells the host
+      // (onEnqContextEnded); the façade drops the handles that context gave
+      // out, so the old one is a 409 and not a write
+      const {sessions, server} = await withSessions();
+      const {bindEnqSession} = await import("../tools/osd-enq-host.mjs");
+      const one = await logon(server);
+      const {handle} = await lock(one);
+      expect(sessions.get(one.id).locks.has(handle)).to.equal(true);
+      // the step the front would run for this session, dumping
+      await dialogStep(async () => {
+        bindEnqSession(sessions.owners.key(one.id), {user: "OSD"});
+        throw new Error("a dump in the session's step");
+      }, "test: a dump").catch(() => {});
+      expect(sessions.get(one.id).locks.size, "no handle left").to.equal(0);
+      expect(await rows(), "no lock left").to.deep.equal([]);
+      const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${handle}`, {headers: {"content-type": "text/plain"}, body: "* no\n"});
+      expect(put.status).to.equal(409);
+      const two = await logon(server, "DEVTWO");
+      expect((await lock(two)).status).to.equal(200);
+      await logoff(two);
+      // and the dumped session goes on: its next LOCK is a new context
+      expect((await lock(one)).status).to.equal(200);
+      await logoff(one);
+    });
+
+    it("a LOCK queued behind its own session's logoff is answered as a gone session, and leaves no lock", async () => {
+      // The LOCK's step waits for the work process (held here), the logoff is a
+      // Node route and does not, so the session has ended when the step
+      // starts: binding its key throws EnqSessionEnded before any ABAP runs,
+      // and the request gets what the façade answers a session that is gone,
+      // the CSRF refusal a client re-logs on
+      const {server} = await withSessions();
+      const one = await logon(server);
+      const two = await logon(server, "DEVTWO");
+      let free;
+      let started;
+      const running = new Promise((resolve) => { started = resolve; });
+      const held = dialogStep(() => new Promise((resolve) => { free = resolve; started(); }), "test: the work process is busy");
+      await running;
+      steps.length = 0;
+      const queued = fetch(`http://127.0.0.1:${server.address().port}${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`, {method: "POST",
+        headers: {cookie: `sap-contextid=${one.id}`, "x-csrf-token": one.token, "x-sap-adt-sessiontype": "stateful"}});
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(steps, "the LOCK waits for the work process").to.have.length(1);
+      expect(await logoff(one)).to.equal(200);
+      free();
+      await held;
+      const answer = await queued;
+      const gone = {status: answer.status, type: answer.headers.get("content-type"), token: answer.headers.get("x-csrf-token"), body: await answer.text()};
+      // the same request once the session is gone, which the middleware refuses
+      const late = await fetch(`http://127.0.0.1:${server.address().port}${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`, {method: "POST",
+        headers: {cookie: `sap-contextid=${one.id}`, "x-csrf-token": one.token, "x-sap-adt-sessiontype": "stateful"}});
+      expect(gone).to.deep.equal({status: late.status, type: late.headers.get("content-type"), token: late.headers.get("x-csrf-token"), body: await late.text()});
+      expect(gone).to.deep.equal({status: 403, type: "text/plain; charset=utf-8", token: "Required", body: "CSRF token validation failed"});
+      expect((await rows()).map((r) => `${r.user} ${r.arg}`), "no lock left").to.deep.equal([]);
+      const after = await lock(two);
+      expect(after.status, after.body).to.equal(200);
+      await logoff(two);
+    });
+
+    it("a holder this owner table issued and no longer knows is dead, and gives way", async () => {
+      // holderOf: an id under this table's own prefix that no session carries
+      // is a session that ended without its lock going (nothing makes one now
+      // that an ended key stays ended, so it is made here by hand); asked by
+      // the ABAP LOCK (LOCK_HOLDER) or a Node route, it is ended and the
+      // caller proceeds. Another façade's holder is not this table's to end.
+      const {sessions, server} = await withSessions();
+      const {enqTake} = await import("../tools/osd-enq-host.mjs");
+      const input = {mode_zosd_adt_lock: "X", objtype: "CLAS", objname: LOCKED, x_objtype: "X", x_objname: "X", _scope: "1"};
+      expect(enqTake(sessions.owners.key("ghost"), "GHOST", "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input).subrc).to.equal(0);
+      const two = await logon(server, "DEVTWO");
+      const after = await lock(two);
+      expect(after.status, after.body).to.equal(200);
+      await logoff(two);
+      // a holder under another table's prefix stays, and is quoted
+      const other = new EnqOwners();
+      expect(enqTake(other.key("elsewhere"), "ELSEWHERE", "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input).subrc).to.equal(0);
+      const three = await logon(server, "DEVTHREE");
+      const refused = await lock(three);
+      expect(refused.status).to.equal(403);
+      expect(refused.body).to.contain("<entry key=\"T100KEY-V1\">ELSEWHERE</entry>");
+      other.end("elsewhere");
+      // an ended key takes and drops nothing from the host either (#433)
+      const {enqDrop} = await import("../tools/osd-enq-host.mjs");
+      expect(() => enqTake(other.key("elsewhere"), "ELSEWHERE", "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input)).to.throw().with.property("code", "ENQ_SESSION_ENDED");
+      expect(() => enqDrop(other.key("elsewhere"), "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input)).to.throw().with.property("code", "ENQ_SESSION_ENDED");
+      await logoff(three);
+      expect(await rows()).to.deep.equal([]);
+    });
+
+    it("a relock whose handle the host cannot give keeps the lock the session had", async () => {
+      // zcl_osd_adt_lock: only a lock this LOCK granted goes again when
+      // LOCK_HANDLE fails; a relock (MC 602, the session's own) is not this
+      // call's to give back
+      let failing = false;
+      const {server} = await withSessions((own, ...args) => {
+        if (failing) throw new Error("the host has no handle for you");
+        return own(...args);
+      });
+      const one = await logon(server);
+      const first = await lock(one);
+      expect(first.status).to.equal(200);
+      failing = true;
+      const again = await lock(one);
+      expect(again.status).to.equal(500);
+      expect(again.body).to.contain("the host has no handle for you");
+      failing = false;
+      expect((await rows()).filter((r) => r.arg.includes(LOCKED)), "still held").to.have.length(1);
+      const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${first.handle}`,
+        {headers: {"content-type": "text/plain"}, body: "* still mine\n"});
+      expect(put.status).to.equal(200);
+      // and a first LOCK whose handle fails leaves nothing behind
+      const two = await logon(server, "DEVTWO");
+      failing = true;
+      expect((await lock(two, DOOMED)).status).to.equal(500);
+      failing = false;
+      expect((await rows()).filter((r) => r.arg.includes(DOOMED)), "a granted lock goes again").to.deep.equal([]);
+      await logoff(one);
+      await logoff(two);
     });
   });
 });

@@ -53,6 +53,16 @@ export function sessionIdOf(cookies) {
   return cookies[CONTEXT_COOKIE] || cookies[SESSION_COOKIE];
 }
 
+// How a write from a session that is gone is answered: the CSRF refusal, with
+// the word that tells a client to fetch a token, which it does by logging on
+// again (Eclipse re-logs on it). The middleware answers it for a token that
+// names no live session; the ABAP front answers it for a request whose
+// session ended while its step waited (EnqSessionEnded).
+export function refuseToken(res) {
+  res.setHeader("x-csrf-token", REQUIRED);
+  res.status(403).type("text/plain").send("CSRF token validation failed");
+}
+
 export class Session {
   constructor(user) {
     this.id = randomBytes(12).toString("hex");
@@ -83,7 +93,7 @@ export class SessionOwners {
 
   holder(type, name) {
     const id = this.byObject.get(objectKey(type, name));
-    return id === undefined ? undefined : {id};
+    return id === undefined ? undefined : {id, mine: true};
   }
 
   take(session, type, name) {
@@ -147,15 +157,22 @@ export class Sessions {
 
   // {session, handle} of the session that holds an object, or undefined; an
   // owner whose session has expired holds nothing, and is released on the
-  // way. A holder this Sessions does not know (another façade's session on
-  // the same lock server, or ABAP outside any ADT session) is answered with
-  // its user and no handle.
+  // way. So is one of this table's (mine) whose session is gone: a LOCK
+  // queued behind a logoff of its own session can still take the object
+  // after the session ended, and that lock has nobody left to give it back.
+  // A holder that is not this table's (another façade's session on the same
+  // lock server, or ABAP outside any ADT session) is answered with its user
+  // and no handle.
   holderOf(type, name) {
     const owner = this.owners.holder(type, name);
     if (owner === undefined) {
       return undefined;
     }
-    const session = owner.id === undefined ? undefined : this.byId.get(owner.id);
+    const session = owner.mine === true ? this.byId.get(owner.id) : undefined;
+    if (session === undefined && owner.mine === true) {
+      this.owners.end(owner.id);
+      return undefined;
+    }
     if (session === undefined) {
       return {session: {id: owner.id, user: owner.user ?? "", locks: new Map()}, handle: undefined};
     }
@@ -343,8 +360,7 @@ export class Sessions {
       if (UNSAFE.has(req.method.toUpperCase()) && wanted !== session.token) {
         // the one place the word appears: a write without a valid token is
         // refused, and the client is told to fetch one and retry
-        res.setHeader("x-csrf-token", REQUIRED);
-        res.status(403).type("text/plain").send("CSRF token validation failed");
+        refuseToken(res);
         return;
       }
 

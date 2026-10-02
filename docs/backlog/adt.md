@@ -265,6 +265,15 @@ A.9  Creating an object: two dialogs, and only one of them is read   [S]
 A.8  CTS                                                                 [S]
      └─ deliberately absent: there is no transport system here, and the
         boundary to a real system is an abapGit archive from a git ref
+
+A.11 One file, one lock: INCL X and PROG X                      [S] should
+     ├─ both name the same file in the store, but the lock argument is
+     │  (type, name), so INCL X and PROG X are two locks: two sessions can
+     │  each take one and both write the same source
+     ├─ found by the slice-2 review of the ADT lock route (#432); the Node
+     │  façade's own lock table has the same gap
+     └─ fix idea: lock by the store file (or the entry the file belongs
+        to), not by type and name, in EZOSD_ADT_OBJ and in the Node table
 ```
 
 ---

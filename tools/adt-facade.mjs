@@ -26,7 +26,7 @@ import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions, parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {abapFront} from "./adt-abap-front.mjs";
-import {EnqOwners, abapSession} from "./adt-enq.mjs";
+import {EnqOwners, abapSession, statelessLock} from "./adt-enq.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
@@ -2173,9 +2173,9 @@ export function adtRouter(options = {}) {
             .send(lockResultDocument(""));
           return;
         }
-        // one holder per object across sessions; the same session locking
-        // again gets the handle it has, another session gets a refusal that
-        // says who holds it, the way an enqueue conflict reads on a system
+        // a lock lives with a stateful session: without one it is refused, not given (statelessLock)
+        if (session.stateful !== true) return void refuse(res, 400, "ExceptionInvalidRequest", statelessLock(entry));
+        // one holder per object; the same session gets its handle again
         const taken = req.adt.sessions.lock(session, entry.type, entry.name, () => randomUUID());
         if (taken.heldBy !== undefined) {
           res.status(403).type("application/xml").send(lockedByOtherDocument(taken.heldBy.user, entry.name));

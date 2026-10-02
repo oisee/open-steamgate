@@ -122,6 +122,8 @@ function recorder() {
  * @param {object} [options.store] this façade's ObjectStore, what OBJECT reads
  * @param {Function} [options.enter] (req) => void, run first inside the step:
  *   where the façade binds the step to the request's ENQ session
+ * @param {Function} [options.ended] (res) => void: the answer when enter finds
+ *   the session ended (EnqSessionEnded, code ENQ_SESSION_ENDED)
  * @param {Function} [options.served] (servedBy, req) => void, for a test or a log
  * @param {number} [options.retryMs] how long a failed route-table read waits before the next try (5000)
  */
@@ -168,7 +170,11 @@ export function abapFront(options) {
         () => options.run({req: view, res: answer, class: HANDLER, base: BASE, enter: () => options.enter?.(req)}),
         {store: options.store});
     } catch (e) {
-      if (res.headersSent === false) refuse(`${HANDLER}: ${String(e?.message?.get?.() ?? e?.message ?? e)}`);
+      if (res.headersSent === true) return;
+      // the session ended while the step waited (enter, before any ABAP):
+      // answered as the façade answers a session that is gone
+      if (e?.code === "ENQ_SESSION_ENDED" && options.ended !== undefined) options.ended(res);
+      else refuse(`${HANDLER}: ${String(e?.message?.get?.() ?? e?.message ?? e)}`);
       return;
     }
     if (answer.headers.some(([name, value]) => name.toLowerCase() === SERVED_BY && value === "HOST")) {

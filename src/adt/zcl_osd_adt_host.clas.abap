@@ -14,7 +14,9 @@
 "!     and is it ours to change (a library object is not);
 "!   - SYSTEM LOCK_HANDLE: the editing session's handle for an object it has
 "!     just locked, the one it already has or a new one;
-"!   - SYSTEM LOCK_RELEASE: forget a handle, answering the object it named.
+"!   - SYSTEM LOCK_RELEASE: forget a handle, answering the object it named;
+"!   - SYSTEM SESSION: whether the request's session asked for state;
+"!   - SYSTEM LOCK_HOLDER: whether an object's holder is a live session.
 "! The two SYSTEM kinds are the session's handle map, which is still the
 "! Node session's in slice 2 (docs/adt-abap-port/abap-skeleton.md, "Slice
 "! 2"). Who holds an object is not asked: that is ENQUEUE_EZOSD_ADT_OBJ.
@@ -52,6 +54,19 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_type          TYPE string
                 iv_name          TYPE string
       RETURNING VALUE(rv_handle) TYPE string
+      RAISING   zcx_osd_adt.
+
+    "! the request's session asked for state (SYSTEM SESSION)
+    CLASS-METHODS session_stateful
+      RETURNING VALUE(rv_stateful) TYPE abap_bool
+      RAISING   zcx_osd_adt.
+
+    "! whether the holder of an object is a live session (SYSTEM
+    "! LOCK_HOLDER); asking ends a holder whose session the host knows is gone
+    CLASS-METHODS holder_alive
+      IMPORTING iv_type         TYPE string
+                iv_name         TYPE string
+      RETURNING VALUE(rv_alive) TYPE abap_bool
       RAISING   zcx_osd_adt.
 
     "! the object the handle named (initial type: the session had no such
@@ -139,6 +154,24 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
     lv_json = system( iv_kind = `LOCK_HANDLE` iv_name = lv_object ).
     lo_json = parse( iv_what = `SYSTEM LOCK_HANDLE` iv_json = lv_json ).
     rv_handle = lo_json->get_string( `/handle` ).
+  ENDMETHOD.
+
+  METHOD session_stateful.
+    DATA lo_json TYPE REF TO zcl_ajson.
+    DATA lv_json TYPE string.
+    lv_json = system( `SESSION` ).
+    lo_json = parse( iv_what = `SYSTEM SESSION` iv_json = lv_json ).
+    rv_stateful = lo_json->get_boolean( `/stateful` ).
+  ENDMETHOD.
+
+  METHOD holder_alive.
+    DATA lo_json TYPE REF TO zcl_ajson.
+    DATA lv_object TYPE string.
+    DATA lv_json TYPE string.
+    lv_object = iv_type && ` ` && iv_name.
+    lv_json = system( iv_kind = `LOCK_HOLDER` iv_name = lv_object ).
+    lo_json = parse( iv_what = `SYSTEM LOCK_HOLDER` iv_json = lv_json ).
+    rv_alive = lo_json->get_boolean( `/alive` ).
   ENDMETHOD.
 
   METHOD lock_release.

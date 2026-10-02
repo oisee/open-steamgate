@@ -59,9 +59,11 @@ export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HIST
 // system's, answered by the same per-call binding because only the facade
 // instance knows which session a request belongs to: LOCK_HANDLE (IV_NAME
 // "TYPE NAME": the session's handle for an object its ABAP LOCK has just
-// enqueued) and LOCK_RELEASE (IV_NAME the handle: forget it, answer the
-// object). They go when the session moves into ABAP.
-const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE"];
+// enqueued), LOCK_RELEASE (IV_NAME the handle: forget it, answer the
+// object), SESSION (does the request's session hold state) and LOCK_HOLDER
+// (IV_NAME "TYPE NAME": is the holder a live session; a dead one is ended).
+// They go when the session moves into ABAP.
+const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER"];
 let systemCalls;
 try {
   if (typeof process !== "undefined" && process.versions?.node !== undefined) {
