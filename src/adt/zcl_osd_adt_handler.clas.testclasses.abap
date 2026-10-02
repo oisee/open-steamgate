@@ -6,6 +6,7 @@ CLASS ltcl_session_double DEFINITION FOR TESTING FINAL.
     DATA ms_session TYPE zif_osd_adt_session=>ty_session.
     DATA mt_cookies TYPE string_table.
     DATA mv_raise TYPE abap_bool.
+    DATA mv_ended TYPE abap_bool.
     DATA mv_asked_id TYPE string.
     DATA mv_asked_token TYPE string.
     DATA mv_asked TYPE i.
@@ -19,6 +20,10 @@ CLASS ltcl_session_double IMPLEMENTATION.
     mt_seen_cookies = it_cookies.
     IF mv_raise = abap_true.
       lx_error = zcx_osd_adt=>internal( `no session table` ).
+      RAISE EXCEPTION lx_error.
+    ENDIF.
+    IF mv_ended = abap_true.
+      lx_error = zcx_osd_adt=>session_ended( ).
       RAISE EXCEPTION lx_error.
     ENDIF.
     rs_session = ms_session.
@@ -100,6 +105,7 @@ CLASS ltcl_csrf DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS a_route_header_is_replaced FOR TESTING RAISING cx_static_check.
     METHODS no_session_no_gate FOR TESTING RAISING cx_static_check.
     METHODS a_session_that_fails FOR TESTING RAISING cx_static_check.
+    METHODS an_ended_session FOR TESTING RAISING cx_static_check.
     METHODS a_token_that_is_fetch FOR TESTING RAISING cx_static_check.
     METHODS an_empty_token FOR TESTING RAISING cx_static_check.
     METHODS cookies_are_parsed FOR TESTING RAISING cx_static_check.
@@ -335,6 +341,23 @@ CLASS ltcl_csrf IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 500 ).
     cl_abap_unit_assert=>assert_equals( act = lv_by exp = zcl_osd_adt_router=>c_abap ).
     cl_abap_unit_assert=>assert_char_cp( act = ls_response-body exp = `*no session table*` ).
+  ENDMETHOD.
+
+  METHOD an_ended_session.
+*   a session that ended while its request waited is the refusal a client
+*   logs on again after, on a read as on a write, with no cookies
+    DATA ls_response TYPE zif_osd_adt_route=>ty_response.
+    DATA lv_by TYPE string.
+    mo_session->mv_ended = abap_true.
+    CLEAR mo_session->mt_cookies.
+    APPEND `sap-contextid=x; Path=/sap/bc/adt` TO mo_session->mt_cookies.
+    ls_response = call( EXPORTING iv_method = `GET` IMPORTING ev_served_by = lv_by ).
+    assert_refused( ls_response ).
+    cl_abap_unit_assert=>assert_equals( act = lv_by exp = zcl_osd_adt_router=>c_abap ).
+    cl_abap_unit_assert=>assert_initial( headers_named( is_response = ls_response iv_name = `set-cookie` ) ).
+    ls_response = call( iv_method = `POST` iv_token = c_token ).
+    assert_refused( ls_response ).
+    cl_abap_unit_assert=>assert_equals( act = mo_session->mv_asked exp = 0 ).
   ENDMETHOD.
 
   METHOD a_token_that_is_fetch.

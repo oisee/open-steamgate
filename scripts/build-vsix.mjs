@@ -330,6 +330,8 @@ function libEntries() {
 export const TEST_ONLY_ABAP = [
   /^integration[/\\]zosd_(voyage|ready)\.prog\.(abap|xml)$/,
   /^unit[/\\]zcl_osd_adt_session_mem\.clas\.(abap|xml)$/,
+  // the route that ends in an echo continuation (test/adt-abap-front.mjs)
+  /^unit[/\\]zcl_osd_adt_route_echo\.clas\.(abap|xml)$/,
 ];
 
 /** whether a path under test/ (relative to it) goes into a system seed: the

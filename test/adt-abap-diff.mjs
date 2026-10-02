@@ -1,14 +1,16 @@
-// Migration gate 1 for the ADT façade in ABAP (ADR 0007, slices 1 and 2): every
+// Migration gate 1 for the ADT façade in ABAP (ADR 0007, slices 1 to 3): every
 // route ZCL_OSD_ADT_ROUTER serves answers what the Node façade answers --
 // status, content type, length, entity tag and body, byte for byte -- and
 // every route it does not serve still reaches the Node façade unchanged,
-// without ABAP being asked and whatever state the ABAP side is in.
+// after the handler's step has resolved its session and gated it (slice 3,
+// option B: every request enters ZCL_OSD_ADT_HANDLER first).
 //
-// Two adtRouters over one store: one plain, one with the ABAP front
-// (tools/adt-abap-front.mjs) running the transpiled handler under
-// dialogStep, the way test/start.mjs mounts it inline. The front reports
-// who served each request, so a route that silently fell through to Node
-// cannot pass as ported.
+// Two adtRouters over one store: one plain (Node's Sessions and its
+// middleware), one with the ABAP front (tools/adt-abap-front.mjs) running the
+// transpiled handler under dialogStep with ABAP sessions, the way
+// test/start.mjs mounts it inline. The front reports who served each
+// request, so a route that silently fell through to Node cannot pass as
+// ported, and every entry into the handler is counted.
 import {expect} from "chai";
 import express from "express";
 import {request as httpRequest} from "node:http";
@@ -20,12 +22,12 @@ import {join} from "node:path";
 import "./start.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {adtRouter, answered} from "../tools/adt-facade.mjs";
-import {abapRunner, matchRoute, routeRows} from "../tools/adt-abap-front.mjs";
+import {abapRunner} from "../tools/adt-abap-front.mjs";
+import {AbapSessions} from "../tools/adt-abap-sessions.mjs";
 import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
-import {Sessions, SESSION_COOKIE} from "../tools/adt-session.mjs";
-import {EnqOwners} from "../tools/adt-enq.mjs";
+import {SESSION_COOKIE} from "../tools/adt-session.mjs";
 
 const output = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
 
@@ -46,9 +48,9 @@ const PORTED = [
 const DELEGATED = [
   ["GET", "/sap/bc/adt/discovery"],
   ["HEAD", "/sap/bc/adt/core/discovery"],
-  // refused by the CSRF gate, which is still the Node session middleware's
-  // and runs before the front: the front is not reached at all (slice 2)
-  ["POST", SYSINFO, "nobody"],
+  // refused by the CSRF gate, which is the handler's now (slice 3): ABAP
+  // answers it, with the bytes of the Node middleware's refusal
+  ["POST", SYSINFO, "ABAP"],
   ["GET", "/sap/bc/adt/debugger/listeners"],
   ["GET", "/sap/bc/adt/packages/settings"],
   ["GET", "/sap/bc/adt/no/such/resource"],
@@ -92,7 +94,6 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
   this.timeout(60000);
   let root;
   let abapSide;
-  let router;
   const servers = [];
   const served = [];
   const steps = [];
@@ -105,10 +106,10 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     servers.push(server);
     return server;
   };
-  // every entry into the ABAP is counted, so "ABAP was not asked" is a fact
-  const counted = (runner) => ({...runner, run: (args) => {
-    steps.push(`${args.req.method} ${args.req.path}`);
-    return runner.run(args);
+  // every entry into the handler is counted, so "ABAP was asked" is a fact
+  const counted = (runner) => ({...runner, answer: (view, session) => {
+    steps.push(`${view.method} ${view.path}`);
+    return runner.answer(view, session);
   }});
   const withAbap = (options, runner = abapSide) => ({...options, abap: counted(runner),
     abapServed: (by, req) => served.push(`${by} ${req.method} ${req.originalUrl}`)});
@@ -208,9 +209,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
   });
 
   before(async () => {
-    const {cl_express_icf_shim: shim} = await output("cl_express_icf_shim.clas.mjs");
-    ({zcl_osd_adt_router: router} = await output("zcl_osd_adt_router.clas.mjs"));
-    abapSide = abapRunner({shim, router, step: dialogStep});
+    const {zcl_osd_adt_handler: handler} = await output("zcl_osd_adt_handler.clas.mjs");
+    abapSide = abapRunner({handler, step: dialogStep});
     root = mkdtempSync(join(tmpdir(), "osd-adt-abap-"));
     mkdirSync(join(root, "src"));
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
@@ -239,29 +239,28 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     }
   });
 
-  it("a route ABAP does not serve reaches the Node façade unchanged, and no ABAP runs for it", async () => {
+  it("a route ABAP does not serve reaches the Node façade unchanged, after the handler's step", async () => {
     const shared = store();
     const node = await mount({store: shared});
     const ported = await mount(withAbap({store: shared}));
-    await call(ported, "GET", "/sap/bc/adt/discovery"); // the route table is read once, in a step of its own
-    steps.length = 0;
     for (const [method, path, who = "HOST"] of DELEGATED) {
       served.length = 0;
+      steps.length = 0;
       const expected = await call(node, method, path);
       const actual = await call(ported, method, path);
       // none of these carries a time or a session value, so the body compares
       // whole (a feed carries its time, which is why none is listed); the
       // catch-all's 404 names the path, and so do both
       expect(actual, `${method} ${path}`).to.deep.equal(expected);
-      expect(served, `${method} ${path}`).to.deep.equal(who === "nobody" ? [] : [`${who} ${method} ${path}`]);
+      expect(served, `${method} ${path}`).to.deep.equal([`${who} ${method} ${path}`]);
+      // every ADT request enters the handler, exactly once
+      expect(steps, `${method} ${path}`).to.deep.equal([`${method} ${path}`]);
     }
-    expect(steps, "no step for a HOST row").to.deep.equal([]);
   });
 
-  it("a broken ABAP side answers the ADT exception document, and the Node routes keep answering", async () => {
+  it("a broken ABAP side answers the ADT exception document for every request, a HOST row included", async () => {
     const shared = store();
-    const node = await mount({store: shared});
-    const broken = await mount(withAbap({store: shared}, {...abapSide, run: async () => {
+    const broken = await mount(withAbap({store: shared}, {...abapSide, answer: async () => {
       throw new Error("the shim fell over");
     }}));
     // the ABAP row: the Node façade's own refusal for the same failure
@@ -275,29 +274,13 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     expect(actual.status).to.equal(500);
     expect(actual.type).to.equal("application/xml; charset=utf-8");
     expect(actual.body).to.contain("<type id=\"ExceptionInternalError\"/>");
-    // and every HOST row is untouched by it
-    for (const [method, path] of DELEGATED.filter(([, , who]) => who === undefined)) {
-      expect(await call(broken, method, path), `${method} ${path}`).to.deep.equal(await call(node, method, path));
+    // no session was resolved, so nothing goes past the gate to Node: a
+    // HOST row gets the same refusal (fail closed)
+    for (const [method, path] of DELEGATED.filter(([verb, , who]) => who === undefined && verb === "GET")) {
+      const answer = await call(broken, method, path);
+      expect([answer.status, answer.type], `${method} ${path}`).to.deep.equal([500, "application/xml; charset=utf-8"]);
+      expect(answer.body, `${method} ${path}`).to.contain("the shim fell over");
     }
-  });
-
-  it("a route table that fails to read once is asked again, not cached as 'Node serves everything'", async () => {
-    const shared = store();
-    let reads = 0;
-    const flaky = {...abapSide, retryMs: 0, routes: async () => {
-      reads += 1;
-      if (reads === 1) throw new Error("the generation is not loaded yet");
-      return abapSide.routes();
-    }};
-    const ported = await mount(withAbap({store: shared}, flaky));
-    const [, path] = PORTED[0];
-    served.length = 0;
-    await call(ported, "GET", path); // the first read fails: Node answers it
-    expect(served).to.deep.equal([`HOST GET ${path}`]);
-    served.length = 0;
-    await call(ported, "GET", path); // asked again: ABAP answers now
-    expect(served).to.deep.equal([`ABAP GET ${path}`]);
-    expect(reads).to.equal(2);
   });
 
   it("a ported row that raises answers on the wire what the Node façade answers for it", async () => {
@@ -352,60 +335,13 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     expect(signature.importing.EV_ERROR.get()).to.match(/^nothing answers SYSTEM IDENTITY/);
   });
 
-  it("the front's matcher and ZCL_OSD_ADT_ROUTER=>MATCH pick the same row", async () => {
-    const abapMatch = async (table, method, path) => {
-      const route = new abap.types.Structure({method: new abap.types.String(), pattern: new abap.types.String(),
-        handler: new abap.types.String(), served_by: new abap.types.String()});
-      const found = new abap.types.Character(1);
-      await router.match({it_routes: table, iv_method: method, iv_path: path, ev_found: found, es_route: route});
-      return found.get() === "X" ? `${route.get().method.get()} ${route.get().pattern.get()}` : "none";
-    };
-    const real = await router.routes();
-    const synthetic = real.clone();
-    synthetic.clear();
-    for (const [method, pattern, servedBy] of [
-      ["GET", "/sap/bc/adt/packages/valuehelps/:what", "ABAP"],
-      ["GET", "/sap/bc/adt/packages/:name", "ABAP"],
-      ["HEAD", "/sap/bc/adt/discovery", "ABAP"],
-      ["GET", "/sap/bc/adt/discovery", "HOST"],
-      ["POST", "/sap/bc/adt/oo/classes/:name/includes", "ABAP"],
-      ["*", "/sap/bc/adt/*", "HOST"],
-    ]) {
-      const row = synthetic.appendInitial().get();
-      row.method.set(method);
-      row.pattern.set(pattern);
-      row.served_by.set(servedBy);
-    }
-    const paths = ["/sap/bc/adt/packages/zpkg", "/sap/bc/adt/packages/valuehelps/x", "/sap/bc/adt/packages/",
-      "/sap/bc/adt/packages//x", "/SAP/bc/ADT/Discovery/", "/sap/bc/adt/discovery", "/sap/bc/adt/oo/classes/zcl_x/includes",
-      "/sap/bc/adt/oo/classes//includes", "/sap/bc/adt", "/sap/bc/adt/", "/sap/bc/other", SYSINFO, `${SYSINFO}/`,
-      `${SYSINFO}/x`, "/sap/bc/adt/compatibility/graph", "/sap/bc/adt/packages/%zz", "/sap/bc/adt//packages/zpkg",
-      "/sap/bc/adt/oo/classes/zcl_x/source/main/versions",
-      "/sap/bc/adt/oo/classes/zcl_x/source/main/versions/19700101101123/00000/content",
-      "/sap/bc/adt/oo/interfaces/zif_x/includes/main/versions",
-      "/sap/bc/adt/ddic/ddl/sources/zx/versions",
-      "/sap/bc/adt/programs/programs/zx/source/main/versions"];
-    for (const table of [real, synthetic]) {
-      const rows = routeRows(table);
-      for (const method of ["GET", "HEAD", "POST", "DELETE"]) {
-        for (const path of paths) {
-          const js = matchRoute(rows, method, path);
-          expect(js === undefined ? "none" : `${js.method} ${js.pattern}`, `${method} ${path}`)
-            .to.equal(await abapMatch(table, method, path));
-        }
-      }
-    }
-  });
-
   it("the body reaches ABAP as bytes, however the host buffered it, and a parsed one is refused", async () => {
     const bodies = [];
     const echo = {
-      routes: async () => [{method: "GET", pattern: SYSINFO, handler: "X", served_by: "ABAP"},
-        {method: "*", pattern: "/sap/bc/adt/*", handler: "", served_by: "HOST"}],
-      run: async ({req, res}) => {
-        bodies.push(req.body.toString("utf8"));
-        res.append("content-type", "text/plain");
-        res.status(200).send(Buffer.from("ok"));
+      step: dialogStep,
+      answer: async (view) => {
+        bodies.push(view.body.toString("utf8"));
+        return {status: 200, contentType: "text/plain", headers: [], body: Buffer.from("ok"), servedBy: "ABAP"};
       },
     };
     const streamed = await mount(withAbap({store: store()}, echo));
@@ -672,7 +608,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       });
     }
 
-    it("a write without the token is refused by the session middleware before the front, as before", async () => {
+    it("a write without the token is refused by the handler, with the Node middleware's bytes", async () => {
       const node = await mount({store: tree()});
       const ported = await mount(withAbap({store: tree()}));
       const answers = [];
@@ -690,7 +626,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       expect(answers[2].type).to.equal("text/plain; charset=utf-8");
       expect(answers[2].body).to.equal("CSRF token validation failed");
       expect(answers[3].token).to.equal("Required");
-      expect(steps.filter((s) => s.startsWith("POST")), "no ABAP step for a refused write").to.deep.equal([]);
+      // the refusal is the handler's: both writes of the ported side entered it
+      expect(steps.filter((s) => s.startsWith("POST")), "the refused writes entered the handler").to.have.length(2);
     });
 
     it("the ENQ row names the ADT session's user, and goes with the session", async () => {
@@ -712,7 +649,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
 
     // a façade with its sessions in hand, so a test can reach behind the wire
     const withSessions = async (adopt) => {
-      const sessions = new Sessions({owners: new EnqOwners()});
+      const sessions = new AbapSessions();
       if (adopt !== undefined) {
         const own = sessions.adopt.bind(sessions);
         sessions.adopt = (...args) => adopt(own, ...args);
@@ -724,20 +661,24 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       return locks().read({table: "ZOSD_ADT_LOCK"});
     };
 
-    it("a handle whose lock the lock server no longer has writes nothing", async () => {
-      // holds( ) asks the lock server, not only the session's handle map: the
-      // lock can go behind the map's back (the lock server ending the ENQ
-      // session, which a dumped step will do), and the handle must go with it
+    it("a handle whose ENQ session the lock server ended writes nothing: the session is gone", async () => {
+      // The lock can go behind the session's back (the lock server ending
+      // the ENQ session). Under ABAP sessions an ended ENQ key is an ended
+      // ADT session: the next RESOLVE cannot bind it, deletes the session
+      // and its handles, and the request is the CSRF refusal a client logs
+      // on again after (slice 3). Nothing is written with the old handle.
       const {sessions, server} = await withSessions();
       const one = await logon(server);
       const {handle} = await lock(one);
       sessions.owners.end(one.id);
-      expect(sessions.get(one.id).locks.has(handle), "the handle is still in the map").to.equal(true);
+      expect((await sessions.get(one.id)).locks.has(handle), "the handle is still in the table").to.equal(true);
       const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${handle}`, {headers: {"content-type": "text/plain"}, body: "* no\n"});
-      expect(put.status).to.equal(409);
+      expect([put.status, put.body]).to.deep.equal([403, "CSRF token validation failed"]);
+      expect(await sessions.get(one.id), "the session went with its ENQ session").to.equal(undefined);
       const include = await send(one, "POST", `${at(LOCKED)}/includes?lockHandle=${handle}`,
         {body: `<class:abapClassInclude adtcore:name="${LOCKED}" class:includeType="testclasses"/>`});
-      expect(include.status).to.equal(409);
+      expect(include.status).to.equal(403);
+      expect((await send(one, "GET", `${at(LOCKED)}/source/main`)).body).to.not.contain("* no");
       await logoff(one);
     });
 
@@ -749,16 +690,17 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       const {bindEnqSession} = await import("../tools/osd-enq-host.mjs");
       const one = await logon(server);
       const {handle} = await lock(one);
-      expect(sessions.get(one.id).locks.has(handle)).to.equal(true);
+      expect((await sessions.get(one.id)).locks.has(handle)).to.equal(true);
       // the step the front would run for this session, dumping
       await dialogStep(async () => {
         bindEnqSession(sessions.owners.key(one.id), {user: "OSD"});
         throw new Error("a dump in the session's step");
       }, "test: a dump").catch(() => {});
-      expect(sessions.get(one.id).locks.size, "no handle left").to.equal(0);
       expect(await rows(), "no lock left").to.deep.equal([]);
+      // the next RESOLVE sees the ended context and clears the handles first
       const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${handle}`, {headers: {"content-type": "text/plain"}, body: "* no\n"});
       expect(put.status).to.equal(409);
+      expect((await sessions.get(one.id)).locks.size, "no handle left").to.equal(0);
       const two = await logon(server, "DEVTWO");
       expect((await lock(two)).status).to.equal(200);
       await logoff(two);
@@ -767,12 +709,12 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       await logoff(one);
     });
 
-    it("a LOCK queued behind its own session's logoff is answered as a gone session, and leaves no lock", async () => {
-      // The LOCK's step waits for the work process (held here), the logoff is a
-      // Node route and does not, so the session has ended when the step
-      // starts: binding its key throws EnqSessionEnded before any ABAP runs,
-      // and the request gets what the façade answers a session that is gone,
-      // the CSRF refusal a client re-logs on
+    it("a LOCK and its session's logoff both wait for the work process, in order, and leave no lock", async () => {
+      // Slice 3: the logoff ends the session through AbapSessions, in a step
+      // of its own, so it queues behind the LOCK's step instead of passing
+      // it (under Node sessions it did, and the LOCK found its session gone).
+      // The LOCK is granted, the logoff then takes it away, and the old
+      // cookie and token are a session that is gone.
       const {server} = await withSessions();
       const one = await logon(server);
       const two = await logon(server, "DEVTWO");
@@ -785,17 +727,25 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       const queued = fetch(`http://127.0.0.1:${server.address().port}${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`, {method: "POST",
         headers: {cookie: `sap-contextid=${one.id}`, "x-csrf-token": one.token, "x-sap-adt-sessiontype": "stateful"}});
       await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(steps, "the LOCK waits for the work process").to.have.length(1);
-      expect(await logoff(one)).to.equal(200);
+      // counted inside the step: the LOCK has not entered the handler yet
+      expect(steps, "the LOCK waits for the work process").to.have.length(0);
+      const off = logoff(one);
+      await new Promise((resolve) => setTimeout(resolve, 50));
       free();
       await held;
       const answer = await queued;
-      const gone = {status: answer.status, type: answer.headers.get("content-type"), token: answer.headers.get("x-csrf-token"), body: await answer.text()};
-      // the same request once the session is gone, which the middleware refuses
+      expect(answer.status, "the LOCK ran first").to.equal(200);
+      expect(steps, "and entered the handler once").to.have.length(1);
+      expect(await off).to.equal(200);
+      // the same session once it is gone: the cookie names nothing, so a new
+      // session opens, and the old token is not its token
       const late = await fetch(`http://127.0.0.1:${server.address().port}${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`, {method: "POST",
         headers: {cookie: `sap-contextid=${one.id}`, "x-csrf-token": one.token, "x-sap-adt-sessiontype": "stateful"}});
-      expect(gone).to.deep.equal({status: late.status, type: late.headers.get("content-type"), token: late.headers.get("x-csrf-token"), body: await late.text()});
-      expect(gone).to.deep.equal({status: 403, type: "text/plain; charset=utf-8", token: "Required", body: "CSRF token validation failed"});
+      expect({status: late.status, type: late.headers.get("content-type"), token: late.headers.get("x-csrf-token"), body: await late.text()})
+        .to.deep.equal({status: 403, type: "text/plain; charset=utf-8", token: "Required", body: "CSRF token validation failed"});
+      const fresh = /sap-contextid=([^;]+)/.exec(late.headers.getSetCookie().join("; "))?.[1];
+      expect(fresh, "a fresh session").to.match(/^[0-9a-f]{24}$/);
+      expect(fresh).to.not.equal(one.id);
       expect((await rows()).map((r) => `${r.user} ${r.arg}`), "no lock left").to.deep.equal([]);
       const after = await lock(two);
       expect(after.status, after.body).to.equal(200);

@@ -17,9 +17,9 @@
 "!     differently (the graph does);
 "!   - a row served by HOST, or no row at all, is not answered here: the
 "!     handler says so and the Node front hands the request to the Node
-"!     facade (docs/adt-abap-port/abap-skeleton.md). The Node front matches
-"!     this table itself, before any ABAP runs (tools/adt-abap-front.mjs,
-"!     matchRoute), and test/adt-abap-diff.mjs holds the two matchers equal.
+"!     facade after the step (docs/adt-abap-port/slice-3-front.md). This
+"!     table is the only matcher: the front no longer matches it in
+"!     JavaScript, every request enters the handler first.
 "! Slice 1 lists the rows ABAP serves and one catch-all for the host. The
 "! per-type rows are generated from the type table (ZCL_OSD_ADT_TYPES) when
 "! their group moves; slice 2 moves POST <collection>/:name, LOCK and UNLOCK.

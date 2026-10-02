@@ -1367,10 +1367,13 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     // after the lock was checked (this suite's app parses first, which
     // closes the window); the façade is mounted bare for this one.
     it("a lock released while the PUT's body is still arriving does not write", async () => {
-      // Synchronised on the route itself, not on a timer: the PUT handler
-      // checks the lock and only then attaches its "data" listener, so the
-      // first chunk reaching that listener proves the first check has
-      // passed. Only then does the lock go and the rest of the body follow.
+      // Synchronised on the request itself, not on a timer: the first chunk
+      // reaching a "data" listener proves the body is being read. Without
+      // the ABAP front that listener is the PUT handler's, attached after
+      // its first lock check; with it (slice 3) it is the front's, which
+      // reads the body before the handler's step, so the PUT route checks
+      // the lock only after the whole body is in. Either way the lock goes
+      // while the body is still arriving, and nothing is written.
       let bodyReached;
       const reached = new Promise((resolve) => {
         bodyReached = resolve;

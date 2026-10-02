@@ -169,9 +169,10 @@ Express also answers HEAD for every GET automatically. That is one router rule (
     - ADT_TYPE, INCLUDES, LABELS, SOURCE_PROPERTY_MIME
     - `uri_of( )` and `object_from_uri( )`.
 13. **Mixed-phase bridge and Gate 1 harness.**
-    - On the Node host, the ABAP handler is mounted in front of the JS router through `cl_express_icf_shim` under `dialogStep`.
-    - A row with `served-by HOST` falls through to the JS router.
-    - `STG_ADT_DUMP` capture stays in the Node front, before the shim, so it sees both sides.
+    - On the Node host, every request under BASE enters `ZCL_OSD_ADT_HANDLER` first (slice 3, option B, `docs/adt-abap-port/slice-3-front.md`). The front (`tools/adt-abap-front.mjs`) calls `ANSWER` with the request record in one `dialogStep`, with the request's `ZCL_OSD_ADT_SESSION` from `AbapSessions#sessionFor`. The session (items 5 and 6) is resolved and the CSRF gate run in ABAP. Node's `Sessions` and its middleware are not mounted when the front is. There is no JS route matcher any more.
+    - A row with `served-by HOST` (or a route that answers with a continuation) ends the step with the HOST verdict. The front puts the record's two `Set-Cookie` lines and the token on the response and sets `req.adt` to the session ABAP resolved. Then it runs the continuation after the step; the default continuation is `next()`, the JS router.
+    - A failure of the step answers 500 for every request, a HOST row included, because no session was resolved.
+    - `STG_ADT_DUMP` capture stays in the Node front, before the handler, so it sees both sides.
       - **OSGo** has no Node front. Its Go front must implement the same JSONL capture before any group is switched to ABAP on OSGo. Otherwise the only record of what Eclipse sent is lost.
       - **Preview:** n/a, because no ADT client reaches a service worker.
     - `tools/gogen/parity.mjs:447-507` classifies all `/sap/bc/adt` traffic and `test/adt-facade.mjs` as `adt-deferred`. Each landed group narrows `ADT_PATH` to the paths still served by HOST, and the last group removes the category. The parity denominator changes on every landing, so report the old and the new figure side by side.
@@ -531,9 +532,9 @@ Every landing also:
 ## 7. Risks and open questions
 
 1. **Session state and rollback.**
-   - `zcl_stg_http_handler` rolls back on status ≥ 400, but a session or token issued on a 403 or 404 must persist. The ADT handler commits session and handle rows whatever the status.
-   - On OSGo, state cannot live in statics: tables `ZOSD_ADT_SESS` / `ZOSD_ADT_HNDL`.
-   - Touching the session is a write per request. Measure it.
+   - `zcl_stg_http_handler` rolls back on status ≥ 400, but a session or token issued on a 403 or 404 must persist. The ADT handler catches every refusal in `ANSWER`, so the step ends without an exception and commits the session and handle rows whatever the status. That includes the CSRF refusal of a session that ended (its rows' deletion).
+   - On OSGo, state cannot live in statics: tables `ZOSD_ADT_SESS` / `ZOSD_ADT_SHDL` (#464).
+   - Touching the session is a write per request. Measured with the front moved up (one process, 120 requests per cell, median of the last 100, four runs), a delegated request costs 1.3 to 2.2 ms more than on main, and an ABAP LOCK 0.6 to 0.9 ms more. See `slice-3-front.md`.
 2. **Async waits.**
    - Activation and unit runs hold the work-process FIFO lock for seconds.
    - The host answers a job id, and ABAP polls with `WAIT UP TO n SECONDS`, which releases the lock while it waits.
@@ -546,13 +547,13 @@ Every landing also:
 4. **SHA-256 everywhere.**
    - `cl_abap_message_digest` goes through `@KERNEL import("crypto")`, marked "this doesnt work in browser?". Verify it in the service worker and in OSGo first.
    - Hash UTF-8 bytes, not characters.
-5. **Duplicate headers.** Verify that the open-abap response object keeps two `set_header_field` calls with the same name, i.e. both `Set-Cookie` lines.
+5. **Duplicate headers.** Measured: the open-abap response object does not keep both `Set-Cookie` lines. `set_header_field` replaces a header of the same name, and `set_cookie` is a stub. On Node the front reads `ANSWER`'s record and not the shim's, so both lines reach the client (`test/adt-abap-front.mjs`). The shim path (a real ICF, and any host that uses the shim) still needs an open-abap-core fix.
 6. **XML in ABAP.**
    - Request bodies: `FIND REGEX` and offsets (7.02, they transpile). The sXML reader is there if needed.
    - Output: string tables plus `concat_lines_of`.
    - Never `escape_xml_attr_value`.
    - ABAP source is 7-bit ASCII: run `npm run lint`.
-7. **Streaming bodies.** ICF delivers the whole body first. The "lock released while the body arrives" case becomes a check at the start of the step, and the check right before WRITE is kept.
+7. **Streaming bodies.** ICF delivers the whole body first, and so does the Node front now: it reads the body before the handler's step. In the "lock released while the body arrives" case, the PUT route therefore checks the lock after the whole body is in, and still writes nothing (`test/adt-devloop.mjs`).
 8. **Binary.** No ADT route returns a zip. Sources travel as UTF-8 xstring through `body_x`, with the final newline and line endings kept byte-stable (REVISION restore).
 9. **Performance.**
    - Every request runs transpiled ABAP plus at least GENERATION.

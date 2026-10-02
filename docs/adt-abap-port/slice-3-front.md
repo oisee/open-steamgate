@@ -2,8 +2,9 @@
 
 ADR 0007 puts the session, the CSRF token and the router in ABAP. Slice 3 splits that between two owners:
 the session itself (`ZIF_OSD_ADT_SESSION`, #458, and its implementation on `feat/adt-session-impl`) is stoker's;
-the CSRF gate and the move of the front are dell's. This note covers dell's half. Part A is built. Part B is a
-design; its fork was decided for B (below) and it waits for the session implementation and its adapter.
+the CSRF gate and the move of the front are dell's. This note covers dell's half. Part A is built. Part B was
+decided for option B and is built on `feat/adt-front-up`, over the session implementation (#464) and its adapter
+(#465).
 
 ## Part A: the CSRF gate (built)
 
@@ -62,24 +63,128 @@ Evidence:
 stub in open-abap-core. The answer record (`ty_response-headers`) keeps both lines. The diff test pins the one line
 that survives, so this case flips when the gap is fixed.
 
-## Part B: the front moves up (design; B chosen)
+## Part B: the front moves up (built, option B)
 
-### Today
+### Before
 
-`tools/adt-abap-front.mjs` sits behind the Node session middleware. It matches the ABAP route table in JavaScript
-and does the following:
+`tools/adt-abap-front.mjs` sat behind the Node session middleware. It matched the ABAP route table in JavaScript.
+A HOST row went to `next()` with no step and no ABAP. An ABAP row ran the handler through the shim in a step, bound
+the ENQ session first (`enter`) and replayed the recorded answer. The session and the CSRF gate were Node's.
 
-- a HOST row goes to `next()` with no step, no work-process lock and no ABAP;
-- an ABAP row runs the handler in a dialog step through the shim, binds the ENQ session first (`enter`), and then
-  replays the recorded answer.
+### Now
 
-The session, the CSRF gate and `X-OSD-Generation` are all Node's.
+Every request under `/sap/bc/adt` enters `ZCL_OSD_ADT_HANDLER` first, in one dialog step:
 
-### Target
+1. The front reads the body (the handler takes it as bytes), and hands it on as `req.body` for a Node route.
+2. In the step, `AbapSessions#sessionFor(req)` makes the request's `ZCL_OSD_ADT_SESSION`. The front calls
+   `ZCL_OSD_ADT_HANDLER=>ANSWER` with the request record and that session (`answerOf`), not through the shim.
+3. `ANSWER` resolves the session, runs the gate (Part A) and routes. The `RESOLVE` it calls also sets `req.adt`
+   (`{session, sessions, fetching}`), so the host's SYSTEM answers (`LOCK_HANDLE`, `SESSION`, `LOCK_HOLDER`)
+   and the Node routes see the same session.
+4. A session that ended while its request waited (`ZCX_OSD_ADT=>SESSION_ENDED`, an ended ENQ key) is answered
+   in `ANSWER` as the CSRF refusal (403, `Required`), with no cookies. The step ends without an exception, so the
+   deletion of the session's rows commits.
+5. The verdict:
+   - **ABAP**: the record is replayed onto the response.
+   - **HOST**: the record's two `Set-Cookie` lines and its `x-csrf-token` go onto the response. Then the
+     continuation runs after the step, with no work-process lock held. The default continuation is `next()`,
+     which runs the Node route.
 
-Every request under `/sap/bc/adt` enters `ZCL_OSD_ADT_HANDLER` first. The handler resolves the session, runs the
-gate (Part A) and routes. An ABAP row is answered in that step. A HOST row goes to the Node façade with the session
-already resolved. The Node session middleware goes away, and the JS matcher goes with it.
+The Node `Sessions`, its middleware, the JS matcher (`matchRoute`, `routeRows`) and the front's `enter` and
+`ended` options are gone from every host that mounts the front. The ENQ binding of a stateful session is
+`RESOLVE`'s. `adtRouter` makes the `AbapSessions` itself when `abap` is given, with the façade's system id and
+client, and refuses a Node `Sessions` next to the front. `ZCL_OSD_ADT_HANDLER=>USE_SESSION` stays the ICF path's
+(a system); on Node the session is passed per request, because the adapter wraps it per request.
+
+Per host:
+
+- `test/start.mjs` inline (and so `npm start`, `test/run.mjs`, `osd up` in the binary): the front with
+  `AbapSessions`.
+- `test/start.mjs` in child mode, and `OSD_ADT=js`: no ABAP in that process, so Node's `Sessions` and its
+  middleware, as before.
+- `tools/osd-serve.mjs` (the child, and `osd serve`): mounts no ADT façade.
+- `web/preview-backend.mjs`: mounts no ADT façade (no ADT client reaches a service worker).
+
+The one-owner guard (`claimAdtSessions`) does not fire in any host or suite: a façade with the front claims
+`abap`, and the Node-only façades use `Sessions` without the ENQ owner table, which claims nothing.
+
+What changed in behaviour, on purpose:
+
+- **Fail closed.** A step that fails (a dump, a nested step) answers the ADT exception document, 500, for every
+  request, a HOST row included. Before, HOST rows never touched ABAP and kept answering.
+- **The logoff waits for the work process.** The logoff and the session DELETE end the session through
+  `AbapSessions`, in a step of their own. A LOCK queued before the logoff now runs first and is granted, and the
+  logoff then releases it. Before, the logoff passed the queued LOCK and the LOCK found its session gone.
+- **An ended ENQ session is an ended ADT session.** When the lock server ends a session's ENQ key, the next
+  request cannot bind it. It deletes the session and answers the CSRF refusal. Before, a write with an old handle
+  answered 409.
+- **A delegated request queues** behind a long step, because it takes the work process for its session.
+
+### The continuation
+
+A route may end in a HOST verdict of its own: `ZIF_OSD_ADT_ROUTE=>TY_RESPONSE` has one more field,
+`continuation` (`kind`, `payload` as JSON text). When a route sets a kind, the handler answers `EV_SERVED_BY =
+HOST` and keeps the route's response. On a system, where no host stands behind the handler, that response is the
+answer. On Node:
+
+```js
+import {registerContinuation, continuationKinds} from "./tools/adt-abap-front.mjs";
+const unregister = registerContinuation("publish", async ({req, res, next, kind, payload, session, answer, replay}) => {
+  // after the step: no work-process lock held; a dialogStep of its own is allowed
+});
+```
+
+- A kind is registered once per process, at host startup, and registering it twice throws.
+- The handler runs after the step. `payload` is the parsed JSON, `session` is `req.adt.session` (resolved in
+  ABAP), and `answer` is the handler's record (`status`, `contentType`, `headers`, `body`, `servedBy`,
+  `continuation`). The session's cookies and token are already on `res`.
+- The handler can replace the ABAP answer by sending its own, extend it by doing its work and then calling
+  `replay()`, or delegate with `next()`.
+- The kind `""` (no continuation) is `next()`. The kind `echo` is built in for tests: it answers JSON with the
+  kind, the payload, the session and ABAP's answer.
+- An unregistered kind, or a payload that is not JSON, answers 500 `ExceptionInternalError`.
+
+The test route is `ZCL_OSD_ADT_ROUTE_ECHO` in `test/unit`. It is test-only ABAP (`TEST_ONLY_ABAP`), and a test puts
+it in front of the table with `ZCL_OSD_ADT_HANDLER=>USE_ROUTES`.
+
+### Evidence
+
+- `test/adt-abap-front.mjs` (7 cases):
+  - every ADT request enters the handler once, counted at `answer`, whoever serves it;
+  - a fresh fetch gets both `Set-Cookie` lines, and its id and token are a row of `ZOSD_ADT_SESS`;
+  - a HOST route (`core/http/sessions`) names the session ABAP resolved;
+  - a write with another session's token is refused by ABAP, with and without a cookie;
+  - logoff, then a dump, then an ended ENQ session: each next request gets a fresh session, and the refusal's
+    deletion commits;
+  - the `echo` continuation answers after the step with the ABAP session;
+  - a registered kind runs with no work-process lock held, may take a step of its own and extends the answer
+    with `replay()`; an unknown kind is a 500.
+- ABAP Unit `an_ended_session` in `ltcl_csrf`: `SESSION_ENDED` is the CSRF refusal, with no cookies, on a read and
+  on a write.
+- **Red on main** (`d0768a9f`, the same claims through main's mount): no step for a HOST row, the session is not a
+  row of `ZOSD_ADT_SESS`, a foreign-token write is not refused by ABAP, and `an_ended_session` fails (an
+  exception document instead of the refusal).
+- **Green:** the `adt` suite group (`test/suites.d/adt.json`) together with `osd-enq` and `osd-enq-abap` gives
+  524 passing and 4 pending, the 7 new cases included. The adapter's parity suite, `adt-abap-diff` (rewritten for option B), `adt-abap-csrf`,
+  `adt-abap-session`, `adt-devloop`, `adt-activation` and `tmp-package` are all part of that run.
+- **ABAP-FS conformance** (`--start`, own port): 30 PASS, 1 FAIL, 16 MISSING, no regressions.
+
+### Measured overhead, with the real session
+
+One process per run, 120 requests per cell, the median of the last 100, two rounds per run. The same script ran on
+main (`d0768a9f`, mixed front, Node sessions) and on the branch (option B, `AbapSessions`), alternating, four runs
+each. The LOCK is a relock of the session's own lock.
+
+| request | main | option B | added |
+|---|---|---|---|
+| `core/discovery` (HOST) | 0.47-0.52 ms | 1.83-2.68 ms | +1.3 to +2.2 ms |
+| source GET (HOST) | 0.39-0.46 ms | 1.52-2.41 ms | +1.1 to +2.0 ms |
+| LOCK (ABAP) | 1.57-1.90 ms | 2.37-2.56 ms | +0.6 to +0.9 ms |
+
+The figures are round 2 of each run. This is more than the 0.45 to 0.6 ms the earlier shim-only measurement
+(below) predicted. The real session adds a sweep, a read and a touch per request, then the adapter's `peek` and
+`handles` for `req.adt`, and the commit. The LOCK already paid for a step and a bind on main, so its share is
+smaller.
 
 ### The fork: how a HOST row reaches Node
 
@@ -130,6 +235,16 @@ switched on (`USE_SESSION` bound, the front moved up, the Node middleware and th
 
 ### Needed whichever way the fork goes
 
+Where each item stands with B built:
+
+1. Done: the Node routes read the session through `AbapSessions` (#465).
+2. Logoff stays Node's and calls `END` through the adapter.
+3. `X-OSD-Generation` and the capture stay in the Node front, mounted before it.
+4. Done: the ENQ binding is `RESOLVE`'s, and an ended session is the handler's CSRF refusal.
+5. Sidestepped on Node by reading `ANSWER`'s record. Still open for the shim path.
+
+The original notes follow.
+
 1. **The Node routes' view of the session.** In `tools/adt-facade.mjs`, 11 places read `req.adt.session` (`.id`,
    `.locks`, `.stateful`, `.user`) or call `Sessions` methods: `holds`, `holderOf`, `lock`, `unlock`, `release`,
    `end` (logoff and `DELETE core/http/sessions/:id`). `abapSession` in `tools/adt-enq.mjs` clears `.locks` from
@@ -167,7 +282,7 @@ switched on (`USE_SESSION` bound, the front moved up, the Node middleware and th
    `if_http_entity~set_cookie`. It should append a `set-cookie` row rather than assert. That is a fork PR like
    #1218, with an ANORMALIES entry first.
 
-### Measured overhead
+### Measured overhead (before the session existed)
 
 One process, 120 requests per cell, the median of the last 100, the same script for every cell, two rounds. The
 route is delegated to Node, and "ABAP first" runs the handler in a step through the shim before `next()`:

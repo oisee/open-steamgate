@@ -26,7 +26,8 @@ import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions, parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {abapFront} from "./adt-abap-front.mjs";
-import {EnqOwners, abapSession, statelessLock} from "./adt-enq.mjs";
+import {AbapSessions} from "./adt-abap-sessions.mjs";
+import {abapSession, statelessLock} from "./adt-enq.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict, InvalidName} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
@@ -597,7 +598,30 @@ export function adtRouter(options = {}) {
     // in a stand-in store that does not watch, and that is not an error
     store.watch();
   }
-  const sessions = options.sessions ?? new Sessions(options.abap === undefined ? {} : {owners: new EnqOwners()});
+  // who this system says it is (see "What an ABAP Cloud Project needs",
+  // below, for why the id matters); said here because the ABAP sessions
+  // name their cookie after it
+  const whoami = osdIdentity().adt;
+  const identity = {
+    systemID: options.systemID ?? whoami.systemID,
+    userName: options.userName ?? whoami.userName,
+    userFullName: options.userFullName ?? whoami.userFullName,
+    client: options.client ?? whoami.client,
+    language: options.language ?? whoami.language,
+    ...options.identity,
+  };
+  // With the ABAP front every request resolves its session in ABAP
+  // (ZCL_OSD_ADT_SESSION through AbapSessions, slice 3 option B), and Node's
+  // Sessions is not in this façade at all: one session store, the tables.
+  // Without it (OSD_ADT=js, the child-mode parent, which runs no ABAP, and
+  // the suites that mount the Node façade alone) Node's Sessions is the
+  // store and its middleware the gate, as before.
+  if (options.abap !== undefined && options.sessions !== undefined && options.sessions instanceof AbapSessions === false) {
+    throw new Error("the ABAP front resolves its sessions in ABAP: pass AbapSessions, or no sessions");
+  }
+  const sessions = options.sessions ?? (options.abap === undefined ? new Sessions()
+    : new AbapSessions({identity: {systemID: identity.systemID, client: identity.client}}));
+
   const data = options.data ?? store.data();
   const router = express.Router();
   const resources = [];
@@ -646,7 +670,9 @@ export function adtRouter(options = {}) {
   // scoped to the façade's own prefix: this router is mounted on the same
   // app as the OData front, and a CSRF gate over somebody else's POST is a
   // 403 they never asked for
-  router.use(BASE, sessions.middleware());
+  // the Node session middleware is the gate only when no ABAP front is; with
+  // one, the front resolves the session and runs the gate in ABAP
+  if (options.abap === undefined) router.use(BASE, sessions.middleware());
   // every answer names the generation of the system it describes
   router.use(BASE, (req, res, next) => {
     const generation = liveHash(store.root);
@@ -689,9 +715,11 @@ export function adtRouter(options = {}) {
     });
   }
 
-  // ADR 0007: ABAP rows go to ZCL_OSD_ADT_HANDLER (adt-abap-front.mjs), locks to ENQ (adt-enq.mjs)
+  // ADR 0007: every request enters ZCL_OSD_ADT_HANDLER (adt-abap-front.mjs),
+  // which resolves the session, gates and answers or hands over; locks go
+  // to ENQ (adt-enq.mjs)
   if (options.abap !== undefined) router.use(BASE, abapFront({...options.abap, served: options.abapServed, refuse, store,
-    ...abapSession(sessions, (kind) => (kind === "IDENTITY" ? identity : undefined))}));
+    sessions, ...abapSession(sessions, (kind) => (kind === "IDENTITY" ? identity : undefined))}));
 
   // ---- What an ABAP Cloud Project needs that an ordinary one does not.
   //
@@ -709,16 +737,6 @@ export function adtRouter(options = {}) {
   // service have it; the client (001) is not sy-mandt (123). A project
   // refuses a logon to a system reporting another id than the one it was
   // created against, so rename before projects exist: tools/osd-identity.mjs.
-  const whoami = osdIdentity().adt;
-  const identity = {
-    systemID: options.systemID ?? whoami.systemID,
-    userName: options.userName ?? whoami.userName,
-    userFullName: options.userFullName ?? whoami.userFullName,
-    client: options.client ?? whoami.client,
-    language: options.language ?? whoami.language,
-    ...options.identity,
-  };
-
   // The logon, and the whole of what the wizard calls a challenge.
   //
   // It turns out to be neither OAuth nor PKCE. Eclipse opens a listener on a

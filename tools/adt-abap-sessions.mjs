@@ -33,7 +33,9 @@ export class AbapSessions {
     this.owners = new EnqOwners();
     this.step = options.step ?? dialogStep;
     this.ttlMs = options.ttlMs ?? 30 * 60 * 1000;
-    this.identity = options.identity ?? {systemID: "OSD", client: "001", userName: "OSD"};
+    // userName is the user of a session opened without a Basic header, Node's
+    // ANONYMOUS; the system id and the client name the session cookie
+    this.identity = {systemID: "OSD", client: "001", userName: "OSD", ...options.identity};
   }
 
   static user(req) { return Sessions.user(req); }
@@ -161,6 +163,29 @@ export class AbapSessions {
       }
       return {gone};
     });
+  }
+
+  /** The ZIF_OSD_ADT_SESSION of one request of the ABAP front
+   *  (tools/adt-abap-front.mjs), made inside its step: ZCL_OSD_ADT_HANDLER
+   *  resolves it, and the RESOLVE it calls also sets req.adt -- the session
+   *  as the Node routes and the host's SYSTEM answers read it -- before the
+   *  router runs. One object per request, so nothing of one request's
+   *  session reaches another's. */
+  async sessionFor(req) {
+    const a = globalThis.abap;
+    const obj = await new a.Classes.ZCL_OSD_ADT_SESSION().constructor_({
+      iv_ttl_seconds: new a.types.Integer().set(Math.ceil(this.ttlMs / 1000)),
+    });
+    const resolve = obj[API + "resolve"].bind(obj);
+    obj[API + "resolve"] = async (input) => {
+      // the sessions' identity, as every other call of this adapter has it
+      const resolved = await withSystem((kind) => kind === "IDENTITY" ? this.identity : undefined, () => resolve(input));
+      const session = await this.#view(obj, value(resolved.get().id));
+      req.adt = {session, sessions: this,
+        fetching: String(req.headers["x-csrf-token"] ?? "").toLowerCase() === FETCH};
+      return resolved;
+    };
+    return obj;
   }
 
   middleware() {

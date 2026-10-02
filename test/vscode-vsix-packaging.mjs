@@ -84,6 +84,7 @@ describe("packaging: test-only ABAP stays out of a system seed", function () {
 
   it("the staging filter names the session double and the fleet reports", () => {
     for (const rel of ["unit/zcl_osd_adt_session_mem.clas.abap", "unit/zcl_osd_adt_session_mem.clas.xml",
+      "unit/zcl_osd_adt_route_echo.clas.abap", "unit/zcl_osd_adt_route_echo.clas.xml",
       "integration/zosd_voyage.prog.abap", "integration/zosd_ready.prog.xml", "e2e", "e2e/flp.spec.mjs",
       "fixtures", "fixtures/enq/contract.json"]) {
       expect(shipsTestPath(rel), rel).to.equal(false);
