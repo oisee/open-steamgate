@@ -136,6 +136,34 @@ complete OSD (ICF, Gateway, the apps, SQLite) as one Go binary. The same ABAP
 Unit tests run on Node and on Go and are compared method by method; closing
 the gap is the work before 0.4.
 
+**Generated classes in CI.** The same folder of `*.clas.abap` and
+`*.clas.testclasses.abap` can run on either runtime:
+
+```sh
+npm run osgo:unit -- ./generated --json --class ZCL_EXAMPLE
+npm run osgjs:unit -- ./generated --json --class ZCL_EXAMPLE
+```
+
+Both commands read the immediate directory, stage missing class metadata in a
+temporary folder, preserve existing `.clas.xml`, reject source lines longer than
+255 characters with `file:line`, and report overrides on stderr and in JSON.
+`--class` accepts multiple owner names; omit it to run all owners in the folder.
+They work from any cwd when invoked by the checkout's absolute script path.
+JSON contains `rows` (`class`, `testclass`, `method`, `status`, `message`),
+`totals` (`success`, `failure`, `not_compiled`, `error`, `tests`) and `overrides`.
+Exit codes are 0 for at least one test and all SUCCESS, 1 for assertion FAILURE,
+2 for NOT_COMPILED/ERROR/SKIPPED, and 3 when there are no tests.
+
+The JS command requires installed Node dependencies and synced libraries. It
+copies the configured checkout layers into a disposable checkout, excluding all
+content packs (including `OSD_PACKS`), runs the generators and transpiles
+the **whole tree** (roughly 20 seconds for transpilation), then runs ABAP Unit
+only for the selected owners, including class and instance lifecycle hooks.
+The pinned transpiler lacks the `only` option needed for a smaller build.
+Each invocation owns its output and database; parallel runs leave the input
+folder, `output/` and `build/live` untouched. The Go command additionally accepts
+`--jobs N` (default 4) and needs Go 1.26.
+
 ## Architecture
 
 ```mermaid

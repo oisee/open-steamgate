@@ -50,7 +50,8 @@
   ],
   "groups": {
     "gogen": [
-      "test/osgo-unit.mjs"
+      "test/osgo-unit.mjs",
+      "test/osgjs-unit.mjs"
     ]
   }
 }
