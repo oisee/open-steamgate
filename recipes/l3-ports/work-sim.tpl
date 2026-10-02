@@ -45,8 +45,6 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_alphabet TYPE string VALUE {{alphabet | literal}}.
     CONSTANTS c_percentiles TYPE string VALUE {{percentiles | literal}}.
 {{/sim}}
-    " the seed of the last pile drawn here: the chance autoclose draws with it
-    CLASS-DATA gv_seed TYPE i READ-ONLY.
     CLASS-METHODS config
       IMPORTING iv_rule TYPE csequence
       RETURNING VALUE(rs_config) TYPE ty_config.
@@ -55,23 +53,24 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 it_keys TYPE string_table
                 iv_filter TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_draw) TYPE ty_draw.
-    " the stream of a text: the seed, then each character mixed in and stepped
+    " the stream of a text: the seed, then each character mixed in and
+    " stepped; its state, which next( ) steps (a draw holds no state here:
+    " it is a pure function of its inputs)
     CLASS-METHODS start
       IMPORTING iv_seed TYPE i
-                iv_text TYPE csequence.
-    " the next number of the stream, from 0 to 999999
+                iv_text TYPE csequence
+      RETURNING VALUE(rv_state) TYPE i.
+    " the next state of a stream: 16807 * x mod (2^31 - 1); its number from
+    " 0 to 999999 is the state modulo a million
     CLASS-METHODS next
-      RETURNING VALUE(rv_u) TYPE i.
+      IMPORTING iv_state TYPE i
+      RETURNING VALUE(rv_state) TYPE i.
     CLASS-METHODS alert
       IMPORTING is_pile TYPE {{iface}}=>ty_pile
                 is_config TYPE ty_config
                 iv_key TYPE string
       RETURNING VALUE(rv_text) TYPE string.
   PRIVATE SECTION.
-    CLASS-DATA gv_state TYPE i.
-    CLASS-METHODS step
-      IMPORTING iv_x TYPE i
-      RETURNING VALUE(rv_x) TYPE i.
     CLASS-METHODS duration
       IMPORTING is_config TYPE ty_config
                 iv_u TYPE i
@@ -134,15 +133,15 @@ CLASS {{class}} IMPLEMENTATION.
 {{/sim}}
   ENDMETHOD.
 
-  METHOD step.
+  METHOD next.
     " 16807 * x mod (2^31 - 1) by Schrage's method: no product leaves INT4
     DATA lv_hi TYPE i.
     DATA lv_lo TYPE i.
-    lv_hi = iv_x DIV 127773.
-    lv_lo = iv_x MOD 127773.
-    rv_x = 16807 * lv_lo - 2836 * lv_hi.
-    IF rv_x <= 0.
-      rv_x = rv_x + c_modulus.
+    lv_hi = iv_state DIV 127773.
+    lv_lo = iv_state MOD 127773.
+    rv_state = 16807 * lv_lo - 2836 * lv_hi.
+    IF rv_state <= 0.
+      rv_state = rv_state + c_modulus.
     ENDIF.
   ENDMETHOD.
 
@@ -153,9 +152,9 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_char TYPE c LENGTH 1.
     DATA lv_code TYPE i.
     DATA lv_room TYPE i.
-    gv_state = iv_seed MOD c_modulus.
-    IF gv_state <= 0.
-      gv_state = 1.
+    rv_state = iv_seed MOD c_modulus.
+    IF rv_state <= 0.
+      rv_state = 1.
     ENDIF.
     lv_text = iv_text.
     lv_len = strlen( lv_text ).
@@ -173,21 +172,16 @@ CLASS {{class}} IMPLEMENTATION.
         ENDIF.
       ENDIF.
       lv_room = c_modulus - lv_code.
-      IF gv_state >= lv_room.
-        gv_state = gv_state - lv_room.
+      IF rv_state >= lv_room.
+        rv_state = rv_state - lv_room.
       ELSE.
-        gv_state = gv_state + lv_code.
+        rv_state = rv_state + lv_code.
       ENDIF.
-      IF gv_state = 0.
-        gv_state = 1.
+      IF rv_state = 0.
+        rv_state = 1.
       ENDIF.
-      gv_state = step( gv_state ).
+      rv_state = next( rv_state ).
     ENDDO.
-  ENDMETHOD.
-
-  METHOD next.
-    gv_state = step( gv_state ).
-    rv_u = gv_state MOD c_million.
   ENDMETHOD.
 
   METHOD duration.
@@ -288,6 +282,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_text TYPE string.
     DATA lv_run TYPE string.
     DATA lv_rule TYPE string.
+    DATA lv_state TYPE i.
     DATA lv_u TYPE i.
     DATA lv_base TYPE i.
     DATA lv_bound TYPE i.
@@ -301,13 +296,13 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_span TYPE p LENGTH 16 DECIMALS 0.
     DATA lv_product TYPE p LENGTH 16 DECIMALS 0.
     ls_config = config( is_pile-rule ).
-    gv_seed = is_pile-seed.
     lv_run = is_pile-run_id.
     lv_rule = is_pile-rule.
     lv_text = |{ lv_run }\|{ lv_rule }\|{ is_pile-pile_no }\|{ is_pile-attempt }|.
-    start( iv_seed = is_pile-seed
-           iv_text = lv_text ).
-    lv_u = next( ).
+    lv_state = start( iv_seed = is_pile-seed
+                      iv_text = lv_text ).
+    lv_state = next( lv_state ).
+    lv_u = lv_state MOD c_million.
     lv_bound = ls_config-ok.
     IF lv_u < lv_bound.
       rs_draw-outcome = 'OK'.
@@ -324,16 +319,19 @@ CLASS {{class}} IMPLEMENTATION.
         ENDIF.
       ENDIF.
     ENDIF.
-    lv_u = next( ).
+    lv_state = next( lv_state ).
+    lv_u = lv_state MOD c_million.
     lv_base = duration( is_config = ls_config
                         iv_u = lv_u ).
-    lv_u = next( ).
+    lv_state = next( lv_state ).
+    lv_u = lv_state MOD c_million.
     rs_draw-hits = hits( is_config = ls_config
                          iv_u = lv_u ).
     IF iv_filter = abap_true.
       " a filter keeps each key with the probability keep
       LOOP AT it_keys INTO lv_key.
-        lv_u = next( ).
+        lv_state = next( lv_state ).
+        lv_u = lv_state MOD c_million.
         IF lv_u < ls_config-keep.
           APPEND lv_key TO rs_draw-keys.
         ENDIF.
@@ -349,7 +347,8 @@ CLASS {{class}} IMPLEMENTATION.
       lv_i = 1.
       WHILE lv_i <= lv_k.
         lv_span = lv_n - lv_i + 1.
-        lv_u = next( ).
+        lv_state = next( lv_state ).
+        lv_u = lv_state MOD c_million.
         lv_product = lv_span * lv_u.
         lv_product = lv_product DIV c_million.
         lv_j = lv_i + lv_product.

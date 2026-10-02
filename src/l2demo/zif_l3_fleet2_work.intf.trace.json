@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-ports/iface-work.tpl",
- "model": "sha256:5f36f60a0fe3e472cabd58a8af56542aa1a737312abddfd97ec0117483f6e8f6",
+ "model": "sha256:55b99a54229ef36a725675e15255e0475548e62a9aa42355c90017d79407c0de",
  "lines": [
   {
    "line": 1,

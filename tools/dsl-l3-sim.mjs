@@ -271,7 +271,7 @@ export function compileSimulate(doc, model, all, {line, fail, bindings}) {
   const production = sink.variants.filter((v) => v.is_log || v.hand);
   const simOnly = model.ports.filter((p) => p.variants.some((v) => v.sim_only)).map((p) => ({port: p.name, "port@type": CHAR(30)}));
   const blocked = production.filter((v) => !allow.includes(v.name)).map((v) => ({name: v.name, "name@type": CHAR(30)}));
-  const sim = {"@id": id, set_line: at, seed, scale, ports_class: model.ports_class, exception: model.exception,
+  const sim = {"@id": id, set_line: at, seed, scale, ports_class: model.ports_class, exception: model.exception, runner: model.class,
     sink: {name: sink.name, "name@type": CHAR(30)}, work_class: work.variants.find((v) => v.name === "sim").class, work_iface: work.iface,
     blocked, ...(blocked.length ? {guarded: {"@id": id, set_line: at}} : {}),
     ...(simOnly.length ? {sim_only: simOnly} : {}), rules,

@@ -314,7 +314,9 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
     const stamp = (n) => { const s = String(n); return Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(8, 10), +s.slice(10, 12), +s.slice(12, 14)) / 1000; };
     const report = (raw) => raw.array().map((x) => `${trim(x.get().doc_action.get())} ${trim(x.get().reason.get())}${trim(x.get().rule_name.get()) ? ` ${trim(x.get().rule_name.get())} ${x.get().pile_no.get()}` : ""}`);
     const doctor = () => dialogStep(async () => report(await cls().doctor({})));
-    const lockRow = () => read("SELECT run_id, status, run_bind FROM zosd_l3_run WHERE set_name = 'fleet2' AND check_date = ?", DATE)[0];
+    const lockRow = (day = DATE) => read("SELECT run_id, status FROM zosd_l3_run WHERE set_name = 'fleet2' AND check_date = ?", day)[0];
+    // the binding a run started with, on its own gate rows
+    const recorded = (run) => read("SELECT run_bind FROM zosd_l3_stage WHERE run_id = ? AND stage_no = 1", run)[0]?.run_bind;
     const pilesOf = (run) => read("SELECT * FROM zosd_l3_pile WHERE run_id = ? ORDER BY stage_no, rule_name, pile_no", run);
     const gates = (run) => read("SELECT status FROM zosd_l3_stage WHERE run_id = ? ORDER BY stage_no", run).map((r) => r.status);
     const lastJob = () => store.db.prepare("SELECT MAX(rowid) AS n FROM batch_runs").get().n ?? 0;
@@ -371,9 +373,10 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
     // The run id is fixed (the draws depend on it), so a test is the same run every time.
     const begin = (bind, prefix = "0A1647A0") => fixedRuns(prefix, () => dialogStep(() => cls().run({iv_date: new abap.types.Date().set(DATE),
       iv_mode: new abap.types.Character(1).set("P"), iv_bind: str(bind)})));
-    async function twin({bind = "work=sim,close=sim", hold, after: afterJob, passes = 400, prefix} = {}) {
+    async function twin({bind = "work=sim,close=sim", hold, after: afterJob, passes = 400, prefix, afterStart} = {}) {
       const wall0 = Date.now(), clock0 = clock.now();
       const result = await begin(bind, prefix);
+      await afterStart?.();
       const run = trim(result.get().run_id.get());
       expect(trim(result.get().status.get())).to.equal("SUBMITTED");
       const doctorReports = [];
@@ -499,6 +502,8 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       const files = {[`${name}.clas.abap`]: own, [`${name}.clas.xml`]: readFileSync(join(OUT, `${real}.clas.xml`), "utf8").replace(real.toUpperCase(), name.toUpperCase())};
       for (const [f, t] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(t, f, core)));
       const deps = [...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
+        "gen/gui/zcl_osd_batch_report.clas.abap", "src/jobs/zcl_osd_submit_semantics.clas.abap", "src/jobs/zcl_osd_submit_ranges.clas.abap",
+        ".local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),
         ...readdirSync(OUT).filter((f) => /^(zif_l3_fleet2_|zcx_l3_fleet2_port|zcl_l3_fleet2)[a-z_]*\.(clas|intf)\.(abap|xml)$/.test(f) && !f.startsWith(`${real}.`)).map((f) => join(OUT, f)),
         ...model.rules.flatMap((r) => [`${OUT}/${r.check_class}.clas.abap`, `${OUT}/${r.check_class}.clas.xml`]),
@@ -535,7 +540,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
     // its simulate: block replaced, compiled and rendered, and its sim class
     // transpiled alone and answering for the committed one while `work` runs
     let variantCount = 0;
-    async function withConfig(block, work, {editSim} = {}) {
+    async function withConfig(block, work, {editSim, editClose} = {}) {
       const file = manifest(`config${++variantCount}`, [[SET_TEXT.slice(SET_TEXT.indexOf("simulate:\n"), SET_TEXT.indexOf("settings:\n")), block]]);
       const variant = compileSet(file);
       const {files} = await renderSet(variant);
@@ -544,7 +549,11 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       const name = `zcl_l3_fleet2_sim_v${variantCount}`;
       await loadAs(SIM, name, text);
       const configs = (rule) => configOf(variant.simulate.rules.find((r) => r.rule === rule));
-      return answering(SIM, name, () => work({configs, variant}));
+      if (!editClose) return answering(SIM, name, () => work({configs, variant}));
+      // the chance autoclose of the variant, edited, answering too
+      const close = `zcl_l3_fleet2_close_v${variantCount}`;
+      await loadAs("zcl_l3_fleet2_close_sim", close, editClose(files["zcl_l3_fleet2_close_sim.clas.abap"]));
+      return answering(SIM, name, () => answering("zcl_l3_fleet2_close_sim", close, () => work({configs, variant})));
     }
 
     // ---- the generator: what the ABAP draws, the JavaScript twin draws -------
@@ -594,9 +603,12 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       expect([...outcomes].sort()).to.deep.equal(["DUMP", "HANG", "OK", "SLOW"]);
       // the stream itself, and an alert's text
       for (const [seed, text] of [[1, ""], [42, "RUN|rule|3|1"], [2147483646, "a-b_c.d:e|zZ9 ?"]]) {
-        await cls(SIM).start({iv_seed: int(seed), iv_text: str(text)});
+        let state = await cls(SIM).start({iv_seed: int(seed), iv_text: str(text)});
         const ours = [];
-        for (let i = 0; i < 5; i++) ours.push((await cls(SIM).next()).get());
+        for (let i = 0; i < 5; i++) {
+          state = await cls(SIM).next({iv_state: state});
+          ours.push(state.get() % 1000000);
+        }
         const s = start(seed, text);
         expect(ours, `${seed} ${text}`).to.deep.equal(Array.from({length: 5}, () => s.next()));
       }
@@ -608,7 +620,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
 
     it("mutant: a generator that ignores the seed (the clock instead): the draws differ from the twin's", async () => {
       const name = "zcl_l3_fleet2_m_seed";
-      await loadAs(SIM, name, edit(edit(committed(SIM), "    gv_state = iv_seed MOD c_modulus.\n", "    GET TIME STAMP FIELD lv_now.\n    gv_state = lv_now MOD c_modulus.\n"),
+      await loadAs(SIM, name, edit(edit(committed(SIM), "    rv_state = iv_seed MOD c_modulus.\n", "    GET TIME STAMP FIELD lv_now.\n    rv_state = lv_now MOD c_modulus.\n"),
         "    DATA lv_room TYPE i.\n", "    DATA lv_room TYPE i.\n    DATA lv_now TYPE timestamp.\n"));
       expect((await drawProblems(name)).join("\n")).to.match(/ABAP .* twin /);
     });
@@ -654,7 +666,11 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
 
     // ---- the long twin ------------------------------------------------------------
     // the outcome frequencies over every attempt made: within four standard
-    // deviations (plus one draw) of each configured probability
+    // deviations (plus one draw) of each configured probability. This is a
+    // smoke check, and a broad one: on a group of a few dozen attempts the
+    // band is about 20 points wide. The oracle is the exact comparison with
+    // the JavaScript twin, pile by pile and row by row (problemsAgainst,
+    // logProblems); this only says the draws are not wildly off.
     const frequencyProblems = (predicted) => {
       const groups = new Map();
       for (const {config, p, pred} of predicted) {
@@ -691,7 +707,8 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       expect(simulated, "simulated seconds").to.be.greaterThan(2 * 3600);
       // every pile final as configured, the run final and its lock released
       expect(piles.every((p) => p.status === "DONE" || (p.status === "FAILED" && p.attempt === 21) || ["HELD", "FUSED"].includes(p.status))).to.equal(true);
-      expect(lockRow()).to.deep.include({run_id: run, status: "RELEASED", run_bind: "work=sim,close=sim"});
+      expect(lockRow()).to.deep.include({run_id: run, status: "RELEASED"});
+      expect(recorded(run)).to.equal("work=sim,close=sim");
       expect(gates(run).every((g) => ["DONE", "PARTIAL", "NOT-RUN"].includes(g))).to.equal(true);
       // dumps and hangs happened and were healed
       const outcomes = predicted.flatMap(({p, pred}) => pred.attempts.slice(0, p.attempt).map((a) => a.outcome));
@@ -713,12 +730,38 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       events: read("SELECT seq, kind, reserved, consumed, refunded, glass, amount, reason, acted FROM zosd_l3_event WHERE run_id = ? ORDER BY seq", run),
       log: read("SELECT rule_name, pile_no, alert_seq, alert_text, closed FROM zosd_l3_alert WHERE run_id = ? ORDER BY rule_name, pile_no, alert_seq", run),
     });
-    async function smallTwin(seed) {
+    // jobs of another program released beside a twin (ZGG_EX_012, a converted
+    // demo report), each to start a day later, so it stays deletable (a job
+    // released to start at once counts as running for BP_JOB_DELETE)
+    const box = (v = "") => new abap.types.String().set(v);
+    const releaseJob = (name) => dialogStep(async () => {
+      const count = new abap.types.String();
+      await abap.FunctionModules.JOB_OPEN({exporting: {jobname: box(name)}, importing: {jobcount: count}});
+      await abap.FunctionModules.JOB_SUBMIT({exporting: {jobname: box(name), jobcount: box(count.get()), report: box("ZGG_EX_012"),
+        authcknam: box(abap.builtin.sy.get().uname.get().trim())}});
+      const at = new Date(clock.now() + 86400000).toISOString().replace(/[-:T]/g, "").slice(0, 14);
+      await abap.FunctionModules.JOB_CLOSE({exporting: {jobname: box(name), jobcount: box(count.get()),
+        sdlstrtdt: box(at.slice(0, 8)), sdlstrttm: box(at.slice(8))}});
+      return count.get();
+    });
+    const deleteJob = (name, count) => dialogStep(async () => {
+      try {
+        await abap.FunctionModules.BP_JOB_DELETE({exporting: {jobname: box(name), jobcount: box(count)}});
+      } catch (error) { throw new Error(`BP_JOB_DELETE ${name} ${count}: ${error.classic ?? error.message}`); }
+    });
+    async function smallTwin(seed, {interfere = false} = {}) {
       await seedShips(24);
       await tune("simulate.time_scale", "1000000");
       await tune("budget.glass", "100000");
       if (seed) await tune("simulate.seed", seed);
-      const {run} = await twin({prefix: "5EED0000"});
+      // with interfere: two jobs of another program released before the twin's,
+      // the second deleted from the middle of the outbox, a third released after
+      let before;
+      if (interfere) before = [await releaseJob("SIMX_1"), await releaseJob("SIMX_2")];
+      const {run} = await twin({prefix: "5EED0000", afterStart: interfere ? async () => {
+        await deleteJob("SIMX_2", before[1]);
+        await releaseJob("SIMX_3");
+      } : undefined});
       return {run, table: tableOf(run)};
     }
 
@@ -730,6 +773,16 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       const second = await smallTwin();
       expect(second.run).to.equal(first.run);
       for (const part of ["piles", "doctor", "log", "events"]) expect(second.table[part], part).to.deep.equal(first.table[part]);
+      // jobs of another program released around the twin's, one deleted from
+      // the middle of the outbox: the twin's jobs still run in their release
+      // order (RELEASE_SEQ), and the same seed gives the same tables
+      await fresh();
+      const since = lastJob();
+      const third = await smallTwin(undefined, {interfere: true});
+      expect(third.run).to.equal(first.run);
+      for (const part of ["piles", "doctor", "log", "events"]) expect(third.table[part], `${part}, with a deleted job between`).to.deep.equal(first.table[part]);
+      const others = jobsSince(since).filter((j) => j.job_name.startsWith("SIMX_")).map((j) => j.job_name);
+      expect(others, "the deleted job never reached the queue").to.deep.equal(["SIMX_1", "SIMX_3"]);
       await fresh();
       const other = await smallTwin("43");
       expect(other.run).to.equal(first.run);
@@ -966,6 +1019,245 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       expect(logProblems(run, predicted)).to.deep.equal([]);
     });
 
+    // ---- round 2: a simulated run and a real one of the same set and date ------------
+    // a real fleet to alert on: S001 in maintenance with a voyage ahead, among the twin's ships
+    const realFleet = async (n = 20) => {
+      await seedShips(n);
+      await exec(["UPDATE zosd_l2_ship SET status = 'M' WHERE ship_id = 'S001'",
+        "INSERT INTO zosd_l2_voy (mandt, voyage_id, ship_id, dep_date) VALUES ('123', 'V00001', 'S001', '20991005')"]);
+    };
+    const runReal = async (mode = "S") => trim((await dialogStep(() => cls().run({iv_date: new abap.types.Date().set(DATE),
+      iv_mode: new abap.types.Character(1).set(mode)}))).get().run_id.get());
+    const logOf = (run) => read("SELECT rule_name, pile_no, alert_seq, model_hash, alert_text FROM zosd_l3_alert WHERE run_id = ? ORDER BY rule_name, pile_no, alert_seq", run);
+    // every path that finalises, purges or heals, against a simulated run of
+    // the date: none may touch a real run's rows, and a real run none of the twin's
+    async function sharedDateProblems() {
+      const problems = [];
+      await realFleet();
+      await tune("simulate.time_scale", "1000000");
+      await tune("budget.glass", "100000");
+      const real = await runReal();
+      const sentinel = logOf(real);
+      if (!sentinel.length || sentinel.some((r) => !r.model_hash.startsWith("sha256:"))) problems.push(`the real run logged ${sentinel.length} real rows`);
+      const intact = (when) => {
+        const now = logOf(real);
+        if (JSON.stringify(now) !== JSON.stringify(sentinel)) problems.push(`${when}: the real run's rows are ${now.length}, were ${sentinel.length}`);
+      };
+      const {run: sim, result} = await twin();
+      intact("after the twin");
+      // a finalisation that was interrupted: the twin's lock HELD again, long ago
+      await exec([`UPDATE zosd_l3_run SET status = 'HELD' WHERE set_name = 'fleet2' AND check_date = '${DATE}'`]);
+      clock.set(clock.now() + 2 * 3600000);
+      const report = await doctor();
+      if (!report.includes("RELEASE ALL-FINAL")) problems.push(`the doctor answered ${JSON.stringify(report)}, not RELEASE ALL-FINAL`);
+      intact("after the doctor's RELEASE ALL-FINAL");
+      // a collect( ) with no binding at all, a resume( ), a purge( )
+      result.get().bind.set("");
+      await exec([`UPDATE zosd_l3_run SET status = 'HELD' WHERE set_name = 'fleet2' AND check_date = '${DATE}'`]);
+      await dialogStep(() => cls().collect({is_result: result}));
+      intact("after collect( ) without a binding");
+      await dialogStep(() => cls().resume({iv_run: str(sim)}));
+      intact("after resume( )");
+      await dialogStep(() => cls().purge({}));
+      intact("after purge( )");
+      await exec([`UPDATE zosd_l3_run SET status = 'RELEASED' WHERE set_name = 'fleet2' AND check_date = '${DATE}'`]);
+      // the reverse: a real run of the date leaves the twin's rows
+      const twinRows = logOf(sim);
+      if (!twinRows.length || twinRows.some((r) => !r.model_hash.startsWith("sim256:"))) problems.push(`the twin logged ${twinRows.length} sim256: rows`);
+      await runReal();
+      if (JSON.stringify(logOf(sim)) !== JSON.stringify(twinRows)) problems.push(`a real run of the date changed the twin's rows: ${logOf(sim).length}, were ${twinRows.length}`);
+      return problems;
+    }
+    it("P1: a real run's alerts survive the doctor, collect( ), resume( ) and purge( ) of a simulated run of the same date, and the reverse", async () => {
+      expect(await sharedDateProblems()).to.deep.equal([]);
+    });
+    it("mutant: finalise with the default hash, not the run's own", async () => {
+      const name = "zcl_l3_fleet2_m_final";
+      await loadAs(RUNNER, name, edit(committed(RUNNER), "      lv_hash = sim_hash( iv_hash ).\n", "      lv_hash = iv_hash.\n"));
+      const problems = await answering(RUNNER, name, () => sharedDateProblems());
+      expect(problems.join("\n")).to.match(/the real run's rows are \d+, were \d+|changed the twin's rows/);
+    });
+
+    // ---- round 2: a run keeps the work it started with --------------------------------
+    // a real run in jobs whose min-crew pile dumps once: the doctor fails it
+    async function realWithFailedPile() {
+      await realFleet(6);
+      await tune("budget.glass", "100000");
+      const real = abap.Classes.ZCL_L2_SHIP_MIN_CREW.check;
+      let left = 1;
+      abap.Classes.ZCL_L2_SHIP_MIN_CREW.check = async function (...args) {
+        if (left > 0) { left--; throw new Error("min crew dumps (a test fault)"); }
+        return real.apply(this, args);
+      };
+      try {
+        const run = await runReal("P");
+        await drainAndWork();
+        clock.set(clock.now() + 60000);
+        await doctor();
+        return run;
+      } finally { abap.Classes.ZCL_L2_SHIP_MIN_CREW.check = real; }
+    }
+    const failedOf = (run) => pilesOf(run).filter((p) => p.status === "FAILED");
+    async function overrideProblems() {
+      const problems = [];
+      const run = await realWithFailedPile();
+      if (!failedOf(run).length) problems.push("no pile failed");
+      if (recorded(run) !== "work=real") problems.push(`the run recorded ${recorded(run)}`);
+      const answer = await dialogStep(async () => report(await cls().resume({iv_run: str(run), iv_bind: str("work=sim")})));
+      if (JSON.stringify(answer) !== JSON.stringify(["REFUSED WORK-BIND"])) problems.push(`resume( work=sim ) answered ${JSON.stringify(answer)}`);
+      await drainAndWork();
+      // healed with the run's own binding, as a real run
+      await dialogStep(() => cls().resume({iv_run: str(run)}));
+      for (let pass = 0; pass < 10 && lockRow()?.status !== "RELEASED"; pass++) { await drainAndWork(); clock.set(clock.now() + 900000); await doctor(); }
+      if (lockRow()?.status !== "RELEASED") problems.push("the real run did not complete");
+      const sims = read("SELECT COUNT(*) AS n FROM zosd_l3_alert WHERE alert_text LIKE 'SIM%' OR model_hash LIKE 'sim256:%'")[0].n;
+      if (sims) problems.push(`${sims} SIM rows in a real run's log`);
+      if (recorded(run) !== "work=real") problems.push(`the run's record became ${recorded(run)}`);
+      return problems;
+    }
+    it("P2-a: resume( ) refuses a work binding the run did not start with, and heals it as it started", async () => {
+      expect(await overrideProblems()).to.deep.equal([]);
+    });
+    it("mutant: resume( ) accepts a work override", async () => {
+      const name = "zcl_l3_fleet2_m_override";
+      const text = committed(RUNNER);
+      const from = text.slice(text.indexOf("    IF sim_named( iv_bind ) IS NOT INITIAL\n       AND"), text.indexOf("    heal( EXPORTING iv_run = ls_lock-run_id\n                    iv_date = ls_lock-check_date\n                    iv_now = lv_now\n                    iv_force = abap_true"));
+      expect(from).to.match(/REFUSED/);
+      await loadAs(RUNNER, name, edit(edit(text, from, ""), "    IF rv_bind IS INITIAL.\n      rv_bind = iv_bind.\n    ENDIF.\n",
+        "    IF iv_bind IS NOT INITIAL.\n      rv_bind = iv_bind.\n    ENDIF.\n"));
+      const problems = await answering(RUNNER, name, () => overrideProblems());
+      expect(problems.join("\n")).to.match(/resume\( work=sim \) answered|SIM rows/);
+    });
+    it("P2-a: a factory whose default is sim does not make the doctor resubmit a run that started real as a simulated one", async () => {
+      const run = await realWithFailedPile();
+      expect(failedOf(run).length).to.be.greaterThan(0);
+      const file = manifest("defaultsim", [["  work: real\n", "  work: sim\n"]]);
+      const {files} = await renderSet(compileSet(file));
+      const name = `zcl_l3_fleet2_ports_d${++variantCount}`;
+      await loadAs(PORTS, name, files[`${PORTS}.clas.abap`]);
+      await answering(PORTS, name, async () => {
+        expect(trim((await cls(PORTS).variant({iv_port: str("work")})).get())).to.equal("sim");
+        for (let pass = 0; pass < 10 && lockRow()?.status !== "RELEASED"; pass++) { clock.set(clock.now() + 900000); await doctor(); await drainAndWork(); }
+      });
+      expect(lockRow()?.status).to.equal("RELEASED");
+      expect(pilesOf(run).every((p) => p.status === "DONE")).to.equal(true);
+      expect(read("SELECT COUNT(*) AS n FROM zosd_l3_alert WHERE alert_text LIKE 'SIM%' OR model_hash LIKE 'sim256:%'")[0].n).to.equal(0);
+    });
+
+    // ---- round 2: no draw state in statics ---------------------------------------------
+    // two simulated runs in their own dialog steps at once (mode S, two dates,
+    // seeds 42 and 43): each waits while the other draws, and each run's hits
+    // and chance closures are what the twin says for its own seed
+    const interleaveBlock = `${"simulate:\n  allow_sink: [log]\n  default:\n    duration: {dist: fixed, value: 30}\n"}    outcome: {ok: 1}
+    hits: {dist: fixed, value: 2}
+    autoclose: 0.5
+  stages:
+    candidates:
+      keep: 1
+`;
+    const D2 = "20991002";
+    async function interleavedProblems(editClose) {
+      await seedShips(8);
+      await tune("simulate.time_scale", "1000000");
+      await tune("budget.glass", "100000");
+      await tune("simulate.seed", "42");
+      return withConfig(interleaveBlock, async ({configs}) => {
+        const problems = [];
+        const runOn = (day) => dialogStep(() => cls().run({iv_date: new abap.types.Date().set(day), iv_bind: str("work=sim,close=sim")}));
+        const results = await virtual(async () => {
+          const a = runOn(DATE);
+          while (!clock.pending().length) await new Promise((r) => setTimeout(r, 1));
+          await tune("simulate.seed", "43");
+          const b = runOn(D2);
+          return Promise.all([a, b]);
+        });
+        for (const [result, seed] of [[results[0], 42], [results[1], 43]]) {
+          const run = trim(result.get().run_id.get());
+          const work = read("SELECT key_value FROM zosd_l3_work WHERE run_id = ? ORDER BY key_value", run).map((r) => r.key_value);
+          const want = [];
+          for (const p of pilesOf(run).filter((x) => x.stage_no === 2)) {
+            const keys = work.filter((k) => k >= p.range_low && k <= p.range_high);
+            const config = configs(p.rule_name);
+            const d = draw(config, {run, rule: p.rule_name, pile: p.pile_no, attempt: 0, seed, scale: 1000000, stale: 900}, keys);
+            d.keys.forEach((k, i) => want.push(`${p.rule_name} ${p.pile_no} ${i + 1} ${alertText(config, {pile: p.pile_no, attempt: 0}, k)} ${closes(config, {seed, run, rule: p.rule_name, key: k}) ? "X" : "-"}`));
+          }
+          const got = read("SELECT rule_name, pile_no, alert_seq, alert_text, closed FROM zosd_l3_alert WHERE run_id = ?", run)
+            .map((r) => `${r.rule_name} ${r.pile_no} ${r.alert_seq} ${r.alert_text} ${r.closed === "X" ? "X" : "-"}`);
+          got.sort(); want.sort();
+          if (!got.length) problems.push(`seed ${seed}: no rows`);
+          if (JSON.stringify(got) !== JSON.stringify(want)) problems.push(`seed ${seed}: ${got.filter((l, i) => l !== want[i]).length} rows differ from the twin, first ${got.find((l, i) => l !== want[i])}`);
+        }
+        return problems;
+      }, {editClose});
+    }
+    it("P2-b: two runs drawing at once, each with its own seed, each match the twin", async () => {
+      expect(await interleavedProblems()).to.deep.equal([]);
+    });
+    it("mutant: a chance autoclose with a static seed (the first run's)", async () => {
+      const problems = await interleavedProblems((t) => edit(edit(t, "    INTERFACES zif_l3_fleet2_close.\n", "    INTERFACES zif_l3_fleet2_close.\n    CLASS-DATA gv_seed TYPE i.\n"),
+        "        lv_seed = seed_of( lv_run ).\n", "        IF gv_seed IS INITIAL.\n          gv_seed = seed_of( lv_run ).\n        ENDIF.\n        lv_seed = gv_seed.\n"));
+      expect(problems.join("\n")).to.match(/seed 43: \d+ rows differ/);
+    });
+
+    // ---- round 2: the manual clock and the real scheduler ------------------------------
+    it("P2-c: one advance of 3660 s, with the real scheduler and a job that waits 79 s on the same clock, completes the job", async () => {
+      await seedShips(2);
+      await tune("simulate.time_scale", "1000000");
+      await tune("budget.glass", "100000");
+      await withConfig(`${"simulate:\n  allow_sink: [log]\n  default:\n    duration: {dist: fixed, value: 79}\n"}    outcome: {ok: 1}
+  stages:
+    candidates:
+      keep: 0
+`, async () => {
+        const {JobScheduler} = await import("../tools/osd-job-scheduler.mjs");
+        const run = trim((await begin("work=sim")).get().run_id.get());
+        const scheduler = new JobScheduler({root, store, env: process.env, clock});
+        // the scheduler's pass is a timer of the clock, due at +60 s; the job it
+        // runs waits 79 s on the same clock
+        const start0 = clock.now();
+        clock.setTimer(() => scheduler.tick(), 60000);
+        const advanced = clock.advance(3660000).then(() => "advanced");
+        const stall = new Promise((r) => setTimeout(() => r("stalled"), 20000));
+        expect(await Promise.race([advanced, stall])).to.equal("advanced");
+        scheduler.stop();
+        expect(clock.now() - start0).to.equal(3660000);
+        const pile = pilesOf(run).find((p) => p.stage_no === 1);
+        expect(pile).to.include({status: "DONE"});
+        expect(stamp(pile.ended) - stamp(pile.started)).to.equal(79);
+      });
+    });
+    it("a WAIT on a manual clock nobody moves ends at its wall-clock ceiling, and says so", async () => {
+      const {setWaitClock} = await import("../tools/osd-dialog-step.mjs");
+      const restore = setWaitClock(clock, {ceilingMs: 300});
+      const said = [];
+      const error = console.error;
+      console.error = (...items) => said.push(items.join(" "));
+      const wall0 = Date.now();
+      try {
+        await dialogStep(async () => { await abap.statements.wait({seconds: {get: () => 3600}}); });
+      } finally { console.error = error; restore(); }
+      expect(Date.now() - wall0).to.be.within(250, 5000);
+      expect(said.join("\n")).to.match(/WAIT UP TO 3600 s on an injected clock: nobody moved the clock for 300 ms/);
+      expect(clock.pending(), "its timer is gone").to.deep.equal([]);
+    });
+
+    // ---- round 2 (dell): the outbox in release order -----------------------------------
+    it("the outbox imports the jobs one second released in release order, a deleted one leaving a gap", async () => {
+      await drainAndWork();
+      const since = lastJob();
+      const a = await releaseJob("SIMO_A");
+      const b = await releaseJob("SIMO_B");
+      await releaseJob("SIMO_C");
+      await deleteJob("SIMO_B", b);
+      await releaseJob("SIMO_D");
+      const seqs = read("SELECT jobname, release_seq FROM zosd_job_outbox WHERE jobname LIKE 'SIMO_%' ORDER BY release_seq").map((r) => r.jobname);
+      expect(seqs).to.deep.equal(["SIMO_A", "SIMO_C", "SIMO_D"]);
+      await drainJobOutbox(store);
+      expect(jobsSince(since).map((j) => j.job_name)).to.deep.equal(["SIMO_A", "SIMO_C", "SIMO_D"]);
+      expect(a).to.be.a("string");
+      await drainAndWork();
+    });
+
     // ---- the run-time half of the safety rule ------------------------------------
     async function factoryProblems(editFactory = (t) => t) {
       const file = manifest("noallow", [["  allow_sink: [log]\n", ""]]);
@@ -1005,7 +1297,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       const rows = read("SELECT model_hash, alert_text FROM zosd_l3_alert WHERE run_id = ?", run);
       expect(rows.length).to.be.greaterThan(0);
       expect(rows.every((r) => r.model_hash.startsWith("sha256:") && !r.alert_text.startsWith("SIM"))).to.equal(true);
-      expect(lockRow().run_bind).to.equal("");
+      expect(recorded(run)).to.equal("work=real");
     });
   });
 });

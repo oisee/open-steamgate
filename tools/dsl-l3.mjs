@@ -488,6 +488,8 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   if (doc.governor !== undefined) model.governor = compileGovernor(doc, model, all, {line, fail});
   if (doc.simulate !== undefined) model.simulate = compileSimulate(doc, model, all, {line, fail, bindings: bindingDocs});
   if (doc.settings !== undefined) model.settings = compileSettings(doc, model, {line, fail});
+  // a tunable seed is the run's: the chance autoclose reads it from the run's snapshot
+  if (model.simulate && model.settings?.simulate_seed) model.simulate.seed_conf = {"@id": model.simulate["@id"], set_line: model.simulate.set_line, conf: model.settings.class};
   Object.defineProperty(model, "where", {value: where});
   return model;
 }

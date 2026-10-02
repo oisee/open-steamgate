@@ -282,12 +282,21 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS sim_hash
       IMPORTING iv_hash TYPE csequence
       RETURNING VALUE(rv_hash) TYPE zosd_l3_alert-model_hash.
-    " what the doctor and resume( ) heal a run with: iv_bind when given, else
-    " the run's recorded binding when it was a simulated run, else nothing
+    " the binding run iv_run started with (its gate rows): every pile of it is
+    " submitted, worked and finalised with this, never with the binding of the
+    " moment; iv_bind only for a run that has none (one made by hand)
     CLASS-METHODS sim_bind
-      IMPORTING iv_recorded TYPE csequence
+      IMPORTING iv_run TYPE csequence
                 iv_bind TYPE string OPTIONAL
       RETURNING VALUE(rv_bind) TYPE string.
+    " what run( ) records: iv_bind, and the work variant it resolves to
+    CLASS-METHODS sim_record
+      IMPORTING iv_bind TYPE string
+      RETURNING VALUE(rv_bind) TYPE string.
+    " the work variant iv_bind names itself, initial when it names none
+    CLASS-METHODS sim_named
+      IMPORTING iv_bind TYPE csequence
+      RETURNING VALUE(rv_variant) TYPE string.
     " puts the rows of zosd_l2_ship back after a replay: the rows kept before it
     CLASS-METHODS restore_1
       IMPORTING it_keep TYPE zif_l3_fleet2_ships=>tt_rows.
@@ -427,11 +436,6 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       rs_result-status = 'BUSY'.
       RETURN.
     ENDIF.
-    " the run's binding on its lock row: a simulated run is healed as one
-    UPDATE zosd_l3_run SET run_bind = iv_bind
-      WHERE set_name = c_set
-        AND check_date = rs_result-check_date
-        AND run_id = rs_result-run_id.
     IF lv_dry = abap_false.
       zcl_l3_fleet2_conf=>snapshot( iv_run = rs_result-run_id is_state = gs_settings ).
     ENDIF.
@@ -461,6 +465,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         ls_gate-run_id = rs_result-run_id.
         ls_gate-check_date = rs_result-check_date.
         ls_gate-status = 'WAITING'.
+        " the binding the run starts with, and its work variant, on the run's
+        " own rows: the lock row names only the latest run of a date
+        ls_gate-run_bind = sim_record( iv_bind ).
         LOOP AT lt_stages INTO ls_stage.
           ls_gate-stage_no = ls_stage-stage_no.
           ls_gate-stage_name = ls_stage-stage.
@@ -894,12 +901,42 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD sim_bind.
-    DATA lv_recorded TYPE string.
-    rv_bind = iv_bind.
-    lv_recorded = iv_recorded.
-    IF rv_bind IS INITIAL AND zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = lv_recorded ) = 'sim'.
-      rv_bind = lv_recorded.
+    SELECT SINGLE run_bind FROM zosd_l3_stage INTO rv_bind
+      WHERE run_id = iv_run
+        AND stage_no = 1.
+    IF rv_bind IS INITIAL.
+      rv_bind = iv_bind.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD sim_record.
+    DATA lv_work TYPE string.
+    lv_work = zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = iv_bind ).
+    IF sim_named( iv_bind ) IS NOT INITIAL.
+      rv_bind = iv_bind.
+    ELSEIF iv_bind IS INITIAL.
+      rv_bind = `work=` && lv_work.
+    ELSE.
+      rv_bind = iv_bind && `,work=` && lv_work.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD sim_named.
+    DATA lt_parts TYPE string_table.
+    DATA lv_part TYPE string.
+    DATA lv_name TYPE string.
+    DATA lv_value TYPE string.
+    DATA lv_bind TYPE string.
+    lv_bind = iv_bind.
+    SPLIT lv_bind AT ',' INTO TABLE lt_parts.
+    LOOP AT lt_parts INTO lv_part.
+      CLEAR: lv_name, lv_value.
+      SPLIT lv_part AT '=' INTO lv_name lv_value.
+      CONDENSE: lv_name, lv_value.
+      IF lv_name = 'work'.
+        rv_variant = lv_value.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD restore_1.
@@ -963,6 +1000,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA li_work TYPE REF TO zif_l3_fleet2_work.
     DATA ls_work TYPE zif_l3_fleet2_work=>ty_pile.
     DATA lt_simkeys TYPE string_table.
+    DATA lv_run_bind TYPE string.
+    DATA lv_work TYPE string.
     DATA ls_pile TYPE zosd_l3_pile.
     DATA lt_range_1 TYPE tt_range_1.
     DATA lt_range_2 TYPE tt_range_2.
@@ -1028,11 +1067,24 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       rs_rule-status = 'KILLED'.
       RETURN.
     ENDIF.
+    " the work is the run's own, recorded when it started: a binding of the
+    " moment that names another work variant is refused, and a simulated pile
+    " meets the sink-safety rule here, where it is worked
+    lv_run_bind = sim_bind( iv_run = iv_run
+                            iv_bind = iv_bind ).
+    lv_work = zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = lv_run_bind ).
+    IF sim_named( iv_bind ) IS NOT INITIAL AND sim_named( iv_bind ) <> lv_work.
+      rs_rule-status = 'WORK-BIND'.
+      RETURN.
+    ENDIF.
+    IF lv_work = 'sim'.
+      zcl_l3_fleet2_ports=>check( iv_bind = lv_run_bind ).
+    ENDIF.
     ls_pile-status = 'RUNNING'.
     GET TIME STAMP FIELD ls_pile-started.
     UPDATE zosd_l3_pile FROM ls_pile.
     " the work: the L2 classes below (variant real), or the simulated twin
-    li_work = zcl_l3_fleet2_ports=>get_work( zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = iv_bind ) ).
+    li_work = zcl_l3_fleet2_ports=>get_work( lv_work ).
     IF li_work IS BOUND.
       ls_work-run_id = iv_run.
       ls_work-rule = iv_rule.
@@ -1507,19 +1559,24 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     " run bound to another variant of alerts leaves the log as it is
     DATA lv_latest TYPE zosd_l3_run-run_id.
     DATA lv_hash TYPE zosd_l3_alert-model_hash.
+    DATA lv_bound TYPE string.
     SELECT SINGLE run_id FROM zosd_l3_run INTO lv_latest
       WHERE set_name = c_set
         AND check_date = iv_date.
     IF lv_latest <> iv_run.
       RETURN.
     ENDIF.
-    IF zcl_l3_fleet2_ports=>variant( iv_port = 'alerts' iv_bind = iv_bind ) <> 'log'.
-      RETURN.
-    ENDIF.
-    " a simulated run finalises its own rows only, those under sim256:
+    " the run's own binding and work, never the binding of the moment (a
+    " doctor or a collect( ) passes none): a simulated run finalises its own
+    " rows only, those under sim256:, and a real run never those
+    lv_bound = sim_bind( iv_run = iv_run
+                         iv_bind = iv_bind ).
     lv_hash = iv_hash.
-    IF zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = iv_bind ) = 'sim'.
+    IF zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = lv_bound ) = 'sim'.
       lv_hash = sim_hash( iv_hash ).
+    ENDIF.
+    IF zcl_l3_fleet2_ports=>variant( iv_port = 'alerts' iv_bind = lv_bound ) <> 'log'.
+      RETURN.
     ENDIF.
     DELETE FROM zosd_l3_alert
       WHERE set_name = c_set
@@ -1538,9 +1595,27 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_released TYPE btch0000-char1.
     DATA ls_guard TYPE zosd_l3_budget.
     DATA lv_chains TYPE i.
+    DATA lv_run_bind TYPE string.
     DATA lv_pile TYPE n LENGTH 4.
     lv_pile = cs_pile-pile_no.
     CONCATENATE iv_jobname '_' lv_pile INTO lv_jobname.
+    " the run's own binding goes to the job, whoever submits the pile (run( ),
+    " a gate, the doctor, resume( ), a chain); a simulated pile meets the
+    " sink-safety rule here, where it is submitted
+    lv_run_bind = sim_bind( iv_run = iv_run
+                            iv_bind = iv_bind ).
+    IF zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = lv_run_bind ) = 'sim'.
+      TRY.
+          zcl_l3_fleet2_ports=>check( iv_bind = lv_run_bind
+                                iv_parallel = abap_true ).
+        CATCH zcx_l3_fleet2_port.
+          cs_pile-status = 'FAILED'.
+          cs_pile-reason = 'BIND-REFUSED'.
+          GET TIME STAMP FIELD cs_pile-ended.
+          UPDATE zosd_l3_pile FROM cs_pile.
+          RETURN.
+      ENDTRY.
+    ENDIF.
     " ATTEMPT counts the pile's submits: the first is 1, the doctor sets a retry's
     IF cs_pile-attempt = 0.
       cs_pile-attempt = 1.
@@ -1588,7 +1663,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       WITH p_date = iv_date
       WITH p_run = iv_run
       WITH p_pile = cs_pile-pile_no
-      WITH p_bind = iv_bind
+      WITH p_bind = lv_run_bind
       WITH s_1 = gs_settings-vals-budget_glass
       WITH s_2 = gs_settings-vals-budget_warn
       WITH s_3 = gs_settings-vals-budget_narrow_at
@@ -2064,11 +2139,23 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
            CHANGING ct_report = rt_report ).
       RETURN.
     ENDIF.
+    " a run is healed with the binding it started with: an iv_bind naming
+    " another work variant is refused, never applied to an existing run
+    IF sim_named( iv_bind ) IS NOT INITIAL
+       AND sim_named( iv_bind ) <> zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = sim_bind( ls_lock-run_id ) ).
+      act( EXPORTING iv_run = iv_run
+                     iv_date = ls_lock-check_date
+                     iv_action = 'REFUSED'
+                     iv_reason = 'WORK-BIND'
+                     iv_audit = abap_false
+           CHANGING ct_report = rt_report ).
+      RETURN.
+    ENDIF.
     heal( EXPORTING iv_run = ls_lock-run_id
                     iv_date = ls_lock-check_date
                     iv_now = lv_now
                     iv_force = abap_true
-                    iv_bind = sim_bind( iv_recorded = ls_lock-run_bind
+                    iv_bind = sim_bind( iv_run = ls_lock-run_id
                                         iv_bind = iv_bind )
                     is_params = is_params
           CHANGING ct_report = rt_report ).
@@ -2131,7 +2218,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                       iv_date = ls_lock-check_date
                       iv_now = lv_now
                       iv_force = abap_false
-                      iv_bind = sim_bind( ls_lock-run_bind )
+                      iv_bind = sim_bind( ls_lock-run_id )
             CHANGING ct_report = rt_report ).
       IF budget_guard( ls_lock-run_id ) = abap_false.
         act( EXPORTING iv_run = ls_lock-run_id iv_date = ls_lock-check_date

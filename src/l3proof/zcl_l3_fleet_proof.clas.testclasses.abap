@@ -1483,7 +1483,9 @@ CLASS ltcl_proof IMPLEMENTATION.
       WAIT UP TO 1 SECONDS.
       lv_waited = lv_waited + 1.
     ENDDO.
-    cl_abap_unit_assert=>assert_equals( act = ls_lock-run_bind exp = 'work=sim' msg = 'the run row records its binding' ).
+    SELECT SINGLE run_bind FROM zosd_l3_stage INTO lv_text
+      WHERE run_id = ls_result-run_id AND stage_no = 1.
+    cl_abap_unit_assert=>assert_equals( act = lv_text exp = 'work=sim' msg = 'the run records the binding it started with' ).
     IF lv_resubmits < 1.
       cl_abap_unit_assert=>fail( msg = 'no pile dumped and was submitted again' ).
     ENDIF.

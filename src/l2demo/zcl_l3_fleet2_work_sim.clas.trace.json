@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-ports/work-sim.tpl",
- "model": "sha256:68e1506de6ed5e53f84acd2410fa08ab47e5fbde6bb80ba74018d0ca091cf690",
+ "model": "sha256:ed23ffe269d60127e8f6677512350a7c32a887cdc5a3c748c8b8dd1226a9b9fe",
  "lines": [
   {
    "line": 1,
@@ -350,7 +350,7 @@
   {
    "line": 50,
    "template_line": 52,
-   "path": "/",
+   "path": "/iface",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
@@ -364,7 +364,7 @@
   {
    "line": 52,
    "template_line": 54,
-   "path": "/iface",
+   "path": "/",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
@@ -448,7 +448,7 @@
   {
    "line": 64,
    "template_line": 66,
-   "path": "/iface",
+   "path": "/",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
@@ -469,7 +469,7 @@
   {
    "line": 67,
    "template_line": 69,
-   "path": "/",
+   "path": "/iface",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
@@ -588,897 +588,897 @@
   {
    "line": 84,
    "template_line": 86,
-   "path": "/",
+   "path": "/class",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
   {
    "line": 85,
    "template_line": 87,
-   "path": "/class",
-   "node": "set/fleet2/port/work/variant/sim",
-   "set_line": 65
-  },
-  {
-   "line": 86,
-   "template_line": 88,
    "path": "/",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
   {
-   "line": 87,
-   "template_line": 90,
+   "line": 86,
+   "template_line": 89,
    "path": "/sim",
    "node": "set/fleet2/simulate",
    "set_line": 82
   },
   {
-   "line": 88,
-   "template_line": 92,
+   "line": 87,
+   "template_line": 91,
    "path": "/sim/rules/1/rule",
    "node": "set/fleet2/simulate/rule/ship-busy",
    "set_line": 82
   },
   {
+   "line": 88,
+   "template_line": 93,
+   "path": "/sim/rules/1/duration/dist",
+   "node": "set/fleet2/simulate/rule/ship-busy/duration",
+   "set_line": 94
+  },
+  {
    "line": 89,
    "template_line": 94,
-   "path": "/sim/rules/1/duration/dist",
+   "path": "/sim/rules/1/duration/a",
    "node": "set/fleet2/simulate/rule/ship-busy/duration",
    "set_line": 94
   },
   {
    "line": 90,
    "template_line": 95,
-   "path": "/sim/rules/1/duration/a",
-   "node": "set/fleet2/simulate/rule/ship-busy/duration",
-   "set_line": 94
-  },
-  {
-   "line": 91,
-   "template_line": 96,
    "path": "/sim/rules/1/duration/b",
    "node": "set/fleet2/simulate/rule/ship-busy/duration",
    "set_line": 94
   },
   {
+   "line": 91,
+   "template_line": 101,
+   "path": "/sim/rules/1/outcome/ok",
+   "node": "set/fleet2/simulate/rule/ship-busy/outcome",
+   "set_line": 95
+  },
+  {
    "line": 92,
    "template_line": 102,
-   "path": "/sim/rules/1/outcome/ok",
+   "path": "/sim/rules/1/outcome/slow",
    "node": "set/fleet2/simulate/rule/ship-busy/outcome",
    "set_line": 95
   },
   {
    "line": 93,
    "template_line": 103,
-   "path": "/sim/rules/1/outcome/slow",
+   "path": "/sim/rules/1/outcome/dump",
    "node": "set/fleet2/simulate/rule/ship-busy/outcome",
    "set_line": 95
   },
   {
    "line": 94,
    "template_line": 104,
-   "path": "/sim/rules/1/outcome/dump",
-   "node": "set/fleet2/simulate/rule/ship-busy/outcome",
-   "set_line": 95
-  },
-  {
-   "line": 95,
-   "template_line": 105,
    "path": "/sim/rules/1/outcome/hang",
    "node": "set/fleet2/simulate/rule/ship-busy/outcome",
    "set_line": 95
   },
   {
-   "line": 96,
-   "template_line": 108,
+   "line": 95,
+   "template_line": 107,
    "path": "/sim/rules/1/slow_factor/value",
    "node": "set/fleet2/simulate/rule/ship-busy/slow_factor",
    "set_line": 89
   },
   {
+   "line": 96,
+   "template_line": 110,
+   "path": "/sim/rules/1/hits/dist",
+   "node": "set/fleet2/simulate/rule/ship-busy/hits",
+   "set_line": 90
+  },
+  {
    "line": 97,
    "template_line": 111,
-   "path": "/sim/rules/1/hits/dist",
+   "path": "/sim/rules/1/hits/a",
    "node": "set/fleet2/simulate/rule/ship-busy/hits",
    "set_line": 90
   },
   {
    "line": 98,
    "template_line": 112,
-   "path": "/sim/rules/1/hits/a",
-   "node": "set/fleet2/simulate/rule/ship-busy/hits",
-   "set_line": 90
-  },
-  {
-   "line": 99,
-   "template_line": 113,
    "path": "/sim/rules/1/hits/b",
    "node": "set/fleet2/simulate/rule/ship-busy/hits",
    "set_line": 90
   },
   {
-   "line": 100,
-   "template_line": 115,
+   "line": 99,
+   "template_line": 114,
    "path": "/sim/rules/1/hits/chunks/1/text",
    "node": "set/fleet2/simulate/rule/ship-busy/hits",
    "set_line": 90
   },
   {
-   "line": 101,
-   "template_line": 119,
+   "line": 100,
+   "template_line": 118,
    "path": "/sim/rules/1/autoclose/value",
    "node": "set/fleet2/simulate/rule/ship-busy/autoclose",
    "set_line": 91
   },
   {
-   "line": 102,
-   "template_line": 122,
+   "line": 101,
+   "template_line": 121,
    "path": "/sim/rules/1/keep/value",
    "node": "set/fleet2/simulate/rule/ship-busy/keep",
    "set_line": 96
   },
   {
-   "line": 103,
-   "template_line": 125,
+   "line": 102,
+   "template_line": 124,
    "path": "/sim/rules/1/layout/prefix",
    "node": "set/fleet2/simulate/rule/ship-busy",
    "set_line": 82
   },
   {
-   "line": 104,
-   "template_line": 126,
+   "line": 103,
+   "template_line": 125,
    "path": "/sim/rules/1/layout/length",
    "node": "set/fleet2/simulate/rule/ship-busy",
    "set_line": 82
   },
   {
-   "line": 105,
-   "template_line": 92,
+   "line": 104,
+   "template_line": 91,
    "path": "/sim/rules/2/rule",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage",
    "set_line": 82
   },
   {
+   "line": 105,
+   "template_line": 93,
+   "path": "/sim/rules/2/duration/dist",
+   "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/duration",
+   "set_line": 87
+  },
+  {
    "line": 106,
    "template_line": 94,
-   "path": "/sim/rules/2/duration/dist",
+   "path": "/sim/rules/2/duration/a",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/duration",
    "set_line": 87
   },
   {
    "line": 107,
    "template_line": 95,
-   "path": "/sim/rules/2/duration/a",
-   "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/duration",
-   "set_line": 87
-  },
-  {
-   "line": 108,
-   "template_line": 96,
    "path": "/sim/rules/2/duration/b",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/duration",
    "set_line": 87
   },
   {
-   "line": 109,
-   "template_line": 98,
+   "line": 108,
+   "template_line": 97,
    "path": "/sim/rules/2/duration/knots",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/duration",
    "set_line": 87
   },
   {
+   "line": 109,
+   "template_line": 101,
+   "path": "/sim/rules/2/outcome/ok",
+   "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/outcome",
+   "set_line": 88
+  },
+  {
    "line": 110,
    "template_line": 102,
-   "path": "/sim/rules/2/outcome/ok",
+   "path": "/sim/rules/2/outcome/slow",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/outcome",
    "set_line": 88
   },
   {
    "line": 111,
    "template_line": 103,
-   "path": "/sim/rules/2/outcome/slow",
+   "path": "/sim/rules/2/outcome/dump",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/outcome",
    "set_line": 88
   },
   {
    "line": 112,
    "template_line": 104,
-   "path": "/sim/rules/2/outcome/dump",
-   "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/outcome",
-   "set_line": 88
-  },
-  {
-   "line": 113,
-   "template_line": 105,
    "path": "/sim/rules/2/outcome/hang",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/outcome",
    "set_line": 88
   },
   {
-   "line": 114,
-   "template_line": 108,
+   "line": 113,
+   "template_line": 107,
    "path": "/sim/rules/2/slow_factor/value",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/slow_factor",
    "set_line": 89
   },
   {
+   "line": 114,
+   "template_line": 110,
+   "path": "/sim/rules/2/hits/dist",
+   "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/hits",
+   "set_line": 90
+  },
+  {
    "line": 115,
    "template_line": 111,
-   "path": "/sim/rules/2/hits/dist",
+   "path": "/sim/rules/2/hits/a",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/hits",
    "set_line": 90
   },
   {
    "line": 116,
    "template_line": 112,
-   "path": "/sim/rules/2/hits/a",
-   "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/hits",
-   "set_line": 90
-  },
-  {
-   "line": 117,
-   "template_line": 113,
    "path": "/sim/rules/2/hits/b",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/hits",
    "set_line": 90
   },
   {
-   "line": 118,
-   "template_line": 115,
+   "line": 117,
+   "template_line": 114,
    "path": "/sim/rules/2/hits/chunks/1/text",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/hits",
    "set_line": 90
   },
   {
-   "line": 119,
-   "template_line": 119,
+   "line": 118,
+   "template_line": 118,
    "path": "/sim/rules/2/autoclose/value",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/autoclose",
    "set_line": 91
   },
   {
-   "line": 120,
-   "template_line": 122,
+   "line": 119,
+   "template_line": 121,
    "path": "/sim/rules/2/keep/value",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage/keep",
    "set_line": 82
   },
   {
-   "line": 121,
-   "template_line": 125,
+   "line": 120,
+   "template_line": 124,
    "path": "/sim/rules/2/layout/prefix",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage",
    "set_line": 82
   },
   {
-   "line": 122,
-   "template_line": 126,
+   "line": 121,
+   "template_line": 125,
    "path": "/sim/rules/2/layout/length",
    "node": "set/fleet2/simulate/rule/maintenance-ship-no-future-voyage",
    "set_line": 82
   },
   {
-   "line": 123,
-   "template_line": 92,
+   "line": 122,
+   "template_line": 91,
    "path": "/sim/rules/3/rule",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers",
    "set_line": 82
   },
   {
+   "line": 123,
+   "template_line": 93,
+   "path": "/sim/rules/3/duration/dist",
+   "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/duration",
+   "set_line": 87
+  },
+  {
    "line": 124,
    "template_line": 94,
-   "path": "/sim/rules/3/duration/dist",
+   "path": "/sim/rules/3/duration/a",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/duration",
    "set_line": 87
   },
   {
    "line": 125,
    "template_line": 95,
-   "path": "/sim/rules/3/duration/a",
-   "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/duration",
-   "set_line": 87
-  },
-  {
-   "line": 126,
-   "template_line": 96,
    "path": "/sim/rules/3/duration/b",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/duration",
    "set_line": 87
   },
   {
-   "line": 127,
-   "template_line": 98,
+   "line": 126,
+   "template_line": 97,
    "path": "/sim/rules/3/duration/knots",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/duration",
    "set_line": 87
   },
   {
+   "line": 127,
+   "template_line": 101,
+   "path": "/sim/rules/3/outcome/ok",
+   "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/outcome",
+   "set_line": 88
+  },
+  {
    "line": 128,
    "template_line": 102,
-   "path": "/sim/rules/3/outcome/ok",
+   "path": "/sim/rules/3/outcome/slow",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/outcome",
    "set_line": 88
   },
   {
    "line": 129,
    "template_line": 103,
-   "path": "/sim/rules/3/outcome/slow",
+   "path": "/sim/rules/3/outcome/dump",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/outcome",
    "set_line": 88
   },
   {
    "line": 130,
    "template_line": 104,
-   "path": "/sim/rules/3/outcome/dump",
-   "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/outcome",
-   "set_line": 88
-  },
-  {
-   "line": 131,
-   "template_line": 105,
    "path": "/sim/rules/3/outcome/hang",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/outcome",
    "set_line": 88
   },
   {
-   "line": 132,
-   "template_line": 108,
+   "line": 131,
+   "template_line": 107,
    "path": "/sim/rules/3/slow_factor/value",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/slow_factor",
    "set_line": 89
   },
   {
+   "line": 132,
+   "template_line": 110,
+   "path": "/sim/rules/3/hits/dist",
+   "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/hits",
+   "set_line": 90
+  },
+  {
    "line": 133,
    "template_line": 111,
-   "path": "/sim/rules/3/hits/dist",
+   "path": "/sim/rules/3/hits/a",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/hits",
    "set_line": 90
   },
   {
    "line": 134,
    "template_line": 112,
-   "path": "/sim/rules/3/hits/a",
-   "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/hits",
-   "set_line": 90
-  },
-  {
-   "line": 135,
-   "template_line": 113,
    "path": "/sim/rules/3/hits/b",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/hits",
    "set_line": 90
   },
   {
-   "line": 136,
-   "template_line": 115,
+   "line": 135,
+   "template_line": 114,
    "path": "/sim/rules/3/hits/chunks/1/text",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/hits",
    "set_line": 90
   },
   {
-   "line": 137,
-   "template_line": 119,
+   "line": 136,
+   "template_line": 118,
    "path": "/sim/rules/3/autoclose/value",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/autoclose",
    "set_line": 91
   },
   {
-   "line": 138,
-   "template_line": 122,
+   "line": 137,
+   "template_line": 121,
    "path": "/sim/rules/3/keep/value",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers/keep",
    "set_line": 82
   },
   {
-   "line": 139,
-   "template_line": 125,
+   "line": 138,
+   "template_line": 124,
    "path": "/sim/rules/3/layout/prefix",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers",
    "set_line": 82
   },
   {
-   "line": 140,
-   "template_line": 126,
+   "line": 139,
+   "template_line": 125,
    "path": "/sim/rules/3/layout/length",
    "node": "set/fleet2/simulate/rule/grounded-ship-keeps-only-keepers",
    "set_line": 82
   },
   {
-   "line": 141,
-   "template_line": 92,
+   "line": 140,
+   "template_line": 91,
    "path": "/sim/rules/4/rule",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain",
    "set_line": 82
   },
   {
+   "line": 141,
+   "template_line": 93,
+   "path": "/sim/rules/4/duration/dist",
+   "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/duration",
+   "set_line": 87
+  },
+  {
    "line": 142,
    "template_line": 94,
-   "path": "/sim/rules/4/duration/dist",
+   "path": "/sim/rules/4/duration/a",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/duration",
    "set_line": 87
   },
   {
    "line": 143,
    "template_line": 95,
-   "path": "/sim/rules/4/duration/a",
-   "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/duration",
-   "set_line": 87
-  },
-  {
-   "line": 144,
-   "template_line": 96,
    "path": "/sim/rules/4/duration/b",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/duration",
    "set_line": 87
   },
   {
-   "line": 145,
-   "template_line": 98,
+   "line": 144,
+   "template_line": 97,
    "path": "/sim/rules/4/duration/knots",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/duration",
    "set_line": 87
   },
   {
+   "line": 145,
+   "template_line": 101,
+   "path": "/sim/rules/4/outcome/ok",
+   "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/outcome",
+   "set_line": 88
+  },
+  {
    "line": 146,
    "template_line": 102,
-   "path": "/sim/rules/4/outcome/ok",
+   "path": "/sim/rules/4/outcome/slow",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/outcome",
    "set_line": 88
   },
   {
    "line": 147,
    "template_line": 103,
-   "path": "/sim/rules/4/outcome/slow",
+   "path": "/sim/rules/4/outcome/dump",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/outcome",
    "set_line": 88
   },
   {
    "line": 148,
    "template_line": 104,
-   "path": "/sim/rules/4/outcome/dump",
-   "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/outcome",
-   "set_line": 88
-  },
-  {
-   "line": 149,
-   "template_line": 105,
    "path": "/sim/rules/4/outcome/hang",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/outcome",
    "set_line": 88
   },
   {
-   "line": 150,
-   "template_line": 108,
+   "line": 149,
+   "template_line": 107,
    "path": "/sim/rules/4/slow_factor/value",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/slow_factor",
    "set_line": 89
   },
   {
+   "line": 150,
+   "template_line": 110,
+   "path": "/sim/rules/4/hits/dist",
+   "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/hits",
+   "set_line": 90
+  },
+  {
    "line": 151,
    "template_line": 111,
-   "path": "/sim/rules/4/hits/dist",
+   "path": "/sim/rules/4/hits/a",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/hits",
    "set_line": 90
   },
   {
    "line": 152,
    "template_line": 112,
-   "path": "/sim/rules/4/hits/a",
-   "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/hits",
-   "set_line": 90
-  },
-  {
-   "line": 153,
-   "template_line": 113,
    "path": "/sim/rules/4/hits/b",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/hits",
    "set_line": 90
   },
   {
-   "line": 154,
-   "template_line": 115,
+   "line": 153,
+   "template_line": 114,
    "path": "/sim/rules/4/hits/chunks/1/text",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/hits",
    "set_line": 90
   },
   {
-   "line": 155,
-   "template_line": 119,
+   "line": 154,
+   "template_line": 118,
    "path": "/sim/rules/4/autoclose/value",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/autoclose",
    "set_line": 91
   },
   {
-   "line": 156,
-   "template_line": 122,
+   "line": 155,
+   "template_line": 121,
    "path": "/sim/rules/4/keep/value",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain/keep",
    "set_line": 82
   },
   {
-   "line": 157,
-   "template_line": 125,
+   "line": 156,
+   "template_line": 124,
    "path": "/sim/rules/4/layout/prefix",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain",
    "set_line": 82
   },
   {
-   "line": 158,
-   "template_line": 126,
+   "line": 157,
+   "template_line": 125,
    "path": "/sim/rules/4/layout/length",
    "node": "set/fleet2/simulate/rule/ship-in-service-has-a-captain",
    "set_line": 82
   },
   {
-   "line": 159,
-   "template_line": 92,
+   "line": 158,
+   "template_line": 91,
    "path": "/sim/rules/5/rule",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages",
    "set_line": 82
   },
   {
+   "line": 159,
+   "template_line": 93,
+   "path": "/sim/rules/5/duration/dist",
+   "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/duration",
+   "set_line": 87
+  },
+  {
    "line": 160,
    "template_line": 94,
-   "path": "/sim/rules/5/duration/dist",
+   "path": "/sim/rules/5/duration/a",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/duration",
    "set_line": 87
   },
   {
    "line": 161,
    "template_line": 95,
-   "path": "/sim/rules/5/duration/a",
-   "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/duration",
-   "set_line": 87
-  },
-  {
-   "line": 162,
-   "template_line": 96,
    "path": "/sim/rules/5/duration/b",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/duration",
    "set_line": 87
   },
   {
-   "line": 163,
-   "template_line": 98,
+   "line": 162,
+   "template_line": 97,
    "path": "/sim/rules/5/duration/knots",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/duration",
    "set_line": 87
   },
   {
+   "line": 163,
+   "template_line": 101,
+   "path": "/sim/rules/5/outcome/ok",
+   "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/outcome",
+   "set_line": 88
+  },
+  {
    "line": 164,
    "template_line": 102,
-   "path": "/sim/rules/5/outcome/ok",
+   "path": "/sim/rules/5/outcome/slow",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/outcome",
    "set_line": 88
   },
   {
    "line": 165,
    "template_line": 103,
-   "path": "/sim/rules/5/outcome/slow",
+   "path": "/sim/rules/5/outcome/dump",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/outcome",
    "set_line": 88
   },
   {
    "line": 166,
    "template_line": 104,
-   "path": "/sim/rules/5/outcome/dump",
-   "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/outcome",
-   "set_line": 88
-  },
-  {
-   "line": 167,
-   "template_line": 105,
    "path": "/sim/rules/5/outcome/hang",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/outcome",
    "set_line": 88
   },
   {
-   "line": 168,
-   "template_line": 108,
+   "line": 167,
+   "template_line": 107,
    "path": "/sim/rules/5/slow_factor/value",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/slow_factor",
    "set_line": 89
   },
   {
+   "line": 168,
+   "template_line": 110,
+   "path": "/sim/rules/5/hits/dist",
+   "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/hits",
+   "set_line": 90
+  },
+  {
    "line": 169,
    "template_line": 111,
-   "path": "/sim/rules/5/hits/dist",
+   "path": "/sim/rules/5/hits/a",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/hits",
    "set_line": 90
   },
   {
    "line": 170,
    "template_line": 112,
-   "path": "/sim/rules/5/hits/a",
-   "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/hits",
-   "set_line": 90
-  },
-  {
-   "line": 171,
-   "template_line": 113,
    "path": "/sim/rules/5/hits/b",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/hits",
    "set_line": 90
   },
   {
-   "line": 172,
-   "template_line": 115,
+   "line": 171,
+   "template_line": 114,
    "path": "/sim/rules/5/hits/chunks/1/text",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/hits",
    "set_line": 90
   },
   {
-   "line": 173,
-   "template_line": 119,
+   "line": 172,
+   "template_line": 118,
    "path": "/sim/rules/5/autoclose/value",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/autoclose",
    "set_line": 91
   },
   {
-   "line": 174,
-   "template_line": 122,
+   "line": 173,
+   "template_line": 121,
    "path": "/sim/rules/5/keep/value",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages/keep",
    "set_line": 82
   },
   {
-   "line": 175,
-   "template_line": 125,
+   "line": 174,
+   "template_line": 124,
    "path": "/sim/rules/5/layout/prefix",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages",
    "set_line": 82
   },
   {
-   "line": 176,
-   "template_line": 126,
+   "line": 175,
+   "template_line": 125,
    "path": "/sim/rules/5/layout/length",
    "node": "set/fleet2/simulate/rule/ship-too-many-future-voyages",
    "set_line": 82
   },
   {
-   "line": 177,
-   "template_line": 92,
+   "line": 176,
+   "template_line": 91,
    "path": "/sim/rules/6/rule",
    "node": "set/fleet2/simulate/rule/ship-min-crew",
    "set_line": 98
   },
   {
+   "line": 177,
+   "template_line": 93,
+   "path": "/sim/rules/6/duration/dist",
+   "node": "set/fleet2/simulate/rule/ship-min-crew/duration",
+   "set_line": 87
+  },
+  {
    "line": 178,
    "template_line": 94,
-   "path": "/sim/rules/6/duration/dist",
+   "path": "/sim/rules/6/duration/a",
    "node": "set/fleet2/simulate/rule/ship-min-crew/duration",
    "set_line": 87
   },
   {
    "line": 179,
    "template_line": 95,
-   "path": "/sim/rules/6/duration/a",
-   "node": "set/fleet2/simulate/rule/ship-min-crew/duration",
-   "set_line": 87
-  },
-  {
-   "line": 180,
-   "template_line": 96,
    "path": "/sim/rules/6/duration/b",
    "node": "set/fleet2/simulate/rule/ship-min-crew/duration",
    "set_line": 87
   },
   {
-   "line": 181,
-   "template_line": 98,
+   "line": 180,
+   "template_line": 97,
    "path": "/sim/rules/6/duration/knots",
    "node": "set/fleet2/simulate/rule/ship-min-crew/duration",
    "set_line": 87
   },
   {
+   "line": 181,
+   "template_line": 101,
+   "path": "/sim/rules/6/outcome/ok",
+   "node": "set/fleet2/simulate/rule/ship-min-crew/outcome",
+   "set_line": 88
+  },
+  {
    "line": 182,
    "template_line": 102,
-   "path": "/sim/rules/6/outcome/ok",
+   "path": "/sim/rules/6/outcome/slow",
    "node": "set/fleet2/simulate/rule/ship-min-crew/outcome",
    "set_line": 88
   },
   {
    "line": 183,
    "template_line": 103,
-   "path": "/sim/rules/6/outcome/slow",
+   "path": "/sim/rules/6/outcome/dump",
    "node": "set/fleet2/simulate/rule/ship-min-crew/outcome",
    "set_line": 88
   },
   {
    "line": 184,
    "template_line": 104,
-   "path": "/sim/rules/6/outcome/dump",
-   "node": "set/fleet2/simulate/rule/ship-min-crew/outcome",
-   "set_line": 88
-  },
-  {
-   "line": 185,
-   "template_line": 105,
    "path": "/sim/rules/6/outcome/hang",
    "node": "set/fleet2/simulate/rule/ship-min-crew/outcome",
    "set_line": 88
   },
   {
-   "line": 186,
-   "template_line": 108,
+   "line": 185,
+   "template_line": 107,
    "path": "/sim/rules/6/slow_factor/value",
    "node": "set/fleet2/simulate/rule/ship-min-crew/slow_factor",
    "set_line": 89
   },
   {
+   "line": 186,
+   "template_line": 110,
+   "path": "/sim/rules/6/hits/dist",
+   "node": "set/fleet2/simulate/rule/ship-min-crew/hits",
+   "set_line": 99
+  },
+  {
    "line": 187,
    "template_line": 111,
-   "path": "/sim/rules/6/hits/dist",
+   "path": "/sim/rules/6/hits/a",
    "node": "set/fleet2/simulate/rule/ship-min-crew/hits",
    "set_line": 99
   },
   {
    "line": 188,
    "template_line": 112,
-   "path": "/sim/rules/6/hits/a",
-   "node": "set/fleet2/simulate/rule/ship-min-crew/hits",
-   "set_line": 99
-  },
-  {
-   "line": 189,
-   "template_line": 113,
    "path": "/sim/rules/6/hits/b",
    "node": "set/fleet2/simulate/rule/ship-min-crew/hits",
    "set_line": 99
   },
   {
-   "line": 190,
-   "template_line": 119,
+   "line": 189,
+   "template_line": 118,
    "path": "/sim/rules/6/autoclose/value",
    "node": "set/fleet2/simulate/rule/ship-min-crew/autoclose",
    "set_line": 91
   },
   {
-   "line": 191,
-   "template_line": 122,
+   "line": 190,
+   "template_line": 121,
    "path": "/sim/rules/6/keep/value",
    "node": "set/fleet2/simulate/rule/ship-min-crew/keep",
    "set_line": 82
   },
   {
-   "line": 192,
-   "template_line": 125,
+   "line": 191,
+   "template_line": 124,
    "path": "/sim/rules/6/layout/prefix",
    "node": "set/fleet2/simulate/rule/ship-min-crew",
    "set_line": 82
   },
   {
-   "line": 193,
-   "template_line": 126,
+   "line": 192,
+   "template_line": 125,
    "path": "/sim/rules/6/layout/length",
    "node": "set/fleet2/simulate/rule/ship-min-crew",
    "set_line": 82
   },
   {
-   "line": 194,
-   "template_line": 92,
+   "line": 193,
+   "template_line": 91,
    "path": "/sim/rules/7/rule",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit",
    "set_line": 82
   },
   {
+   "line": 194,
+   "template_line": 93,
+   "path": "/sim/rules/7/duration/dist",
+   "node": "set/fleet2/simulate/rule/ship-cargo-limit/duration",
+   "set_line": 87
+  },
+  {
    "line": 195,
    "template_line": 94,
-   "path": "/sim/rules/7/duration/dist",
+   "path": "/sim/rules/7/duration/a",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/duration",
    "set_line": 87
   },
   {
    "line": 196,
    "template_line": 95,
-   "path": "/sim/rules/7/duration/a",
-   "node": "set/fleet2/simulate/rule/ship-cargo-limit/duration",
-   "set_line": 87
-  },
-  {
-   "line": 197,
-   "template_line": 96,
    "path": "/sim/rules/7/duration/b",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/duration",
    "set_line": 87
   },
   {
-   "line": 198,
-   "template_line": 98,
+   "line": 197,
+   "template_line": 97,
    "path": "/sim/rules/7/duration/knots",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/duration",
    "set_line": 87
   },
   {
+   "line": 198,
+   "template_line": 101,
+   "path": "/sim/rules/7/outcome/ok",
+   "node": "set/fleet2/simulate/rule/ship-cargo-limit/outcome",
+   "set_line": 88
+  },
+  {
    "line": 199,
    "template_line": 102,
-   "path": "/sim/rules/7/outcome/ok",
+   "path": "/sim/rules/7/outcome/slow",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/outcome",
    "set_line": 88
   },
   {
    "line": 200,
    "template_line": 103,
-   "path": "/sim/rules/7/outcome/slow",
+   "path": "/sim/rules/7/outcome/dump",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/outcome",
    "set_line": 88
   },
   {
    "line": 201,
    "template_line": 104,
-   "path": "/sim/rules/7/outcome/dump",
-   "node": "set/fleet2/simulate/rule/ship-cargo-limit/outcome",
-   "set_line": 88
-  },
-  {
-   "line": 202,
-   "template_line": 105,
    "path": "/sim/rules/7/outcome/hang",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/outcome",
    "set_line": 88
   },
   {
-   "line": 203,
-   "template_line": 108,
+   "line": 202,
+   "template_line": 107,
    "path": "/sim/rules/7/slow_factor/value",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/slow_factor",
    "set_line": 89
   },
   {
+   "line": 203,
+   "template_line": 110,
+   "path": "/sim/rules/7/hits/dist",
+   "node": "set/fleet2/simulate/rule/ship-cargo-limit/hits",
+   "set_line": 90
+  },
+  {
    "line": 204,
    "template_line": 111,
-   "path": "/sim/rules/7/hits/dist",
+   "path": "/sim/rules/7/hits/a",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/hits",
    "set_line": 90
   },
   {
    "line": 205,
    "template_line": 112,
-   "path": "/sim/rules/7/hits/a",
-   "node": "set/fleet2/simulate/rule/ship-cargo-limit/hits",
-   "set_line": 90
-  },
-  {
-   "line": 206,
-   "template_line": 113,
    "path": "/sim/rules/7/hits/b",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/hits",
    "set_line": 90
   },
   {
-   "line": 207,
-   "template_line": 115,
+   "line": 206,
+   "template_line": 114,
    "path": "/sim/rules/7/hits/chunks/1/text",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/hits",
    "set_line": 90
   },
   {
-   "line": 208,
-   "template_line": 119,
+   "line": 207,
+   "template_line": 118,
    "path": "/sim/rules/7/autoclose/value",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/autoclose",
    "set_line": 91
   },
   {
-   "line": 209,
-   "template_line": 122,
+   "line": 208,
+   "template_line": 121,
    "path": "/sim/rules/7/keep/value",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit/keep",
    "set_line": 82
   },
   {
-   "line": 210,
-   "template_line": 125,
+   "line": 209,
+   "template_line": 124,
    "path": "/sim/rules/7/layout/prefix",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit",
    "set_line": 82
   },
   {
-   "line": 211,
-   "template_line": 126,
+   "line": 210,
+   "template_line": 125,
    "path": "/sim/rules/7/layout/length",
    "node": "set/fleet2/simulate/rule/ship-cargo-limit",
+   "set_line": 82
+  },
+  {
+   "line": 211,
+   "template_line": 128,
+   "path": "/sim",
+   "node": "set/fleet2/simulate",
    "set_line": 82
   },
   {
@@ -1511,10 +1511,10 @@
   },
   {
    "line": 216,
-   "template_line": 133,
-   "path": "/sim",
-   "node": "set/fleet2/simulate",
-   "set_line": 82
+   "template_line": 134,
+   "path": "/",
+   "node": "set/fleet2/port/work/variant/sim",
+   "set_line": 65
   },
   {
    "line": 217,
@@ -3395,14 +3395,14 @@
   {
    "line": 485,
    "template_line": 403,
-   "path": "/",
+   "path": "/exception",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
   {
    "line": 486,
    "template_line": 404,
-   "path": "/exception",
+   "path": "/",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
@@ -3444,14 +3444,14 @@
   {
    "line": 492,
    "template_line": 410,
-   "path": "/",
+   "path": "/iface",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
   {
    "line": 493,
    "template_line": 411,
-   "path": "/iface",
+   "path": "/",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
@@ -3563,14 +3563,14 @@
   {
    "line": 509,
    "template_line": 427,
-   "path": "/",
+   "path": "/iface",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
   {
    "line": 510,
    "template_line": 428,
-   "path": "/iface",
+   "path": "/",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65
   },
@@ -3619,13 +3619,6 @@
   {
    "line": 517,
    "template_line": 435,
-   "path": "/",
-   "node": "set/fleet2/port/work/variant/sim",
-   "set_line": 65
-  },
-  {
-   "line": 518,
-   "template_line": 436,
    "path": "/",
    "node": "set/fleet2/port/work/variant/sim",
    "set_line": 65

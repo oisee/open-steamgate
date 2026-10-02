@@ -41,12 +41,21 @@
       "    CLASS-METHODS sim_hash\n",
       "      IMPORTING iv_hash TYPE csequence\n",
       "      RETURNING VALUE(rv_hash) TYPE zosd_l3_alert-model_hash.\n",
-      "    \" what the doctor and resume( ) heal a run with: iv_bind when given, else\n",
-      "    \" the run's recorded binding when it was a simulated run, else nothing\n",
+      "    \" the binding run iv_run started with (its gate rows): every pile of it is\n",
+      "    \" submitted, worked and finalised with this, never with the binding of the\n",
+      "    \" moment; iv_bind only for a run that has none (one made by hand)\n",
       "    CLASS-METHODS sim_bind\n",
-      "      IMPORTING iv_recorded TYPE csequence\n",
+      "      IMPORTING iv_run TYPE csequence\n",
       "                iv_bind TYPE string OPTIONAL\n",
       "      RETURNING VALUE(rv_bind) TYPE string.\n",
+      "    \" what run( ) records: iv_bind, and the work variant it resolves to\n",
+      "    CLASS-METHODS sim_record\n",
+      "      IMPORTING iv_bind TYPE string\n",
+      "      RETURNING VALUE(rv_bind) TYPE string.\n",
+      "    \" the work variant iv_bind names itself, initial when it names none\n",
+      "    CLASS-METHODS sim_named\n",
+      "      IMPORTING iv_bind TYPE csequence\n",
+      "      RETURNING VALUE(rv_variant) TYPE string.\n",
       "{{/simulate}}\n",
       "{{#sources}}\n",
       "    \" puts the rows of {{table}} back after a replay: the rows kept before it\n"
@@ -54,23 +63,17 @@
   },
   {
     "before": [
-      "    IF lock( iv_run = rs_result-run_id iv_date = rs_result-check_date ) = abap_false.\n",
-      "      rs_result-status = 'BUSY'.\n",
-      "      RETURN.\n",
-      "    ENDIF.\n"
+      "        ls_gate-status = 'WAITING'.\n",
+      "        LOOP AT lt_stages INTO ls_stage.\n"
     ],
     "after": [
-      "    IF lock( iv_run = rs_result-run_id iv_date = rs_result-check_date ) = abap_false.\n",
-      "      rs_result-status = 'BUSY'.\n",
-      "      RETURN.\n",
-      "    ENDIF.\n",
+      "        ls_gate-status = 'WAITING'.\n",
       "{{#simulate}}\n",
-      "    \" the run's binding on its lock row: a simulated run is healed as one\n",
-      "    UPDATE zosd_l3_run SET run_bind = iv_bind\n",
-      "      WHERE set_name = c_set\n",
-      "        AND check_date = rs_result-check_date\n",
-      "        AND run_id = rs_result-run_id.\n",
-      "{{/simulate}}\n"
+      "        \" the binding the run starts with, and its work variant, on the run's\n",
+      "        \" own rows: the lock row names only the latest run of a date\n",
+      "        ls_gate-run_bind = sim_record( iv_bind ).\n",
+      "{{/simulate}}\n",
+      "        LOOP AT lt_stages INTO ls_stage.\n"
     ]
   },
   {
@@ -85,6 +88,8 @@
       "    DATA li_work TYPE REF TO {{work_iface}}.\n",
       "    DATA ls_work TYPE {{work_iface}}=>ty_pile.\n",
       "    DATA lt_simkeys TYPE string_table.\n",
+      "    DATA lv_run_bind TYPE string.\n",
+      "    DATA lv_work TYPE string.\n",
       "{{/simulate}}\n",
       "    DATA ls_pile TYPE zosd_l3_pile.\n",
       "{{#stages}}\n",
@@ -94,14 +99,33 @@
   },
   {
     "before": [
+      "    ls_pile-status = 'RUNNING'.\n",
+      "    GET TIME STAMP FIELD ls_pile-started.\n",
       "    UPDATE zosd_l3_pile FROM ls_pile.\n",
       "    CASE iv_rule.\n"
     ],
     "after": [
+      "{{#simulate}}\n",
+      "    \" the work is the run's own, recorded when it started: a binding of the\n",
+      "    \" moment that names another work variant is refused, and a simulated pile\n",
+      "    \" meets the sink-safety rule here, where it is worked\n",
+      "    lv_run_bind = sim_bind( iv_run = iv_run\n",
+      "                            iv_bind = iv_bind ).\n",
+      "    lv_work = {{ports_class}}=>variant( iv_port = 'work' iv_bind = lv_run_bind ).\n",
+      "    IF sim_named( iv_bind ) IS NOT INITIAL AND sim_named( iv_bind ) <> lv_work.\n",
+      "      rs_rule-status = 'WORK-BIND'.\n",
+      "      RETURN.\n",
+      "    ENDIF.\n",
+      "    IF lv_work = 'sim'.\n",
+      "      {{ports_class}}=>check( iv_bind = lv_run_bind ).\n",
+      "    ENDIF.\n",
+      "{{/simulate}}\n",
+      "    ls_pile-status = 'RUNNING'.\n",
+      "    GET TIME STAMP FIELD ls_pile-started.\n",
       "    UPDATE zosd_l3_pile FROM ls_pile.\n",
       "{{#simulate}}\n",
       "    \" the work: the L2 classes below (variant real), or the simulated twin\n",
-      "    li_work = {{ports_class}}=>get_work( {{ports_class}}=>variant( iv_port = 'work' iv_bind = iv_bind ) ).\n",
+      "    li_work = {{ports_class}}=>get_work( lv_work ).\n",
       "    IF li_work IS BOUND.\n",
       "      ls_work-run_id = iv_run.\n",
       "      ls_work-rule = iv_rule.\n",
@@ -192,6 +216,26 @@
       "    DATA lv_latest TYPE zosd_l3_run-run_id.\n",
       "{{#simulate}}\n",
       "    DATA lv_hash TYPE zosd_l3_alert-model_hash.\n",
+      "    DATA lv_bound TYPE string.\n",
+      "{{/simulate}}\n"
+    ]
+  },
+  {
+    "before": [
+      "    IF {{ports_class}}=>variant( iv_port = {{sink.name | literal}} iv_bind = iv_bind ) <> 'log'.\n"
+    ],
+    "after": [
+      "{{#simulate}}\n",
+      "    \" the run's own binding and work, never the binding of the moment (a\n",
+      "    \" doctor or a collect( ) passes none): a simulated run finalises its own\n",
+      "    \" rows only, those under sim256:, and a real run never those\n",
+      "    lv_bound = sim_bind( iv_run = iv_run\n",
+      "                         iv_bind = iv_bind ).\n",
+      "    lv_hash = iv_hash.\n",
+      "    IF {{ports_class}}=>variant( iv_port = 'work' iv_bind = lv_bound ) = 'sim'.\n",
+      "      lv_hash = sim_hash( iv_hash ).\n",
+      "    ENDIF.\n",
+      "    IF {{ports_class}}=>variant( iv_port = {{sink.name | literal}} iv_bind = lv_bound ) <> 'log'.\n",
       "{{/simulate}}\n"
     ]
   },
@@ -211,32 +255,33 @@
   },
   {
     "before": [
-      "    DELETE FROM {{sink.table}}\n",
-      "      WHERE set_name = c_set\n",
-      "        AND rule_name = iv_rule\n"
-    ],
-    "after": [
-      "{{#simulate}}\n",
-      "    \" a simulated run finalises its own rows only, those under sim256:\n",
-      "    lv_hash = iv_hash.\n",
-      "    IF {{ports_class}}=>variant( iv_port = 'work' iv_bind = iv_bind ) = 'sim'.\n",
-      "      lv_hash = sim_hash( iv_hash ).\n",
-      "    ENDIF.\n",
-      "{{/simulate}}\n",
-      "    DELETE FROM {{sink.table}}\n",
-      "      WHERE set_name = c_set\n",
-      "        AND rule_name = iv_rule\n"
-    ]
-  },
-  {
-    "before": [
+      "    heal( EXPORTING iv_run = ls_lock-run_id\n",
+      "                    iv_date = ls_lock-check_date\n",
+      "                    iv_now = lv_now\n",
       "                    iv_force = abap_true\n",
       "                    iv_bind = iv_bind\n"
     ],
     "after": [
+      "{{#simulate}}\n",
+      "    \" a run is healed with the binding it started with: an iv_bind naming\n",
+      "    \" another work variant is refused, never applied to an existing run\n",
+      "    IF sim_named( iv_bind ) IS NOT INITIAL\n",
+      "       AND sim_named( iv_bind ) <> {{ports_class}}=>variant( iv_port = 'work' iv_bind = sim_bind( ls_lock-run_id ) ).\n",
+      "      act( EXPORTING iv_run = iv_run\n",
+      "                     iv_date = ls_lock-check_date\n",
+      "                     iv_action = 'REFUSED'\n",
+      "                     iv_reason = 'WORK-BIND'\n",
+      "                     iv_audit = abap_false\n",
+      "           CHANGING ct_report = rt_report ).\n",
+      "      RETURN.\n",
+      "    ENDIF.\n",
+      "{{/simulate}}\n",
+      "    heal( EXPORTING iv_run = ls_lock-run_id\n",
+      "                    iv_date = ls_lock-check_date\n",
+      "                    iv_now = lv_now\n",
       "                    iv_force = abap_true\n",
       "{{#simulate}}\n",
-      "                    iv_bind = sim_bind( iv_recorded = ls_lock-run_bind\n",
+      "                    iv_bind = sim_bind( iv_run = ls_lock-run_id\n",
       "                                        iv_bind = iv_bind )\n",
       "{{/simulate}}\n"
     ]
@@ -249,9 +294,59 @@
     "after": [
       "                      iv_force = abap_false\n",
       "{{#simulate}}\n",
-      "                      iv_bind = sim_bind( ls_lock-run_bind )\n",
+      "                      iv_bind = sim_bind( ls_lock-run_id )\n",
       "{{/simulate}}\n",
       "            CHANGING ct_report = rt_report ).\n"
+    ]
+  },
+  {
+    "before": [
+      "    DATA lv_pile TYPE n LENGTH 4.\n"
+    ],
+    "after": [
+      "{{#simulate}}\n",
+      "    DATA lv_run_bind TYPE string.\n",
+      "{{/simulate}}\n",
+      "    DATA lv_pile TYPE n LENGTH 4.\n"
+    ]
+  },
+  {
+    "before": [
+      "    lv_pile = cs_pile-pile_no.\n",
+      "    CONCATENATE iv_jobname '_' lv_pile INTO lv_jobname.\n"
+    ],
+    "after": [
+      "    lv_pile = cs_pile-pile_no.\n",
+      "    CONCATENATE iv_jobname '_' lv_pile INTO lv_jobname.\n",
+      "{{#simulate}}\n",
+      "    \" the run's own binding goes to the job, whoever submits the pile (run( ),\n",
+      "    \" a gate, the doctor, resume( ), a chain); a simulated pile meets the\n",
+      "    \" sink-safety rule here, where it is submitted\n",
+      "    lv_run_bind = sim_bind( iv_run = iv_run\n",
+      "                            iv_bind = iv_bind ).\n",
+      "    IF {{ports_class}}=>variant( iv_port = 'work' iv_bind = lv_run_bind ) = 'sim'.\n",
+      "      TRY.\n",
+      "          {{ports_class}}=>check( iv_bind = lv_run_bind\n",
+      "                                iv_parallel = abap_true ).\n",
+      "        CATCH {{exception}}.\n",
+      "          cs_pile-status = 'FAILED'.\n",
+      "          cs_pile-reason = 'BIND-REFUSED'.\n",
+      "          GET TIME STAMP FIELD cs_pile-ended.\n",
+      "          UPDATE zosd_l3_pile FROM cs_pile.\n",
+      "          RETURN.\n",
+      "      ENDTRY.\n",
+      "    ENDIF.\n",
+      "{{/simulate}}\n"
+    ]
+  },
+  {
+    "before": [
+      "      WITH p_bind = iv_bind\n"
+    ],
+    "after": [
+      "{{#simulate}}\n",
+      "      WITH p_bind = lv_run_bind\n",
+      "{{/simulate}}\n"
     ]
   },
   {
@@ -293,12 +388,42 @@
       "  ENDMETHOD.\n",
       "\n",
       "  METHOD sim_bind.\n",
-      "    DATA lv_recorded TYPE string.\n",
-      "    rv_bind = iv_bind.\n",
-      "    lv_recorded = iv_recorded.\n",
-      "    IF rv_bind IS INITIAL AND {{ports_class}}=>variant( iv_port = 'work' iv_bind = lv_recorded ) = 'sim'.\n",
-      "      rv_bind = lv_recorded.\n",
+      "    SELECT SINGLE run_bind FROM zosd_l3_stage INTO rv_bind\n",
+      "      WHERE run_id = iv_run\n",
+      "        AND stage_no = 1.\n",
+      "    IF rv_bind IS INITIAL.\n",
+      "      rv_bind = iv_bind.\n",
       "    ENDIF.\n",
+      "  ENDMETHOD.\n",
+      "\n",
+      "  METHOD sim_record.\n",
+      "    DATA lv_work TYPE string.\n",
+      "    lv_work = {{ports_class}}=>variant( iv_port = 'work' iv_bind = iv_bind ).\n",
+      "    IF sim_named( iv_bind ) IS NOT INITIAL.\n",
+      "      rv_bind = iv_bind.\n",
+      "    ELSEIF iv_bind IS INITIAL.\n",
+      "      rv_bind = `work=` && lv_work.\n",
+      "    ELSE.\n",
+      "      rv_bind = iv_bind && `,work=` && lv_work.\n",
+      "    ENDIF.\n",
+      "  ENDMETHOD.\n",
+      "\n",
+      "  METHOD sim_named.\n",
+      "    DATA lt_parts TYPE string_table.\n",
+      "    DATA lv_part TYPE string.\n",
+      "    DATA lv_name TYPE string.\n",
+      "    DATA lv_value TYPE string.\n",
+      "    DATA lv_bind TYPE string.\n",
+      "    lv_bind = iv_bind.\n",
+      "    SPLIT lv_bind AT ',' INTO TABLE lt_parts.\n",
+      "    LOOP AT lt_parts INTO lv_part.\n",
+      "      CLEAR: lv_name, lv_value.\n",
+      "      SPLIT lv_part AT '=' INTO lv_name lv_value.\n",
+      "      CONDENSE: lv_name, lv_value.\n",
+      "      IF lv_name = 'work'.\n",
+      "        rv_variant = lv_value.\n",
+      "      ENDIF.\n",
+      "    ENDLOOP.\n",
       "  ENDMETHOD.\n",
       "\n",
       "{{/simulate}}\n",

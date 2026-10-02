@@ -1646,8 +1646,13 @@ wraps in an `IF li_work IS BOUND` keep their rule's line.
 - **dump**: wait half the duration, then raise the port's exception (`CX_NO_CHECK`, nobody catches
   it): on a system an uncaught exception, a short dump and status A; here the job fails. The doctor
   marks the pile `FAILED` (`JOB-ENDED`) and submits it again within its retry budget.
-- **hang**: wait `stale` * 1.5 (scaled), then end the same way. While it waits the doctor finds the
-  pile `RUNNING` with a job that has not ended and leaves it alone; when it ends, it is retried.
+- **hang**: wait `stale` * 1.5 simulated seconds (scaled like every wait), then end the same way.
+  While it waits the doctor finds the pile `RUNNING` with a job that has not ended and leaves it
+  alone; when it ends, it is retried. A hang is relative to the **scaled** stale: the doctor's own
+  stale is wall time, so the hang crosses it only at `time_scale` 1, which is how the twin runs on
+  this runtime's manual clock. At the demo's 0.01 on a system a hang of a 900 s stale waits 13.5 s
+  and never reaches the doctor's 900; that is chosen, not scaled away: scaling `stale` itself would
+  change the doctor's policy for the real runs of the same set.
 - **hits**: k from the hits distribution; min(k, keys) distinct keys of the pile, a partial
   Fisher-Yates on the stream, sorted. The alert text is `SIM `, the rule's literal prefix, the key
   padded to its width, `: simulated hit, pile <p>, attempt <a>`; a governed rule's object key is read
@@ -1679,25 +1684,46 @@ in ABAP. `tools/dsl-l3-sim.mjs` is the twin: the same draws in JavaScript (with 
 product is large), and `predictPile( )`, what the orchestration makes of a pile's draws (attempts
 until one ends normally, at most retry.max + 1).
 
+No draw holds state outside its call: the stream's state is a local of `draw( )` (`start( )`
+returns it, `next( )` steps it), and the chance autoclose reads the seed of the alert's own run
+from that run's snapshot (`ZCL_L3_<SET>_CONF=>scope( )`; the compiled seed when the seed is not
+tunable), never a class attribute a draw of another run may have set while this one waited.
+
 One more thing made a replay reproducible: the jobs a step released in the same second were
-imported in the order of their random intent ids. `tools/osd-job-outbox.mjs` now imports them in the
-order they were released (the outbox's row order); a run on a manual clock then runs its jobs in one
-order every time.
+imported in the order of their random intent ids. The outbox now carries its release order,
+`ZOSD_JOB_OUTBOX-RELEASE_SEQ` (NUMC 16), which `JOB_CLOSE` writes as one more than any intent still
+in the outbox, and the drain (`tools/osd-job-outbox.mjs`) sorts by it, on any engine; a deleted job
+leaves a gap, never a reordering. A SQLite file from before is migrated in place
+(`migrateJobReleaseFile` in `test/setup.mjs`), a DuckDB file by `tools/osd-db-migrate.mjs`; a
+pending intent from before keeps an empty sequence and drains first. A run on a manual clock then
+runs its jobs in one order every time, also with other jobs released and deleted around it.
 
 ### Safety
 
 A simulated run is never mistaken for a real one:
 
-- the run row records its binding: `ZOSD_L3_RUN` gains `RUN_BIND` (CHAR 255, not a key; the key
-  stays MANDT 3 + SET_NAME 16 + CHECK_DATE 8 = **27**), written by `run( )` in a set with
-  `simulate:`; the doctor and `resume( )` heal a run whose recorded binding names `work=sim` with
-  that binding (`sim_bind( )`), so a retried pile is simulated too;
+- the run records the binding it starts with, on its own rows: `ZOSD_L3_STAGE` (the gate, one row
+  per run and stage) gains `RUN_BIND` (CHAR 255, not a key; the key stays MANDT 3 + RUN_ID 32 +
+  STAGE_NO 10 = **45**), written by `run( )` with the work variant it resolves to appended
+  (`sim_record( )`: `alerts=log` becomes `alerts=log,work=real`). Not on the lock row: that row names
+  only the latest run of a date, and a run the doctor or `release_pile( )` takes up again may not be
+  it. Every path then takes the binding from there (`sim_bind( iv_run )`), never from a default or
+  the binding of the moment, at the three places every path goes through: `submit( )` sends the run's
+  binding to the job, whoever submits (`run( )`, a gate, the doctor, `resume( )`, `continue_glass( )`,
+  `release_pile( )`, a NARROW chain); `run_rule( )` works the pile with the run's work variant and
+  answers `WORK-BIND` (working nothing) when the binding it was given names another; and
+  `finalise( )` takes both the model hash and the sink from it, so a doctor's `RELEASE ALL-FINAL` or
+  a `collect( )` that passes no binding finalises a simulated run under `sim256:` and never deletes
+  a real run's rows (the round-2 P1); `resume( )` with an `iv_bind` naming another work variant
+  than the run's answers `REFUSED WORK-BIND` and changes nothing;
 - every simulated alert text starts with `SIM`, and its row is written under the model hash with
   `sim256:` for `sha256:` (`sim_hash( )`): a simulated run never takes the slots of a real run's
   rows, and its finalise (which also compares the hash) deletes only simulated rows;
 - the factory refuses, before anything is created: `work=sim` with a production sink variant (the
   log, or a hand-written class) that `allow_sink` does not name; `work=sim` in a replay; and a `sim`
   variant of another port without `work=sim`. The compiler refuses the same for default bindings.
+  The same check runs wherever a simulated pile is submitted (`submit( )`: refused, the pile is
+  `FAILED`, `BIND-REFUSED`) and worked (`run_rule( )`), not only when the run starts.
 
 The demo, fleet2, names `allow_sink: [log]`: in jobs only the log can be the sink (dummy and capture
 keep their rows in the session, which the factory refuses in mode P), and with the hash and the text
@@ -1710,7 +1736,19 @@ followed the jobs facade's injectable clock (`ANORMALIES.md`,
 `ANOMALY-2026-10-02-wait-off-the-injected-clock`). `installAbapClock( )` now installs its clock for
 WAIT too (`setWaitClock( )` in `tools/osd-dialog-step.mjs`): the deadline is that clock's now plus
 the seconds, and the step sleeps on that clock's timer, which a `manualClock` fires when a test
-advances it. Nothing special-cases the twin: any WAIT in a step follows an injected clock.
+advances it. Nothing special-cases the twin: any WAIT in a step follows an injected clock. The
+deadline of a WAIT without a condition starts once its commit is done, as it always did.
+
+Two more things make that clock safe to drive. `manualClock.advance( )` fires the due timers in
+time order and awaits each callback, but no longer one that waits on a later timer of the same
+clock: the scheduler's pass awaits its job, the job waits in WAIT on the clock, and an advance that
+awaited the pass never reached the WAIT's timer (one advance of 3660 s stalled at +60 s with a WAIT
+due at +79 s). A callback now runs until it settles or goes quiet with a timer of its own pending;
+the timers due by then fire in order, and the advance ends when nothing is due by its end and every
+callback still running waits on a timer past it. And a WAIT on an injected clock nobody moves would
+hold its request for ever (the work process is given up, so nothing deadlocks): it has a wall-clock
+ceiling, `OSD_WAIT_CLOCK_CEILING_MS` (default 120000), past which it ends as if its time had passed
+and says so on stderr, loudly. Without an injected clock nothing changes.
 
 ### The long twin, on this runtime and on a system
 
@@ -1723,8 +1761,9 @@ the doctor every 15 simulated minutes, the period of its scheduled job. Measured
 stages (and 258 attempts, 41 of them resubmitted by the doctor) in about 6 s of wall time while the
 clock moved about 6 hours. The run ends final, its lock released; every pile, its attempt, its
 alert count and its duration (`ENDED - STARTED`) are what the twin predicts, the log is the twin's
-texts and chance closures row by row, and the outcome frequencies over every attempt made are within
-four standard deviations (plus one draw) of the configured probabilities.
+texts and chance closures row by row. The outcome frequencies over every attempt made are within
+four standard deviations (plus one draw) of the configured probabilities; that is a smoke check
+(about 20 points wide on a few dozen attempts), and the exact comparison with the twin is the oracle.
 
 On a system: tune `simulate.time_scale` (0.01 is the demo's default: 40 simulated seconds are 0.4 s,
 rounded to whole seconds), choose a check date no real run uses (the lock is per set and date), and
@@ -1758,7 +1797,16 @@ what dumps. The ABAP Unit proof does this (`sim_twin`, below).
   the rest go back to `PLANNED`, the doctor answers `KILLED` and changes nothing, and once the row is
   gone `resume( )` completes the run exactly as the uninterrupted twin says (a kill spends no attempt);
 - the factory's refusals at run time (a production sink not allowed, a replay, a sim autoclose
-  without `work=sim`), and a real run of the same runner under the real hash.
+  without `work=sim`), and a real run of the same runner under the real hash;
+- round 2: a real run's alerts survive the doctor's `RELEASE ALL-FINAL`, a `collect( )` with no
+  binding, `resume( )` and `purge( )` of a simulated run of the same date, and a real run of the date
+  leaves the twin's rows; `resume( iv_bind = 'work=sim' )` on a real run answers `REFUSED WORK-BIND`
+  and the run heals as real; a factory whose default is `sim` does not make the doctor resubmit a run
+  that started real as a simulated one; two simulated runs drawing at once in their own steps
+  (seeds 42 and 43) each match the twin; one advance of 3660 s with the real `JobScheduler` and a job
+  that waits 79 s on the same clock completes the job; a WAIT on a clock nobody moves ends at its
+  ceiling and says so; the outbox imports a second's jobs in release order, a deleted one leaving a
+  gap; and the determinism holds with other jobs released and one deleted around the twin's.
 
 **Mutation evidence**, each red against the test named:
 
@@ -1771,14 +1819,17 @@ what dumps. The ABAP Unit proof does this (`sim_twin`, below).
 | precedence broken in the generated class (a rule's own hits dropped) | the draw table |
 | the compiler allowing sim with a production sink (`sinkSafety( )`) | the refusal |
 | the factory allowing sim with a production sink | the factory's refusals: `work=sim` on the log allowed |
+| finalise with the default hash, not the run's own | P1: the real run's rows are gone after the doctor's `RELEASE ALL-FINAL` |
+| `resume( )` accepting a work override (no refusal, the caller's binding first) | P2-a: `resume( work=sim )` not refused, SIM rows in a real run |
+| the chance autoclose with a static seed (the first run's) | P2-b: the seed 43 run's closures differ from the twin's |
 
 **The ABAP Unit proof** gains `sim_twin` (alphabetically after `settings_tune`): seven golden draws
 of the generator against the values the twin computes (all four outcomes; the mocha suite checks
 them against the twin), then sixteen more ships (L30A to L30P, ten piles in stage 1, so a dump
 among their first attempts is all but certain: 1 in 1024 for none), `retry.max` 20, `retry.backoff`
 0, `stale` 60, `budget.glass` 1000, `simulate.time_scale` 0, and `run( iv_bind = 'work=sim' )` in
-mode P on real jobs, with `doctor( )` once a second until the lock is released. It asserts the run
-row's binding, at least one resubmit, every pile `DONE` at the attempt the generator says (every
+mode P on real jobs, with `doctor( )` once a second until the lock is released. It asserts the
+binding the run recorded, at least one resubmit, every pile `DONE` at the attempt the generator says (every
 attempt before it a dump or a hang), and every log row a `SIM` row under `sim256:`. `npm run unit`
 skips it by configuration, as `mode_p`; `test/dsl-l3.mjs` runs it with a worker beside it and checks
 that its dumps aborted their jobs and the rest completed.
@@ -1793,18 +1844,21 @@ that its dumps aborted their jobs and the rest completed.
 - **A simulated run writes under `sim256:`** beside the `SIM` text: the alert key has no run id, so
   without it a simulated run of a date would rewrite a real run's slots and its finalise delete a
   real run's rows.
-- **The run row records the whole binding (`RUN_BIND`)**, not the work variant alone, and the doctor
-  heals a simulated run with it: a resubmitted pile must stay simulated, and the chance autoclose
-  binding with it. A real run is healed as before (the manifest's bindings).
+- **The run records the whole binding (`ZOSD_L3_STAGE-RUN_BIND`)**, with its work variant made
+  explicit, not the work variant alone, and every pile of the run is submitted, worked and
+  finalised with it: a resubmitted pile must stay what it was, and the chance autoclose binding with
+  it. In a set with `simulate:` this holds for its real runs too (round 2: a factory default must not
+  turn a real run into a simulated one), which is a change from 5a's "the doctor heals with the
+  manifest's bindings" for those sets; a set without `simulate:` is unchanged.
 - **The default demo binds the log for the twin, by `allow_sink: [log]`**, not dummy or capture:
   those keep rows in the session and the factory refuses them in jobs.
 - **The chance autoclose is a binding of its own (`close=sim`)**, not implied by `work=sim`: bindings
   stay data; the factory refuses it without `work=sim`.
 - **A hang ends abnormally** after 1.5 * stale: a hang that ended normally would never be retried,
   and "a pile that hangs twice" needs the retry.
-- **The jobs facade imports a second's jobs in release order** (one line in
-  `tools/osd-job-outbox.mjs`): with the random intent id as the order, the same seed gave the same
-  piles but another event log, and the slice asks for the same log.
+- **The jobs facade imports a second's jobs in release order** (`RELEASE_SEQ` on the outbox, written
+  by `JOB_CLOSE`, with a migration): with the random intent id as the order, the same seed gave the
+  same piles but another event log, and the slice asks for the same log.
 - **The lognormal and the Poisson are tables the compiler computes**, interpolated in integers at run
   time, so a system needs no floating point to draw what this runtime draws.
 
