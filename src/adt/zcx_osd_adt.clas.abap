@@ -16,6 +16,12 @@ CLASS zcx_osd_adt DEFINITION PUBLIC INHERITING FROM cx_static_check CREATE PUBLI
     CONSTANTS c_namespace_adt TYPE string VALUE `com.sap.adt`.
     CONSTANTS c_namespace_osd TYPE string VALUE `org.open-steamgate.osd`.
 
+    CONSTANTS c_session_ended TYPE string VALUE `ExceptionSessionEnded`.
+    CONSTANTS c_system_not_supported TYPE string VALUE `ExceptionSystemNotSupported`.
+
+    CLASS-METHODS session_ended RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS system_not_supported RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+
     DATA status TYPE i READ-ONLY.
     DATA type_id TYPE string READ-ONLY.
     DATA namespace TYPE string READ-ONLY.
@@ -63,6 +69,18 @@ CLASS zcx_osd_adt DEFINITION PUBLIC INHERITING FROM cx_static_check CREATE PUBLI
 ENDCLASS.
 
 CLASS zcx_osd_adt IMPLEMENTATION.
+
+  METHOD session_ended.
+    CREATE OBJECT ro_error
+      EXPORTING iv_status = 403 iv_type = c_session_ended
+                iv_namespace = c_namespace_osd iv_message = `the ADT session has ended`.
+  ENDMETHOD.
+
+  METHOD system_not_supported.
+    CREATE OBJECT ro_error
+      EXPORTING iv_status = 501 iv_type = c_system_not_supported
+                iv_namespace = c_namespace_osd iv_message = `not supported on this system`.
+  ENDMETHOD.
 
   METHOD constructor.
     super->constructor( previous = previous ).
