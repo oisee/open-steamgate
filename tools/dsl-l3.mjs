@@ -27,6 +27,7 @@ import {compileResilience, resilienceNodes} from "./dsl-l3-resilience.mjs";
 import {compileGovernor, governorTemplate} from "./dsl-l3-governor.mjs";
 import {compileSettings} from "./dsl-l3-settings.mjs";
 import {compileSimulate, simPorts, simVariant, WORK_PORT} from "./dsl-l3-sim.mjs";
+import {docDrift, graphJson, graphMermaid, graphOf} from "./dsl-l3-graph.mjs";
 
 export const SET_TEMPLATE = "recipes/l3-set/template.tpl";
 export const JOB_TEMPLATE = "recipes/l3-job/template.tpl";
@@ -852,13 +853,29 @@ async function main(args) {
   const [command, target, ...rest] = args;
   const ddic = [];
   const sets = [];
-  let out, db;
+  let out, db, docs;
+  const formats = [];
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === "--out") out = rest[++i];
+    else if (command === "graph" && ["--mermaid", "--json"].includes(rest[i])) formats.push(rest[i].slice(2));
+    else if (command === "graph" && rest[i] === "--docs") docs = rest[++i];
+    else if (command === "graph") throw new Error(`unknown argument ${rest[i]} (graph takes --mermaid, --json, --out <file>, --docs <file>)`);
     else if (rest[i] === "--ddic") ddic.push(rest[++i]);
     else if (rest[i] === "--set") sets.push(rest[++i]);
     else if (rest[i] === "--db") db = rest[++i];
     else throw new Error(`unknown argument ${rest[i]}`);
+  }
+  if (command === "graph" && target) {
+    if (formats.length > 1) throw new Error("graph prints one format: --mermaid or --json");
+    const graph = graphOf(compileSet(target));
+    const text = formats[0] === "json" ? graphJson(graph) : graphMermaid(graph);
+    if (docs !== undefined) {
+      const drift = formats[0] === "json" ? "--docs checks the mermaid copy" : docDrift(docs, graph.set, text);
+      console.log(drift || `${docs}: the diagram of ${graph.set} matches`);
+      return drift ? 1 : 0;
+    }
+    if (out) writeFileSync(out, text); else process.stdout.write(text);
+    return 0;
   }
   if (command === "explain" && target) {
     const {text} = await explainAlert(target, {...(sets.length ? {sets} : {}), db});
@@ -867,6 +884,7 @@ async function main(args) {
   }
   if (!["build", "check"].includes(command) || !target || !out) {
     console.error("Usage: node tools/dsl-l3.mjs <build|check> <set.l3.yaml> --out <dir> [--ddic <folder>]...\n"
+      + "       node tools/dsl-l3.mjs graph <set.l3.yaml> [--mermaid|--json] [--out <file>] [--docs <doc.md>]\n"
       + "       node tools/dsl-l3.mjs explain <set>/<rule>/<model hash>/<date>/<pile>/<seq> [--set <set.l3.yaml>]... [--db <sqlite file>]");
     return 2;
   }
