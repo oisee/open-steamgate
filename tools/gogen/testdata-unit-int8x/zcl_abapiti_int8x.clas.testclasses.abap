@@ -1,8 +1,9 @@
 * First six methods: measured A4H 758 oracle supplied with TASK.md.
-* Additional methods: supplied oracle and documentation; see NOTES.md.
+* Additional methods: measured 007/008 and documentation; see NOTES.md.
 CLASS ltcl_int8x DEFINITION FINAL FOR TESTING
   DURATION SHORT RISK LEVEL HARMLESS.
   PRIVATE SECTION.
+    METHODS top_bit_xstrings FOR TESTING.
     METHODS documented_xstrings FOR TESTING.
     METHODS documented_comparisons FOR TESTING.
     METHODS boundaries FOR TESTING.
@@ -149,6 +150,28 @@ CLASS ltcl_int8x IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = v exp = 0 ).
   ENDMETHOD.
 
+* ABAPiti 008, measured on A4H 758.
+  METHOD top_bit_xstrings.
+    DATA num TYPE i.
+    DATA v TYPE int8.
+    DATA raw TYPE xstring.
+    num = 128.
+    raw = num.
+    cl_abap_unit_assert=>assert_equals( act = raw exp = '80' ).
+    num = 32768.
+    raw = num.
+    cl_abap_unit_assert=>assert_equals( act = raw exp = '8000' ).
+    v = 2147483648.
+    raw = v.
+    cl_abap_unit_assert=>assert_equals( act = raw exp = '80000000' ).
+    v = 72057594037927936.
+    raw = v.
+    cl_abap_unit_assert=>assert_equals( act = raw exp = '0100000000000000' ).
+    num = -128.
+    raw = num.
+    cl_abap_unit_assert=>assert_equals( act = raw exp = 'FFFFFF80' ).
+  ENDMETHOD.
+
   METHOD documented_xstrings.
     DATA v TYPE int8.
     DATA num TYPE i.
@@ -156,7 +179,7 @@ CLASS ltcl_int8x IMPLEMENTATION.
     DATA s TYPE int2.
     DATA raw TYPE xstring.
 
-* Supplied oracle and documentation, unmeasured extensions: see NOTES.md.
+* Measured 007/008 rows and documentation extensions: see NOTES.md.
     num = 0.
     raw = num.
     ASSERT raw = '00'.

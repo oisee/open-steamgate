@@ -54,6 +54,14 @@ test("supplied oracle and documentation: xstring integer lengths", () => {
   assert.equal(XToHex(IToX(9223372036854775807n, undefined, 8)), "7FFFFFFFFFFFFFFF");
 });
 
+test("A4H ABAPiti 008: top-bit xstrings use minimal positive bytes", () => {
+  for (const [v, width, want] of [
+    [128n, 4, "80"], [32768n, 4, "8000"],
+    [1n << 31n, 8, "80000000"], [1n << 56n, 8, "0100000000000000"],
+    [-128n, 4, "FFFFFF80"],
+  ]) assert.equal(XToHex(IToX(v, undefined, width)), want);
+});
+
 test("both emitters lower byte conversions and isolate helper imports", async () => {
   const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZCL_GOGEN_T_INT8X"]});
   assert.deepEqual(program.partial, []);

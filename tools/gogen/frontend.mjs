@@ -6686,8 +6686,12 @@ function lineExists(chain, ctx) {
  * - against c or string (literal or not): the byte operand becomes its hex
  *   digits in upper case, then it is a character comparison (x'FF' <> 'ff',
  *   x'FF' < 'ff', x'00' <> '0', an empty xstring = ' ');
- * - against i/int8: convert bytes to that integer (documentation, unmeasured
- *   for int8); n retains the measured i rule. Short inputs zero-extend.
+ * - against i/int8: convert bytes to that integer. ABAPiti 007 measured
+ *   x4 FFFFFFFF = i -1 / int8 4294967295, x4 00000005 = i 5 (NE 6),
+ *   x4 80000000 = INT_MIN, x8 FFFFFFFFFFFFFFFF = int8 -1, and
+ *   xstring FFFFFFFF = i -1. Xstring vs int8, x1 vs int8, x9 and other
+ *   extensions remain documentation, unmeasured. Short inputs zero-extend;
+ *   n retains the measured i rule.
  * Anything else with a byte operand (p, f, d, t, ...) is refused.
  * null when neither side is byte-like. */
 function compareBytes(op, l, r, node) {
