@@ -130,9 +130,6 @@ const HOST_ALLOWED = [
   // B6: search and virtual folders
   "POST /sap/bc/adt/repository/informationsystem/virtualfolders/contents",
   "GET /sap/bc/adt/repository/informationsystem/search",
-  // C1: check runs
-  "GET /sap/bc/adt/checkruns/reporters",
-  "POST /sap/bc/adt/checkruns",
   // C2a: ABAP Unit metadata and plan
   "GET /sap/bc/adt/abapunit/metadata",
   "GET /sap/bc/adt/core/http/unit/object",

@@ -33,7 +33,7 @@ import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotS
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
 import {emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
-import {portabilityWarnings} from "./amdp-gen.mjs";
+import {checkRunReport} from "./adt-checkrun.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 import {objectVersions, versionSource, versionsFeedDocument} from "./adt-versions.mjs";
@@ -2462,32 +2462,7 @@ export function adtRouter(options = {}) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no check object in the request"));
         return;
       }
-      const reports = [...packageReports, ...objects.map((o) => {
-        if (TYPES[o.type]?.source !== true) {
-          try {
-            store.read(o.type, o.name);
-            return {uri: o.uri, issues: [], statusText: "no dictionary check here; the object is present and readable"};
-          } catch (e) {
-            return {uri: o.uri, issues: [], status: "notProcessed", statusText: String(e?.message ?? e)};
-          }
-        }
-        try {
-          const result = store.check(o.type, o.name, {
-            source: o.source,
-            include: o.include,
-          });
-          const source = o.source ?? (o.type === "CLAS" ? store.read(o.type, o.name)?.source : undefined);
-          const configured = process.env.STG_DB ?? "sqlite";
-          const engine = ["file", "memory", "sqljs"].includes(configured) ? "sqlite" : configured;
-          const warnings = o.type === "CLAS" && (o.include === undefined || o.include === "main") && source
-            ? portabilityWarnings(source, `${o.name.toLowerCase()}.clas.abap`, store, engine) : [];
-          return {uri: o.uri, issues: [...result.issues, ...warnings]};
-        } catch (e) {
-          // a check that could not run must not look like a check that found
-          // nothing, or a client writes on the strength of it
-          return {uri: o.uri, issues: [], status: "notProcessed", statusText: String(e?.message ?? e)};
-        }
-      })];
+      const reports = [...packageReports, ...objects.map((o) => ({uri: o.uri, ...checkRunReport(store, o)}))];
       res.status(200).type("application/vnd.sap.adt.checkmessages+xml").send(checkReportDocument(reports));
     });
   });

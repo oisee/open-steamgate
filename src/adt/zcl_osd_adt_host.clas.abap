@@ -59,6 +59,8 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_name TYPE string OPTIONAL
                 iv_include TYPE string OPTIONAL
                 iv_json TYPE string OPTIONAL
+                iv_source TYPE string OPTIONAL
+                iv_filter TYPE string OPTIONAL
       RETURNING VALUE(rs_answer) TYPE ty_answer
       RAISING zcx_osd_adt.
 
@@ -152,6 +154,8 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
                 iv_name = iv_name
                 iv_include = iv_include
                 iv_json = iv_json
+                iv_source = iv_source
+                iv_filter = iv_filter
       IMPORTING ev_json = rs_answer-json
                 ev_source = rs_answer-source
                 ev_error = lv_error
