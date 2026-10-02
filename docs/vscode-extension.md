@@ -1275,8 +1275,17 @@ commits, fetches the packs named by their manifests, then runs the transpile to
 create `gen/`. On a workstation, `node tools/osd-libs.mjs --sync` materialises
 each commit at `.local/pins/<folder>@<sha>` and points `.local/lars/<folder>`
 there. An existing real clone moves to `.local/dev/<folder>`; if that destination
-already exists, sync refuses and leaves both directories alone. Pins are
-read-only by convention: edit the development clone and use
+already exists, sync refuses and leaves both directories alone. A folder there
+that is not a clone of its own (`git rev-parse --show-toplevel` is not the
+folder) is moved as is, with a log line, and its dirty check is skipped, since
+git would otherwise answer for the enclosing repository. Pins are standalone
+checkouts; a pin made earlier as a `git worktree` of a clone is re-attached
+(`git worktree repair`) when sync moves that clone, and on a re-run if an
+earlier sync stopped in between. Pins are read-only by convention, not by
+file mode: sync gives every pin directory owner write access again, because a
+555 directory copied with `fs.cpSync` (a local `build-vsix`) stays 555 and the
+copy fails with EACCES. The gate (clean checkout at the locked commit) is what
+keeps a pin unchanged. Edit the development clone and use
 `OSD_LIB_<FOLDER>=<path>` to select it explicitly. The override is printed
 when used. On Windows, sync creates junctions; if the OS refuses a link,
 enable Developer Mode or run an elevated terminal. CI keeps real clones under
