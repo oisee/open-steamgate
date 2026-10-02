@@ -1,0 +1,11 @@
+REPORT zosd_ora2_sub.
+PARAMETERS p_prog TYPE c LENGTH 40.
+DATA lv_r TYPE i.
+DATA lv_out TYPE string.
+TRY.
+    PERFORM f IN PROGRAM (p_prog) USING 21 CHANGING lv_r IF FOUND.
+    lv_out = |r{ lv_r }|.
+  CATCH cx_root INTO DATA(lx).
+    lv_out = cl_abap_classdescr=>get_class_name( lx ).
+ENDTRY.
+EXPORT out = lv_out TO MEMORY ID 'ZOSD_ORA2'.

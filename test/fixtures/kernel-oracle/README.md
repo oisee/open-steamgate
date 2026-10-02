@@ -44,3 +44,14 @@ What the runtimes here should take from it (the answers, not a diagnosis of the 
 - **GENERATE SUBROUTINE POOL.** It works in ABAP Unit. A semantic error gives `sy-subrc` 4 with
   MESSAGE, LINE and WORD filled, and no exception. A syntax error gives `sy-subrc` 4 with WORD
   `SYS$$INCOMPLETE$$`.
+
+## GENERATE SUBROUTINE POOL: where a pool lives (`subpool.json`)
+
+Asked by dell for point 7, measured on A4H on 2026-10-02:
+- **Not a repository object.** A pool is named like `%_T002QE` (`%_T` and 5 characters, counting
+  up per generation) and has no row in TADIR, TRDIR or REPOSRC.
+- **Its lifetime is the internal session.** It survives `COMMIT WORK` (`PERFORM` after it still
+  answers 42). A second internal session (`SUBMIT ... AND RETURN`) does not find it:
+  `PERFORM ... IN PROGRAM (name) IF FOUND` does nothing.
+- **At most 36 pools per internal session.** The 37th `GENERATE` is a runtime error,
+  `GENERATE_SUBPOOL_DIR_FULL`. It is not catchable and does not set `sy-subrc`.

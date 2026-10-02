@@ -1,0 +1,82 @@
+CLASS ltcl_probe DEFINITION FINAL FOR TESTING RISK LEVEL HARMLESS DURATION MEDIUM.
+  PRIVATE SECTION.
+    DATA mv TYPE string.
+    METHODS add IMPORTING iv_case TYPE string iv_value TYPE string.
+    METHODS gen RETURNING VALUE(rv_prog) TYPE string.
+    METHODS p8_pool FOR TESTING.
+    METHODS p9_limit FOR TESTING.
+ENDCLASS.
+
+CLASS ltcl_probe IMPLEMENTATION.
+  METHOD add.
+    mv = mv && iv_case && '=' && iv_value && ';'.
+  ENDMETHOD.
+
+  METHOD gen.
+    DATA: lt_code TYPE STANDARD TABLE OF string WITH DEFAULT KEY,
+          lv_prog TYPE c LENGTH 40,
+          lv_mess TYPE string.
+    APPEND `PROGRAM.` TO lt_code.
+    APPEND `FORM f USING p TYPE i CHANGING r TYPE i.` TO lt_code.
+    APPEND `  r = p * 2.` TO lt_code.
+    APPEND `ENDFORM.` TO lt_code.
+    GENERATE SUBROUTINE POOL lt_code NAME lv_prog MESSAGE lv_mess.
+    IF sy-subrc = 0.
+      rv_prog = lv_prog.
+    ELSE.
+      rv_prog = |subrc{ sy-subrc }:{ lv_mess }|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD p8_pool.
+    DATA: lv_prog  TYPE string,
+          lv_name  TYPE c LENGTH 40,
+          lv_cnt   TYPE i,
+          lv_r     TYPE i,
+          lv_out   TYPE string.
+    lv_prog = gen( ).
+    lv_name = lv_prog.
+    add( iv_case = 'name' iv_value = lv_prog ).
+    add( iv_case = 'name length' iv_value = |{ strlen( lv_prog ) }| ).
+    SELECT COUNT(*) FROM tadir INTO lv_cnt WHERE obj_name = lv_name.
+    add( iv_case = 'tadir rows' iv_value = |{ lv_cnt }| ).
+    SELECT COUNT(*) FROM trdir INTO lv_cnt WHERE name = lv_name.
+    add( iv_case = 'trdir rows' iv_value = |{ lv_cnt }| ).
+    SELECT COUNT(*) FROM reposrc INTO lv_cnt WHERE progname = lv_name.
+    add( iv_case = 'reposrc rows' iv_value = |{ lv_cnt }| ).
+    COMMIT WORK.
+    CLEAR lv_r.
+    PERFORM f IN PROGRAM (lv_name) USING 21 CHANGING lv_r IF FOUND.
+    add( iv_case = 'perform after commit' iv_value = |{ lv_r }| ).
+    FREE MEMORY ID 'ZOSD_ORA2'.
+    SUBMIT zosd_ora2_sub WITH p_prog = lv_name AND RETURN.
+    CLEAR lv_out.
+    IMPORT out = lv_out FROM MEMORY ID 'ZOSD_ORA2'.
+    IF sy-subrc <> 0.
+      lv_out = 'no export'.
+    ENDIF.
+    add( iv_case = 'second internal session' iv_value = lv_out ).
+    lv_prog = gen( ).
+    add( iv_case = 'second pool name' iv_value = lv_prog ).
+    cl_abap_unit_assert=>fail( msg = 'P8' detail = mv quit = if_aunit_constants=>method ).
+  ENDMETHOD.
+
+  METHOD p9_limit.
+    DATA: lv_prog TYPE string,
+          lv_n    TYPE i,
+          lv_last TYPE string.
+    DO 1500 TIMES.
+      lv_prog = gen( ).
+      IF lv_prog CP 'subrc*'.
+        add( iv_case = 'first failure at' iv_value = |{ sy-index }| ).
+        add( iv_case = 'failure' iv_value = lv_prog ).
+        EXIT.
+      ENDIF.
+      lv_n = sy-index.
+      lv_last = lv_prog.
+    ENDDO.
+    add( iv_case = 'generated' iv_value = |{ lv_n }| ).
+    add( iv_case = 'last name' iv_value = lv_last ).
+    cl_abap_unit_assert=>fail( msg = 'P9' detail = mv quit = if_aunit_constants=>method ).
+  ENDMETHOD.
+ENDCLASS.
