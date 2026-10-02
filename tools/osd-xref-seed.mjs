@@ -102,6 +102,11 @@ export async function rows(root = process.cwd(), options = {}) {
   if (file !== undefined) {
     try {
       fs.mkdirSync(dir, {recursive: true});
+      // written aside and renamed, so a second process starting at the same
+      // moment reads a whole file or none
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(out));
+      fs.renameSync(tmp, file);
       // the last few generations' answers, not only the newest: a tree goes
       // back to a generation it was on -- a test creates an object and
       // deletes it, a branch is checked out and back -- and each return
@@ -109,6 +114,7 @@ export async function rows(root = process.cwd(), options = {}) {
       // under load, inside every recycle's boot). A `.tmp` is somebody's
       // write in flight unless it is old enough to be the leftover of a
       // writer that died.
+      // Pruned after the write, so writers missing at once cannot leave more.
       const kept = [];
       for (const old of fs.readdirSync(dir)) {
         const full = path.join(dir, old);
@@ -120,12 +126,7 @@ export async function rows(root = process.cwd(), options = {}) {
         }
       }
       kept.sort((a, b) => b.at - a.at || (a.full < b.full ? -1 : 1));
-      for (const {full} of kept.slice(KEEP - 1)) fs.rmSync(full, {force: true});
-      // written aside and renamed, so a second process starting at the same
-      // moment reads a whole file or none
-      const tmp = `${file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(out));
-      fs.renameSync(tmp, file);
+      for (const {full} of kept.slice(KEEP)) fs.rmSync(full, {force: true});
     } catch {
       // a tree that cannot be written to still gets its rows
     }

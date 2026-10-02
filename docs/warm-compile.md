@@ -125,16 +125,19 @@ registry is primed again.
   runtime's own boot limit already was. A fixed 60 s had turned a boot
   that was slow and correct into a failed activation (vsp-i7, 0.6.1511: a
   boot past 60 s under load, the cross-reference alone 21.6 s).
-- **A save is not an activation.** The dev loop (`STG_DEV=1`) leaves a
-  file alone while it is exactly what the store itself last wrote there,
-  or still gone where the store deleted it (`ObjectStore#ownWrite`): an
-  ADT create, save or delete, whose activation is the façade's. Without
-  this every create, PUT and delete through the façade was a cold build
-  and a recycle of its own -- 21 recycles in vsp-i7's suite, 1.52x the
-  cold run's wall time, and the activation behind them timed out. The rule
-  is state, not a time window: other bytes there are another editor's, and
-  the record goes, so that editor's next save is a change whatever it
-  holds. Measured on a create, two edits and a delete, twice
+- **A save is not an activation.** The dev loop (`STG_DEV=1`) leaves the
+  change a store write makes alone (`ObjectStore#ownWrite`): an ADT
+  create, save or delete, whose activation is the façade's. Without this
+  every create, PUT and delete through the façade was a cold build and a
+  recycle of its own -- 21 recycles in vsp-i7's suite, 1.52x the cold
+  run's wall time, and the activation behind them timed out. The record is
+  one-shot and bound to the write's own event: consumed by the first
+  matching change the dev loop sees, dropped by a watcher event with other
+  bytes, cleared by any publish (success or failure), expired after
+  `OSD_OWN_WRITE_MS` (2 s). A standing record would suppress the same bytes
+  for ever -- a PUT whose activation failed, then that source from a
+  checkout -- so after any of these an identical save is an ordinary change.
+  Measured on a create, two edits and a delete, twice
   (`OSD_WARM=1 STG_DEV=1`): 290 s and 10 recycles before, 83-90 s and 2
   recycles after, both edits warm (1.3-1.5 s).
 - **The prime waits for a runtime changing hands**, and a cold build stops

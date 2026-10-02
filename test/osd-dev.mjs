@@ -118,6 +118,64 @@ describe("tools/osd-dev: a save is a check, a build and a recycle", function () 
       expect(published.length).to.equal(before + 2);
     });
 
+    // critic on 0e7ec1c2: a standing record suppressed identical bytes for
+    // ever. PUT B, its activation fails, and the same B from another editor
+    // or a checkout never reached the dev loop.
+    it("PUT B, the activation fails, an identical save of B is built", async () => {
+      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* b\n");
+      const transpile = store.transpile;
+      store.transpile = async () => ({ok: false, error: "the activation failed"});
+      try {
+        expect(await store.publish()).to.include({ok: false});
+      } finally {
+        store.transpile = transpile;
+      }
+      writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a") + "* b\n");
+      store.index = undefined;
+      store.parsed = undefined;
+      const before = published.length;
+      expect(await loop.touch(saved.file)).to.include({ok: true, stage: "live"});
+      expect(published.length).to.equal(before + 1);
+    });
+
+    it("the record is one-shot: the write's event is left alone, a later identical save is built", async () => {
+      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* c\n");
+      expect(await loop.touch(saved.file)).to.include({stage: "own"});
+      // a checkout or another editor writes the same bytes afterwards
+      writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a") + "* c\n");
+      store.index = undefined;
+      store.parsed = undefined;
+      expect(await loop.touch(saved.file)).to.include({ok: true, stage: "live"});
+    });
+
+    it("a record whose event never came expires", async () => {
+      store.ownWriteMs = 50;
+      try {
+        const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* d\n");
+        await new Promise((r) => setTimeout(r, 120));
+        expect(await loop.touch(saved.file)).to.include({ok: true, stage: "live"});
+      } finally {
+        store.ownWriteMs = 2000;
+      }
+    });
+
+    it("B, C, B again in one burst is another editor's change (the watcher sees C)", async () => {
+      store.watch();
+      try {
+        const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* e\n");
+        await new Promise((r) => setTimeout(r, 100));
+        writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a") + "* other\n");
+        await new Promise((r) => setTimeout(r, 100));
+        writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a") + "* e\n");
+        await new Promise((r) => setTimeout(r, 100));
+        const before = published.length;
+        expect(await loop.touch(saved.file)).to.include({ok: true, stage: "live"});
+        expect(published.length).to.equal(before + 1);
+      } finally {
+        store.unwatch();
+      }
+    });
+
     it("a burst with the store's write and another file is a pass for the other file", async () => {
       const saved = store.write("CLAS", "ZCL_DEV_B", CALLER("zcl_dev_b", "zcl_dev_a"));
       writeFileSync(join(root, "src/osd/zcl_dev_a.clas.abap"), CLEAN("zcl_dev_a"));
