@@ -32,6 +32,27 @@ describe("release notes and version checks", () => {
     ]);
   });
 
+  it("takes a (#N) subject only when it is that PR's own merge commit", () => {
+    const log = [
+      "aaa\x01Direct maintenance (#12)",
+      "bbb\x01Real fix (#12)\n\n* body",
+      "ccc\x01Revert X (#13)",
+      "ddd\x01Merge pull request #14 from example/b",
+      "eee\x01Squashed later (#15)",
+      "fff\x01Merge pull request #15 from example/c\n\nMerged earlier",
+    ].join("\0");
+    const merges = {12: "bbb", 15: "eee"};
+    const isSquashOf = (number, sha) => merges[number] === sha;
+    assert.deepEqual(mergedPullRequests(log, (n) => `Title of ${n}`, isSquashOf), [
+      "- Real fix (#12)",
+      "- Title of 14 (#14)",
+      "- Squashed later (#15)",
+    ]);
+    // the other order: a merge commit first, then a squash claiming the same PR
+    const swapped = ["fff\x01Merge pull request #15 from example/c\n\nMerged earlier", "eee\x01Squashed later (#15)"].join("\0");
+    assert.deepEqual(mergedPullRequests(swapped, () => undefined, isSquashOf), ["- Merged earlier (#15)"]);
+  });
+
   it("parses --allow-untagged separately from an optional VSIX in both orders", () => {
     const tag = "vscode-v0.1.42";
     const vsix = "build/vsix/open-steamgate-0.1.42.vsix";
@@ -78,7 +99,11 @@ describe("release notes and version checks", () => {
       assert.match(notes, /since vscode-v0\.1\.2/);
       git("commit", "-q", "--allow-empty", "-m", "Unreleased change");
       git("commit", "-q", "--allow-empty", "-m", "Squashed improvement (#3)\n\n* one\n* two");
-      const draftNotes = generateNotes({cwd, tag: "vscode-v0.1.4", to: "HEAD"});
+      const squashSha = git("rev-parse", "HEAD");
+      git("commit", "-q", "--allow-empty", "-m", "Direct maintenance (#4)");
+      const mergeShaFor = (number) => (number === "3" ? `2026-10-02T00:00:00Z ${squashSha}` : "null deadbeef");
+      const draftNotes = generateNotes({cwd, tag: "vscode-v0.1.4", to: "HEAD", mergeShaFor});
+      assert.doesNotMatch(draftNotes, /Direct maintenance/);
       assert.match(draftNotes, /since vscode-v0\.1\.3/);
       assert.doesNotMatch(draftNotes, /Second improvement/);
       assert.doesNotMatch(draftNotes, /Unreleased change/);
