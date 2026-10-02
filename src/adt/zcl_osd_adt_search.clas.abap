@@ -65,11 +65,9 @@ CLASS zcl_osd_adt_search IMPLEMENTATION.
     DATA lv_end TYPE i.
     zcl_osd_adt_host=>require( `PACKAGES` ).
     ls_answer = zcl_osd_adt_host=>store( iv_command = `PACKAGES` iv_json = `{}` ).
-    lo_json = zcl_ajson=>parse( ls_answer-json ).
-    lt_members = lo_json->members( `/` ).
-    DO lines( lt_members ) TIMES.
-      lv_member = sy-index.
-      CONDENSE lv_member NO-GAPS.
+    lo_json = zcl_ajson=>parse( iv_json = ls_answer-json iv_keep_item_order = abap_true ).
+    lt_members = zcl_osd_adt_json=>ordered_members( io_json = lo_json iv_path = `/` ).
+    LOOP AT lt_members INTO lv_member.
       lv_path = `/` && lv_member.
       IF matches( iv_name = lo_json->get_string( lv_path && `/name` ) iv_pattern = iv_pattern ) = abap_true.
         ls_ref = reference( io_json = lo_json iv_path = lv_path iv_type = `DEVC` ).
@@ -77,7 +75,7 @@ CLASS zcl_osd_adt_search IMPLEMENTATION.
         ls_ref-has_description = boolc( ls_ref-description IS NOT INITIAL ).
         APPEND ls_ref TO rt_refs.
       ENDIF.
-    ENDDO.
+    ENDLOOP.
     lv_end = slice_end( is_max = is_max iv_length = lines( rt_refs ) ).
     IF lv_end < lines( rt_refs ).
       lv_end = lv_end + 1.
@@ -115,11 +113,9 @@ CLASS zcl_osd_adt_search IMPLEMENTATION.
     lo_input->add_raw( iv_name = `limit` iv_json = lv_limit ).
     zcl_osd_adt_host=>require( `SEARCH` ).
     ls_answer = zcl_osd_adt_host=>store( iv_command = `SEARCH` iv_json = lo_input->document( ) ).
-    lo_json = zcl_ajson=>parse( ls_answer-json ).
-    lt_members = lo_json->members( `/` ).
-    DO lines( lt_members ) TIMES.
-      lv_member = sy-index.
-      CONDENSE lv_member NO-GAPS.
+    lo_json = zcl_ajson=>parse( iv_json = ls_answer-json iv_keep_item_order = abap_true ).
+    lt_members = zcl_osd_adt_json=>ordered_members( io_json = lo_json iv_path = `/` ).
+    LOOP AT lt_members INTO lv_member.
       lv_path = `/` && lv_member.
       IF matches( iv_name = lo_json->get_string( lv_path && `/name` ) iv_pattern = iv_pattern ) = abap_false.
         CONTINUE.
@@ -130,7 +126,7 @@ CLASS zcl_osd_adt_search IMPLEMENTATION.
           ( is_max-infinity = 0 AND lines( rt_refs ) >= is_max-value ) ).
         EXIT.
       ENDIF.
-    ENDDO.
+    ENDLOOP.
   ENDMETHOD.
   METHOD document.
     DATA lv_pattern TYPE string.

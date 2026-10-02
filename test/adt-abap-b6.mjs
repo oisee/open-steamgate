@@ -81,12 +81,20 @@ describe("ADT B6: search and virtual folders Node diff", function () {
         "x-csrf-token": warm.headers.get("x-csrf-token")}};
     };
     const red = process.env.OSD_ADT_RED;
-    if (["search", "vfs"].includes(red)) {
-      const klass = abap.Classes[red === "search" ? "ZCL_OSD_ADT_SEARCH" : "ZCL_OSD_ADT_VFS"];
+    if (["search", "vfs", "search-order", "vfs-order"].includes(red)) {
+      const klass = abap.Classes[red.startsWith("search") ? "ZCL_OSD_ADT_SEARCH" : "ZCL_OSD_ADT_VFS"];
       const original = klass.document;
       klass.document = async (...args) => {
         const result = await original.apply(klass,args);
-        result.set(result.get()+"\n");
+        if (red.endsWith("-order")) {
+          // Model array member enumeration as string keys: 1,10,11,12,2,...
+          // Mutate only the ABAP boundary; the live Node oracle stays intact.
+          const pattern = red.startsWith("search") ? /<adtcore:objectReference [^>]*\/>/g : /<vfs:object [\s\S]*?<\/vfs:object>/g;
+          const rows = [...result.get().matchAll(pattern)].map((m, i) => ({key:String(i+1), xml:m[0]}));
+          rows.sort((a,b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+          let i = 0;
+          result.set(result.get().replace(pattern, () => rows[i++].xml));
+        } else result.set(result.get()+"\n");
         return result;
       };
     }
@@ -127,6 +135,11 @@ describe("ADT B6: search and virtual folders Node diff", function () {
       const path = base+"search?"+query+(max === undefined ? "" : "&maxResults="+encodeURIComponent(max));
       expect((await diff(path)).status).to.equal(200);
     });
+  it("search preserves Node byte order for 12 hits", async () => {
+    const res = await diff(base+"search?query=ZSEED_B_*&objectType=PROG&maxResults=12");
+    const names = [...res.body.toString().matchAll(/(?:adtcore:)?name="(ZSEED_B_[^"]+)"/g)].map((m) => m[1]);
+    expect(names).to.deep.equal(Array.from({length:12}, (_,i) => `ZSEED_B_${String(i).padStart(2,"0")}`));
+  });
   it("seed max*4 retains a suffix hit after more than max index entries", async () => {
     const res = await diff(base+"search?query=*B&objectType=PROG&maxResults=4");
     expect(res.body.toString()).to.include("ZSEED_END_B");
@@ -137,6 +150,11 @@ describe("ADT B6: search and virtual folders Node diff", function () {
   const request = (selected,order=[],pattern) => '<vfs:request'+(pattern === undefined ? '' : ` objectSearchPattern="${pattern}"`)+'>'+
     selected.map(([facet,values]) => `<vfs:preselection facet="${facet}">${values.map((v)=>`<vfs:value>${v}</vfs:value>`).join('')}</vfs:preselection>`).join('')+
     order.map((f)=>`<vfs:facet>${f}</vfs:facet>`).join('')+'</vfs:request>';
+  it("VFS preserves Node byte order for 12 objects", async () => {
+    const res = await diff(base+"virtualfolders/contents", "POST", {}, request([["package",["$ROOT"]]], [], "ZSEED_B_*"));
+    const names = [...res.body.toString().matchAll(/(?:adtcore:)?name="(ZSEED_B_[^"]+)"/g)].map((m) => m[1]);
+    expect(names).to.deep.equal(Array.from({length:12}, (_,i) => `ZSEED_B_${String(i).padStart(2,"0")}`));
+  });
   const selections = [[], [["package",["$ROOT"]]], [["package",["..$ROOT"]]], [["package",["$ZT_A","$ZTA"]]], [["package",["$UNKNOWN"]]],
     [["package",["$ROOT_CHILD"]]], [["package",["$LIB"]]], [["package",["$ROOT"]],["type",["REPO"]]],
     [["package",["$LIB"]],["type",["CLAS"]],["package",["$ROOT"]]], [["package",["A&amp;B"]]], [["PACKAGE",["$ROOT"]]],

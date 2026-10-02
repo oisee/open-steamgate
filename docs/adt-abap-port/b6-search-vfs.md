@@ -22,9 +22,9 @@ store. Neither puts identifiers in ET_OBJECT.
 Search selection and XML rendering are ABAP. It retains Node's package-first
 arithmetic, including the second slice for a negative package limit, NaN's
 empty package slice and unbounded object scan, fractional cutoffs, Infinity,
-and the seed limit of four times the remaining maximum. Ajson array members
-are traversed by numeric position, because MEMBERS itself orders names as
-strings (`1,10,11,...,2`); this preserves the host array without SORT.
+and the seed limit of four times the remaining maximum. Ajson arrays are parsed with `iv_keep_item_order = abap_true` and traversed
+through the shared `ZCL_OSD_ADT_JSON=>ORDERED_MEMBERS` helper. Its array-index
+key preserves numeric position without a caller-specific traversal.
 
 VFS uses the S0b SYSTEM raw channel. SYSTEM VFS takes the request XML in
 IV_NAME and returns the finished document untouched in EV_SOURCE. The live
@@ -84,3 +84,28 @@ and three B6 ABAP Unit methods. All four focused mutants exited 1 with
 exactly one failing diff. `npm run lint` passed with no issues in the new
 classes; existing repository warnings remain. New class XML carries
 WITH_UNIT_TESTS and was staged before the strict XML test ran.
+
+## Ordering regression follow-up
+
+The rebased `ce670a3f` already used numeric positions for search and the raw
+shared renderer for VFS; its two new 12-item live Node byte comparisons pass
+before the helper change. Both search array traversals now use the main-branch
+ordered-member helper. VFS has no array MEMBERS call.
+
+`OSD_ADT_RED=search-order|vfs-order` permutes XML rows at the ABAP document
+boundary in string-index order (`1,10,11,12,2,...`). Before the helper change,
+each focused 12-item test failed with exactly one byte-comparison failure.
+These are mutation red proofs, not a claim that `ce670a3f` reproduced the bug.
+
+Follow-up verification: 763 passing (634 B6 route/envelope cases, two B6
+measurement cases, 91 ADT diff, 11 coverage, five XML, 20 store-destination),
+plus three ABAP Unit methods (two search, one VFS). All runs used
+`OSD_HEAVY_RANGE=80-89 tools/osd-heavy.sh`; no full suite ran.
+
+Coverage gate: `ADT on ABAP: 97 of 142 registrations still on the host
+(44 ABAP, 1 host by design)`. The B6 allowlist block was already absent.
+Both new class XMLs have `WITH_UNIT_TESTS=X`; neither local test class
+has a superclass. Go does not advertise PACKAGES/SEARCH, so both ABAP routes
+refuse unsupported hosts through REQUIRE. Lint passed with 68 existing
+warnings after the store-destination temporary fixture was removed.
+No `osd-serve.mjs` process belonging to this clone remained after the tests.
