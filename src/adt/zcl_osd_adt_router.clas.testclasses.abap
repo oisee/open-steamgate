@@ -18,6 +18,7 @@ CLASS ltcl_match DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL
     METHODS the_rest_is_the_hosts FOR TESTING RAISING cx_static_check.
     METHODS a_host_row_is_not_served FOR TESTING RAISING cx_static_check.
     METHODS settings_shadow FOR TESTING.
+    METHODS discovery_rows FOR TESTING RAISING cx_static_check.
     METHODS versions_rows FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
@@ -35,6 +36,25 @@ CLASS ltcl_match IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_route-served_by exp = zcl_osd_adt_router=>c_abap ).
     cl_abap_unit_assert=>assert_equals( act = ls_route-pattern exp = `/sap/bc/adt/packages/:name` ).
   ENDMETHOD.
+  METHOD discovery_rows.
+    DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
+    DATA ls_route TYPE zcl_osd_adt_router=>ty_route.
+    DATA lt_paths TYPE string_table.
+    DATA lv_path TYPE string.
+    DATA lv_found TYPE abap_bool.
+    lt_routes = zcl_osd_adt_router=>routes( ).
+    APPEND `/sap/bc/adt/core/discovery` TO lt_paths.
+    APPEND `/sap/bc/adt/discovery` TO lt_paths.
+    LOOP AT lt_paths INTO lv_path.
+      zcl_osd_adt_router=>match( EXPORTING it_routes = lt_routes iv_method = `HEAD` iv_path = lv_path
+                                IMPORTING ev_found = lv_found es_route = ls_route ).
+      cl_abap_unit_assert=>assert_true( lv_found ).
+      cl_abap_unit_assert=>assert_equals( act = ls_route-method exp = `HEAD` ).
+      cl_abap_unit_assert=>assert_equals( act = ls_route-handler exp = `ZCL_OSD_ADT_DISCOVERY` ).
+      cl_abap_unit_assert=>assert_equals( act = ls_route-served_by exp = zcl_osd_adt_router=>c_abap ).
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD versions_rows.
     DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
     DATA ls_route TYPE zcl_osd_adt_router=>ty_route.

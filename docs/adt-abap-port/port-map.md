@@ -103,6 +103,28 @@ The original port difficulty ranking is superseded by variant C (2026-10-03); ac
    - It runs on every tree expansion.
    - Its sibling `virtualfolders/contents` (966) is nearly as hard.
 
+### PORTED: A1 discovery and debugger listeners
+
+| method | path | handler | status |
+|---|---|---|---|
+| HEAD, GET | `core/discovery` | `ZCL_OSD_ADT_DISCOVERY` | PORTED (explicit HEAD before GET) |
+| HEAD, GET | `discovery` | `ZCL_OSD_ADT_DISCOVERY` | PORTED (explicit HEAD before GET) |
+| GET, POST, DELETE | `debugger/listeners` | `ZCL_OSD_ADT_LISTENERS` | PORTED (200, untyped, empty) |
+
+Discovery uses the ordered `COLLECTIONS()` list, independent of the route
+rows and host state. Its 25 collections preserve Node's titles, accept order,
+workspace grouping and template links. Any change to a Node `advertise()` call
+must update `COLLECTIONS()` in the same change. The discovery cases remain in
+`test/adt-abap-diff.mjs`'s PORTED list permanently to catch drift.
+Node routes remain the reference and fallback. The diff harness disables
+Express weak ETags, matching production (S0 wire rule); discovery has no strong
+ETag and GET with an unmatched If-None-Match tag remains 200. The listener matrix warms up through an
+unknown HOST path and fetches a valid token before POST and DELETE.
+
+The S0 `test/adt-abap-coverage.mjs` / `HOST_ALLOWED` gate is absent at this
+slice's base. A1's diff cases assert ABAP ownership of every new row, so silent
+delegation cannot pass. No catch-all or neighbouring family is ported here.
+
 ## 2. The skeleton (dell, 0.6 must)
 
 ### Responsibilities, in build order
@@ -175,13 +197,13 @@ The original port difficulty ranking is superseded by variant C (2026-10-03); ac
      - Answers 307 with Location.
      - Never writes over the session cookie.
 10. **Discovery and compatibility.**
-    - `core/discovery` and `discovery` (HEAD and GET) are generated from the advertise column plus ACCEPT, CATEGORY, TITLE, TEMPLATE_LINKS and WORKSPACE (the `respository` misspelling stays).
+    - `core/discovery` and `discovery` (HEAD and GET) are PORTED via `ZCL_OSD_ADT_DISCOVERY=>COLLECTIONS`, mirroring ACCEPT, CATEGORY, TITLE, TEMPLATE_LINKS and WORKSPACE (the `respository` misspelling stays).
     - Rows marked HOST and still served by the JS router are advertised too.
     - `compatibility/graph` (HEAD and GET) is static data, `application/xml`.
 11. **Small static routes.**
     - `systeminformation`: identity JSON, systemID = the one system id, the same as sy-sysid (default `OSD`); client `001`, not sy-mandt.
     - `repository/typestructure`: type table × LABELS.
-    - `debugger/listeners`: 3 rows, 200 empty.
+    - `debugger/listeners`: 3 PORTED rows via `ZCL_OSD_ADT_LISTENERS`, 200 untyped and empty.
     - One `empty_feed( title, self )` serves `runtime/dumps`, `runtime/systemmessages`, `gw/errorlog`, `feeds` and `feeds/variants`. `system/users` is close to it.
     - Timestamps are ISO-8601 with milliseconds and `Z`.
     - **Identity values are written unescaped, as the JS does.** This keeps the Gate 1 byte diff clean. The default values are plain ASCII, so no test pins either form. Escaping is a later fix, made in OSG-JS first.
@@ -241,7 +263,7 @@ Reuse:
 | Miss registry, catch-all, `/osd/not-served` | yes | `STG_ADT_DUMP` (Node front; Go front on OSGo) |
 | Watcher / index invalidation | The ABAP caches key on `index_generation` from CAPABILITIES. | `store.watch()`: the host bumps the counter on every watcher event and every WRITE, CREATE or DELETE. Tests pass `watch: false` to the host, never to ABAP. |
 | Lock and ownership | yes, over ENQ | — |
-| Discovery | yes, from the route table | — |
+| Discovery | yes, from the ordered COLLECTIONS list | — |
 
 ### Acceptance
 
