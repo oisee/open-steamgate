@@ -17,7 +17,7 @@
 import {readFileSync} from "node:fs";
 import {expect} from "chai";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
-import {EnqSessionEnded, bindEnqSession, endEnqSession, noteUpdateTask, onEnqContextEnded} from "../tools/osd-enq-host.mjs";
+import {EnqSessionEnded, bindEnqSession, endEnqSession, enqDrop, enqHolder, noteUpdateTask, onEnqContextEnded} from "../tools/osd-enq-host.mjs";
 import {locks} from "../tools/osd-enq.mjs";
 
 const contract = JSON.parse(readFileSync(new URL("./fixtures/enq/contract.json", import.meta.url), "utf8"));
@@ -287,6 +287,86 @@ describe("the lock server through the generated ENQUEUE_ modules (ENQ E0 as ABAP
         expect(resume).to.equal(1);
         expect(held("LCTWOA"), "the last step out dropped the context").to.have.length(0);
         expect(heard).to.deep.equal([key]);
+      } finally {
+        endEnqSession(key);
+      }
+    });
+
+    it("gives a step that binds after a dump a new context, which the old one's drop does not take", async () => {
+      const key = "lifecycle:after";
+      const heard = [];
+      onEnqContextEnded((k) => heard.push(k));
+      try {
+        const parked = signal();
+        const parkedStep = dialogStep(async () => {
+          bindEnqSession(key);
+          await enqueue(dialogLock("LCAFTA"));
+          parked.fire();
+          await abap.statements.wait({seconds: {get: () => 0.5}});
+          // after the WAIT, A still works in its own (old) context
+          await enqueue(dialogLock("LCAFTA2"));
+          await abap.statements.commit();
+        }, "ENQ lifecycle: step A, parked across the dump");
+        await parked.fired;
+        await dialogStep(async () => {
+          bindEnqSession(key);
+          throw new Error("step B dumps");
+        }, "ENQ lifecycle: step B, dumping").catch(() => {});
+        // step C comes after the dump: a new context, not the dead one
+        expect((await call(key, "ENQUEUE_EZOSD_PRB", dialogLock("LCAFTC"))).subrc).to.equal(0);
+        expect(held("LCAFTA"), "A's lock while A runs").to.have.length(1);
+        await parkedStep;
+        expect(held("LCAFTA"), "the old context went with A").to.have.length(0);
+        expect(held("LCAFTA2"), "A's lock after the WAIT was the old context's too").to.have.length(0);
+        expect(held("LCAFTC"), "C's lock is the new context's").to.have.length(1);
+        expect(heard).to.deep.equal([key]);
+        // and the new context is the key's: its next step sees the lock as its own (602)
+        const again = await call(key, "ENQUEUE_EZOSD_PRB", {...dialogLock("LCAFTC"), MODE_ZOSD_PRB: "X"});
+        expect(again.msgno, "602: its own lock, not a foreign one").to.equal("602");
+      } finally {
+        endEnqSession(key);
+      }
+      expect(held("LCAFTC"), "the host's end takes the new context's locks").to.have.length(0);
+    });
+
+    it("keeps a step that bound and parked before locking in the old context, and a later dump of it spares the new one", async () => {
+      const key = "lifecycle:unpinned";
+      const heard = [];
+      onEnqContextEnded((k) => heard.push(k));
+      try {
+        // B binds and parks before it locks anything
+        const parkedB = signal();
+        const lockedB = signal();
+        let releaseB;
+        const gateB = new Promise((r) => { releaseB = r; });
+        const stepB = dialogStep(async () => {
+          bindEnqSession(key);
+          parkedB.fire();
+          await abap.statements.wait({seconds: {get: () => 0.4}});
+          await enqueue(dialogLock("LCUNB"));
+          lockedB.fire();
+          await gateB;
+          throw new Error("step B dumps too");
+        }, "ENQ lifecycle: step B, bound and parked");
+        await parkedB.fired;
+        // A dumps: the context B bound to is retired
+        await dialogStep(async () => {
+          bindEnqSession(key);
+          throw new Error("step A dumps");
+        }, "ENQ lifecycle: step A, dumping").catch(() => {});
+        // C binds after the dump and locks in the new context
+        expect((await call(key, "ENQUEUE_EZOSD_PRB", dialogLock("LCUNC"))).subrc).to.equal(0);
+        await lockedB.fired; // B is past its WAIT and has locked
+        expect(held("LCUNB"), "B locked in the old context").to.have.length(1);
+        // the host releases what enqHolder names under the key, retired or not
+        expect(enqHolder("ZOSD_PRB", dialogLock("LCUNB"))?.key).to.equal(key);
+        enqDrop(key, "ZOSD_PRB", "EZOSD_PRB", dialogLock("LCUNB"));
+        expect(held("LCUNB"), "enqDrop reaches the retired session").to.have.length(0);
+        releaseB();
+        await stepB.catch(() => {});
+        expect(held("LCUNB"), "B's dump ended the old context").to.have.length(0);
+        expect(held("LCUNC"), "and spared C's new one").to.have.length(1);
+        expect(heard, "one context ended, once").to.deep.equal([key]);
       } finally {
         endEnqSession(key);
       }

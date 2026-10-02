@@ -50,8 +50,13 @@ export class EnqSessionEnded extends Error {
 // insertion order, the oldest forgotten past ENDED_KEEP -- long after any
 // step queued behind its end has run. A key ended without ever being bound
 // (a host ends every session it had, stateful or not) counts too; harmless
-const live = new Map(); // a bound key -> the steps bound to it that are still running
-const dropAfter = new Set(); // bound keys whose context dumped while another step of theirs was parked
+// A bound step keeps the session of its key at the moment it bound
+// (token.enqSid, pinned by bindEnqSession, whether or not it locks), so a
+// dump in another step of its key can retire that session without taking
+// it from under the step: the retired session stays doomed until the last
+// step pinned to it is out, and the key's next step opens a new one
+const pins = new Map(); // a bound session's handle -> the running steps pinned to it
+const doomed = new Map(); // a retired session's handle -> its key
 const contextEnded = [];
 const ENDED_KEEP = 10000;
 const endedObjects = new WeakSet();
@@ -97,7 +102,32 @@ function user() {
 export function currentEnqSession() {
   const key = sessionKey();
   if (isEnded(key)) throw new EnqSessionEnded(key);
-  return sessionOf(key, token()?.enqUser ?? user());
+  const t = token();
+  if (t?.enqSession === undefined) return sessionOf(key, t?.enqUser ?? user());
+  if (t.enqSid === undefined) pin(t, key);
+  return t.enqSid;
+}
+
+/** the step belongs to key's session as it is now, opened if need be */
+function pin(t, key) {
+  const sid = sessionOf(key, t.enqUser ?? user());
+  t.enqSid = sid;
+  pins.set(sid, (pins.get(sid) ?? 0) + 1);
+}
+
+/** the step is no longer pinned to its session; a doomed one ends with the
+ * last step out */
+function unpin(t) {
+  const sid = t?.enqSid;
+  if (sid === undefined) return;
+  t.enqSid = undefined;
+  const n = (pins.get(sid) ?? 1) - 1;
+  if (n > 0) {
+    pins.set(sid, n);
+    return;
+  }
+  pins.delete(sid);
+  if (doomed.has(sid)) retireNow(sid, doomed.get(sid), true);
 }
 
 function sessionOf(key, owner) {
@@ -113,7 +143,9 @@ function sessionOf(key, owner) {
  * what a release needs (an ended key has nothing left to release) */
 function existingEnqSession() {
   const key = sessionKey();
-  return isEnded(key) ? undefined : sessions.get(key);
+  if (isEnded(key)) return undefined;
+  const t = token();
+  return t?.enqSession !== undefined ? t.enqSid : sessions.get(key);
 }
 
 /** a host's longer session: the step running now belongs to key (any value
@@ -127,9 +159,9 @@ export function bindEnqSession(key, {user: owner} = {}) {
   if (t === undefined) return;
   if (owner !== undefined) t.enqUser = owner;
   if (t.enqSession === key) return;
-  if (t.enqSession !== undefined) leave(t.enqSession);
+  unpin(t);
   t.enqSession = key;
-  live.set(key, (live.get(key) ?? 0) + 1);
+  pin(t, key);
 }
 
 /** callback(key) when a bound session ends by a dump, not by its host: the
@@ -138,20 +170,19 @@ export function onEnqContextEnded(callback) {
   contextEnded.push(callback);
 }
 
-/** a step bound to key is over; the last one out carries a deferred drop */
-function leave(key) {
-  const n = (live.get(key) ?? 1) - 1;
-  if (n > 0) {
-    live.set(key, n);
-    return;
-  }
-  live.delete(key);
-  if (dropAfter.delete(key)) dropContext(key);
+/** a dump ended key's context: the session sid is no longer the key's; it
+ * ends now if no other running step is pinned to it, else with the last */
+function retire(sid, key) {
+  if (sessions.get(key) === sid) sessions.delete(key);
+  if ((pins.get(sid) ?? 0) > 0) doomed.set(sid, key);
+  else retireNow(sid, key, true);
 }
 
-/** a dump ended key's context: its session goes, and the host hears of it */
-function dropContext(key) {
-  dropEnqSession(key);
+function retireNow(sid, key, tell) {
+  doomed.delete(sid);
+  updated.delete(sid);
+  locks().end(sid);
+  if (!tell) return;
   for (const callback of contextEnded) {
     try {
       callback(key);
@@ -165,8 +196,8 @@ function dropContext(key) {
  * go, and the key stays ended */
 export function endEnqSession(key) {
   markEnded(key);
-  dropAfter.delete(key);
   dropEnqSession(key);
+  for (const [sid, k] of [...doomed]) if (k === key) retireNow(sid, key, false);
 }
 
 /** the session behind key goes, with its locks; the key may open a new one */
@@ -191,7 +222,7 @@ export function enqHolder(table, input) {
   const arg = garg(r.client, r.fields);
   const row = locks().read({client: r.client, table: r.table}).find((w) => collide(w.arg, arg));
   if (row === undefined) return undefined;
-  let key;
+  let key = doomed.get(row.session);
   for (const [k, sid] of sessions) {
     if (sid === row.session) key = k;
   }
@@ -208,8 +239,12 @@ export function enqTake(key, owner, table, object, input) {
 /** DEQUEUE_<object> on behalf of the bound session key, without a step */
 export function enqDrop(key, table, object, input) {
   if (isEnded(key)) throw new EnqSessionEnded(key);
+  const r = request(globalThis.abap, table, object, input);
+  // the key's session now, and any retired by a dump that a parked step
+  // still holds: enqHolder names those under the key too
   const sid = sessions.get(key);
-  if (sid !== undefined) locks().dequeue(sid, request(globalThis.abap, table, object, input));
+  if (sid !== undefined) locks().dequeue(sid, r);
+  for (const [retired, k] of doomed) if (k === key) locks().dequeue(retired, r);
 }
 
 /** an update module ran in the session's LUW (what the wrapped update
@@ -392,21 +427,28 @@ export function installEnq(abap, {updateModules = []} = {}) {
   onEveryStep({
     onEnd(stepToken, {dumped}) {
       const bound = stepToken.enqSession;
-      const sid = sessions.get(bound ?? stepToken);
+      const sid = bound === undefined ? sessions.get(stepToken) : stepToken.enqSid;
+      // a step's own session ends with it (its token is never seen again, so
+      // it is not remembered as ended)
+      if (bound === undefined) {
+        if (sid !== undefined && dumped) {
+          updated.delete(sid);
+          locks().rollback(sid);
+        }
+        dropEnqSession(stepToken);
+        return;
+      }
       if (sid !== undefined && dumped) {
         updated.delete(sid);
         locks().rollback(sid);
-        // a dump ends the context, and its dialog locks with it; the bound
-        // key is not ended -- its next step is a new context, as on a system.
-        // A system runs one step of a context at a time; here another step
-        // of the key can be parked in a WAIT, and its locks are its own
-        // context's too: the drop waits until the last of them is out
-        if (bound !== undefined) dropAfter.add(bound);
       }
-      // a step's own session ends with it (its token is never seen again, so
-      // it is not remembered as ended); a bound one goes on
-      if (bound === undefined) dropEnqSession(stepToken);
-      else leave(bound);
+      unpin(stepToken);
+      // a dump ends the context, and its dialog locks with it; the bound key
+      // is not ended -- its next step is a new context, as on a system. A
+      // system runs one step of a context at a time; here another step of
+      // the key can be parked in a WAIT, and keeps the old session until it
+      // is out, while a step that binds after the dump starts the new one
+      if (sid !== undefined && dumped && (sessions.get(bound) === sid || doomed.has(sid))) retire(sid, bound);
     },
   });
 }
