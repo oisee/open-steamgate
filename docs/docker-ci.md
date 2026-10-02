@@ -31,8 +31,8 @@ their explicit manual publication path; the `publish=false` dry run never
 waits. The `manifest` matrix then joins the two digests for each profile and checks
 that the manifest contains exactly AMD64
 and ARM64. The GHCR package is `ghcr.io/oisee/open-steamgate`. For a release
-tag `vscode-v0.5.N`, showcase receives `0.5.N`, `showcase`, `latest` and
-`showcase-draft`; core receives `0.5.N-core` and `draft`. A manual publication
+tag `vscode-v0.6.N`, showcase receives `0.6.N`, `showcase`, `latest` and
+`showcase-draft`; core receives `0.6.N-core` and `draft`. A manual publication
 uses `sha-<commit>-run-<run-id>-<attempt>` in place of the version, with
 `-core` for core, and updates the same moving tags. The `showcase-draft` name
 remains available for existing Compose stacks. Use the version tag or digest
