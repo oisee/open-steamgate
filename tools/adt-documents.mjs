@@ -1030,11 +1030,31 @@ ${lines.join("\n")}
 `;
 }
 
+// whether a package hangs below $TMP, however deep
+function underTmp(store, name) {
+  if (typeof store.packages !== "function") return false;
+  const byName = new Map(store.packages().map((p) => [p.name, p]));
+  let at = byName.get(name)?.parent;
+  for (let depth = 0; at !== undefined && depth < 64; depth++) {
+    if (at === LOCAL_PACKAGE) return true;
+    at = byName.get(at)?.parent;
+  }
+  return false;
+}
+
 export function packageOf(store, name, options = {}) {
   const wanted = String(name ?? "").toUpperCase();
   const pkg = store.package(wanted);
   if (wanted !== LOCAL_PACKAGE) {
-    return pkg;
+    // a package below $TMP is filtered the same way as $TMP: its objects and
+    // its sub-packages are its authors' (no user, nothing). A package outside
+    // $TMP is the system's and is answered whole.
+    if (pkg.parent === undefined || !underTmp(store, wanted)) return pkg;
+    const user = String(options.user ?? "").toUpperCase();
+    const mine = (author) => user !== "" && author !== undefined && author === user;
+    return {...pkg,
+      objects: pkg.objects.filter((object) => mine(object.author)),
+      subpackages: (pkg.subpackages ?? []).filter((child) => mine(store.authorOf("DEVC", child)))};
   }
   // $TMP is a package of the store now (tools/osd-tmp.mjs): what was created
   // in it, and the packages under it. On a system its tree also shows the

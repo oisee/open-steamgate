@@ -45,5 +45,6 @@ for (const source of sources.libraries) {
 // Fetch only the selected pinned pack sources. The empty default remains the
 // small core image; adding packs changes the compiled generation.
 if (selectedPacks.length) run("node", ["tools/osd-fetch.mjs"]);
-run("npm", ["run", "transpile"]);
+// a published image: $TMP is left out (tools/osd-tmp.mjs)
+run("node", ["tools/osd-build.mjs", "--publish"]);
 run("node", ["docker/image/assemble.mjs", "/image"]);

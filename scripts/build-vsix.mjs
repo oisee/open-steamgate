@@ -96,6 +96,7 @@ import {requireSupportedNode} from "../tools/osd-node-version.mjs";
 import {packAt} from "../tools/osd-packs.mjs";
 import {readLock} from "../tools/osd-lock.mjs";
 import {writeThirdPartyNotices} from "./third-party-notices.mjs";
+import {forPublishing, generationTmpProblem} from "../tools/osd-tmp.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXT_DIR = join(ROOT, "editors", "vscode");
@@ -476,11 +477,14 @@ export function excludeStagedPackSources(seedRoot, selectedPacks) {
  *  that brings nothing is not an input (tools/osd-build.mjs inputsOf); a
  *  workspace pack with content is another input and builds cold, as before. */
 function prebuildGeneration(seedRoot, env) {
-  const buildEnv = {...env};
+  // a seed is published: $TMP is left out (tools/osd-tmp.mjs)
+  const buildEnv = forPublishing({...env});
   delete buildEnv.OSD_PACKS;
   delete buildEnv.OSD_WARM;
   execFileSync(process.execPath, ["tools/osd-build.mjs"], {cwd: seedRoot, env: buildEnv, stdio: ["ignore", "pipe", "inherit"]});
   const live = realpathSync(join(seedRoot, "build", "live"));
+  const local = generationTmpProblem(live);
+  if (local !== undefined) throw new Error(local);
   const hash = basename(live);
   // the generation's manifest records when and how long: the same tree
   // packaged twice must make the same seed ID (the materialized copy is

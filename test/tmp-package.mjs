@@ -204,7 +204,7 @@ describe("$TMP, the local package", () => {
     writeFileSync(join(root, "output", "zosd_tmp_probe.prog.mjs"), "");
     expect(tmpModulesIn(join(root, "output"), localObjectKeys(root))).to.deep.equal(["PROG ZOSD_TMP_PROBE"]);
     const preview = readFileSync(new URL("../scripts/build-preview.mjs", import.meta.url), "utf8");
-    expect(preview, "the preview build sets it and checks output/").to.match(/OSD_TMP = "off"[\s\S]*tmpModulesIn\(/);
+    expect(preview, "the preview build sets it and checks output/").to.match(/forPublishing\(process\.env\)[\s\S]*tmpModulesIn\(/);
   });
 
   it("shows nothing of $TMP to a caller without a user, nor an object nobody authored", async () => {
@@ -255,5 +255,92 @@ describe("$TMP, the local package", () => {
     expect(out[2]).to.contain("'$TMP'");
     const setup = readFileSync(new URL("./setup.mjs", import.meta.url), "utf8");
     expect(setup, "the database setup applies it").to.match(/insert = await withTmpPackages\(insert\)/);
+  });
+
+  // ---- review round 2 (codex on 610274b4)
+
+  it("never writes through a link: not an ancestor link under $TMP, not local/tmp itself", async () => {
+    const {symlinkSync} = await import("node:fs");
+    mkdirSync(join(root, TMP_FOLDER), {recursive: true});
+    symlinkSync(join(root, "local"), join(root, TMP_FOLDER, "kid"));
+    const store = new ObjectStore({root, libs: []});
+    expect(() => store.create("DEVC", "$TMP_KID", {package: "$TMP", author: "ALICE"})).to.throw();
+    expect(existsSync(join(root, "local", "package.devc.xml")), "nothing in local/").to.equal(false);
+    // local/tmp as a link to src: nothing of $TMP is written there
+    rmSync(join(root, "local"), {recursive: true, force: true});
+    mkdirSync(join(root, "local"));
+    symlinkSync(join(root, "src"), join(root, TMP_FOLDER));
+    const again = new ObjectStore({root, libs: []});
+    expect(() => again.create("PROG", "ZOSD_VIA_LINK", {package: "$TMP", author: "ALICE"})).to.throw();
+    expect(existsSync(join(root, "src", "zosd_via_link.prog.abap"))).to.equal(false);
+    expect(existsSync(join(root, "src", "package.devc.xml"))).to.equal(false);
+  });
+
+  it("catches a folder swapped for a link between the check and the write", async () => {
+    const {symlinkSync} = await import("node:fs");
+    let swapped = false;
+    const store = new ObjectStore({root, libs: [], hooks: {beforeWrite: (file) => {
+      if (swapped) return;
+      swapped = true;
+      const folder = join(root, file, "..");
+      rmSync(folder, {recursive: true, force: true});
+      symlinkSync(join(root, "src"), folder);
+    }}});
+    expect(() => store.create("DEVC", "$ZSWAP", {package: "$TMP", author: "ALICE"})).to.throw();
+    expect(swapped, "the hook ran").to.equal(true);
+    expect(existsSync(join(root, "src", "package.devc.xml")), "nothing reached src/").to.equal(false);
+  });
+
+  it("filters every package below $TMP by author, not only $TMP itself", async () => {
+    const alice = await logon("ALICE");
+    const bob = await logon("BOB");
+    const made = await alice("/packages", {method: "POST", body:
+      `<pack:package xmlns:pack="http://www.sap.com/adt/packages" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="$ZOSD_KID" adtcore:description="x"><pack:superPackage adtcore:name="$TMP"/></pack:package>`});
+    expect(made.status).to.equal(201);
+    expect((await createProg(alice, "ZOSD_IN_KID", "$ZOSD_KID")).status).to.equal(201);
+    writeFileSync(join(root, TMP_FOLDER, "$zosd_kid", "zosd_kid_by_hand.prog.abap"), "REPORT zosd_kid_by_hand.\n");
+    const kid = async (call) => {
+      const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24ZOSD_KID", {method: "POST"})).text();
+      return [...xml.matchAll(/<OBJECT_NAME>([^<]*)<\/OBJECT_NAME>/g)].map((m) => m[1]);
+    };
+    expect(await kid(alice)).to.include("ZOSD_IN_KID").and.not.include("ZOSD_KID_BY_HAND");
+    expect(await kid(bob), "another user's").to.not.include("ZOSD_IN_KID");
+    const {packageOf} = await import("../tools/adt-documents.mjs");
+    const store = new ObjectStore({root, libs: []});
+    expect(packageOf(store, "$ZOSD_KID").objects, "no user, nothing").to.deep.equal([]);
+    // and a package outside $TMP is answered whole
+    expect(packageOf(store, "$STG").objects.map((o) => o.name)).to.include("ZCL_TMP_NEIGHBOUR");
+  });
+
+  it("refuses to publish a generation whose layers included local/tmp, whatever the tree holds now", async () => {
+    const {generationTmpProblem} = await import("../tools/osd-tmp.mjs");
+    const generation = join(root, "build", "by-input", "abc");
+    mkdirSync(join(generation, "output"), {recursive: true});
+    // built with $TMP; its source deleted since -- the module is still in output/
+    writeFileSync(join(generation, "manifest.json"), JSON.stringify({inputs: {folders: ["src", TMP_FOLDER]}}));
+    writeFileSync(join(generation, "output", "zosd_gone.prog.mjs"), "");
+    expect(generationTmpProblem(generation)).to.match(/local\/tmp as a layer/);
+    writeFileSync(join(generation, "manifest.json"), JSON.stringify({inputs: {folders: ["src", "gen"]}}));
+    expect(generationTmpProblem(generation)).to.equal(undefined);
+    rmSync(join(generation, "manifest.json"));
+    expect(generationTmpProblem(generation), "no record, no publishing").to.match(/no readable record/);
+  });
+
+  it("leaves $TMP out of every publishing path: Pages preview, VSIX and binary seed, Docker", async () => {
+    const {forPublishing} = await import("../tools/osd-tmp.mjs");
+    mkdirSync(join(root, TMP_FOLDER), {recursive: true});
+    const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
+    expect(inputFoldersOf(root, config, {})).to.include(TMP_FOLDER);
+    expect(inputFoldersOf(root, config, forPublishing({}))).to.not.include(TMP_FOLDER);
+    const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+    const scripts = JSON.parse(read("../package.json")).scripts;
+    for (const name of ["web:preview", "web:preview:duckdb"]) {
+      expect(scripts[name], name).to.match(/^node tools\/osd-build\.mjs --publish && /);
+    }
+    expect(read("../tools/osd-build.mjs"), "osd-build --publish").to.match(/args\.includes\("--publish"\)\) forPublishing\(/);
+    expect(read("../scripts/build-preview.mjs"), "preview").to.match(/forPublishing\(process\.env\)[\s\S]*generationTmpProblem\(generation\)/);
+    expect(read("../scripts/build-vsix.mjs"), "VSIX and binary seed").to.match(/forPublishing\(\{\.\.\.env\}\)[\s\S]*generationTmpProblem\(live\)/);
+    expect(read("../scripts/build-binary.mjs"), "the binary seeds through the VSIX staging").to.match(/stageSystemSeed/);
+    expect(read("../docker/image/build.mjs"), "Docker").to.match(/run\("node", \["tools\/osd-build\.mjs", "--publish"\]\)/);
   });
 });

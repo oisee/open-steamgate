@@ -38,6 +38,7 @@ import {inputFoldersOf, packsOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
+import {forPublishing} from "./osd-tmp.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
 // script ran them; each writes its part of gen/ and says so
@@ -934,6 +935,8 @@ export function gc(root, options = {}) {
 }
 
 export async function main(args) {
+  // a build for publishing leaves $TMP out (tools/osd-tmp.mjs)
+  if (args.includes("--publish")) forPublishing(process.env);
   const root = process.env.OSD_ROOT ?? process.cwd();
   const say = (m) => console.log(`osd-build: ${m}`);
   const cmd = args.find((a) => !a.startsWith("--")) ?? "build";

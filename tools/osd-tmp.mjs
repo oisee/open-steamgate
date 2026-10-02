@@ -27,7 +27,7 @@
 //
 // Who created an object is not something an abapGit file says, so it is kept
 // beside the objects in TMP_AUTHORS, the TADIR of this one package.
-import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
+import {existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {isAbsolute, join, relative, resolve} from "node:path";
 
 export const TMP_PACKAGE = "$TMP";
@@ -57,7 +57,9 @@ export function insideTmp(root, path) {
 /** the package object of $TMP, written the first time something goes in */
 export function ensureTmp(root) {
   const folder = join(root, TMP_FOLDER);
+  refuseLinks(root);
   mkdirSync(folder, {recursive: true});
+  refuseLinks(root);
   const devc = join(folder, "package.devc.xml");
   if (!existsSync(devc)) {
     writeFileSync(devc, `<?xml version="1.0" encoding="utf-8"?>
@@ -73,6 +75,24 @@ export function ensureTmp(root) {
 `);
   }
   return folder;
+}
+
+/** local/ and local/tmp/ are real folders: a link at either would steer
+ *  every write of $TMP somewhere else */
+export function refuseLinks(root) {
+  let at = root;
+  for (const step of TMP_FOLDER.split("/")) {
+    at = join(at, step);
+    let info;
+    try {
+      info = lstatSync(at);
+    } catch {
+      return;
+    }
+    if (info.isSymbolicLink()) {
+      throw new Error(`${relative(root, at)} is a symbolic link; ${TMP_PACKAGE} is written only into a real folder`);
+    }
+  }
 }
 
 /** "TYPE NAME" -> {author, createdAt}, for the objects of $TMP. `{}` when
@@ -154,6 +174,39 @@ export function tmpFiles(root) {
 /** OSD_TMP=off leaves $TMP out of the layers and the store: what a preview
  *  or any other published build runs with (scripts/build-preview.mjs) */
 export const tmpDisabled = (env = process.env) => String(env.OSD_TMP ?? "").toLowerCase() === "off";
+
+/** The one switch every publishing path throws (preview/Pages, VSIX and the
+ *  binary's seed, Docker, osd-build --publish): $TMP is left out of what it
+ *  builds. Returns the env it changed. */
+export function forPublishing(env = process.env) {
+  env.OSD_TMP = "off";
+  return env;
+}
+
+/** Why a generation may not be published, from its own provenance: the
+ *  layer list the build recorded (manifest.json inputs.folders, and the
+ *  abap_transpile.json it handed the transpiler). A module whose source was
+ *  deleted after the build is still in that list's generation, so this is
+ *  decided by what the build read, not by what the tree holds now. Without
+ *  a record there is no knowing, and that is a refusal too. */
+export function generationTmpProblem(generationDir) {
+  const layers = [];
+  try {
+    const manifest = JSON.parse(readFileSync(join(generationDir, "manifest.json"), "utf8"));
+    layers.push(...(manifest.inputs?.folders ?? []));
+    if (!Array.isArray(manifest.inputs?.folders)) throw new Error("it lists no input folders");
+  } catch (e) {
+    return `${generationDir} has no readable record of its layers (manifest.json: ${e.message}); it cannot be shown to be free of ${TMP_PACKAGE}`;
+  }
+  try {
+    layers.push(...[JSON.parse(readFileSync(join(generationDir, "abap_transpile.json"), "utf8")).input_folder ?? []].flat());
+  } catch {
+    // the manifest's list is the record; the config is a second witness only
+  }
+  const local = layers.filter((f) => f === TMP_FOLDER || String(f).startsWith(TMP_FOLDER + "/"));
+  return local.length === 0 ? undefined
+    : `${generationDir} was built with ${TMP_FOLDER} as a layer: it holds ${TMP_PACKAGE} objects and is never published. Rebuild with OSD_TMP=off (osd-build --publish).`;
+}
 
 // ------------------------------------------------------------ names
 //

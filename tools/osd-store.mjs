@@ -12,7 +12,7 @@
 // registry, because a class that compiles alone can still break the system
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
-import {closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync, writeSync} from "node:fs";
+import {closeSync, constants as fsConstants, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync, writeSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
@@ -170,25 +170,49 @@ function withTmp(roots) {
   return roots.some((r) => r.path === TMP_FOLDER) ? roots : [...roots, tmpRoot()];
 }
 
-// whether `target` (relative to `base`) stays inside `inside`, by path and,
-// for whatever of it already exists, by the real path a symlink resolves to
-function contained(base, inside, target) {
+// Whether `target` (relative to `base`) may be written as a file of the
+// root `inside`. One way only: the target is inside the root, by path and by
+// the real path of whatever of it exists. And no symlink on the way: below
+// the root for every root, and from the top of the tree for a strict one
+// ($TMP), where a link anywhere -- local/, local/tmp/, a package folder -- is
+// how a write would be steered somewhere else. Asked again right before each
+// write, so a folder swapped for a link after the first look is still caught.
+function writable(base, inside, target, strict) {
   const within = (outer, inner) => {
     const rel = relative(outer, inner);
     return rel === "" || (!isAbsolute(rel) && rel.split(/[\\/]/)[0] !== "..");
   };
   const outer = resolve(base, inside);
   const full = resolve(base, target);
-  if (!within(outer, full)) return false;
-  let existing = full;
-  while (!existsSync(existing) && existing !== dirname(existing)) existing = dirname(existing);
-  const realOuter = existsSync(outer) ? realpathSync(outer) : outer;
-  return within(realOuter, realpathSync(existing)) || within(realpathSync(existing), realOuter);
+  if (!within(outer, full) || full === outer) return false;
+  // every component that exists, from where the check starts down to the file
+  const from = strict ? resolve(base) : outer;
+  const steps = relative(from, full).split(/[\\/]/).filter((p) => p !== "");
+  // (a root itself may be a link -- a pack mounted from elsewhere -- unless strict)
+  let at = from;
+  for (const step of steps) {
+    at = join(at, step);
+    let info;
+    try {
+      info = lstatSync(at);
+    } catch {
+      break; // nothing exists from here down
+    }
+    if (info.isSymbolicLink()) return false;
+  }
+  if (existsSync(outer)) {
+    let existing = full;
+    while (!existsSync(existing)) existing = dirname(existing);
+    if (!within(realpathSync(outer), realpathSync(existing))) return false;
+  }
+  return true;
 }
 
 export class ObjectStore {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
+    // test seams: beforeWrite(file) runs between a create's check and its write
+    this.hooks = options.hooks ?? {};
     this.explicitRoots = options.roots !== undefined;
     this.roots = withTmp(options.roots ?? rootsOf(this.root));
     // the build's exclusions are the store's too, from the same file
@@ -923,13 +947,18 @@ export class ObjectStore {
       file = join(folder, fileOf(upper) + meta.ext);
     }
     // and whatever the name was, the file stays inside the root it is filed under
-    if (root === undefined || !contained(this.root, root.path, file)) {
-      throw new InvalidName(`${type} ${upper} would be written outside ${root?.path ?? "every root"}`);
-    }
+    const strict = root?.tmp === true;
+    const safe = (target) => {
+      if (root === undefined || !writable(this.root, root.path, target, strict)) {
+        throw new InvalidName(`${type} ${upper} would be written outside ${root?.path ?? "every root"}, or through a link`);
+      }
+    };
+    safe(file);
     if (existsSync(join(this.root, file))) {
       throw new Conflict(type, upper);
     }
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
+    safe(file);
     const made = CREATABLE[type](upper, description, options.source);
     const writes = Object.entries(made).map(([suffix, content]) =>
       [type === "DEVC" ? file : file.slice(0, -meta.ext.length) + suffix, content]);
@@ -952,7 +981,25 @@ export class ObjectStore {
       this.#markInactive(entry, new Map(writes.map(([target, content]) => [target, Buffer.from(String(content), "utf8")])));
     }
     for (const [target, content] of writes) {
-      writeFileSync(join(this.root, target), content);
+      this.hooks.beforeWrite?.(target);
+      // a temp file beside the target, opened without following a link and
+      // only if new, the folder checked again, then renamed into place
+      safe(target);
+      const temp = `${target}.${process.pid}.${Date.now()}.new`;
+      const fd = openSync(join(this.root, temp),
+        fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0), 0o644);
+      try {
+        writeSync(fd, content);
+      } finally {
+        closeSync(fd);
+      }
+      try {
+        safe(target);
+      } catch (e) {
+        rmSync(join(this.root, temp), {force: true});
+        throw e;
+      }
+      renameSync(join(this.root, temp), join(this.root, target));
     }
     this.#entries().set(`${type} ${upper}`, entry);
     this.#forget();
