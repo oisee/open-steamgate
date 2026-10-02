@@ -37,10 +37,13 @@ if ! [[ "$slots" =~ ^[1-9][0-9]?$ ]] || [ "$slots" -gt $((hi - lo + 1)) ]; then
 fi
 [ $# -gt 0 ] || { echo "usage: OSD_HEAVY_RANGE=40-49 tools/osd-heavy.sh <command...>" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
+# the probe's path and the instance go in as arguments, never spliced into the JavaScript
 ports_free() {
-  node --input-type=module -e "
-    const {instancePorts, available} = await import('$here/../docker/image/free-instance.mjs');
-    process.exit(await available(instancePorts('$1')) ? 0 : 1);"
+  node --input-type=module -e '
+    import {pathToFileURL} from "node:url";
+    const [probe, n] = process.argv.slice(1);
+    const {instancePorts, available} = await import(pathToFileURL(probe).href);
+    process.exit(await available(instancePorts(n)) ? 0 : 1);' "$here/../docker/image/free-instance.mjs" "$1"
 }
 t0=$(date +%s)
 got=""
