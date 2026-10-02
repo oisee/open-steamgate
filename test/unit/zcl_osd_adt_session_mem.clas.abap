@@ -117,17 +117,21 @@ CLASS zcl_osd_adt_session_mem IMPLEMENTATION.
 
   METHOD zif_osd_adt_session~adopt_handle.
     DATA ls_handle TYPE ty_handle.
+    DATA lv_type TYPE string.
+    DATA lv_name TYPE string.
     READ TABLE gt_sessions TRANSPORTING NO FIELDS WITH KEY id = iv_id.
     IF sy-subrc <> 0.
       RETURN.
     ENDIF.
+    lv_type = to_upper( iv_type ).
+    lv_name = to_upper( iv_name ).
     READ TABLE gt_handles INTO ls_handle WITH KEY id = iv_id
-      objtype = to_upper( iv_type ) objname = to_upper( iv_name ).
+      objtype = lv_type objname = lv_name.
     IF sy-subrc <> 0.
       ls_handle-id = iv_id.
       ls_handle-handle = random( ).
-      ls_handle-objtype = to_upper( iv_type ).
-      ls_handle-objname = to_upper( iv_name ).
+      ls_handle-objtype = lv_type.
+      ls_handle-objname = lv_name.
       APPEND ls_handle TO gt_handles.
     ENDIF.
     rv_handle = ls_handle-handle.
@@ -145,12 +149,20 @@ CLASS zcl_osd_adt_session_mem IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~release_object.
-    DELETE gt_handles WHERE id = iv_id AND objtype = to_upper( iv_type ) AND objname = to_upper( iv_name ).
+    DATA lv_type TYPE string.
+    DATA lv_name TYPE string.
+    lv_type = to_upper( iv_type ).
+    lv_name = to_upper( iv_name ).
+    DELETE gt_handles WHERE id = iv_id AND objtype = lv_type AND objname = lv_name.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~holds.
+    DATA lv_type TYPE string.
+    DATA lv_name TYPE string.
+    lv_type = to_upper( iv_type ).
+    lv_name = to_upper( iv_name ).
     READ TABLE gt_handles TRANSPORTING NO FIELDS WITH KEY id = iv_id handle = iv_handle
-      objtype = to_upper( iv_type ) objname = to_upper( iv_name ).
+      objtype = lv_type objname = lv_name.
     rv_holds = boolc( sy-subrc = 0 ).
   ENDMETHOD.
 

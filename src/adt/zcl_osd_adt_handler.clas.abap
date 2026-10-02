@@ -42,6 +42,8 @@ CLASS zcl_osd_adt_handler DEFINITION PUBLIC CREATE PUBLIC.
                 ev_served_by TYPE string.
 
     "! The transaction boundary for route work. No route commits itself.
+    "! Called once per request by the handler; never call it from inside a
+    "! route, because the inner COMMIT would persist the outer route's work.
     CLASS-METHODS fence
       IMPORTING is_request TYPE zif_osd_adt_route=>ty_request
                 it_routes TYPE zcl_osd_adt_router=>tt_route OPTIONAL
@@ -173,7 +175,6 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
     ENDIF.
 
     ls_request-session = ls_session.
-    ls_request-sessions = io_session.
     route( EXPORTING is_request   = ls_request
            IMPORTING es_response  = es_response
                      ev_served_by = ev_served_by ).

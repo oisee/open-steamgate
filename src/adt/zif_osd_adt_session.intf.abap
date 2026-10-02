@@ -32,6 +32,8 @@
 "! Two things an implementation must keep in mind:
 "!   - The handler fences session writes before route work, so a route
 "!     exception rolls back its work while the resolved session stays.
+"!     A stateless probe whose route dumps keeps its fresh row, because
+"!     the end of the step never runs; the sweep removes it after the TTL.
 "!   - RESOLVE touches the session on every request, a database write. The
 "!     touch must not wait on, or take, a lock another step holds: it is a
 "!     row of the session table only, never the ENQ lock table.
