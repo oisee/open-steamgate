@@ -48,7 +48,11 @@ export class EnqSessionEnded extends Error {
 
 // ended keys: an object key is held weakly; a primitive one (a cookie id) in
 // insertion order, the oldest forgotten past ENDED_KEEP -- long after any
-// step queued behind its end has run
+// step queued behind its end has run. A key ended without ever being bound
+// (a host ends every session it had, stateful or not) counts too; harmless
+const live = new Map(); // a bound key -> the steps bound to it that are still running
+const dropAfter = new Set(); // bound keys whose context dumped while another step of theirs was parked
+const contextEnded = [];
 const ENDED_KEEP = 10000;
 const endedObjects = new WeakSet();
 const endedValues = new Set();
@@ -114,13 +118,46 @@ function existingEnqSession() {
 export function bindEnqSession(key) {
   if (isEnded(key)) throw new EnqSessionEnded(key);
   const t = token();
-  if (t !== undefined) t.enqSession = key;
+  if (t === undefined || t.enqSession === key) return;
+  if (t.enqSession !== undefined) leave(t.enqSession);
+  t.enqSession = key;
+  live.set(key, (live.get(key) ?? 0) + 1);
+}
+
+/** callback(key) when a bound session ends by a dump, not by its host: the
+ * host's own record of it (an ADT session and its lock handles) can go too */
+export function onEnqContextEnded(callback) {
+  contextEnded.push(callback);
+}
+
+/** a step bound to key is over; the last one out carries a deferred drop */
+function leave(key) {
+  const n = (live.get(key) ?? 1) - 1;
+  if (n > 0) {
+    live.set(key, n);
+    return;
+  }
+  live.delete(key);
+  if (dropAfter.delete(key)) dropContext(key);
+}
+
+/** a dump ended key's context: its session goes, and the host hears of it */
+function dropContext(key) {
+  dropEnqSession(key);
+  for (const callback of contextEnded) {
+    try {
+      callback(key);
+    } catch (e) {
+      console.error(`osd-enq-host: a context-ended callback failed: ${e?.message ?? e}`);
+    }
+  }
 }
 
 /** the host ends key's session (logoff, expiry, a closed channel): its locks
  * go, and the key stays ended */
 export function endEnqSession(key) {
   markEnded(key);
+  dropAfter.delete(key);
   dropEnqSession(key);
 }
 
@@ -175,6 +212,9 @@ function request(abap, table, object, input) {
 /** _WAIT's sleep: WAIT UP TO, which gives the work process up inside a step */
 async function yieldingSleep(abap, ms) {
   await abap.statements.wait({seconds: {get: () => ms / 1000}});
+  // the host may have ended the key while this ENQUEUE waited for its lock
+  const key = sessionKey();
+  if (isEnded(key)) throw new EnqSessionEnded(key);
 }
 
 function raiseClassic(abap, name, msgno = "", holder = "") {
@@ -315,12 +355,16 @@ export function installEnq(abap, {updateModules = []} = {}) {
         updated.delete(sid);
         locks().rollback(sid);
         // a dump ends the context, and its dialog locks with it; the bound
-        // key is not ended -- its next step is a new context, as on a system
-        if (bound !== undefined) dropEnqSession(bound);
+        // key is not ended -- its next step is a new context, as on a system.
+        // A system runs one step of a context at a time; here another step
+        // of the key can be parked in a WAIT, and its locks are its own
+        // context's too: the drop waits until the last of them is out
+        if (bound !== undefined) dropAfter.add(bound);
       }
       // a step's own session ends with it (its token is never seen again, so
       // it is not remembered as ended); a bound one goes on
       if (bound === undefined) dropEnqSession(stepToken);
+      else leave(bound);
     },
   });
 }

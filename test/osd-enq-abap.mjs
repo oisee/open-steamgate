@@ -17,7 +17,7 @@
 import {readFileSync} from "node:fs";
 import {expect} from "chai";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
-import {EnqSessionEnded, bindEnqSession, endEnqSession, noteUpdateTask} from "../tools/osd-enq-host.mjs";
+import {EnqSessionEnded, bindEnqSession, endEnqSession, noteUpdateTask, onEnqContextEnded} from "../tools/osd-enq-host.mjs";
 import {locks} from "../tools/osd-enq.mjs";
 
 const contract = JSON.parse(readFileSync(new URL("./fixtures/enq/contract.json", import.meta.url), "utf8"));
@@ -145,6 +145,15 @@ describe("the lock server through the generated ENQUEUE_ modules (ENQ E0 as ABAP
   describe("the host's session lifecycle", function () {
     const dialogLock = (k1) => ({MODE_ZOSD_PRB: "E", K1: k1, K2: "K", MANDT: client, _SCOPE: "1"});
     const held = (k1) => locks().read({client, table: "ZOSD_PRB"}).filter((r) => r.arg.startsWith(`${client}${k1}`));
+    const enqueue = (fields) => abap.FunctionModules.ENQUEUE_EZOSD_PRB({exporting: Object.fromEntries(Object.entries(fields)
+      .map(([k, v]) => [k.toLowerCase(), new abap.types.Character(Math.max(1, v.length)).set(v)]))});
+    // a promise the step resolves just before it parks, so a test acts while
+    // it is parked rather than after a guessed delay
+    const signal = () => {
+      let fire;
+      const fired = new Promise((r) => { fire = r; });
+      return {fire, fired};
+    };
 
     it("refuses to bind a key its host has ended, and releases its locks at the end", async () => {
       const key = "lifecycle:ended";
@@ -165,13 +174,14 @@ describe("the lock server through the generated ENQUEUE_ modules (ENQ E0 as ABAP
 
     it("takes no lock for a step that was parked in a WAIT when its key ended (logoff racing a LOCK)", async () => {
       const key = "lifecycle:race";
+      const parked = signal();
       const step = dialogStep(async () => {
         bindEnqSession(key);
+        parked.fire();
         await abap.statements.wait({seconds: {get: () => 0.3}});
-        await abap.FunctionModules.ENQUEUE_EZOSD_PRB({exporting: Object.fromEntries(Object.entries(dialogLock("LCRACE"))
-          .map(([k, v]) => [k.toLowerCase(), new abap.types.Character(Math.max(1, v.length)).set(v)]))});
+        await enqueue(dialogLock("LCRACE"));
       }, "ENQ lifecycle: a LOCK behind a WAIT");
-      await new Promise((r) => setTimeout(r, 100));
+      await parked.fired;
       endEnqSession(key); // the logoff, outside any step, while the LOCK is parked
       let error;
       try {
@@ -184,15 +194,17 @@ describe("the lock server through the generated ENQUEUE_ modules (ENQ E0 as ABAP
       // what has nothing to release does nothing under an ended key: the
       // step that ran into the end still finishes its DEQUEUE and COMMIT
       const other = "lifecycle:race2";
+      const parked2 = signal();
       const finishing = dialogStep(async () => {
         bindEnqSession(other);
+        parked2.fire();
         await abap.statements.wait({seconds: {get: () => 0.3}});
         await abap.FunctionModules.DEQUEUE_ALL({});
         await abap.statements.commit();
         await abap.statements.rollback();
         return "finished";
       }, "ENQ lifecycle: DEQUEUE_ALL, COMMIT and ROLLBACK behind a WAIT");
-      await new Promise((r) => setTimeout(r, 100));
+      await parked2.fired;
       endEnqSession(other);
       expect(await finishing).to.equal("finished");
     });
@@ -205,8 +217,7 @@ describe("the lock server through the generated ENQUEUE_ modules (ENQ E0 as ABAP
         try {
           await dialogStep(async () => {
             bindEnqSession(key);
-            await abap.FunctionModules.ENQUEUE_EZOSD_PRB({exporting: Object.fromEntries(Object.entries(dialogLock("LCDUMP2"))
-              .map(([k, v]) => [k.toLowerCase(), new abap.types.Character(Math.max(1, v.length)).set(v)]))});
+            await enqueue(dialogLock("LCDUMP2"));
             expect(held("LCDUMP2")).to.have.length(1);
             throw new Error("a short dump");
           }, "ENQ lifecycle: a step that dumps");
@@ -219,6 +230,63 @@ describe("the lock server through the generated ENQUEUE_ modules (ENQ E0 as ABAP
         // the next step of the key is a new context, not a refused one
         expect((await call(key, "ENQUEUE_EZOSD_PRB", dialogLock("LCDUMP"))).subrc).to.equal(0);
         expect(held("LCDUMP")).to.have.length(1);
+      } finally {
+        endEnqSession(key);
+      }
+    });
+
+    it("stops an ENQUEUE that waits for a lock (_WAIT) when its key ends meanwhile", async () => {
+      const holder = "lifecycle:holder";
+      const waiter = "lifecycle:waiter";
+      try {
+        expect((await call(holder, "ENQUEUE_EZOSD_PRB", dialogLock("LCWAIT"))).subrc).to.equal(0);
+        const started = signal();
+        const step = dialogStep(async () => {
+          bindEnqSession(waiter);
+          started.fire();
+          await enqueue({...dialogLock("LCWAIT"), _WAIT: "X"});
+        }, "ENQ lifecycle: an ENQUEUE with _WAIT");
+        await started.fired;
+        await new Promise((r) => setTimeout(r, 50)); // into its first sleep
+        endEnqSession(waiter);
+        let error;
+        try {
+          await step;
+        } catch (e) {
+          error = e;
+        }
+        expect(error, "the end, not SYSTEM_FAILURE").to.be.an.instanceOf(EnqSessionEnded);
+        expect(held("LCWAIT")).to.have.length(1); // the holder's, still
+      } finally {
+        endEnqSession(holder);
+      }
+    });
+
+    it("drops a dumped context only when its other step parked in a WAIT is out, and tells the host", async () => {
+      const key = "lifecycle:two";
+      const heard = [];
+      onEnqContextEnded((k) => heard.push(k));
+      try {
+        const parked = signal();
+        let resume;
+        const parkedStep = dialogStep(async () => {
+          bindEnqSession(key);
+          await enqueue(dialogLock("LCTWOA"));
+          parked.fire();
+          await abap.statements.wait({seconds: {get: () => 0.5}});
+          resume = held("LCTWOA").length; // still its own while it ran
+        }, "ENQ lifecycle: step A, parked");
+        await parked.fired;
+        await dialogStep(async () => {
+          bindEnqSession(key);
+          throw new Error("step B dumps");
+        }, "ENQ lifecycle: step B, dumping").catch(() => {});
+        expect(held("LCTWOA"), "A is still parked: the drop waits").to.have.length(1);
+        expect(heard).to.deep.equal([]);
+        await parkedStep;
+        expect(resume).to.equal(1);
+        expect(held("LCTWOA"), "the last step out dropped the context").to.have.length(0);
+        expect(heard).to.deep.equal([key]);
       } finally {
         endEnqSession(key);
       }
