@@ -550,8 +550,8 @@ export async function renderSet(model) {
   let runner, job;
   try {
     console.log = (...items) => console.error(...items); // runtime bootstrap diagnostics
-    runner = await renderRecipe(model, model.settings ? SET_TEMPLATE : "recipes/l3-set/legacy.tpl", {profile: "abap"});
-    job = await renderRecipe(model, model.settings ? JOB_TEMPLATE : "recipes/l3-job/legacy.tpl", {profile: "abap"});
+    runner = await renderRecipe(model, SET_TEMPLATE, {profile: "abap"});
+    job = await renderRecipe(model, JOB_TEMPLATE, {profile: "abap"});
   } finally {
     console.log = quiet;
   }

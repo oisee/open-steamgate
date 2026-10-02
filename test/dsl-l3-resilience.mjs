@@ -81,7 +81,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
         expect([model.resilience, model.fused, model.killable]).to.deep.equal([undefined, undefined, undefined]);
         const {renderRecipe} = await import("../tools/dsl-abap.mjs");
         const {files} = await renderSet(model);
-        for (const [template, out] of [["recipes/l3-set/legacy.tpl", `${model.class}.clas.abap`], ["recipes/l3-job/legacy.tpl", `${model.report}.prog.abap`]]) {
+        for (const [template, out] of [["recipes/l3-set/template.tpl", `${model.class}.clas.abap`], ["recipes/l3-job/template.tpl", `${model.report}.prog.abap`]]) {
           const stripped = join(scratch, `plain-${basename(dirname(template))}.tpl`);
           writeFileSync(stripped, strip(template));
           expect(readFileSync(stripped, "utf8"), template).to.not.match(/doctor|resume|purge|killed|attempt|c_max_alerts|dry_run|\bFUSED\b|\bKILLED\b/i);

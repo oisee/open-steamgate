@@ -37,7 +37,9 @@ describe("DSL L3 slice 5b: settings", function () {
     const dir = mkdtempSync(join(tmpdir(), "dsl-settings-manifest-"));
     try {
       for (const [from, to, message] of [["retry.max,", "retry.unknown,", /unavailable tunable/],
-        ["max: 100000", "max: 2147483648", /bounds must lie within/]]) {
+        ["max: 100000", "max: 2147483648", /bounds must lie within/],
+        // a fuse tunable without a ceiling could be tuned off (up to INT4)
+        ["    fuses.max_alerts: {min: 1, max: 100000}", "    retry.max: {min: 0, max: 99}", /fuses\.max_alerts is tunable only with bounds/]]) {
         const file = join(dir, "fleet2.l3.yaml");
         writeFileSync(file, text.replace(/rule: ([a-z_]+\.l2\.yaml)/g, (_, f) => `rule: ${join(process.cwd(), "src/l2demo", f)}`)
           .replace(from, to));
@@ -75,6 +77,26 @@ describe("DSL L3 slice 5b: settings", function () {
       expect(runner).to.include("prdweeks = lv_weeks");
       expect(helper).to.include("params.active_status");
       expect(helper).to.include("schedule.every");
+    } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
+  it("marks what belongs to a run (fuse, pile sizes, parameters) and what is the pass's policy", () => {
+    const model = compileSet(SET);
+    expect(model.settings.entries.map((e) => [e.name, e.scoped])).to.deep.equal([["retry.max", false], ["retry.backoff", false],
+      ["stale", false], ["fuses.max_alerts", true], ["keep.days", false], ["piles.checks.size", true]]);
+  });
+  it("a dry run reads its settings without seeding, logging or a snapshot", async () => {
+    const text = readFileSync(SET, "utf8");
+    const dir = mkdtempSync(join(tmpdir(), "dsl-settings-dry-"));
+    try {
+      const file = join(dir, "fleet2.l3.yaml");
+      writeFileSync(file, text.replace(/rule: ([a-z_]+\.l2\.yaml)/g, (_, f) => `rule: ${join(process.cwd(), "src/l2demo", f)}`)
+        .replace("dry_run: false", "dry_run: true"));
+      const runner = (await renderSet(compileSet(file))).files["zcl_l3_fleet2.clas.abap"];
+      const dry = runner.slice(runner.indexOf("  METHOD dry."), runner.indexOf("ENDMETHOD.", runner.indexOf("  METHOD dry.")));
+      expect(dry).to.include("gv_dry = abap_true.");
+      const run = runner.slice(runner.indexOf("  METHOD run."), runner.indexOf("  METHOD plan."));
+      expect(run).to.include("IF lv_dry = abap_true.\n      gs_settings = zcl_l3_fleet2_conf=>load( iv_write = abap_false ).");
+      expect(run).to.include("IF lv_dry = abap_false.\n      zcl_l3_fleet2_conf=>snapshot(");
     } finally { rmSync(dir, {recursive: true, force: true}); }
   });
   it("renders the unstaged piles.size through the same settings structure", async () => {
@@ -275,6 +297,93 @@ describe("DSL L3 slice 5b: settings", function () {
       expect(first.rules.some((r) => r.status === "FUSED")).to.equal(false);
       const second = await run();
       expect(second.rules.some((r) => r.status === "FUSED")).to.equal(true);
+    });
+
+    const vals = (raw) => Object.fromEntries(Object.entries(raw.get()).map(([k, v]) => [k, v.get()]));
+    const scope = (run, from) => dialogStep(async () => {
+      const state = await conf().load({iv_write: new abap.types.Character(1).set("")});
+      if (from) for (const [k, v] of Object.entries(from)) state.get().vals.get()[k].set(v);
+      return conf().scope({iv_run: str(run), is_vals: state.get().vals});
+    }).then(vals);
+
+    it("load( iv_write = abap_false ) reads the defaults and writes nothing", async () => {
+      const state = await dialogStep(() => conf().load({iv_write: new abap.types.Character(1).set("")}));
+      expect(vals(state.get().vals)).to.include({fuses_max_alerts: 500, piles_checks_size: 2, retry_max: 2});
+      expect(rows()).to.have.length(0);
+      expect(logs()).to.have.length(0);
+    });
+
+    it("scope( ): the run's own fuse and pile size from its snapshot, the pass's retry and stale; no snapshot: the compiled defaults", async () => {
+      const first = await run();
+      expect(await set("fuses.max_alerts", "1")).to.equal(true);
+      expect(await set("piles.checks.size", "1")).to.equal(true);
+      expect(await set("retry.max", "5")).to.equal(true);
+      // the live table says 1, 1 and 5; the run's snapshot says 500 and 2
+      const live = vals((await dialogStep(() => conf().load({}))).get().vals);
+      expect(live).to.include({fuses_max_alerts: 1, piles_checks_size: 1, retry_max: 5});
+      expect(await scope(first.run)).to.include({fuses_max_alerts: 500, piles_checks_size: 2, retry_max: 5});
+      // a run without a snapshot (planned by hand, or before 5b): the compiled defaults, never the table's
+      expect(await scope("NO-SUCH-RUN")).to.include({fuses_max_alerts: 500, piles_checks_size: 2, retry_max: 5});
+      // a snapshot value that is not valid falls back too, never to zero
+      await update(`UPDATE zosd_l3_run_conf SET param_val = '0' WHERE run_id = '${first.run}' AND param_name = 'fuses.max_alerts'`);
+      expect(await scope(first.run)).to.include({fuses_max_alerts: 500});
+    });
+
+    it("sane( ): a value that did not arrive in a job's selection (zero) is the compiled default, never a zero", async () => {
+      const raw = await dialogStep(async () => {
+        const state = await conf().load({iv_write: new abap.types.Character(1).set("")});
+        const v = state.get().vals;
+        v.get().fuses_max_alerts.set(0);
+        v.get().piles_checks_size.set(0);
+        v.get().stale.set(0);
+        v.get().retry_max.set(0);
+        v.get().retry_backoff.set(7);
+        return conf().sane({is_vals: v});
+      });
+      expect(vals(raw)).to.include({fuses_max_alerts: 500, piles_checks_size: 2, stale: 900, retry_max: 0, retry_backoff: 7});
+    });
+
+    it("an invalid stored value is logged once, not once per pass, and snapshot as FALLBACK without the operator's name", async () => {
+      await seed();
+      await update("UPDATE zosd_l3_conf SET param_val = 'nonsense', origin = 'USER', changed_by = 'OPERATOR' WHERE set_name = 'fleet2' AND param_name = 'fuses.max_alerts'");
+      const first = await run();
+      await run();
+      await seed();
+      expect(logs().filter((r) => trim(r.note_text) === "invalid; DSL default used")).to.have.length(1);
+      const snap = read("SELECT * FROM zosd_l3_run_conf WHERE run_id = ? AND param_name = 'fuses.max_alerts'", first.run)[0];
+      expect([trim(snap.param_val), trim(snap.origin), trim(snap.changed_by)]).to.deep.equal(["500", "FALLBACK", ""]);
+    });
+
+    it("two first runs seeding at once: the second INSERT finds the row and writes no second seed entry", async () => {
+      const real = client.select;
+      let raced = false;
+      client.select = async function (options) {
+        const result = await real.call(this, options);
+        if (!raced && /FROM\s+"?zosd_l3_conf"?\s/i.test(options.select)) {
+          raced = true;
+          // a first run beside this one seeded and committed after this SELECT
+          // (MANDT as this runtime writes it: no implicit client, ANORMALIES.md)
+          for (const e of compileSet(SET).settings.entries) {
+            await client.execute(`INSERT INTO zosd_l3_conf (mandt, set_name, param_name, param_val, origin, dsl_value, changed_by, changed_at, note_text) VALUES ('', 'fleet2', '${e.name}', '${e.default}', 'DSL', '${e.default}', 'OTHER', 0, '')`);
+          }
+          return {...result, rows: []};
+        }
+        return result;
+      };
+      try { await seed(); } finally { client.select = real; }
+      expect(raced).to.equal(true);
+      expect(rows().map((r) => trim(r.changed_by))).to.deep.equal(Array(6).fill("OTHER"));
+      expect(logs()).to.have.length(0);
+    });
+
+    it("reset_all( ) puts every setting back, and a reset of a DSL value logs nothing", async () => {
+      await seed();
+      expect(await set("fuses.max_alerts", "7")).to.equal(true);
+      expect(await set("stale", "120")).to.equal(true);
+      const before = logs().length;
+      expect(trim((await dialogStep(() => cls().reset_settings())).get())).to.equal("X");
+      expect(rows().filter((r) => trim(r.origin) !== "DSL" || trim(r.param_val) !== trim(r.dsl_value))).to.have.length(0);
+      expect(logs()).to.have.length(before + 2);
     });
 
     it("mutant: seeding over a USER row loses the tuned value", async () => {

@@ -105,6 +105,8 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS reset_setting
       IMPORTING iv_param TYPE csequence
       RETURNING VALUE(rv_ok) TYPE abap_bool.
+    CLASS-METHODS reset_settings
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
     " iv_bind: the variant of each port for this run, "port=variant,port=variant";
     " a port it does not name keeps the manifest's binding. A source that is not
     " live replaces table content in the caller's LUW: a test and dev seam, never
@@ -187,6 +189,8 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PRIVATE SECTION.
     CLASS-DATA gs_settings TYPE zcl_l3_fleet2_conf=>ty_state.
     CLASS-DATA gv_settings_run TYPE zosd_l3_run-run_id.
+    " set by dry( ) for the run( ) it calls, and cleared by that run( )
+    CLASS-DATA gv_dry TYPE abap_bool.
     CLASS-METHODS write
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
@@ -291,6 +295,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
   METHOD reset_setting.
     rv_ok = zcl_l3_fleet2_conf=>reset_setting( iv_param ).
   ENDMETHOD.
+  METHOD reset_settings.
+    rv_ok = zcl_l3_fleet2_conf=>reset_all( ).
+  ENDMETHOD.
   METHOD run.
     " stage by stage: a stage opens through its gate row in ZOSD_L3_STAGE
     " (WAITING to OPEN), is planned then (a later stage reads the worklist an
@@ -311,6 +318,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_stamp TYPE timestampl.
     DATA lv_parallel TYPE abap_bool.
     DATA lx_error TYPE REF TO cx_root.
+    DATA lv_dry TYPE abap_bool.
     DATA li_src_1 TYPE REF TO zif_l3_fleet2_ships.
     DATA lv_swap_1 TYPE abap_bool.
     DATA lt_keep_1 TYPE zif_l3_fleet2_ships=>tt_rows.
@@ -324,7 +332,15 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                        iv_allow_replay = iv_allow_replay ).
       RETURN.
     ENDIF.
-    gs_settings = zcl_l3_fleet2_conf=>load( ).
+    " a dry run (dry( ) runs this in mode S) reads the settings and writes
+    " none: nothing seeded, logged or snapshot
+    lv_dry = gv_dry.
+    CLEAR gv_dry.
+    IF lv_dry = abap_true.
+      gs_settings = zcl_l3_fleet2_conf=>load( iv_write = abap_false ).
+    ELSE.
+      gs_settings = zcl_l3_fleet2_conf=>load( ).
+    ENDIF.
     IF iv_mode = c_parallel.
       lv_parallel = abap_true.
     ENDIF.
@@ -355,7 +371,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       rs_result-status = 'BUSY'.
       RETURN.
     ENDIF.
-    zcl_l3_fleet2_conf=>snapshot( iv_run = rs_result-run_id is_state = gs_settings ).
+    IF lv_dry = abap_false.
+      zcl_l3_fleet2_conf=>snapshot( iv_run = rs_result-run_id is_state = gs_settings ).
+    ENDIF.
     lt_rules = rules( ).
     " a source that is not live replaces table content for this run, and the
     " table is put back whatever happens: after the loop, or when an exception
@@ -825,17 +843,6 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lt_keys_1 TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key_1 LIKE LINE OF lt_keys_1.
     DATA ls_params TYPE ty_params.
-    IF is_settings IS NOT INITIAL.
-      gs_settings-vals = is_settings.
-      gv_settings_run = iv_run.
-    ELSEIF gv_settings_run <> iv_run.
-      gs_settings = zcl_l3_fleet2_conf=>load( ).
-      gv_settings_run = iv_run.
-    ENDIF.
-    ls_params = is_params.
-    IF ls_params-active_status IS INITIAL.
-      ls_params-active_status = 'A'.
-    ENDIF.
     rs_rule-rule = iv_rule.
     SELECT SINGLE FOR UPDATE * FROM zosd_l3_pile INTO ls_pile
       WHERE set_name = c_set
@@ -854,6 +861,24 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF ls_pile-status <> 'PLANNED'.
       rs_rule-status = 'NOT-PLANNED'.
       RETURN.
+    ENDIF.
+    IF is_settings IS NOT INITIAL.
+      " the values the submitter planned this run with, each checked: one
+      " that did not arrive reads as zero and is the compiled default
+      gs_settings-vals = zcl_l3_fleet2_conf=>sane( is_settings ).
+      gv_settings_run = iv_run.
+    ELSEIF gv_settings_run <> iv_run.
+      " the run's own values: its snapshot, else the compiled defaults, never
+      " the live table's values of the moment. Read after the plan row: a
+      " job may start before the step that submitted it commits, and the
+      " read of the row above waits for that commit
+      gs_settings = zcl_l3_fleet2_conf=>load( iv_write = abap_false ).
+      gs_settings-vals = zcl_l3_fleet2_conf=>scope( iv_run = iv_run is_vals = gs_settings-vals ).
+      gv_settings_run = iv_run.
+    ENDIF.
+    ls_params = is_params.
+    IF ls_params-active_status IS INITIAL.
+      ls_params-active_status = 'A'.
     ENDIF.
     " the kill switch: the pile goes back to PLANNED without a job and its
     " attempt is not spent; resume( ) or the doctor submits it again
@@ -1323,6 +1348,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_final TYPE abap_bool VALUE abap_true.
     DATA lv_closed TYPE abap_bool.
     DATA lv_stamp TYPE timestampl.
+    DATA ls_pass TYPE zcl_l3_fleet2_conf=>ty_values.
     DATA lv_fused TYPE abap_bool.
     DATA ls_rule TYPE ty_rule.
     DATA lv_aborted TYPE btch0000-char1.
@@ -1333,6 +1359,10 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_preliminary TYPE btch0000-char1.
     rs_result = is_result.
     CLEAR: rs_result-rules, rs_result-alerts.
+    " a stage advanced here is planned and submitted with the run's own
+    " values (its snapshot), not with the table's values of the moment
+    ls_pass = gs_settings-vals.
+    gs_settings-vals = zcl_l3_fleet2_conf=>scope( iv_run = is_result-run_id is_vals = ls_pass ).
     CLEAR rs_result-stages.
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = c_set
@@ -1498,6 +1528,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ELSE.
       rs_result-status = 'RUNNING'.
     ENDIF.
+    gs_settings-vals = ls_pass.
   ENDMETHOD.
 
   METHOD dry.
@@ -1509,6 +1540,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_rule TYPE ty_rule.
     zcl_l3_fleet2_alerts_capture=>reset( ).
     CONCATENATE iv_bind ',alerts=capture' INTO lv_bind.
+    gv_dry = abap_true.
     rs_result = run( iv_date = iv_date
                      iv_mode = c_sequential
                      iv_bind = lv_bind
@@ -1718,6 +1750,13 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_ready TYPE btch0000-char1.
     DATA lv_scheduled TYPE btch0000-char1.
     DATA lv_preliminary TYPE btch0000-char1.
+    DATA ls_pass TYPE zcl_l3_fleet2_conf=>ty_values.
+    " the retry budget, the backoff and staleness are this pass's; what the
+    " run was planned with (the fuse, the pile sizes, the parameters) is the
+    " run's own, from its snapshot: a job submitted again, or a stage planned
+    " here, runs as the run's first jobs ran, whatever the table says now
+    ls_pass = gs_settings-vals.
+    gs_settings-vals = zcl_l3_fleet2_conf=>scope( iv_run = iv_run is_vals = ls_pass ).
     lv_stale = ago( iv_now = iv_now iv_secs = gs_settings-vals-stale ).
     lt_rules = rules( ).
     SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
@@ -1943,6 +1982,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
              CHANGING ct_report = ct_report ).
       ENDIF.
     ENDLOOP.
+    gs_settings-vals = ls_pass.
   ENDMETHOD.
 
   METHOD due.

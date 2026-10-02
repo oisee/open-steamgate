@@ -17,6 +17,11 @@
 * again by one doctor pass on a real job, and the jobs complete the run with
 * mode S's log; a rule that has written c_max_alerts alerts in a run is
 * FUSED, writes nothing more, and the older run's rows of it stay.
+* Settings (slice 5b): a tuned max_alerts fuses the next run, and a run the
+* doctor heals after the operator tuned the fuse and the pile size keeps the
+* values its snapshot holds. Every method starts and ends with every setting
+* of the set at its DSL default, so no method inherits another's tuning,
+* whatever order a system runs them in (a system runs them alphabetically).
 * RISK LEVEL DANGEROUS: setup commits rows into the rule tables, every run
 * commits its alerts, and teardown deletes both again and commits. The
 * keys all start with L30, which no generated L2 test uses.
@@ -42,17 +47,19 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS teardown.
     METHODS settle.
     METHODS cleanup.
+    " in the order a system runs them: alphabetical
+    METHODS doctor_heals FOR TESTING.
+    METHODS doctor_keeps_run_values FOR TESTING.
+    METHODS fuse_stops FOR TESTING.
+    METHODS mode_p FOR TESTING.
     METHODS mode_s FOR TESTING.
+    METHODS partial_keeps_old FOR TESTING.
     METHODS rerun FOR TESTING.
     METHODS rerun_fewer_piles FOR TESTING.
-    METHODS mode_p FOR TESTING.
-    METHODS partial_keeps_old FOR TESTING.
-    METHODS stages_mode_s FOR TESTING.
-    METHODS stages_mode_p FOR TESTING.
-    METHODS stages_partial FOR TESTING.
-    METHODS doctor_heals FOR TESTING.
-    METHODS fuse_stops FOR TESTING.
     METHODS settings_tune FOR TESTING.
+    METHODS stages_mode_p FOR TESTING.
+    METHODS stages_mode_s FOR TESTING.
+    METHODS stages_partial FOR TESTING.
     METHODS open_run
       IMPORTING iv_failed TYPE abap_bool
       RETURNING VALUE(rs_result) TYPE zcl_l3_fleet2=>ty_result.
@@ -103,6 +110,9 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
       IMPORTING is_result TYPE zcl_l3_fleet2=>ty_result
                 iv_stage TYPE i
       RETURNING VALUE(rv_status) TYPE zosd_l3_stage-status.
+    METHODS piles_text
+      IMPORTING iv_run TYPE zosd_l3_alert-run_id
+      RETURNING VALUE(rv_text) TYPE string.
     METHODS assert_cut
       IMPORTING iv_run TYPE zosd_l3_alert-run_id.
     METHODS wait_for_stages
@@ -141,6 +151,11 @@ CLASS ltcl_proof IMPLEMENTATION.
     DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet2=>c_set
                               AND check_date = zcl_l3_fleet_proof=>c_check_date.
     DELETE FROM zosd_l3_kill WHERE set_name = zcl_l3_fleet2=>c_set.
+    " every setting of the two-stage set at its DSL default, whatever an
+    " earlier method or an operator left in ZOSD_L3_CONF
+    IF zcl_l3_fleet2=>reset_settings( ) = abap_false.
+      cl_abap_unit_assert=>fail( msg = 'setup resets every setting to its DSL default' ).
+    ENDIF.
     INSERT zosd_l2_ship FROM TABLE mt_ship.
     INSERT zosd_l2_voy FROM TABLE mt_voy.
     INSERT zosd_l2_crew FROM TABLE mt_crew.
@@ -239,6 +254,9 @@ CLASS ltcl_proof IMPLEMENTATION.
                               AND check_date = zcl_l3_fleet_proof=>c_check_date.
     DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet2=>c_set
                               AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    " and the settings back at their DSL defaults: a method that tuned one
+    " and failed before it reset it leaves nothing for the next
+    zcl_l3_fleet2=>reset_settings( ).
     COMMIT WORK.
   ENDMETHOD.
 
@@ -1040,6 +1058,8 @@ CLASS ltcl_proof IMPLEMENTATION.
     DATA ls_pile TYPE zosd_l3_pile.
     DATA ls_lock TYPE zosd_l3_run.
     DATA lv_count TYPE i.
+    DATA lv_msg TYPE string.
+    DATA lv_text TYPE string.
     ls_seq = staged( zcl_l3_fleet2=>c_sequential ).
     lt_seq = staged_logged( ls_seq-run_id ).
     ls_result = open_run( abap_true ).
@@ -1050,7 +1070,14 @@ CLASS ltcl_proof IMPLEMENTATION.
     ENDLOOP.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the doctor submits the failed pile again, once' ).
     ls_result = wait_for_stages( ls_result ).
-    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'DONE' msg = 'the healed run ends DONE' ).
+    " a run that does not end DONE names each pile's state and reason
+    lv_msg = 'the healed run ends DONE'.
+    IF ls_result-status <> 'DONE'.
+      lv_text = piles_text( ls_result-run_id ).
+      CONCATENATE lv_msg '; piles:' INTO lv_msg.
+      CONCATENATE lv_msg lv_text INTO lv_msg SEPARATED BY space.
+    ENDIF.
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'DONE' msg = lv_msg ).
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = ls_result-run_id AND stage_no = 1 AND attempt = 2.
     lv_count = lines( lt_piles ).
@@ -1065,6 +1092,93 @@ CLASS ltcl_proof IMPLEMENTATION.
     SELECT COUNT(*) FROM zosd_l3_doctor WHERE run_id = ls_result-run_id AND doc_action = 'RESUBMIT'.
     lv_count = sy-dbcnt.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the audit holds the resubmit' ).
+  ENDMETHOD.
+
+  METHOD doctor_keeps_run_values.
+    " a run planned with the DSL's fuse (500) and stage 2 pile size (2), as
+    " its snapshot says, whose last stage 1 pile failed; then the operator
+    " tunes both to 1. The doctor submits the pile again with the run's own
+    " values: stage 2 is cut by 2 as mode S cut it, nothing is FUSED, and the
+    " run ends DONE with mode S's log. With the table's values of the moment
+    " stage 2 would be cut by 1 and a rule alerting in two piles would fuse
+    DATA ls_seq TYPE zcl_l3_fleet2=>ty_result.
+    DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
+    DATA ls_state TYPE zcl_l3_fleet2_conf=>ty_state.
+    DATA lt_seq TYPE tt_row.
+    DATA lt_par TYPE tt_row.
+    DATA lt_report TYPE zcl_l3_fleet2=>tt_doctor.
+    DATA ls_report TYPE zcl_l3_fleet2=>ty_doctor.
+    DATA ls_voy TYPE zosd_l2_voy.
+    DATA lv_count TYPE i.
+    DATA lv_cut TYPE i.
+    DATA lv_ok TYPE abap_bool.
+    DATA lv_msg TYPE string.
+    DATA lv_text TYPE string.
+    " a third busy ship: three keys in stage 2, so its cut shows the size, and
+    " the minimum-crew rule alerts on two of them
+    add_voyage( iv_id = 'L30099' iv_ship = 'L303' iv_date = '20991020' ).
+    READ TABLE mt_voy INTO ls_voy INDEX lines( mt_voy ).
+    INSERT zosd_l2_voy FROM ls_voy.
+    COMMIT WORK.
+    ls_seq = staged( zcl_l3_fleet2=>c_sequential ).
+    lt_seq = staged_logged( ls_seq-run_id ).
+    lv_cut = staged_piles( iv_run = ls_seq-run_id iv_stage = 2 ).
+    ls_result = open_run( abap_true ).
+    " the snapshot run( ) writes when a run starts: the DSL defaults
+    ls_state = zcl_l3_fleet2_conf=>load( ).
+    zcl_l3_fleet2_conf=>snapshot( iv_run = ls_result-run_id is_state = ls_state ).
+    COMMIT WORK.
+    lv_ok = zcl_l3_fleet2=>set_setting( iv_param = 'fuses.max_alerts' iv_value = '1' iv_note = 'ABAP Unit tune' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_ok exp = abap_true msg = 'max_alerts tuned to 1' ).
+    lv_ok = zcl_l3_fleet2=>set_setting( iv_param = 'piles.checks.size' iv_value = '1' iv_note = 'ABAP Unit tune' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_ok exp = abap_true msg = 'the stage 2 pile size tuned to 1' ).
+    COMMIT WORK.
+    lt_report = zcl_l3_fleet2=>doctor( ).
+    COMMIT WORK.
+    LOOP AT lt_report INTO ls_report WHERE run_id = ls_result-run_id AND doc_action = 'RESUBMIT'.
+      lv_count = lv_count + 1.
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the doctor submits the failed pile again, once' ).
+    ls_result = wait_for_stages( ls_result ).
+    lv_msg = 'the healed run keeps its own fuse and ends DONE'.
+    IF ls_result-status <> 'DONE'.
+      lv_text = piles_text( ls_result-run_id ).
+      CONCATENATE lv_msg '; piles:' INTO lv_msg.
+      CONCATENATE lv_msg lv_text INTO lv_msg SEPARATED BY space.
+    ENDIF.
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'DONE' msg = lv_msg ).
+    lv_count = staged_piles( iv_run = ls_result-run_id iv_stage = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = lv_cut msg = 'stage 2 is cut by the run''s own pile size' ).
+    lt_par = staged_logged( ls_result-run_id ).
+    cl_abap_unit_assert=>assert_equals( act = lt_par exp = lt_seq msg = 'the healed run wrote the log mode S wrote' ).
+  ENDMETHOD.
+
+  METHOD piles_text.
+    " each pile of the run as stage/rule/pile status reason attempt
+    DATA lt_piles TYPE zcl_l3_fleet2=>tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lv_one TYPE string.
+    DATA lv_no TYPE string.
+    DATA lv_stage TYPE string.
+    DATA lv_attempt TYPE string.
+    SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
+      WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = iv_run
+      ORDER BY PRIMARY KEY.
+    LOOP AT lt_piles INTO ls_pile.
+      lv_stage = ls_pile-stage_no.
+      lv_no = ls_pile-pile_no.
+      lv_attempt = ls_pile-attempt.
+      CONDENSE: lv_stage, lv_no, lv_attempt.
+      CONCATENATE lv_stage '/' ls_pile-rule_name '/' lv_no INTO lv_one.
+      CONCATENATE lv_one ls_pile-status ls_pile-reason lv_attempt INTO lv_one SEPARATED BY space.
+      CONDENSE lv_one.
+      IF rv_text IS INITIAL.
+        rv_text = lv_one.
+      ELSE.
+        CONCATENATE rv_text ';' INTO rv_text.
+        CONCATENATE rv_text lv_one INTO rv_text SEPARATED BY space.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD fuse_stops.

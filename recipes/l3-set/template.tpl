@@ -150,6 +150,8 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS reset_setting
       IMPORTING iv_param TYPE csequence
       RETURNING VALUE(rv_ok) TYPE abap_bool.
+    CLASS-METHODS reset_settings
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
 {{/settings}}
     " iv_bind: the variant of each port for this run, "port=variant,port=variant";
     " a port it does not name keeps the manifest's binding. A source that is not
@@ -272,6 +274,8 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
 {{#settings}}
     CLASS-DATA gs_settings TYPE {{settings.class}}=>ty_state.
     CLASS-DATA gv_settings_run TYPE zosd_l3_run-run_id.
+    " set by dry( ) for the run( ) it calls, and cleared by that run( )
+    CLASS-DATA gv_dry TYPE abap_bool.
 {{/settings}}
     CLASS-METHODS write
       IMPORTING iv_date TYPE d
@@ -401,6 +405,9 @@ CLASS {{class}} IMPLEMENTATION.
   METHOD reset_setting.
     rv_ok = {{settings.class}}=>reset_setting( iv_param ).
   ENDMETHOD.
+  METHOD reset_settings.
+    rv_ok = {{settings.class}}=>reset_all( ).
+  ENDMETHOD.
 {{/settings}}
   METHOD run.
 {{^planned}}
@@ -442,6 +449,9 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_stamp TYPE timestampl.
     DATA lv_parallel TYPE abap_bool.
     DATA lx_error TYPE REF TO cx_root.
+{{#settings}}
+    DATA lv_dry TYPE abap_bool.
+{{/settings}}
 {{#sources}}
     DATA li_src_{{index}} TYPE REF TO {{iface}}.
     DATA lv_swap_{{index}} TYPE abap_bool.
@@ -464,7 +474,15 @@ CLASS {{class}} IMPLEMENTATION.
 {{/dry_run}}
 {{/resilience}}
 {{#settings}}
-    gs_settings = {{settings.class}}=>load( ).
+    " a dry run (dry( ) runs this in mode S) reads the settings and writes
+    " none: nothing seeded, logged or snapshot
+    lv_dry = gv_dry.
+    CLEAR gv_dry.
+    IF lv_dry = abap_true.
+      gs_settings = {{settings.class}}=>load( iv_write = abap_false ).
+    ELSE.
+      gs_settings = {{settings.class}}=>load( ).
+    ENDIF.
 {{/settings}}
     IF iv_mode = c_parallel.
       lv_parallel = abap_true.
@@ -518,7 +536,9 @@ CLASS {{class}} IMPLEMENTATION.
     ENDIF.
 {{/planned}}
 {{#settings}}
-    {{settings.class}}=>snapshot( iv_run = rs_result-run_id is_state = gs_settings ).
+    IF lv_dry = abap_false.
+      {{settings.class}}=>snapshot( iv_run = rs_result-run_id is_state = gs_settings ).
+    ENDIF.
 {{/settings}}
     lt_rules = rules( ).
     " a source that is not live replaces table content for this run, and the
@@ -1106,10 +1126,15 @@ CLASS {{class}} IMPLEMENTATION.
 {{/with_params}}
 {{#settings}}
     IF is_settings IS NOT INITIAL.
-      gs_settings-vals = is_settings.
+      " the values the submitter ran with, each checked: one that did not
+      " arrive reads as zero and is the compiled default, never a zero
+      gs_settings-vals = {{settings.class}}=>sane( is_settings ).
       gv_settings_run = iv_run.
     ELSEIF gv_settings_run <> iv_run.
-      gs_settings = {{settings.class}}=>load( ).
+      " the run's own values (its snapshot, else the compiled defaults), never
+      " the live table's values of the moment
+      gs_settings = {{settings.class}}=>load( iv_write = abap_false ).
+      gs_settings-vals = {{settings.class}}=>scope( iv_run = iv_run is_vals = gs_settings-vals ).
       gv_settings_run = iv_run.
     ENDIF.
 {{/settings}}
@@ -1219,30 +1244,6 @@ CLASS {{class}} IMPLEMENTATION.
 {{#with_params}}
     DATA ls_params TYPE ty_params.
 {{/with_params}}
-{{#settings}}
-    IF is_settings IS NOT INITIAL.
-      gs_settings-vals = is_settings.
-      gv_settings_run = iv_run.
-    ELSEIF gv_settings_run <> iv_run.
-      gs_settings = {{settings.class}}=>load( ).
-      gv_settings_run = iv_run.
-    ENDIF.
-{{/settings}}
-{{#with_params}}
-    ls_params = is_params.
-{{/with_params}}
-{{#params}}
-{{#default}}
-    IF ls_params-{{name}} IS INITIAL.
-{{#tunable}}
-      ls_params-{{name}} = gs_settings-vals-params_{{name}}.
-{{/tunable}}
-{{^tunable}}
-      ls_params-{{name}} = {{default | literal}}.
-{{/tunable}}
-    ENDIF.
-{{/default}}
-{{/params}}
     rs_rule-rule = iv_rule.
     SELECT SINGLE{{#resilience}} FOR UPDATE{{/resilience}} * FROM zosd_l3_pile INTO ls_pile
       WHERE set_name = c_set
@@ -1264,6 +1265,37 @@ CLASS {{class}} IMPLEMENTATION.
       RETURN.
     ENDIF.
 {{/resilience}}
+{{#settings}}
+    IF is_settings IS NOT INITIAL.
+      " the values the submitter planned this run with, each checked: one
+      " that did not arrive reads as zero and is the compiled default
+      gs_settings-vals = {{settings.class}}=>sane( is_settings ).
+      gv_settings_run = iv_run.
+    ELSEIF gv_settings_run <> iv_run.
+      " the run's own values: its snapshot, else the compiled defaults, never
+      " the live table's values of the moment. Read after the plan row: a
+      " job may start before the step that submitted it commits, and the
+      " read of the row above waits for that commit
+      gs_settings = {{settings.class}}=>load( iv_write = abap_false ).
+      gs_settings-vals = {{settings.class}}=>scope( iv_run = iv_run is_vals = gs_settings-vals ).
+      gv_settings_run = iv_run.
+    ENDIF.
+{{/settings}}
+{{#with_params}}
+    ls_params = is_params.
+{{/with_params}}
+{{#params}}
+{{#default}}
+    IF ls_params-{{name}} IS INITIAL.
+{{#tunable}}
+      ls_params-{{name}} = gs_settings-vals-params_{{name}}.
+{{/tunable}}
+{{^tunable}}
+      ls_params-{{name}} = {{default | literal}}.
+{{/tunable}}
+    ENDIF.
+{{/default}}
+{{/params}}
 {{#killable}}
     " the kill switch: the pile goes back to PLANNED without a job and its
     " attempt is not spent; resume( ) or the doctor submits it again
@@ -1827,6 +1859,9 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_final TYPE abap_bool VALUE abap_true.
     DATA lv_closed TYPE abap_bool.
     DATA lv_stamp TYPE timestampl.
+{{#settings}}
+    DATA ls_pass TYPE {{settings.class}}=>ty_values.
+{{/settings}}
 {{/staged}}
 {{#fused}}
     DATA lv_fused TYPE abap_bool.
@@ -2004,6 +2039,12 @@ CLASS {{class}} IMPLEMENTATION.
     ENDIF.
 {{/piles}}
 {{#staged}}
+{{#settings}}
+    " a stage advanced here is planned and submitted with the run's own
+    " values (its snapshot), not with the table's values of the moment
+    ls_pass = gs_settings-vals.
+    gs_settings-vals = {{settings.class}}=>scope( iv_run = is_result-run_id is_vals = ls_pass ).
+{{/settings}}
     CLEAR rs_result-stages.
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = c_set
@@ -2177,6 +2218,9 @@ CLASS {{class}} IMPLEMENTATION.
     ELSE.
       rs_result-status = 'RUNNING'.
     ENDIF.
+{{#settings}}
+    gs_settings-vals = ls_pass.
+{{/settings}}
 {{/staged}}
   ENDMETHOD.
 {{#resilience}}
@@ -2192,6 +2236,9 @@ CLASS {{class}} IMPLEMENTATION.
     {{capture}}=>reset( ).
 {{/dry_run}}
     CONCATENATE iv_bind ',{{sink.name}}=capture' INTO lv_bind.
+{{#settings}}
+    gv_dry = abap_true.
+{{/settings}}
     rs_result = run( iv_date = iv_date
                      iv_mode = c_sequential
                      iv_bind = lv_bind
@@ -2420,6 +2467,15 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_ready TYPE btch0000-char1.
     DATA lv_scheduled TYPE btch0000-char1.
     DATA lv_preliminary TYPE btch0000-char1.
+{{#settings}}
+    DATA ls_pass TYPE {{settings.class}}=>ty_values.
+    " the retry budget, the backoff and staleness are this pass's; what the
+    " run was planned with (the fuse, the pile sizes, the parameters) is the
+    " run's own, from its snapshot: a job submitted again, or a stage planned
+    " here, runs as the run's first jobs ran, whatever the table says now
+    ls_pass = gs_settings-vals.
+    gs_settings-vals = {{settings.class}}=>scope( iv_run = iv_run is_vals = ls_pass ).
+{{/settings}}
     lv_stale = ago( iv_now = iv_now iv_secs = {{#settings.stale}}gs_settings-vals-stale{{/settings.stale}}{{^settings.stale}}c_stale{{/settings.stale}} ).
     lt_rules = rules( ).
     SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
@@ -2657,6 +2713,9 @@ CLASS {{class}} IMPLEMENTATION.
              CHANGING ct_report = ct_report ).
       ENDIF.
     ENDLOOP.
+{{#settings}}
+    gs_settings-vals = ls_pass.
+{{/settings}}
   ENDMETHOD.
 
   METHOD due.

@@ -3214,6 +3214,24 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 
 ### ANOMALY-2026-10-02-jobcount-unique-per-name — JOBCOUNT is hhmmss plus two base-36 digits per name
 
+### ANOMALY-2026-10-02-abap-unit-method-order — a system runs the test methods of a class alphabetically, the transpiled runner in declaration order
+
+- Status: `workaround`
+- Discovery date: `2026-10-02`
+- Affected versions: every transpiled `output/index.mjs` (the runner calls `setup`, the method, `teardown` for each method in the order the class declares them)
+- Affected ABAP statement, runtime API or adapter: ABAP Unit, the order of `METHODS ... FOR TESTING` within one test class
+- Minimal reproducer: `ZCL_L3_FLEET_PROOF`, whose `ltcl_proof` declared `mode_s` first and `doctor_heals` ninth
+- Exact command used to run it: `node tools/osd-prove-on-system.mjs .local/stage/l3demo --unit l3demo` (sandbox, 2026-10-02, slice 5a run 2 and slice 5b runs 1 and 2)
+- Expected SAP behaviour: the sandbox ran `DOCTOR_HEALS` first: in 5a run 2 an exception in it was the only method of the class that ran, the nine declared before and after it did not. That is alphabetical order (`doctor_heals` sorts first). Observed through which method ran, not measured with a probe of its own; ABAP Unit documents no order
+- Actual open-abap behaviour: declaration order, so locally `doctor_heals` ran after eight methods had left their state behind, and on the system it ran first, against freshly created tables
+- Impact on open-steamgate: an order dependence between test methods shows on one side and not on the other. The 5b regression hunt had to rule out a settings leak from `settings_tune` into `doctor_heals` (it cannot happen on the system: `doctor_heals` runs first there)
+- Smallest safe workaround: declare test methods in alphabetical order where order could matter (`ZCL_L3_FLEET_PROOF` does now, so `npm run unit` and the system agree), and the L3 harness runs the proof in the order read off the class and sorted (`test/dsl-l3.mjs`, "runs the methods in the order a system runs them"); every proof method resets the settings in `setup` and `teardown`, so its outcome does not depend on order at all
+- Upstream issue: none filed; the transpiler's runner order is not documented either way, and a system's order is inferred, not measured
+- Regression-test location: `test/dsl-l3.mjs` (the order test, and "a setup that does not reset the settings" mutant, which turns `stages_mode_s` red when a tuned pile size is left behind)
+- Upstream version containing a fix: not applicable
+
+### ANOMALY-2026-10-02-jobcount-unique-per-name — JOBCOUNT was a random eight-digit number unique across names, a system's is hhmmss plus a counter per name
+
 - Status: `fixed` (in this repository's JOB_* facade; no upstream involved)
 - Discovery date: `2026-10-02`
 - Affected versions: `tools/osd-job-port.mjs` and `tools/osd-job-scheduler.mjs` before this change

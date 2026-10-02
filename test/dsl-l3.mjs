@@ -1217,38 +1217,74 @@ ENDCLASS.
       });
       afterEach(() => expect(worker.errors, "the worker").to.deep.equal([]));
 
+      // A system runs the test methods of a class in alphabetical order, not in
+      // the order the class declares them (A4H, 2026-10-02: a failing first
+      // method was DOCTOR_HEALS, and the methods after it never ran). The
+      // harness runs them in that order, read off the class, so a method that
+      // leaves something behind for the next one fails here as it would there.
+      const PROOF_METHODS = ["doctor_heals", "doctor_keeps_run_values", "fuse_stops", "mode_p", "mode_s", "partial_keeps_old", "rerun",
+        "rerun_fewer_piles", "settings_tune", "stages_mode_p", "stages_mode_s", "stages_partial"];
+      const systemOrder = () => [...readFileSync(join(PROOF_DIR, `${PROOF}.clas.testclasses.abap`), "utf8")
+        .matchAll(/^\s*METHODS (\w+) FOR TESTING\./gm)].map((m) => m[1].toLowerCase()).sort();
+      const conf = () => abap.Classes.ZCL_L3_FLEET2_CONF;
+      const runner2 = () => abap.Classes.ZCL_L3_FLEET2;
+      // a static method of a generated class replaced for the length of `work`
+      const patched = async (cls, method, replacement, work) => {
+        const was = cls[method];
+        cls[method] = replacement(was);
+        try { return await work(); } finally { cls[method] = was; }
+      };
+      const tune = (name, value) => dialogStep(() => runner2().set_setting({iv_param: new abap.types.String().set(name),
+        iv_value: new abap.types.String().set(value), iv_note: new abap.types.String().set("left by an earlier method")}));
+      const setting = (name) => read("SELECT param_val, origin FROM zosd_l3_conf WHERE set_name = 'fleet2' AND param_name = ?", name)
+        .map((r) => [String(r.param_val).trim(), String(r.origin).trim()])[0];
+
+      it("runs the methods in the order a system runs them: alphabetical", () => {
+        expect(systemOrder()).to.deep.equal(PROOF_METHODS);
+      });
+
       it("passes on this runtime, mode_p and stages_mode_p included: their jobs run while it waits, and it leaves nothing behind", async () => {
         const local = await proofClass();
         const before = new Set(store.list(200).map((r) => r.id));
         const failures = {};
-        const methods = ["mode_s", "rerun", "rerun_fewer_piles", "partial_keeps_old", "mode_p", "stages_mode_s", "stages_mode_p", "stages_partial",
-          "doctor_heals", "fuse_stops", "settings_tune"];
+        const methods = systemOrder();
         for (const method of methods) failures[method] = await runMethod(local, method);
         expect(failures).to.deep.equal(Object.fromEntries(methods.map((m) => [m, undefined])));
         const all = store.list(200).filter((r) => !before.has(r.id));
         // the two-stage set: the filter's four piles (eight ships, two per pile), then
         // stage 2's six rules over the two busy ships of the proof's date, one pile each;
         // doctor_heals (slice 5a): the last filter pile once more, submitted by the doctor,
-        // and stage 2's six again
+        // and stage 2's six again; doctor_keeps_run_values (slice 5b): the same pile, and
+        // stage 2 over three busy ships cut by the run's own size 2, two piles a rule
         const staged = all.filter((r) => r.jobName.startsWith("L3_FLEET2_"));
         const stage2 = [2, 3, 4, 5, 6, 7].map((n) => `L3_FLEET2_20${n}_0001`);
+        const stage2Cut = [2, 3, 4, 5, 6, 7].flatMap((n) => [`L3_FLEET2_20${n}_0001`, `L3_FLEET2_20${n}_0002`]);
         expect(staged.map((r) => r.jobName).sort(), "the two stages' jobs").to.deep.equal([1, 2, 3, 4].map((p) => `L3_FLEET2_101_000${p}`)
-          .concat(stage2, ["L3_FLEET2_101_0004"], stage2).sort());
-        expect(staged.map((r) => r.state)).to.deep.equal(Array(17).fill("COMPLETED"));
+          .concat(stage2, ["L3_FLEET2_101_0004"], stage2, ["L3_FLEET2_101_0004"], stage2Cut).sort());
+        expect(staged.map((r) => r.state)).to.deep.equal(Array(30).fill("COMPLETED"));
         const runs = all.filter((r) => r.jobName.startsWith("L3_FLEET_"));
         expect(runs.map((r) => r.jobName).sort(), "twenty-four jobs ran").to.deep.equal(model.rules.flatMap((_, i) => [1, 2, 3, 4].map((p) => `L3_FLEET_0${i + 1}_000${p}`)));
         expect(runs.map((r) => r.state)).to.deep.equal(Array(24).fill("COMPLETED"));
         expect(ours(), "teardown deleted the seed and the runs' rows").to.deep.equal({log: 0, piles: 0, seed: 0, stages: 0, work: 0, doctor: 0});
+        // and every setting is back at its DSL default
+        expect(read("SELECT COUNT(*) AS n FROM zosd_l3_conf WHERE set_name = 'fleet2' AND (origin <> 'DSL' OR param_val <> dsl_value)")[0].n).to.equal(0);
+      });
+
+      it("a setting an earlier method left tuned does not reach the next one: setup resets every setting", async () => {
+        const local = await proofClass();
+        // what settings_tune leaves when it fails before its reset (or an operator's tune)
+        await tune("piles.checks.size", "1");
+        expect(setting("piles.checks.size")).to.deep.equal(["1", "USER"]);
+        expect(await runMethod(local, "stages_mode_s")).to.equal(undefined);
+        expect(setting("piles.checks.size")).to.deep.equal(["2", "DSL"]);
       });
 
       it("npm run unit runs mode_s and rerun and skips mode_p by configuration, said in the run", () => {
         const index = readFileSync(join(root, "output", "index.mjs"), "utf8");
         const entry = index.split("ret.push(").find((e) => e.includes(`"${PROOF.toUpperCase()}"`));
-        expect(entry).to.include('{"name":"mode_s","skip":false},{"name":"rerun","skip":false}');
-        expect(entry).to.include('{"name":"mode_p","skip":true}');
-        expect(entry).to.include('{"name":"stages_mode_s","skip":false},{"name":"stages_mode_p","skip":true},{"name":"stages_partial","skip":false}');
-        expect(entry).to.include('{"name":"doctor_heals","skip":true},{"name":"fuse_stops","skip":false}');
-        expect(entry).to.include('{"name":"settings_tune","skip":false}');
+        // declared in the order a system runs them, so `npm run unit` runs them in it too
+        const skipped = new Set(["mode_p", "stages_mode_p", "doctor_heals", "doctor_keeps_run_values"]);
+        expect(entry).to.include(`methods: ${JSON.stringify(PROOF_METHODS.map((name) => ({name, skip: skipped.has(name)})))}`);
         expect(entry).to.include('riskLevel: "DANGEROUS"');
       });
 
@@ -1262,6 +1298,32 @@ ENDCLASS.
       });
 
       describe("mutants it catches", () => {
+        it("a setup that does not reset the settings: a size left tuned by an earlier method cuts stage 2 by one", async () => {
+          const local = await proofClass();
+          await tune("piles.checks.size", "1");
+          const failure = await patched(runner2(), "reset_settings", () => async () => new abap.types.Character(1).set("X"),
+            () => runMethod(local, "stages_mode_s"));
+          expect(failure).to.equal("stage 2 has one pile per two worklist keys for each of its six rules");
+          await settled();
+          await dialogStep(() => runner2().reset_settings());
+          expect(setting("piles.checks.size")).to.deep.equal(["2", "DSL"]);
+          expect(ours().seed).to.equal(0);
+        });
+
+        it("the doctor that takes the table's values of the moment (review P2-1): the healed run is cut by 1 and fuses", async () => {
+          const local = await proofClass();
+          // scope( ) that keeps the values it is given: heal( ) and collect( ) keep the live ones
+          const failure = await patched(conf(), "scope", (was) => async function (args) {
+            const kept = await was.call(this, args);
+            kept.set(args.is_vals);
+            return kept;
+          }, () => runMethod(local, "doctor_keeps_run_values"));
+          expect(failure).to.match(/^the healed run keeps its own fuse and ends DONE; piles: .*2\/ship-min-crew\/3 FUSED MAX-ALERTS 1(;|$)/);
+          await settled();
+          expect(setting("fuses.max_alerts")).to.deep.equal(["500", "DSL"]);
+          expect(ours().seed).to.equal(0);
+        });
+
         it("finalise running when a pile failed (collect, mode P): the partial proof turns red", async () => {
           const source = mutate(renamed("zcl_l3_fleet_partial_mutant"), "      ELSEIF lv_lost = abap_true.\n        ls_rule-status = 'PARTIAL'.\n",
             "      ELSEIF lv_lost = abap_true.\n        ls_rule-status = 'PARTIAL'.\n        finalise( iv_rule = ls_rule-rule iv_hash = ls_rule-model_hash iv_date = is_result-check_date\n"

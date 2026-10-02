@@ -10,6 +10,12 @@ const numeric = [
   ["fuses.max_alerts", (m) => m.resilience?.fuses?.max_alerts?.count, 1, INT4],
   ["keep.days", (m) => m.resilience?.keep?.days, 1, 9999],
 ];
+// What a run is planned and fused with belongs to the run: the fuse, the pile
+// sizes and the set's parameters are read from the run's snapshot whenever the
+// run is worked again (a job, the doctor, collect( )). The rest (retry budget,
+// backoff, staleness, retention, the schedule) is the operator's policy of the
+// moment and is read fresh once per pass.
+export const runScoped = (name) => name === "fuses.max_alerts" || /^piles\.([a-z0-9_]+\.)?size$/.test(name) || name.startsWith("params.");
 export function compileSettings(doc, model, {line, fail}) {
   if (doc.settings === undefined) return undefined;
   const spec = doc.settings;
@@ -48,6 +54,8 @@ export function compileSettings(doc, model, {line, fail}) {
     const base = available.get(name);
     const bound = bounds[name] ?? {};
     if (!bound || typeof bound !== "object" || Array.isArray(bound) || Object.keys(bound).some((k) => !["min", "max"].includes(k))) fail(line(`settings/bounds/${name}`), `bounds for ${name} are {min, max}`);
+    // a fuse tunable up to INT4 can be tuned off: the manifest names its ceiling
+    if (name === "fuses.max_alerts" && bound.max === undefined) fail(line(`settings/bounds/${name}`), `${name} is tunable only with bounds: {max: n}; without a ceiling the fuse can be tuned off`);
     const integerParam = typeof base.min === "bigint";
     const integer = (raw) => /^-?[0-9]+$/.test(String(raw)) ? BigInt(raw) : undefined;
     const min = bound.min === undefined ? base.min : integerParam ? integer(bound.min) : Number(bound.min);
@@ -63,7 +71,7 @@ export function compileSettings(doc, model, {line, fail}) {
       field, screen: `s_${i + 1}`, default: base.defaultValue, "default@type": {built_in: "CHAR", length: 40},
       kind: base.kind, min: String(min), max: String(max), numeric: base.kind === "N", period: base.kind === "P", char: base.kind === "C",
       value_type: base.valueType, digit_text: base.built === "NUMC", date_text: base.built === "DATS",
-      time_text: base.built === "TIMS"};
+      time_text: base.built === "TIMS", scoped: runScoped(name)};
   });
   for (const name of Object.keys(bounds)) if (!seen.has(name)) fail(line(`settings/bounds/${name}`), `bounds names non-tunable ${name}`);
   const has = (name) => seen.has(name);
@@ -72,7 +80,7 @@ export function compileSettings(doc, model, {line, fail}) {
     stage.piles.tunable_size = true;
     stage.piles.settings_field = `piles_${stage.name}_size`;
   }
-  return {"@id": `${model["@id"]}/settings`, set_line: line("settings"), entries,
+  return {"@id": `${model["@id"]}/settings`, set_line: line("settings"), entries, has_scoped: entries.some((e) => e.scoped),
     class: `zcl_l3_${model.set}_conf`, report: `zl3_${model.set}_conf`,
     retry_max: has("retry.max"), retry_backoff: has("retry.backoff"), stale: has("stale"),
     max_alerts: has("fuses.max_alerts"), keep_days: has("keep.days"),

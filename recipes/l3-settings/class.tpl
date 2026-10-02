@@ -12,16 +12,36 @@ CLASS {{settings.class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
              vals TYPE ty_values,
              rows TYPE tt_conf,
              warnings TYPE string_table,
+             fallback TYPE string_table,
            END OF ty_state.
     CLASS-METHODS specs RETURNING VALUE(rt_specs) TYPE tt_conf.
     CLASS-METHODS settings_seed.
-    CLASS-METHODS load RETURNING VALUE(rs_state) TYPE ty_state.
+    " the compiled DSL defaults: what every reader falls back to, never a zero
+    CLASS-METHODS defaults RETURNING VALUE(rs_vals) TYPE ty_values.
+    " iv_write = abap_false (a dry run, a job): read only, nothing seeded or logged
+    CLASS-METHODS load
+      IMPORTING iv_write TYPE abap_bool DEFAULT abap_true
+      RETURNING VALUE(rs_state) TYPE ty_state.
     CLASS-METHODS snapshot IMPORTING iv_run TYPE csequence is_state TYPE ty_state.
+    " is_vals with the values that belong to run iv_run (the fuse, the pile
+    " sizes, the parameters) taken from its snapshot ZOSD_L3_RUN_CONF; a value
+    " the snapshot lacks or holds invalid is the compiled default
+    CLASS-METHODS scope
+      IMPORTING iv_run TYPE csequence is_vals TYPE ty_values
+      RETURNING VALUE(rs_vals) TYPE ty_values.
+    " is_vals with each value outside its type or bounds (a selection field
+    " that did not arrive reads as zero) replaced by the compiled default
+    CLASS-METHODS sane
+      IMPORTING is_vals TYPE ty_values
+      RETURNING VALUE(rs_vals) TYPE ty_values.
     CLASS-METHODS set_setting
       IMPORTING iv_param TYPE csequence iv_value TYPE csequence iv_note TYPE csequence
       RETURNING VALUE(rv_ok) TYPE abap_bool.
     CLASS-METHODS reset_setting
       IMPORTING iv_param TYPE csequence
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
+    " every setting of the set back to its DSL default
+    CLASS-METHODS reset_all
       RETURNING VALUE(rv_ok) TYPE abap_bool.
   PRIVATE SECTION.
     CLASS-METHODS valid
@@ -42,6 +62,63 @@ CLASS {{settings.class}} IMPLEMENTATION.
     ls_spec-param_name = {{name | literal}}.
     ls_spec-dsl_value = {{default | literal}}.
     APPEND ls_spec TO rt_specs.
+{{/settings.entries}}
+  ENDMETHOD.
+
+  METHOD defaults.
+{{#settings.entries}}
+    rs_vals-{{field}} = {{default | literal}}.
+{{/settings.entries}}
+  ENDMETHOD.
+
+  METHOD sane.
+    DATA ls_def TYPE ty_values.
+    DATA lv_text TYPE c LENGTH 40.
+    DATA lv_number TYPE p LENGTH 16 DECIMALS 0.
+    ls_def = defaults( ).
+    rs_vals = is_vals.
+{{#settings.entries}}
+{{#numeric}}
+    lv_number = is_vals-{{field}}.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+{{/numeric}}
+{{^numeric}}
+    lv_text = is_vals-{{field}}.
+{{/numeric}}
+    IF valid( iv_param = {{name | literal}} iv_value = lv_text ) = abap_false.
+      rs_vals-{{field}} = ls_def-{{field}}.
+    ENDIF.
+{{/settings.entries}}
+  ENDMETHOD.
+
+  METHOD scope.
+{{#settings.has_scoped}}
+    DATA lt_rows TYPE STANDARD TABLE OF zosd_l3_run_conf WITH DEFAULT KEY.
+    DATA ls_row TYPE zosd_l3_run_conf.
+    DATA ls_def TYPE ty_values.
+    DATA lv_value TYPE c LENGTH 40.
+{{/settings.has_scoped}}
+    rs_vals = is_vals.
+{{#settings.has_scoped}}
+    ls_def = defaults( ).
+    SELECT * FROM zosd_l3_run_conf INTO TABLE lt_rows
+      WHERE run_id = iv_run AND set_name = {{set | literal}}.
+{{/settings.has_scoped}}
+{{#settings.entries}}
+{{#scoped}}
+    rs_vals-{{field}} = ls_def-{{field}}.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = {{name | literal}}.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = {{name | literal}} iv_value = lv_value ) = abap_true.
+        rs_vals-{{field}} = lv_value.
+      ENDIF.
+    ENDIF.
+{{/scoped}}
 {{/settings.entries}}
   ENDMETHOD.
 
@@ -148,6 +225,7 @@ CLASS {{settings.class}} IMPLEMENTATION.
   METHOD load.
     DATA lt_specs TYPE tt_conf.
     DATA lt_found TYPE tt_conf.
+    DATA lv_logged TYPE i.
     DATA ls_spec TYPE zosd_l3_conf.
     DATA ls_row TYPE zosd_l3_conf.
     DATA ls_old TYPE zosd_l3_conf.
@@ -164,9 +242,17 @@ CLASS {{settings.class}} IMPLEMENTATION.
         ls_row-origin = 'DSL'.
         ls_row-changed_by = sy-uname.
         GET TIME STAMP FIELD ls_row-changed_at.
-        INSERT zosd_l3_conf FROM ls_row.
-        CLEAR ls_old.
-        audit( is_old = ls_old is_new = ls_row iv_note = 'DSL seed' ).
+        IF iv_write = abap_true.
+          INSERT zosd_l3_conf FROM ls_row.
+          IF sy-subrc = 0.
+            CLEAR ls_old.
+            audit( is_old = ls_old is_new = ls_row iv_note = 'DSL seed' ).
+          ELSE.
+            " seeded by a first run beside this one: its row, and its log entry
+            SELECT SINGLE * FROM zosd_l3_conf INTO ls_row
+              WHERE set_name = {{set | literal}} AND param_name = ls_spec-param_name.
+          ENDIF.
+        ENDIF.
       ELSEIF ls_row-dsl_value <> ls_spec-dsl_value.
         ls_old = ls_row.
         ls_row-dsl_value = ls_spec-dsl_value.
@@ -175,15 +261,26 @@ CLASS {{settings.class}} IMPLEMENTATION.
           ls_row-changed_by = sy-uname.
           GET TIME STAMP FIELD ls_row-changed_at.
         ENDIF.
-        UPDATE zosd_l3_conf FROM ls_row.
-        audit( is_old = ls_old is_new = ls_row iv_note = 'DSL default changed' ).
+        IF iv_write = abap_true.
+          UPDATE zosd_l3_conf FROM ls_row.
+          audit( is_old = ls_old is_new = ls_row iv_note = 'DSL default changed' ).
+        ENDIF.
       ENDIF.
       lv_effective = ls_row-param_val.
       IF valid( iv_param = ls_row-param_name iv_value = lv_effective ) = abap_false.
         lv_effective = ls_spec-dsl_value.
         CONCATENATE ls_row-param_name 'invalid; DSL default used' INTO lv_warning SEPARATED BY space.
         APPEND lv_warning TO rs_state-warnings.
-        audit( is_old = ls_row is_new = ls_row iv_note = 'invalid; DSL default used' ).
+        APPEND ls_row-param_name TO rs_state-fallback.
+        " logged once per stored value, not once per pass
+        IF iv_write = abap_true.
+          SELECT COUNT(*) FROM zosd_l3_conf_log INTO lv_logged
+            WHERE set_name = ls_row-set_name AND param_name = ls_row-param_name
+              AND new_value = ls_row-param_val AND note_text = 'invalid; DSL default used'.
+          IF lv_logged = 0.
+            audit( is_old = ls_row is_new = ls_row iv_note = 'invalid; DSL default used' ).
+          ENDIF.
+        ENDIF.
       ENDIF.
       ls_row-param_val = lv_effective.
       APPEND ls_row TO rs_state-rows.
@@ -209,6 +306,13 @@ CLASS {{settings.class}} IMPLEMENTATION.
       ls_run-dsl_value = ls_conf-dsl_value.
       ls_run-changed_by = ls_conf-changed_by.
       ls_run-changed_at = ls_conf-changed_at.
+      " the stored value was invalid and the run used the compiled default:
+      " neither the operator's value nor the operator's name is the run's
+      READ TABLE is_state-fallback TRANSPORTING NO FIELDS WITH KEY table_line = ls_conf-param_name.
+      IF sy-subrc = 0.
+        ls_run-origin = 'FALLBACK'.
+        CLEAR: ls_run-changed_by, ls_run-changed_at.
+      ENDIF.
       INSERT zosd_l3_run_conf FROM ls_run.
     ENDLOOP.
   ENDMETHOD.
@@ -264,6 +368,11 @@ CLASS {{settings.class}} IMPLEMENTATION.
     IF sy-subrc <> 0.
       RETURN.
     ENDIF.
+    rv_ok = abap_true.
+    " already the DSL default: nothing changes and nothing is logged
+    IF ls_row-origin = 'DSL' AND ls_row-param_val = ls_spec-dsl_value.
+      RETURN.
+    ENDIF.
     ls_old = ls_row.
     ls_row-param_val = ls_spec-dsl_value.
     ls_row-origin = 'DSL'.
@@ -272,6 +381,17 @@ CLASS {{settings.class}} IMPLEMENTATION.
     GET TIME STAMP FIELD ls_row-changed_at.
     UPDATE zosd_l3_conf FROM ls_row.
     audit( is_old = ls_old is_new = ls_row iv_note = 'reset to DSL default' ).
+  ENDMETHOD.
+
+  METHOD reset_all.
+    DATA lt_specs TYPE tt_conf.
+    DATA ls_spec TYPE zosd_l3_conf.
     rv_ok = abap_true.
+    lt_specs = specs( ).
+    LOOP AT lt_specs INTO ls_spec.
+      IF reset_setting( ls_spec-param_name ) = abap_false.
+        rv_ok = abap_false.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
 ENDCLASS.
