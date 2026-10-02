@@ -188,10 +188,22 @@ export function startServer(quiet) {
     // the facade's reads share the one connection with the steps, so they
     // wait for the work process like a step (tools/osd-dialog-step.mjs)
     : new Data({client: lockedClient(abap.context.databaseConnections["DEFAULT"], "the ADT facade's data preview")});
+  // the ABAP front of the façade (ADR 0007, tools/adt-abap-front.mjs): in
+  // this process only when it runs ABAP, which is inline. The child-mode
+  // parent loads no ABAP, so there the Node façade answers everything, as
+  // it did before (docs/adt-abap-port/abap-skeleton.md). OSD_ADT=js turns
+  // the front off here too.
+  const adtAbap = MODE === "inline" && process.env.OSD_ADT !== "js"
+    ? (args) => dialogStep(() => inline.cl_express_icf_shim.run({
+      ...args,
+      base: new abap.types.String().set(args.base),
+    }), `ADT ${args.req.method} ${args.req.path}`)
+    : undefined;
   const facade = adtRouter({
     store,
     data,
     systemID: process.env.STG_ADT_SID,
+    abap: adtAbap,
   });
   // the façade claims no path of its own -- it is a router that answers
   // /sap/bc/adt/** and passes everything else on -- so the node says the

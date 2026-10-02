@@ -25,6 +25,7 @@ import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions, parseCookies, sessionIdOf} from "./adt-session.mjs";
+import {abapFront} from "./adt-abap-front.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
@@ -714,6 +715,10 @@ export function adtRouter(options = {}) {
       next();
     });
   }
+
+  // ADR 0007: ZCL_OSD_ADT_HANDLER answers first (tools/adt-abap-front.mjs)
+  if (options.abap !== undefined) router.use(BASE, abapFront({run: options.abap, served: options.abapServed,
+    system: (kind) => (kind === "IDENTITY" ? identity : undefined)}));
 
   // ---- What an ABAP Cloud Project needs that an ordinary one does not.
   //

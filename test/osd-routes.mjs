@@ -181,7 +181,12 @@ describe("tools/osd-routes: one inventory, and what nothing explains", () => {
     // more: it is registered from the registry, under the node
     // /sap/bc/adt, so the scan no longer sees a path list to judge.
     const all = nodes(".", {proxies: false});
-    expect(all.find((n) => n.path === "/sap/bc/adt")?.handler).to.equal("adt-facade");
+    expect(all.find((n) => n.path === "/sap/bc/adt" && n.type === "HOST")?.handler).to.equal("adt-facade");
+    // the mixed phase of the ADT façade in ABAP (ADR 0007): the SICF node
+    // names the ABAP handler, which the façade mounts in front of itself
+    // (tools/adt-abap-front.mjs), and the HOST node stays until the last
+    // group has moved -- then the node flips and this pair becomes one
+    expect(all.find((n) => n.path === "/sap/bc/adt" && n.type === "ABAP")?.handler).to.equal("ZCL_OSD_ADT_HANDLER");
     // the one registration that is a route and is neither a node nor a
     // mount: it decorates every answer with the generation that produced it
     expect(servedBy("tools/osd-serve.mjs", "(no path: middleware)").wrapper)

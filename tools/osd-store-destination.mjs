@@ -28,6 +28,7 @@ import {given, givenText, fill} from "./osd-destination.mjs";
 import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
 import {objectOf} from "./osd-inputs.mjs";
 import {basename, join} from "node:path";
+import {identity as osdIdentity} from "./osd-identity.mjs";
 
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
@@ -40,6 +41,27 @@ const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", 
  *  or activate (OSGo, a built binary) leaves them out and the screen shows
  *  no button that would only be refused (host-tools review 2026-09-25, D2). */
 export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION"];
+
+// SYSTEM answers facts about this system rather than about the tree, one
+// kind per call, as JSON in EV_JSON (docs/adt-abap-port/port-map.md,
+// section 3). Slice 1 of the ADT facade in ABAP asks IDENTITY: who this
+// system says it is to an ADT client. The answer belongs to the facade
+// instance that is running the ABAP, not to the process -- a test mounts
+// several -- so the ADT front binds a provider for the length of its call
+// (tools/adt-abap-front.mjs) and this default answers when none is bound.
+// SYSTEM needs no store and does not open one: opening it parses the tree.
+const SYSTEM_KINDS = {
+  IDENTITY: () => osdIdentity().adt,
+};
+let systemProvider;
+
+/** Bind who answers SYSTEM; returns the previous provider. The provider
+ *  gets the kind and returns a value, or undefined to fall back. */
+export function provideSystem(provider) {
+  const before = systemProvider;
+  systemProvider = provider;
+  return before;
+}
 
 export class StoreDestination {
   /**
@@ -88,6 +110,9 @@ export class StoreDestination {
   }
 
   async #answer(command, signature) {
+    if (command === "SYSTEM") {
+      return this.#system(givenText(signature, "IV_TYPE").toUpperCase());
+    }
     if (await this.#open() === undefined) {
       // Named, and with the reason. "No store" answered as an empty list is
       // a screen that says the system is empty, which is a different and
@@ -119,6 +144,14 @@ export class StoreDestination {
       // written rather than turned into "failed"
       return {EV_ERROR: String(error?.message ?? error), EV_MS: String(Date.now() - started)};
     }
+  }
+
+  #system(kind) {
+    if (SYSTEM_KINDS[kind] === undefined) {
+      return {EV_ERROR: `unknown SYSTEM kind ${kind || "(none)"}`};
+    }
+    const value = systemProvider?.(kind) ?? SYSTEM_KINDS[kind]();
+    return {EV_JSON: JSON.stringify(value)};
   }
 
   #list(signature) {
@@ -369,6 +402,7 @@ const EMPTY = {
   EV_COUNT: "0",
   EV_MS: "0",
   EV_ERROR: "",
+  EV_JSON: "",
   ET_OBJECT: [],
   ET_ISSUE: [],
   ET_TYPE: [],
