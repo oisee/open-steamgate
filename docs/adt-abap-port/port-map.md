@@ -572,3 +572,4 @@ Every landing also:
     - Identity escaping in feeds: fix in OSG-JS first, or keep it.
     - Which uncovered rows get tests first: vfs facets, releasestates, objectproperties, packages/settings, feeds, users, abapunit/metadata, checkruns/reporters, inactiveobjects, valuehelps, include PUT `/source/main`, the INCL/SRVD bare path, and `includes/:include` on a non-CLAS type.
     - ADR 0007 should record five host families (store, git, build, system, SQL check) and 17 destination commands.
+F3 continuation contract: [slice-f3-continuations.md](slice-f3-continuations.md); router rows declare `resume_kind`, dispatched through `ZIF_OSD_ADT_RESUMABLE` in a fresh step. HTTP row ownership is unchanged.

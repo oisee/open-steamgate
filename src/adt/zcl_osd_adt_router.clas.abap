@@ -33,6 +33,7 @@ CLASS zcl_osd_adt_router DEFINITION PUBLIC FINAL CREATE PUBLIC.
              method    TYPE string,
              pattern   TYPE string,
              handler   TYPE string,
+             resume_kind TYPE string,
              served_by TYPE string,
            END OF ty_route.
     TYPES tt_route TYPE STANDARD TABLE OF ty_route WITH DEFAULT KEY.

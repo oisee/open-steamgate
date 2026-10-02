@@ -135,7 +135,7 @@ export class StoreDestination {
     if (command === "OBJECT") {
       return this.#object(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));
     }
-    const store = ["READ", "HISTORY", "REVISION"].includes(command)
+    const store = ["READ", "WRITE", "HISTORY", "REVISION"].includes(command)
       ? (systemCalls?.getStore()?.store ?? await this.#open())
       : await this.#open();
     if (store === undefined) {
@@ -157,7 +157,7 @@ export class StoreDestination {
         case "CAPABILITIES": return {EV_NOTE: CAPABILITIES.join(" ")};
         case "LIST": return this.#list(signature);
         case "READ": return this.#read(type, name, include, store);
-        case "WRITE": return this.#write(type, name, include, source, started);
+        case "WRITE": return this.#write(type, name, include, source, started, store);
         case "CHECK": return this.#check(type, name, include, source, started);
         case "ACTIVATE": return await this.#activate(type, name, started);
         case "HISTORY": return await this.#history(type, name, include, signature, store);
@@ -324,13 +324,13 @@ export class StoreDestination {
     };
   }
 
-  #write(type, name, include, source, started) {
+  #write(type, name, include, source, started, store) {
     if (source === undefined) {
       // not "an empty source": a screen that posts a form with no text area
       // in it would otherwise silently empty the object it was showing
       return {EV_ERROR: "WRITE without IV_SOURCE: nothing was written"};
     }
-    const written = this.store.write(type, name, String(source), include);
+    const written = store.write(type, name, String(source), include);
     return {
       EV_FILE: String(written.file ?? ""),
       EV_PACKAGE: String(written.package ?? ""),

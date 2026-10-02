@@ -27,6 +27,7 @@
 // the Node façade answers one -- the ADT exception document, 500,
 // ExceptionInternalError in our namespace -- for every request, a HOST row
 // included: no session was resolved, so nothing may go past the gate.
+import {currentStepToken} from "./osd-dialog-step.mjs";
 import {withSystem} from "./osd-store-destination.mjs";
 
 export const HANDLER = "ZCL_OSD_ADT_HANDLER";
@@ -38,14 +39,15 @@ const NAMESPACE = "org.open-steamgate.osd";
 // A HOST verdict may carry a continuation (ZIF_OSD_ADT_ROUTE=>TY_CONTINUATION:
 // kind, payload as JSON). The kind names a handler a host registered here at
 // startup; it runs after the step, with:
-//   {req, res, next, kind, payload, session, answer, replay}
+//   {req, res, next, kind, payload, session, answer, replay, resume}
 // where payload is the parsed JSON (undefined when empty), session is
 // req.adt.session (resolved in ABAP), answer is the handler's record
 // ({status, contentType, headers, body, servedBy, continuation}) and replay()
 // sends that record as an ABAP answer. A handler answers on its own (it
 // replaces the ABAP answer), calls replay() after its work (it extends it),
 // or calls next() (the Node route serves). Cookies and the token are already
-// on res when it runs.
+// on res when it runs. resume(json) finishes host work through the route's
+// ABAP RESUME in a fresh step and sends that response.
 //
 // What a continuation holds is a snapshot: the step has ended, no work-process
 // lock is held, and between the verdict and the continuation another step may
@@ -163,6 +165,11 @@ export async function answerOf(handler, view, session) {
       RTTIName: "\\INTERFACE=ZIF_OSD_ADT_SESSION"}).set(session);
   }
   await handler.answer(input);
+  return responseOf(response, text(servedBy));
+}
+
+/** Convert the response of either ANSWER or RESUME without losing headers. */
+export function responseOf(response, servedBy = "ABAP") {
   const s = response.get();
   const kind = text(s.continuation?.get().kind);
   return {
@@ -170,7 +177,7 @@ export async function answerOf(handler, view, session) {
     contentType: text(s.content_type),
     headers: s.headers.array().map((row) => [text(row.get().name), text(row.get().value)]),
     body: Buffer.from(text(s.body), "utf8"),
-    servedBy: text(servedBy),
+    servedBy,
     continuation: kind === "" ? undefined : {kind, payload: text(s.continuation.get().payload)},
   };
 }
@@ -181,11 +188,55 @@ export async function answerOf(handler, view, session) {
 export function abapRunner({handler, step, stale}) {
   return {
     stale,
+    resume: (kind, json) => resumeOf(globalThis.abap.Classes?.[HANDLER] ?? handler, kind, json),
     step: (work, label) => step(work, label),
     // the class slot read each time, so a warm load (tools/osd-hot.mjs) is
     // the handler the next request enters
     answer: (view, session) => answerOf(globalThis.abap.Classes?.[HANDLER] ?? handler, view, session),
   };
+}
+
+/** Call only inside the request's fresh dialog step. */
+export async function resumeOf(handler, kind, json) {
+  if (currentStepToken() === undefined) throw new Error("ADT RESUME requires a dialog step");
+  const a = globalThis.abap;
+  return responseOf(await handler.resume({iv_kind: new a.types.String().set(kind),
+    iv_json: new a.types.String().set(json)}));
+}
+
+/** Host work finishes by sending the response returned by ABAP RESUME. */
+export async function resume(req, res, kind, json) {
+  const {store, step, front} = req.osdFacade;
+  const record = await withSystem((k, n) => front.system?.(k, n, req), () => step(async () => {
+    const original = req.adt?.session;
+    if (original !== undefined && await front.sessions.get(original.id) === undefined) {
+      const error = new Error("the ADT session has ended");
+      error.code = "ENQ_SESSION_ENDED";
+      throw error;
+    }
+    const session = await front.sessions?.sessionFor?.(req);
+    // Re-resolve in the new step: this pins ENQ and notices ended sessions.
+    if (session !== undefined) {
+      const a = globalThis.abap;
+      const params = a.Classes[HANDLER].METHODS.ANSWER.parameters.IS_REQUEST.type().get();
+      // A fresh request had no cookie on arrival. Re-entry uses the session
+      // ANSWER resolved, including that case, rather than opening a new one.
+      const headers = original === undefined ? req.headers
+        : {...req.headers, cookie: `sap-contextid=${original.id}`};
+      for (const [name, value] of Object.entries(headers)) {
+        for (const one of Array.isArray(value) ? value : [value]) {
+          const r = params.headers.appendInitial().get(); r.name.set(name); r.value.set(String(one));
+        }
+      }
+      await session.zif_osd_adt_session$resolve({it_cookies: await a.Classes.ZCL_OSD_ADT_CSRF.cookies_of({it_headers: params.headers}),
+        it_headers: params.headers});
+    }
+    return front.resume(kind, typeof json === "string" ? json : JSON.stringify(json));
+  }, `ADT RESUME ${kind}`), {store});
+  // RESUME does not stamp session headers; keep every header its owner
+  // returned, alongside the cookies already sent by ANSWER.
+  replay(res, record, req.method);
+  return record;
 }
 
 const SESSION_HEADERS = new Set(["set-cookie", "x-csrf-token"]);
@@ -233,6 +284,7 @@ function dumped(generation, message) {
  * @param {object} options
  * @param {Function} options.step the dialog step: (work, label) => Promise
  * @param {Function} options.answer (view, session) => Promise of the answer record, inside the step
+ * @param {Function} options.resume (kind, json) => response record, called inside a fresh step
  * @param {object} options.sessions AbapSessions: sessionFor(req) gives the ZIF_OSD_ADT_SESSION
  *   whose RESOLVE sets req.adt
  * @param {Function} options.refuse the façade's refusal: (res, status, type, message, options)
@@ -246,6 +298,7 @@ function dumped(generation, message) {
  */
 export function abapFront(options) {
   return async (req, res, next) => {
+    req.osdFacade = {store: options.store, options: options.facadeOptions ?? options, step: options.step, front: options};
     // the full path, undecoded, whatever router prefix express has stripped
     const url = req.originalUrl ?? req.url;
     const path = url.split("?")[0];
@@ -326,8 +379,13 @@ export function abapFront(options) {
     }
     try {
       await handler({req, res, next, kind, payload, session: req.adt?.session, answer: record,
+        resume: (json) => resume(req, res, kind, json),
         replay: () => replay(res, record, req.method, {sessionSent: true})});
     } catch (e) {
+      if (e?.code === "ENQ_SESSION_ENDED" && res.headersSent !== true) {
+        res.status(403).set("x-csrf-token", "Required").type("text/plain; charset=utf-8").send("CSRF token validation failed");
+        return;
+      }
       console.error(`ADT continuation ${JSON.stringify(kind)} failed on ${req.method} ${path}: ${e?.stack ?? e?.message ?? e}`);
       if (res.headersSent !== true) refuse(`continuation ${JSON.stringify(kind)}: ${String(e?.message ?? e)}`);
     }
