@@ -38,11 +38,27 @@ const rel = (p) => relative(ROOT, p).split("\\").join("/");
 
 /** the Go packages: directories under tools/gogen/go with .go files, but
  * not generated/ or testdata/ */
+/** the files git tracks under tools/, or undefined outside a checkout: what
+ * is measured is what a commit carries, so a local run and CI measure the
+ * same tree (generated files a build leaves on disk do not count) */
+let trackedFiles;
+function tracked() {
+  if (trackedFiles !== undefined) return trackedFiles ?? undefined;
+  try {
+    const out = execFileSync("git", ["ls-files", "-z", "--cached", "--", "tools"], {cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1e8});
+    trackedFiles = new Set(out.split("\0").filter(Boolean));
+  } catch {
+    trackedFiles = null;
+  }
+  return trackedFiles ?? undefined;
+}
+const isTracked = (file) => tracked()?.has(rel(file)) ?? true;
+
 function goPackages() {
   const out = [];
   const walk = (dir) => {
     const names = readdirSync(dir).sort();
-    if (names.some((n) => n.endsWith(".go"))) out.push(dir);
+    if (names.some((n) => n.endsWith(".go") && isTracked(join(dir, n)))) out.push(dir);
     for (const n of names) {
       const p = join(dir, n);
       if (n === "testdata" || n === "generated" || n.startsWith(".") || !statSync(p).isDirectory()) continue;
@@ -58,7 +74,8 @@ function goPackages() {
  * anywhere else is written by hand and counts */
 const ownGoFiles = (dir) => readdirSync(dir).sort()
   .filter((n) => n.endsWith(".go") && !n.endsWith("_test.go") && !(n.startsWith("zz_") && rel(dir).startsWith("tools/gogen/go/cmd/")))
-  .map((n) => join(dir, n));
+  .map((n) => join(dir, n))
+  .filter(isTracked);
 
 const pkgName = (dir) => rel(dir).replace(/^tools\/gogen\/go\//, "");
 
@@ -67,7 +84,7 @@ function mjsFiles(dir = join(ROOT, "tools"), out = []) {
     const p = join(dir, n);
     if (n === "node_modules" || n === ".out" || n.startsWith(".")) continue;
     if (statSync(p).isDirectory()) mjsFiles(p, out);
-    else if (n.endsWith(".mjs")) out.push(p);
+    else if (n.endsWith(".mjs") && isTracked(p)) out.push(p);
   }
   return out;
 }
