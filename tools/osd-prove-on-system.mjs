@@ -798,17 +798,17 @@ export async function receiptVersions(mcp, pkg, items) {
   return {versions, problems};
 }
 
-/** Step 7: one `git_delete_objects` call. Every object of the receipt goes
- *  with `expect: {sha256}`, the receipt's: vsp takes the lock, reads the
- *  version under it and deletes only on a match; otherwise it answers
- *  `changed`, keeps the object, the repository and the package, and goes on
- *  with the others. The repository row goes only when `createdKey` names
- *  this run's own: `delete_repo` with `expect_repo {key, name}`, which
- *  ZADT_VSP rechecks in the step that deletes it. With no receipt entry the
- *  call names the package as its one (skipped) item, which makes vsp delete
- *  the package if it is empty and no repository is registered for it.
- *  Then the residue is read twice (our count and vsp's inventory). Returns
- *  the problems; anything left is one. */
+// vsp deletes in the given order, and a table whose data element went first serialises
+// with COMPTYPE N and comes back `changed` (A4H 2026-10-02): users before what they use
+export const deleteRank = (type) => ({INTF: 1, DDLS: 2, SHLP: 3, ENQU: 3, TTYP: 4, VIEW: 5, TABL: 5, DTEL: 6, DOMA: 7})[type] ?? 0;
+
+/** Step 7: one `git_delete_objects` call, users first (deleteRank). Each object goes
+ *  with the receipt's `expect: {sha256}`: vsp locks, reads the version under the
+ *  lock and deletes only on a match, else answers `changed` and keeps the object,
+ *  the repository and the package. The repository row goes only when `createdKey`
+ *  is this run's (`delete_repo` + `expect_repo`, rechecked by ZADT_VSP). With no
+ *  receipt entry the one (skipped) item is the package, deleted only if empty.
+ *  Then the residue is read twice. Returns the problems; anything left is one. */
 export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log = () => {}} = {}) {
   const dropRepo = createdKey !== undefined && REPO_KEY.test(createdKey) && createdKey === expectedKey;
   const problems = [];
@@ -819,7 +819,7 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log =
     asked = entries.map((e) => {
       if (!OBJECT_ITEM.test(e.item) || !SHA256.test(e.sha256 ?? "")) throw new Error(`not a receipt entry: ${e.item}`);
       return {type: e.item.slice(0, 4), name: e.item.slice(5), expect: {sha256: e.sha256}};
-    });
+    }).sort((a, b) => deleteRank(a.type) - deleteRank(b.type));
     params = {type: "git_delete_objects", package: pkg, objects: asked.length > 0 ? asked : [{type: "DEVC", name: pkg}]};
     if (dropRepo) Object.assign(params, {delete_repo: true, expect_repo: {key: createdKey, name: ownRepoName(pkg)}});
     const {json, isError} = jsonAnswer(await mcp.call("system", undefined, params), "delete");
