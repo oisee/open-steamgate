@@ -3,7 +3,7 @@ import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync} from "node:
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {spawnSync} from "node:child_process";
-import {check, loadList, localCounts, tableOf, LIST} from "../tools/osd-ddic-reserved.mjs";
+import {check, keyFindings, keyLength, loadList, localCounts, tableOf, LIST} from "../tools/osd-ddic-reserved.mjs";
 
 // A field a system refuses to activate because its name is a reserved word
 // ("RULE is a reserved word (choose another field name)", A4H 2026-10-01,
@@ -116,6 +116,40 @@ describe("DDIC reserved field names (tools/osd-ddic-reserved.mjs)", () => {
     expect(run.status).to.equal(2);
     expect(run.stderr).to.match(/trese\.json could not be read \(SyntaxError\); its content is not printed/);
     expect(run.stdout + run.stderr).to.not.include("QQMALFORMEDWORD");
+  });
+
+  describe("key length, as a system counts it (A4H 2026-10-02: ZOSD_L3_PILE, \"Key length > 120\")", () => {
+    // a key field as abapGit writes it: LENG, or a data element without one
+    const field = (name, leng, key = true, rollname) => `    <DD03P><FIELDNAME>${name}</FIELDNAME>${key ? "<KEYFLAG>X</KEYFLAG>" : ""}`
+      + `${rollname ? `<ROLLNAME>${rollname}</ROLLNAME>` : ""}${leng === undefined ? "" : `<LENG>${String(leng).padStart(6, "0")}</LENG>`}</DD03P>`;
+    const table = (name, fields, tabclass = "TRANSP") => TABLE(name, []).replace("   <DD03P_TABLE>\n", `   <DD03P_TABLE>\n${fields.join("\n")}\n`)
+      .replace(`<TABCLASS>${"TRANSP"}</TABCLASS>`, `<TABCLASS>${tabclass}</TABCLASS>`);
+    // the shape A4H refused: MANDT, SET_NAME 16, RUN_ID 32, RULE_NAME 60, PILE_NO INT4 (LENG 10)
+    const PILE = [field("MANDT", undefined, true, "MANDT"), field("SET_NAME", 16), field("RUN_ID", 32), field("RULE_NAME", 60), field("PILE_NO", 10), field("STATUS", 12, false)];
+
+    it("sums the key fields' LENG, an INT4 at 10 and MANDT at 3: the refused table is 121, and found", () => {
+      expect(keyLength(table("ZT_PILE", PILE))).to.deep.equal({table: "ZT_PILE", length: 121, unmeasured: []});
+      expect(keyFindings(table("ZT_PILE", PILE))).to.have.length(1);
+    });
+    it("120 passes; non-key fields do not count", () => {
+      expect(keyFindings(table("ZT_PILE", PILE.filter((_, i) => i !== 1).concat([field("SET_NAME", 16, false)])))).to.deep.equal([]);
+      expect(keyFindings(table("ZT_EDGE", [field("A", 110), field("B", 10)]))).to.deep.equal([]);
+      expect(keyFindings(table("ZT_EDGE", [field("A", 111), field("B", 10)]))).to.have.length(1);
+    });
+    it("a key field without a length the XML gives is a finding; structures and SAP's tables are not checked", () => {
+      expect(keyFindings(table("ZT_X", [field("A", undefined, true, "ZSOME_DTEL")]))[0].unmeasured).to.deep.equal(["A"]);
+      expect(keyFindings(table("ZT_S", [field("A", 200)], "INTTAB"))).to.deep.equal([]);
+      expect(keyFindings(table("TBTCX", [field("A", 200)]))).to.deep.equal([]);
+    });
+    it("the command fails on such a table under a path", () => {
+      const dir = mkdtempSync(join(tmpdir(), "ddic-key-"));
+      try {
+        writeFileSync(join(dir, "zt_pile.tabl.xml"), table("ZT_PILE", PILE));
+        const run = spawnSync(process.execPath, ["tools/osd-ddic-reserved.mjs", dir], {encoding: "utf8"});
+        expect(run.status).to.equal(1);
+        expect(run.stdout).to.match(/ZT_PILE: the key is 121 long .* a system refuses more than 120/);
+      } finally { rmSync(dir, {recursive: true, force: true}); }
+    });
   });
 
   it("the tree has no finding and no allow entry it does not need", () => {

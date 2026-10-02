@@ -2,8 +2,11 @@
 * Rule ship-in-service-has-a-captain: A ship in service has a captain aboard on the check date
 CLASS zcl_l2_ship_captain DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
+    TYPES tt_range TYPE RANGE OF zosd_l2_ship-ship_id.
     CLASS-METHODS check
       IMPORTING iv_date TYPE d
+                it_range TYPE tt_range OPTIONAL
+                iv_active_status TYPE zosd_l2_ship-status DEFAULT 'A'
       RETURNING VALUE(rt_alerts) TYPE string_table.
 ENDCLASS.
 
@@ -22,11 +25,12 @@ CLASS zcl_l2_ship_captain IMPLEMENTATION.
         ship~name AS ship_name
       FROM zosd_l2_ship AS ship
       INTO CORRESPONDING FIELDS OF TABLE lt_join
-      WHERE ship~status = 'A'
+      WHERE ship~status = iv_active_status
         AND NOT EXISTS ( SELECT * FROM zosd_l2_crew AS crew
           WHERE crew~ship_id = ship~ship_id
             AND crew~role = 'C'
             AND crew~since <= iv_date )
+        AND ship~ship_id IN it_range
       ORDER BY
         ship~ship_id.
     LOOP AT lt_join INTO ls_join.

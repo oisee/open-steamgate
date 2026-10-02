@@ -2,8 +2,10 @@
 * Rule ship-max-cargo: No cargo item exceeds two kilograms
 CLASS zcl_l2_ship_max_cargo DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
+    TYPES tt_range TYPE RANGE OF zosd_l2_ship-ship_id.
     CLASS-METHODS check
       IMPORTING iv_date TYPE d
+                it_range TYPE tt_range OPTIONAL
       RETURNING VALUE(rt_alerts) TYPE string_table.
 ENDCLASS.
 
@@ -30,6 +32,7 @@ CLASS zcl_l2_ship_max_cargo IMPLEMENTATION.
         INNER JOIN zosd_l2_cargo AS cargo
           ON cargo~ship_id = ship~ship_id
       INTO CORRESPONDING FIELDS OF TABLE lt_join
+      WHERE ship~ship_id IN it_range
       ORDER BY
         ship~ship_id.
     SORT lt_join BY ship_ship_id.

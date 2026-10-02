@@ -17,14 +17,15 @@ import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSyn
 import {tmpdir} from "node:os";
 import {dirname, join, relative, resolve as resolvePath, sep} from "node:path";
 import {pathToFileURL} from "node:url";
-import {createRequire} from "node:module";
 import yaml from "js-yaml";
 import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor, unresolvedDeep} from "./dsl-ddic.mjs";
+import {compileParams} from "./dsl-l2-params.mjs";
+import {compileRange, exampleRange} from "./dsl-l2-range.mjs";
+import {lineIndex, lineOf} from "./dsl-yaml-lines.mjs";
 import {INT_RANGE, PACKED, allReferences, canonical, compareValues, deriveCases, evaluate, kindOf, shiftDate} from "./dsl-l2-eval.mjs";
 
-const {DDIC} = createRequire(import.meta.url)("@abaplint/core/build/src/ddic.js");
-
 export {evaluate, stepValue} from "./dsl-l2-eval.mjs";
+export {lineIndex} from "./dsl-yaml-lines.mjs";
 
 export const CHECK_TEMPLATE = "recipes/l2-check/template.tpl";
 export const TEST_TEMPLATE = "recipes/l2-check-test/template.tpl";
@@ -35,63 +36,6 @@ export class RuleError extends Error {
     this.file = file;
     this.line = line;
   }
-}
-
-// ---------------------------------------------------------------------------
-// where each key and list item of the YAML is written
-
-// A path is the keys and 0-based item indexes joined by "/", as
-// `forbid/where` or `examples/1/rows/ZTAB/0/field`. Block mappings and block
-// sequences are indexed; a flow collection (`[{a: 1}]`) is one line, so what
-// is inside it takes the line of the key that holds it (see `lineOf`).
-export function lineIndex(text) {
-  const index = new Map();
-  const stack = [{indent: -1, path: ""}];
-  let scalarIndent = -1;
-  text.split(/\r?\n/).forEach((raw, i) => {
-    const line = i + 1;
-    const indent = raw.length - raw.trimStart().length;
-    const content = raw.trim();
-    if (scalarIndent >= 0) {
-      if (content === "" || indent > scalarIndent) return;
-      scalarIndent = -1;
-    }
-    if (content === "" || content.startsWith("#") || content === "---") return;
-    let column = indent;
-    let rest = raw.slice(indent);
-    while (rest === "-" || rest.startsWith("- ")) {
-      while (stack.at(-1).indent > column || (stack.at(-1).indent === column && stack.at(-1).item)) stack.pop();
-      const parent = stack.at(-1);
-      parent.count = parent.itemIndent === column ? parent.count + 1 : 0;
-      parent.itemIndent = column;
-      const path = `${parent.path}/${parent.count}`;
-      if (!index.has(path)) index.set(path, line);
-      stack.push({indent: column, path, item: true});
-      const after = rest.slice(1);
-      const skip = after.length - after.trimStart().length;
-      column += 1 + skip;
-      rest = after.trimStart();
-    }
-    const key = /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s"'#{[\]}:,][^:#]*?)\s*:(?:\s|$)/.exec(rest);
-    if (!key) return;
-    const name = key[1].startsWith('"') || key[1].startsWith("'") ? key[1].slice(1, -1) : key[1].trim();
-    while (stack.at(-1).indent >= column) stack.pop();
-    const path = `${stack.at(-1).path}/${name}`;
-    if (!index.has(path)) index.set(path, line);
-    stack.push({indent: column, path});
-    if (/^[|>][-+0-9]*\s*(#.*)?$/.test(rest.slice(key[0].length).trim())) scalarIndent = column;
-  });
-  return index;
-}
-
-// the line of a path, or of the nearest enclosing path that has one
-function lineOf(index, path) {
-  let current = `/${path}`;
-  while (current) {
-    if (index.has(current)) return index.get(current);
-    current = current.slice(0, current.lastIndexOf("/"));
-  }
-  return 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,7 +499,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     return value;
   };
   need(doc, "", "a mapping of the rule's keys", "map");
-  const known = new Set(["rule", "class", "title", "params", "for", "when", "forbid", "require", "limit", "alert", "boundaries", "examples"]);
+  const known = new Set(["rule", "class", "title", "params", "for", "range", "when", "forbid", "require", "limit", "alert", "boundaries", "examples"]);
   for (const key of Object.keys(doc)) if (!known.has(key)) failAt(line(key))(`unknown key ${key}`);
 
   const name = need(doc.rule, "rule", "the rule's name");
@@ -570,30 +514,13 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   if (/[\r\n]/.test(title)) failAt(line("title"))("title must be one line");
 
   registry ??= registryFor(ddic, []);
-  const parameterTypes = new DDIC(registry);
-  const params = new Map();
-  if (doc.params !== undefined) {
-    need(doc.params, "params", "a mapping of parameter names to types", "map");
-    for (const [rawName, spec] of Object.entries(doc.params)) {
-      const path = `params/${rawName}`;
-      const name = rawName.toLowerCase();
-      if (!/^[a-z][a-z0-9_]*$/.test(rawName) || rawName !== name || name.length > 27) failAt(line(path))(`parameter ${rawName} must be a lower-case ABAP name of at most 27 characters`);
-      if (name === "date") failAt(line(path))("parameter date clashes with the built-in $date");
-      need(spec, path, "a mapping with type and optional default", "map");
-      for (const key of Object.keys(spec)) if (!["type", "default"].includes(key)) failAt(line(`${path}/${key}`))(`unknown key params.${rawName}.${key}`);
-      const typeName = need(spec.type, `${path}/type`, "a DDIC element or built-in type").toUpperCase();
-      const resolved = parameterTypes.lookupBuiltinType(typeName) ?? parameterTypes.lookup(typeName)?.type;
-      const type = DDIC_PROVIDER.literalType(registry, resolved, typeName);
-      if (type.resolved === false) failAt(line(`${path}/type`))(`parameter $${name} type ${typeName} cannot resolve: ${type.reason}`);
-      if (spec.default !== undefined) {
-        const value = need(spec.default, `${path}/default`, "a scalar default");
-        const why = misfit(value, type);
-        if (why) failAt(line(`${path}/default`))(`default for $${name} is ${typeText(type)}; ${why}`);
-      }
-      params.set(name, {"@id": `${id}/param/${name}`, rule_line: line(path), name, type_name: typeName.toLowerCase(), type,
-        ref: `iv_${name}`, ...(spec.default !== undefined ? {default: spec.default, "default@type": type} : {})});
-    }
-  }
+  // <TABLE>-<field>: the field's type; undefined for a table or field the DDIC does not have
+  const fieldType = (table, column) => {
+    let info;
+    try { info = tableInfo(registry, table, () => { throw fieldType; }); } catch (e) { if (e === fieldType) return undefined; throw e; }
+    return info.fields.get(column)?.literal;
+  };
+  const params = compileParams({doc, registry, id, line, failAt, need, misfit, typeText, fieldType});
   const usedParams = new Set();
   const windows = new Map();
   const tables = new Map();
@@ -610,6 +537,11 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     return {...parsed, info: tableOf(parsed.table, path)};
   };
   const outer = source("for", doc.for);
+  const range = compileRange({doc, outer, id, line, failAt, need});
+  // the range is one more conjunct of the driving query's WHERE, so an OR
+  // above it is parenthesised like any other group (`layout`)
+  const ranged = (tree) => range ? conjoin([tree, {op: "cmp", leaf: {"@id": range["@id"], rule_line: range.rule_line,
+    column: range.field, lhs: range.source, op: "IN", is_literal: false, sref: "it_range", ref: "it_range"}}]) : tree;
   const wa = (alias) => `ls_${alias}`;
 
   // forbid: one exists, or all: / any: of two or three; require: one exists
@@ -1023,7 +955,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
         key_change: group_keys.map((k) => `${qwa}-${k.name} <> ls_prev-${k.name}`).join(" OR ")} : {}),
       for_query: {"@id": `${qid}/for`, rule_line: line("for"),
         from: {"@id": `${id}/for`, rule_line: line("for"), table: outer.table.toLowerCase(), alias: outer.alias},
-        where: whereLines(whenTree)}} : undefined;
+        where: whereLines(ranged(whenTree))}} : undefined;
     return {"@id": qid, rule_line: line(kind), type: `ty_join${suffix}`, itab: `lt_join${suffix}`, wa: qwa,
       fields: [...fields.values()], ...(kind === "limit" ? {aggregate} : {}),
       ...(zero ? {zero, join_fields: [...fields.values()].filter((f) => group_keys.some((k) => k.source === f.source)
@@ -1033,7 +965,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
         rule_line: kind === "limit" ? c.exists_line : c.rule_line, table: c.table, alias: c.alias,
         on: oneOuter ? topWhere.map((node) => c.conditions[node.index]) : c.on,
         ...(oneOuter ? {one_outer: true} : {})})),
-      where: whereLines(oneOuter ? whenTree : condition), order, alert_parts: parts,
+      where: whereLines(ranged(oneOuter ? whenTree : condition)), order, alert_parts: parts,
       ...(oneOuter || (kind === "limit" && !zero) ? {sort_by: group_keys.map((k) => k.name).join(" ")} : {}),
       ...(kind === "limit" && !zero ? {limit: {...threshold, aggregate}, group_keys,
         key_change: group_keys.map((k) => `${qwa}-${k.name} <> ls_prev-${k.name}`).join(" OR ")} : {})};
@@ -1062,7 +994,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     itab: `lt_${outer.alias}`, wa: wa(outer.alias)};
   const level = (node, tree, leaves, indent, isLoop) => ({"@id": node["@id"], rule_line: node.rule_line, indent,
     table: node.table, itab: node.itab, wa: node.wa, is_loop: isLoop,
-    where: whereLines(tree && resolve(tree, leaves), `${indent}  `)});
+    where: whereLines(node === forNode ? ranged(tree && resolve(tree, leaves)) : tree && resolve(tree, leaves), `${indent}  `)});
   const pass = (group, parts) => {
     const levels = [level(forNode, when.tree, when.conditions, "    ", true),
       ...group.map((c, k) => level(c, c.tree, c.conditions, " ".repeat(6 + 2 * k), kind !== "require"))];
@@ -1095,7 +1027,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     const base = `examples/${e}`;
     const fail = failAt(line(base));
     need(example, base, "a mapping with name, date, rows and expect", "map");
-    for (const key of Object.keys(example)) if (!["name", "date", "params", "rows", "expect"].includes(key)) failAt(line(`${base}/${key}`))(`unknown key ${key} in an example`);
+    for (const key of Object.keys(example)) if (!["name", "date", "params", "range", "rows", "expect"].includes(key)) failAt(line(`${base}/${key}`))(`unknown key ${key} in an example`);
     const label = need(example.name, `${base}/name`, "the example's name");
     const labelWhy = misfit(label, {built_in: "STRG"});
     if (labelWhy) failAt(line(`${base}/name`))(`example name: ${labelWhy}`);
@@ -1106,6 +1038,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     if (methods.has(method) || ["teardown", "assert_alerts", "assert_same_as_reference"].includes(method)) failAt(line(`${base}/name`))(`example name ${JSON.stringify(label)} gives method ${method} a second time`);
     methods.add(method);
     const exampleId = `${id}/example/${label}`;
+    const rangeRows = exampleRange({example, base, range, exampleId, line, failAt, need, misfit, table: outer.table});
     const date = need(example.date, `${base}/date`, "the check date (YYYYMMDD)");
     const dateWhy = misfit(date, DATE_TYPE);
     if (dateWhy) failAt(line(`${base}/date`))(dateWhy);
@@ -1167,11 +1100,13 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     raw.push(Object.fromEntries(Object.entries(rows).map(([t, list]) => [t.toLowerCase(),
       list.map((row) => Object.fromEntries(Object.entries(row).map(([f, v]) => [f.toLowerCase(), v])))])));
     exampleParams.push(effectiveParams);
+    effectiveParams.$range = rangeRows;
     return {"@id": exampleId, rule_line: line(base), name: label, method, label, "label@type": {built_in: "STRG"},
       ref_label: `${label} (check against check_reference)`, "ref_label@type": {built_in: "STRG"},
       date: {"@id": `${exampleId}/date`, rule_line: line(`${base}/date`), value: date, "value@type": DATE_TYPE,
         call: `${className}=>check`},
       ...(params.size ? {param_args: paramArgs, has_params: true} : {}),
+      ...(range ? {range, range_args: rangeRows} : {}),
       tables: exampleTables,
       expect: expect.map((value, x) => {
         if (typeof value !== "string") failAt(line(`${base}/expect/${x}`))("an expected alert is one line of text");
@@ -1189,6 +1124,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   const model = {
     "@id": id, rule_line: line("rule"), rule: name, title, source: recorded, class: className, kind, combine, comment,
     ...(params.size ? {params: [...params.values()]} : {}), ...(windows.size ? {windows: [...windows.values()]} : {}),
+    ...(range ? {range} : {}),
     for: forNode,
     when: {"@id": `${id}/when`, rule_line: line(doc.when === undefined ? "for" : "when"), conditions: when.conditions,
       ...(when.tree ? {tree: when.tree} : {})},
@@ -1281,6 +1217,7 @@ function caseNode(model, c) {
     derived: {condition: c.condition, kind: c.kind, structural: c.structural},
     date: {...literal(`${id}/date`, c.date, DATE_TYPE), call: `${model.class}=>check`},
     ...(model.params ? {param_args: c.paramArgs ?? [], has_params: true} : {}),
+    ...(model.range ? {range: model.range, range_args: []} : {}),
     tables,
     expect, long_expect: expect.some((x) => !x.single)};
 }

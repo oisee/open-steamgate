@@ -7,11 +7,14 @@
 * own tables and its teardown deletes them again by key.
 CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT FINAL.
   PRIVATE SECTION.
+    TYPES tt_range TYPE RANGE OF zosd_l2_ship-ship_id.
     DATA mt_zosd_l2_ship TYPE STANDARD TABLE OF zosd_l2_ship WITH DEFAULT KEY.
     DATA mt_zosd_l2_crew TYPE STANDARD TABLE OF zosd_l2_crew WITH DEFAULT KEY.
     METHODS teardown.
     METHODS check_reference
       IMPORTING iv_date TYPE d
+                it_range TYPE tt_range OPTIONAL
+                iv_active_status TYPE zosd_l2_ship-status DEFAULT 'A'
       RETURNING VALUE(rt_alerts) TYPE string_table.
     METHODS assert_alerts
       IMPORTING it_act TYPE string_table it_exp TYPE string_table iv_example TYPE string.
@@ -23,6 +26,7 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
     METHODS the_captain_joins_later FOR TESTING.
     METHODS a_captain_of_another_ship FOR TESTING.
     METHODS in_maintenance_needs_none FOR TESTING.
+    METHODS the_range_keeps_the_inner_ship FOR TESTING.
     METHODS b_status_eq FOR TESTING.
     METHODS b_status_ne FOR TESTING.
     METHODS b_status_blank FOR TESTING.
@@ -55,7 +59,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_crew TYPE STANDARD TABLE OF zosd_l2_crew WITH DEFAULT KEY.
     DATA lv_alert TYPE string.
     SELECT * FROM zosd_l2_ship INTO TABLE lt_ship
-      WHERE status = 'A'
+      WHERE status = iv_active_status
+        AND ship_id IN it_range
       ORDER BY PRIMARY KEY.
     LOOP AT lt_ship INTO ls_ship.
       SELECT * FROM zosd_l2_crew INTO TABLE lt_crew
@@ -95,6 +100,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -110,8 +117,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_crew-since = '20260101'.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `captain aboard (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `captain aboard` ).
   ENDMETHOD.
@@ -121,6 +128,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -129,8 +138,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
     INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `no crew at all (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `no crew at all` ).
   ENDMETHOD.
@@ -141,6 +150,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -157,8 +168,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `only an engineer (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `only an engineer` ).
   ENDMETHOD.
@@ -169,6 +180,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -185,8 +198,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `the captain joins later (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `the captain joins later` ).
   ENDMETHOD.
@@ -197,6 +210,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -219,8 +234,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `a captain of another ship (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `a captain of another ship` ).
   ENDMETHOD.
@@ -230,6 +245,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -237,10 +254,48 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_ship-status = 'M'.
     APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
     INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `in maintenance needs none (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `in maintenance needs none` ).
+  ENDMETHOD.
+
+  METHOD the_range_keeps_the_inner_ship.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
+    CLEAR ls_range.
+    ls_range-sign = 'I'.
+    ls_range-option = 'EQ'.
+    ls_range-low = 'S002'.
+    APPEND ls_range TO lt_range.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S001'.
+    ls_zosd_l2_ship-name = 'Albatross'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S002'.
+    ls_zosd_l2_ship-name = 'Cormorant'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S004'.
+    ls_zosd_l2_ship-name = 'Dove'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `the range keeps the inner ship (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `the range keeps the inner ship` ).
   ENDMETHOD.
 
   METHOD b_status_eq.
@@ -248,6 +303,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -256,10 +313,10 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
     INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
-    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = 'A': eq (check against check_reference)` ).
-    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = 'A': eq` ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = $active_status: eq (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = $active_status: eq` ).
   ENDMETHOD.
 
   METHOD b_status_ne.
@@ -267,6 +324,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -274,10 +333,10 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_ship-status = 'B'.
     APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
     INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
-    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = 'A': ne (check against check_reference)` ).
-    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = 'A': ne` ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = $active_status: ne (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = $active_status: ne` ).
   ENDMETHOD.
 
   METHOD b_status_blank.
@@ -285,6 +344,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -292,10 +353,10 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_ship-status = ''.
     APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
     INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
-    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = 'A': blank (check against check_reference)` ).
-    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = 'A': blank` ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = $active_status: blank (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = $active_status: blank` ).
   ENDMETHOD.
 
   METHOD b_ship_id_match.
@@ -304,6 +365,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -319,8 +382,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_crew-since = '20260101'.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `crew.ship_id = ship.ship_id: match (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `crew.ship_id = ship.ship_id: match` ).
   ENDMETHOD.
@@ -331,6 +394,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -347,8 +412,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `crew.ship_id = ship.ship_id: nomatch (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `crew.ship_id = ship.ship_id: nomatch` ).
   ENDMETHOD.
@@ -359,6 +424,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -374,8 +441,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_crew-since = '20260101'.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `crew.role = 'C': eq (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `crew.role = 'C': eq` ).
   ENDMETHOD.
@@ -386,6 +453,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -402,8 +471,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `crew.role = 'C': ne (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `crew.role = 'C': ne` ).
   ENDMETHOD.
@@ -414,6 +483,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -430,8 +501,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `crew.role = 'C': blank (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `crew.role = 'C': blank` ).
   ENDMETHOD.
@@ -442,6 +513,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -457,8 +530,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_crew-since = '20260930'.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `crew.since <= $date: lt (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `crew.since <= $date: lt` ).
   ENDMETHOD.
@@ -469,6 +542,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -484,8 +559,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_crew-since = '20261001'.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `crew.since <= $date: eq (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `crew.since <= $date: eq` ).
   ENDMETHOD.
@@ -496,6 +571,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -512,8 +589,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `crew.since <= $date: gt (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `crew.since <= $date: gt` ).
   ENDMETHOD.
@@ -523,6 +600,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -531,8 +610,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
     INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `exists ZOSD_L2_CREW as crew: zero (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `exists ZOSD_L2_CREW as crew: zero` ).
   ENDMETHOD.
@@ -543,6 +622,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -558,8 +639,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_crew-since = '20260101'.
     APPEND ls_zosd_l2_crew TO mt_zosd_l2_crew.
     INSERT zosd_l2_crew FROM TABLE mt_zosd_l2_crew.
-    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `exists ZOSD_L2_CREW as crew: one (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `exists ZOSD_L2_CREW as crew: one` ).
   ENDMETHOD.

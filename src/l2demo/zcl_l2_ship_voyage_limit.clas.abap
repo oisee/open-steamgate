@@ -2,8 +2,10 @@
 * Rule ship-too-many-future-voyages: A ship has at most two voyages departing after the check date
 CLASS zcl_l2_ship_voyage_limit DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
+    TYPES tt_range TYPE RANGE OF zosd_l2_ship-ship_id.
     CLASS-METHODS check
       IMPORTING iv_date TYPE d
+                it_range TYPE tt_range OPTIONAL
       RETURNING VALUE(rt_alerts) TYPE string_table.
 ENDCLASS.
 
@@ -29,6 +31,7 @@ CLASS zcl_l2_ship_voyage_limit IMPLEMENTATION.
       INTO CORRESPONDING FIELDS OF TABLE lt_join
       WHERE ship~status <> 'D'
         AND voy~dep_date > iv_date
+        AND ship~ship_id IN it_range
       ORDER BY
         ship~ship_id.
     SORT lt_join BY ship_ship_id.

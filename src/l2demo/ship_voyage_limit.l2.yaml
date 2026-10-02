@@ -2,6 +2,7 @@ rule: ship-too-many-future-voyages
 class: zcl_l2_ship_voyage_limit
 title: A ship has at most two voyages departing after the check date
 for: ZOSD_L2_SHIP as ship
+range: ship.ship_id
 when: ship.status <> 'D'
 limit:
   count: ZOSD_L2_VOY as voy
@@ -95,3 +96,24 @@ examples:
         - {voyage_id: V00033, ship_id: S022, dep_date: 20261002}
         - {voyage_id: V00035, ship_id: S020, dep_date: 20261004}
     expect: ["S020 Wren: 3 future voyages"]
+
+  - name: the range keeps the inner ship
+    date: 20261001
+    range: [{sign: I, option: BT, low: S002, high: S003}]
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: A}
+        - {ship_id: S002, name: Cormorant, status: A}
+        - {ship_id: S004, name: Dove, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00001, ship_id: S001, dep_date: 20261002}
+        - {voyage_id: V00002, ship_id: S001, dep_date: 20261003}
+        - {voyage_id: V00003, ship_id: S001, dep_date: 20261004}
+        - {voyage_id: V00004, ship_id: S002, dep_date: 20261002}
+        - {voyage_id: V00005, ship_id: S002, dep_date: 20261003}
+        - {voyage_id: V00006, ship_id: S002, dep_date: 20261004}
+        - {voyage_id: V00007, ship_id: S004, dep_date: 20261002}
+        - {voyage_id: V00008, ship_id: S004, dep_date: 20261003}
+        - {voyage_id: V00009, ship_id: S004, dep_date: 20261004}
+    expect:
+      - "S002 Cormorant: 3 future voyages"

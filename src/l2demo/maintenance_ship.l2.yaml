@@ -5,6 +5,7 @@ rule: maintenance-ship-no-future-voyage
 class: zcl_l2_maintenance_ship
 title: A ship in maintenance has no voyage departing after the check date
 for: ZOSD_L2_SHIP as ship
+range: ship.ship_id
 when: ship.status = 'M'
 forbid:
   exists: ZOSD_L2_VOY as voy
@@ -52,3 +53,18 @@ examples:
       - "S003 Petrel: in maintenance, voyage V00007 departs 20261002"
       - "S001 Albatross: in maintenance, voyage V00006 departs 20261003"
       - "S001 Albatross: in maintenance, voyage V00005 departs 20261010"
+
+  - name: the range keeps the inner ship
+    date: 20261001
+    range: [{sign: I, option: BT, low: S002, high: S003}]
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S002, name: Petrel, status: M}
+        - {ship_id: S004, name: Dove, status: M}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00001, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00002, ship_id: S002, dep_date: 20261005}
+        - {voyage_id: V00004, ship_id: S004, dep_date: 20261005}
+    expect:
+      - "S002 Petrel: in maintenance, voyage V00002 departs 20261005"

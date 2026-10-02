@@ -636,8 +636,11 @@ each mutation is caught.
 
 ## Slice 7: typed parameters and date windows
 
-`params:` declares names for `$name` operands. Each name has a DDIC element or
-provider-resolved built-in `type`, and may have a `default`. For example,
+`params:` declares names for `$name` operands. Each name has a DDIC element,
+a table field (`<TABLE>-<field>`, typed as the field is and named so in the
+ABAP) or a provider-resolved built-in `type`, and may have a `default`. A bare
+`C`, `N`, `P` or `X` is refused at its line: it has no length, and a system
+refuses it in a class or a report (A4H, 2026-10-02; `tools/dsl-l2-params.mjs`). For example,
 `max_days: {type: ZOSD_L2_DAYS, default: 30}` declares `$max_days`. A default
 makes the ABAP IMPORTING parameter optional; without it, every example must
 supply a value. An example's `params:` mapping overrides defaults. The test
@@ -666,8 +669,46 @@ are refused at the comparison line.
 an active ship needs a voyage in the last `$max_days` days, default 30. Its
 first example sets one day and checks the 2024-02-29 lower bound from a
 2024-03-01 check date. The derived cases check the adjacent days. The rule
-stays out of `fleet.l3.yaml` because the L3 runner passes only the date to
-each rule and cannot supply `$max_days` or other rule parameters.
+stays out of `fleet.l3.yaml`; the fleet set instead demonstrates a set
+parameter with its captain rule.
+
+## Optional driving-key range (`range:`)
+
+For the L3 pile planner (`docs/dsl-l3.md`, "Piles and set parameters"), a rule may declare a key
+range on its driving table:
+
+```yaml
+for: ZOSD_L2_SHIP as ship
+range: ship.ship_id
+```
+
+`range:` names a field of the `for:` alias (refused at its line otherwise, and for a field the
+table does not have). The generated `check` then takes `it_range TYPE RANGE OF <for
+table>-<field> OPTIONAL`, and the query that reads the `for:` table carries `<alias>~<field> IN
+it_range` as one more conjunct of its `WHERE`: the range is tested by the database, never in a
+`LOOP ... WHERE`, and a `when:` that is an `or` is parenthesised before it, as any group is
+(`layout` in `tools/dsl-l2.mjs`). An empty range is every row, as Open SQL has it, and the
+interpreter reads it the same way. The reference in the test class filters its first `SELECT` the
+same way, and the line traces to the rule's `range:` line.
+
+An example may give a range of its own, as select-option rows, sign `I` with option `EQ` (a low)
+or `BT` (a low and a high), each value fitting the field:
+
+```yaml
+  - name: the range keeps the inner ship
+    date: 20261001
+    range: [{sign: I, option: BT, low: S002, high: S003}]
+    rows: ...
+```
+
+The test class passes the range to `check` and to `check_reference`; an example without one
+passes none, and the derived cases run over every row. Every demo rule on `ZOSD_L2_SHIP` has such
+an example over three flagged ships, one inside the range, so dropping the range from the `WHERE`
+turns that example red (`test/dsl-l2.mjs`). The range is part of the compiled model, so it changes
+the model hash of the rules that declare it. A rule without `range:` renders the same ABAP as
+before: `test/dsl-l2.mjs` renders the two demo rules without one through the templates and through
+the templates with every range section taken out, and compares the bytes. The code is
+`tools/dsl-l2-range.mjs`.
 
 ## Not yet
 

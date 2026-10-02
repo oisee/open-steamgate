@@ -7,12 +7,18 @@
 * own tables and its teardown deletes them again by key.
 CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT FINAL.
   PRIVATE SECTION.
+{{#range}}
+    TYPES tt_range TYPE RANGE OF {{table}}-{{field}}.
+{{/range}}
 {{#tables}}
     DATA {{itab}} TYPE STANDARD TABLE OF {{table}} WITH DEFAULT KEY.
 {{/tables}}
     METHODS teardown.
     METHODS check_reference
       IMPORTING iv_date TYPE d
+{{#range}}
+                it_range TYPE tt_range OPTIONAL
+{{/range}}
 {{#params}}
                 {{ref}} TYPE {{type_name}}{{#default}} DEFAULT {{default | literal}}{{/default}}
 {{/params}}
@@ -219,6 +225,20 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+{{#range}}
+    DATA lt_range TYPE RANGE OF {{table}}-{{field}}.
+    DATA ls_range LIKE LINE OF lt_range.
+{{#range_args}}
+    CLEAR ls_range.
+    ls_range-sign = {{sign | literal}}.
+    ls_range-option = {{option | literal}}.
+    ls_range-low = {{low | literal}}.
+{{#high}}
+    ls_range-high = {{high | literal}}.
+{{/high}}
+    APPEND ls_range TO lt_range.
+{{/range_args}}
+{{/range}}
 {{#long_expect}}
     DATA lv_exp TYPE string.
 {{/long_expect}}
@@ -246,8 +266,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND lv_exp TO lt_exp.
 {{/single}}
 {{/expect}}
-    lt_act = {{date.call}}( iv_date = {{date.value | literal}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
-    lt_ref = check_reference( iv_date = {{date.value | literal}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
+    lt_act = {{date.call}}( iv_date = {{date.value | literal}}{{#range}} it_range = lt_range{{/range}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
+    lt_ref = check_reference( iv_date = {{date.value | literal}}{{#range}} it_range = lt_range{{/range}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = {{ref_label | literal}} ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = {{label | literal}} ).
   ENDMETHOD.

@@ -193,6 +193,125 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
     });
   });
 
+  describe("driving-table ranges (range:)", () => {
+    // the template with every range section taken out: what it was before
+    // the range existed (`{{#range}}`, `{{#outer.range}}` and their inline forms)
+    const withoutRange = (template) => readFileSync(template, "utf8")
+      .replace(/^\{\{#(?:outer\.)?range\}\}\n[\s\S]*?^\{\{\/(?:outer\.)?range\}\}\n/gm, "")
+      .replace(/\{\{#range\}\}[^\n]*?\{\{\/range\}\}/g, "");
+    const at = (file, re) => readFileSync(file, "utf8").split("\n").findIndex((l) => re.test(l)) + 1;
+
+    it("an empty range is every row; a range keeps the rows inside it, in the interpreter and in the SQL", () => {
+      const model = compileRule(RULE, {registry});
+      const rows = {zosd_l2_ship: ["S001", "S002", "S004"].map((ship_id) => ({ship_id, name: ship_id, status: "M"})),
+        zosd_l2_voy: ["S001", "S002", "S004"].map((ship_id, i) => ({voyage_id: `V0000${i + 1}`, ship_id, dep_date: "20261005"}))};
+      const ships = (range) => evaluate(model, rows, {date: "20261001", $range: range}).map((a) => a.slice(0, 4));
+      expect(ships([])).to.deep.equal(["S001", "S002", "S004"]);
+      expect(ships([{sign: "I", option: "BT", low: "S002", high: "S004"}])).to.deep.equal(["S002", "S004"]);
+      expect(ships([{sign: "I", option: "EQ", low: "S001"}, {sign: "I", option: "EQ", low: "S004"}])).to.deep.equal(["S001", "S004"]);
+      expect(ships([{sign: "I", option: "EQ", low: "S003"}])).to.deep.equal([]);
+      const check = readFileSync(join(OUT, `${CLASS}.clas.abap`), "utf8");
+      expect(check).to.include("                it_range TYPE tt_range OPTIONAL\n");
+      expect(check).to.include("        AND ship~ship_id IN it_range\n");
+      expect(check, "never a LOOP ... WHERE ... IN").to.not.match(/LOOP AT[^.]*\bIN\b/);
+    });
+
+    it("the range line traces to the rule's range: line", () => {
+      const trace = JSON.parse(readFileSync(join(OUT, `${CLASS}.clas.trace.json`), "utf8"));
+      const lines = readFileSync(join(OUT, `${CLASS}.clas.abap`), "utf8").split("\n");
+      const entry = trace.lines.find((e) => /IN it_range/.test(lines[e.line - 1]));
+      expect(entry).to.include({node: "rule/maintenance-ship-no-future-voyage/range", rule_line: at(RULE, /^range:/)});
+    });
+
+    it("a rule without range: renders what the templates rendered before the range existed", async () => {
+      const {renderModel} = await import("../tools/dsl-l2.mjs");
+      const {renderRecipe} = await import("../tools/dsl-abap.mjs");
+      for (const [rule, template, file] of [[RECENT, "recipes/l2-check/template.tpl", "clas.abap"],
+        [RECENT, "recipes/l2-check-test/template.tpl", "clas.testclasses.abap"],
+        [MIN_CAPTAINS, "recipes/l2-check/template.tpl", "clas.abap"], [MIN_CAPTAINS, "recipes/l2-check-test/template.tpl", "clas.testclasses.abap"]]) {
+        const model = renderModel(compileRule(rule, {registry}));
+        expect(model.range).to.equal(undefined);
+        const stripped = join(scratch, `no-range-${basename(template)}`);
+        writeFileSync(stripped, withoutRange(template));
+        expect(readFileSync(stripped, "utf8"), "every range line sits in a range section").to.not.match(/range/);
+        const before = (await renderRecipe(model, stripped)).text;
+        expect(before, `${rule} ${file}`).to.equal((await renderRecipe(model, template)).text);
+        expect(readFileSync(join(OUT, `${model.class}.${file}`), "utf8")).to.equal(before);
+      }
+    });
+
+    it("an or at the top of when is parenthesised before the range is anded", async () => {
+      const text = readFileSync(MIN_CREW, "utf8").replace("when: ship.status = 'A'", "when: ship.status = 'A' or ship.status = 'X'")
+        .replace(/^class: .*$/m, "class: zcl_l2_range_or");
+      const out = join(scratch, "range-or");
+      await buildRule(writeRange("range-or", text), out, {registry});
+      const check = readFileSync(join(out, "zcl_l2_range_or.clas.abap"), "utf8");
+      const count = (text) => check.split(text).length - 1;
+      // the for query (the range directly after the or) and the join query
+      expect(count(["      WHERE ( ship~status = 'A'", "           OR ship~status = 'X' )", "        AND ship~ship_id IN it_range"].join("\n"))).to.equal(1);
+      expect(count(["      WHERE ( ship~status = 'A'", "           OR ship~status = 'X' )", "        AND crew~since <= iv_date",
+        "        AND ship~ship_id IN it_range"].join("\n"))).to.equal(1);
+      expect(readFileSync(join(out, "zcl_l2_range_or.clas.testclasses.abap"), "utf8"))
+        .to.include(["      WHERE ( status = 'A'", "           OR status = 'X' )", "        AND ship_id IN it_range"].join("\n"));
+    });
+
+    const writeRange = (name, text) => {
+      const file = join(scratch, `${name}.l2.yaml`);
+      writeFileSync(file, text);
+      return file;
+    };
+    for (const [what, from, to, message, line] of [
+      ["an alias other than the for alias", "range: ship.ship_id", "range: voy.ship_id", /range must name a field of the for alias ship/, /^range:/],
+      ["a field the for table does not have", "range: ship.ship_id", "range: ship.colour", /range field ship\.colour is not a resolved field of ZOSD_L2_SHIP/, /^range:/],
+      ["an EQ row with a high", "range: [{sign: I, option: BT, low: S002, high: S003}]", "range: [{sign: I, option: EQ, low: S002, high: S003}]",
+        /an EQ range row has no high/, /^    range:/],
+      ["sign E", "range: [{sign: I, option: BT, low: S002, high: S003}]", "range: [{sign: E, option: BT, low: S002, high: S003}]",
+        /a range row is sign I with option EQ or BT/, /^    range:/],
+      ["a low that does not fit the field", "range: [{sign: I, option: BT, low: S002, high: S003}]", "range: [{sign: I, option: BT, low: S00002, high: S003}]",
+        /range low must fit ZOSD_L2_SHIP-ship_id/, /^    range:/],
+      ["an example range in a rule without range:", "range: ship.ship_id\n", "", /an example range needs a range: line in the rule/, /^    range:/],
+    ]) {
+      it(`refuses ${what} at its line`, () => {
+        const file = variant(`range-${what.replace(/\W+/g, "-")}`, from, to);
+        expect(() => compileRule(file, {registry})).to.throw(RuleError, new RegExp(`:${at(file, line)}: ${message.source}`));
+      });
+    }
+
+    it("mutant: the range dropped from the WHERE fails the example whose range excludes a flagged ship", async () => {
+      const file = variant("range-mutant", "class: zcl_l2_maintenance_ship", "class: zcl_l2_range_mutant");
+      const {results} = await runRule(file, "zcl_l2_range_mutant", {mutate: {"clas.abap": [["        AND ship~ship_id IN it_range\n", ""]]}});
+      expect(results.the_range_keeps_the_inner_ship).to.equal("failed");
+      expect(failed(results)).to.deep.equal(["the_range_keeps_the_inner_ship"]);
+    });
+  });
+
+  describe("parameter types a class and a report accept (A4H 2026-10-02: ZL3_FLEET, \"Lengths must be specified explicitly\")", () => {
+    const CAPTAIN = readFileSync(REQUIRE, "utf8");
+    const at = (file) => readFileSync(file, "utf8").split("\n").findIndex((l) => /^  active_status:/.test(l)) + 1;
+    const captain = (name, type) => {
+      const file = join(scratch, `${name}.l2.yaml`);
+      writeFileSync(file, CAPTAIN.replace("active_status: {type: ZOSD_L2_SHIP-STATUS, default: A}", `active_status: {type: ${type}, default: A}`));
+      return file;
+    };
+    for (const bare of ["C", "c", "N", "P", "X"]) {
+      it(`refuses a bare ${bare} at its line`, () => {
+        const file = captain(`bare-${bare}`, bare);
+        expect(() => compileRule(file, {registry})).to.throw(RuleError,
+          new RegExp(`:${at(file)}: parameter \\$active_status type ${bare.toUpperCase()} has no length, which a class or report refuses`));
+      });
+    }
+    it("a table field types the parameter as the field is typed, and the ABAP names it as written", () => {
+      const model = compileRule(REQUIRE, {registry});
+      expect(model.params.map((p) => [p.type_name, p.type])).to.deep.equal([["zosd_l2_ship-status", {built_in: "CHAR", length: 1}]]);
+      expect(readFileSync(join(OUT, "zcl_l2_ship_captain.clas.abap"), "utf8")).to.include("iv_active_status TYPE zosd_l2_ship-status DEFAULT 'A'");
+      expect(readFileSync(join(OUT, "zcl_l2_ship_captain.clas.testclasses.abap"), "utf8")).to.include("iv_active_status TYPE zosd_l2_ship-status DEFAULT 'A'");
+    });
+    it("refuses a field the table does not have", () => {
+      const file = captain("no-field", "ZOSD_L2_SHIP-COLOUR");
+      expect(() => compileRule(file, {registry})).to.throw(RuleError, new RegExp(`:${at(file)}: parameter \\$active_status type ZOSD_L2_SHIP-COLOUR cannot resolve`));
+    });
+  });
+
   describe("type errors name the rule file and line", () => {
     const cases = [
       ["a date compared with a CHAR literal", "voy.dep_date > $date", "voy.dep_date > 'M'",
@@ -343,12 +462,12 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
     };
 
     it("each example's check call traces to that example's date line", () => {
-      const calls = abap.map((l, i) => [i + 1, l]).filter(([, l]) => /=>check\( iv_date = '\d{8}' \)/.test(l));
+      const calls = abap.map((l, i) => [i + 1, l]).filter(([, l]) => /=>check\( iv_date = '\d{8}'(?: it_range = lt_range)? \)/.test(l));
       const dates = RULE_TEXT.split("\n").map((l, i) => [i + 1, l]).filter(([, l]) => /^\s+date: /.test(l));
       const names = [...RULE_TEXT.matchAll(/- name: (.+)/g)].map((m) => m[1]);
-      expect(calls.length).to.equal(15);
-      expect(dates.length).to.equal(5);
-      calls.slice(0, 5).forEach(([line], k) => {
+      expect(calls.length).to.equal(16);
+      expect(dates.length).to.equal(6);
+      calls.slice(0, 6).forEach(([line], k) => {
         expect(trace.lines.find((e) => e.line === line)).to.include({
           node: `rule/maintenance-ship-no-future-voyage/example/${names[k]}/date`, rule_line: dates[k][0]});
       });
@@ -642,7 +761,7 @@ examples:
 
     it("the committed rule runs its examples and all eleven derived cases, including two groups", async () => {
       const {model, results, messages} = await runRule(LIMIT, "zcl_l2_ship_voyage_limit");
-      expect(Object.keys(results)).to.have.length(19);
+      expect(Object.keys(results)).to.have.length(20);
       expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
       const groups = model.cases.find((c) => c.method === "b_count_groups");
       expect(groups).to.exist;
@@ -991,7 +1110,7 @@ examples:
 
     it("the committed rule runs its examples and its thirteen derived cases, a for row with no crew among them", async () => {
       const {model, results, messages} = await runRule(MIN_CREW, "zcl_l2_ship_min_crew");
-      expect(Object.keys(results)).to.have.length(8 + 13);
+      expect(Object.keys(results)).to.have.length(9 + 13);
       expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
       expect(model.cases.map((c) => c.method)).to.include.members(["b_count_below", "b_count_at", "b_count_zero", "b_count_next_zero", "b_count_groups"]);
       // a counted key directly before, in key order, a key with no counted row
@@ -1247,7 +1366,7 @@ examples:
       expect(reference).to.contain("SELECT weight FROM zosd_l2_cargo INTO TABLE lt_aggregate_values");
       expect(reference).to.contain("LOOP AT lt_aggregate_values INTO lv_aggregate_value.");
       expect(model.examples.map((e) => e.expect.map((x) => x.value))).to.deep.equal([
-        ["S003: 1000.01 kg booked"], [], [], ["S011: 1000.01 kg booked"],
+        ["S003: 1000.01 kg booked"], [], [], ["S011: 1000.01 kg booked"], ["S002: 1000.01 kg booked"],
       ]);
     });
 
@@ -1506,8 +1625,8 @@ examples:
       const result = await new UnitRun(new ObjectStore()).runDetached("CLAS", CLASS.toUpperCase());
       const methods = result.testClasses.flatMap((c) => c.testMethods);
       expect(methods.map((m) => m.name)).to.deep.equal(["FLAGGED", "PAST_VOYAGE_IS_FINE", "DEPARTS_ON_THE_CHECK_DATE",
-        "SHIP_IN_SERVICE_IS_FINE", "ONE_ALERT_PER_VOYAGE", ...DERIVED]);
-      expect(result.counts, JSON.stringify(result.testClasses)).to.include({methods: 15, passed: 15, failed: 0});
+        "SHIP_IN_SERVICE_IS_FINE", "ONE_ALERT_PER_VOYAGE", "THE_RANGE_KEEPS_THE_INNER_SHIP", ...DERIVED]);
+      expect(result.counts, JSON.stringify(result.testClasses)).to.include({methods: 16, passed: 16, failed: 0});
       expect(result.ok).to.equal(true);
     });
 
@@ -1518,7 +1637,7 @@ examples:
     it("the rule as written: every example and every derived case passes", async () => {
       const file = variant("as_written", "class: zcl_l2_maintenance_ship", "class: zcl_l2_as_written");
       const {results} = await runRule(file, "zcl_l2_as_written");
-      expect(Object.keys(results)).to.have.length(15);
+      expect(Object.keys(results)).to.have.length(16);
       expect(failed(results)).to.deep.equal([]);
     });
 
@@ -1611,10 +1730,10 @@ examples:
 
     it("agrees with the committed examples and with its own derived cases", () => {
       const model = compileRule(RULE, {registry});
-      expect(model.examples).to.have.length(5);
+      expect(model.examples).to.have.length(6);
       expect(model.cases).to.have.length(10);
       for (const t of [...model.examples, ...model.cases]) {
-        const got = evaluate(model, rowsOfNode(t), {date: t.date.value});
+        const got = evaluate(model, rowsOfNode(t), {date: t.date.value, $range: t.range_args ?? []});
         expect(got.sort(), t.method).to.deep.equal(t.expect.map((e) => e.value).sort());
       }
     });
@@ -2129,10 +2248,11 @@ examples:
         "           OR ship~status = 'D' )",
         "        AND NOT ( crew~role = 'K'",
         "           OR crew~since > iv_date )",
+        "        AND ship~ship_id IN it_range",
         "      ORDER BY"].join("\n"));
       expect(check).to.contain("          ON crew~ship_id = ship~ship_id\n");
       const reference = methodOf(join(OUT, "zcl_l2_grounded_ship_crew.clas.testclasses.abap"), "check_reference");
-      expect(reference).to.contain("      WHERE status = 'M'\n         OR status = 'D'\n");
+      expect(reference).to.contain("      WHERE ( status = 'M'\n           OR status = 'D' )\n        AND ship_id IN it_range\n");
       expect(reference).to.contain("        WHERE ship_id = ls_ship-ship_id\n          AND NOT ( role = 'K'\n             OR since > iv_date )\n");
     });
 
@@ -2140,11 +2260,12 @@ examples:
       const check = methodOf(join(OUT, "zcl_l2_ship_captain.clas.abap"), "check");
       expect(check).to.contain(["      FROM zosd_l2_ship AS ship",
         "      INTO CORRESPONDING FIELDS OF TABLE lt_join",
-        "      WHERE ship~status = 'A'",
+        "      WHERE ship~status = iv_active_status",
         "        AND NOT EXISTS ( SELECT * FROM zosd_l2_crew AS crew",
         "          WHERE crew~ship_id = ship~ship_id",
         "            AND crew~role = 'C'",
         "            AND crew~since <= iv_date )",
+        "        AND ship~ship_id IN it_range",
         "      ORDER BY",
         "        ship~ship_id."].join("\n"));
       expect(check.match(/^\s+SELECT$/gm)).to.have.length(1);
@@ -2212,7 +2333,7 @@ examples:
       expect(models.map((m) => m.cases.length)).to.deep.equal([16, 13, 20, 21]);
       for (const model of models) {
         for (const t of [...model.examples, ...model.cases]) {
-          expect(evaluate(model, rowsOfCase(t), {date: t.date.value}).sort(), `${model.rule} ${t.method}`).to.deep.equal(alerts(t).sort());
+          expect(evaluate(model, rowsOfCase(t), {date: t.date.value, $range: t.range_args ?? [], ...Object.fromEntries((model.params ?? []).map((p) => [p.name, p.default]))}).sort(), `${model.rule} ${t.method}`).to.deep.equal(alerts(t).sort());
         }
       }
     });
@@ -2241,7 +2362,7 @@ examples:
       for (const model of [compileRule(OR_NOT, {registry}), compileRule(REQUIRE, {registry}),
         compileRule(writeRule("disc-all", ALL_RULE), {registry}), compileRule(writeRule("disc-any", ANY_RULE), {registry})]) {
         for (const c of model.cases) {
-          const params = {date: c.date.value};
+          const params = {date: c.date.value, ...Object.fromEntries((model.params ?? []).map((p) => [p.name, p.default]))};
           const ok = c.derived.structural ? structureDiscriminates(model, rowsOfCase(c), params)
             : caseDiscriminates(model, conditionOf(model, c.derived.condition), rowsOfCase(c), params);
           expect(ok, `${model.rule} ${c.method}`).to.equal(true);
@@ -2305,15 +2426,15 @@ examples:
     const copy = (name, text, className) => writeRule(name, text.replace(/^class: .*$/m, `class: ${className}`));
 
     it("ABAP Unit of the two new demo classes runs green in this runtime", async () => {
-      for (const [className, count] of [["ZCL_L2_GROUNDED_SHIP_CREW", 22], ["ZCL_L2_SHIP_CAPTAIN", 19]]) {
+      for (const [className, count] of [["ZCL_L2_GROUNDED_SHIP_CREW", 23], ["ZCL_L2_SHIP_CAPTAIN", 20]]) {
         const result = await new UnitRun(new ObjectStore()).runDetached("CLAS", className);
         expect(result.counts, JSON.stringify(result.testClasses)).to.include({methods: count, passed: count, failed: 0});
       }
     });
 
     for (const [what, text, className, cases] of [
-      ["or and not", () => OR_NOT_TEXT, "zcl_l2_s3_ornot", 22],
-      ["require", () => REQUIRE_TEXT, "zcl_l2_s3_require", 19],
+      ["or and not", () => OR_NOT_TEXT, "zcl_l2_s3_ornot", 23],
+      ["require", () => REQUIRE_TEXT, "zcl_l2_s3_require", 20],
       ["all", () => ALL_RULE, "zcl_l2_s3_all", 23],
       ["any", () => ANY_RULE, "zcl_l2_s3_any", 23],
     ]) {
