@@ -1,0 +1,58 @@
+name: metrics
+
+# Trend metrics, one snapshot per commit on main (tools/osd-metrics.mjs):
+# size, cyclomatic complexity and Go coverage per package and module. To
+# watch, not a gate (the size budget is the gate). The snapshots go to the
+# `metrics` branch, a data branch that never merges: history.ndjson (one
+# snapshot per line) and osd-code-gauge.html, the page built from it
+# (tools/osd-metrics-page.mjs), which the dashboard artifact is published
+# from. Nothing is written into main's tree.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: metrics
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: tools/gogen/go/go.sum
+      - run: npm ci --ignore-scripts
+      - name: Snapshot
+        run: node tools/osd-metrics.mjs --coverage > "$RUNNER_TEMP/snapshot.json"
+      - name: Append to the metrics branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          dir="$RUNNER_TEMP/metrics"
+          # the token travels as a header, never in a URL or an argv
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          url="https://github.com/${{ github.repository }}.git"
+          if git ls-remote --exit-code --heads origin metrics >/dev/null; then
+            git -c http.extraheader="$auth" clone --quiet --depth 1 --branch metrics "$url" "$dir"
+          else
+            mkdir -p "$dir" && git -C "$dir" init --quiet -b metrics && git -C "$dir" remote add origin "$url"
+          fi
+          node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))) + "\n")' "$RUNNER_TEMP/snapshot.json" >> "$dir/history.ndjson"
+          node tools/osd-metrics-page.mjs "$dir/history.ndjson" > "$dir/osd-code-gauge.html"
+          cd "$dir"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add history.ndjson osd-code-gauge.html
+          git commit --quiet -m "metrics: ${GITHUB_SHA::8}"
+          git -c http.extraheader="$auth" push --quiet origin HEAD:metrics
