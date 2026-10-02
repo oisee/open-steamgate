@@ -249,6 +249,8 @@ export class WarmCompiler {
     // inactive object keeps serving its copy. `overlay(S)` is the store's
     // (ObjectStore#overlay); without a store, the tree as it is.
     this.overlayOf = options.overlay ?? (() => undefined);
+    // the object a file belongs to, "TYPE NAME" (ObjectStore#objectKeyOf)
+    this.keyOf = options.keyOf ?? (() => undefined);
     // the view each generation this made was built from, for its comparison
     this.views = new Map();
   }
@@ -315,7 +317,8 @@ export class WarmCompiler {
     // to look closer when inactive objects are read from copies, and the
     // full run below, byte for byte, is the premise either way
     const copied = overlay?.folder !== undefined;
-    if (hash !== live && !copied) {
+    const proved = hash === live;
+    if (!proved && !copied) {
       throw new NotWarm(`the tree is not the live generation (${hash} on disk, ${live} live); a cold build comes first`);
     }
     const paths = layout(root);
@@ -331,7 +334,7 @@ export class WarmCompiler {
     const read = await readAll(wanted, resolve(root, own.output_folder),
       (source, filename) => lowerNarrowSubmit(source, filename, core));
     this.files = new Map(wanted.map((path, i) => [this.#logical(path, overlay), read[i]]));
-    this.actual = view.actual;
+    this.actual = new Map(view.actual);
     // where the live generation read each copied file from: its copy, when
     // the object was inactive at that build, or its source in the tree, when
     // it was saved since -- read off the live source map, so the full run
@@ -350,6 +353,42 @@ export class WarmCompiler {
       if (map.includes(copiesAt.split(sep).join("/"))) continue;
       this.actual.set(logical, logical);
       this.files.get(logical).relative = relative(resolve(root, own.output_folder), dirname(logical));
+    }
+    // A view that names the live generation differently is primed only on
+    // proof that the difference is the saves since and nothing else: the
+    // live view rebuilt -- those objects read from the tree, as live read
+    // them, each file counted with the digest of its active copy, the bytes
+    // live was built from -- must hash to the live name exactly. Every other
+    // input is in that hash as it is now: a YAML or any other generator
+    // input changed since, a library, the config, the generators. A full run
+    // of the registry could not see those (it transpiles today's gen/), and
+    // neither can the comparison, so without this a corrupt .stg.yaml was
+    // built warm over (critic on ab4ded7c).
+    if (!proved) {
+      const keys = new Set();
+      const substitute = new Map();
+      for (const [logical, path] of view.actual) {
+        if (this.actual.get(logical) !== logical || logical === path) continue;
+        const key = this.keyOf(relative(root, logical));
+        if (key === undefined) throw new NotWarm(`${relative(root, logical)} is read from a copy and belongs to no object`);
+        keys.add(key);
+        substitute.set(resolve(logical), createHash("sha256").update(readFileSync(path)).digest("hex"));
+      }
+      const back = hashOf(root, inputsOf(root, config), {transpiler, overlay: this.overlayOf(keys), substitute});
+      if (back !== live) {
+        throw new NotWarm(`the tree is not the live generation (${hash} on disk, ${live} live, ${back} with the saves since put back); a cold build comes first`);
+      }
+      // and in the order live read them: a file read from its copy is listed
+      // after the tree, and the order the registry holds its objects in is
+      // the order init.mjs loads them
+      const order = listFiles(root, ownConfig(root, config, stack, join(paths.tmp, "warm", "output"), this.overlayOf(keys))).wanted;
+      const files = new Map();
+      for (const p of order) {
+        const logical = this.#logical(p, overlay);
+        if (this.files.has(logical)) files.set(logical, this.files.get(logical));
+      }
+      for (const [logical, f] of this.files) if (!files.has(logical)) files.set(logical, f);
+      this.files = files;
     }
     const libs = await loadLibs(root, own);
     const reg = new core.Registry();

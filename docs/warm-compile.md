@@ -74,15 +74,23 @@ the old view (the edit held, reverted by the next build that does not
 activate it). The comparison runs a cold transpile of the same view
 (`OSD_VERIFY_OVERLAY`). A prime that is due after a cold build runs at the
 next activation if the five seconds have not passed, since an ADT client
-saves and activates at once; a prime whose view names the live generation
-differently (an object saved since, read from its copy) is checked by the
-full run, with each copied file placed where the live source map says it
-was read from.
+saves and activates at once. A prime whose view names the live generation
+differently (an object saved since, read from its copy) is accepted only on
+proof that the saves since are the whole difference: the live view rebuilt
+-- those objects read from the tree as live read them, each file counted
+with its active copy's digest -- must hash to the live name exactly, so a
+generator input (a `.stg.yaml`), a library, the config or a generator that
+changed since refuses the prime and the build goes cold. A full run of the
+registry cannot see those (it transpiles today's `gen/`), and neither can
+the comparison. The registry then takes live's file order (a copy is listed
+after the tree, and `init.mjs` loads objects in that order), and each
+copied file is placed where the live source map says it was read from.
 
 Before this every activation through ADT was cold. Measured on the stand-in
 (create, two edits, delete, twice; `OSD_WARM=1 STG_DEV=1`): 110 s and 7
 boots with every activation cold, then 77 s and 4 boots with both edits
-warm (1.5 s each).
+warm (1.5 s each); with the proof, 103 s and 5 boots, both edits warm (the
+second after a prime on demand, 18 s in all).
 
 ## What is warm, and what is cold
 

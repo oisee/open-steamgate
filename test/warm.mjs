@@ -1054,6 +1054,101 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
   });
 });
 
+// critic on ab4ded7c: a prime whose view names the live generation
+// differently (a class saved since, read from its copy) was accepted on a
+// full run of the registry alone, which transpiles today's gen/ and cannot
+// see a generator input that changed. A .stg.yaml corrupted before the
+// reprime became the warm baseline, and a class activation built warm over
+// it where a cold build would refuse it.
+describe("tools/osd-warm: a renamed view is primed only on proof", function () {
+  this.timeout(180000);
+  let root;
+  let store;
+  const src = (name, v) => `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS v RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD v.\n    rv = ${v}.\n  ENDMETHOD.\nENDCLASS.\n`;
+  const fresh = () => new WarmCompiler({root, overlay: (s) => store.overlay(s), keyOf: (f) => store.objectKeyOf(f)});
+
+  before(async function () {
+    const {Transpiler, core, plugin} = modulesOf(REPO);
+    const missing = plugin !== undefined ? "a transpiler plugin is installed" : await probe(Transpiler, core);
+    if (missing !== undefined) {
+      console.log(`      (skipped: ${missing})`);
+      this.skip();
+    }
+    root = realpathSync(mkdtempSync(join(tmpdir(), "osd-warm-proof-")));
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "zcl_wp_a.clas.abap"), src("ZCL_WP_A", 1));
+    writeFileSync(join(root, "src", "zcl_wp_b.clas.abap"), src("ZCL_WP_B", 1));
+    writeFileSync(join(root, "src", "zwp_svc.stg.yaml"), "service: ZWP_SVC\nentities: []\n");
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+      input_folder: "src", input_filter: [], exclude_filter: ["\\.stg\\.yaml$"], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
+      options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+    }));
+    writeFileSync(join(root, "package.json"), "{}");
+    symlinkSync(join(REPO, "node_modules"), join(root, "node_modules"));
+    store = new ObjectStore({root, roots: [{path: "src", writable: true}], libs: [], build: {generators: false}});
+    const first = await store.publish();
+    expect(first.ok, JSON.stringify(first.transpile)).to.equal(true);
+    // a class saved since the live build: read from its copy now
+    store.write("CLAS", "ZCL_WP_B", src("ZCL_WP_B", 2));
+  });
+  after(() => {
+    if (root !== undefined) rmSync(root, {recursive: true, force: true});
+  });
+
+  it("primes when the only difference is a save since, put back to its active bytes", async () => {
+    const w = fresh();
+    const r = await w.prime();
+    expect(r.files).to.equal(2);
+    w.drop();
+  });
+
+  // the copy is listed after the tree, and live read the file from the
+  // tree: the registry takes live's order, and a build of the view that
+  // reads the copy compares equal with a cold build of that view
+  it("a save since that sorts first: primed in live's order, the next build verified", async () => {
+    store.write("CLAS", "ZCL_WP_A", src("ZCL_WP_A", 5));
+    const w = fresh();
+    await w.prime();
+    store.write("CLAS", "ZCL_WP_B", src("ZCL_WP_B", 6));
+    const built = await w.build(new Set(["CLAS ZCL_WP_B"]));
+    const v = await w.verify(built.hash);
+    expect(v.verdict, JSON.stringify(v)).to.equal("same");
+    w.drop();
+  });
+
+  it("refuses when a generator input changed as well, and the activation goes cold", async () => {
+    writeFileSync(join(root, "src", "zwp_svc.stg.yaml"), "service: [ this is not yaml\n");
+    let error;
+    try {
+      await fresh().prime();
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.code, error?.message).to.equal("NOT_WARM");
+    expect(error.message).to.match(/with the saves since put back/);
+    // and through the store: the activation of a class is not built warm over it
+    store.warmState = {on: true, compiler: undefined, priming: undefined, reason: undefined, verifying: undefined, next: undefined, last: undefined, timer: undefined};
+    await store.warmUp();
+    expect(store.warmState.compiler?.primed, store.warmState.reason).to.not.equal(true);
+    store.write("CLAS", "ZCL_WP_A", src("ZCL_WP_A", 2));
+    const r = await store.publish({activate: [{type: "CLAS", name: "ZCL_WP_A"}]});
+    expect(r.transpile.warm, "built warm over a changed generator input").to.not.equal(true);
+    clearTimeout(store.warmState.reprime);
+  });
+
+  it("a valid edit of a generator input is not left stale either", async () => {
+    writeFileSync(join(root, "src", "zwp_svc.stg.yaml"), "service: ZWP_SVC\nentities: [one]\n");
+    store.write("CLAS", "ZCL_WP_B", src("ZCL_WP_B", 3));
+    let error;
+    try {
+      await fresh().prime();
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.code, error?.message).to.equal("NOT_WARM");
+  });
+});
+
 describe("tools/osd-warm: the real path on a small tree", function () {
   this.timeout(180000);
   let root;

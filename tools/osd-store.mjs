@@ -304,6 +304,18 @@ export class ObjectStore {
   // So the same bytes again -- another editor, a checkout, a watcher event
   // that comes late -- are that same inactive source, and wait for it to be
   // activated, however long.
+  // the object a file of the tree belongs to, "TYPE NAME", among the
+  // inactive ones (what a warm prime asks of a file read from its copy)
+  objectKeyOf(file) {
+    const wanted = join(String(file));
+    for (const key of this.inactive) {
+      const [type, ...rest] = key.split(" ");
+      const entry = this.find(type, rest.join(" "));
+      if (entry !== undefined && this.#filesOfEntry(entry).some((f) => join(f) === wanted)) return key;
+    }
+    return undefined;
+  }
+
   savedInactive(file) {
     const wanted = join(String(file));
     for (const key of this.inactive) {
@@ -1495,7 +1507,8 @@ export class ObjectStore {
     w.priming = (async () => {
       const {WarmCompiler} = await import("./osd-warm.mjs");
       // primed on the build view: inactive objects as their active copies
-      w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m), overlay: (activating) => this.overlay(activating)});
+      w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m), overlay: (activating) => this.overlay(activating),
+        keyOf: (file) => this.objectKeyOf(file)});
       try {
         const r = await w.compiler.prime();
         w.reason = undefined;
