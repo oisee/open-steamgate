@@ -565,4 +565,22 @@ Tests: `test/prove-inplace.mjs` (fake system; each rule checked failing without 
 
 ### Measured on A4H: cleanup by content hash (2026-10-01, the snippet version)
 
-The sequence was a fresh `--keep` run, then `--in-place` on the same package, then `--cleanup`. Before this change it needed manual deletion of six objects. Now it completes on its own. The cleanup reported one class and five DDIC objects (one data element, four tables) as "stamp moved … but the content equals the receipt's hash (re-activated, not edited)" and deleted them. The repository row and the package went with them, and the residue was zero. abapGit's serialisation of an unedited object was byte-stable between the receipt and the cleanup, so no XML needed the canonical comparison. A DDLS object has not been run through this yet. (That was the snippet's own content hash; the cleanup is now vsp's sha256 (#320) and the same sequence has to be measured again on a system.)
+The sequence was a fresh `--keep` run, then `--in-place` on the same package, then `--cleanup`. Before this change it needed manual deletion of six objects. Now it completes on its own. The cleanup reported one class and five DDIC objects (one data element, four tables) as "stamp moved … but the content equals the receipt's hash (re-activated, not edited)" and deleted them. The repository row and the package went with them, and the residue was zero. abapGit's serialisation of an unedited object was byte-stable between the receipt and the cleanup, so no XML needed the canonical comparison. A DDLS object has not been run through this yet. (That was the snippet's own content hash; the in-place-then-`--cleanup` sequence with vsp's sha256 has not been measured yet.)
+
+### Measured on A4H: the vsp conditional delete (2026-10-02, vsp v2.58.0-72)
+
+1. **Fresh run, `$ZOSG_TMP_VSP3`.** The probe passed and the receipt held the
+   sha256 of both objects. ABAP Unit passed 2/2. `git_delete_objects` with an
+   `expect` sha256 per object deleted both classes, and `expect_repo` dropped
+   the repository. The residue was 0.
+2. **Foreign edit, `$ZOSG_TMP_VSP4`.** Installed with `--keep`, then
+   ZCL_OSD_PROVE_PLAIN was changed on the system by hand (`rv_out = iv_in * 2`
+   became `rv_out = iv_in + iv_in`) and activated. Then `--cleanup`:
+   ZCL_OSD_PROVE_DEMO came back `deleted`; ZCL_OSD_PROVE_PLAIN came back
+   `changed` ("changed since its version was read (it is now sha256 f590cc31...);
+   not deleted") and was kept; the repository and the package were kept; the
+   run exited 1, INCOMPLETE. This is the guarantee, on a real system.
+
+`--cleanup` also probes `git_object_versions` before it deletes: an older vsp
+drops `expect` and `expect_repo` and would delete unconditionally, so it is
+refused (exit 2) with nothing sent.

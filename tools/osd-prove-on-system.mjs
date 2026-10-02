@@ -58,10 +58,9 @@
 //      (test class -> method), not by count;
 //   7. cleanup as above; anything left fails the run (exit 1) and is listed.
 //
-// Missing evidence is never a pass: no status, no class-check entry, a unit
-// result that is not vsp's JSON or does not name the class, an unnamed test
-// method with an alert, a snippet result that is not JSON or has no end row,
-// a zip without classes, or no test method run on the system all fail the run.
+// Missing evidence is never a pass (no status, no class-check entry, a unit
+// result that is not vsp's JSON, a snippet result without its end row, no test
+// method run on the system): each fails the run.
 import {spawn} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -79,11 +78,8 @@ import {proveInPlace, rollbackFromState, snapshotDir} from "./osd-prove-inplace.
 export const MIN_VSP = "vsp v2.58.0-72 (vibing-steampunk #320: git_object_versions and expect on git_delete_objects)";
 export const DEFAULT_PACKAGE = "$ZOSG_TMP_PROVE";
 export const B64_LINE = 200;
-// abapGit log messages the in-place deploy snippet carries back; the rest are counted
 export const MAX_LOG = 20;
-/** Seconds vsp may spend on one long call (`params.timeout`). */
 export const CALL_TIMEOUT = 300;
-/** How long git_import_zip waits for its job before it answers. */
 export const IMPORT_WAIT_SECONDS = 300;
 /** If the job is still running after that: how often, and how far apart,
  *  git_import_status is asked before the run gives up (fail closed). */
@@ -234,7 +230,6 @@ export function jsonAnswer(text, step) {
   return {json, isError};
 }
 
-/** One snippet, run: its rows and a printable line. */
 export async function exec(mcp, code, step) {
   const text = await mcp.call("analyze", undefined, {type: "execute_abap", code, timeout: CALL_TIMEOUT});
   const rows = rowsOf(text, step);
@@ -832,6 +827,7 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log =
     res = isError ? json.result : json;
     if (res === undefined || !Array.isArray(res.objects)) throw new Error(`vsp answered no result: ${JSON.stringify(json).slice(0, 300)}`);
     log(`cleanup: ${res.objects.map((o) => `${o.type} ${o.name} ${o.status}`).join(", ")}`);
+    if (isError && json.error) log(`cleanup: vsp's error text: ${json.error}`);
   } catch (e) {
     return {ok: false, problems: [`cleanup: ${e.message}`]};
   }
@@ -842,6 +838,7 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log =
     else if (o.status === "changed") problems.push(`cleanup: ${item} changed since the import (${o.reason ?? "no reason given"}): a foreign edit; kept`);
     else if (o.status === "failed") problems.push(`cleanup: ${item} could not be deleted: ${o.reason ?? "no reason given"}`);
     else if (o.status === "skipped" && asked.length === 0) continue;
+    else if (o.status === "skipped") problems.push(`cleanup: ${item} is not in ${pkg} any more (moved out of the package?)${o.reason ? `: ${o.reason}` : ""}; not touched`);
     else if (o.status !== "deleted") problems.push(`cleanup: ${item} came back ${o.status ?? "without a status"}${o.reason ? ` (${o.reason})` : ""}`);
   }
   for (const item of want.keys()) problems.push(`cleanup: vsp did not answer for ${item}`);
@@ -1258,9 +1255,11 @@ export async function cleanupFromReceipt(mcp, pkg, file, out) {
     return 2;
   }
   if (receipt.repoCreated === undefined) {
-    out(`note: the receipt does not record whether its run created repository ${receipt.repoKey} (written by an older version), `
-      + "so the row is left registered and the package with it; remove them by hand in abapGit if they are this tool's");
+    out(`note: the receipt does not record whether its run created repository ${receipt.repoKey} (older version), `
+      + "so the row and the package are left; remove them by hand in abapGit if they are this tool's");
   }
+  // an older vsp drops `expect` and `expect_repo` and deletes unconditionally: probe first
+  try { await objectVersions(mcp, pkg, [receipt.versions[0]?.item ?? receipt.objects?.[0] ?? `DEVC ${pkg}`], {sha256: false}); } catch (e) { out(`refused: ${e.message}`); return 2; }
   const c = await cleanup(mcp, pkg, receipt.versions, {expectedKey: receipt.repoKey,
     createdKey: receipt.repoCreated === true ? receipt.repoKey : undefined, log: out});
   for (const p of c.problems) out(`FAIL ${p}`);

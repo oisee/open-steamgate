@@ -431,7 +431,7 @@
       "reason": "baseline 2026-10-01 re-taken after #409 (merged before #407, same night): JSON reporting of the in-place snippets"
     },
     "tools/osd-prove-on-system.mjs": {
-      "lines": 1344,
+      "lines": 1343,
       "reason": "conditional delete moved to vsp (#320)"
     },
     "tools/osd-store.mjs": {

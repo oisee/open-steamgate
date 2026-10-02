@@ -1241,13 +1241,23 @@ describe("osd-prove-on-system", () => {
           {type: "PROG", name: "ZUNASKED", status: "deleted"}]});
         const mcp = {call: async (action, target, params) => (params?.type === "git_delete_objects" ? reply : (() => { throw new Error("stop"); })())};
         const r = await cleanup(mcp, PKG, entries, {});
-        assert.match(r.problems.join("\n"), /cleanup: CLAS ZCL_OSD_PROVE_DEMO came back skipped \(not in package\)/);
+        assert.match(r.problems.join("\n"), /cleanup: CLAS ZCL_OSD_PROVE_DEMO is not in \$ZOSG_TMP_TEST any more \(moved out of the package\?\): not in package; not touched/);
         assert.match(r.problems.join("\n"), /cleanup: vsp answered for PROG ZUNASKED, which was not asked about/);
         assert.match(r.problems.join("\n"), /cleanup: vsp did not answer for CLAS ZCL_OSD_PROVE_PLAIN/);
         const odd = JSON.stringify({package: PKG, objects: [{type: "CLAS", name: "ZCL_OSD_PROVE_DEMO", status: "gone"}, ok("ZCL_OSD_PROVE_PLAIN")]});
         const r2 = await cleanup({call: async (a, t, p) => (p?.type === "git_delete_objects" ? odd : (() => { throw new Error("stop"); })())}, PKG, entries, {});
         assert.match(r2.problems.join("\n"), /CLAS ZCL_OSD_PROVE_DEMO came back gone/);
       });
+    });
+
+    it("--cleanup on an older vsp (no git_object_versions) is refused: no git_delete_objects, so no unconditional delete", async () => {
+      const {receiptDir} = await keptRun();
+      const mcp = fakeSystem({oldVsp: true});
+      const {code, text} = await run(["--cleanup", "--package", PKG], mcp, receiptDir);
+      assert.equal(code, 2, text);
+      assert.match(text, /refused: git_object_versions: .*needs vsp v2\.58\.0-72|needs vsp v2\.58\.0-72/);
+      assert.deepEqual(mcp.sys.calls.filter((c) => c.params?.type === "git_delete_objects"), []);
+      assert.ok(existsSync(receiptIn(receiptDir)));
     });
 
     it("--cleanup with a receipt of the older kind (stamps, no sha256) refuses and sends nothing", async () => {
