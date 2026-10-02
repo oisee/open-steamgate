@@ -433,6 +433,24 @@ function objectOf(file) {
   };
 }
 
+/** Whether a breakpoint's file and the file a command acts on are the same
+ *  ABAP source, and why: the same path, the same file through a link (a
+ *  workspace opened through a symlink, a pack projection), or the same object
+ *  and include in another folder (the breakpoint's URI and the editor's or
+ *  the store's path need not be spelled alike). Returns the reason, or
+ *  undefined when they differ. */
+function sameAbapSource(a, b, realpath = fs.realpathSync) {
+  if (typeof a !== "string" || typeof b !== "string" || a === "" || b === "") return undefined;
+  if (path.resolve(a) === path.resolve(b)) return "path";
+  const real = (file) => { try { return realpath(file); } catch { return undefined; } };
+  const ra = real(a);
+  if (ra !== undefined && ra === real(b)) return "realpath";
+  const oa = adtObjectOf(a);
+  const ob = adtObjectOf(b);
+  if (oa && ob && oa.type === ob.type && oa.name === ob.name && oa.include === ob.include) return "object";
+  return undefined;
+}
+
 /** `{type, name, base, include}` for a file Check or Activate can reach
  *  (a class, its includes, an interface, a program), else undefined. */
 function adtObjectOf(file) {
@@ -2624,7 +2642,7 @@ function serviceDetailsHtml(details, nonce = "") {
     </style></head><body>${body}${script}</body></html>`;
 }
 
-module.exports = {osdRunCommandLine, unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning, objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
+module.exports = {osdRunCommandLine, unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning, objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor, sameAbapSource,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
   packSourceMappings, runningAbapSources, breakpointWarning, sourceKey,
   warmStatusText, activationBuildText, closureTestsText,

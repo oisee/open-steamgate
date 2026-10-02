@@ -934,12 +934,13 @@ describe("editors/vscode: the extension's logic", function () {
       getDebugProtocolBreakpoint: async () => ({verified})});
     api.debug.breakpoints = [new api.SourceBreakpoint(file, false)];
     expect(await controller.waitForDebuggerReady(file, 100, {reportMissingBreakpoint: true})).to.equal(true);
-    expect(output).to.deep.equal([`osd debugger: no enabled breakpoint in ${file}; calling without a verified breakpoint`]);
+    const said = () => output.filter((line) => line.includes("calling without a verified breakpoint"));
+    expect(said()).to.deep.equal([`osd debugger: no enabled breakpoint in ${file}; calling without a verified breakpoint`]);
     api.debug.breakpoints = [new api.SourceBreakpoint(file)];
     expect(await controller.waitForDebuggerReady(file, 80, {reportMissingBreakpoint: true})).to.equal(false);
     verified = true;
     expect(await controller.waitForDebuggerReady(file, 100, {reportMissingBreakpoint: true})).to.equal(true);
-    expect(output).to.have.length(1);
+    expect(said()).to.have.length(1);
   });
 
   it("serializes a generation refresh with a following attach and ignores the old termination", async () => {
@@ -985,22 +986,27 @@ describe("editors/vscode: the extension's logic", function () {
     }
   });
 
-  it("classrun with debugger waits for its class breakpoint before sending the run", async () => {
+  it("classrun with debugger waits for its class breakpoint, then sends the run even when the wait gives up", async () => {
     const api = debugApi();
-    api.window.showWarningMessage = () => {};
+    // an unattended run: nobody ever answers a notification
+    api.window.showWarningMessage = () => new Promise(() => {});
     const {classrunObject} = loadExtension(api);
     const lines = [];
+    const notes = [];
     const output = {show() {}, appendLine(line) { lines.push(line); }};
     const calls = [];
     const options = {attach: async () => true,
-      controller: {waitForDebuggerReady: async (file) => { calls.push(file); return false; }},
+      controller: {waitForDebuggerReady: async (file) => { calls.push(file); return false; },
+        debugNote: (line) => notes.push(line)},
       client: () => ({classrun: async () => { calls.push("run"); return {text: "ok", ms: 1}; }})};
     await classrunObject("ZCL_X", output, true, "/w/src/zcl_x.clas.abap", options);
-    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap"]);
+    // 0.5.1467 returned here: nothing sent, nothing in any output channel
+    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap", "run"]);
+    expect(notes).to.include("classrun ZCL_X: running without a verified breakpoint");
     options.controller.waitForDebuggerReady = async (file) => { calls.push(file); return true; };
     await classrunObject("ZCL_X", output, true, "/w/src/zcl_x.clas.abap", options);
-    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap", "/w/src/zcl_x.clas.abap", "run"]);
-    expect(lines).to.include("ok");
+    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap", "run", "/w/src/zcl_x.clas.abap", "run"]);
+    expect(lines.filter((line) => line === "ok")).to.have.length(2);
   });
 
   it("the debugger on demand says why it cannot attach: not running, or the door refused", async () => {
