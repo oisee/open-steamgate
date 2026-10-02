@@ -950,6 +950,110 @@ describe("tools/osd-warm: where the filesystem will not link", () => {
   });
 });
 
+// #460 keeps every inactive object out of the build (its active copy, or
+// nothing), and an ADT save makes its object inactive: with the registry on
+// the raw tree, every activation through ADT went cold. The registry is now
+// on the build view, and an activation of S is a warm edit of it.
+describe("tools/osd-warm: the build view, with other objects inactive", function () {
+  this.timeout(180000);
+  let root;
+  let store;
+  const A = "ZCL_WV_A";
+  const B = "ZCL_WV_B";
+  const src = (name, v) => `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS v RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD v.\n    rv = ${v}.\n  ENDMETHOD.\nENDCLASS.\n`;
+  const out = (name) => readFileSync(join(root, "output", `${name.toLowerCase()}.clas.mjs`), "utf8");
+  const activate = async (name) => {
+    const checked = store.warmActivation("CLAS", name);
+    const r = await store.publish({activate: [{type: "CLAS", name}]});
+    if (r.ok === true) expect(store.completeActivations([checked], r.transpile.built), "promoted").to.equal(true);
+    return r;
+  };
+
+  before(async function () {
+    const {Transpiler, core, plugin} = modulesOf(REPO);
+    const missing = plugin !== undefined ? "a transpiler plugin is installed" : await probe(Transpiler, core);
+    if (missing !== undefined) {
+      console.log(`      (skipped: ${missing})`);
+      this.skip();
+    }
+    root = realpathSync(mkdtempSync(join(tmpdir(), "osd-warm-view-")));
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "zcl_wv_a.clas.abap"), src(A, 1));
+    writeFileSync(join(root, "src", "zcl_wv_b.clas.abap"), src(B, 1));
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+      input_folder: "src", input_filter: [], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
+      options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+    }));
+    writeFileSync(join(root, "package.json"), "{}");
+    symlinkSync(join(REPO, "node_modules"), join(root, "node_modules"));
+    store = new ObjectStore({root, roots: [{path: "src", writable: true}], libs: [], build: {generators: false}});
+    expect(await store.publish()).to.include({ok: true});
+    store.warmState = {on: true, compiler: undefined, priming: undefined, reason: undefined, verifying: undefined, next: undefined, last: undefined, timer: undefined};
+    expect(await store.warmUp()).to.not.equal(undefined, store.warmState.reason);
+  });
+  after(() => {
+    store?.warmState?.compiler?.drop();
+    clearTimeout(store?.warmState?.timer);
+    clearTimeout(store?.warmState?.reprime);
+    if (root !== undefined) rmSync(root, {recursive: true, force: true});
+  });
+
+  it("with B inactive, activating an edit of A is warm, and B keeps its active copy", async () => {
+    store.write("CLAS", B, src(B, 20));
+    store.write("CLAS", A, src(A, 2));
+    const r = await activate(A);
+    expect(r.ok, JSON.stringify(r.transpile)).to.equal(true);
+    expect(r.transpile.warm, store.warmState.reason).to.equal(true);
+    // A's edit, and B, now read from its copy: the same code, a source map
+    // that names the copy, as a cold build of this view writes it
+    expect(r.transpile.modules.sort()).to.deep.equal(["zcl_wv_a.clas.mjs", "zcl_wv_b.clas.mjs"]);
+    expect(out(A)).to.include("IntegerFactory.get(2)");
+    expect(out(B), "B serves its active copy").to.include("IntegerFactory.get(1)").and.not.include("get(20)");
+    expect(store.stateOf(store.find("CLAS", B)).version).to.equal("inactive");
+    expect(store.stateOf(store.find("CLAS", A)).version).to.equal("active");
+    // the verifier compares it with a cold transpile of the same view
+    const v = await store.warmState.compiler.verify(r.transpile.hash);
+    expect(v.verdict, JSON.stringify(v)).to.equal("same");
+  });
+
+  it("a failed warm activation leaves the registry on the old view, and the next activation is warm", async () => {
+    store.write("CLAS", A, src(A, 3).replace("rv = 3.", "rv = nope."));
+    const failed = await activate(A);
+    expect(failed.ok).to.equal(false);
+    expect(failed.transpile).to.include({warm: true, check: true});
+    expect(out(A)).to.include("IntegerFactory.get(2)");
+    store.write("CLAS", A, src(A, 4));
+    const r = await activate(A);
+    expect(r.ok, JSON.stringify(r.transpile)).to.equal(true);
+    expect(r.transpile.warm, store.warmState.reason).to.equal(true);
+    expect(out(A)).to.include("IntegerFactory.get(4)");
+    expect(out(B)).to.include("IntegerFactory.get(1)");
+    // and B, activated at last, is a warm edit too: its copy gives way to its source
+    const b = await activate(B);
+    expect(b.transpile.warm, store.warmState.reason).to.equal(true);
+    expect(out(B)).to.include("IntegerFactory.get(20)");
+    const v = await store.warmState.compiler.verify(b.transpile.hash);
+    expect(v.verdict, JSON.stringify(v)).to.equal("same");
+  });
+
+  // an ADT client creates, saves and activates (cold: the object is new),
+  // then saves and activates again at once -- before the reprime five
+  // seconds later, so that one went cold as well (the stand-in, round 2)
+  it("the activation right after a cold one primes on demand and is warm", async () => {
+    writeFileSync(join(root, "src", "zcl_wv_c.clas.abap"), src("ZCL_WV_C", 1));
+    store.index = undefined;
+    const made = await activate("ZCL_WV_C");
+    expect(made.ok, JSON.stringify(made.transpile)).to.equal(true);
+    expect(made.transpile.warm).to.not.equal(true);
+    store.write("CLAS", "ZCL_WV_C", src("ZCL_WV_C", 2));
+    const r = await activate("ZCL_WV_C");
+    expect(r.transpile.warm, store.warmState.reason).to.equal(true);
+    expect(out("ZCL_WV_C")).to.include("IntegerFactory.get(2)");
+    const v = await store.warmState.compiler.verify(r.transpile.hash);
+    expect(v.verdict, JSON.stringify(v)).to.equal("same");
+  });
+});
+
 describe("tools/osd-warm: the real path on a small tree", function () {
   this.timeout(180000);
   let root;

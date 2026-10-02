@@ -1480,13 +1480,6 @@ export class ObjectStore {
     const w = this.warm();
     if (w.on !== true) return undefined;
     if (w.priming !== undefined) return w.priming;
-    // the warm registry primes on the tree as saved; while some of it is
-    // inactive and kept out of the build, it would prime on what is not live.
-    // The next cold build schedules another try.
-    if (this.overlay() !== undefined) {
-      w.reason = `${this.inactive.size} inactive object(s) are kept out of the build`;
-      return undefined;
-    }
     // not while the runtime changes hands: the prime holds this process for
     // seconds (11 s on vsp-i7, 17-30 s here under load), and a boot the
     // supervisor cannot hear meanwhile is a recycle that reads as that much
@@ -1497,9 +1490,12 @@ export class ObjectStore {
     if (changing !== undefined) {
       return changing.catch(() => undefined).then(() => this.warmUp());
     }
+    w.primeDue = false;
+    clearTimeout(w.reprime);
     w.priming = (async () => {
       const {WarmCompiler} = await import("./osd-warm.mjs");
-      w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m)});
+      // primed on the build view: inactive objects as their active copies
+      w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m), overlay: (activating) => this.overlay(activating)});
       try {
         const r = await w.compiler.prime();
         w.reason = undefined;
@@ -1933,18 +1929,25 @@ export class ObjectStore {
         const digests = new Map([...read].map(([file, digest]) => [normalPath(file), digest]));
         return Object.fromEntries([...activating].map((key) => [key, this.#builtRevision(key, digests)]));
       };
-      if (w.on === true && overlay !== undefined && w.compiler !== undefined) {
-        // the warm registry holds the tree as saved, inactive objects
-        // included; a build that must leave some out is a cold one
-        w.reason = `${this.inactive.size} inactive object(s) are kept out of the build`;
-        w.compiler.drop?.();
-        w.compiler = undefined;
+      // the warm registry holds the build view (#460's overlay), and a build
+      // of `activating` is a warm edit of it: those objects' saved sources
+      // replace their active copies, every other inactive object keeps its
+      // copy (WarmCompiler#overlayOf) -- an ADT save makes its object
+      // inactive, so without this every activation through ADT was cold
+      // a prime that is due (after a cold build) and not yet run is run now,
+      // when nothing is changing hands: it costs a parse of the tree, and the
+      // cold build it saves costs that, the transpile and a recycle. An ADT
+      // client saves and activates in one breath, so the activation after a
+      // create's cold build used to come before the reprime and go cold too.
+      if (w.on === true && options.force !== true && w.primeDue === true && w.priming === undefined &&
+          (this.served?.recycling ?? this.served?.starting) === undefined) {
+        await this.warmUp();
       }
-      if (w.on === true && options.force !== true && overlay === undefined) {
+      if (w.on === true && options.force !== true) {
         await w.priming;
         if (w.compiler?.primed === true) {
           try {
-            const r = await w.compiler.build();
+            const r = await w.compiler.build(activating);
             return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, warm: true,
               built: built(w.compiler.digests),
               modules: r.modules, hostHeld: r.hostHeld, from: r.from, stale: r.stale, steps: r.steps,
@@ -1970,6 +1973,10 @@ export class ObjectStore {
       try {
         const {build} = await import("./osd-build.mjs");
         const r = await build({...this.buildOptions, root: this.root, force: options.force === true, replace: options.replace === true, overlay});
+        // only a build that made a generation live is one to prime on: after
+        // a failed one the tree is not the live generation, and a prime on
+        // demand would parse it to be told so
+        w.primeDue = w.on === true;
         return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, built: built(r.digests)};
       } catch (error) {
         // the transpiler's refusal names each object and line; the rest of

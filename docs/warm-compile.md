@@ -57,6 +57,33 @@ watcher and a 30 ms debounce.
    source maps read as files and a generation swapped back to is evaluated
    again.
 
+## The build view, with objects inactive
+
+An ADT save makes its object inactive, and an inactive object is kept out
+of every build (`ObjectStore#overlay`, #460): its last active copy from
+`build/inactive/active/`, or nothing when it never had one. The registry is
+primed from that view and not from the raw tree, and an activation of a set
+S is a warm edit of it: S's saved sources replace their copies, every other
+inactive object keeps serving its copy, before and after. A file is known by
+its place in the tree, whichever copy the view reads (`#logical`), so a
+promotion is a content edit and the warm rule applies to it as to any save
+(a new object, `INTERFACES`, AMDP and generator inputs stay cold). A file
+the view reads from elsewhere with the same bytes is rebuilt for its source
+map, which names where it was read. A refused build leaves the registry on
+the old view (the edit held, reverted by the next build that does not
+activate it). The comparison runs a cold transpile of the same view
+(`OSD_VERIFY_OVERLAY`). A prime that is due after a cold build runs at the
+next activation if the five seconds have not passed, since an ADT client
+saves and activates at once; a prime whose view names the live generation
+differently (an object saved since, read from its copy) is checked by the
+full run, with each copied file placed where the live source map says it
+was read from.
+
+Before this every activation through ADT was cold. Measured on the stand-in
+(create, two edits, delete, twice; `OSD_WARM=1 STG_DEV=1`): 110 s and 7
+boots with every activation cold, then 77 s and 4 boots with both edits
+warm (1.5 s each).
+
 ## What is warm, and what is cold
 
 The generators read the tree too, and a change one of them would see has to
