@@ -2,8 +2,8 @@ import {expect} from "chai";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {testClassesIn, reported, missing} from "../tools/osd-unit-run.mjs";
-import {harnessEntries, runAll} from "../tools/osd-unit-all.mjs";
+import {testClassesIn, reported, missing, runCaptured, exitCodeOf} from "../tools/osd-unit-run.mjs";
+import {harnessEntries, invalidEntries, runAll} from "../tools/osd-unit-all.mjs";
 
 // **`npm run unit` printed OK whether it executed 156 test classes or none.**
 //
@@ -141,5 +141,71 @@ describe("a unit run goes on past a failure", () => {
     expect(failed.map((f) => f.name)).to.deep.equal(["ZCL_A: ltcl_a->red"]);
     expect(reported(lines.join("\n"))).to.deep.equal(["ZCL_A", "ZCL_B"]);
     expect(lines).to.include("ZCL_B: running ltcl_b->off, skipped due to configuration");
+  });
+  it("keeps the method's failure when its teardown fails too, and runs every teardown", async () => {
+    const calls = [];
+    const methods = {
+      red: async () => { throw new Error("the assertion"); },
+      teardown: async () => { calls.push("own.teardown"); throw new Error("the cleanup"); },
+      SUPER: {teardown: async () => { calls.push("super.teardown"); }},
+    };
+    const Local = class {
+      async constructor_() { this.FRIENDS_ACCESS_INSTANCE = methods; return this; }
+    };
+    const entries = [{objectName: "ZCL_A", localClass: "ltcl_a", methods: [{name: "red", skip: false}], riskLevel: "HARMLESS", filename: "./a.mjs"}];
+    const {failed} = await runAll(entries, async () => ({ltcl_a: Local}), {log: () => {}});
+    expect(calls, "a failing teardown does not stop the next one").to.deep.equal(["own.teardown", "super.teardown"]);
+    expect(failed).to.have.length(1);
+    expect(failed[0].error.message, "the original failure survives").to.equal("the assertion");
+    expect(failed[0].errors.map((e) => `${e.phase}: ${e.error.message}`)).to.deep.equal(["method: the assertion", "teardown: the cleanup"]);
+  });
+
+  it("still tears down after a failing setup, and does not run the method", async () => {
+    const calls = [];
+    const methods = {
+      setup: async () => { calls.push("setup"); throw new Error("no fixture"); },
+      green: async () => { calls.push("method"); },
+      teardown: async () => { calls.push("teardown"); },
+    };
+    const Local = class {
+      async constructor_() { this.FRIENDS_ACCESS_INSTANCE = methods; return this; }
+    };
+    const entries = [{objectName: "ZCL_A", localClass: "ltcl_a", methods: [{name: "green", skip: false}], riskLevel: "HARMLESS", filename: "./a.mjs"}];
+    const {failed} = await runAll(entries, async () => ({ltcl_a: Local}), {log: () => {}});
+    expect(calls).to.deep.equal(["setup", "teardown"]);
+    expect(failed[0].errors.map((e) => e.phase)).to.deep.equal(["setup"]);
+  });
+
+  it("refuses a harness list whose data is malformed, not just its syntax", () => {
+    const good = {objectName: "ZCL_A", localClass: "ltcl_a", methods: [{name: "m", skip: false}], riskLevel: "HARMLESS", filename: "./a.mjs"};
+    expect(invalidEntries([good])).to.deep.equal([]);
+    expect(invalidEntries([{...good, riskLevel: "undefined"}]), "no RISK LEVEL clause").to.deep.equal([]);
+    expect(invalidEntries({})).to.have.length(1);
+    expect(invalidEntries([{...good, methods: [{name: "m", skip: "false"}]}]).join()).to.match(/skip "false" is not a boolean/);
+    expect(invalidEntries([{...good, methods: "m"}]).join()).to.match(/methods is not an array/);
+    expect(invalidEntries([{...good, methods: [{skip: false}]}]).join()).to.match(/has no name/);
+    expect(invalidEntries([{...good, riskLevel: "harmless"}]).join()).to.match(/riskLevel "harmless"/);
+    expect(invalidEntries([{...good, filename: ""}]).join()).to.match(/filename is not a non-empty string/);
+    expect(invalidEntries([{...good, objectName: 7}]).join()).to.match(/objectName/);
+    const quoted = harness.replace('{"name":"green","skip":false}', '{"name":"green","skip":"false"}');
+    expect(quoted).to.not.equal(harness);
+    expect(() => harnessEntries(quoted)).to.throw(/malformed/);
+  });
+});
+
+describe("a unit run killed by a signal is not a pass", () => {
+  it("reports the signal of a child that reported everything and was then killed", async function () {
+    this.timeout(10000);
+    const result = await runCaptured(["-e", "console.log('ZCL_A: running ltcl_a->m'); process.kill(process.pid, 'SIGTERM'); setTimeout(() => {}, 5000);"], {echo: false});
+    expect(result.signal).to.equal("SIGTERM");
+    expect(result.code).to.equal(null);
+    expect(reported(result.captured)).to.deep.equal(["ZCL_A"]);
+    expect(exitCodeOf(result), "process.exit(null) would have exited 0").to.equal(1);
+  });
+
+  it("passes a clean exit and a failing one through", () => {
+    expect(exitCodeOf({code: 0, signal: null})).to.equal(0);
+    expect(exitCodeOf({code: 3, signal: null})).to.equal(3);
+    expect(exitCodeOf({code: null, signal: null})).to.equal(1);
   });
 });

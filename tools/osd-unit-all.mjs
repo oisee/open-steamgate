@@ -21,11 +21,51 @@ import {readFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 
-/** the entries of the generated harness's getData(), from its source */
+const RISK_LEVELS = new Set(["HARMLESS", "DANGEROUS", "CRITICAL",
+  // a test class without a RISK LEVEL clause: the transpiler writes
+  // "${def.riskLevel}" into the harness, which is the string "undefined"
+  "undefined"]);
+
+/** what is wrong with a getData() result, as a list of messages */
+export function invalidEntries(entries) {
+  if (!Array.isArray(entries)) return ["getData() did not return an array"];
+  const problems = [];
+  const text = (v) => typeof v === "string" && v.length > 0;
+  entries.forEach((st, i) => {
+    const at = `entry ${i}${st && text(st.objectName) ? ` (${st.objectName})` : ""}`;
+    if (st === null || typeof st !== "object") {
+      problems.push(`${at}: not an object`);
+      return;
+    }
+    for (const key of ["objectName", "localClass", "filename"]) {
+      if (!text(st[key])) problems.push(`${at}: ${key} is not a non-empty string`);
+    }
+    if (!RISK_LEVELS.has(st.riskLevel)) problems.push(`${at}: riskLevel ${JSON.stringify(st.riskLevel)} is not one of ${[...RISK_LEVELS].join(", ")}`);
+    if (!Array.isArray(st.methods)) {
+      problems.push(`${at}: methods is not an array`);
+      return;
+    }
+    st.methods.forEach((m, j) => {
+      if (m === null || typeof m !== "object") problems.push(`${at}: method ${j} is not an object`);
+      else {
+        if (!text(m.name)) problems.push(`${at}: method ${j} has no name`);
+        if (typeof m.skip !== "boolean") problems.push(`${at}: method ${j} skip ${JSON.stringify(m.skip)} is not a boolean`);
+      }
+    });
+  });
+  return problems;
+}
+
+/** the entries of the generated harness's getData(), from its source, checked */
 export function harnessEntries(source) {
   const match = /function getData\(\) \{[\s\S]*?\n  return ret;\n\}/.exec(source);
   if (!match) throw new Error("osd-unit-all: no getData() in the generated harness; its shape changed");
-  return new Function(`${match[0]}\nreturn getData();`)();
+  const entries = new Function(`${match[0]}\nreturn getData();`)();
+  const problems = invalidEntries(entries);
+  if (problems.length > 0) {
+    throw new Error("osd-unit-all: the generated harness's list is malformed; its shape changed:\n  " + problems.join("\n  "));
+  }
+  return entries;
 }
 
 function describe(err) {
@@ -35,24 +75,56 @@ function describe(err) {
   return message ? `${name}: ${message}` : name;
 }
 
+/** calls each hook that exists, every one of them even if an earlier throws */
+async function each(hooks, phase, errors) {
+  for (const hook of hooks) {
+    if (typeof hook !== "function") continue;
+    try {
+      await hook();
+    } catch (error) {
+      errors.push({phase, error});
+    }
+  }
+}
+
 /**
  * Runs every entry; `load(filename)` returns the imported test module. Never
- * throws for a failing test: returns {ran, failed: [{name, error}]}.
+ * throws for a failing test: returns {ran, failed: [{name, errors, error}]},
+ * where `errors` are phase-labelled (class_setup, setup, method, teardown,
+ * class_teardown) and `error` is the first of them, the original failure.
+ *
+ * Phases are kept apart: a setup failure skips the method but not the
+ * teardown, a teardown failure does not stop the next teardown hook, and a
+ * teardown failure never replaces the method's own.
  */
 export async function runAll(entries, load, {mode, log = console.log} = {}) {
   const failed = [];
   let ran = 0;
+  const fail = (name, errors, where) => {
+    for (const {phase, error} of errors) log(`${where} [${phase}]: ${describe(error)}`);
+    failed.push({name, errors, error: errors[0].error});
+  };
   for (const st of entries) {
     let localClass;
+    const classErrors = [];
     try {
       localClass = (await load(st.filename))[st.localClass];
-      if (localClass.class_setup) await localClass.class_setup();
-    } catch (err) {
+      if (typeof localClass !== "function") throw new Error(`no local class ${st.localClass} in ${st.filename}`);
+    } catch (error) {
+      classErrors.push({phase: "class_setup", error});
+    }
+    if (classErrors.length === 0) await each([localClass.class_setup && (() => localClass.class_setup())], "class_setup", classErrors);
+    if (classErrors.length > 0) {
       for (const m of st.methods) {
-        const name = `${st.objectName}: ${st.localClass}->${m.name}`;
         log(`${st.objectName}: running ${st.localClass}->${m.name}`);
-        log(`${st.objectName}: FAILED ${st.localClass}->${m.name} in class_setup: ${describe(err)}`);
-        failed.push({name, error: err});
+        fail(`${st.objectName}: ${st.localClass}->${m.name}`, classErrors,
+          `${st.objectName}: FAILED ${st.localClass}->${m.name}`);
+      }
+      // what class_setup did before it failed is still cleaned up
+      if (localClass) {
+        const down = [];
+        await each([localClass.class_teardown && (() => localClass.class_teardown())], "class_teardown", down);
+        if (down.length > 0) fail(`${st.objectName}: ${st.localClass} class_teardown`, down, `${st.objectName}: FAILED ${st.localClass}`);
       }
       continue;
     }
@@ -68,31 +140,43 @@ export async function runAll(entries, load, {mode, log = console.log} = {}) {
         continue;
       }
       ran++;
+      log(prefix);
+      const errors = [];
+      let test;
       try {
-        const test = await (new localClass()).constructor_();
-        const own = test.FRIENDS_ACCESS_INSTANCE;
-        if (test.setup) await test.setup();
-        if (own.setup) await own.setup();
-        if (own.SUPER && own.SUPER.setup) await own.SUPER.setup();
-        log(prefix);
-        try {
-          await own[m.name]();
-        } finally {
-          if (test.teardown) await test.teardown();
-          if (own.teardown) await own.teardown();
-          if (own.SUPER && own.SUPER.teardown) await own.SUPER.teardown();
-        }
-      } catch (err) {
-        log(`${st.objectName}: FAILED ${st.localClass}->${m.name}: ${describe(err)}`);
-        failed.push({name: `${st.objectName}: ${st.localClass}->${m.name}`, error: err});
+        test = await (new localClass()).constructor_();
+      } catch (error) {
+        errors.push({phase: "setup", error});
       }
+      const own = test?.FRIENDS_ACCESS_INSTANCE;
+      if (test) {
+        // the setups in order, stopping at the first that fails: a later
+        // setup may rely on an earlier one
+        for (const hook of [test.setup && (() => test.setup()), own?.setup && (() => own.setup()),
+          own?.SUPER?.setup && (() => own.SUPER.setup())]) {
+          if (!hook) continue;
+          try {
+            await hook();
+          } catch (error) {
+            errors.push({phase: "setup", error});
+            break;
+          }
+        }
+        if (errors.length === 0) {
+          try {
+            await own[m.name]();
+          } catch (error) {
+            errors.push({phase: "method", error});
+          }
+        }
+        await each([test.teardown && (() => test.teardown()), own?.teardown && (() => own.teardown()),
+          own?.SUPER?.teardown && (() => own.SUPER.teardown())], "teardown", errors);
+      }
+      if (errors.length > 0) fail(`${st.objectName}: ${st.localClass}->${m.name}`, errors, `${st.objectName}: FAILED ${st.localClass}->${m.name}`);
     }
-    try {
-      if (localClass.class_teardown) await localClass.class_teardown();
-    } catch (err) {
-      log(`${st.objectName}: FAILED ${st.localClass} class_teardown: ${describe(err)}`);
-      failed.push({name: `${st.objectName}: ${st.localClass} class_teardown`, error: err});
-    }
+    const down = [];
+    await each([localClass.class_teardown && (() => localClass.class_teardown())], "class_teardown", down);
+    if (down.length > 0) fail(`${st.objectName}: ${st.localClass} class_teardown`, down, `${st.objectName}: FAILED ${st.localClass}`);
   }
   return {ran, failed};
 }
