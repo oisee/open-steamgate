@@ -9,24 +9,27 @@
 "! namespace, which is what the Node facade's answered( ) does.
 "!
 "! A request no ABAP row serves is answered 404 with the header
-"! X-OSD-Served-By: HOST. On Node that header is the signal to the front in
-"! tools/adt-abap-front.mjs, which drops this answer and lets the Node
-"! facade serve the request; on a system there is no host behind it, and
-"! the 404 with its document is the honest answer.
+"! X-OSD-Served-By: HOST: the HOST verdict. On Node the front in
+"! tools/adt-abap-front.mjs calls ANSWER itself and reads the verdict from
+"! EV_SERVED_BY, keeps the session's cookies and token of this answer and
+"! lets the Node facade serve the request after the step; on a system there
+"! is no host behind it, and the 404 with its document is the honest answer.
+"! A route may also end in a HOST verdict of its own, with a continuation
+"! (ZIF_OSD_ADT_ROUTE=>TY_CONTINUATION) the host runs after the step.
 "!
-"! The session (slice 3): when a ZIF_OSD_ADT_SESSION is in use
-"! (USE_SESSION), every request resolves its session first, the CSRF gate
-"! of ZCL_OSD_ADT_CSRF runs before the router, and every answer carries
-"! the session's token and cookies. When none is (the mixed phase of
-"! slices 1 and 2) the Node session middleware has done all of that before
-"! the front, and the handler adds nothing
-"! (docs/adt-abap-port/slice-3-front.md).
+"! The session (slice 3): when a ZIF_OSD_ADT_SESSION is in use (IO_SESSION
+"! of ANSWER, which the Node front passes per request; USE_SESSION for the
+"! ICF path), every request resolves its session first, the CSRF gate of
+"! ZCL_OSD_ADT_CSRF runs before the router, and every answer carries the
+"! session's token and cookies. A session that ended while its request
+"! waited (ZCX_OSD_ADT=>SESSION_ENDED) is answered as the CSRF refusal,
+"! which makes a client log on again (docs/adt-abap-port/slice-3-front.md).
 "!
-"! No route writes rows yet, so there is no COMMIT here: slice 2's LOCK and
-"! UNLOCK write to the lock server, which no COMMIT or ROLLBACK touches at
-"! _SCOPE 1. When the session itself moves into tables, its rows must
-"! survive a 4xx (port-map.md, risk 1): the commit then goes here, whatever
-"! the status.
+"! There is no COMMIT here: the step around the handler commits when it
+"! ends without an exception, whatever the status, so the session's rows
+"! survive a 4xx (port-map.md, risk 1). Every refusal is caught in ANSWER
+"! for that reason. LOCK and UNLOCK write to the lock server, which no
+"! COMMIT or ROLLBACK touches at _SCOPE 1.
 CLASS zcl_osd_adt_handler DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
     INTERFACES if_http_extension.
@@ -44,8 +47,14 @@ CLASS zcl_osd_adt_handler DEFINITION PUBLIC CREATE PUBLIC.
     "! default) leaves the session and CSRF to the host in front
     CLASS-METHODS use_session
       IMPORTING io_session TYPE REF TO zif_osd_adt_session OPTIONAL.
+
+    "! a route table in place of ZCL_OSD_ADT_ROUTER=>ROUTES, for a test; an
+    "! initial table is the real one again
+    CLASS-METHODS use_routes
+      IMPORTING it_routes TYPE zcl_osd_adt_router=>tt_route OPTIONAL.
   PRIVATE SECTION.
     CLASS-DATA go_session TYPE REF TO zif_osd_adt_session.
+    CLASS-DATA gt_routes TYPE zcl_osd_adt_router=>tt_route.
     CLASS-METHODS route
       IMPORTING is_request   TYPE zif_osd_adt_route=>ty_request
       EXPORTING es_response  TYPE zif_osd_adt_route=>ty_response
@@ -101,6 +110,10 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
     go_session = io_session.
   ENDMETHOD.
 
+  METHOD use_routes.
+    gt_routes = it_routes.
+  ENDMETHOD.
+
   METHOD answer.
     DATA ls_session TYPE zif_osd_adt_session=>ty_session.
     DATA lt_cookies TYPE string_table.
@@ -122,6 +135,9 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
         lt_cookies = io_session->cookies( ls_session ).
         zcl_osd_adt_csrf=>check_token( ls_session-token ).
       CATCH zcx_osd_adt INTO lx_adt.
+*       the session's own refusal, SESSION_ENDED included: an ENQ context
+*       that ended is not a session that ended (the session binds the next
+*       context and keeps its token), so it is never the CSRF refusal here
         ev_served_by = zcl_osd_adt_router=>c_abap.
         es_response = refusal( lx_adt ).
         RETURN.
@@ -136,6 +152,10 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
       zcl_osd_adt_csrf=>stamp( EXPORTING it_cookies  = lt_cookies
                                          iv_token    = zcl_osd_adt_csrf=>c_required
                                CHANGING  cs_response = es_response ).
+*     a refused write keeps no session it opened
+      IF ls_session-fresh = abap_true.
+        io_session->end( ls_session-id ).
+      ENDIF.
       RETURN.
     ENDIF.
 
@@ -145,6 +165,15 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
     zcl_osd_adt_csrf=>stamp( EXPORTING it_cookies  = lt_cookies
                                        iv_token    = ls_session-token
                              CHANGING  cs_response = es_response ).
+*   A request that opened its session and asks nothing of it (no token, no
+*   state, no write: a readiness probe, a plain GET) is answered with the
+*   session as usual but keeps no row: the step ends it. The next request
+*   that fetches a token or asks for state opens the one that stays.
+    IF ls_session-fresh = abap_true AND ls_session-stateful = abap_false
+        AND zcl_osd_adt_csrf=>fetching( is_request-headers ) = abap_false
+        AND zcl_osd_adt_csrf=>unsafe( is_request-method ) = abap_false.
+      io_session->end( ls_session-id ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD route.
@@ -155,9 +184,14 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
 
     CLEAR: es_response, ev_served_by.
     TRY.
-        ls_result = zcl_osd_adt_router=>dispatch( is_request ).
+        ls_result = zcl_osd_adt_router=>dispatch( is_request = is_request
+                                                  it_routes  = gt_routes ).
         ev_served_by = ls_result-served_by.
-        IF ev_served_by = zcl_osd_adt_router=>c_host.
+        IF ls_result-response-continuation-kind IS NOT INITIAL.
+*         the route's own HOST verdict: its answer and what follows it
+          ev_served_by = zcl_osd_adt_router=>c_host.
+          es_response = ls_result-response.
+        ELSEIF ev_served_by = zcl_osd_adt_router=>c_host.
           lv_text = |{ is_request-method } { is_request-path } is not served by ABAP here|.
           lx_adt = zcx_osd_adt=>not_found( lv_text ).
           es_response = refusal( lx_adt ).

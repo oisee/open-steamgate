@@ -6,6 +6,8 @@ CLASS ltcl_session_double DEFINITION FOR TESTING FINAL.
     DATA ms_session TYPE zif_osd_adt_session=>ty_session.
     DATA mt_cookies TYPE string_table.
     DATA mv_raise TYPE abap_bool.
+    DATA mv_ended TYPE abap_bool.
+    DATA mv_ended_id TYPE string.
     DATA mv_asked_id TYPE string.
     DATA mv_asked_token TYPE string.
     DATA mv_asked TYPE i.
@@ -19,6 +21,10 @@ CLASS ltcl_session_double IMPLEMENTATION.
     mt_seen_cookies = it_cookies.
     IF mv_raise = abap_true.
       lx_error = zcx_osd_adt=>internal( `no session table` ).
+      RAISE EXCEPTION lx_error.
+    ENDIF.
+    IF mv_ended = abap_true.
+      lx_error = zcx_osd_adt=>session_ended( ).
       RAISE EXCEPTION lx_error.
     ENDIF.
     rs_session = ms_session.
@@ -36,7 +42,7 @@ CLASS ltcl_session_double IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~end.
-    RETURN.
+    mv_ended_id = iv_id.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~alive.
@@ -100,6 +106,8 @@ CLASS ltcl_csrf DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS a_route_header_is_replaced FOR TESTING RAISING cx_static_check.
     METHODS no_session_no_gate FOR TESTING RAISING cx_static_check.
     METHODS a_session_that_fails FOR TESTING RAISING cx_static_check.
+    METHODS an_ended_session FOR TESTING RAISING cx_static_check.
+    METHODS a_fresh_session_asked_nothing FOR TESTING RAISING cx_static_check.
     METHODS a_token_that_is_fetch FOR TESTING RAISING cx_static_check.
     METHODS an_empty_token FOR TESTING RAISING cx_static_check.
     METHODS cookies_are_parsed FOR TESTING RAISING cx_static_check.
@@ -335,6 +343,40 @@ CLASS ltcl_csrf IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 500 ).
     cl_abap_unit_assert=>assert_equals( act = lv_by exp = zcl_osd_adt_router=>c_abap ).
     cl_abap_unit_assert=>assert_char_cp( act = ls_response-body exp = `*no session table*` ).
+  ENDMETHOD.
+
+  METHOD an_ended_session.
+*   SESSION_ENDED is the session's own refusal and never the CSRF one: an
+*   ENQ context that ended is not a session that ended (#471)
+    DATA ls_response TYPE zif_osd_adt_route=>ty_response.
+    DATA lv_by TYPE string.
+    mo_session->mv_ended = abap_true.
+    ls_response = call( EXPORTING iv_method = `GET` IMPORTING ev_served_by = lv_by ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 403 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-content_type exp = `application/xml; charset=utf-8` ).
+    cl_abap_unit_assert=>assert_char_cp( act = ls_response-body exp = `*ExceptionSessionEnded*` ).
+    cl_abap_unit_assert=>assert_initial( headers_named( is_response = ls_response iv_name = `x-csrf-token` ) ).
+    cl_abap_unit_assert=>assert_equals( act = lv_by exp = zcl_osd_adt_router=>c_abap ).
+  ENDMETHOD.
+
+  METHOD a_fresh_session_asked_nothing.
+*   a probe keeps no session row; a fetch, a stateful request and a refused
+*   write are told apart
+    mo_session->ms_session-fresh = abap_true.
+    call( `GET` ).
+    cl_abap_unit_assert=>assert_equals( act = mo_session->mv_ended_id exp = mo_session->ms_session-id ).
+    CLEAR mo_session->mv_ended_id.
+    call( iv_method = `GET` iv_token = `fetch` ).
+    cl_abap_unit_assert=>assert_initial( mo_session->mv_ended_id ).
+    mo_session->ms_session-stateful = abap_true.
+    call( `GET` ).
+    cl_abap_unit_assert=>assert_initial( mo_session->mv_ended_id ).
+    mo_session->ms_session-stateful = abap_false.
+    call( iv_method = `POST` iv_token = `wrong` ).
+    cl_abap_unit_assert=>assert_equals( act = mo_session->mv_ended_id exp = mo_session->ms_session-id ).
+    CLEAR mo_session->mv_ended_id.
+    call( iv_method = `POST` iv_token = c_token ).
+    cl_abap_unit_assert=>assert_initial( mo_session->mv_ended_id ).
   ENDMETHOD.
 
   METHOD a_token_that_is_fetch.

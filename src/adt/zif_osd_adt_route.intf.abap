@@ -23,13 +23,26 @@ INTERFACE zif_osd_adt_route PUBLIC.
            body    TYPE xstring,
          END OF ty_request.
 
+  "! What a host does after the step, when a route asks for it
+  "! (docs/adt-abap-port/slice-3-front.md, "The continuation"): kind names
+  "! a handler the host registered, payload is JSON for it. An initial kind
+  "! is no continuation.
+  TYPES: BEGIN OF ty_continuation,
+           kind    TYPE string,
+           payload TYPE string,
+         END OF ty_continuation.
+
   "! content_type is written exactly as given, charset included: the wire
-  "! value is part of the contract (Gate 1 compares it byte for byte)
+  "! value is part of the contract (Gate 1 compares it byte for byte).
+  "! A response with a continuation is the handler's HOST verdict: on Node
+  "! the host runs the continuation after the step; on a system, where no
+  "! host stands behind the handler, this response is the answer.
   TYPES: BEGIN OF ty_response,
            status       TYPE i,
            content_type TYPE string,
            headers      TYPE tihttpnvp,
            body         TYPE string,
+           continuation TYPE ty_continuation,
          END OF ty_response.
 
   METHODS handle

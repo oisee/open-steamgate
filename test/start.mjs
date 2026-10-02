@@ -12,6 +12,8 @@ import {join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {abapRunner} from "../tools/adt-abap-front.mjs";
+import {kernelFreshness} from "../tools/adt-abap-kernel.mjs";
+import {liveHash} from "../tools/osd-build.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
@@ -56,7 +58,7 @@ async function loadInline() {
   const from = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
   const {initializeABAP} = await from("init.mjs");
   const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
-  const {zcl_osd_adt_router} = await from("zcl_osd_adt_router.clas.mjs");
+  const {zcl_osd_adt_handler} = await from("zcl_osd_adt_handler.clas.mjs");
   const {zcl_stg_segw_registry} = await from("zcl_stg_segw_registry.clas.mjs");
   const {zcl_stg_shlp_registry} = await from("zcl_stg_shlp_registry.clas.mjs");
   const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
@@ -84,9 +86,28 @@ async function loadInline() {
   // the synthetic taxi facts, made by ZCL_OSD_DEMO_DATA (tools/osd-demo-data.mjs)
   const {zcl_osd_demo_data} = await from("zcl_osd_demo_data.clas.mjs");
   await ensureDemoData(zcl_osd_demo_data);
-  return {cl_express_icf_shim, zcl_osd_adt_router, zcl_apc_host, zcl_osd_status, icf};
+  return {cl_express_icf_shim, zcl_osd_adt_handler, zcl_apc_host, zcl_osd_status, icf};
 }
 const inline = MODE === "inline" ? await loadInline() : undefined;
+
+// The child-mode parent runs no system, but it runs the ADT front: the ADT
+// classes and nothing else, with their own database in memory and the lock
+// server in this process, so the ADT sessions and their locks outlive every
+// recycle of the serving child (tools/adt-abap-kernel.mjs). OSD_ADT=js is the
+// way out when the ABAP front itself is broken: Node's sessions and routes
+// answer everything, as before slice 3.
+async function loadChildKernel() {
+  try {
+    const {loadAdtKernel} = await import("../tools/adt-abap-kernel.mjs");
+    const setup = await import("./setup.mjs");
+    const output = process.env.OSD_OUTPUT ?? join(process.env.OSD_ROOT ?? process.cwd(), "output");
+    return {...await loadAdtKernel({output, setup}), output};
+  } catch (e) {
+    console.error(`ADT front: the ABAP kernel did not load, so Node's sessions and routes answer ADT (${e?.message ?? e}); OSD_ADT=js says so on purpose`);
+    return undefined;
+  }
+}
+const adtKernel = MODE === "child" && process.env.OSD_ADT !== "js" ? await loadChildKernel() : undefined;
 
 
 export function startServer(quiet) {
@@ -192,13 +213,18 @@ export function startServer(quiet) {
     // the facade's reads share the one connection with the steps, so they
     // wait for the work process like a step (tools/osd-dialog-step.mjs)
     : new Data({client: lockedClient(abap.context.databaseConnections["DEFAULT"], "the ADT facade's data preview")});
-  // the ABAP front of the façade (ADR 0007, tools/adt-abap-front.mjs): in
-  // this process only when it runs ABAP, which is inline. The child-mode
-  // parent loads no ABAP, so there the Node façade answers everything, as
-  // it did before (docs/adt-abap-port/abap-skeleton.md). OSD_ADT=js turns
-  // the front off here too.
-  const adtAbap = MODE === "inline" && process.env.OSD_ADT !== "js"
-    ? abapRunner({shim: inline.cl_express_icf_shim, router: inline.zcl_osd_adt_router, step: dialogStep})
+  // the ABAP front of the façade (ADR 0007, tools/adt-abap-front.mjs), in
+  // both shapes: inline over the system's own classes, in child mode over
+  // the ADT kernel above. Every ADT request enters ZCL_OSD_ADT_HANDLER, and
+  // the sessions are ZCL_OSD_ADT_SESSION through AbapSessions, which
+  // adtRouter makes for it (slice 3, option B, docs/adt-abap-port/
+  // slice-3-front.md). OSD_ADT=js turns the front off in both.
+  const adtHandler = MODE === "inline" ? inline.zcl_osd_adt_handler : adtKernel?.handler;
+  // the kernel is loaded once; a generation that changes the front's classes
+  // or tables is said (X-OSD-Front-Stale, one console line) until a restart
+  const adtAbap = adtHandler !== undefined && process.env.OSD_ADT !== "js"
+    ? abapRunner({handler: adtHandler, step: dialogStep, stale: adtKernel === undefined ? undefined
+      : kernelFreshness({output: adtKernel.output, loaded: adtKernel.hash, generation: () => liveHash(process.env.OSD_ROOT ?? process.cwd())})})
     : undefined;
   const facade = adtRouter({
     store,

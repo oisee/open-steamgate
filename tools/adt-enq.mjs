@@ -18,8 +18,7 @@
 // it, so the two sides cannot disagree on it.
 import {adtEnqOwner} from "./adt-enq-key.mjs";
 import {randomUUID} from "node:crypto";
-import {EnqSessionEnded, bindEnqSession, endEnqSession, enqDrop, enqHolder, enqTake, onEnqContextEnded, reviveEnqSession} from "./osd-enq-host.mjs";
-import {Sessions, refuseToken} from "./adt-session.mjs";
+import {endEnqSession, enqDrop, enqHolder, enqTake} from "./osd-enq-host.mjs";
 
 export const LOCK_TABLE = "ZOSD_ADT_LOCK";
 export const LOCK_OBJECT = "EZOSD_ADT_OBJ";
@@ -51,8 +50,8 @@ export class EnqOwners {
     return {id: mine ? adtEnqOwner.idOf(held.key) : undefined, user: held.user, mine};
   }
 
-  // the Node LOCK route, which serves only when the ABAP route table could
-  // not be read: the same lock, taken from the host
+  // a lock taken from the host (AbapSessions#lock, Node's Sessions over
+  // this table): the same lock ZCL_OSD_ADT_LOCK takes
   take(session, type, name) {
     const res = enqTake(this.key(session.id), session.user, LOCK_TABLE, LOCK_OBJECT, argument(type, name));
     // 602: the session's own lock, which LOCK answers with its handle
@@ -76,66 +75,22 @@ export class EnqOwners {
 
 /**
  * What the ABAP front of one façade instance needs from its sessions
- * (tools/adt-abap-front.mjs, options enter and system):
+ * (tools/adt-abap-front.mjs, option system): SYSTEM LOCK_HANDLE and
+ * LOCK_RELEASE (the session's handles), SESSION (stateful or not) and
+ * LOCK_HOLDER (holderOf, which ends a holder whose session is gone), asked by
+ * ZCL_OSD_ADT_LOCK through the host; any other kind goes to `other` (the
+ * façade's IDENTITY). The session is req.adt.session, which the RESOLVE of
+ * the same step set (AbapSessions#sessionFor).
  *
- * - enter: a step of a stateful ADT session is that session's ENQ session,
- *   so a lock it takes outlives the request and goes with logoff, the
- *   session DELETE or expiry (Sessions#end -> EnqOwners#end). The session is
- *   the one the middleware chose by sessionIdOf, the one precedence rule. A
- *   session that never asked for state binds nothing: its step is its ENQ
- *   session, as a stateless request is on a system. A stateless request of a
- *   stateful session is bound like any other, so it clears nothing.
- * - ended: a session that ended while its step waited for the work process
- *   (a LOCK queued behind its own logoff) cannot be bound again
- *   (EnqSessionEnded); the request is answered as one from a session that
- *   is gone, the CSRF refusal (refuseToken), and no ABAP runs for it.
- * - system: SYSTEM LOCK_HANDLE and LOCK_RELEASE, the session's handle map,
- *   SESSION (stateful or not) and LOCK_HOLDER (Sessions#holderOf, which
- *   ends a holder whose session is gone), all of which stay in the Node
- *   session until it moves into ABAP; any other kind goes to `other` (the
- *   façade's IDENTITY).
+ * The ENQ binding of a stateful session (its locks outlive the request) is
+ * RESOLVE's (ZCL_OSD_ADT_SESSION, KERNEL_ENQ_SESSION). An ENQ context that
+ * ended (a dump, #433, or the lock server) is not a session that ended: the
+ * next RESOLVE clears the handles that context gave out and binds again
+ * (#471). A step whose ENQ session ended while it waited (its logoff) is
+ * answered by the front as the CSRF refusal.
  */
 export function abapSession(sessions, other) {
-  // A dump ends the bound ENQ context (#433) and its locks with it, but not
-  // the key: the session's next step opens a new context, as on a system.
-  // The handles that context gave out go too, so none of them looks alive.
-  // The logon session itself stays (its token, its cookies): a write with an
-  // old handle is then the 409 of a handle that holds nothing, not a CSRF
-  // refusal, and the client locks again.
-  // ABAP clears persisted handles when its next resolve sees the ended
-  // context. Only the Node table needs immediate in-memory cleanup here.
-  if (sessions instanceof Sessions) onEnqContextEnded((key) => {
-    const prefix = sessions.owners.prefix;
-    if (typeof key !== "string" || prefix === undefined || key.startsWith(prefix) === false) return;
-    sessions.byId.get(key.slice(prefix.length))?.locks.clear();
-  });
   return {
-    async enter(req) {
-      const session = req.adt?.session;
-      if (session?.stateful !== true) return;
-      const key = sessions.owners.key(session.id);
-      try {
-        bindEnqSession(key, {user: session.user});
-      } catch (e) {
-        // The lock server ended this context. If the session still exists it
-        // goes on in a new context: a read is answered, a write with a handle
-        // of the old one is the 409 of a handle that holds nothing.
-        if (!(e instanceof EnqSessionEnded)) throw e;
-        // ...but the request resolved its session before it queued, so ask
-        // again: a logoff that ran meanwhile has removed it, and then this is
-        // the refusal (#432: no lock under a logged-off session)
-        const live = await sessions.get(session.id);
-        if (live === undefined) throw e;
-        // the handles of the ended context hold nothing: they go before the
-        // key lives again, so a relock gives a new handle, never an old one
-        if (typeof sessions.contextEnded === "function") await sessions.contextEnded(session.id);
-        else live.locks.clear();
-        session.locks?.clear?.();
-        reviveEnqSession(key);
-        bindEnqSession(key, {user: session.user});
-      }
-    },
-    ended: refuseToken,
     async system(kind, name, req) {
       const session = req.adt?.session;
       if (kind === "LOCK_HANDLE" && session !== undefined) {

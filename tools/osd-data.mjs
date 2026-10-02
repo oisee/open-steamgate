@@ -68,6 +68,12 @@ export class Data {
     if (this.booted !== undefined) {
       return this.booted;
     }
+    // a host that holds only the ADT kernel (tools/adt-abap-kernel.mjs, the
+    // child-mode parent) must not boot the whole system over it: init.mjs
+    // installs a new runtime and the ADT sessions and locks would go with it
+    if (globalThis.__osdAdtKernel !== undefined) {
+      return Promise.reject(new Error("this process holds the ADT kernel; the system's ABAP runs in the serving child, not here"));
+    }
     this.booted = (async () => {
       const init = join(this.root, "output", "init.mjs");
       if (existsSync(init) === false) {

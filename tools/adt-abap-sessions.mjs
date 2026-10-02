@@ -33,7 +33,9 @@ export class AbapSessions {
     this.owners = new EnqOwners();
     this.step = options.step ?? dialogStep;
     this.ttlMs = options.ttlMs ?? 30 * 60 * 1000;
-    this.identity = options.identity ?? {systemID: "OSD", client: "001", userName: "OSD"};
+    // userName is the user of a session opened without a Basic header, Node's
+    // ANONYMOUS; the system id and the client name the session cookie
+    this.identity = {systemID: "OSD", client: "001", userName: "OSD", ...options.identity};
   }
 
   static user(req) { return Sessions.user(req); }
@@ -150,8 +152,27 @@ export class AbapSessions {
     });
   }
 
+  /** The work, run in one step with the proof that the session's handle
+   *  still holds the object: a route's last check before it writes, with
+   *  nothing able to run between the check and the write (a logoff, an
+   *  UNLOCK, an expiry would otherwise fit in the gap). Answers false, and
+   *  runs nothing, when the handle no longer holds. */
+  whileHeld(session, handle, type, name, work) {
+    return this.#run(async (obj) => {
+      if ((await this.#call(obj, "holds", {iv_id: session.id, iv_handle: handle, iv_type: type, iv_name: name})).get() !== "X") return false;
+      const holder = await this.#holder(obj, type, name);
+      if (holder?.session.id !== session.id || holder.handle !== handle) return false;
+      await work();
+      return true;
+    });
+  }
+
+  // {ended} when the caller's session is gone by the time the delete runs:
+  // its logoff can run between the front's verdict and this step, and a
+  // session that is gone holds nothing and may delete nothing
   deleteObject(session, type, name, store) {
     return this.#run(async (obj) => {
+      if ((await this.#call(obj, "alive", {iv_id: session.id})).get() !== "X") return {ended: true};
       const holder = await this.#holder(obj, type, store.find(type, name)?.name ?? name);
       if (holder !== undefined && holder.session.id !== session.id) return {holder};
       const gone = store.delete(type, name);
@@ -161,6 +182,29 @@ export class AbapSessions {
       }
       return {gone};
     });
+  }
+
+  /** The ZIF_OSD_ADT_SESSION of one request of the ABAP front
+   *  (tools/adt-abap-front.mjs), made inside its step: ZCL_OSD_ADT_HANDLER
+   *  resolves it, and the RESOLVE it calls also sets req.adt -- the session
+   *  as the Node routes and the host's SYSTEM answers read it -- before the
+   *  router runs. One object per request, so nothing of one request's
+   *  session reaches another's. */
+  async sessionFor(req) {
+    const a = globalThis.abap;
+    const obj = await new a.Classes.ZCL_OSD_ADT_SESSION().constructor_({
+      iv_ttl_seconds: new a.types.Integer().set(Math.ceil(this.ttlMs / 1000)),
+    });
+    const resolve = obj[API + "resolve"].bind(obj);
+    obj[API + "resolve"] = async (input) => {
+      // the sessions' identity, as every other call of this adapter has it
+      const resolved = await withSystem((kind) => kind === "IDENTITY" ? this.identity : undefined, () => resolve(input));
+      const session = await this.#view(obj, value(resolved.get().id));
+      req.adt = {session, sessions: this,
+        fetching: String(req.headers["x-csrf-token"] ?? "").toLowerCase() === FETCH};
+      return resolved;
+    };
+    return obj;
   }
 
   middleware() {
