@@ -1288,7 +1288,22 @@ copy fails with EACCES. The gate (clean checkout at the locked commit) is what
 keeps a pin unchanged. Edit the development clone and use
 `OSD_LIB_<FOLDER>=<path>` to select it explicitly. The override is printed
 when used. On Windows, sync creates junctions; if the OS refuses a link,
-enable Developer Mode or run an elevated terminal. CI keeps real clones under
+enable Developer Mode or run an elevated terminal.
+
+A `.local/lars` that worktrees share (a symlink to another checkout's) is
+migrated once per machine with `node tools/osd-libs.mjs --sync --shared`:
+plain `--sync` refuses it, and `--shared` also refuses a clone with
+uncommitted changes, so commit held changes to a branch inside the clone
+first (it moves to `.local/dev` with that branch). Run it from any
+up-to-date checkout whose `.local/lars` resolves to the shared folder: the
+pins and the lock come from that checkout, the clones from the folder its
+`.local/lars` points at, so a main checkout parked on an old branch without
+`libs.lock.json` is migrated from a fresh `origin/main` worktree with
+`.local/lars` linked to it. A folder there that is not a git clone at all is
+moved to `.local/dev` by hand before the run. Afterwards
+`node tools/osd-libs.mjs --status` lists every library as ready.
+
+CI keeps real clones under
 `.local/lars` so its build artefact and restore paths stay the same. A pin moves
 only in a pin PR that also carries its licence approval; `node tools/osd-libs.mjs`
 and `test/bootstrap.mjs` check that approval against
