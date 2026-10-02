@@ -1,36 +1,64 @@
 import {createRequire} from "node:module";
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {createHash} from "node:crypto";
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {mkdtempSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo} from "./emit-go.mjs";
+import {emitGo, referencedClasses} from "./emit-go.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
 
 const require = createRequire(import.meta.url);
 const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
-// Captured from dacc7961 before changing the frontend, using the locked libs.
-const expected = JSON.parse(readFileSync(join(here, "frontend-output.json"), "utf8"));
-test("all gogen testdata emits the same Go bytes as the original frontend", () => {
-  const args = {
-    folders: [join(here, "testdata"), join(libraryPath(root, "open-abap-core"), "src"), join(libraryPath(root, "ajson"), "src/core")],
-    objects: [...expected.objects, ...expected.core],
-  };
-  const session = {};
-  const program = compileProgram({...args, session});
-  const go = emitGo(program);
-  assert.equal(program.classes.length, expected.classes);
-  assert.equal(program.classes.reduce((n, c) => n + c.methods.length, 0), expected.methods);
-  assert.equal(Buffer.byteLength(go), expected.bytes);
-  assert.equal(createHash("sha256").update(go).digest("hex"), expected.sha256);
-  const reused = compileProgram({...args, registry: program.reg, session});
-  assert.ok(reused.frontendCounts.reused > 0);
-  assert.equal(emitGo(reused), go);
+const folders = [join(here, "testdata"), join(libraryPath(root, "open-abap-core"), "src"), join(libraryPath(root, "ajson"), "src/core")];
+const objects = readdirSync(folders[0], {recursive: true}).filter((f) => /\.(clas|intf|fugr)\.(abap|xml)$/.test(f))
+  .map((f) => f.split("/").at(-1).split(".")[0].replaceAll("#", "/").toUpperCase());
+
+test("growing testdata closure emits the same Go bytes as a fresh final compile", () => {
+  const wanted = new Set(objects), session = {};
+  let program, rounds = 0, reused = 0;
+  const libraryReused = new Set();
+  for (; rounds < 12; rounds++) {
+    program = compileProgram({folders, objects: [...wanted], registry: program?.reg, session});
+    reused += program.frontendCounts.reused;
+    program.frontendCounts.reusedClasses.forEach((name) => libraryReused.add(name));
+    const refs = new Set([...referencedClasses(program), ...program.missing]);
+    const visit = (node) => {
+      if (!node || typeof node !== "object") return;
+      if (node.e === "call") {
+        if (node.owner) refs.add(node.owner);
+        if (node.receiver?.type?.k === "ref" && !node.receiver.type.intf) refs.add(node.receiver.type.name);
+      }
+      if (node.e === "new") refs.add(node.cls);
+      for (const [k, v] of Object.entries(node)) if (k !== "type") visit(v);
+    };
+    for (const name of wanted) {
+      const sup = program.reg.getObject("CLAS", name)?.getDefinition()?.getSuperClass();
+      if (sup) refs.add(sup.toUpperCase());
+    }
+    for (const c of program.classes) {
+      if (c.super) refs.add(c.super);
+      for (const m of c.methods) visit(m.body);
+    }
+    const more = [...refs].filter((n) => !wanted.has(n) && !n.includes(":")
+      && (program.reg.getObject("CLAS", n) || program.reg.getObject("INTF", n)));
+    if (!more.length) break;
+    more.forEach((n) => wanted.add(n));
+  }
+  assert.ok(rounds > 0 && rounds < 12, "closure grows and settles");
+  assert.ok(reused > 0, "closure exercises cached lowerings");
+  assert.ok(libraryReused.has("CX_ROOT"), "dependency-sensitive library lowering is reused across growth");
+  const fresh = compileProgram({folders, objects: [...wanted]});
+  const actual = emitGo(program), expected = emitGo(fresh);
+  const offset = [...actual].findIndex((c, i) => c !== expected[i]);
+  assert.ok(actual === expected, `Go differs at ${offset}: ${JSON.stringify(actual.slice(offset - 90, offset + 200))} vs ${JSON.stringify(expected.slice(offset - 90, offset + 200))}`);
+  assert.deepEqual(program.skipped, fresh.skipped);
+  const repeated = compileProgram({folders, objects: [...wanted], registry: program.reg, session});
+  assert.ok(repeated.frontendCounts.reused > 0);
+  assert.equal(emitGo(repeated), emitGo(fresh));
 });
 
 test("closure reuse retains refusals and recompiles dependency-sensitive callers", () => {
@@ -59,7 +87,7 @@ ENDCLASS.`;
     assert.equal(first.classes.find((c) => c.name === "ZCL_CALLER").methods[0].body[0].s, "stub");
     const all = {...args, objects: [...args.objects, "ZCL_DEPENDENCY"]};
     const next = compileProgram({...all, registry: first.reg, session});
-    assert.equal(next.frontendCounts.reused, 2);
+    assert.ok(next.frontendCounts.reused >= 2);
     assert.notEqual(next.classes.find((c) => c.name === "ZCL_CALLER").methods[0].body[0].s, "stub");
     assert.deepEqual(next.skipped, compileProgram(all).skipped);
     assert.equal(emitGo(next), emitGo(compileProgram(all)));

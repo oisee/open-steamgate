@@ -219,10 +219,15 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
       return false;
     }
   });
+  const lowerClass = (ctx, obj) => {
+    const saved = PROGRAM;
+    PROGRAM = ctx.program; // Global type helpers must use the tracked program too.
+    try { return classIr(ctx, obj); } finally { PROGRAM = saved; }
+  };
   for (const obj of reg.getObjects()) {
-    if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(compileClass(ctx0, obj, classIr, session));
+    if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(compileClass(ctx0, obj, lowerClass, session));
   }
-  for (const l of localDefs) program.classes.push(compileClass(ctx0, l, classIr, session));
+  for (const l of localDefs) program.classes.push(compileClass(ctx0, l, lowerClass, session));
   for (const g of readable) program.classes.push(functionGroupIr(ctx0, g));
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it

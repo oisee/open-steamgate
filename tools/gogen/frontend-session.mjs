@@ -1,6 +1,7 @@
+import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // A unit closure keeps one immutable registry. Reuse lowering only for
-// elementary classes whose result cannot depend on newly selected objects.
-// Complex classes still retry normally, including their named refusals.
+// elementary classes directly. Dependency-sensitive classes record their
+// program reads and effects and retry whenever a recorded input changes.
 const scalarKinds = new Set(["i", "int8", "f", "p", "c", "x", "n", "d", "t", "string", "xstring", "void"]);
 const sensitiveSource = /=>|->|~|\b(?:TYPES|CONSTANTS|INTERFACES|INHERITING|NEW|CATCH|RAISE|ASSIGN|SELECT|INSERT|DELETE|UPDATE|MODIFY|APPEND|COLLECT|SUBMIT|DESCRIBE)\b|\b(?:CALL\s+FUNCTION|IS\s+(?:NOT\s+)?SUPPLIED|SET\s+HANDLER|GET\s+REFERENCE)\b/i;
 const current = new Set(["currentClass", "currentOwner", "currentTypes"]);
@@ -63,11 +64,13 @@ export function compileClass(ctx, obj, lower, session) {
   const file = obj.getMainABAPFile();
   const key = obj.getName().toUpperCase();
   const cached = session?.classes.get(key);
-  if (cached && cached.file === file && cached.structure === file.getStructure() && cached.supplied === suppliedKey(program, key)) {
+  if (cached && cached.file === file && cached.structure === file.getStructure() && cached.supplied === suppliedKey(program, key) && (!cached.replay || replayLowering(program, cached.replay))) {
     Object.assign(program, cached.current);
-    for (const [k, sig] of cached.sigs) program.sigs.set(k, sig);
-    program.skipped.push(...cached.skipped);
-    program.partial.push(...cached.partial);
+    for (const [k, sig] of cached.sigs ?? []) program.sigs.set(k, sig);
+    if (!cached.replay) {
+      program.skipped.push(...cached.skipped);
+      program.partial.push(...cached.partial);
+    }
     counts.reused++;
     counts.reusedClasses.push(key);
     return cached.ir;
@@ -82,13 +85,17 @@ export function compileClass(ctx, obj, lower, session) {
   const candidate = session && !sensitiveSource.test(file.getRaw());
   const before = candidate ? snapshot(program) : undefined;
   const start = {skipped: program.skipped.length, partial: program.partial.length};
-  const ir = lower(ctx, obj);
+  const recorded = session && !candidate && !/\bFOR\s+ALL\s+ENTRIES\b/i.test(file.getRaw()) ? recordLowering(program, (tracked) => lower({...ctx, program: tracked}, obj)) : undefined;
+  const ir = recorded ? recorded.ir : lower(ctx, obj);
   const sigs = candidate ? ownSignatures(before.get("sigs"), program.sigs, key) : undefined;
   if (candidate && sigs && unchanged(before, program) && elementary(ir, key)) {
     session.classes.set(key, {file, structure: file.getStructure(), ir, sigs, supplied: suppliedKey(program, key),
       current: Object.fromEntries([...current].map((k) => [k, program[k]])),
       skipped: program.skipped.slice(start.skipped), partial: program.partial.slice(start.partial)});
   }
+  if (recorded?.replay) session.classes.set(key, {file, structure: file.getStructure(), ir,
+    replay: recorded.replay, supplied: suppliedKey(program, key),
+    current: Object.fromEntries([...current].map((k) => [k, program[k]]))});
   return ir;
 }
 
