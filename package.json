@@ -153,5 +153,8 @@
   },
   "optionalDependencies": {
     "hdb": "^2.29.6"
+  },
+  "overrides": {
+    "@abaplint/core": "$@abaplint/core"
   }
 }
