@@ -12,11 +12,11 @@ import {expect} from "chai";
 import {spawnSync} from "node:child_process";
 import {mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {basename, join, relative, sep} from "node:path";
+import {basename, dirname, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DatabaseSync} from "node:sqlite";
 import {buildRule} from "../tools/dsl-l2.mjs";
-import {buildSet, checkSet, compileSet, explainAlert, parseAlertKey, SetError, unitFindings} from "../tools/dsl-l3.mjs";
+import {buildSet, checkSet, compileSet, explainAlert, parseAlertKey, renderSet, SetError, unitFindings} from "../tools/dsl-l3.mjs";
 import {lowerNarrowSubmit} from "../tools/osd-narrow-submit.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 
@@ -93,6 +93,48 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       expect(runner).to.not.include("zcl_l2_ship_max_cargo=>check");
     });
 
+    it("a set without piles: or params: renders what the templates rendered before they existed", async () => {
+      // the templates with every section of slice 3a taken out (and the
+      // unpiled branches kept): what they were before; the same model renders
+      // the same bytes through both
+      const NEW = ["piles", "with_params", "params", "range", "piled", "unpiled", "param_args", "has_args"];
+      const before = (template) => {
+        let text = readFileSync(template, "utf8");
+        for (const n of NEW) {
+          text = text.replace(new RegExp(`^\\{\\{#${n}\\}\\}\\n[\\s\\S]*?^\\{\\{/${n}\\}\\}\\n`, "gm"), "")
+            .replace(new RegExp(`\\{\\{#${n}\\}\\}[^\\n]*?\\{\\{/${n}\\}\\}`, "g"), "");
+        }
+        return text.replace(/^\{\{\^piles\}\}\n([\s\S]*?)^\{\{\/piles\}\}\n/gm, "$1");
+      };
+      const file = join(OUT, `zz_unpiled_${process.pid}.l3.yaml`);
+      writeFileSync(file, SET_TEXT.replace(/^params:\n(  .*\n)+/m, "").replace(/^piles:\n(  .*\n)+/m, ""));
+      try {
+        const model = compileSet(file);
+        expect([model.piles, model.params]).to.deep.equal([undefined, undefined]);
+        const {renderRecipe} = await import("../tools/dsl-abap.mjs");
+        const {files} = await renderSet(model);
+        for (const [template, out] of [["recipes/l3-set/template.tpl", `${model.class}.clas.abap`], ["recipes/l3-job/template.tpl", `${model.report}.prog.abap`]]) {
+          const stripped = join(scratch, `before-${basename(dirname(template))}.tpl`);
+          writeFileSync(stripped, before(template));
+          expect(readFileSync(stripped, "utf8"), template).to.not.match(/\bpiles?\b|pile_no|ty_params|is_params|it_range/);
+          expect(files[out], out).to.equal((await renderRecipe(model, stripped)).text);
+        }
+      } finally { rmSync(file, {force: true}); }
+    });
+
+    it("piles: and params: in the model: the source port's key, its size, the piled rules and the bound parameters", () => {
+      const model = compileSet(SET);
+      expect(model.piles).to.deep.include({size: "2", source: {name: "ships", "name@type": model.piles.source["name@type"], key: "ship_id", table: "zosd_l2_ship", iface: "zif_l3_fleet_ships"}});
+      expect(model.rules.map((r) => Boolean(r.piled))).to.deep.equal(Array(6).fill(true));
+      expect(model.rules.find((r) => r.name === "ship-in-service-has-a-captain").range).to.include({rule_file: "src/l2demo/ship_captain.l2.yaml",
+        rule_line: readFileSync(join(OUT, "ship_captain.l2.yaml"), "utf8").split("\n").findIndex((l) => /^range:/.test(l)) + 1});
+      expect(model.params.map((p) => [p.name, p.screen, p.type_name, p.default])).to.deep.equal([["active_status", "p_active", "c", "A"]]);
+      expect(model.rules.filter((r) => r.param_args).map((r) => [r.name, r.param_args.map((a) => a.ref)])).to.deep.equal([["ship-in-service-has-a-captain", ["iv_active_status"]]]);
+      const report = readFileSync(join(OUT, `${REPORT}.prog.abap`), "utf8");
+      expect(report).to.include("PARAMETERS p_pile TYPE i.\nPARAMETERS p_bind TYPE c LENGTH 255 LOWER CASE.\nPARAMETERS p_active TYPE c.\n");
+      expect(report).to.include("    iv_pile = p_pile\n    is_params = ls_params\n");
+    });
+
     // a copy of the manifest beside the committed rules, one line replaced
     const variant = (name, from, to) => {
       expect(SET_TEXT, `the set has ${from}`).to.include(from);
@@ -141,7 +183,7 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
     });
     it("a rule that does not compile names the manifest line and the rule's own line", () => {
       const rule = join(OUT, `zz_broken_${process.pid}.l2.yaml`);
-      writeFileSync(rule, readFileSync(join(OUT, "ship_captain.l2.yaml"), "utf8").replace("ship.status = 'A'", "ship.colour = 'A'"));
+      writeFileSync(rule, readFileSync(join(OUT, "ship_captain.l2.yaml"), "utf8").replace("ship.status = $active_status", "ship.colour = $active_status"));
       try {
         refused("broken", "rule: ship_captain.l2.yaml", `rule: ${basename(rule)}`,
           new RegExp(`^rule ${basename(rule).replace(/\./g, "\\.")} does not compile: .*${basename(rule).replace(/\./g, "\\.")}:\\d+: ZOSD_L2_SHIP has no field COLOUR`), /zz_broken/);
@@ -159,6 +201,72 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       const where = relative(process.cwd(), set).split(sep).join("/");
       expect(() => compileSet(set)).to.throw(SetError, new RegExp(`^${where.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:5: the generated class of stale\\.l2\\.yaml is stale`));
     });
+  });
+
+  describe("set parameters and piles in the manifest", () => {
+    // a copy of the manifest in its own folder, rules referenced from there,
+    // with replacements and extra rule files (built beside it)
+    let n = 0;
+    const manifest = async (edits, rules = {}) => {
+      const dir = join(scratch, `piles-${n++}`);
+      mkdirSync(dir);
+      for (const [name, text] of Object.entries(rules)) {
+        writeFileSync(join(dir, name), text);
+        await buildRule(join(dir, name), dir);
+      }
+      let text = SET_TEXT;
+      for (const [from, to] of edits) {
+        expect(text, `the set has ${JSON.stringify(from)}`).to.include(from);
+        text = text.replace(from, to);
+      }
+      text = text.replace(/rule: ([a-z_]+\.l2\.yaml)/g, (m, f) => rules[f] ? m : `rule: ${relative(dir, join(process.cwd(), OUT, f)).split(sep).join("/")}`);
+      const file = join(dir, "fleet.l3.yaml");
+      writeFileSync(file, text);
+      return file;
+    };
+    const refusedAt = (file, message, at) => {
+      const where = relative(process.cwd(), file).split(sep).join("/");
+      const line = readFileSync(file, "utf8").split("\n").findIndex((l) => at.test(l)) + 1;
+      expect(line, `a line matching ${at}`).to.be.greaterThan(0);
+      let error;
+      try { compileSet(file); } catch (e) { error = e; }
+      expect(error, "an error").to.be.instanceOf(SetError);
+      expect(error.message.startsWith(`${where}:${line}: `), error.message).to.equal(true);
+      expect(error.message.slice(`${where}:${line}: `.length)).to.match(message);
+    };
+    const CAPTAIN = readFileSync(join(OUT, "ship_captain.l2.yaml"), "utf8");
+    const PARAM = "  active_status: {type: C, default: A}\n";
+
+    it("a set parameter no enabled rule declares", async () => refusedAt(await manifest([[PARAM, "  idle: {type: C, default: A}\n"]]),
+      /^set parameter idle is not used: no enabled rule declares \$idle/, /^  idle:/));
+    it("a set parameter whose rule is disabled", async () => refusedAt(await manifest([["  - rule: ship_captain.l2.yaml\n", "  - rule: ship_captain.l2.yaml\n    enabled: false\n"]]),
+      /^set parameter active_status is not used/, /^  active_status:/));
+    it("a set parameter of another type than the rule's", async () => refusedAt(await manifest([[PARAM, "  active_status: {type: N, default: '1'}\n"]]),
+      /^set parameter active_status is N; rule ship-in-service-has-a-captain declares \$active_status as C/, /^  active_status:/));
+    it("a default that does not fit", async () => refusedAt(await manifest([[PARAM, "  active_status: {type: C, default: AB}\n"]]),
+      /^the default of set parameter active_status does not fit C/, /^  active_status:/));
+    it("a rule parameter without a default and no set parameter, at the rule's line", async () => refusedAt(
+      await manifest([[PARAM, ""], ["params:\n", ""], ["rule: ship_captain.l2.yaml", "rule: captain.l2.yaml"]],
+        {"captain.l2.yaml": CAPTAIN.replace("active_status: {type: C, default: A}", "active_status: {type: C}").replace(/^class: .*$/m, "class: zcl_l2_captain_nodefault")
+          .replace(/^( {4}date: \d+\n)/gm, "$1    params: {active_status: A}\n")}),
+      /^rule ship-in-service-has-a-captain needs \$active_status, which has no default in the rule: declare a set parameter active_status/, /rule: captain\.l2\.yaml/));
+    it("a set parameter's selection field is P_ and six characters, made unique with digits, never a field of the report", async () => {
+      const rules = {"crew.l2.yaml": readFileSync(join(OUT, "ship_min_crew.l2.yaml"), "utf8").replace(/^class: .*$/m, "class: zcl_l2_crew_param")
+        .replace("when: ship.status = 'A'", "params:\n  active_state: {type: C, default: A}\nwhen: ship.status = $active_state")};
+      const file = await manifest([[PARAM, `${PARAM}  active_state: {type: C, default: A}\n`], ["rule: ship_min_crew.l2.yaml", "rule: crew.l2.yaml"]], rules);
+      expect(compileSet(file).params.map((p) => p.screen)).to.deep.equal(["p_active", "p_activ1"]);
+    });
+    it("a pile size that is not a positive INT4", async () => {
+      for (const size of ["0", "-1", "two", "2147483648"]) {
+        refusedAt(await manifest([["  size: 2\n", `  size: ${size}\n`]]), /^piles\.size is a whole number from 1 to 2147483647/, /^  size:/);
+      }
+    });
+    it("a pile source that is not a source port", async () => refusedAt(await manifest([["  source: ships\n", "  source: alerts\n"]]),
+      /^piles\.source "alerts" is not a source port of the set \(ships\)/, /^  source:/));
+    it("an unknown key in piles", async () => refusedAt(await manifest([["  size: 2\n", "  size: 2\n  order: desc\n"]]),
+      /^unknown key order in piles \(source, size\)/, /^  order:/));
+    it("piles with no piled rule: no enabled rule has the source port's key as its range", async () => refusedAt(await manifest([["    key: ship_id\n", "    key: name\n"]]),
+      /^no enabled rule is piled: a rule is piled when its range: is name of ZOSD_L2_SHIP, the key of port ships/, /^piles:/));
   });
 
   describe("ports in the manifest", () => {
@@ -372,7 +480,7 @@ ENDCLASS.
         const t = JSON.parse(readFileSync(join(OUT, f.replace(/\.abap$/, ".trace.json")), "utf8"));
         expect(t.lines.map((l) => l.line), f).to.deep.equal(text.slice(0, -1).map((_, i) => i + 1));
         for (const entry of t.lines) {
-          expect(entry.set_line, `${f}:${entry.line}`).to.be.within(/^zcx_|_ports\./.test(f) ? setLine(/^set:/) : portsAt, yamlLines.length);
+          expect(entry.set_line, `${f}:${entry.line}`).to.be.within(/^zcx_|_ports\./.test(f) ? setLine(/^set:/) : setLine(/^piles:/), yamlLines.length);
           expect(entry.node, `${f}:${entry.line}`).to.match(/^set\/fleet(\/|$)/);
         }
       }
@@ -420,7 +528,7 @@ ENDCLASS.
       const ships = setLine(/^  ships:/), alerts = setLine(/^  alerts:/);
       const of = (re) => src.map((l, i) => [l, t.lines[i]]).filter(([l]) => re.test(l)).map(([, e]) => e.set_line);
       expect(of(/li_src_1|lt_keep_1|lt_scope_1|lv_swap_1/)).to.satisfy((ls) => ls.length >= 10 && ls.every((l) => l === ships));
-      expect(of(/li_sink|ls_group/)).to.satisfy((ls) => ls.length >= 8 && ls.every((l) => l === alerts));
+      expect(of(/li_sink|ls_group/)).to.satisfy((ls) => ls.length >= 8 && ls.every((l) => l === alerts || l === setLine(/^piles:/)));
     });
 
     it("the job report has its own trace, and names each rule's version", () => {
@@ -435,22 +543,28 @@ ENDCLASS.
     let dir, dbPath, envBefore, priorAbap, priorContext, abap, client, store, dialogStep, drainJobOutbox, workQueuedBatch;
     const root = process.cwd();
     const date = () => new abap.types.Date().set(DATE);
+    const paramsOf = (status) => {
+      const value = abap.Classes.ZCL_L3_FLEET.ty_params.clone();
+      value.get().active_status.set(status);
+      return value;
+    };
     const read = (sql, ...args) => {
       const db = new DatabaseSync(dbPath, {readOnly: true});
       try { return db.prepare(sql).all(...args); } finally { db.close(); }
     };
     const exec = (statements) => dialogStep(async () => { for (const s of statements) await client.execute(s); });
-    const log = () => read("SELECT * FROM zosd_l3_alert ORDER BY set_name, rule_name, model_hash, check_date, alert_seq")
+    const log = () => read("SELECT * FROM zosd_l3_alert ORDER BY set_name, rule_name, model_hash, check_date, pile_no, alert_seq")
       .map((r) => ({set: r.set_name.trim(), rule: r.rule_name.trim(), hash: r.model_hash.trim(), date: r.check_date,
-        seq: Number(r.alert_seq), text: String(r.alert_text), run: r.run_id.trim(), ts: Number(r.run_ts),
+        pile: Number(r.pile_no), seq: Number(r.alert_seq), text: String(r.alert_text), run: r.run_id.trim(), ts: Number(r.run_ts),
         file: r.rule_file.trim(), line: Number(r.rule_line), class: r.rule_class.trim()})).sort(byKey);
-    const content = (rows) => rows.map(({run, ts, ...rest}) => rest);
+    const content = (rows) => rows.map(({run, ts, pile, seq, ...rest}) => rest)
+      .sort((a, b) => a.rule.localeCompare(b.rule) || a.hash.localeCompare(b.hash) || a.text.localeCompare(b.text));
     // one order for the log and for the checks' answers: by key
-    const byKey = (a, b) => (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : a.seq - b.seq);
+    const byKey = (a, b) => (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : (a.pile ?? 0) - (b.pile ?? 0) || a.seq - b.seq);
     const plain = (result) => {
       const r = result.get();
       return {run: r.run_id.get().trim(), mode: r.mode.get(), alerts: r.alerts.get(), date: r.check_date.get(),
-        rules: r.rules.array().map((x) => Object.fromEntries(["rule", "model_hash", "jobname", "jobcount", "status", "alerts", "failed"]
+        rules: r.rules.array().map((x) => Object.fromEntries(["rule", "model_hash", "jobname", "jobcount", "status", "alerts", "failed", "piles", "piles_done"]
           .map((k) => [k, typeof x.get()[k].get() === "string" ? x.get()[k].get().trim() : x.get()[k].get()])))};
     };
     const model = compileSet(SET);
@@ -465,11 +579,12 @@ ENDCLASS.
       return rows.sort(byKey);
     };
     // allow: the explicit opt-in a replay needs (a source that swaps table content)
-    const runSet = (className, mode = "S", bind, allow = false) => dialogStep(() => abap.Classes[className.toUpperCase()].run({
+    const runSet = (className, mode = "S", bind, allow = false, status) => dialogStep(() => abap.Classes[className.toUpperCase()].run({
       iv_date: date(), iv_mode: new abap.types.Character(1).set(mode),
+      ...(status === undefined ? {} : {is_params: paramsOf(status)}),
       ...(bind === undefined ? {} : {iv_bind: new abap.types.String().set(bind)}),
       ...(allow ? {iv_allow_replay: new abap.types.Character(1).set("X")} : {})})).then(plain);
-    const clearLog = () => exec(["DELETE FROM zosd_l3_alert"]);
+    const clearLog = () => exec(["DELETE FROM zosd_l3_alert", "DELETE FROM zosd_l3_pile"]);
 
     before(async () => {
       // the renderer and the other suites boot the in-memory system first;
@@ -510,7 +625,7 @@ ENDCLASS.
       Object.assign(classes, classesBefore);
     });
     after(async () => {
-      if (client) await exec([...Object.keys(FLEET).map((t) => `DELETE FROM ${t}`), "DELETE FROM zosd_l3_alert"]).catch(() => {});
+      if (client) await exec([...Object.keys(FLEET).map((t) => `DELETE FROM ${t}`), "DELETE FROM zosd_l3_alert", "DELETE FROM zosd_l3_pile"]).catch(() => {});
       store?.close();
       await client?.disconnect?.();
       if (priorAbap === abap && priorContext) {
@@ -535,7 +650,7 @@ ENDCLASS.
       const want = await expected();
       const first = await runSet(className);
       const once = log();
-      if (JSON.stringify(content(once)) !== JSON.stringify(want)) problems.push(`the log after one run is not the union of the checks: ${JSON.stringify(content(once))}`);
+      if (JSON.stringify(content(once)) !== JSON.stringify(content(want))) problems.push(`the log after one run is not the union of the checks: ${JSON.stringify(content(once))}`);
       for (const r of first.rules) if (r.status !== "DONE") problems.push(`${r.rule}: status ${r.status} after the first run`);
       for (const row of once) {
         const rule = model.rules.find((r) => r.name === row.rule);
@@ -545,7 +660,7 @@ ENDCLASS.
       const second = await runSet(className);
       const twice = log();
       if (JSON.stringify(content(twice)) !== JSON.stringify(content(once))) problems.push(`a rerun changed the log: ${JSON.stringify(content(twice))}`);
-      const keys = twice.map((r) => `${r.set}/${r.rule}/${r.hash}/${r.date}/${r.text}`);
+      const keys = twice.map((r) => `${r.set}/${r.rule}/${r.hash}/${r.date}/${r.pile}/${r.seq}`);
       if (new Set(keys).size !== keys.length) problems.push("a rerun duplicated an alert");
       for (const r of second.rules) if (r.status !== "DONE") problems.push(`${r.rule}: status ${r.status} after the rerun`);
       const stale = twice.filter((r) => r.run !== second.run);
@@ -569,6 +684,15 @@ ENDCLASS.
       expect(rows.find((r) => r.rule === "ship-cargo-limit").text).to.equal("S003: 1100.50 kg booked");
     });
 
+    it("a set parameter reaches only the L2 rules that declare it", async () => {
+      await clearLog();
+      const result = await runSet(RUNNER, "S", undefined, false, "D");
+      const captain = result.rules.find((r) => r.rule === "ship-in-service-has-a-captain");
+      expect(captain.alerts).to.equal(0);
+      expect(result.alerts).to.equal(6);
+      expect(log().every((r) => r.run === result.run)).to.equal(true);
+    });
+
     it("a rerun that finds fewer alerts drops the rows past the last one (same rule, hash and date)", async () => {
       await clearLog();
       await runSet(RUNNER);
@@ -577,15 +701,119 @@ ENDCLASS.
       try {
         await runSet(RUNNER);
         const after = log();
-        expect(after.filter((r) => r.rule === "ship-min-crew").map((r) => [r.seq, r.text])).to.deep.equal([[1, "S002 Bluebird: 1 crew aboard"], [2, "S003 Condor: 1 crew aboard"]]);
+        expect(after.filter((r) => r.rule === "ship-min-crew").map((r) => [r.seq, r.text])).to.deep.equal([[1, "S002 Bluebird: 1 crew aboard"], [1, "S003 Condor: 1 crew aboard"]]);
         expect(after.filter((r) => r.rule === "ship-in-service-has-a-captain")).to.have.length(0);
-        expect(content(after)).to.deep.equal(await expected());
+        expect(content(after)).to.deep.equal(content(await expected()));
       } finally {
         await exec(["DELETE FROM zosd_l2_crew WHERE crew_id = 'C00009'"]);
       }
     });
 
-    describe("mode P: one background job per rule", () => {
+    // the plan of a run for one rule: [pile, low, high, status]
+    const plan = (run, rule = model.rules[0].name) => read("SELECT pile_no, range_low, range_high, status FROM zosd_l3_pile WHERE run_id = ? AND rule_name = ? ORDER BY pile_no", run, rule)
+      .map((r) => [Number(r.pile_no), r.range_low.trim(), r.range_high.trim(), r.status.trim()]);
+    const runSized = (size, className = RUNNER) => dialogStep(() => abap.Classes[className.toUpperCase()].run({iv_date: date(),
+      iv_mode: new abap.types.Character(1).set("S"), iv_pile_size: new abap.types.Integer().set(size)})).then(plain);
+    // the exact plan of the seeded keys, and every alert row in the pile of its ship: a list of what is wrong
+    const planProblems = async (className) => {
+      const problems = [];
+      await clearLog();
+      const result = await runSet(className);
+      for (const r of model.rules) {
+        const got = plan(result.run, r.name);
+        if (JSON.stringify(got) !== JSON.stringify([[1, "S001", "S002", "DONE"], [2, "S003", "S004", "DONE"]])) problems.push(`${r.name}: plan ${JSON.stringify(got)}`);
+      }
+      for (const row of log()) if (row.pile !== (/^S00[12]/.test(row.text) ? 1 : 2)) problems.push(`${row.text} in pile ${row.pile}`);
+      return {problems, result};
+    };
+
+    it("mode S plans two piles of two keys for every rule, runs each, and each alert row names its pile", async () => {
+      const {problems, result} = await planProblems(RUNNER);
+      expect(problems).to.deep.equal([]);
+      expect(result.rules.map((r) => [r.status, r.piles, r.piles_done])).to.deep.equal(Array(6).fill(["DONE", 2, 2]));
+      expect(log()).to.have.length(7);
+      expect(read("SELECT SUM(alerts) AS n FROM zosd_l3_pile WHERE run_id = ?", result.run)[0].n, "each plan row counts what its pile wrote").to.equal(7);
+      const stamps = read("SELECT started, ended FROM zosd_l3_pile WHERE run_id = ?", result.run);
+      expect(stamps.every((r) => Number(r.started) > 0 && Number(r.ended) >= Number(r.started))).to.equal(true);
+    });
+
+    it("three keys per pile cut elsewhere: I BT S001 S003, then I EQ S004, the one key left", async () => {
+      await clearLog();
+      const before = content((await runSet(RUNNER), log()));
+      const sized = await runSized(3);
+      expect(plan(sized.run)).to.deep.equal([[1, "S001", "S003", "DONE"], [2, "S004", "S004", "DONE"]]);
+      expect(content(log())).to.deep.equal(before);
+      for (const row of log()) expect(row.pile, row.text).to.equal(/^S00[123]/.test(row.text) ? 1 : 2);
+    });
+
+    it("a rerun with fewer piles than the run before: finalise leaves exactly the rerun's rows", async () => {
+      await clearLog();
+      const first = await runSet(RUNNER);
+      const before = content(log());
+      expect(log().filter((r) => r.pile === 2).length, "the first run wrote rows in pile 2").to.be.greaterThan(0);
+      const one = await runSized(4);
+      expect(plan(one.run)).to.deep.equal([[1, "S001", "S004", "DONE"]]);
+      expect(one.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("DONE"));
+      const rows = log();
+      expect(new Set(rows.map((r) => r.run)), "no row of the first run is left, not even in its pile 2").to.deep.equal(new Set([one.run]));
+      expect(rows.every((r) => r.pile === 1)).to.equal(true);
+      expect(content(rows)).to.deep.equal(before);
+      expect(first.run).to.not.equal(one.run);
+    });
+
+    it("no key, no pile: over a source with no rows the plan is empty and every piled rule is DONE without an alert", async () => {
+      await clearLog();
+      await abap.Classes.ZCL_L3_FLEET_SHIPS_CAPTURE.reset();
+      const result = await runSet(RUNNER, "S", "ships=capture", true);
+      expect(result.rules.map((r) => [r.status, r.piles, r.piles_done, r.alerts])).to.deep.equal(Array(6).fill(["DONE", 0, 0, 0]));
+      expect(read("SELECT COUNT(*) AS n FROM zosd_l3_pile WHERE run_id = ?", result.run)[0].n).to.equal(0);
+      expect(log()).to.deep.equal([]);
+      expect(read("SELECT COUNT(*) AS n FROM zosd_l2_ship")[0].n, "the table is put back").to.equal(4);
+    });
+
+    it("a run bound to another sink variant does not finalise: the log keeps the last logged run", async () => {
+      await clearLog();
+      await runSet(RUNNER);
+      const before = log();
+      const dummy = await runSet(RUNNER, "S", "alerts=dummy");
+      expect(dummy.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("DONE"));
+      expect(log()).to.deep.equal(before);
+    });
+
+    // a log variant whose pile 2 writes do not land: the rules alerting there fail that pile
+    const failingPile2 = async () => {
+      if (!abap.Classes.ZCL_L3_FLEET_ALERTS_LOG_PILE2) {
+        await loadPortClass("zcl_l3_fleet_alerts_log", "zcl_l3_fleet_alerts_log_pile2", (text) => mutate(text,
+          "    LOOP AT it_rows INTO ls_row.\n", "    LOOP AT it_rows INTO ls_row.\n      IF ls_row-pile_no = 2.\n        CONTINUE.\n      ENDIF.\n"));
+      }
+    };
+    // a run after a complete one, its pile 2 failing; what must hold, as a list of what is wrong
+    async function partialProblems(className) {
+      const problems = [];
+      await clearLog();
+      const older = await runSet(className);
+      await failingPile2();
+      const partial = await withClass("zcl_l3_fleet_alerts_log", "zcl_l3_fleet_alerts_log_pile2", () => runSet(className));
+      const rule = partial.rules.find((r) => r.rule === "ship-min-crew");
+      if (rule.status !== "PARTIAL" || rule.piles !== 2 || rule.piles_done !== 1) problems.push(`ship-min-crew: ${JSON.stringify(rule)}`);
+      const states = plan(partial.run, "ship-min-crew").map((p) => p[3]);
+      if (JSON.stringify(states) !== JSON.stringify(["DONE", "FAILED"])) problems.push(`ship-min-crew plan: ${states}`);
+      const done = partial.rules.find((r) => r.rule === "maintenance-ship-no-future-voyage");
+      if (done.status !== "DONE") problems.push(`a rule with nothing in pile 2 is ${done.status}`);
+      const kept = log().filter((r) => r.rule === "ship-min-crew" && r.run === older.run).map((r) => r.text);
+      if (JSON.stringify(kept) !== JSON.stringify(["S003 Condor: 0 crew aboard"])) problems.push(`the older run's pile 2 row of ship-min-crew: ${JSON.stringify(kept)}`);
+      return {problems, older, partial};
+    }
+
+    it("a pile that fails leaves its rule PARTIAL, its plan row FAILED, the older run's rows in place; a complete rerun finalises", async () => {
+      const {problems} = await partialProblems(RUNNER);
+      expect(problems).to.deep.equal([]);
+      const again = await runSet(RUNNER);
+      expect(again.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("DONE"));
+      expect(new Set(log().map((r) => r.run))).to.deep.equal(new Set([again.run]));
+    });
+
+    describe("mode P: one background job per rule and pile", () => {
       let sequential;
       const drainAndWork = async () => {
         const drained = await drainJobOutbox(store);
@@ -598,10 +826,11 @@ ENDCLASS.
         return {drained, outcomes};
       };
       const collect = (result) => dialogStep(() => abap.Classes.ZCL_L3_FLEET.collect({is_result: result.raw})).then(plain);
-      const runParallel = async () => {
+      const runParallel = async (status) => {
         let raw;
         const submitted = await dialogStep(async () => {
-          raw = await abap.Classes.ZCL_L3_FLEET.run({iv_date: date(), iv_mode: new abap.types.Character(1).set("P")});
+          raw = await abap.Classes.ZCL_L3_FLEET.run({iv_date: date(), iv_mode: new abap.types.Character(1).set("P"),
+            ...(status === undefined ? {} : {is_params: paramsOf(status)})});
           return raw;
         }).then(plain);
         return {...submitted, raw};
@@ -613,23 +842,31 @@ ENDCLASS.
         sequential = content(log());
       });
 
-      it("submits six jobs, each runs as its own step, and collect reports every rule finished", async () => {
+      it("submits twelve jobs, each runs as its own step, and collect reports every pile done", async () => {
         await clearLog();
         const submitted = await runParallel();
         expect(submitted.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("SUBMITTED"));
         expect(submitted.rules.map((r) => r.jobname)).to.deep.equal(model.rules.map((_, i) => `L3_FLEET_0${i + 1}`));
+        expect(submitted.rules.map((r) => r.piles)).to.deep.equal(Array(6).fill(2));
+        expect(read("SELECT rule_name, pile_no, range_low, range_high FROM zosd_l3_pile WHERE run_id = ? ORDER BY rule_name, pile_no", submitted.run)
+          .map((r) => [r.pile_no, r.range_low.trim(), r.range_high.trim()])).to.deep.equal(model.rules.flatMap(() => [[1, "S001", "S002"], [2, "S003", "S004"]]));
         expect(log(), "nothing is written before the jobs run").to.deep.equal([]);
+        // before the jobs ran: no pile is DONE or FAILED, and a rule shows the state of an open job
         const before = await collect(submitted);
-        expect(before.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("READY"));
+        expect(before.rules.map((r) => [r.status, r.piles, r.piles_done])).to.deep.equal(Array(6).fill(["READY", 2, 0]));
+        expect(read("SELECT DISTINCT status FROM zosd_l3_pile WHERE run_id = ?", submitted.run).map((r) => r.status.trim())).to.deep.equal(["PLANNED"]);
+        expect(read("SELECT job_name FROM zosd_l3_pile WHERE run_id = ? ORDER BY rule_name, pile_no", submitted.run).map((r) => r.job_name.trim()).sort())
+          .to.deep.equal(model.rules.flatMap((_, i) => [1, 2].map((p) => `L3_FLEET_0${i + 1}_000${p}`)).sort());
         const {drained, outcomes} = await drainAndWork();
-        expect(drained.imported).to.equal(6);
-        expect(outcomes).to.have.length(6);
+        expect(drained.imported).to.equal(12);
+        expect(outcomes).to.have.length(12);
         const steps = read("SELECT program, input_json FROM zosd_job_step");
         expect(steps, "the steps are acknowledged and gone from the outbox").to.deep.equal([]);
         const runs = store.list().filter((r) => r.jobName.startsWith("L3_FLEET_"));
-        expect(runs.map((r) => r.state)).to.deep.equal(Array(6).fill("COMPLETED"));
+        expect(runs.map((r) => r.state)).to.deep.equal(Array(12).fill("COMPLETED"));
         const collected = await collect(submitted);
-        expect(collected.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("FINISHED"));
+        expect(collected.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("DONE"));
+        expect(collected.rules.map((r) => r.piles_done)).to.deep.equal(Array(6).fill(2));
         expect(collected.alerts).to.equal(7);
         expect(collected.rules.map((r) => r.alerts)).to.deep.equal(model.rules.map((r) => sequential.filter((x) => x.rule === r.name).length));
         const rows = log();
@@ -640,12 +877,22 @@ ENDCLASS.
       it("a second parallel run (a retry) leaves the same log, under its own run id", async () => {
         const submitted = await runParallel();
         const {outcomes} = await drainAndWork();
-        expect(outcomes).to.have.length(6);
+        expect(outcomes).to.have.length(12);
         const collected = await collect(submitted);
-        expect(collected.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("FINISHED"));
+        expect(collected.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("DONE"));
         const rows = log();
         expect(content(rows)).to.deep.equal(sequential);
         expect(new Set(rows.map((r) => r.run))).to.deep.equal(new Set([submitted.run]));
+      });
+
+      it("jobs carry the set parameter through report selection fields", async () => {
+        const submitted = await runParallel("D");
+        const {outcomes} = await drainAndWork();
+        expect(outcomes).to.have.length(12);
+        const collected = await collect(submitted);
+        expect(collected.rules.map((r) => r.status)).to.deep.equal(Array(6).fill("DONE"));
+        expect(collected.rules.find((r) => r.rule === "ship-in-service-has-a-captain").alerts).to.equal(0);
+        expect(collected.alerts).to.equal(6);
       });
     });
 
@@ -659,7 +906,7 @@ ENDCLASS.
       const files = {[`${name}.clas.abap`]: abapSource, [`${name}.clas.xml`]: readFileSync(join(OUT, `${RUNNER}.clas.xml`), "utf8")
         .replace(RUNNER.toUpperCase(), name.toUpperCase()), ...extra};
       for (const [f, text] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(text, f, core)));
-      const deps = ["src/dsl/zosd_l3_alert.tabl.xml", "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
+      const deps = ["src/dsl/zosd_l3_alert.tabl.xml", "src/dsl/zosd_l3_pile.tabl.xml", "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
         "gen/gui/zcl_osd_batch_report.clas.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),
         // the ports the runner binds: their interfaces, variants, factory and exception
@@ -722,11 +969,58 @@ ENDCLASS.
         expect((await logProblems("zcl_l3_fleet_ok")).problems).to.deep.equal([]);
       });
 
+      // the mutants of slice 3a (docs/dsl-l3.md, "Piles and set parameters"), each against the test that names it
+      const runnerMutant = async (name, from, to) => loadRunner(name, mutate(renamed(name), from, to));
+
+      it("off-by-one in the cut (a chunk closes one key late): the exact plan turns red", async () => {
+        await runnerMutant("zcl_l3_fleet_cut_mutant", "      IF lv_count = lv_size.\n", "      IF lv_count > lv_size.\n");
+        const {problems} = await planProblems("zcl_l3_fleet_cut_mutant");
+        expect(problems).to.include(`${model.rules[0].name}: plan [[1,"S001","S003","DONE"],[2,"S004","S004","DONE"]]`);
+      });
+
+      it("finalise deleting this run's rows: the union check turns red", async () => {
+        await runnerMutant("zcl_l3_fleet_delete_new", "        AND run_id <> iv_run.\n", "        AND run_id = iv_run.\n");
+        const {problems} = await logProblems("zcl_l3_fleet_delete_new");
+        expect(problems.join("\n")).to.match(/the log after one run is not the union of the checks: \[\]/);
+      });
+
+      it("finalise running when a pile failed (mode S): the older run's row of the partial rule is gone", async () => {
+        await runnerMutant("zcl_l3_fleet_finalise_partial", "          ELSEIF ls_rule-piles_done = ls_rule-piles.\n", "          ELSEIF ls_rule-piles_done >= 0.\n");
+        const {problems} = await partialProblems("zcl_l3_fleet_finalise_partial");
+        expect(problems.join("\n")).to.match(/ship-min-crew: .*"status":"DONE"/);
+        expect(problems.join("\n")).to.match(/the older run's pile 2 row of ship-min-crew: \[\]/);
+      });
+
+      it("finalise never deleting: a rerun with fewer piles leaves the older run's pile 2", async () => {
+        await runnerMutant("zcl_l3_fleet_no_finalise", "    IF zcl_l3_fleet_ports=>variant( iv_port = 'alerts' iv_bind = iv_bind ) <> 'log'.\n",
+          "    IF abap_true = abap_true.\n");
+        await clearLog();
+        await runSet("zcl_l3_fleet_no_finalise");
+        const one = await runSized(4, "zcl_l3_fleet_no_finalise");
+        expect(log().filter((r) => r.run !== one.run && r.pile === 2).length).to.be.greaterThan(0);
+      });
+
+      it("finalise for any sink: a dummy run wipes the log", async () => {
+        await runnerMutant("zcl_l3_fleet_finalise_any", "    IF zcl_l3_fleet_ports=>variant( iv_port = 'alerts' iv_bind = iv_bind ) <> 'log'.\n",
+          "    IF abap_true = abap_false.\n");
+        await clearLog();
+        await runSet("zcl_l3_fleet_finalise_any");
+        expect(log()).to.have.length(7);
+        await runSet("zcl_l3_fleet_finalise_any", "S", "alerts=dummy");
+        expect(log()).to.deep.equal([]);
+      });
+
+      it("a pile reading the range of another pile (pile 1 for every pile): the union check turns red", async () => {
+        await runnerMutant("zcl_l3_fleet_wrong_pile", "        AND pile_no = iv_pile.\n", "        AND pile_no = 1.\n");
+        const {problems} = await logProblems("zcl_l3_fleet_wrong_pile");
+        expect(problems.join("\n")).to.match(/not the union of the checks/);
+      });
+
       it("INSERT instead of MODIFY: the rerun cannot rewrite its rows", async () => {
         await loadPortClass("zcl_l3_fleet_alerts_log", "zcl_l3_fleet_alerts_log_m1",
           (text) => mutate(text, "      MODIFY zosd_l3_alert FROM ls_row.", "      INSERT zosd_l3_alert FROM ls_row."));
         const {problems} = await withClass("zcl_l3_fleet_alerts_log", "zcl_l3_fleet_alerts_log_m1", () => logProblems(RUNNER));
-        expect(problems.join("\n")).to.match(/status WRITE-FAILED after the rerun/);
+        expect(problems.join("\n")).to.match(/status PARTIAL after the rerun/);
         expect(problems.join("\n")).to.match(/still name the first run/);
       });
 
@@ -804,6 +1098,7 @@ ENDCLASS.
       const proofClass = async (module = pathToFileURL(join(root, "output", `${PROOF}.clas.testclasses.mjs`)).href) => (await import(module)).ltcl_proof;
       const ours = () => ({
         log: read("SELECT COUNT(*) AS n FROM zosd_l3_alert WHERE check_date = ?", CHECK_DATE)[0].n,
+        piles: read("SELECT COUNT(*) AS n FROM zosd_l3_pile WHERE check_date = ?", CHECK_DATE)[0].n,
         seed: read("SELECT COUNT(*) AS n FROM zosd_l2_ship WHERE ship_id LIKE 'L30%'")[0].n,
       });
       // a runner mutant answers every call the proof (and a job) makes to ZCL_L3_FLEET
@@ -817,26 +1112,27 @@ ENDCLASS.
       after(async () => {
         worker.stop = true;
         await worker.done;
-        await exec([`DELETE FROM zosd_l3_alert WHERE check_date = '${CHECK_DATE}'`]);
+        await exec([`DELETE FROM zosd_l3_alert WHERE check_date = '${CHECK_DATE}'`, `DELETE FROM zosd_l3_pile WHERE check_date = '${CHECK_DATE}'`]);
       });
       afterEach(() => expect(worker.errors, "the worker").to.deep.equal([]));
 
-      it("passes on this runtime, mode_p included: six jobs run while it waits, and it leaves nothing behind", async () => {
+      it("passes on this runtime, mode_p included: twenty-four jobs run while it waits, and it leaves nothing behind", async () => {
         const local = await proofClass();
         const before = new Set(store.list().map((r) => r.id));
         const failures = {};
-        for (const method of ["mode_s", "rerun", "mode_p"]) failures[method] = await runMethod(local, method);
-        expect(failures).to.deep.equal({mode_s: undefined, rerun: undefined, mode_p: undefined});
+        for (const method of ["mode_s", "rerun", "rerun_fewer_piles", "partial_keeps_old", "mode_p"]) failures[method] = await runMethod(local, method);
+        expect(failures).to.deep.equal({mode_s: undefined, rerun: undefined, rerun_fewer_piles: undefined, partial_keeps_old: undefined, mode_p: undefined});
         const runs = store.list().filter((r) => !before.has(r.id));
-        expect(runs.map((r) => r.jobName).sort(), "six jobs ran").to.deep.equal(model.rules.map((_, i) => `L3_FLEET_0${i + 1}`));
-        expect(runs.map((r) => r.state)).to.deep.equal(Array(6).fill("COMPLETED"));
-        expect(ours(), "teardown deleted the seed and the runs' rows").to.deep.equal({log: 0, seed: 0});
+        expect(runs.map((r) => r.jobName).sort(), "twenty-four jobs ran").to.deep.equal(model.rules.flatMap((_, i) => [1, 2, 3, 4].map((p) => `L3_FLEET_0${i + 1}_000${p}`)));
+        expect(runs.map((r) => r.state)).to.deep.equal(Array(24).fill("COMPLETED"));
+        expect(ours(), "teardown deleted the seed and the runs' rows").to.deep.equal({log: 0, piles: 0, seed: 0});
       });
 
       it("npm run unit runs mode_s and rerun and skips mode_p by configuration, said in the run", () => {
         const index = readFileSync(join(root, "output", "index.mjs"), "utf8");
         const entry = index.split("ret.push(").find((e) => e.includes(`"${PROOF.toUpperCase()}"`));
-        expect(entry).to.include('{"name":"mode_s","skip":false},{"name":"rerun","skip":false},{"name":"mode_p","skip":true}');
+        expect(entry).to.include('{"name":"mode_s","skip":false},{"name":"rerun","skip":false}');
+        expect(entry).to.include('{"name":"mode_p","skip":true}');
         expect(entry).to.include('riskLevel: "DANGEROUS"');
       });
 
@@ -850,6 +1146,15 @@ ENDCLASS.
       });
 
       describe("mutants it catches", () => {
+        it("finalise running when a pile failed (collect, mode P): the partial proof turns red", async () => {
+          const source = mutate(renamed("zcl_l3_fleet_partial_mutant"), "      ELSEIF lv_lost = abap_true.\n        ls_rule-status = 'PARTIAL'.\n",
+            "      ELSEIF lv_lost = abap_true.\n        ls_rule-status = 'PARTIAL'.\n        finalise( iv_rule = ls_rule-rule iv_hash = ls_rule-model_hash iv_date = is_result-check_date\n"
+            + "                  iv_run = is_result-run_id iv_bind = is_result-bind ).\n");
+          await loadRunner("zcl_l3_fleet_partial_mutant", source);
+          const local = await proofClass();
+          const failure = await withRunner("zcl_l3_fleet_partial_mutant", () => runMethod(local, "partial_keeps_old"));
+          expect(failure).to.equal("a failed pile keeps the previous run until a complete plan finalises");
+        });
         it("a runner that drops a rule: mode S runs five, and the log misses the rule's alerts", async () => {
           const lines = "    ls_rule-rule = c_rule_6.\n    ls_rule-model_hash = c_hash_6.\n    ls_rule-jobname = 'L3_FLEET_06'.\n    APPEND ls_rule TO rt_rules.\n";
           await loadRunner("zcl_l3_fleet_pm1", mutate(renamed("zcl_l3_fleet_pm1"), lines, ""));
@@ -861,7 +1166,7 @@ ENDCLASS.
           // with its own text and not with msg; a system shows msg
           expect(failures.rerun).to.be.oneOf(["after the rerun the log is still the union of the checks",
             "Expected table to contain 12 rows, got 10"]);
-          expect(ours()).to.deep.equal({log: 0, seed: 0});
+          expect(ours()).to.deep.equal({log: 0, piles: 0, seed: 0});
         });
 
         it("INSERT instead of MODIFY: the first run passes, the rerun cannot rewrite its rows", async () => {
@@ -871,8 +1176,8 @@ ENDCLASS.
           const failures = await withClass("zcl_l3_fleet_alerts_log", "zcl_l3_fleet_alerts_log_pm2", async () => ({
             mode_s: await runMethod(local, "mode_s"), rerun: await runMethod(local, "rerun")}));
           expect(failures.mode_s).to.equal(undefined);
-          expect(failures.rerun).to.match(/^the rerun: every rule DONE expected, got L3_FLEET_01 .* WRITE-FAILED ;/);
-          expect(ours()).to.deep.equal({log: 0, seed: 0});
+          expect(failures.rerun).to.match(/^the rerun: every rule DONE expected, got L3_FLEET_01 .* PARTIAL ;/);
+          expect(ours()).to.deep.equal({log: 0, piles: 0, seed: 0});
         });
 
         it("mode P that does not wait: collect reads the jobs before they ran, and the proof names their states", async () => {
@@ -882,13 +1187,14 @@ ENDCLASS.
             extra: {[`${name}.clas.testclasses.abap`]: mutate(tests, "      WAIT UP TO 1 SECONDS.\n", "")}});
           const local = await proofClass(pathToFileURL(join(scratch, name, `${name}.clas.testclasses.mjs`)).href);
           const failure = await runMethod(local, "mode_p");
-          expect(failure).to.match(/^the jobs did not end within 180 seconds: L3_FLEET_01 \d{8} maintenance-ship-no-future-voyage READY ;/);
+          // a rule whose piles are all still to run shows the state of an open job, as before piles
+          expect(failure).to.match(/^the jobs did not end within 180 seconds: L3_FLEET_01 +maintenance-ship-no-future-voyage READY ;/);
           expect(failure.match(/ READY ;/g)).to.have.length(6);
           // the jobs were released all the same: they run once the step is
           // over, after the teardown, and write under the run it deleted
           await settled();
           expect(ours().seed).to.equal(0);
-          await exec([`DELETE FROM zosd_l3_alert WHERE check_date = '${CHECK_DATE}'`]);
+          await exec([`DELETE FROM zosd_l3_alert WHERE check_date = '${CHECK_DATE}'`, `DELETE FROM zosd_l3_pile WHERE check_date = '${CHECK_DATE}'`]);
         });
       });
     });
@@ -900,7 +1206,7 @@ ENDCLASS.
       const CAPTURE = "ZCL_L3_FLEET_ALERTS_CAPTURE";
       const SHIPS = "ZCL_L3_FLEET_SHIPS_CAPTURE";
       const nameOf = (r) => ({set: r.set_name, rule: r.rule_name, hash: r.model_hash, date: r.check_date,
-        seq: Number(r.alert_seq), text: r.alert_text, file: r.rule_file, line: Number(r.rule_line), class: r.rule_class});
+        pile: Number(r.pile_no), seq: Number(r.alert_seq), text: r.alert_text, file: r.rule_file, line: Number(r.rule_line), class: r.rule_class});
       const trimmed = (rows) => rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, typeof v === "string" ? v.trim() : v])));
       const captured = async () => (await abap.Classes[CAPTURE].rows()).array().map((r) => nameOf(Object.fromEntries(
         Object.entries(r.get()).map(([k, v]) => [k, v.get()])))).sort(byKey);
@@ -948,8 +1254,7 @@ ENDCLASS.
         const got = await captured();
         expect(got).to.have.length(7);
         // the rows are the log's rows but for the run and its time, which belong to the run
-        expect(trimmed(got)).to.deep.equal(trimmed(content(want.log).map(({set, rule, hash, date, seq, text, file, line, class: c}) =>
-          ({set, rule, hash, date, seq: Number(seq), text, file, line, class: c})).sort(byKey)));
+        expect(trimmed(got)).to.deep.equal(trimmed(want.log.map(({run, ts, ...rest}) => rest).sort(byKey)));
       });
 
       // what a replay must do, and what a refusal must do, as lists of what is wrong
@@ -1036,9 +1341,10 @@ ENDCLASS.
         expect(problems).to.deep.equal([]);
         // S002 as the table has it, and S777, which no table holds
         expect(texts.filter((t) => t.startsWith("S002")).sort()).to.deep.equal(full.filter((r) => r.text.startsWith("S002")).map((r) => r.text).sort());
-        expect(Number((await abap.Classes[SHIPS].reads()).get())).to.equal(1);
+        // read twice: once for the replay, once by the planner
+        expect(Number((await abap.Classes[SHIPS].reads()).get())).to.equal(2);
         // and the run after it, bound as before, sees the table again
-        expect(content((await bound()).log)).to.deep.equal(full.map(({set, rule, hash, date, seq, text, file, line, class: c}) => ({set, rule, hash, date, seq, text, file, line, class: c})));
+        expect(content((await bound()).log)).to.deep.equal(content(full));
       });
 
       it("a variant the port does not have is a typed refusal, before anything is read or written", async () => {
@@ -1067,7 +1373,7 @@ ENDCLASS.
           await runSet(RUNNER, "S", "alerts=dummy");
           if (log().length) problems.push(`alerts=dummy wrote ${log().length} log row(s)`);
           await runSet(RUNNER);
-          const want = trimmed(content(log()).map(({set, rule, hash, date, seq, text, file, line, class: c}) => ({set, rule, hash, date, seq, text, file, line, class: c})));
+          const want = trimmed(log().map(({run, ts, ...rest}) => rest));
           await clearLog();
           await abap.Classes[CAPTURE].reset();
           await runSet(RUNNER, "S", "alerts=capture");
@@ -1197,7 +1503,12 @@ ENDCLASS.
         const problems = [];
         resetCounts();
         await abap.Classes.ZCL_L3_FLEET_SHIPS_CAPTURE.reset();
-        await abap.Classes.ZCL_L3_FLEET_SHIPS_CAPTURE.set_rows({it_rows: emptyRows()});
+        await abap.Classes.ZCL_L3_FLEET_SHIPS_CAPTURE.set_rows({it_rows: (() => {
+          const rows = emptyRows();
+          rows.append(new abap.types.Structure({mandt: new abap.types.Character(3).set("123"), ship_id: new abap.types.Character(4).set("S003"),
+            name: new abap.types.Character(30).set("Condor"), status: new abap.types.Character(1).set("A")}));
+          return rows;
+        })()});
         const before = ships();
         const error = await withClass(PORTS, factory, () => refusal(() => runSet(RUNNER, "S", "ships=capture,alerts=remote", true)));
         if (error?.constructor?.name?.toUpperCase() !== "ZCX_L3_FLEET_PORT" || !/generated variants only/.test(error.reason?.get() ?? "")) problems.push(`no refusal of a hand-written sink in a replay: ${String(error?.reason?.get?.() ?? error?.message ?? error)}`);
@@ -1235,10 +1546,11 @@ ENDCLASS.
       });
 
       it("mutant: a factory that lets a hand-written variant into a replay is caught", async () => {
+        await loadHand(`${PORTS}_h0`);
+        expect(await handSinkProblems(`${PORTS}_h0`), "control").to.deep.equal([]);
         await loadHand(`${PORTS}_h1`, (t) => mutate(t, "    IF lv_replay_port IS NOT INITIAL AND lv_hand_port IS NOT INITIAL.", "    IF abap_false = abap_true."));
         const problems = await handSinkProblems(`${PORTS}_h1`);
         expect(problems.join("\n")).to.match(/the hand-written sink was created \d+ time/);
-        expect(await handSinkProblems(`${PORTS}_h0`), "control").to.deep.equal([]);
       });
 
       it("mutant: a check that creates the earlier port's adapter before it validates the later one is caught", async () => {
@@ -1310,7 +1622,7 @@ ENDCLASS.
         await clearLog();
         await runSet(RUNNER);
         const row = log().find((r) => r.rule === "ship-too-many-future-voyages");
-        const key = `${row.set}/${row.rule}/${row.hash}/${row.date}/${row.seq}`;
+        const key = `${row.set}/${row.rule}/${row.hash}/${row.date}/${row.pile}/${row.seq}`;
         const {text, ruleLine, generated, runnerLines} = await explainAlert(key, {sets: [SET], row: {...row, alert_text: row.text, run_id: row.run, run_ts: row.ts, rule_line: row.line}});
         const ruleText = readFileSync(join(OUT, "ship_voyage_limit.l2.yaml"), "utf8").split("\n");
         expect(ruleLine).to.equal(ruleText.findIndex((l) => /^alert:/.test(l)) + 1);
@@ -1324,12 +1636,28 @@ ENDCLASS.
         expect(text).to.include(`set     src/l2demo/fleet.l3.yaml:${setLine(/- rule: ship_voyage_limit/)}:`);
       });
 
-      it("the command reads the alert row from the database file", () => {
+      it("the command reads the alert row from the database file", async () => {
+        await clearLog();
+        await runSet(RUNNER);
         const row = log().find((r) => r.rule === "ship-cargo-limit");
-        const run = spawnSync(process.execPath, ["tools/dsl-l3.mjs", "explain", `fleet/ship-cargo-limit/${row.hash.slice(7, 19)}/${DATE}/1`, "--db", dbPath], {encoding: "utf8"});
+        expect(row.pile).to.equal(2);
+        const run = spawnSync(process.execPath, ["tools/dsl-l3.mjs", "explain", `fleet/ship-cargo-limit/${row.hash.slice(7, 19)}/${DATE}/2/${row.seq}`, "--db", dbPath], {encoding: "utf8"});
         expect(run.status, run.stderr).to.equal(0);
         expect(run.stdout).to.include("text    S003: 1100.50 kg booked");
         expect(run.stdout).to.match(/line {4}src\/l2demo\/ship_cargo_limit\.l2\.yaml:10: alert:/);
+        expect(run.stdout).to.match(/pile {4}2 of the plan, 2 keys of ship_id per pile \(src\/l2demo\/fleet\.l3\.yaml:\d+\), range I BT S003 S004, DONE/);
+        // the five-part key of before piles is pile 0: no row of this run is there
+        const old = spawnSync(process.execPath, ["tools/dsl-l3.mjs", "explain", `fleet/ship-cargo-limit/${row.hash.slice(7, 19)}/${DATE}/${row.seq}`, "--db", dbPath], {encoding: "utf8"});
+        expect(old.status, old.stderr).to.equal(0);
+        expect(old.stdout).to.match(/^alert {3}fleet\/ship-cargo-limit\/sha256:[0-9a-f]{12}\.\.\.\/20261001\/0\/1$/m);
+        expect(old.stdout).to.not.include("text    ");
+      });
+
+      it("an alert key names its pile; the five-part key of before piles is pile 0", () => {
+        expect(parseAlertKey(`fleet/r/${"ab".repeat(4)}/20261001/3/2`)).to.include({pile: 3, seq: 2});
+        expect(parseAlertKey(`fleet/r/${"ab".repeat(4)}/20261001/2`)).to.include({pile: 0, seq: 2});
+        expect(() => parseAlertKey(`fleet/r/${"ab".repeat(4)}/20261001/x/2`)).to.throw(/pile x is a non-negative number/);
+        expect(() => parseAlertKey(`fleet/r/${"ab".repeat(4)}/20261001/1/2/3`)).to.throw(/an alert key is <set>\/<rule>\/<model hash>\/<check date>\/<pile>\/<seq>/);
       });
 
       it("a hash no version of the rule carried is refused", async () => {

@@ -1,8 +1,11 @@
 * The L3 runner ZCL_L3_FLEET against the rule classes it runs: seeded rows
-* make six rules alert (seven alerts), mode S writes exactly the union of
-* the rules' own check answers, a rerun leaves the log as it was with every
-* row on the new run, and mode P (one background job per rule) ends with
-* every job FINISHED and the same log as mode S.
+* make six rules alert (seven alerts), mode S, every rule cut into piles of
+* keys, writes exactly the union of the rules' own check answers over all
+* rows, a rerun leaves the log as it was with every row on the new run, a
+* rerun with one pile per rule finalises away the older run's piles, a
+* plan whose pile fails stays PARTIAL and keeps the older rows, and mode P
+* (one background job per rule and pile) ends with every pile DONE and the
+* same log as mode S.
 * RISK LEVEL DANGEROUS: setup commits rows into the rule tables, every run
 * commits its alerts, and teardown deletes both again and commits. The
 * keys all start with L30, which no generated L2 test uses.
@@ -12,7 +15,6 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     TYPES: BEGIN OF ty_row,
              rule_name TYPE zosd_l3_alert-rule_name,
              model_hash TYPE zosd_l3_alert-model_hash,
-             alert_seq TYPE i,
              alert_text TYPE string,
            END OF ty_row.
     TYPES tt_row TYPE STANDARD TABLE OF ty_row WITH DEFAULT KEY.
@@ -29,7 +31,9 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS teardown.
     METHODS mode_s FOR TESTING.
     METHODS rerun FOR TESTING.
+    METHODS rerun_fewer_piles FOR TESTING.
     METHODS mode_p FOR TESTING.
+    METHODS partial_keeps_old FOR TESTING.
     METHODS add_ship IMPORTING iv_id TYPE csequence iv_name TYPE csequence iv_status TYPE csequence.
     METHODS add_voyage IMPORTING iv_id TYPE csequence iv_ship TYPE csequence iv_date TYPE csequence.
     METHODS add_crew IMPORTING iv_id TYPE csequence iv_ship TYPE csequence iv_role TYPE csequence iv_since TYPE csequence.
@@ -99,6 +103,7 @@ CLASS ltcl_proof IMPLEMENTATION.
     delete_seed( ).
     LOOP AT mt_runs INTO lv_run.
       DELETE FROM zosd_l3_alert WHERE set_name = zcl_l3_fleet=>c_set AND run_id = lv_run.
+      DELETE FROM zosd_l3_pile WHERE set_name = zcl_l3_fleet=>c_set AND run_id = lv_run.
     ENDLOOP.
     CLEAR mt_runs.
     COMMIT WORK.
@@ -109,6 +114,7 @@ CLASS ltcl_proof IMPLEMENTATION.
     DATA lt_log TYPE tt_row.
     DATA ls_row TYPE ty_row.
     DATA ls_result TYPE zcl_l3_fleet=>ty_result.
+    DATA ls_rule TYPE zcl_l3_fleet=>ty_rule.
     DATA lt_rules TYPE STANDARD TABLE OF zosd_l3_alert-rule_name WITH DEFAULT KEY.
     DATA lv_ours TYPE i.
     DATA lv_lines TYPE i.
@@ -131,12 +137,17 @@ CLASS ltcl_proof IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lv_lines exp = 6
       msg = 'mode S runs the six enabled rules' ).
     assert_all( is_result = ls_result iv_status = 'DONE' iv_when = 'mode S' ).
+    LOOP AT ls_result-rules INTO ls_rule.
+      IF ls_rule-piles < 2 OR ls_rule-piles_done <> ls_rule-piles.
+        cl_abap_unit_assert=>fail( msg = 'mode S cuts every rule into piles and runs each' ).
+      ENDIF.
+    ENDLOOP.
     lv_lines = lines( lt_exp ).
     cl_abap_unit_assert=>assert_equals( act = ls_result-alerts exp = lv_lines
       msg = 'the result counts the alerts the checks answer' ).
     lt_log = logged( ls_result-run_id ).
     cl_abap_unit_assert=>assert_equals( act = lt_log exp = lt_exp
-      msg = 'the log of the run is the union of the rules'' check answers' ).
+      msg = 'the log of the piled run is the union of the rules'' answers over all rows' ).
   ENDMETHOD.
 
   METHOD rerun.
@@ -166,6 +177,47 @@ CLASS ltcl_proof IMPLEMENTATION.
       msg = 'after the rerun every row of the log names the rerun' ).
   ENDMETHOD.
 
+  METHOD rerun_fewer_piles.
+    " a rerun with one pile per rule (a size above any key count): its pile 1
+    " rewrites the older pile 1, and finalise removes the older run's other
+    " piles, which no group of the rerun touched
+    DATA ls_first TYPE zcl_l3_fleet=>ty_result.
+    DATA ls_second TYPE zcl_l3_fleet=>ty_result.
+    DATA ls_rule TYPE zcl_l3_fleet=>ty_rule.
+    DATA lt_once TYPE tt_row.
+    DATA lt_twice TYPE tt_row.
+    DATA lv_beyond TYPE i.
+    DATA lv_foreign TYPE i.
+    ls_first = run_set( zcl_l3_fleet=>c_sequential ).
+    lt_once = logged( ls_first-run_id ).
+    SELECT COUNT(*) FROM zosd_l3_alert
+      WHERE set_name = zcl_l3_fleet=>c_set
+        AND check_date = zcl_l3_fleet_proof=>c_check_date
+        AND run_id = ls_first-run_id
+        AND pile_no > 1.
+    lv_beyond = sy-dbcnt.
+    IF lv_beyond = 0.
+      cl_abap_unit_assert=>fail( msg = 'the first run writes rows beyond its first pile' ).
+    ENDIF.
+    ls_second = zcl_l3_fleet=>run( iv_date = zcl_l3_fleet_proof=>c_check_date
+                                   iv_mode = zcl_l3_fleet=>c_sequential
+                                   iv_pile_size = 1000000 ).
+    APPEND ls_second-run_id TO mt_runs.
+    COMMIT WORK.
+    assert_all( is_result = ls_second iv_status = 'DONE' iv_when = 'the rerun with one pile' ).
+    LOOP AT ls_second-rules INTO ls_rule.
+      IF ls_rule-piles <> 1.
+        cl_abap_unit_assert=>fail( msg = 'a size above the key count plans one pile per rule' ).
+      ENDIF.
+    ENDLOOP.
+    lt_twice = logged( ls_second-run_id ).
+    cl_abap_unit_assert=>assert_equals( act = lt_twice exp = lt_once
+      msg = 'one pile per rule gives the alerts two keys per pile gave' ).
+    lv_foreign = foreign( ls_second-run_id ).
+    cl_abap_unit_assert=>assert_equals( act = lv_foreign exp = 0
+      msg = 'finalise leaves exactly the rerun''s rows' ).
+  ENDMETHOD.
+
   METHOD mode_p.
     DATA ls_seq TYPE zcl_l3_fleet=>ty_result.
     DATA ls_par TYPE zcl_l3_fleet=>ty_result.
@@ -182,11 +234,16 @@ CLASS ltcl_proof IMPLEMENTATION.
     ls_par = run_set( zcl_l3_fleet=>c_parallel ).
     lv_lines = lines( ls_par-rules ).
     cl_abap_unit_assert=>assert_equals( act = lv_lines exp = 6
-      msg = 'mode P submits one job per enabled rule' ).
+      msg = 'mode P submits the six enabled rules' ).
     assert_all( is_result = ls_par iv_status = 'SUBMITTED' iv_when = 'submitting' ).
+    LOOP AT ls_par-rules INTO ls_rule.
+      IF ls_rule-piles < 2.
+        cl_abap_unit_assert=>fail( msg = 'each fleet rule needs more than one pile and job' ).
+      ENDIF.
+    ENDLOOP.
 
     ls_par = wait_for_jobs( ls_par ).
-    assert_all( is_result = ls_par iv_status = 'FINISHED' iv_when = 'the jobs' ).
+    assert_all( is_result = ls_par iv_status = 'DONE' iv_when = 'the jobs' ).
     LOOP AT ls_par-rules INTO ls_rule.
       READ TABLE ls_seq-rules INTO ls_same WITH KEY rule = ls_rule-rule.
       CONCATENATE ls_rule-rule ': the job wrote as many alerts as mode S' INTO lv_msg.
@@ -200,6 +257,96 @@ CLASS ltcl_proof IMPLEMENTATION.
     lv_count = foreign( ls_par-run_id ).
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0
       msg = 'after the jobs every row of the log names the parallel run' ).
+  ENDMETHOD.
+
+  METHOD partial_keeps_old.
+    " a complete run, then a second plan of the same keys whose pile holding
+    " L301 fails for the first rule (its write is bound to a sink variant the
+    " port does not have) while the rule's other piles run: collect( ) finds
+    " the pile FAILED and the rule PARTIAL, and runs no finalise, so the
+    " complete run's rows in that pile stay
+    DATA ls_old TYPE zcl_l3_fleet=>ty_result.
+    DATA ls_new TYPE zcl_l3_fleet=>ty_result.
+    DATA lt_piles TYPE zcl_l3_fleet=>tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA ls_rule TYPE zcl_l3_fleet=>ty_rule.
+    DATA ls_done TYPE zcl_l3_fleet=>ty_rule.
+    DATA lv_pile TYPE i.
+    DATA lv_old TYPE i.
+    DATA lv_kept TYPE i.
+    DATA lv_left TYPE i.
+    DATA lv_failed TYPE abap_bool.
+    DATA lv_status TYPE zosd_l3_pile-status.
+    ls_old = run_set( zcl_l3_fleet=>c_sequential ).
+    ls_new-set_name = zcl_l3_fleet=>c_set.
+    ls_new-check_date = zcl_l3_fleet_proof=>c_check_date.
+    ls_new-mode = zcl_l3_fleet=>c_parallel.
+    ls_new-rules = zcl_l3_fleet=>rules( ).
+    ls_new-run_id = cl_system_uuid=>create_uuid_c32_static( ).
+    APPEND ls_new-run_id TO mt_runs.
+    lt_piles = zcl_l3_fleet=>plan( iv_run = ls_new-run_id
+                                   iv_date = zcl_l3_fleet_proof=>c_check_date ).
+    INSERT zosd_l3_pile FROM TABLE lt_piles.
+    LOOP AT lt_piles INTO ls_pile WHERE rule_name = zcl_l3_fleet=>c_rule_1
+                                    AND range_low <= 'L301' AND range_high >= 'L301'.
+      lv_pile = ls_pile-pile_no.
+    ENDLOOP.
+    SELECT COUNT(*) FROM zosd_l3_alert
+      WHERE set_name = zcl_l3_fleet=>c_set
+        AND rule_name = zcl_l3_fleet=>c_rule_1
+        AND check_date = zcl_l3_fleet_proof=>c_check_date
+        AND pile_no = lv_pile
+        AND run_id = ls_old-run_id.
+    lv_old = sy-dbcnt.
+    IF lv_old = 0.
+      cl_abap_unit_assert=>fail( msg = 'the complete run wrote the L301 alert in the pile that will fail' ).
+    ENDIF.
+    LOOP AT lt_piles INTO ls_pile WHERE rule_name = zcl_l3_fleet=>c_rule_1.
+      IF ls_pile-pile_no = lv_pile.
+        TRY.
+            ls_done = zcl_l3_fleet=>run_rule( iv_rule = zcl_l3_fleet=>c_rule_1
+                                              iv_date = zcl_l3_fleet_proof=>c_check_date
+                                              iv_run = ls_new-run_id
+                                              iv_pile = ls_pile-pile_no
+                                              iv_bind = 'alerts=nope' ).
+          CATCH cx_root.
+            lv_failed = abap_true.
+        ENDTRY.
+      ELSE.
+        ls_done = zcl_l3_fleet=>run_rule( iv_rule = zcl_l3_fleet=>c_rule_1
+                                          iv_date = zcl_l3_fleet_proof=>c_check_date
+                                          iv_run = ls_new-run_id
+                                          iv_pile = ls_pile-pile_no ).
+        cl_abap_unit_assert=>assert_equals( act = ls_done-status exp = 'DONE'
+          msg = 'the other piles of the rule run' ).
+      ENDIF.
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_equals( act = lv_failed exp = abap_true
+      msg = 'a sink variant the port does not have makes the pile fail' ).
+    COMMIT WORK.
+    ls_new = zcl_l3_fleet=>collect( ls_new ).
+    READ TABLE ls_new-rules INTO ls_rule WITH KEY rule = zcl_l3_fleet=>c_rule_1.
+    cl_abap_unit_assert=>assert_equals( act = ls_rule-status exp = 'PARTIAL'
+      msg = 'collect reports the rule with a failed pile PARTIAL' ).
+    lv_left = ls_rule-piles - 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_rule-piles_done exp = lv_left
+      msg = 'every pile of the rule but the failed one is DONE' ).
+    SELECT SINGLE status FROM zosd_l3_pile INTO lv_status
+      WHERE set_name = zcl_l3_fleet=>c_set
+        AND run_id = ls_new-run_id
+        AND rule_name = zcl_l3_fleet=>c_rule_1
+        AND pile_no = lv_pile.
+    cl_abap_unit_assert=>assert_equals( act = lv_status exp = 'FAILED'
+      msg = 'the failed pile is FAILED in the plan' ).
+    SELECT COUNT(*) FROM zosd_l3_alert
+      WHERE set_name = zcl_l3_fleet=>c_set
+        AND rule_name = zcl_l3_fleet=>c_rule_1
+        AND check_date = zcl_l3_fleet_proof=>c_check_date
+        AND pile_no = lv_pile
+        AND run_id = ls_old-run_id.
+    lv_kept = sy-dbcnt.
+    cl_abap_unit_assert=>assert_equals( act = lv_kept exp = lv_old
+      msg = 'a failed pile keeps the previous run until a complete plan finalises' ).
   ENDMETHOD.
 
   METHOD add_ship.
@@ -268,10 +415,11 @@ CLASS ltcl_proof IMPLEMENTATION.
       rs_result = zcl_l3_fleet=>collect( is_result ).
       lv_open = 0.
       LOOP AT rs_result-rules INTO ls_rule.
-        IF ls_rule-status <> 'FINISHED' AND ls_rule-status <> 'ABORTED'.
+        IF ls_rule-status <> 'DONE' AND ls_rule-status <> 'PARTIAL'.
           lv_open = lv_open + 1.
         ENDIF.
       ENDLOOP.
+      " every rule DONE, or a pile lost: waiting longer changes nothing
       IF lv_open = 0.
         RETURN.
       ENDIF.
@@ -310,7 +458,7 @@ CLASS ltcl_proof IMPLEMENTATION.
     lt_alerts = zcl_l2_ship_cargo_limit=>check( zcl_l3_fleet_proof=>c_check_date ).
     add_expected( EXPORTING iv_rule = zcl_l3_fleet=>c_rule_6 iv_hash = zcl_l3_fleet=>c_hash_6
                             it_alerts = lt_alerts CHANGING ct_rows = rt_rows ).
-    SORT rt_rows BY rule_name model_hash alert_seq.
+    SORT rt_rows BY rule_name model_hash alert_text.
   ENDMETHOD.
 
   METHOD add_expected.
@@ -319,7 +467,6 @@ CLASS ltcl_proof IMPLEMENTATION.
     LOOP AT it_alerts INTO lv_alert.
       ls_row-rule_name = iv_rule.
       ls_row-model_hash = iv_hash.
-      ls_row-alert_seq = sy-tabix.
       ls_row-alert_text = lv_alert.
       APPEND ls_row TO ct_rows.
     ENDLOOP.
@@ -328,18 +475,18 @@ CLASS ltcl_proof IMPLEMENTATION.
   METHOD logged.
     " the log of the proof's check date: one run's rows, or all of them
     IF iv_run IS INITIAL.
-      SELECT rule_name model_hash alert_seq alert_text FROM zosd_l3_alert
+      SELECT rule_name model_hash alert_text FROM zosd_l3_alert
         INTO CORRESPONDING FIELDS OF TABLE rt_rows
         WHERE set_name = zcl_l3_fleet=>c_set
           AND check_date = zcl_l3_fleet_proof=>c_check_date.
     ELSE.
-      SELECT rule_name model_hash alert_seq alert_text FROM zosd_l3_alert
+      SELECT rule_name model_hash alert_text FROM zosd_l3_alert
         INTO CORRESPONDING FIELDS OF TABLE rt_rows
         WHERE set_name = zcl_l3_fleet=>c_set
           AND check_date = zcl_l3_fleet_proof=>c_check_date
           AND run_id = iv_run.
     ENDIF.
-    SORT rt_rows BY rule_name model_hash alert_seq.
+    SORT rt_rows BY rule_name model_hash alert_text.
   ENDMETHOD.
 
   METHOD foreign.

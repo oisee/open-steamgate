@@ -2233,7 +2233,7 @@ examples:
       const check = methodOf(join(OUT, "zcl_l2_ship_captain.clas.abap"), "check");
       expect(check).to.contain(["      FROM zosd_l2_ship AS ship",
         "      INTO CORRESPONDING FIELDS OF TABLE lt_join",
-        "      WHERE ship~status = 'A'",
+        "      WHERE ship~status = iv_active_status",
         "        AND NOT EXISTS ( SELECT * FROM zosd_l2_crew AS crew",
         "          WHERE crew~ship_id = ship~ship_id",
         "            AND crew~role = 'C'",

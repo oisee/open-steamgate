@@ -14,6 +14,7 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
     METHODS check_reference
       IMPORTING iv_date TYPE d
                 it_range TYPE tt_range OPTIONAL
+                iv_active_status TYPE c DEFAULT 'A'
       RETURNING VALUE(rt_alerts) TYPE string_table.
     METHODS assert_alerts
       IMPORTING it_act TYPE string_table it_exp TYPE string_table iv_example TYPE string.
@@ -58,7 +59,7 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_crew TYPE STANDARD TABLE OF zosd_l2_crew WITH DEFAULT KEY.
     DATA lv_alert TYPE string.
     SELECT * FROM zosd_l2_ship INTO TABLE lt_ship
-      WHERE status = 'A'
+      WHERE status = iv_active_status
         AND ship_id IN it_range
       ORDER BY PRIMARY KEY.
     LOOP AT lt_ship INTO ls_ship.
@@ -314,8 +315,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND `S002 Cormorant: in service without a captain` TO lt_exp.
     lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
     lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
-    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = 'A': eq (check against check_reference)` ).
-    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = 'A': eq` ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = $active_status: eq (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = $active_status: eq` ).
   ENDMETHOD.
 
   METHOD b_status_ne.
@@ -334,8 +335,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
     lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
     lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
-    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = 'A': ne (check against check_reference)` ).
-    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = 'A': ne` ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = $active_status: ne (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = $active_status: ne` ).
   ENDMETHOD.
 
   METHOD b_status_blank.
@@ -354,8 +355,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
     lt_act = zcl_l2_ship_captain=>check( iv_date = '20261001' it_range = lt_range ).
     lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
-    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = 'A': blank (check against check_reference)` ).
-    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = 'A': blank` ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status = $active_status: blank (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status = $active_status: blank` ).
   ENDMETHOD.
 
   METHOD b_ship_id_match.

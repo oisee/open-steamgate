@@ -24,6 +24,7 @@ CLASS zcl_l3_fleet_alerts_log IMPLEMENTATION.
       AND rule_name = is_group-rule_name
       AND model_hash = is_group-model_hash
       AND check_date = is_group-check_date
+      AND pile_no = is_group-pile_no
       AND alert_seq > lv_lines.
   ENDMETHOD.
 ENDCLASS.

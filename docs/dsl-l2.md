@@ -666,8 +666,8 @@ are refused at the comparison line.
 an active ship needs a voyage in the last `$max_days` days, default 30. Its
 first example sets one day and checks the 2024-02-29 lower bound from a
 2024-03-01 check date. The derived cases check the adjacent days. The rule
-stays out of `fleet.l3.yaml` because the L3 runner passes only the date to
-each rule and cannot supply `$max_days` or other rule parameters.
+stays out of `fleet.l3.yaml`; the fleet set instead demonstrates a set
+parameter with its captain rule.
 
 ## Optional driving-key range (`range:`)
 

@@ -2,91 +2,91 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet.l3.yaml",
  "template": "recipes/l3-ports/sink-dummy.tpl",
- "model": "sha256:57608867133cdf7caa418f9fc8d440ea76fbee13e4143b8683e2f45f1530b898",
+ "model": "sha256:13118108c2ae8512f3cdd7a09a2089fcd2b0e5f0837d963d13c4bd49c624679a",
  "lines": [
   {
    "line": 1,
    "template_line": 1,
    "path": "/source",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 2,
    "template_line": 2,
    "path": "/port",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 3,
    "template_line": 3,
    "path": "/class",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 4,
    "template_line": 4,
    "path": "/",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 5,
    "template_line": 5,
    "path": "/iface",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 6,
    "template_line": 6,
    "path": "/",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 7,
    "template_line": 7,
    "path": "/",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 8,
    "template_line": 8,
    "path": "/class",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 9,
    "template_line": 9,
    "path": "/iface",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 10,
    "template_line": 10,
    "path": "/",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 11,
    "template_line": 11,
    "path": "/",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   },
   {
    "line": 12,
    "template_line": 12,
    "path": "/",
    "node": "set/fleet/port/alerts/variant/dummy",
-   "set_line": 36
+   "set_line": 41
   }
  ]
 }

@@ -7,6 +7,7 @@ INTERFACE zif_l3_fleet_alerts PUBLIC.
            rule_name TYPE zosd_l3_alert-rule_name,
            model_hash TYPE zosd_l3_alert-model_hash,
            check_date TYPE zosd_l3_alert-check_date,
+           pile_no TYPE zosd_l3_alert-pile_no,
          END OF ty_group.
   " the rows of one group (its key fields given in is_group) as the run found
   " them, in alert_seq order; the answer is how many rows the sink took

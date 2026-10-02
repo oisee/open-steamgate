@@ -8,7 +8,7 @@
 //
 //   node tools/dsl-l3.mjs build <set.l3.yaml> --out <dir> [--ddic <folder>]...
 //   node tools/dsl-l3.mjs check <set.l3.yaml> --out <dir> [--ddic <folder>]...
-//   node tools/dsl-l3.mjs explain <set>/<rule>/<model hash>/<date>/<seq> [--set <set.l3.yaml>]... [--db <sqlite file>]
+//   node tools/dsl-l3.mjs explain <set>/<rule>/<model hash>/<date>/<pile>/<seq> [--set <set.l3.yaml>]... [--db <sqlite file>]
 import {spawnSync} from "node:child_process";
 import {createHash} from "node:crypto";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
@@ -19,7 +19,7 @@ import {pathToFileURL} from "node:url";
 import yaml from "js-yaml";
 const abaplint = createRequire(import.meta.url)("@abaplint/core");
 import {lineOf} from "./dsl-yaml-lines.mjs";
-import {compileRule, lineIndex, modelHash, renderModel, rulePath, RuleError} from "./dsl-l2.mjs";
+import {compileRule, lineIndex, misfit, modelHash, renderModel, rulePath, RuleError} from "./dsl-l2.mjs";
 import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
 
 export const SET_TEMPLATE = "recipes/l3-set/template.tpl";
@@ -46,6 +46,8 @@ export const WIDTH = {set: 16, rule: 60, hash: 71, file: 128, jobname: 32};
 // class ZCL_OSD_GUITX_L3_<SET> has 30 characters at most) and the job names
 // L3_<SET>_<nn> are made of it
 export const SET_NAME = /^[a-z][a-z0-9_]{0,12}$/;
+// the job report's own selection fields; a set parameter's field is another name
+export const REPORT_PARAMETERS = ["p_rule", "p_date", "p_run", "p_pile", "p_bind"];
 // ---------------------------------------------------------------------------
 // static checks on ABAP source, read with abaplint (statements, not text)
 
@@ -116,7 +118,7 @@ export function classShape(text, name, className) {
   return shape.line === undefined ? undefined : shape;
 }
 
-const KEYS = ["set", "title", "class", "report", "date", "rules", "ports", "bindings"];
+const KEYS = ["set", "title", "class", "report", "date", "rules", "params", "piles", "ports", "bindings"];
 const PORT_KEYS = ["kind", "table", "key", "group", "seq", "variants"];
 const PORT_NAME = /^[a-z][a-z0-9_]{0,11}$/;
 const RULE_KEYS = ["rule", "enabled"];
@@ -177,7 +179,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   const report = (scalar("report") ?? `zl3_${set}`).toLowerCase();
   if (!/^z[a-z0-9_]{1,18}$/.test(report)) fail(line("report"), `report ${report} is a Z name of at most 19 characters (its converted class ZCL_OSD_GUITX_<name without Z> has 30)`);
   const date = scalar("date", true);
-  if (date !== "$date" && date !== "today") fail(line("date"), `date is $date (the caller passes the check date) or today ($date, the current date when the caller passes none); L2 rules know no other parameter`);
+  if (date !== "$date" && date !== "today") fail(line("date"), `date is $date (the caller passes the check date) or today ($date, the current date when the caller passes none); other parameters are params:`);
 
   if (!Array.isArray(doc.rules)) fail(line("rules"), "rules is a list of {rule: <file.l2.yaml>, enabled: true|false}");
   if (!doc.rules.length) fail(line("rules"), "a set needs at least one rule");
@@ -229,6 +231,36 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   if (!enabled.length) fail(line("rules"), "every rule of the set is disabled; a set runs at least one");
   if (enabled.length > 99) fail(line("rules"), "a set runs at most 99 rules (the job name numbers them in two digits)");
 
+  // set parameters (docs/dsl-l3.md, "Piles and set parameters"): one per
+  // name an enabled rule declares as an L2 parameter, of the same type
+  const paramDocs = doc.params === undefined ? {} : doc.params;
+  if (!paramDocs || typeof paramDocs !== "object" || Array.isArray(paramDocs)) fail(line("params"), "params is a mapping of names to {type, default}");
+  const screens = new Set(REPORT_PARAMETERS);
+  const params = Object.entries(paramDocs).map(([name, spec]) => {
+    const at = line(`params/${name}`);
+    if (!/^[a-z][a-z0-9_]{0,26}$/.test(name)) fail(at, `set parameter ${name} is a lower-case ABAP name of at most 27 characters`);
+    if (!spec || typeof spec !== "object" || Array.isArray(spec) || typeof spec.type !== "string") fail(at, `set parameter ${name} is {type: <type>, default: <value>}, with a type`);
+    for (const key of Object.keys(spec)) if (!["type", "default"].includes(key)) fail(line(`params/${name}/${key}`), `unknown key ${key} of set parameter ${name} (type, default)`);
+    const uses = enabled.flatMap((r) => (r.compiled.params ?? []).filter((p) => p.name === name).map((p) => ({...p, rule: r.compiled.rule})));
+    if (!uses.length) fail(at, `set parameter ${name} is not used: no enabled rule declares $${name}`);
+    const other = uses.find((p) => p.type_name !== spec.type.toLowerCase() || JSON.stringify(p.type) !== JSON.stringify(uses[0].type));
+    if (other) fail(line(`params/${name}/type`), `set parameter ${name} is ${spec.type}; rule ${other.rule} declares $${name} as ${other.type_name.toUpperCase()}, and a set parameter has the type of every L2 parameter it binds`);
+    if (["STRG", "SSTR", "RSTR"].includes(uses[0].type.built_in)) fail(line(`params/${name}/type`), `set parameter ${name} is a string; a job receives it through a selection field, which has a fixed length`);
+    if (spec.default !== undefined && (typeof spec.default !== "string" || misfit(spec.default, uses[0].type))) fail(line(`params/${name}/default`), `the default of set parameter ${name} does not fit ${spec.type}`);
+    // the job report's selection field: P_<first six characters>, made unique with digits
+    let screen = `p_${name.slice(0, 6)}`;
+    for (let n = 1; screens.has(screen) && n < 1e5; n++) screen = `p_${name.slice(0, 6 - String(n).length)}${n}`;
+    if (screen.length > 8 || screens.has(screen)) fail(at, `the selection field of set parameter ${name} cannot be made unique in eight characters`);
+    screens.add(screen);
+    return {"@id": `set/${set}/param/${name}`, set_line: at, name, screen, type_name: spec.type.toLowerCase(),
+      ...(spec.default !== undefined ? {default: spec.default, "default@type": uses[0].type} : {})};
+  });
+  for (const r of enabled) {
+    for (const p of r.compiled.params ?? []) {
+      if (!paramDocs[p.name] && p.default === undefined) fail(r.at, `rule ${r.compiled.rule} needs $${p.name}, which has no default in the rule: declare a set parameter ${p.name} (params:)`);
+    }
+  }
+
   const id = `set/${set}`;
 
   // ports and bindings (docs/dsl-l3.md, "Ports and adapters")
@@ -241,9 +273,10 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     registry0 ??= registryFor(ddic ?? DEFAULT_DDIC, []);
     const object = registry0.getObject("TABL", table.toUpperCase());
     if (!object) fail(line(`${key}/table`), `table ${table.toUpperCase()} is not in the DDIC given`);
-    const names = (object.getFields() ?? []).filter((f) => !f.FIELDNAME.startsWith(".")).map((f) => f.FIELDNAME.toLowerCase());
+    const fields = (object.getFields() ?? []).filter((f) => !f.FIELDNAME.startsWith("."));
+    const names = fields.map((f) => f.FIELDNAME.toLowerCase());
     const clidep = /<CLIDEP>X</.test(object.getXML() ?? "");
-    return {names, client: clidep ? names[0] : undefined};
+    return {names, fields, client: clidep ? names[0] : undefined};
   };
   const classSearch = [dirname(file), "src"];
   const portDocs = doc.ports === undefined ? {alerts: {kind: "sink", table: SINK_TABLE, group: [...SINK_GROUP], seq: "alert_seq", variants: {log: "generated"}}} : asMap(doc.ports, "ports", "a mapping of port name to its definition");
@@ -351,7 +384,38 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   for (const name of Object.keys(bindingDocs)) if (!ports.some((p) => p.name === name)) fail(line(`bindings/${name}`), `binding ${name} names no port of the set`);
   const sinks = ports.filter((p) => p.is_sink);
   if (sinks.length !== 1) fail(line("ports"), `a set has exactly one sink, the alert sink the runner writes through; this one has ${sinks.length}`);
+  // the pile planner (docs/dsl-l3.md, "Piles and set parameters"): the keys
+  // of a source port cut into piles of `size`; a rule is piled when its L2
+  // range: is that key on that table
+  let piles;
+  if (doc.piles !== undefined) {
+    const spec = asMap(doc.piles, "piles", "a mapping with source and size");
+    for (const key of Object.keys(spec)) if (!["source", "size"].includes(key)) fail(line(`piles/${key}`), `unknown key ${key} in piles (source, size)`);
+    const source = ports.find((p) => p.name === spec.source && p.is_source);
+    if (!source) fail(line("piles/source"), `piles.source ${JSON.stringify(spec.source)} is not a source port of the set (${ports.filter((p) => p.is_source).map((p) => p.name).join(", ") || "none"})`);
+    const keyField = columnsOf(source.table, `ports/${source.name}`).fields.find((f) => f.FIELDNAME.toLowerCase() === source.key);
+    if (Number(keyField.LENG) > 40) fail(line("piles/source"), `the key ${source.table.toUpperCase()}-${source.key.toUpperCase()} is longer than 40 characters, the width of ZOSD_L3_PILE-RANGE_LOW and RANGE_HIGH`);
+    if (!/^[1-9][0-9]{0,9}$/.test(String(spec.size)) || Number(spec.size) > 2147483647) fail(line("piles/size"), `piles.size is a whole number from 1 to 2147483647 (an INT4), not ${JSON.stringify(spec.size)}`);
+    piles = {"@id": `${id}/piles`, set_line: line("piles"), size: spec.size, "size@type": {built_in: "INT4"},
+      source: {name: source.name, "name@type": CHAR(30), key: source.key, table: source.table, iface: source.iface}};
+    if (!enabled.some((r) => r.compiled.range?.table === source.table && r.compiled.range.field === source.key)) {
+      fail(line("piles"), `no enabled rule is piled: a rule is piled when its range: is ${source.key} of ${source.table.toUpperCase()}, the key of port ${source.name}`);
+    }
+    if (`L3_${set}_99_9999`.length > WIDTH.jobname) fail(line("piles"), `the job names L3_<SET>_<nn>_<pppp> have at most ${WIDTH.jobname} characters`);
+    // the alert log's group gains the pile: a rerun of one pile replaces that pile's rows only
+    sinks[0].group.push({name: "pile_no", lead: "AND", "@id": piles["@id"], set_line: piles.set_line});
+  }
   const SET = set.toUpperCase();
+  // a piled rule's range traces to its range: line in the rule file
+  const pileOf = (r) => {
+    const range = r.compiled.range;
+    if (!range || range.table !== piles.source.table || range.field !== piles.source.key) return {unpiled: true};
+    return {piled: true, range: {"@id": `${id}/rule/${r.compiled.rule}/range`, set_line: r.at, rule_file: r.recorded, rule_line: range.rule_line}};
+  };
+  // the set parameters a rule's check receives; `fallback`: the rule's own
+  // default, for a set parameter that has none
+  const argsOf = (r) => (r.compiled.params ?? []).filter((p) => paramDocs[p.name]).map((p) => ({name: p.name, ref: p.ref,
+    ...(paramDocs[p.name].default === undefined && p.default !== undefined ? {fallback: p.default, "fallback@type": p.type} : {})}));
   const node = (r, n) => ({
     "@id": `${id}/rule/${r.compiled.rule}`, set_line: r.at,
     name: r.compiled.rule, "name@type": CHAR(WIDTH.rule),
@@ -362,6 +426,9 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     // clauses carry their own alerts names its root line
     alert_line: String(r.compiled.alert?.rule_line ?? r.compiled.rule_line), "alert_line@type": {built_in: "INT4"},
     ...(n ? {index: String(n), jobname: `L3_${SET}_${String(n).padStart(2, "0")}`, "jobname@type": CHAR(WIDTH.jobname)} : {}),
+    ...(piles ? pileOf(r) : {}),
+    ...(argsOf(r).length ? {param_args: argsOf(r)} : {}),
+    ...((piles && pileOf(r).piled) || argsOf(r).length ? {has_args: true} : {}),
   });
   const model = {
     "@id": id, set_line: line("set"),
@@ -370,6 +437,8 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     date: {"@id": `${id}/date`, set_line: line("date"), today: date === "today"},
     ports_class: `zcl_l3_${set}_ports`, exception: `zcx_l3_${set}_port`,
     ports, sources: ports.filter((p) => p.is_source).map((p, i) => ({...p, index: String(i + 1)})), sink: sinks[0],
+    // with_params: the lines every set parameter shares (ty_params, is_params), traced to params:
+    ...(params.length ? {params, with_params: {"@id": `${id}/params`, set_line: line("params")}} : {}), ...(piles ? {piles} : {}),
     rules: enabled.map((r, i) => node(r, i + 1)),
     disabled: all.filter((r) => !r.enabled).map((r) => node(r)),
   };
@@ -384,7 +453,8 @@ function provenance(model, tracePath) {
     current = Array.isArray(current) ? current[Number(part) - 1] : current?.[part];
     if (current?.["@id"]) node = current;
   }
-  return {node: node["@id"], set_line: node.set_line};
+  return {node: node["@id"], set_line: node.set_line,
+    ...(node.rule_line !== undefined ? {rule_file: node.rule_file, rule_line: node.rule_line} : {})};
 }
 
 function sidecar(model, template, rendered) {
@@ -547,17 +617,19 @@ export async function checkSet(file, out, options = {}) {
 // ---------------------------------------------------------------------------
 // explain: an alert key down to the rule line and the generated check lines
 
-// `<set>/<rule>/<model hash>/<check date>/<seq>`; the hash is the full
+// `<set>/<rule>/<model hash>/<check date>/<pile>/<seq>`; the hash is the full
 // `sha256:<hex>` or at least eight of its hex digits.
 export function parseAlertKey(key) {
   const parts = String(key).split("/");
-  if (parts.length !== 5) throw new Error(`an alert key is <set>/<rule>/<model hash>/<check date>/<seq>, got ${JSON.stringify(key)}`);
-  const [set, rule, hash, date, seq] = parts;
+  if (![5, 6].includes(parts.length)) throw new Error(`an alert key is <set>/<rule>/<model hash>/<check date>/<pile>/<seq>, got ${JSON.stringify(key)}`);
+  const [set, rule, hash, date, ...tail] = parts;
+  const [pile, seq] = tail.length === 1 ? ["0", tail[0]] : tail;
   const hex = hash.replace(/^sha256:/, "");
   if (!/^[0-9a-f]{8,64}$/.test(hex)) throw new Error(`model hash ${hash} is sha256:<hex> or at least 8 of its hex digits`);
   if (!/^\d{8}$/.test(date)) throw new Error(`check date ${date} is YYYYMMDD`);
+  if (!/^\d+$/.test(pile)) throw new Error(`pile ${pile} is a non-negative number`);
   if (!/^\d+$/.test(seq) || Number(seq) < 1) throw new Error(`alert sequence ${seq} is a number from 1`);
-  return {set, rule, hash: hex, date, seq: Number(seq)};
+  return {set, rule, hash: hex, date, pile: Number(pile), seq: Number(seq)};
 }
 
 function setFiles(root = "src") {
@@ -606,10 +678,28 @@ function alertRow(db, key) {
   return import("node:sqlite").then(({DatabaseSync}) => {
     const handle = new DatabaseSync(db, {readOnly: true});
     try {
-      return handle.prepare(`SELECT * FROM zosd_l3_alert WHERE set_name = ? AND rule_name = ? AND model_hash LIKE ?
-        AND check_date = ? AND alert_seq = ?`).get(key.set, key.rule, `sha256:${key.hash}%`, key.date, key.seq);
+      const alert = handle.prepare(`SELECT * FROM zosd_l3_alert WHERE set_name = ? AND rule_name = ? AND model_hash LIKE ?
+        AND check_date = ? AND pile_no = ? AND alert_seq = ?`).get(key.set, key.rule, `sha256:${key.hash}%`, key.date, key.pile, key.seq);
+      // the plan row of the alert's pile, by its run (an older database has no plan table)
+      let pile;
+      try {
+        pile = alert && handle.prepare(`SELECT * FROM zosd_l3_pile WHERE set_name = ? AND run_id = ? AND rule_name = ? AND pile_no = ?`)
+          .get(key.set, alert.run_id, key.rule, key.pile);
+      } catch { pile = undefined; }
+      return alert && {...alert, pile};
     } finally { handle.close(); }
   });
+}
+
+// what the pile of an alert was: a piled rule's pile of the plan (its range
+// when the plan row is at hand), or the one pile 0 of a rule that is not piled
+function pileLine(model, entry, k, file, row) {
+  if (!model.piles) return `pile    ${k.pile}: the set has no piles:, every rule runs as one pile`;
+  const at = `${path(file)}:${model.piles.set_line}`;
+  if (!entry.piled) return `pile    ${k.pile}: the rule is not piled (its range: is not ${model.piles.source.key} of ${model.piles.source.table.toUpperCase()}), one pile over every row (${at})`;
+  const range = row ? `, range ${String(row.range_low).trim() === String(row.range_high).trim() ? `I EQ ${String(row.range_low).trim()}`
+    : `I BT ${String(row.range_low).trim()} ${String(row.range_high).trim()}`}, ${String(row.status).trim()}` : "";
+  return `pile    ${k.pile} of the plan, ${model.piles.size} keys of ${model.piles.source.key} per pile (${at})${range}`;
 }
 
 // alert -> set and rule -> the rule version -> its alert line -> the lines of
@@ -633,13 +723,14 @@ export async function explainAlert(key, {sets = setFiles(), db, row} = {}) {
   const runnerTrace = JSON.parse(readFileSync(join(dirname(found.file), `${model.class}.clas.trace.json`), "utf8"));
   const runnerLines = runnerTrace.lines.filter((l) => l.node === entry["@id"]).map((l) => l.line);
   const out = [
-    `alert   ${k.set}/${k.rule}/sha256:${k.hash.slice(0, 12)}.../${k.date}/${k.seq}`,
+    `alert   ${k.set}/${k.rule}/sha256:${k.hash.slice(0, 12)}.../${k.date}/${k.pile}/${k.seq}`,
     ...(alertRowFound ? [`text    ${String(alertRowFound.alert_text).trimEnd()}`, `run     ${String(alertRowFound.run_id).trim()} at ${alertRowFound.run_ts}`] : []),
     `set     ${path(found.file)}:${entry.set_line}: ${readFileSync(found.file, "utf8").split("\n")[entry.set_line - 1].trim()}`,
     `rule    ${k.rule}, ${entry.file} as of ${version.where}, model ${version.trace.model}`,
     `line    ${entry.file}:${ruleLine}: ${(ruleLines[ruleLine - 1] ?? "").trim()}`,
     `check   ${entry.check_class}.clas.abap, ${generated.length} line(s) trace to rule line ${ruleLine}:`,
     ...generated.map((n) => `  ${String(n).padStart(5)}  ${checkLines[n - 1]}`),
+    pileLine(model, entry, k, found.file, alertRowFound?.pile),
     `runner  ${model.class}.clas.abap lines ${compress(runnerLines)} trace to set line ${entry.set_line}`,
   ];
   return {text: out.join("\n"), set: found.file, rule: entry, ruleLine, generated, runnerLines, version: version.where};
@@ -673,7 +764,7 @@ async function main(args) {
   }
   if (!["build", "check"].includes(command) || !target || !out) {
     console.error("Usage: node tools/dsl-l3.mjs <build|check> <set.l3.yaml> --out <dir> [--ddic <folder>]...\n"
-      + "       node tools/dsl-l3.mjs explain <set>/<rule>/<model hash>/<date>/<seq> [--set <set.l3.yaml>]... [--db <sqlite file>]");
+      + "       node tools/dsl-l3.mjs explain <set>/<rule>/<model hash>/<date>/<pile>/<seq> [--set <set.l3.yaml>]... [--db <sqlite file>]");
     return 2;
   }
   const options = ddic.length ? {ddic} : {};

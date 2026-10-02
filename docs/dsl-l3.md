@@ -1,6 +1,6 @@
 # DSL L3: a set of rules, run as one unit
 
-Status: slice 1, 2026-10-01. Built on L2 (`docs/dsl-l2.md`) and the background job facade
+Status: slice 1, 2026-10-01; ports and adapters; piles and set parameters (slice 3a), 2026-10-02. Built on L2 (`docs/dsl-l2.md`) and the background job facade
 (`docs/job-standard-fms.md`, `docs/gui-reports.md`).
 
 L2 compiles one rule into a check class, `check( iv_date ) RETURNING rt_alerts`. L3 is the layer
@@ -27,7 +27,7 @@ rules:
 manifest file and line (`file:line: message`):
 
 - unknown keys, a set name, class or report that does not fit, a `date` other than `$date` or
-  `today` (L2 rules know no other parameter);
+  `today` (other parameters are `params:`, see "Piles and set parameters");
 - a rule file that does not exist; the same rule twice, whether as the same file by two paths,
   two files holding the same `rule:` name, or two rules generating the same class;
 - a rule that does not compile: the message carries the L2 compiler's own `file:line: message`;
@@ -71,13 +71,15 @@ with `MESSAGE ... TYPE 'E'` when the rule did not end `DONE`, which aborts its j
 
 | key | field |
 |---|---|
-| MANDT, SET_NAME (CHAR 16), MODEL_HASH (CHAR 71), CHECK_DATE, ALERT_SEQ | RULE_NAME (CHAR 60), ALERT_TEXT (STRG), RUN_ID, RUN_TS, RULE_CLASS, RULE_FILE, RULE_LINE |
+| MANDT, SET_NAME (CHAR 16), MODEL_HASH (CHAR 71), CHECK_DATE, PILE_NO (INT4), ALERT_SEQ | RULE_NAME (CHAR 60), ALERT_TEXT (STRG), RUN_ID, RUN_TS, RULE_CLASS, RULE_FILE, RULE_LINE |
 
 The rule is not part of the key: its model hash already names it. The hash is a SHA-256 of the
 compiled rule, which holds the rule's name, and a set refuses two rules of one name, so one hash
-is one rule of one set. Leaving it out keeps the key at 102 characters (3 + 16 + 71 + 8 + the
+is one rule of one set. Leaving it out kept the key at 102 characters (3 + 16 + 71 + 8 + the
 four bytes of INT4), under the 120 past which a system warns "Key length > 120 (restricted
 functions)"; with the rule in the key (and a 30-character set name) it was 176, and A4H said so.
+Since the pile planner the key also holds `PILE_NO` (INT4) after `CHECK_DATE`: **106**
+(3 + 16 + 71 + 8 + 4 + 4). A set without `piles:` writes pile 0.
 The set name is 16 wide because a set name has at most 13 characters.
 
 The column is `RULE_NAME`, not `RULE`: `RULE` is a reserved word in a system's dictionary, and
@@ -88,9 +90,9 @@ leaves the tree.
 `ALERT_SEQ` is the position of the alert in the rule's `check` answer, which is ordered (L2's
 `ORDER BY` plus `SORT`). `RULE_FILE` and `RULE_LINE` are the rule file and its `alert:` line.
 
-**Writes are idempotent per (rule, model hash, check date).** `write` does a `MODIFY` per alert on
-the full key, then `DELETE`s the rows of the same (set, rule, hash, date) past the last alert of
-this run, all in the caller's LUW (one dialog step in mode S, the job's own step in mode P). A
+**Writes are idempotent per (rule, model hash, check date)**, and per pile in a piled set.
+`write` does a `MODIFY` per alert on the full key, then `DELETE`s the rows of the same (set, rule,
+hash, date, and pile when the set has `piles:`) past the last alert of this run, all in the caller's LUW (one dialog step in mode S, the job's own step in mode P). A
 rerun, or a retried job, leaves exactly that run's alerts under that rule version, each row naming
 the latest run. A rerun that finds fewer alerts (the data changed) drops the rows it no longer
 finds.
@@ -111,6 +113,9 @@ The rows carry no client: the kernel adds it on a system; this runtime is single
 settled decision (ANORMALIES `no-implicit-mandt`).
 
 ## Mode P: one background job per rule
+
+(With `piles:`, one job per rule and pile, `L3_<SET>_<nn>_<pppp>`, and `collect( )` reads the
+plan: see "Piles and set parameters". This section is the set without piles.)
 
 Only the public jobs API, as a caller (agreed with the jobs code's owner):
 
@@ -143,19 +148,22 @@ them, as it already did for selection values.
 ## Explain
 
 ```
-node tools/dsl-l3.mjs explain <set>/<rule>/<model hash>/<check date>/<seq> [--set <set.l3.yaml>]... [--db <sqlite file>]
+node tools/dsl-l3.mjs explain <set>/<rule>/<model hash>/<check date>/<pile>/<seq> [--set <set.l3.yaml>]... [--db <sqlite file>]
 ```
 
 prints alert -> set manifest line -> rule and version -> rule line -> the lines of the generated
-check that trace to that line -> the runner lines that trace to the rule's manifest line. The hash
-may be cut to eight or more hex digits. `--db` reads the alert's text and run from a file
+check that trace to that line -> the alert's pile -> the runner lines that trace to the rule's
+manifest line. The hash may be cut to eight or more hex digits. The pile is the alert row's
+`PILE_NO`; the five-part key of before piles (`<set>/<rule>/<hash>/<date>/<seq>`) means pile 0.
+The `pile` line says whether the rule is piled; with `--db` it adds the plan row's range and
+status. `--db` reads the alert's text and run from a file
 database. A hash that is not the current version's is looked up in git history (`git log -S` on
 the check class's sidecar), and the rule and class are read at that commit; a hash no version
 carried is an error.
 
 ## Proof
 
-`test/dsl-l3.mjs` (registered in `test/suites.d/infra-misc.json`, 72 tests, the ports' among them, see "Ports and adapters"):
+`test/dsl-l3.mjs` (registered in `test/suites.d/infra-misc.json`, 100 tests, the ports' and the piles' among them, see "Ports and adapters" and "Piles and set parameters"):
 
 - the committed runner and report are a fresh build, and `check` notices a changed byte; the
   compiler names no domain word; each refusal above at its line;
@@ -193,6 +201,7 @@ same on both sides; nothing in it asks which system it is on.
   and the log of that run equals the union of the answers.
 - `rerun`: a second run is a run of its own, every rule `DONE`, the log identical and still the
   union, and no row of the date naming another run.
+- `rerun_fewer_piles`, `partial_keeps_old`: see "Piles and set parameters".
 - `mode_p`: `run( 'P' )` reports six rules `SUBMITTED`; the caller commits; a bounded loop calls
   `collect( )`, then `WAIT UP TO 1 SECONDS`, until every job is `FINISHED` or `ABORTED`, and gives
   up after 180 s with each rule's job name, count and status in the failure. Then every rule is
@@ -208,7 +217,7 @@ queue are worked by `osd-batch-runs worker` or by a test (`drainJobOutbox`, `wor
 Making the unit loop give every method a step, a file and a worker would change every test's
 LUW and is not small, so it is not done. Instead:
 
-- `npm run unit` runs `mode_s` and `rerun` and skips `mode_p` by configuration
+- `npm run unit` runs every method but `mode_p`, which it skips by configuration
   (`options.skip` in `abap_transpile.json`, printed as "skipped due to configuration");
 - `test/dsl-l3.mjs` runs the whole class, `mode_p` included, on its file database: each method
   (setup, method, teardown) as one dialog step, with the worker's own loop (drain the outbox, work
@@ -227,13 +236,14 @@ rows under the run id it deleted; delete `ZOSD_L3_ALERT` rows of check date `209
 
 **On A4H.** The deploy unit `l3demo` (`deploy/manifest.json`) lists exactly what the proof needs:
 the four L2 tables and `ZOSD_L2_WEIGHT`, the six enabled rule classes (with their own generated
-tests, which the run will report too), `ZCL_L3_FLEET` with its ports (below), `ZL3_FLEET`, `ZOSD_L3_ALERT` and the proof.
+tests, which the run will report too), `ZCL_L3_FLEET` with its ports (below), `ZL3_FLEET`, `ZOSD_L3_ALERT`,
+`ZOSD_L3_PILE` and the proof.
 The objects live in three folders and the tool takes one flat folder, so stage them first:
 
 ```
 rm -rf .local/stage/l3demo && mkdir -p .local/stage/l3demo && cp \
   src/l2demo/zosd_l2_ship.tabl.xml src/l2demo/zosd_l2_voy.tabl.xml src/l2demo/zosd_l2_crew.tabl.xml \
-  src/l2demo/zosd_l2_cargo.tabl.xml src/l2demo/zosd_l2_weight.dtel.xml src/dsl/zosd_l3_alert.tabl.xml \
+  src/l2demo/zosd_l2_cargo.tabl.xml src/l2demo/zosd_l2_weight.dtel.xml src/dsl/zosd_l3_alert.tabl.xml src/dsl/zosd_l3_pile.tabl.xml \
   src/l2demo/zcl_l2_maintenance_ship.clas.* src/l2demo/zcl_l2_grounded_ship_crew.clas.* \
   src/l2demo/zcl_l2_ship_captain.clas.* src/l2demo/zcl_l2_ship_voyage_limit.clas.* \
   src/l2demo/zcl_l2_ship_min_crew.clas.* src/l2demo/zcl_l2_ship_cargo_limit.clas.* \
@@ -406,10 +416,9 @@ unchanged.
 
 ### Not here yet
 
-The pipeline around the ports (a pile planner that splits a key range over several workers, an
-order between stages, an audit sink and a provenance row), a schedule, and remote adapters (a
-variant that calls another system is a hand-written class today). A replay that does not touch the
-table needs the L2 check classes to take their rows from a port, a change in L2; a sink other than
+The pipeline around the ports (an order between stages, an audit sink and a provenance row; the
+pile planner is below), a schedule, and remote adapters (a variant that calls another system is a
+hand-written class today). A replay that does not touch the table needs the L2 check classes to take their rows from a port, a change in L2; a sink other than
 the alert log is not done either.
 
 The third run (2026-10-01, with ports and adapters, commit 65bd6731) passed the same way:
@@ -417,7 +426,161 @@ The third run (2026-10-01, with ports and adapters, commit 65bd6731) passed the 
 - 109 tests green, the proof's mode P included, again on real background jobs;
 - cleanup by receipt left nothing.
 
+## Piles and set parameters
+
+Slice 3a, 2026-10-02. Two properties a set gets from its YAML alone; nothing in the compiler or the
+templates knows the fleet.
+
+```yaml
+params:
+  active_status: {type: C, default: A}   # L2's type syntax; default optional
+piles:
+  source: ships                          # a source port of the set
+  size: 2                                # keys per pile, an INT4 from 1
+```
+
+### Set parameters
+
+A rule receives the set parameters whose names match its own L2 parameters (`docs/dsl-l2.md`,
+"Slice 7"). Refused, each at its line: a set parameter no enabled rule declares; one whose type is
+not the type every rule declares for that name (`C` against `C`, the same DDIC element against the
+same element); a default that does not fit; a string-typed parameter (a job receives it through a
+selection field, which has a fixed length); and, at the rule's manifest line, an L2 parameter of an
+enabled rule that has neither a set parameter nor a default of its own.
+
+Generated: `ty_params` with one component per set parameter, `run( iv_date, iv_mode, iv_bind,
+is_params )`, `run_rule( ..., is_params )`, and in the report one `PARAMETERS` line per parameter,
+named `P_` and the first six characters of the name, made unique with digits (`p_active`,
+`p_activ1`) and never one of the report's own fields (`P_RULE`, `P_DATE`, `P_RUN`, `P_PILE`,
+`P_BIND`); `submit` passes them `WITH`, the way it passes `P_DATE`. `run_rule` gives a component
+that is **initial** its default: the set's, or, for a set parameter without one, the rule's own
+L2 default. The limit this sets, stated: a caller cannot pass a parameter's initial value (`space`,
+`0`) on purpose; it reads as "not given". The lines of `ty_params` and `is_params` trace to
+`params:`, a component and its default to its own `params:` entry.
+
+### The pile planner
+
+A rule is **piled** when its L2 `range:` (`docs/dsl-l2.md`, "Optional driving-key range") is the
+source port's `key` on the port's table. The other enabled rules run as one pile, number 0, over
+every row; `plan( )` says so in a comment line that traces to the rule, and `explain` says so too.
+`piles:` with no piled rule is refused at `piles:`, and so are a size that is not an INT4 from 1,
+a source that is not a source port, and a key wider than 40 characters.
+
+`plan( iv_run, iv_date, iv_bind, iv_size )` reads the keys **through the source port**, the
+variant `iv_bind` selects, with an empty range (every row the variant gives, so a capture or
+replay binding plans over the rows given), sorts them, drops repeats and cuts them into consecutive
+chunks of `iv_size` (default `c_pile_size`, the manifest's `size`; a size below one is the
+manifest's). A chunk is one pile, `I BT <first> <last>`, or `I EQ <key>` when it holds one key; no
+key, no pile, and a piled rule with no pile is `DONE` with no alert. The plan is a function of the
+key set and the size; the tests assert the exact plan.
+
+**The plan is data.** `ZOSD_L3_PILE` (`src/dsl/zosd_l3_pile.tabl.xml`), generic for every set:
+
+| key | field |
+|---|---|
+| MANDT, SET_NAME (CHAR 16), RUN_ID (CHAR 32), RULE_NAME (CHAR 60), PILE_NO (INT4) | MODEL_HASH, CHECK_DATE, RANGE_LOW, RANGE_HIGH (CHAR 40, the key as text), STATUS (CHAR 12: PLANNED, RUNNING, DONE, FAILED), JOB_NAME, JOB_COUNT, ALERTS (INT4), STARTED, ENDED (timestamps) |
+
+The key is **115** (3 + 16 + 32 + 60 + 4), counted as the alert log's is, under the 120 a system
+warns past. `tools/osd-ddic-reserved.mjs` finds no reserved field name in it.
+
+### Running the piles
+
+- `run( )` writes the plan (`PLANNED`) before any pile runs. Mode S then runs every pile of every
+  rule in its step; mode P submits one job per (rule, pile), named `L3_<SET>_<nn>_<pppp>` (the
+  compiler checks the 32 characters; `<pppp>` is the pile number's last four digits, and a job
+  finds its plan row by number, not by name).
+- The report has `P_PILE`. A job reads its range from the plan row (set, run, rule, pile): the
+  range is data, not a selection field.
+- `run_rule` sets the pile `RUNNING` (with `STARTED`) as it starts, and `DONE` or `FAILED` (with
+  `ENDED` and its alert count) when the rule's write did or did not land, all in the step's own
+  LUW. A pile that dumps leaves its row as it was; in a job the LUW rolls back, and `collect( )`
+  reads the job.
+- `collect( )` reads the run's plan rows and, for each pile neither `DONE` nor `FAILED`, its job's
+  state (`SHOW_JOBSTATE` by the job name and count the plan row holds). A job that ended
+  (finished or aborted) without its pile `DONE`, or a pile with no job at all, makes the pile
+  `FAILED` (the row is read again first, so a job that finished between the two reads counts as
+  done). This replaces matching the jobs by name and count alone.
+- `rs_result-rules` has `piles` and `piles_done`. A rule is **`DONE`** when every pile is,
+  **`PARTIAL`** when a pile failed, and otherwise shows the state of a job still open (`READY`,
+  `RUNNING`, ...), as `collect( )` did before piles. Mode P's `run( )` reports `SUBMITTED`, or
+  `PARTIAL` when a submit failed.
+
+### The alert log, per pile, and finalise
+
+The alert sink's group gains `PILE_NO`, so `MODIFY` plus the tail `DELETE` are idempotent per
+(set, hash, date, pile): a rerun of one pile replaces that pile's rows only.
+
+**Finalise.** Once every pile of a rule is `DONE` in this run, the rows of the same (set, rule,
+model hash, date) whose `RUN_ID` is not this run go: they are an older plan's, whose piles may have
+cut the keys elsewhere. Mode S finalises at the end of the rule, mode P in `collect( )`. Only the
+log keeps older runs, so a run bound to another variant of the sink (`alerts=dummy`,
+`alerts=capture`, a hand-written sink) does not finalise and leaves the log as it is;
+`ty_result-bind` carries the binding to `collect( )` for that.
+
+**No finalise while a pile is not `DONE`.** The rule is `PARTIAL` and the older run's rows stay
+next to the new run's: the log may then hold a row of each for one alert. That is the conservative
+choice (an older answer is kept rather than a gap left); a later slice's doctor re-runs the
+failed piles, and a complete rerun finalises.
+
+### Explain
+
+`<set>/<rule>/<hash>/<date>/<pile>/<seq>`; the five-part key of before piles is pile 0. The `pile`
+line says whether the rule is piled, the size and source, and with `--db` the plan row's range
+and status.
+
+### The demo and its proof
+
+`fleet.l3.yaml` is piled, two keys per pile, and passes `active_status` to the captain rule (whose
+`when:` was `ship.status = 'A'` and is now `ship.status = $active_status`, default `A`). Every
+fleet rule whose `for:` is `ZOSD_L2_SHIP` has `range: ship.ship_id` and an example whose range
+keeps one of three flagged ships (`range: [{sign: I, option: BT, low: S002, high: S003}]` over
+S001, S002 and S004; the captain rule's uses `EQ`).
+
+In `test/dsl-l3.mjs`, on the file database: mode S plans exactly `[1, S001, S002], [2, S003,
+S004]` for every rule and each alert row names the pile of its ship; three keys per pile cut `I BT
+S001 S003` and `I EQ S004`; a rerun with one pile (`iv_pile_size = 4`) leaves exactly the rerun's
+rows; a source with no rows plans nothing and every rule is `DONE` without an alert; a run bound to
+`alerts=dummy` leaves the log as it was; a log whose pile 2 writes do not land leaves its rules
+`PARTIAL`, pile 2 `FAILED` and the older run's pile 2 rows in place, and a complete rerun then
+finalises; mode P runs twelve jobs, `collect` reads them `READY` before and `DONE` after; the set
+parameter reaches the captain rule in a step and through a job's selection field; the refusals
+above, each at its line; and a set without `piles:` or `params:` renders, through the live
+templates, exactly what the templates render with every section of this slice taken out.
+
+The ABAP Unit proof (`src/l3proof`) adds to `mode_s` (every rule cut into piles, each run, the log
+the union of the rules' answers over all rows) and `mode_p` (more than one pile and job per rule;
+24 jobs with the mocha seed beside the proof's):
+
+- `rerun_fewer_piles`: a run of two keys per pile, then one with `iv_pile_size = 1000000`, one
+  pile per rule: the same alerts, and no row of the date names another run;
+- `partial_keeps_old`: a complete run, then a second plan of the same keys whose pile holding the
+  proof's `L301` fails for the first rule (its write bound to a sink variant the port does not
+  have) while the rule's other piles run; `collect( )` finds that pile `FAILED`, the rule
+  `PARTIAL` with one pile short, and the first run's rows in that pile still there.
+
+**Mutation evidence**, each red against the test named:
+
+| mutant | turns red |
+|---|---|
+| off-by-one in the cut (`lv_count > lv_size`) | the exact plan (`[1, S001, S003], [2, S004, S004]`) |
+| finalise deleting this run's rows (`run_id = iv_run`) | the log check: the log is empty, not the union |
+| finalise when a pile failed, mode S (`piles_done >= 0`) | the partial test: the older pile 2 row is gone |
+| finalise when a pile failed, `collect( )` | the ABAP Unit proof `partial_keeps_old` |
+| finalise never deleting | the rerun with fewer piles: the older run's pile 2 stays |
+| finalise for any sink | `alerts=dummy` wipes the log |
+| a pile reading another pile's range (`pile_no = 1`) | the log check: not the union |
+| the range dropped from the WHERE (L2) | the example whose range keeps one of three flagged ships |
+
+**Deviations from the slice's design, with their reason.** `plan( )` takes `iv_date`, `iv_bind`
+and `iv_size` beside `iv_run`, so it holds no class state and a caller (the proof, a doctor) can
+plan a run of its own. `run( )` takes `iv_pile_size` (default the manifest's size): a rerun with
+another pile size needs no second runner class. A rule whose piles are all still open shows its
+job's state rather than `PARTIAL`, so `PARTIAL` means a pile failed. Finalise runs only when the
+alerts port is bound to `log`.
+
 ## Not yet
 
-Ordering between rules, a set parameter other than the date, a schedule, a log
-retention policy (old versions are kept forever), and a monitor page over the log.
+Ordering between rules, a schedule, a log retention policy (old versions are kept forever), a
+monitor page over the log, and the doctor that re-runs a `PARTIAL` rule's failed piles (the plan
+table is what it will read). A pile planner over more than one source port, or over a key other
+than a single field, is not done either.

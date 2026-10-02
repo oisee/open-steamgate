@@ -4,9 +4,11 @@
 rule: ship-in-service-has-a-captain
 class: zcl_l2_ship_captain
 title: A ship in service has a captain aboard on the check date
+params:
+  active_status: {type: C, default: A}
 for: ZOSD_L2_SHIP as ship
 range: ship.ship_id
-when: ship.status = 'A'
+when: ship.status = $active_status
 require:
   exists: ZOSD_L2_CREW as crew
   where: crew.ship_id = ship.ship_id and crew.role = 'C' and crew.since <= $date

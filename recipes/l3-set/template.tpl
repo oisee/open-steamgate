@@ -10,8 +10,25 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
              status TYPE c LENGTH 12,
              alerts TYPE i,
              failed TYPE i,
+{{#piles}}
+             piles TYPE i,
+             piles_done TYPE i,
+{{/piles}}
            END OF ty_rule.
     TYPES tt_rule TYPE STANDARD TABLE OF ty_rule WITH DEFAULT KEY.
+{{#piles}}
+    TYPES tt_pile TYPE STANDARD TABLE OF zosd_l3_pile WITH DEFAULT KEY.
+{{/piles}}
+{{#with_params}}
+    " the set parameters; run( ) gives a component that is initial its default
+    TYPES: BEGIN OF ty_params,
+{{/with_params}}
+{{#params}}
+             {{name}} TYPE {{type_name}},
+{{/params}}
+{{#with_params}}
+           END OF ty_params.
+{{/with_params}}
     TYPES: BEGIN OF ty_result,
              set_name TYPE zosd_l3_alert-set_name,
              run_id TYPE zosd_l3_alert-run_id,
@@ -19,10 +36,17 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
              mode TYPE c LENGTH 1,
              alerts TYPE i,
              rules TYPE tt_rule,
+{{#piles}}
+             bind TYPE string,
+{{/piles}}
            END OF ty_result.
     CONSTANTS c_set TYPE zosd_l3_alert-set_name VALUE {{set | literal}}.
     CONSTANTS c_sequential TYPE c LENGTH 1 VALUE 'S'.
     CONSTANTS c_parallel TYPE c LENGTH 1 VALUE 'P'.
+{{#piles}}
+    " keys of {{source.table}}-{{source.key}} per pile, read through port {{source.name}}
+    CONSTANTS c_pile_size TYPE i VALUE {{size}}.
+{{/piles}}
 {{#rules}}
     CONSTANTS c_rule_{{index}} TYPE zosd_l3_alert-rule_name VALUE {{name | literal}}.
     CONSTANTS c_hash_{{index}} TYPE zosd_l3_alert-model_hash VALUE {{hash | literal}}.
@@ -38,13 +62,34 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_date TYPE d
                 iv_mode TYPE c DEFAULT 'S'
                 iv_bind TYPE string OPTIONAL
+{{#with_params}}
+                is_params TYPE ty_params OPTIONAL
+{{/with_params}}
+{{#piles}}
+                iv_pile_size TYPE i DEFAULT c_pile_size
+{{/piles}}
                 iv_allow_replay TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_result) TYPE ty_result.
+{{#piles}}
+    " the plan of a run: one row per rule and pile, PLANNED
+    CLASS-METHODS plan
+      IMPORTING iv_run TYPE csequence
+                iv_date TYPE d
+                iv_bind TYPE string OPTIONAL
+                iv_size TYPE i DEFAULT c_pile_size
+      RETURNING VALUE(rt_piles) TYPE tt_pile.
+{{/piles}}
     CLASS-METHODS run_rule
       IMPORTING iv_rule TYPE csequence
                 iv_date TYPE d
                 iv_run TYPE csequence
+{{#piles}}
+                iv_pile TYPE i
+{{/piles}}
                 iv_bind TYPE string OPTIONAL
+{{#with_params}}
+                is_params TYPE ty_params OPTIONAL
+{{/with_params}}
       RETURNING VALUE(rs_rule) TYPE ty_rule.
     CLASS-METHODS collect
       IMPORTING is_result TYPE ty_result
@@ -55,12 +100,23 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS write
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
+{{#piles}}
+                iv_pile TYPE i
+{{/piles}}
                 iv_class TYPE csequence
                 iv_file TYPE csequence
                 iv_line TYPE i
                 it_alerts TYPE string_table
                 iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
+{{#piles}}
+    CLASS-METHODS finalise
+      IMPORTING iv_rule TYPE csequence
+                iv_hash TYPE csequence
+                iv_date TYPE d
+                iv_run TYPE csequence
+                iv_bind TYPE string.
+{{/piles}}
 {{#sources}}
     " puts the rows of {{table}} back after a replay: the rows kept before it
     CLASS-METHODS restore_{{index}}
@@ -70,15 +126,37 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
                 iv_bind TYPE string OPTIONAL
+{{#with_params}}
+                is_params TYPE ty_params OPTIONAL
+{{/with_params}}
+{{^piles}}
       CHANGING cs_rule TYPE ty_rule.
+{{/piles}}
+{{#piles}}
+                iv_jobname TYPE csequence
+      CHANGING cs_pile TYPE zosd_l3_pile.
+{{/piles}}
 ENDCLASS.
 
 CLASS {{class}} IMPLEMENTATION.
   METHOD run.
+{{^piles}}
     " mode S runs every rule in this step; mode P submits one job per rule,
     " and collect( ) reads their states once they have run
+{{/piles}}
+{{#piles}}
+    " the plan first: a row per rule and pile. Mode S then runs every pile in
+    " this step; mode P submits one job per pile, and collect( ) reads the plan
+    " and the jobs' states once they have run
+{{/piles}}
     DATA lt_rules TYPE tt_rule.
     DATA ls_rule TYPE ty_rule.
+{{#piles}}
+    DATA lt_piles TYPE tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA ls_part TYPE ty_rule.
+    DATA lv_lost TYPE i.
+{{/piles}}
     DATA lv_stamp TYPE timestampl.
     DATA lv_parallel TYPE abap_bool.
     DATA lx_error TYPE REF TO cx_root.
@@ -97,6 +175,9 @@ CLASS {{class}} IMPLEMENTATION.
                           iv_allow_replay = iv_allow_replay ).
     rs_result-set_name = c_set.
     rs_result-mode = iv_mode.
+{{#piles}}
+    rs_result-bind = iv_bind.
+{{/piles}}
 {{#date}}
     rs_result-check_date = iv_date.
 {{#today}}
@@ -134,21 +215,80 @@ CLASS {{class}} IMPLEMENTATION.
           INSERT {{table}} FROM TABLE lt_scope_{{index}}.
         ENDIF.
 {{/sources}}
+{{^piles}}
         LOOP AT lt_rules INTO ls_rule.
           IF iv_mode = c_parallel.
             submit( EXPORTING iv_date = rs_result-check_date
                               iv_run = rs_result-run_id
                               iv_bind = iv_bind
+{{#with_params}}
+                              is_params = is_params
+{{/with_params}}
                     CHANGING cs_rule = ls_rule ).
           ELSE.
             ls_rule = run_rule( iv_rule = ls_rule-rule
                                 iv_date = rs_result-check_date
                                 iv_run = rs_result-run_id
-                                iv_bind = iv_bind ).
+                                iv_bind = iv_bind{{#with_params}} is_params = is_params{{/with_params}} ).
             rs_result-alerts = rs_result-alerts + ls_rule-alerts.
           ENDIF.
           APPEND ls_rule TO rs_result-rules.
         ENDLOOP.
+{{/piles}}
+{{#piles}}
+        lt_piles = plan( iv_run = rs_result-run_id
+                         iv_date = rs_result-check_date
+                         iv_bind = iv_bind
+                         iv_size = iv_pile_size ).
+        INSERT zosd_l3_pile FROM TABLE lt_piles.
+        LOOP AT lt_rules INTO ls_rule.
+          lv_lost = 0.
+          LOOP AT lt_piles INTO ls_pile WHERE rule_name = ls_rule-rule.
+            ls_rule-piles = ls_rule-piles + 1.
+            IF iv_mode = c_parallel.
+              submit( EXPORTING iv_date = rs_result-check_date
+                                iv_run = rs_result-run_id
+                                iv_bind = iv_bind
+{{#with_params}}
+                                is_params = is_params
+{{/with_params}}
+                                iv_jobname = ls_rule-jobname
+                      CHANGING cs_pile = ls_pile ).
+              IF ls_pile-status = 'FAILED'.
+                lv_lost = lv_lost + 1.
+              ENDIF.
+            ELSE.
+              ls_part = run_rule( iv_rule = ls_rule-rule
+                                  iv_date = rs_result-check_date
+                                  iv_run = rs_result-run_id
+                                  iv_pile = ls_pile-pile_no
+                                  iv_bind = iv_bind{{#with_params}} is_params = is_params{{/with_params}} ).
+              ls_rule-alerts = ls_rule-alerts + ls_part-alerts.
+              ls_rule-failed = ls_rule-failed + ls_part-failed.
+              ls_rule-piles_done = ls_rule-piles_done + ls_part-piles_done.
+            ENDIF.
+          ENDLOOP.
+          " a rule is DONE when every pile is; only then do the rows an older
+          " run left (under other pile bounds) go. A pile that did not finish
+          " leaves the rule PARTIAL and the older rows where they are
+          IF iv_mode = c_parallel AND lv_lost > 0.
+            ls_rule-status = 'PARTIAL'.
+          ELSEIF iv_mode = c_parallel.
+            ls_rule-status = 'SUBMITTED'.
+          ELSEIF ls_rule-piles_done = ls_rule-piles.
+            ls_rule-status = 'DONE'.
+            finalise( iv_rule = ls_rule-rule
+                      iv_hash = ls_rule-model_hash
+                      iv_date = rs_result-check_date
+                      iv_run = rs_result-run_id
+                      iv_bind = iv_bind ).
+          ELSE.
+            ls_rule-status = 'PARTIAL'.
+          ENDIF.
+          rs_result-alerts = rs_result-alerts + ls_rule-alerts.
+          APPEND ls_rule TO rs_result-rules.
+        ENDLOOP.
+{{/piles}}
       CATCH cx_root INTO lx_error.
 {{#sources}}
         IF lv_swap_{{index}} = abap_true.
@@ -164,6 +304,67 @@ CLASS {{class}} IMPLEMENTATION.
 {{/sources}}
   ENDMETHOD.
 
+{{#piles}}
+  METHOD plan.
+    " the keys through port {{source.name}}, with an empty range (every row the
+    " bound variant gives), sorted and without repeats, cut into consecutive
+    " chunks of iv_size: a chunk is one pile, its first and last key the
+    " range I BT low high, or I EQ low when it holds one key. No key, no pile
+    DATA li_source TYPE REF TO {{source.iface}}.
+    DATA lt_keys TYPE {{source.iface}}=>tt_rows.
+    DATA ls_key LIKE LINE OF lt_keys.
+    DATA lt_cut TYPE tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lv_count TYPE i.
+    DATA lv_size TYPE i.
+    " a size below one is the manifest's
+    lv_size = iv_size.
+    IF lv_size < 1.
+      lv_size = c_pile_size.
+    ENDIF.
+    li_source = {{ports_class}}=>get_{{source.name}}( {{ports_class}}=>variant( iv_port = {{source.name | literal}} iv_bind = iv_bind ) ).
+    lt_keys = li_source->read( ).
+    SORT lt_keys BY {{source.key}}.
+    DELETE ADJACENT DUPLICATES FROM lt_keys COMPARING {{source.key}}.
+    ls_pile-set_name = c_set.
+    ls_pile-run_id = iv_run.
+    ls_pile-check_date = iv_date.
+    ls_pile-status = 'PLANNED'.
+    LOOP AT lt_keys INTO ls_key.
+      IF lv_count = 0.
+        ls_pile-pile_no = ls_pile-pile_no + 1.
+        ls_pile-range_low = ls_key-{{source.key}}.
+      ENDIF.
+      ls_pile-range_high = ls_key-{{source.key}}.
+      lv_count = lv_count + 1.
+      IF lv_count = lv_size.
+        APPEND ls_pile TO lt_cut.
+        lv_count = 0.
+      ENDIF.
+    ENDLOOP.
+    IF lv_count > 0.
+      APPEND ls_pile TO lt_cut.
+    ENDIF.
+{{#rules}}
+{{#range}}
+    " {{name}}: piled, its range: is the key
+    LOOP AT lt_cut INTO ls_pile.
+      ls_pile-rule_name = c_rule_{{index}}.
+      ls_pile-model_hash = c_hash_{{index}}.
+      APPEND ls_pile TO rt_piles.
+    ENDLOOP.
+{{/range}}
+{{#unpiled}}
+    " {{name}}: not piled (its range: is not the key), one pile over every row: 0
+    CLEAR: ls_pile-pile_no, ls_pile-range_low, ls_pile-range_high.
+    ls_pile-rule_name = c_rule_{{index}}.
+    ls_pile-model_hash = c_hash_{{index}}.
+    APPEND ls_pile TO rt_piles.
+{{/unpiled}}
+{{/rules}}
+  ENDMETHOD.
+
+{{/piles}}
 {{#sources}}
   METHOD restore_{{index}}.
     DELETE FROM {{table}}.
@@ -183,15 +384,71 @@ CLASS {{class}} IMPLEMENTATION.
 
   METHOD run_rule.
     DATA lt_alerts TYPE string_table.
+{{#piles}}
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lt_range TYPE RANGE OF {{source.table}}-{{source.key}}.
+    DATA ls_range LIKE LINE OF lt_range.
+{{/piles}}
+{{#with_params}}
+    DATA ls_params TYPE ty_params.
+    ls_params = is_params.
+{{/with_params}}
+{{#params}}
+{{#default}}
+    IF ls_params-{{name}} IS INITIAL.
+      ls_params-{{name}} = {{default | literal}}.
+    ENDIF.
+{{/default}}
+{{/params}}
     rs_rule-rule = iv_rule.
+{{#piles}}
+    " the plan row of the pile: RUNNING now, DONE or FAILED at the end. A
+    " pile that dumps leaves it as it was, and collect( ) reads the job
+    SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
+      WHERE set_name = c_set
+        AND run_id = iv_run
+        AND rule_name = iv_rule
+        AND pile_no = iv_pile.
+    IF sy-subrc <> 0.
+      rs_rule-status = 'NO-PILE'.
+      RETURN.
+    ENDIF.
+    rs_rule-piles = 1.
+    ls_pile-status = 'RUNNING'.
+    GET TIME STAMP FIELD ls_pile-started.
+    UPDATE zosd_l3_pile FROM ls_pile.
+    " the range is the plan row's, data and not a selection field; pile 0
+    " is a rule that is not piled, over every row
+    IF ls_pile-pile_no > 0.
+      ls_range-sign = 'I'.
+      ls_range-low = ls_pile-range_low.
+      IF ls_pile-range_high = ls_pile-range_low.
+        ls_range-option = 'EQ'.
+      ELSE.
+        ls_range-option = 'BT'.
+        ls_range-high = ls_pile-range_high.
+      ENDIF.
+      APPEND ls_range TO lt_range.
+    ENDIF.
+{{/piles}}
     CASE iv_rule.
 {{#rules}}
       WHEN c_rule_{{index}}.
         rs_rule-model_hash = c_hash_{{index}}.
         rs_rule-jobname = {{jobname | literal}}.
-        lt_alerts = {{check_class}}=>check( iv_date ).
+{{#param_args}}
+{{#fallback}}
+        IF ls_params-{{name}} IS INITIAL.
+          ls_params-{{name}} = {{fallback | literal}}.
+        ENDIF.
+{{/fallback}}
+{{/param_args}}
+        lt_alerts = {{check_class}}=>check( iv_date{{#has_args}} = iv_date{{/has_args}}{{#piled}} it_range = lt_range{{/piled}}{{#param_args}} {{ref}} = ls_params-{{name}}{{/param_args}} ).
         write( EXPORTING iv_date = iv_date
                          iv_run = iv_run
+{{#piles}}
+                         iv_pile = iv_pile
+{{/piles}}
                          iv_class = {{check_class | literal}}
                          iv_file = {{file | literal}}
                          iv_line = {{alert_line | literal}}
@@ -202,6 +459,17 @@ CLASS {{class}} IMPLEMENTATION.
       WHEN OTHERS.
         rs_rule-status = 'UNKNOWN'.
     ENDCASE.
+{{#piles}}
+    ls_pile-alerts = rs_rule-alerts.
+    GET TIME STAMP FIELD ls_pile-ended.
+    IF rs_rule-status = 'DONE'.
+      ls_pile-status = 'DONE'.
+      rs_rule-piles_done = 1.
+    ELSE.
+      ls_pile-status = 'FAILED'.
+    ENDIF.
+    UPDATE zosd_l3_pile FROM ls_pile.
+{{/piles}}
   ENDMETHOD.
 
   METHOD write.
@@ -219,6 +487,9 @@ CLASS {{class}} IMPLEMENTATION.
     ls_row-rule_name = cs_rule-rule.
     ls_row-model_hash = cs_rule-model_hash.
     ls_row-check_date = iv_date.
+{{#piles}}
+    ls_row-pile_no = iv_pile.
+{{/piles}}
     ls_row-run_id = iv_run.
     ls_row-rule_class = iv_class.
     ls_row-rule_file = iv_file.
@@ -233,6 +504,9 @@ CLASS {{class}} IMPLEMENTATION.
     ls_group-rule_name = cs_rule-rule.
     ls_group-model_hash = cs_rule-model_hash.
     ls_group-check_date = iv_date.
+{{#piles}}
+    ls_group-pile_no = iv_pile.
+{{/piles}}
     li_sink = {{ports_class}}=>get_{{name}}( {{ports_class}}=>variant( iv_port = {{name | literal}} iv_bind = iv_bind ) ).
     lv_count = li_sink->put( it_rows = lt_rows
                              is_group = ls_group ).
@@ -246,13 +520,45 @@ CLASS {{class}} IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+{{#piles}}
+  METHOD finalise.
+    " every pile of the rule is DONE in this run: the rows of the same set,
+    " rule, model hash and date that an older run wrote, under piles cut
+    " elsewhere, go. Only the log keeps older runs; a run bound to another
+    " variant of {{sink.name}} leaves the log as it is
+    IF {{ports_class}}=>variant( iv_port = {{sink.name | literal}} iv_bind = iv_bind ) <> 'log'.
+      RETURN.
+    ENDIF.
+    DELETE FROM {{sink.table}}
+      WHERE set_name = c_set
+        AND rule_name = iv_rule
+        AND model_hash = iv_hash
+        AND check_date = iv_date
+        AND run_id <> iv_run.
+  ENDMETHOD.
+
+{{/piles}}
   METHOD submit.
+{{^piles}}
     " one job per rule: JOB_OPEN, SUBMIT ... VIA JOB, JOB_CLOSE started at
     " once; the rules do not depend on each other, so no job waits for one
+{{/piles}}
+{{#piles}}
+    " one job per pile: JOB_OPEN, SUBMIT ... VIA JOB, JOB_CLOSE started at
+    " once, named L3_<SET>_<nn>_<pppp> (the last four digits of the pile);
+    " the job finds its range in the plan row by set, run, rule and pile
+{{/piles}}
     DATA lv_jobname TYPE tbtcjob-jobname.
     DATA lv_jobcount TYPE tbtcjob-jobcount.
     DATA lv_released TYPE btch0000-char1.
+{{^piles}}
     lv_jobname = cs_rule-jobname.
+{{/piles}}
+{{#piles}}
+    DATA lv_pile TYPE n LENGTH 4.
+    lv_pile = cs_pile-pile_no.
+    CONCATENATE iv_jobname '_' lv_pile INTO lv_jobname.
+{{/piles}}
     CALL FUNCTION 'JOB_OPEN'
       EXPORTING
         jobname = lv_jobname
@@ -261,15 +567,36 @@ CLASS {{class}} IMPLEMENTATION.
       EXCEPTIONS
         OTHERS = 1.
     IF sy-subrc <> 0.
+{{^piles}}
       cs_rule-status = 'OPEN-FAILED'.
+{{/piles}}
+{{#piles}}
+      cs_pile-status = 'FAILED'.
+      UPDATE zosd_l3_pile FROM cs_pile.
+{{/piles}}
       RETURN.
     ENDIF.
+{{^piles}}
     cs_rule-jobcount = lv_jobcount.
     SUBMIT {{report}}
       WITH p_rule = cs_rule-rule
+{{/piles}}
+{{#piles}}
+    cs_pile-job_name = lv_jobname.
+    cs_pile-job_count = lv_jobcount.
+    UPDATE zosd_l3_pile FROM cs_pile.
+    SUBMIT {{report}}
+      WITH p_rule = cs_pile-rule_name
+{{/piles}}
       WITH p_date = iv_date
       WITH p_run = iv_run
+{{#piles}}
+      WITH p_pile = cs_pile-pile_no
+{{/piles}}
       WITH p_bind = iv_bind
+{{#params}}
+      WITH {{screen}} = is_params-{{name}}
+{{/params}}
       VIA JOB lv_jobname NUMBER lv_jobcount
       AND RETURN.
     CALL FUNCTION 'JOB_CLOSE'
@@ -282,17 +609,38 @@ CLASS {{class}} IMPLEMENTATION.
       EXCEPTIONS
         OTHERS = 1.
     IF sy-subrc <> 0 OR lv_released <> 'X'.
+{{^piles}}
       cs_rule-status = 'CLOSE-FAILED'.
       RETURN.
+{{/piles}}
+{{#piles}}
+      cs_pile-status = 'FAILED'.
+      UPDATE zosd_l3_pile FROM cs_pile.
+{{/piles}}
     ENDIF.
+{{^piles}}
     cs_rule-status = 'SUBMITTED'.
+{{/piles}}
   ENDMETHOD.
 
   METHOD collect.
+{{^piles}}
     " the jobs of the run, found by BP_JOB_SELECT, each read by SHOW_JOBSTATE;
     " a finished rule counts the rows its job wrote under this run
     DATA ls_select TYPE btcselect.
     DATA lt_jobs TYPE STANDARD TABLE OF tbtcjob WITH DEFAULT KEY.
+{{/piles}}
+{{#piles}}
+    " the plan rows of the run, each open pile's job read by SHOW_JOBSTATE: a
+    " pile is DONE when its job wrote so; a job that ended without that, or
+    " none at all, leaves the pile FAILED. A rule is DONE (and finalised) when
+    " every pile is, PARTIAL when a pile failed, else the state of an open job
+    DATA lt_piles TYPE tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lv_open TYPE c LENGTH 12.
+    DATA lv_state TYPE c LENGTH 12.
+    DATA lv_lost TYPE abap_bool.
+{{/piles}}
     DATA ls_rule TYPE ty_rule.
     DATA lv_aborted TYPE btch0000-char1.
     DATA lv_finished TYPE btch0000-char1.
@@ -302,6 +650,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_preliminary TYPE btch0000-char1.
     rs_result = is_result.
     CLEAR: rs_result-rules, rs_result-alerts.
+{{^piles}}
     ls_select-jobname = {{jobs | literal}}.
     ls_select-username = sy-uname.
     CALL FUNCTION 'BP_JOB_SELECT'
@@ -367,5 +716,89 @@ CLASS {{class}} IMPLEMENTATION.
       ENDIF.
       APPEND ls_rule TO rs_result-rules.
     ENDLOOP.
+{{/piles}}
+{{#piles}}
+    SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
+      WHERE set_name = c_set
+        AND run_id = is_result-run_id
+      ORDER BY PRIMARY KEY.
+    LOOP AT is_result-rules INTO ls_rule.
+      CLEAR: ls_rule-alerts, ls_rule-piles, ls_rule-piles_done, lv_open, lv_lost.
+      LOOP AT lt_piles INTO ls_pile WHERE rule_name = ls_rule-rule.
+        ls_rule-piles = ls_rule-piles + 1.
+        IF ls_pile-status <> 'DONE' AND ls_pile-status <> 'FAILED'.
+          lv_state = 'NO-JOB'.
+          IF ls_pile-job_count IS NOT INITIAL.
+            CLEAR: lv_aborted, lv_finished, lv_running, lv_ready, lv_scheduled, lv_preliminary.
+            CALL FUNCTION 'SHOW_JOBSTATE'
+              EXPORTING
+                jobname = ls_pile-job_name
+                jobcount = ls_pile-job_count
+              IMPORTING
+                aborted = lv_aborted
+                finished = lv_finished
+                preliminary = lv_preliminary
+                ready = lv_ready
+                running = lv_running
+                scheduled = lv_scheduled
+              EXCEPTIONS
+                OTHERS = 1.
+            IF sy-subrc <> 0.
+              lv_state = 'NO-JOB'.
+            ELSEIF lv_finished = 'X'.
+              lv_state = 'FINISHED'.
+            ELSEIF lv_aborted = 'X'.
+              lv_state = 'ABORTED'.
+            ELSEIF lv_running = 'X'.
+              lv_state = 'RUNNING'.
+            ELSEIF lv_ready = 'X'.
+              lv_state = 'READY'.
+            ELSEIF lv_scheduled = 'X'.
+              lv_state = 'SCHEDULED'.
+            ELSEIF lv_preliminary = 'X'.
+              lv_state = 'PRELIMINARY'.
+            ELSE.
+              lv_state = 'OTHER'.
+            ENDIF.
+          ENDIF.
+          IF lv_state = 'FINISHED' OR lv_state = 'ABORTED' OR lv_state = 'NO-JOB'.
+            " the job is over: the row as it left it, DONE or not
+            SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
+              WHERE set_name = c_set
+                AND run_id = ls_pile-run_id
+                AND rule_name = ls_pile-rule_name
+                AND pile_no = ls_pile-pile_no.
+            IF ls_pile-status <> 'DONE'.
+              ls_pile-status = 'FAILED'.
+              GET TIME STAMP FIELD ls_pile-ended.
+              UPDATE zosd_l3_pile FROM ls_pile.
+            ENDIF.
+          ELSEIF lv_open IS INITIAL.
+            lv_open = lv_state.
+          ENDIF.
+        ENDIF.
+        IF ls_pile-status = 'DONE'.
+          ls_rule-piles_done = ls_rule-piles_done + 1.
+          ls_rule-alerts = ls_rule-alerts + ls_pile-alerts.
+        ELSEIF ls_pile-status = 'FAILED'.
+          lv_lost = abap_true.
+        ENDIF.
+      ENDLOOP.
+      IF ls_rule-piles_done = ls_rule-piles.
+        ls_rule-status = 'DONE'.
+        finalise( iv_rule = ls_rule-rule
+                  iv_hash = ls_rule-model_hash
+                  iv_date = is_result-check_date
+                  iv_run = is_result-run_id
+                  iv_bind = is_result-bind ).
+      ELSEIF lv_lost = abap_true.
+        ls_rule-status = 'PARTIAL'.
+      ELSE.
+        ls_rule-status = lv_open.
+      ENDIF.
+      rs_result-alerts = rs_result-alerts + ls_rule-alerts.
+      APPEND ls_rule TO rs_result-rules.
+    ENDLOOP.
+{{/piles}}
   ENDMETHOD.
 ENDCLASS.
