@@ -10,10 +10,9 @@ ENDCLASS.
 CLASS ltcl_resume IMPLEMENTATION.
   METHOD install.
     DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
-    DATA ls_route LIKE LINE OF lt_routes.
-    ls_route-handler = `ZCL_OSD_ADT_ROUTE_F3`.
-    ls_route-resume_kind = iv_kind.
-    APPEND ls_route TO lt_routes.
+    zcl_osd_adt_router=>add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/f3`
+                                    iv_handler = `ZCL_OSD_ADT_ROUTE_F3` iv_resume_kind = iv_kind
+                           CHANGING ct_routes = lt_routes ).
     zcl_osd_adt_handler=>use_routes( lt_routes ).
   ENDMETHOD.
   METHOD teardown.

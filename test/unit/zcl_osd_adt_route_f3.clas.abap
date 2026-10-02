@@ -7,6 +7,11 @@ ENDCLASS.
 CLASS zcl_osd_adt_route_f3 IMPLEMENTATION.
   METHOD zif_osd_adt_route~handle.
     DATA ls_field TYPE ihttpnvp.
+    IF is_request-method = `POST`.
+      rs_response-status = 200.
+      rs_response-body = cl_abap_codepage=>convert_from( is_request-body ).
+      RETURN.
+    ENDIF.
     rs_response-status = 500.
     rs_response-body = `host unavailable`.
     rs_response-continuation-kind = `f3-write`.
@@ -33,6 +38,13 @@ CLASS zcl_osd_adt_route_f3 IMPLEMENTATION.
     CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
       EXPORTING iv_command = `WRITE` iv_type = `PROG` iv_name = `ZF3_STORE`
                 iv_source = iv_json
+      IMPORTING ev_error = lv_error.
+    IF lv_error IS NOT INITIAL.
+      lx_error = zcx_osd_adt=>internal( lv_error ).
+      RAISE EXCEPTION lx_error.
+    ENDIF.
+    CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
+      EXPORTING iv_command = `CHECK` iv_type = `PROG` iv_name = `ZF3_STORE`
       IMPORTING ev_error = lv_error.
     IF lv_error IS NOT INITIAL.
       lx_error = zcx_osd_adt=>internal( lv_error ).

@@ -61,13 +61,14 @@ CLASS zcl_osd_adt_router DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rs_result) TYPE ty_result
       RAISING   zcx_osd_adt.
 
-  PRIVATE SECTION.
     CLASS-METHODS add
       IMPORTING iv_method    TYPE string
                 iv_pattern   TYPE string
                 iv_handler   TYPE string OPTIONAL
+                iv_resume_kind TYPE string OPTIONAL
                 iv_served_by TYPE string DEFAULT c_abap
       CHANGING  ct_routes    TYPE tt_route.
+  PRIVATE SECTION.
     CLASS-METHODS match_pattern
       IMPORTING iv_pattern TYPE string
                 iv_path    TYPE string
@@ -164,6 +165,7 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     ls_route-method = iv_method.
     ls_route-pattern = iv_pattern.
     ls_route-handler = iv_handler.
+    ls_route-resume_kind = iv_resume_kind.
     ls_route-served_by = iv_served_by.
     APPEND ls_route TO ct_routes.
   ENDMETHOD.

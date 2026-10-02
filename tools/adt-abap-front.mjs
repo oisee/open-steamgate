@@ -254,6 +254,7 @@ export async function resume(req, res, kind, json) {
   const {store, step, front} = req.osdFacade;
   const record = await withSystem((k, n) => front.system?.(k, n, req), () => step(async () => {
     const original = req.adt?.session;
+    // A fresh stateless GET ends its session in ANSWER and cannot continue.
     if (original !== undefined && await front.sessions.get(original.id) === undefined) {
       const error = new Error("the ADT session has ended");
       error.code = "ENQ_SESSION_ENDED";

@@ -19,11 +19,15 @@ After host work, call the supplied `resume(json)` callback, or
 JSON.stringify'd; strings pass through unchanged. The helper binds that
 request's store and SYSTEM, queues a fresh dialog step through its front's
 step function, checks that its session still exists and resolves it again
-inside the step (including the ENQ pin). An ended session receives the
+inside the step (including the ENQ pin). Continuations require requests
+that keep their session (POST/PUT, or an explicitly stateful GET). A fresh stateless GET ends its session in ANSWER
+and cannot resume. An ended session receives the
 existing 403 CSRF refusal. It never runs ABAP in `outsideStepContext`.
 
 The only ABAP re-entry is `ZCL_OSD_ADT_HANDLER=>RESUME(iv_kind, iv_json)`.
-Declare the kind's owner in the router row's `resume_kind` field and
+Register the owner with `ZCL_OSD_ADT_ROUTER=>ADD`, passing the optional
+`iv_resume_kind` alongside `iv_method`, `iv_pattern` and `iv_handler`
+(`ct_routes` receives the row's `resume_kind`), and
 implement `ZIF_OSD_ADT_RESUMABLE~RESUME` on that class. A class owning
 several kinds can have several rows. Each kind must have one owner; the
 first row with that kind wins. RESUME creates that owner and returns its
@@ -41,10 +45,10 @@ return a finished response, rather than request another continuation.
 The kernel closure follows the router's literal owner class and the new
 interface, so parent-kernel hosts need no separate loader registry.
 
-The browser preview uses ICF instead of the Node facade. The ADT node is
-currently HOST-only, so no browser Node front is mounted. For an ICF node
-mapped to `ZCL_OSD_ADT_HANDLER`, the entry in `web/preview-backend.mjs`
-uses `web/preview-continuations.mjs`, also reached by the service worker. Every continuation kind still receives the front's
+The browser preview uses ICF instead of the Node facade. No browser Node
+front is mounted. For an ICF node mapped to `ZCL_OSD_ADT_HANDLER`, the entry in
+`web/preview-backend.mjs` uses `web/preview-continuations.mjs`, also reached
+by the service worker. Every continuation kind still receives the front's
 unregistered-kind 500 document byte for byte. A later browser continuation
 slice starts at this stub and supplies host work and a fresh resume step.
 No activation, ABAP Unit or notebook kind is implemented by F3.
@@ -52,10 +56,12 @@ No activation, ABAP Unit or notebook kind is implemented by F3.
 `test/adt-abap-f3.mjs` mounts two routers and exercises host writes and
 ABAP STORE writes against both stores, real ABAP RESUME, FIFO waiting and
 step context, both unknown-kind paths, duplicate registration, and browser
-refusal bytes through the ICF record adapter. The test-only route and its
-ABAP Unit tests live under `test/unit/` and are excluded from shipped seeds.
+refusal bytes through the ICF record adapter. `test/adt-preview.mjs` also
+exercises the preview backend and service-worker entry with an intact POST
+XML body, the default content type and the continuation refusal bytes. The
+test-only route and its ABAP Unit tests live under `test/unit/` and are excluded from shipped seeds.
 
-STORE WRITE now uses the request's bound store, as READ/HISTORY/REVISION
-already do. Unbound callers retain their destination's default store.
+Every STORE command, including LIST, CHECK and ACTIVATE, uses the request's
+bound store. Unbound callers retain their destination's default store.
 This is necessary for a resumed route that writes: binding the request
 alone would otherwise still write through the process's default store.
