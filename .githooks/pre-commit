@@ -28,9 +28,11 @@ fi
 # The size budget, as a yellow warning: you see a monolith growing at commit
 # time, and pre-push is what stops it (Alice, 2026-10-02).
 if [ -f "$root/tools/osd-size-budget.mjs" ] && [ -f "$root/tools/osd-size-budget.json" ]; then
-  out=$(node "$root/tools/osd-size-budget.mjs" --warn 2>&1)
+  # --changed: the same attribution pre-push makes, so the warning names only
+  # what this branch touched (no fetch here; origin/main as last fetched)
+  out=$(node "$root/tools/osd-size-budget.mjs" --changed origin/main --warn 2>&1)
   case "$out" in
-    *"breach"*)
+    *"breach(es)"*" (advisory)"*)
       printf '\033[33m%s\033[0m\n' "$out" >&2
       printf '\033[33m%s\033[0m\n' "osd-size-budget: только предупреждение — коммит пройдёт, pre-push остановит." >&2 ;;
   esac

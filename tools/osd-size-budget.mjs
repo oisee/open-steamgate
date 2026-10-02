@@ -10,8 +10,8 @@
 //                                               judge only what this branch
 //                                               changed since its merge base
 //                                               with <ref> (the pre-push hook);
-//                                               a breach already on <ref> is
-//                                               printed, not yours, and passes
+//                                               a breach on what it did not
+//                                               touch is printed and passes
 //
 // What it checks, each a ratchet that only loosens through an edit of the
 // budget file a reviewer sees:
@@ -167,7 +167,7 @@ export function checkKeyed(budget, sizes, {deps, base} = {}) {
       errors.add(key, `tools/gogen/go/${name}: no README.md of at least three lines (what it is, its API, its invariants)`);
     }
     if (deps instanceof Map && deps.get(name) && !(name in (budget.importsAbap ?? {}))) {
-      errors.add(key, `tools/gogen/go/${name}: depends on osg/gogen/abap -- a package takes a narrow interface; only go/abap imports packages`);
+      errors.add(`deps:${name}`, `tools/gogen/go/${name}: depends on osg/gogen/abap -- a package takes a narrow interface; only go/abap imports packages`);
     }
   }
   if (base) {
@@ -202,17 +202,26 @@ export const check = (budget, sizes, options) => checkKeyed(budget, sizes, optio
 
 /** splits keyed breaches into the branch's own and those it only inherits:
  * a file is the branch's when it touched the file, a package when it touched
- * a file directly in the package's directory (its README included) */
-export function attribute(errors, touched) {
+ * a file directly in the package's directory (its README included); either
+ * is also the branch's when it changed that key's budget entry (lowered or
+ * deleted it). A dependency on go/abap is transitive, so it is the branch's
+ * when the branch touched any Go file or go.mod at all. */
+export function attribute(errors, touched, {budget, base} = {}) {
   const dirs = new Set([...touched].map((p) => p.slice(0, p.lastIndexOf("/"))));
-  const mine = (key) => key === null
-    || (key.startsWith("go:") ? dirs.has(`tools/gogen/go/${key.slice(3)}`) : touched.has(key));
+  const anyGo = [...touched].some((p) => p.startsWith("tools/gogen/go/") && (p.endsWith(".go") || p.endsWith("/go.mod")));
+  const entryChanged = (key) => budget !== undefined
+    && JSON.stringify(budget.budgets?.[key]) !== JSON.stringify(base?.budgets?.[key]);
+  const mine = ({key}) => {
+    if (key === null) return true;
+    if (key.startsWith("deps:")) return anyGo;
+    if (entryChanged(key)) return true;
+    return key.startsWith("go:") ? dirs.has(`tools/gogen/go/${key.slice(3)}`) : touched.has(key);
+  };
   return {
-    own: errors.filter((e) => mine(e.key)).map((e) => e.message),
-    inherited: errors.filter((e) => !mine(e.key)).map((e) => e.message),
+    own: errors.filter(mine).map((e) => e.message),
+    inherited: errors.filter((e) => !mine(e)).map((e) => e.message),
   };
 }
-
 
 export function update(budget, sizes, {deps} = {}) {
   const b = budget.budgets;
@@ -267,7 +276,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
         // branch carries, plus what is not committed yet
         touched = new Set(git("diff", "--name-only", "-z", mergeBase).split("\0").filter(Boolean));
       } else {
-        console.error(`osd-size-budget: no merge base with ${changed} -- judging the whole tree`);
+        console.error(`osd-size-budget: no merge base with ${changed} -- judging the whole tree against it`);
+        baseRef ??= changed;
       }
     }
     let base;
@@ -279,7 +289,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       }
     }
     const keyed = checkKeyed(budget, sizes, {deps, base});
-    const {own: errors, inherited} = touched ? attribute(keyed, touched) : {own: keyed.map((e) => e.message), inherited: []};
+    const {own: errors, inherited} = touched ? attribute(keyed, touched, {budget, base}) : {own: keyed.map((e) => e.message), inherited: []};
     if (deps instanceof Error) errors.push(`the dependency direction could not be checked: ${deps.message}`);
     if (deps === undefined) {
       if (process.env.CI) errors.push("no Go toolchain in CI -- the dependency direction was not checked");
@@ -287,7 +297,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     }
     if (inherited.length > 0) {
       const tty = process.stderr.isTTY ? ["\x1b[33m", "\x1b[0m"] : ["", ""];
-      console.error(`${tty[0]}osd-size-budget: ${inherited.length} breach(es) already on ${changed}, not this branch's (it does not touch them):${tty[1]}`);
+      console.error(`${tty[0]}osd-size-budget: ${inherited.length} breach(es) in what this branch does not touch (on ${changed} already, not this branch's to fix):${tty[1]}`);
       for (const e of inherited) console.error(`${tty[0]}  ${e}${tty[1]}`);
     }
     if (errors.length > 0) {

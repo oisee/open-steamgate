@@ -103,6 +103,18 @@ describe("the size budget", function () {
     expect(attribute(checkKeyed(now, {}, {base: base()}), new Set()).own[0]).to.match(/budget raised/);
   });
 
+  it("charges the branch for a breach it caused through the budget file, and for a transitive go/abap dependency", () => {
+    const now = base();
+    now.budgets["tools/big.mjs"] = {lines: 1500, reason: "b"};
+    const keyed = checkKeyed(now, {"tools/big.mjs": 1600});
+    expect(attribute(keyed, new Set(["tools/osd-size-budget.json"]), {budget: now, base: base()}).own).to.have.length(1);
+    delete now.budgets["tools/big.mjs"];
+    expect(attribute(checkKeyed(now, {"tools/big.mjs": 1600}), new Set(), {budget: now, base: base()}).own[0]).to.match(/over 1000 without a budget/);
+    const deps = checkKeyed(base(), {"go:enq": 10}, {deps: new Map([["enq", true]])});
+    expect(attribute(deps, new Set(["tools/gogen/go/other/x.go"])).own[0]).to.match(/enq: depends/);
+    expect(attribute(deps, new Set(["docs/a.md"])).inherited[0]).to.match(/enq: depends/);
+  });
+
   describe("--changed in a repository", function () {
     this.timeout(20000);
     let dir;
@@ -142,7 +154,7 @@ describe("the size budget", function () {
       writeFileSync(join(dir, "README.md"), "unrelated\n");
       const r = run();
       expect(r.status, r.stderr).to.equal(0);
-      expect(r.stderr).to.match(/already on main, not this branch's/).and.match(/big\.mjs: 1103 lines/);
+      expect(r.stderr).to.match(/does not touch \(on main already/).and.match(/big\.mjs: 1103 lines/);
     });
 
     it("does not charge the branch for a budget main raised without a reason", () => {
@@ -158,6 +170,18 @@ describe("the size budget", function () {
       expect(r.stderr).to.not.match(/budget raised/);
     });
 
+    it("judges the whole tree, raises included, when there is no merge base", () => {
+      git("checkout", "-q", "--orphan", "lonely");
+      const b = JSON.parse(execFileSync("git", ["show", "main:tools/osd-size-budget.json"], {cwd: dir, encoding: "utf8"}));
+      b.budgets["tools/other.mjs"].lines = 1200;
+      writeFileSync(join(dir, "tools", "osd-size-budget.json"), JSON.stringify(b));
+      git("add", ".");
+      git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "unrelated history");
+      const r = run();
+      expect(r.status).to.equal(1);
+      expect(r.stderr).to.match(/no merge base/).and.match(/big\.mjs: 1103 lines/).and.match(/other\.mjs: budget raised 1100 -> 1200/);
+    });
+
     it("stops a branch that touches the file over its budget", () => {
       write("tools/big.mjs", 1104);
       const r = run();
@@ -169,7 +193,7 @@ describe("the size budget", function () {
       write("tools/other.mjs", 1101);
       const r = run();
       expect(r.status).to.equal(1);
-      expect(r.stderr).to.match(/other\.mjs: 1101 lines/).and.match(/already on main/);
+      expect(r.stderr).to.match(/other\.mjs: 1101 lines/).and.match(/on main already/);
     });
   });
 });
