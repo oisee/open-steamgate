@@ -31,15 +31,21 @@ describe("ADT F3: continuation re-entry", function () {
   before(async () => {
     handler = abap.Classes.ZCL_OSD_ADT_HANDLER;
     const routes = abap.Classes.ZCL_OSD_ADT_ROUTER.METHODS.DISPATCH.parameters.IT_ROUTES.type();
-    const r = routes.appendInitial().get();
-    r.method.set("GET"); r.pattern.set("/sap/bc/adt/f3"); r.handler.set("ZCL_OSD_ADT_ROUTE_F3");
-    r.served_by.set("ABAP"); r.resume_kind.set("f3-write");
+    await abap.Classes.ZCL_OSD_ADT_ROUTER.add({iv_method: new abap.types.String().set("GET"),
+      iv_pattern: new abap.types.String().set("/sap/bc/adt/f3"),
+      iv_handler: new abap.types.String().set("ZCL_OSD_ADT_ROUTE_F3"),
+      iv_resume_kind: new abap.types.String().set("f3-write"), ct_routes: routes});
+    expect(routes.array()[0].get().resume_kind.get()).to.equal("f3-write");
     await handler.use_routes({it_routes: routes});
     for (const name of ["one", "two"]) {
       const root = mkdtempSync(join(tmpdir(), "osd-f3-"));
       mkdirSync(join(root, "src"));
+      writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "v702"}}));
       writeFileSync(join(root, "src", "zf3_store.prog.abap"), `WRITE '${name}'.\n`);
       const store = new ObjectStore({root, libs: []});
+      const checked = [];
+      const check = store.check.bind(store);
+      store.check = (...args) => { checked.push(store.read(args[0], args[1]).source); return check(...args); };
       const options = {store, data: {}, watch: false, logMisses: false, transpileOnActivate: false};
       const runner = abapRunner({handler, step: dialogStep});
       options.abap = {...runner, resume: async (...args) => {
@@ -49,7 +55,7 @@ describe("ADT F3: continuation re-entry", function () {
       }};
       const app = express(); app.use(express.raw({type: "*/*"})); app.use(adtRouter(options).router);
       const server = await new Promise((r) => { const s = app.listen(0, "127.0.0.1", () => r(s)); });
-      mounts.push({root, store, options, server, url: `http://127.0.0.1:${server.address().port}/sap/bc/adt/f3`});
+      mounts.push({root, store, checked, options, server, url: `http://127.0.0.1:${server.address().port}/sap/bc/adt/f3`});
     }
   });
   after(async () => {
@@ -72,6 +78,7 @@ describe("ADT F3: continuation re-entry", function () {
       expect(await res.text()).to.equal(`finished through RESUME: f3-write;${source}`);
       expect(res.headers.getSetCookie()).to.have.length(2);
       expect(m.store.read("PROG", "ZF3_STORE").source).to.equal(source);
+      expect(m.checked.at(-1), "CHECK must read this router's resumed write").to.equal(source);
       delete m.options.f3Source;
     }
     expect(mounts.map((m) => m.store.read("PROG", "ZF3_STORE").source)).to.deep.equal(["resumed 0", "resumed 1"]);

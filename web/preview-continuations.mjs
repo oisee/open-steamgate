@@ -26,7 +26,7 @@ export async function previewAdtAnswer(handler, {method, path, search = "", head
   const request = params.IS_REQUEST.type();
   const r = request.get();
   r.method.set(String(method || "GET").toUpperCase()); r.path.set(path); r.uri.set(path + search);
-  r.body.set(Array.from(body ?? [], (v) => v.toString(16).padStart(2, "0")).join(""));
+  r.body.set(Array.from(body ?? [], (v) => v.toString(16).padStart(2, "0")).join("").toUpperCase());
   for (const [name, value] of new URLSearchParams(search)) {
     const row = r.query.appendInitial().get(); row.name.set(name); row.value.set(value);
   }
@@ -42,6 +42,6 @@ export async function previewAdtAnswer(handler, {method, path, search = "", head
   const resultHeaders = new Headers();
   if (servedBy.get() === "HOST") resultHeaders.set("x-osd-served-by", "HOST");
   for (const row of s.headers.array()) resultHeaders.append(row.get().name.get(), row.get().value.get());
-  if (s.content_type.get()) resultHeaders.set("content-type", s.content_type.get());
+  resultHeaders.set("content-type", s.content_type.get() || "text/html");
   return {status: s.status.get() || 200, headers: resultHeaders, body: new TextEncoder().encode(s.body.get())};
 }

@@ -135,9 +135,7 @@ export class StoreDestination {
     if (command === "OBJECT") {
       return this.#object(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));
     }
-    const store = ["READ", "WRITE", "HISTORY", "REVISION"].includes(command)
-      ? (systemCalls?.getStore()?.store ?? await this.#open())
-      : await this.#open();
+    const store = systemCalls?.getStore()?.store ?? await this.#open();
     if (store === undefined) {
       // Named, and with the reason. "No store" answered as an empty list is
       // a screen that says the system is empty, which is a different and
@@ -155,11 +153,11 @@ export class StoreDestination {
     try {
       switch (command) {
         case "CAPABILITIES": return {EV_NOTE: CAPABILITIES.join(" ")};
-        case "LIST": return this.#list(signature);
+        case "LIST": return this.#list(signature, store);
         case "READ": return this.#read(type, name, include, store);
         case "WRITE": return this.#write(type, name, include, source, started, store);
-        case "CHECK": return this.#check(type, name, include, source, started);
-        case "ACTIVATE": return await this.#activate(type, name, started);
+        case "CHECK": return this.#check(type, name, include, source, started, store);
+        case "ACTIVATE": return await this.#activate(type, name, started, store);
         case "HISTORY": return await this.#history(type, name, include, signature, store);
         case "REVISION": return await this.#revision(type, name, include, givenText(signature, "IV_REVISION"), store);
       }
@@ -205,11 +203,11 @@ export class StoreDestination {
     }
   }
 
-  #list(signature) {
+  #list(signature, store) {
     const type = givenText(signature, "IV_TYPE").toUpperCase();
     const filter = givenText(signature, "IV_FILTER").toUpperCase();
     const limit = Number(givenText(signature, "IV_LIMIT")) || this.limit;
-    const matching = this.store.list()
+    const matching = store.list()
       .filter((entry) => filter === "" || entry.name.includes(filter));
     // **The tally is of what the FILTER matched, before the type narrows
     // it**, and it is a structure of its own rather than a number pushed
@@ -241,14 +239,14 @@ export class StoreDestination {
       // into the row and every FILE column was empty, which reads as "this
       // object has no file" rather than as "nobody asked for it"
       ET_OBJECT: all.slice(0, limit)
-        .map((entry) => this.store.find(entry.type, entry.name) ?? entry)
-        .map((entry) => this.#row(entry)),
+        .map((entry) => store.find(entry.type, entry.name) ?? entry)
+        .map((entry) => this.#row(entry, store)),
       ET_TYPE: [...tally.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .map(([kind, count]) => ({TYPE: kind, COUNT: count})),
     };
   }
 
-  #row(entry, store = this.store) {
+  #row(entry, store) {
     const state = store.stateOf(entry);
     return {
       TYPE: entry.type,
@@ -340,9 +338,9 @@ export class StoreDestination {
     };
   }
 
-  #check(type, name, include, source, started) {
+  #check(type, name, include, source, started, store) {
     const options = source === undefined ? {} : {source: String(source), include};
-    const result = this.store.check(type, name, options);
+    const result = store.check(type, name, options);
     return {
       EV_ACTIVE: result.issues.length === 0 ? "X" : "",
       EV_COUNT: String(result.issues.length),
@@ -351,8 +349,8 @@ export class StoreDestination {
     };
   }
 
-  async #activate(type, name, started) {
-    const result = this.store.activate(type, name);
+  async #activate(type, name, started, store) {
+    const result = store.activate(type, name);
     // An activation refused by a *dependent* is the case activation exists
     // for, and the screen has to be able to say which caller broke -- so the
     // dependent's own name travels on its rows and is not flattened into the
@@ -395,10 +393,10 @@ export class StoreDestination {
     // fourteen. So no number is right for both, and a screen that says
     // "activated" while it has just rewritten the MPC and DPC of a service
     // nobody opened is hiding the part worth seeing.
-    const before = snapshotOf(join(this.store.root, "gen"));
-    const published = await this.store.publish({activate: [{type, name}]});
-    const committed = published?.ok !== false && this.store.completeActivation(result, published?.transpile?.built);
-    const regenerated = changedSince(before, join(this.store.root, "gen"));
+    const before = snapshotOf(join(store.root, "gen"));
+    const published = await store.publish({activate: [{type, name}]});
+    const committed = published?.ok !== false && store.completeActivation(result, published?.transpile?.built);
+    const regenerated = changedSince(before, join(store.root, "gen"));
     const objects = [
       ...regenerated.written.map((path) => generatedRow(path, "generated")),
       ...regenerated.removed.map((path) => generatedRow(path, "removed")),
