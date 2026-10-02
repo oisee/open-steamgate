@@ -1,32 +1,64 @@
 # Byte section regression fixtures
 
-`zcl_gogen_t_bytesection` and `zcl_gogen_t_bytemem` are derived from the
-ABAPiti contract in TASK.md. They are not copies of the external repro classes:
-those files are outside the permitted workspace and were unavailable here.
-The r1-r6/f1-f5 labels identify contract cases, not verified original methods.
-In particular, f2 expects byte offset 3 for AABB in AABBCCAABBCC, starting
-at offset 1 with length 5; the original f2 expectation remains unverified.
+The original `zcl_abapiti_repro_bytes` and `zcl_abapiti_repro_mem` sources
+are in `abapiti/`, copied unchanged from abapiti commit `0facf0e` except for
+one provenance header per file. All 15 methods are green on A4H and osgo.
+Their historical UNMEASURED comments are preserved; the added header and
+`test/fixtures/kernel-oracle/expect.json` provide the measured provenance.
+The recursive ABAP Unit runner discovers them in this subdirectory; they
+have no static RUN entry for the top-level IR Go/JS semantics harness.
 
-The installed JS runtime ignores FIND sectionLength and matches hex digits,
-so it cannot establish section bounds or whole-byte matching. Go follows the
-TASK.md reference contract: out-of-range sections raise, and a miss leaves
-MATCH OFFSET and MATCH LENGTH unchanged.
-
-A direct JS REPLACE probe of AABBCCDD with 11 measured offset -1/length 1
-raising without mutation; offset 2/length -1 produces AABB11BBCCDD with
-sy-subrc 0. Offset 0/length -1 and offset 2/length -3 raise without mutation.
-Go mirrors the JS splice boundary checks, including that overlap behavior.
-
-The parser accepts omitted OFFSET or omitted LENGTH, but refuses a SECTION
-with neither operand. The runtime supports both defaults; frontend acceptance
-is limited by the installed ABAP parser grammar.
-
-Run the derived fixtures with:
+`zcl_gogen_t_byteoracle` encodes every P1/P2 oracle case as a separate ABAP
+Unit method: 12 REPLACE cases and 11 FIND cases, with the complete expected
+strings exactly as A4H answered. ALL OCCURRENCES with MATCH COUNT / RESULTS
+is supported for a full byte field; section forms of ALL remain refused.
+`zcl_gogen_t_bytesection` and `zcl_gogen_t_bytemem` retain the 18 derived
+contract tests from the first pass. All five fixture classes pass: 56 methods.
 
 ```sh
-node tools/gogen/unit.mjs --fixture tools/gogen/testdata \
-  --class ZCL_GOGEN_T_BYTESECTION --class ZCL_GOGEN_T_BYTEMEM --jobs 2
+flock /tmp/osd-heavy.lock env GOFLAGS=-buildvcs=false \
+  node tools/gogen/unit.mjs --fixture tools/gogen/testdata --jobs 2
 ```
 
-All 18 methods pass. The red proof changed MATCH OFFSET to section-relative:
-f2 failed with expected 3, actual 2; the other 17 passed. The change was reverted.
+The red proof temporarily changed MATCH OFFSET to section-relative and ran
+the original byte repro class: f2 failed with expected 3, actual 2; the other
+10 methods passed. The change was reverted and all fixtures rerun green.
+
+## JS REPLACE comparison (2026-10-02)
+
+The unchanged `@abaplint/transpiler` / `@abaplint/runtime` 2.13.93 build was
+checked with the actual JS-transpiled fixture methods, using:
+
+```sh
+flock /tmp/osd-heavy.lock node tools/gogen/byte-section-js-check.mjs
+```
+
+The runner deliberately exits 1 when it reports an oracle mismatch. It runs
+all 12 P1 methods plus the original r1-r6: 17 SUCCESS, 1 FAILED.
+The complete list of P1 discrepancies to fix in subsequent JS work is:
+
+| Oracle case | A4H expected | JS actual |
+| --- | --- | --- |
+| P1 `x4 longer` (`p1_11`) | `00AABB22 rc2` | `00AABB22 rc0` |
+
+JS gets the truncated bytes right but loses the truncation return code.
+The other 11 P1 cases and all six original REPLACE repros pass, including
+append, empty replacement, out-of-bounds exceptions and unchanged targets.
+No JS runtime or IR-JS emitter was changed here.
+
+The installed JS FIND runtime ignores sectionLength and searches hex digits;
+that earlier observation remains outside this REPLACE comparison. Go uses
+A4H's bounded whole-byte searches and absolute offsets.
+
+A direct JS probe from the first pass of AABBCCDD with replacement 11 measured
+offset -1/length 1 raising without mutation; offset 2/length -1 produces
+AABB11BBCCDD with sy-subrc 0. Offset 0/length -1 and offset 2/length -3 raise
+without mutation. Go retains these JS splice boundary checks and the overlap
+behavior; these negative cases are not claims about the A4H P1 oracle.
+
+SECTION without either OFFSET or LENGTH is not a section selector in the
+installed abaplint grammar. REPLACE's SECTION requires the permutation of
+OFFSET/LENGTH to consume at least one operand. FIND offers SECTION OFFSET
+or SECTION LENGTH; `FIND p IN SECTION OF xs` instead parses SECTION as a
+subject variable with an OF option. These bare forms remain unsupported;
+the frontend grammar regression test pins that distinction.

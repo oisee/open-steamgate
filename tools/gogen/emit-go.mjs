@@ -1862,7 +1862,8 @@ ${t}	}`));
         `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
     case "find_bytes":
-    case "replace_bytes": return emitByteStatement(st, ctx, t, {expr, place});
+    case "replace_bytes":
+    case "find_bytes_all": return emitByteStatement(st, ctx, t, {expr, place});
     case "find": {
       // IN TABLE and IN SECTION (ultra/sadl): see abap.FindTable / abap.FindSection
       const call = st.table ? `fok, fline, foff, flen, fsub := abap.FindTable(${expr(st.table, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length})`
@@ -1892,9 +1893,9 @@ ${t}	}`));
         `${t}\t\t\t${r}.${ident(f.SUBMATCHES)} = append(${r}.${ident(f.SUBMATCHES)}, ${subGo}{${ident(f.SOFFSET)}: fm${n}[g], ${ident(f.SLENGTH)}: fm${n}[g+1]})`,
         `${t}\t\t}`];
       const tgt = place(st.target, ctx);
-      const call = `abap.FindResults(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.mode ? `'${st.mode}'` : "0"}, ${st.icase}, ${st.all})`;
+      const call = st.bytes ? `abap.FindBytesAll(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)})` : `abap.FindResults(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.mode ? `'${st.mode}'` : "0"}, ${st.icase}, ${st.all})`;
       if (st.table) {
-        return [`${t}{`, `${t}\tfms${n} := ${call}`, `${t}\t${tgt} = nil`, `${t}\ts.Sy.Subrc = 4`, `${t}\tfor _, fm${n} := range fms${n} {`,
+        return [`${t}{`, `${t}\tfms${n} := ${call}`, `${t}\t${tgt} = nil`, ...(st.count ? [`${t}\t${place(st.count, ctx)} = int32(len(fms${n}))`] : []), `${t}\ts.Sy.Subrc = 4`, `${t}\tfor _, fm${n} := range fms${n} {`,
           `${t}\t\ts.Sy.Subrc = 0`, `${t}\t\tvar fr${n} ${rowGo}`, ...fill(`fr${n}`), `${t}\t\t${tgt} = append(${tgt}, fr${n})`, `${t}\t}`, `${t}}`];
       }
       return [`${t}{`, `${t}\tfms${n} := ${call}`, `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(fms${n}) > 0 {`, `${t}\t\ts.Sy.Subrc = 0`,

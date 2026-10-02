@@ -155,7 +155,8 @@ const EXPECT = {
   ZCL_GOGEN_T_BYTECAT: "cat:FFAB00CD00/5/0 zeros:0000AB00CD00/6 empty:0/0",
   // FIND ... IN [SECTION [OFFSET o] [LENGTH l] OF] xs IN BYTE MODE
   // [MATCH OFFSET m] [MATCH LENGTH ml]; bounded byte spans and REPLACE SECTION
-  // are covered by the ABAP Unit fixtures and frontend-bytes.test.mjs.
+  // and ALL OCCURRENCES MATCH COUNT / RESULTS are covered by the original
+  // ABAPiti fixtures, the 23 P1/P2 A4H oracle tests and frontend-bytes.test.mjs.
   // See testdata/byte-section-notes.md for JS differences and provenance.
   // (A4H 2026-10-01, execute_abap): byte offsets, a miss leaves m alone with
   // sy-subrc 4, a section offset at the end is a miss and not an error, an

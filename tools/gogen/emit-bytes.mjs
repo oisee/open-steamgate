@@ -5,6 +5,13 @@ export function emitByteStatement(st, ctx, t, {expr, place}) {
     const target = place(st.target, ctx);
     return [`${t}${target}, s.Sy.Subrc = abap.ReplaceBytes(${target}, ${expr(st.with, ctx)}, ${val(st.off, "0")}, ${val(st.len, "abap.NoLength")}, ${st.target.type.k === "x" ? st.target.type.len : -1})`];
   }
+  // P2 ALL C3 reuses the same byte results for MATCH COUNT alone.
+  if (st.s === "find_bytes_all") {
+    const n = ctx.loop++, matches = `byteMatches${n}`;
+    return [`${t}{`, `${t}${matches} := abap.FindBytesAll(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)})`,
+      ...(st.count ? [`${t}${place(st.count, ctx)} = int32(len(${matches}))`] : []),
+      `${t}s.Sy.Subrc = 4`, `${t}if len(${matches}) > 0 { s.Sy.Subrc = 0 }`, `${t}}`];
+  }
   const pattern = expr(st.pattern, ctx);
   const n = ctx.loop++, fp = `bytePattern${n}`, fb = `byteOffset${n}`, ok = `byteFound${n}`;
   const lines = [`${t}{`, `${t}${fp} := ${pattern}`, `${t}if ${fb}, ${ok} := abap.FindBytes(${expr(st.subject, ctx)}, ${fp}, ${val(st.secOff, "0")}, ${val(st.secLen, "abap.NoLength")}); ${ok} {`, `${t}\ts.Sy.Subrc = 0`];

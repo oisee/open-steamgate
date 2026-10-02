@@ -27,6 +27,9 @@ func TestReplaceByteSection(t *testing.T) {
 	if got, rc := ReplaceBytes("abcd", "X", 1, 2, 4); got != "aXd\x00" || rc != 0 {
 		t.Fatalf("fixed x: %q/%d", got, rc)
 	}
+	if got, rc := ReplaceBytes("\x00\x11\x22\x33", "\xaa\xbb", 1, 1, 4); got != "\x00\xaa\xbb\x22" || rc != 2 {
+		t.Fatalf("P1 fixed truncation: %x/%d", got, rc)
+	}
 }
 
 func TestFindByteSection(t *testing.T) {
@@ -41,6 +44,9 @@ func TestFindByteSection(t *testing.T) {
 		{"not found", "abcd", "x", 0, NoLength, 0, false},
 		{"whole bytes", "\xaa\xbb\xcc", "\xab\xbc", 0, NoLength, 0, false},
 		{"rest", "abcd", "cd", 2, NoLength, 2, true},
+		{"P2 empty needle", "\xc3\xa3\xc3", "", 0, NoLength, 0, true},
+		{"P2 A3C3 bounded miss", "\xc3\xa3\xc3", "\xa3\xc3", 0, 2, 0, false},
+		{"P2 A3C3 bounded hit", "\xc3\xa3\xc3", "\xa3\xc3", 0, 3, 1, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got, ok := FindBytes(c.s, c.p, c.off, c.n)

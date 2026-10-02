@@ -1,6 +1,7 @@
 package abap
 
 import (
+	"osg/gogen/byteops"
 	"osg/gogen/bytesection"
 	"regexp"
 	"strings"
@@ -127,13 +128,12 @@ func FindBytes(s, p string, off, n int32) (int32, bool) {
 	return bytesection.Find(s, p, off, n)
 }
 
+// FindBytesAll carries P2 ALL byte offsets to the existing RESULTS emitter.
+func FindBytesAll(s, p string) [][]int32 { return byteops.All(s, p) }
+
 // ReplaceBytes validates before assignment, then splices all bytes (r1-r6).
 func ReplaceBytes(s, with string, off, n int32, xLen int) (string, int32) {
-	out := bytesection.Replace(s, with, off, n)
-	if xLen >= 0 {
-		out = XFit(out, xLen)
-	}
-	return out, 0
+	return byteops.Replace(s, with, off, n, xLen)
 }
 
 // FindSection is FIND p IN SECTION [OFFSET off] [LENGTH n] OF s for a

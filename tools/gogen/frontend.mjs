@@ -83,7 +83,7 @@ export const composite = (t) => t?.k === "table" || t?.k === "struct";
 export const byRef = (p) => p.dir === "importing" && composite(p.type) && !p.byValue;
 const numeric = (t) => t.k === "i" || t.k === "f" || t.k === "int8";
 const charlike = (t) => t.k === "c" || t.k === "string";
-const byteStatementHelpers = {Nodes, Expressions, upper, isExpr, source, lvalue, convert, charlike, Unsupported, I, S, XS};
+const byteStatementHelpers = {Nodes, Expressions, upper, isExpr, source, lvalue, convert, charlike, Unsupported, I, S, XS, findResults};
 const cdsViewsByRegistry = new WeakMap();
 
 /* ------------------------------------------------------------------- program */
@@ -3104,19 +3104,19 @@ function stringFn(name, direct, named, ctx, text) {
  * OFFSET and LENGTH (i) and nothing else -- match_result -- for FIRST, or a
  * standard table of such rows -- match_result_tab -- for ALL. The subject is
  * a string or a c (not a table, not a section); the pattern a string or a
- * c, not a CL_ABAP_REGEX object.
+ * c, not a CL_ABAP_REGEX object. Byte ALL shares the result shape (P2 oracle).
  */
-function findResults(node, ctx, text, tw) {
+function findResults(node, ctx, text, tw, bytes = false, resultNode = null) {
   const all = tw.startsWith("FIND ALL");
   const ft = node.findDirectExpression(Expressions.FindType);
   const kind = ft ? upper(ft.concatTokens()) : "";
   if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind} ... RESULTS`);
   const [pat, subj] = node.findDirectExpressions(Expressions.Source);
   const patX = source(pat, ctx);
-  if (!charlike(patX.type)) throw new Unsupported(`FIND ... RESULTS with a ${patX.type.k} pattern`);
+  if (!(bytes ? ["x", "xstring"].includes(patX.type.k) : charlike(patX.type))) throw new Unsupported(`FIND ... RESULTS with a ${patX.type.k} pattern`);
   const subjX = source(subj, ctx);
-  if (!charlike(subjX.type)) throw new Unsupported(`FIND ... RESULTS in a ${subjX.type.k}`);
-  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+  if (!(bytes ? ["x", "xstring"].includes(subjX.type.k) : charlike(subjX.type))) throw new Unsupported(`FIND ... RESULTS in a ${subjX.type.k}`);
+  const target = lvalue(resultNode ?? node.findDirectExpression(Expressions.Target), ctx);
   const where = `FIND ... RESULTS ${target.type.k}`;
   let row = target.type;
   if (all) {
@@ -3141,7 +3141,7 @@ function findResults(node, ctx, text, tw) {
   }
   const nFields = (t) => ctx.program.structs.get(t.go)?.fields?.length ?? 0;
   if (nFields(row) !== 4 || nFields(sub) !== 2) throw new Unsupported(`${where}: a result structure with more components than match_result`);
-  return {s: "find_results", all, mode: kind === "PCRE" ? "P" : kind === "REGEX" ? "R" : "", pattern: convert(patX, S), subject: convert(subjX, S),
+  return {s: "find_results", all, bytes, mode: kind === "PCRE" ? "P" : kind === "REGEX" ? "R" : "", pattern: convert(patX, bytes ? XS : S), subject: convert(subjX, bytes ? XS : S),
     icase: /\bIGNORING\s+CASE\b/i.test(text), target, table: all, row, sub, f};
 }
 
