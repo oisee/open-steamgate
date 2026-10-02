@@ -24,6 +24,7 @@ import {compileRule, lineIndex, misfit, modelHash, renderModel, rulePath, RuleEr
 import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
 import {compileSchedule, compileStages, explainStage, readStages, worklistVariants} from "./dsl-l3-stages.mjs";
 import {compileResilience, resilienceNodes} from "./dsl-l3-resilience.mjs";
+import {compileSettings} from "./dsl-l3-settings.mjs";
 
 export const SET_TEMPLATE = "recipes/l3-set/template.tpl";
 export const JOB_TEMPLATE = "recipes/l3-job/template.tpl";
@@ -121,7 +122,7 @@ export function classShape(text, name, className) {
   return shape.line === undefined ? undefined : shape;
 }
 
-const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience"];
+const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience", "settings"];
 const PORT_KEYS = ["kind", "table", "key", "group", "seq", "variants"];
 const PORT_NAME = /^[a-z][a-z0-9_]{0,11}$/;
 const RULE_KEYS = ["rule", "enabled"];
@@ -474,6 +475,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   // each stage's rules, for the stage's plan; a worklist variant makes the factory refuse binding it
   if (staged) for (const stage of staged.stages) stage.members = model.rules.filter((r) => r.stage_no === stage.no);
   if (ports.some((p) => p.has_worklist)) model.with_worklist = {"@id": `${id}/stages`, set_line: line("stages")};
+  if (doc.settings !== undefined) model.settings = compileSettings(doc, model, {line, fail});
   Object.defineProperty(model, "where", {value: where});
   return model;
 }
@@ -548,8 +550,8 @@ export async function renderSet(model) {
   let runner, job;
   try {
     console.log = (...items) => console.error(...items); // runtime bootstrap diagnostics
-    runner = await renderRecipe(model, SET_TEMPLATE, {profile: "abap"});
-    job = await renderRecipe(model, JOB_TEMPLATE, {profile: "abap"});
+    runner = await renderRecipe(model, model.settings ? SET_TEMPLATE : "recipes/l3-set/legacy.tpl", {profile: "abap"});
+    job = await renderRecipe(model, model.settings ? JOB_TEMPLATE : "recipes/l3-job/legacy.tpl", {profile: "abap"});
   } finally {
     console.log = quiet;
   }
@@ -562,6 +564,13 @@ export async function renderSet(model) {
     if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
   }
   const results = [[`${model.class}.clas.abap`, runner], [`${model.report}.prog.abap`, job], ...extra.results];
+  if (model.settings) {
+    for (const [name, template, kind] of [[model.settings.class, "recipes/l3-settings/class.tpl", "clas"],
+      [model.settings.report, "recipes/l3-settings/report.tpl", "prog"]]) {
+      const rendered = await renderRecipe(model, template, {profile: "abap"});
+      results.push([`${name}.${kind}.abap`, rendered]);
+    }
+  }
   for (const [name, result] of results) {
     const error = result.findings.find((f) => f.severity === "E");
     if (error) throw new SetError(model.where ?? model.source, nodeLine(error.node), `the generated ${name} line ${error.line}: ${error.text} (${error.rule}, ${error.node})`);
@@ -569,6 +578,12 @@ export async function renderSet(model) {
   return {
     files: {
       ...extra.files,
+      ...(model.settings ? Object.fromEntries(results.slice(-2).flatMap(([name, result]) => [
+        [name, result.text], [name.replace(/\.(clas|prog)\.abap$/, ".$1.xml"), name.endsWith(".clas.abap")
+          ? classXml(model, model.settings.class, `L3 settings of ${model.set}`) : progXml({...model, report: model.settings.report})],
+        [name.replace(/\.abap$/, ".trace.json"), sidecar(model, name.endsWith(".clas.abap")
+          ? "recipes/l3-settings/class.tpl" : "recipes/l3-settings/report.tpl", result)],
+      ])) : {}),
       [`${model.class}.clas.abap`]: runner.text,
       [`${model.class}.clas.xml`]: classXml(model),
       [`${model.class}.clas.trace.json`]: sidecar(model, SET_TEMPLATE, runner),
@@ -578,7 +593,8 @@ export async function renderSet(model) {
     },
     findings: [...runner.findings.map((f) => ({...f, file: `${model.class}.clas.abap`})),
       ...job.findings.map((f) => ({...f, file: `${model.report}.prog.abap`})),
-      ...extra.results.flatMap(([name, r]) => r.findings.map((f) => ({...f, file: name})))],
+      ...extra.results.flatMap(([name, r]) => r.findings.map((f) => ({...f, file: name}))),
+      ...(model.settings ? results.slice(-2).flatMap(([name, r]) => r.findings.map((f) => ({...f, file: name}))) : [])],
   };
 }
 
@@ -714,11 +730,16 @@ function alertRow(db, key) {
         AND check_date = ? AND pile_no = ? AND alert_seq = ?`).get(key.set, key.rule, `sha256:${key.hash}%`, key.date, key.pile, key.seq);
       // the plan row of the alert's pile, by its run (an older database has no plan table)
       let pile;
+      let settings = [];
       try {
         pile = alert && handle.prepare(`SELECT * FROM zosd_l3_pile WHERE set_name = ? AND run_id = ? AND rule_name = ? AND pile_no = ?`)
           .get(key.set, alert.run_id, key.rule, key.pile);
       } catch { pile = undefined; }
-      return alert && {...alert, pile};
+      try {
+        if (alert) settings = handle.prepare(`SELECT * FROM zosd_l3_run_conf WHERE set_name = ? AND run_id = ? ORDER BY param_name`)
+          .all(key.set, alert.run_id);
+      } catch { settings = []; }
+      return alert && {...alert, pile, settings};
     } finally { handle.close(); }
   });
 }
@@ -757,6 +778,8 @@ export async function explainAlert(key, {sets = setFiles(), db, row} = {}) {
   const out = [
     `alert   ${k.set}/${k.rule}/sha256:${k.hash.slice(0, 12)}.../${k.date}/${k.pile}/${k.seq}`,
     ...(alertRowFound ? [`text    ${String(alertRowFound.alert_text).trimEnd()}`, `run     ${String(alertRowFound.run_id).trim()} at ${alertRowFound.run_ts}`] : []),
+    ...(alertRowFound?.settings?.length ? ["settings effective for this run:", ...alertRowFound.settings.map((s) =>
+      `  ${String(s.param_name).trim()} = ${String(s.param_val).trim()} (${String(s.origin).trim()}, DSL ${String(s.dsl_value).trim()}${String(s.origin).trim() === "USER" ? `; ${String(s.changed_by).trim()} at ${s.changed_at}` : ""})`)] : []),
     `set     ${path(found.file)}:${entry.set_line}: ${readFileSync(found.file, "utf8").split("\n")[entry.set_line - 1].trim()}`,
     `rule    ${k.rule}, ${entry.file} as of ${version.where}, model ${version.trace.model}`,
     `line    ${entry.file}:${ruleLine}: ${(ruleLines[ruleLine - 1] ?? "").trim()}`,

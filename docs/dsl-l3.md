@@ -1236,6 +1236,64 @@ made the pile `DONE` and filled the worklist); the proof's `teardown` is made ro
   other doctors inserted at once, the audit row of that action is dropped (the action itself and its
   report row stand).
 
+## Settings
+
+A set can opt individual DSL defaults into production tuning. The manifest uses
+one list and optional bounds:
+
+```yaml
+settings:
+  tunable: [retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, piles.checks.size]
+  bounds:
+    fuses.max_alerts: {min: 1, max: 100000}
+```
+
+The available names are `retry.max`, `retry.backoff`, `stale`,
+`fuses.max_alerts`, `keep.days`, `piles.size` (an unstaged set),
+`piles.<stage>.size`, `schedule.every`, and `params.<name>` for a set parameter
+with a DSL default. A name not in `settings.tunable` remains a compiled
+constant. Bounds narrow the compiler range; they never enlarge it. A period
+uses the schedule grammar (`1m`, `2h`, `1d`, `1w`, within the unit's JOB_CLOSE
+width). A character parameter keeps its DDIC width.
+
+`ZOSD_L3_CONF` holds one row per set and parameter. It is delivery class A:
+application data, maintained without a customizing or workbench transport.
+`PARAM_VAL` is effective when valid, `ORIGIN` says `DSL` or `USER`, and
+`DSL_VALUE` is the current compiled default. `CHANGED_BY`, `CHANGED_AT` and
+`NOTE_TEXT` explain the edit. The names `PARAM_NAME`, `PARAM_VAL` and `ORIGIN`
+avoid dictionary reserved words. The generated `settings_seed( )` is callable
+directly; the first run, schedule or doctor pass also seeds. On a new build a
+DSL row takes the new default; a USER row keeps its tuned value while
+`DSL_VALUE` moves to the new default. The report displays their difference as
+`DRIFT`. Every insert, tune, reset and default migration writes
+`ZOSD_L3_CONF_LOG` with the old and new values, actor, time and note. That
+history is audit data: `purge( )` never deletes it.
+
+The runner loads the set's settings with one SELECT at the start of each run;
+all later uses in that run use the in-memory structure. Values outside their
+type or bounds fall back to the compiled default, appear in
+`ty_result-settings_warnings`, and create an audit entry. A job receives the
+same effective values in its selection fields because a submitted job can
+start before its submitter commits. `ZOSD_L3_RUN_CONF` also stores those values
+per run, with origin, DSL default, actor and time. `dsl-l3 explain` prints the
+snapshot after the alert's run line, including the actor and time for USER
+values. `purge( )` retains these snapshots so older alert traces remain
+explainable. The doctor reads a fresh structure once per pass; the schedule and
+its doctor period use the values at the next `schedule( )`.
+
+`ZCL_L3_<SET>=>set_setting( iv_param, iv_value, iv_note )` validates with the
+same type and bounds rule as reading, writes a USER row and audit row, and
+returns false for an unknown or invalid setting. `reset_setting( iv_param )`
+restores the current DSL default. The generated `ZL3_<SET>_CONF` report lists
+value, source, DSL default and drift; its selection screen can tune one value
+or reset it. The generated authority seam currently returns true. A deployment
+must wire it to a role and an authorisation object chosen by that system's
+security team; the generator does not invent an SAP object.
+
+The key arithmetic follows the system's dictionary `LENG` convention, including
+INT4 as 10: CONF is 3 + 16 + 30 = 49, CONF_LOG is 3 + 32 = 35, and RUN_CONF is
+3 + 32 + 30 = 65. Each is below the 120 key limit.
+
 ## Not yet
 
 Ordering between rules within a stage, a retention of the alert log's old versions (the log is

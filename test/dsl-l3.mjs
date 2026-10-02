@@ -1222,7 +1222,7 @@ ENDCLASS.
         const before = new Set(store.list(200).map((r) => r.id));
         const failures = {};
         const methods = ["mode_s", "rerun", "rerun_fewer_piles", "partial_keeps_old", "mode_p", "stages_mode_s", "stages_mode_p", "stages_partial",
-          "doctor_heals", "fuse_stops"];
+          "doctor_heals", "fuse_stops", "settings_tune"];
         for (const method of methods) failures[method] = await runMethod(local, method);
         expect(failures).to.deep.equal(Object.fromEntries(methods.map((m) => [m, undefined])));
         const all = store.list(200).filter((r) => !before.has(r.id));
@@ -1248,6 +1248,7 @@ ENDCLASS.
         expect(entry).to.include('{"name":"mode_p","skip":true}');
         expect(entry).to.include('{"name":"stages_mode_s","skip":false},{"name":"stages_mode_p","skip":true},{"name":"stages_partial","skip":false}');
         expect(entry).to.include('{"name":"doctor_heals","skip":true},{"name":"fuse_stops","skip":false}');
+        expect(entry).to.include('{"name":"settings_tune","skip":false}');
         expect(entry).to.include('riskLevel: "DANGEROUS"');
       });
 

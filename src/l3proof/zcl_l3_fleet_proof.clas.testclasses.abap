@@ -52,6 +52,7 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS stages_partial FOR TESTING.
     METHODS doctor_heals FOR TESTING.
     METHODS fuse_stops FOR TESTING.
+    METHODS settings_tune FOR TESTING.
     METHODS open_run
       IMPORTING iv_failed TYPE abap_bool
       RETURNING VALUE(rs_result) TYPE zcl_l3_fleet2=>ty_result.
@@ -231,6 +232,7 @@ CLASS ltcl_proof IMPLEMENTATION.
       DELETE FROM zosd_l3_stage WHERE run_id = lv_run.
       DELETE FROM zosd_l3_work WHERE run_id = lv_run.
       DELETE FROM zosd_l3_doctor WHERE run_id = lv_run.
+      DELETE FROM zosd_l3_run_conf WHERE run_id = lv_run.
     ENDLOOP.
     " the run locks of the proof's date, held or released
     DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet=>c_set
@@ -1130,6 +1132,32 @@ CLASS ltcl_proof IMPLEMENTATION.
         AND check_date = zcl_l3_fleet_proof=>c_check_date AND run_id = ls_seq-run_id.
     lv_count = sy-dbcnt.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = lv_older msg = 'the older run keeps its rows of the fused rule' ).
+  ENDMETHOD.
+
+  METHOD settings_tune.
+    DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
+    DATA ls_rule TYPE zcl_l3_fleet2=>ty_rule.
+    DATA ls_voy TYPE zosd_l2_voy.
+    DATA lv_fused TYPE i.
+    DATA lv_ok TYPE abap_bool.
+    zcl_l3_fleet2=>settings_seed( ).
+    lv_ok = zcl_l3_fleet2=>set_setting(
+      iv_param = 'fuses.max_alerts' iv_value = '1' iv_note = 'ABAP Unit tune' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_ok exp = abap_true msg = 'max_alerts accepted' ).
+    " a third busy ship makes the minimum-crew rule alert in two piles
+    add_voyage( iv_id = 'L30099' iv_ship = 'L303' iv_date = '20991020' ).
+    READ TABLE mt_voy INTO ls_voy INDEX lines( mt_voy ).
+    INSERT zosd_l2_voy FROM ls_voy.
+    COMMIT WORK.
+    ls_result = staged( zcl_l3_fleet2=>c_sequential ).
+    LOOP AT ls_result-rules INTO ls_rule WHERE status = 'FUSED'.
+      lv_fused = lv_fused + 1.
+    ENDLOOP.
+    lv_ok = zcl_l3_fleet2=>reset_setting( 'fuses.max_alerts' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_ok exp = abap_true msg = 'max_alerts reset' ).
+    IF lv_fused < 1.
+      cl_abap_unit_assert=>fail( msg = 'tuned max_alerts fuses a rule' ).
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.

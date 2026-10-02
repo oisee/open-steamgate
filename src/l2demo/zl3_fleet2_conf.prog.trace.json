@@ -1,7 +1,7 @@
 {
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
- "template": "recipes/l3-ports/exception.tpl",
+ "template": "recipes/l3-settings/report.tpl",
  "model": "sha256:8df08ffa963ebb6e608bdc46ccacf71f789d295690b247e051b73063f021c403",
  "rules": {
   "ship-busy": {
@@ -44,21 +44,21 @@
   {
    "line": 1,
    "template_line": 1,
-   "path": "/source",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/settings/report",
+   "node": "set/fleet2/settings",
+   "set_line": 61
   },
   {
    "line": 2,
    "template_line": 2,
-   "path": "/set",
+   "path": "/source",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
    "line": 3,
    "template_line": 3,
-   "path": "/exception",
+   "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
@@ -93,9 +93,9 @@
   {
    "line": 8,
    "template_line": 8,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/settings/class",
+   "node": "set/fleet2/settings",
+   "set_line": 61
   },
   {
    "line": 9,
@@ -128,7 +128,7 @@
   {
    "line": 13,
    "template_line": 13,
-   "path": "/",
+   "path": "/class",
    "node": "set/fleet2",
    "set_line": 11
   },
@@ -142,7 +142,7 @@
   {
    "line": 15,
    "template_line": 15,
-   "path": "/exception",
+   "path": "/class",
    "node": "set/fleet2",
    "set_line": 11
   },
@@ -184,14 +184,14 @@
   {
    "line": 21,
    "template_line": 21,
-   "path": "/",
+   "path": "/class",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
    "line": 22,
    "template_line": 22,
-   "path": "/",
+   "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
@@ -219,6 +219,27 @@
   {
    "line": 26,
    "template_line": 26,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 27,
+   "template_line": 27,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 28,
+   "template_line": 28,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 29,
+   "template_line": 29,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
