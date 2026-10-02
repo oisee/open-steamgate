@@ -135,7 +135,10 @@ export class StoreDestination {
     if (command === "OBJECT") {
       return this.#object(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));
     }
-    if (await this.#open() === undefined) {
+    const store = ["READ", "HISTORY", "REVISION"].includes(command)
+      ? (systemCalls?.getStore()?.store ?? await this.#open())
+      : await this.#open();
+    if (store === undefined) {
       // Named, and with the reason. "No store" answered as an empty list is
       // a screen that says the system is empty, which is a different and
       // false statement.
@@ -153,12 +156,12 @@ export class StoreDestination {
       switch (command) {
         case "CAPABILITIES": return {EV_NOTE: CAPABILITIES.join(" ")};
         case "LIST": return this.#list(signature);
-        case "READ": return this.#read(type, name, include);
+        case "READ": return this.#read(type, name, include, store);
         case "WRITE": return this.#write(type, name, include, source, started);
         case "CHECK": return this.#check(type, name, include, source, started);
         case "ACTIVATE": return await this.#activate(type, name, started);
-        case "HISTORY": return await this.#history(type, name, signature);
-        case "REVISION": return await this.#revision(type, name, givenText(signature, "IV_REVISION"));
+        case "HISTORY": return await this.#history(type, name, include, signature, store);
+        case "REVISION": return await this.#revision(type, name, include, givenText(signature, "IV_REVISION"), store);
       }
     } catch (error) {
       // the store's own refusals -- NotFound, ReadOnly, NotSupported -- are
@@ -245,8 +248,8 @@ export class StoreDestination {
     };
   }
 
-  #row(entry) {
-    const state = this.store.stateOf(entry);
+  #row(entry, store = this.store) {
+    const state = store.stateOf(entry);
     return {
       TYPE: entry.type,
       NAME: entry.name,
@@ -269,38 +272,55 @@ export class StoreDestination {
   // read as "never changed".
   // git is loaded on the call, not with the module: the preview bundles this
   // destination and has no child_process (webpack.config.cjs ignores it)
-  async #history(type, name, signature) {
-    const {gitObjectHistory} = await import("./osd-git-history.mjs");
-    const entry = this.store.read(type, name);
+  async #history(type, name, include, signature, store) {
+    const {gitObjectHistory, gitObjectState} = await import("./osd-git-history.mjs");
+    const {statSync} = await import("node:fs");
+    const entry = store.read(type, name, include);
+    if (entry.empty) return {EV_FILE: "", EV_NOTE: "the include has no file", EV_COUNT: "0"};
     const asked = Number(givenText(signature, "IV_LIMIT"));
     const limit = Number.isInteger(asked) && asked > 0 ? asked : 50;
-    const history = gitObjectHistory(this.store.root, entry.file, limit);
+    const history = gitObjectHistory(store.root, entry.file, limit);
+    const commits = history.available === true ? history.entries : [];
+    let modified = true;
+    try {
+      modified = commits.length === 0 || gitObjectState(store.root, entry.file).status !== "clean";
+    } catch {
+      // A tree git cannot read has only its working version.
+    }
+    let changed = new Date(0);
+    try {
+      changed = statSync(join(store.root, entry.file)).mtime;
+    } catch {
+      // A missing include has no file time.
+    }
+    const state = modified ? "modified" : "clean";
+    const fields = {EV_FILE: String(entry.file ?? ""), EV_STATE: state, EV_CHANGED: changed.toISOString()};
     if (history.available !== true) {
-      return {EV_FILE: String(entry.file ?? ""), EV_NOTE: `no history: ${history.reason}`, EV_COUNT: ""};
+      return {...fields, EV_NOTE: `no history: ${history.reason}`, EV_COUNT: ""};
     }
     return {
-      EV_FILE: String(entry.file ?? ""),
+      ...fields,
       EV_COUNT: String(history.entries.length),
       ET_REVISION: history.entries.map((e) => revisionRow(e)),
     };
   }
 
-  async #revision(type, name, revision) {
+  async #revision(type, name, include, revision, store) {
     const {gitObjectRevisionAt} = await import("./osd-git-history.mjs");
-    const entry = this.store.read(type, name);
-    const found = gitObjectRevisionAt(this.store.root, entry.file, revision);
+    const entry = store.read(type, name, include);
+    const found = gitObjectRevisionAt(store.root, entry.file, revision);
     return {EV_SOURCE: found.source, EV_FILE: found.path, EV_VERSION: revision.toLowerCase().slice(0, 12)};
   }
 
-  #read(type, name, include) {
-    const read = this.store.read(type, name, include);
+  #read(type, name, include, store) {
+    const read = store.read(type, name, include);
     return {
       EV_SOURCE: read.source,
       EV_FILE: String(read.file ?? ""),
       EV_PACKAGE: String(read.package ?? ""),
       EV_WRITABLE: read.writable === false ? "" : "X",
-      EV_VERSION: this.store.stateOf(read).version,
-      ET_OBJECT: [this.#row(read)],
+      EV_VERSION: store.stateOf(read).version,
+      ET_OBJECT: [this.#row(read, store)],
     };
   }
 
@@ -443,6 +463,8 @@ const EMPTY = {
   EV_NOTE: "",
   EV_SOURCE: "",
   EV_FILE: "",
+  EV_STATE: "",
+  EV_CHANGED: "",
   EV_PACKAGE: "",
   EV_VERSION: "",
   EV_WRITABLE: "",
@@ -477,5 +499,6 @@ function revisionRow(entry) {
     DATE: valid ? iso.slice(0, 10).replace(/-/g, "") : "00000000",
     TIME: valid ? iso.slice(11, 19).replace(/:/g, "") : "000000",
     SUBJECT: String(entry.subject ?? "").slice(0, 80),
+    SUBJECT_FULL: String(entry.subject ?? ""),
   };
 }
