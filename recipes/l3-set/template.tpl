@@ -1346,14 +1346,11 @@ CLASS {{class}} IMPLEMENTATION.
 {{/params}}
 {{#killable}}
     " the kill switch: the pile goes back to PLANNED without a job and its
-    " attempt is not spent; resume( ) or the doctor submits it again
+    " submit stays counted; resume( ) or the doctor submits it again
     IF killed( ) = abap_true.
       ls_pile-status = 'PLANNED'.
       ls_pile-reason = 'KILLED'.
       CLEAR: ls_pile-job_name, ls_pile-job_count.
-      IF ls_pile-attempt > 0.
-        ls_pile-attempt = ls_pile-attempt - 1.
-      ENDIF.
       GET TIME STAMP FIELD ls_pile-ended.
       save_pile( ls_pile ).
       rs_rule-status = 'KILLED'.
@@ -2630,11 +2627,11 @@ CLASS {{class}} IMPLEMENTATION.
         ls_pile-status = 'FAILED'.
         ls_pile-ended = iv_now.
       ENDIF.
-      " the retry budget: ATTEMPT counts the submits, c_retry_max the ones after the first
-      IF ls_pile-attempt > {{#settings.retry_max}}gs_settings-vals-retry_max{{/settings.retry_max}}{{^settings.retry_max}}c_retry_max{{/settings.retry_max}}.
-        CONTINUE.
-      ENDIF.
       IF ls_pile-status = 'FAILED'.
+        " cap failed retries only; operator-released PLANNED piles keep submit history
+        IF ls_pile-attempt > {{#settings.retry_max}}gs_settings-vals-retry_max{{/settings.retry_max}}{{^settings.retry_max}}c_retry_max{{/settings.retry_max}}.
+          CONTINUE.
+        ENDIF.
         IF due( is_pile = ls_pile iv_now = iv_now iv_force = iv_force ) = abap_false.
           CONTINUE.
         ENDIF.

@@ -419,8 +419,8 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
     });
 
     it("mutant: the retry budget ignored: a fourth submit", async () => {
-      const {resubmits} = await mutant("zcl_l3_fleet2_m_budget", mutate("      IF ls_pile-attempt > gs_settings-vals-retry_max.\n        CONTINUE.\n      ENDIF.\n      IF ls_pile-status = 'FAILED'.\n",
-        "      IF ls_pile-status = 'FAILED'.\n"), () => dumpProblems({times: Infinity}));
+      const {resubmits} = await mutant("zcl_l3_fleet2_m_budget", mutate("        IF ls_pile-attempt > gs_settings-vals-retry_max.\n          CONTINUE.\n        ENDIF.\n",
+        ""), () => dumpProblems({times: Infinity}));
       expect(resubmits).to.be.greaterThan(2);
     });
 
@@ -749,7 +749,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
       const outcomes = await drainAndWork();
       if (outcomes.some((o) => o !== "completed")) problems.push(`the killed jobs ended ${JSON.stringify(outcomes)}, not completed`);
       const piles = plan(run, 1);
-      if (piles.some((p) => p.status !== "PLANNED" || p.job || p.attempt !== 0)) problems.push(`stage 1 while killed: ${JSON.stringify(piles)}`);
+      if (piles.some((p) => p.status !== "PLANNED" || p.job || p.attempt !== 1)) problems.push(`stage 1 while killed: ${JSON.stringify(piles)}`);
       if (JSON.stringify(gates(run)) !== JSON.stringify(["OPEN", "WAITING"])) problems.push(`gates while killed: ${JSON.stringify(gates(run))}`);
       const other = await runSet({day: "20261002"});
       if (other.status !== "KILLED") problems.push(`a run while killed is ${other.status}`);

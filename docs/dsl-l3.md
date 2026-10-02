@@ -1012,8 +1012,10 @@ schedule, `P_MODE = 'H'` is the doctor's job, one `doctor( )`.
 ### Retries and resume
 
 Piles are the checkpoints, and a `DONE` pile is never run again. `submit( )` makes a pile's first
-`ATTEMPT` 1. A pile is submitted again when it is `FAILED`, or `PLANNED` without a job, and its
-`ATTEMPT` is at most `c_retry_max`: the first submit and `retry.max` more. A `FAILED` pile is due
+`ATTEMPT` 1. A `FAILED` pile is submitted again only when its `ATTEMPT` is at most
+`c_retry_max`: the first submit and `retry.max` more. A `PLANNED` pile without a job can be
+submitted regardless of `ATTEMPT`, including after `continue_glass( )`, `release_pile( )`, or a
+kill switch. Every submit stays counted. A `FAILED` pile is due
 `c_backoff` seconds after it failed (`ENDED`), doubled per attempt it has had (60, 120, 240 s ...,
 at most a week); a `PLANNED` pile without a job once it is stale, counted from the later of its own
 `ENDED` and its gate's `OPENED`. Mode S has no retry: its piles run in one step, and a pile that
@@ -1066,7 +1068,7 @@ pile is final: the doctor never submits it again, and like a `FAILED` one it kee
 being `DONE` (the stage is `PARTIAL` once final, and the stages after it `NOT-RUN`).
 
 **The kill switch.** While `ZOSD_L3_KILL` holds a row of the set: `run( )` answers `KILLED`; a pile
-job checks it before it works, puts its pile back to `PLANNED` without a job (its attempt not spent,
+job checks it before it works, puts its pile back to `PLANNED` without a job (its submit still counted,
 reason `KILLED`) and ends without abort; `advance( )` opens no gate; the doctor and `resume( )`
 answer `KILLED` and change nothing. Deleting the row lets `resume( )` (or the doctor, once the piles
 are stale) submit those piles again, and the run goes on. `collect( )` is unchanged: it makes the run
@@ -1208,7 +1210,7 @@ made the pile `DONE` and filled the worklist); the proof's `teardown` is made ro
 - **`max_alerts` and `kill` are optional**; without them nothing of the fuse or the switch is
   generated.
 - **A killed pile job ends without abort**: an abort would roll back the pile's return to `PLANNED`;
-  the kill does not spend an attempt.
+  the submit remains in `ATTEMPT` history and the kill does not consume the failure retry budget.
 - **`resume( )` takes `iv_bind` and `is_params`**: neither is stored with a run; the doctor submits
   with the manifest's bindings and the set parameters' defaults (a limit, below). It resumes only a
   run that still holds its lock.
@@ -1884,7 +1886,7 @@ what dumps. The ABAP Unit proof does this (`sim_twin`, below).
   with a reason completes the run; (d) a per-pile cap of 1 with two hits: the piles of two keys are
   `HELD` (`PER-PILE`) and write nothing, the others `DONE`; (e) the kill switch after fourteen jobs:
   the rest go back to `PLANNED`, the doctor answers `KILLED` and changes nothing, and once the row is
-  gone `resume( )` completes the run exactly as the uninterrupted twin says (a kill spends no attempt);
+  gone `resume( )` completes the run exactly as the uninterrupted twin says (the killed submits stay counted);
 - the factory's refusals at run time (a production sink not allowed, a replay, a sim autoclose
   without `work=sim`), and a real run of the same runner under the real hash;
 - round 2: a real run's alerts survive the doctor's `RELEASE ALL-FINAL`, a `collect( )` with no

@@ -443,13 +443,26 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
     // What the twin says a finished run is: per pile its status, attempt, the
     // keys it answered and its duration, from the plan rows the run made;
     // stage 2's keys are the worklist's between a pile's bounds.
-    function prediction(run, {configs = (name) => configOf(ruleOf(name)), seed = 42, scale = 1000000, stale = 900, retryMax = 2} = {}) {
+    function prediction(run, {configs = (name) => configOf(ruleOf(name)), seed = 42, scale = 1000000, stale = 900, retryMax = 2, killedAttempts = new Map()} = {}) {
       const shipIds = read("SELECT ship_id FROM zosd_l2_ship ORDER BY ship_id").map((r) => r.ship_id);
       const work = read("SELECT key_value FROM zosd_l3_work WHERE run_id = ? ORDER BY key_value", run).map((r) => r.key_value);
       return pilesOf(run).map((p) => {
         const keys = (p.stage_no === 1 ? shipIds : work).filter((k) => k >= p.range_low && k <= p.range_high);
         const config = configs(p.rule_name);
-        const pred = predictPile(config, {run, rule: p.rule_name, pile: p.pile_no, seed, scale, stale}, keys, {filter: p.stage_no === 1, retryMax});
+        let pred = predictPile(config, {run, rule: p.rule_name, pile: p.pile_no, seed, scale, stale}, keys, {filter: p.stage_no === 1, retryMax});
+        const killedAttempt = killedAttempts.get(`${p.rule_name}/${p.pile_no}`);
+        if (killedAttempt !== undefined) {
+          // A killed submit has no draw; subsequent work uses the next attempt.
+          const attempts = [];
+          for (let attempt = 1; attempt <= retryMax + 1; attempt++) {
+            if (attempt === killedAttempt) continue;
+            const d = draw(config, {run, rule: p.rule_name, pile: p.pile_no, seed, scale, stale, attempt}, keys, {filter: p.stage_no === 1});
+            attempts.push(d);
+            const done = d.outcome === "OK" || d.outcome === "SLOW";
+            pred = {status: done ? "DONE" : "FAILED", attempt, final: d, attempts};
+            if (done) break;
+          }
+        }
         return {p, keys, config, pred};
       });
     }
@@ -1064,8 +1077,9 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       }
       expect(lockRow().status).to.equal("RELEASED");
       expect(clock.now()).to.be.greaterThan(wall0);
-      // a kill spends no attempt: the run ends as the uninterrupted twin says
-      const predicted = prediction(run, {retryMax: 9});
+      // Killed submits stay counted, but perform no simulated work.
+      const killedAttempts = new Map(killed.map((p) => [`${p.rule_name}/${p.pile_no}`, p.attempt]));
+      const predicted = prediction(run, {retryMax: 9, killedAttempts});
       expect(problemsAgainst(run, predicted)).to.deep.equal([]);
       expect(logProblems(run, predicted)).to.deep.equal([]);
     });
