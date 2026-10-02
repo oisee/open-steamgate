@@ -27,6 +27,8 @@ const EXPECT = {
   ZCL_GOGEN_T_IPOWTEXT: "a42/42a/a42a/a5-/c:10/n:10/5-/2147483648-",
   // Unmeasured: documented integer power and packed assignment rounding.
   ZCL_GOGEN_T_IPOW: "1073741824/overflow/4611686018427387904/3.38/bytes:2/negative:-1/1/0.50/5.0000000000000000E-01/minimum:2147483648-/wide:4611686018427387904/zero-overflow/wide-overflow",
+  // Unmeasured: fixed-x byte fitting and signed integer moves.
+  ZCL_GOGEN_T_SINGLEBYTES: "255/-2147483648/254/255/FE7FFF80",
   // A raised exception retains reference writes and attributes, but discards
   // VALUE output and RETURNING copy-back (the same fixture runs in both hosts).
   // Unmeasured (SAP docs): classic exceptions retain by-reference TABLES writes.
@@ -811,7 +813,8 @@ for (const f of demoCopies) {
   if (readFileSync(theirs, "utf8") !== readFileSync(join(here, "testdata", f), "utf8")) demoDrift.push(f);
 }
 // sorted: zcl_gogen_t_uncaught_read reads what zcl_gogen_t_uncaught left
-const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
+const selected = new Set(process.argv.slice(2).map((name) => name.toUpperCase()));
+const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).filter((name) => !selected.size || selected.has(name.toUpperCase())).sort();
 // the function groups (parity-wave1: ZGOGEN_T_FG, called by ZCL_GOGEN_T_FM)
 // A focused invocation still checks the shared Go/JS oracle rows.
 const selected = process.argv.slice(2).flatMap((arg, i, args) => arg === "--class" ? [args[i + 1]?.toLowerCase()] : []);

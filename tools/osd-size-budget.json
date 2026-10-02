@@ -167,8 +167,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:xbuf": {
-      "lines": 50,
-      "reason": "Owned bytes for statically unescaped xstrings; snapshot boundaries, selected-span reads and allocation-free equal-length stores. Includes release of oversized capacity on small assignments. No abap or emitter budget increase."
+      "lines": 79,
+      "reason": "Owned xstring read-into and fixed-byte store paths; bounds validated before mutation. The abap and emitter budgets stay unchanged."
     },
     "tools/adt-documents.mjs": {
       "lines": 1621,
@@ -489,6 +489,10 @@
     "go:intarith": {
       "lines": 120,
       "reason": "Native checked int8 arithmetic and overflow fallback for integral packed trees; go/abap shrinks, existing ceilings unchanged."
+    },
+    "go:xsmall": {
+      "lines": 26,
+      "reason": "Inline unescaped x(1..8) fitting and integer moves, independent of abap."
     }
   },
   "readmeMissing": [

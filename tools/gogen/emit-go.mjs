@@ -17,7 +17,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
   + "uint32 uint64 uintptr true false nil iota me s math abap").split(" "));
 
 let exportedFields = false, OWNERSHIP;
-const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), "hXbuf.Buffer") : goType(v.type);
+const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
 export const ident = (name) => {
   // INTF~ATTR, an interface's attribute in the object, keeps the ~ apart
   // from the _ of an attribute of the class's own
@@ -921,8 +921,8 @@ function method(cls, m) {
   // emitter's locals do; before (ultra/packs, ZCL_GOGEN_T_BYTECAT) an x never
   // assigned read as zero bytes long
   for (const l of m.locals) {
-    const z = zero(l.type);
-    lines.push(isGoZero(z) ? `\tvar ${ident(l.name)} ${ownedType(l)}` : `\tvar ${ident(l.name)} ${goType(l.type)} = ${z}`, `\t_ = ${ident(l.name)}`);
+    const z = OWNERSHIP.declarations.has(l) && l.type.k === "x" ? `${ownedType(l)}{}` : zero(l.type);
+    lines.push(isGoZero(z) ? `\tvar ${ident(l.name)} ${ownedType(l)}` : `\tvar ${ident(l.name)} ${ownedType(l)} = ${z}`, `\t_ = ${ident(l.name)}`);
   }
   // the RETURNING parameter starts at its initial value too (the JS emitter's
   // let r = zero(t)); Go's named result starts at Go's zero value
@@ -1188,7 +1188,7 @@ function stmt(st, ctx, d) {
 
 function stmtLines(st, ctx, d) {
   const t = tab(d);
-  const owned = ownedStatement(st, ctx, t, {ownership: OWNERSHIP, expr, place, rowValue});
+  const owned = ownedStatement(st, ctx, t, {ownership: OWNERSHIP, expr, place, rowValue, helper: helperFn});
   if (owned) return owned;
   switch (st.s) {
     case "assign":
@@ -1975,7 +1975,7 @@ const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
 const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
 
 function expr(e, ctx) {
-  const owned = ownedExpression(e, ctx, {ownership: OWNERSHIP, expr, place});
+  const owned = ownedExpression(e, ctx, {ownership: OWNERSHIP, expr, place, helper: helperFn});
   if (owned !== null) return owned;
   switch (e.e) {
     case "static": return place(e, ctx);
