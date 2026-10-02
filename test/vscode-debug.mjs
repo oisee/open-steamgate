@@ -1,8 +1,8 @@
 import {expect} from "chai";
-import {mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {spawn} from "node:child_process";
 import {tmpdir} from "node:os";
-import {dirname, join, relative, resolve} from "node:path";
+import {basename, dirname, join, matchesGlob, relative, resolve} from "node:path";
 import {pathToFileURL, fileURLToPath} from "node:url";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
@@ -13,7 +13,7 @@ import {createRequire} from "node:module";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const {pickInspectorPort, packNameOf} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 const {Launcher} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
-const {debuggerConfiguration, runningAbapSources, breakpointWarning} = createRequire(import.meta.url)("../editors/vscode/lib.js");
+const {debuggerConfiguration, runningAbapSources, breakpointWarning, Osd} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 function decodeVlq(text) {
@@ -185,7 +185,8 @@ ENDCLASS.`;
       const attach = debuggerConfiguration(9341, {root: home, storageDir: storage,
         layers: [{folder: workspace, srcDir: workspaceSource}]});
       expect(attach.outFiles).to.deep.equal([`${generation}/**/*.mjs`]);
-      expect(attach.resolveSourceMapLocations).to.deep.equal([`${generation}/**`, "!**/node_modules/**"]);
+      expect(attach.resolveSourceMapLocations).to.deep.equal(
+        [...new Set([`${join(home, "build")}/**`, `${realpathSync(join(home, "build"))}/**`]), "!**/node_modules/**"]);
       expect(attach.pauseForSourceMap).to.equal(true);
       expect(attach.sourceMapPathOverrides[`${dirname(mapped)}/*`]).to.equal(`${workspaceSource}/*`);
       expect(attach.sourceMapPathOverrides[`file://${packSource}/*`]).to.equal(`${workspaceSource}/*`);
@@ -399,6 +400,152 @@ ENDCLASS.`;
   });
 });
 
+// js-debug reads a script's source map only when the map's own location
+// matches resolveSourceMapLocations (positive globs, `!` excludes, dot files
+// included). The same rule, so a test can ask it without js-debug.
+function sourceMapAllowed(config, mapFile) {
+  const file = mapFile.replaceAll("\\", "/");
+  const patterns = config.resolveSourceMapLocations;
+  return patterns.some((p) => !p.startsWith("!") && matchesGlob(file, p)) &&
+    !patterns.some((p) => p.startsWith("!") && matchesGlob(file, p.slice(1)));
+}
+
+describe("VS Code debugger configuration: which generations' maps js-debug may read", function () {
+  it("predicts the live generation but resolves maps of every generation and of a warm swap", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-debug-generations-"));
+    try {
+      const home = join(dir, "home");
+      const booted = join(home, "build", "by-input", "booted", "output");
+      const live = join(home, "build", "by-input", "live", "output");
+      const hot = join(home, "build", "hot", "live");
+      for (const folder of [booted, live, hot]) mkdirSync(folder, {recursive: true});
+      symlinkSync(join(home, "build", "by-input", "live"), join(home, "build", "live"), "dir");
+      symlinkSync(join("build", "live", "output"), join(home, "output"), "dir");
+      const config = debuggerConfiguration(9229, {root: home});
+      const real = (file) => join(realpathSync(dirname(file)), basename(file));
+      expect(config.outFiles).to.deep.equal([`${realpathSync(live).replaceAll("\\", "/")}/**/*.mjs`]);
+      // The serving process booted from another generation than the one that
+      // is live now (a build ahead of the recycle, or a warm swap that only
+      // replaced the changed modules): its maps must still be read.
+      expect(sourceMapAllowed(config, real(join(booted, "zcl_osd_fleet_report.clas.mjs.map")))).to.equal(true);
+      expect(sourceMapAllowed(config, real(join(live, "zcl_zosd_fleet_dpc_ext.clas.mjs.map")))).to.equal(true);
+      expect(sourceMapAllowed(config, real(join(hot, "zcl_zosd_fleet_dpc_ext.clas.mjs.map")))).to.equal(true);
+      expect(sourceMapAllowed(config, join(home, "node_modules", "@abaplint", "runtime", "build", "x.js.map"))).to.equal(false);
+      // inside the allowed build/ tree, so only the node_modules exclusion can refuse it
+      expect(sourceMapAllowed(config, join(realpathSync(live), "node_modules", "x", "y.js.map"))).to.equal(false);
+      // Without a root the profile stays portable and still covers the build.
+      expect(debuggerConfiguration(9229).resolveSourceMapLocations)
+        .to.deep.equal(["${workspaceFolder}/build/**", "!**/node_modules/**"]);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it("resolves maps from a generation store that build/ only links to", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-debug-store-link-"));
+    try {
+      const home = join(dir, "home");
+      const store = join(dir, "shared", "by-input");
+      const hot = join(dir, "shared", "hot");
+      mkdirSync(join(store, "booted", "output"), {recursive: true});
+      mkdirSync(hot, {recursive: true});
+      mkdirSync(join(home, "build", "other", "output"), {recursive: true});
+      symlinkSync(store, join(home, "build", "by-input"), "dir");
+      symlinkSync(hot, join(home, "build", "hot"), "dir");
+      symlinkSync(join(home, "build", "other"), join(home, "build", "live"), "dir");
+      const config = debuggerConfiguration(9229, {root: home});
+      expect(sourceMapAllowed(config, join(realpathSync(store), "booted", "output", "x.clas.mjs.map"))).to.equal(true);
+      expect(sourceMapAllowed(config, join(realpathSync(store), "booted", "output", "node_modules", "x.js.map"))).to.equal(false);
+      expect(sourceMapAllowed(config, join(realpathSync(store), "..", "elsewhere", "x.clas.mjs.map"))).to.equal(false);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it("resolves maps through a build folder that is itself a link", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-debug-build-link-"));
+    try {
+      const home = join(dir, "home");
+      const store = join(dir, "store");
+      mkdirSync(join(store, "by-input", "a", "output"), {recursive: true});
+      mkdirSync(home);
+      symlinkSync(store, join(home, "build"), "dir");
+      symlinkSync(join(store, "by-input", "a"), join(store, "live"), "dir");
+      const config = debuggerConfiguration(9229, {root: home});
+      expect(sourceMapAllowed(config, join(realpathSync(store), "by-input", "a", "output", "x.clas.mjs.map"))).to.equal(true);
+      expect(sourceMapAllowed(config, join(home, "build", "by-input", "a", "output", "x.clas.mjs.map"))).to.equal(true);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+});
+
+describe("VS Code debugger transport: a generation goes live ahead of the serving process", function () {
+  this.timeout(240000);
+
+  // osg-demo on 0.5.1467: "Run as ABAP Application with debugger" and
+  // "Attach debugger and call" showed a bound breakpoint and never stopped.
+  // The serving process ran modules from the generation it booted from while
+  // build/live already named another, and the attach configuration allowed
+  // source maps from the live generation only. Read the real script URLs off
+  // the running process's inspector and check them against the configuration
+  // the extension builds at that moment.
+  // The system serves from this checkout as it is; nothing here moves its
+  // build/live. The "other generation goes live" is staged in a temp home
+  // whose build/ reuses this checkout's generation store read-only (a link
+  // to build/by-input) and whose own build/live names a different, empty
+  // generation, so the configuration is built exactly as for a home where
+  // live has moved on while the serving process kept the one it booted.
+  it("keeps the classrun class and the DPC the process loaded inside resolveSourceMapLocations", async () => {
+    const storageDir = mkdtempSync(join(tmpdir(), "osd-debug-ahead-"));
+    const dir = mkdtempSync(join(tmpdir(), "osd-debug-ahead-home-"));
+    const launcher = new Launcher({osdHome: ROOT, storageDir, workspaceFolders: [], warm: "off"});
+    let client;
+    try {
+      const {port} = await launcher.start();
+      const rootLive = readlinkSync(join(ROOT, "build", "live"));
+      const osdClient = new Osd(`http://127.0.0.1:${port}`);
+      // The class run and the OData call load both modules before any debugger.
+      expect((await osdClient.classrun("ZCL_OSD_CLASSRUN_DEMO")).text).to.be.a("string");
+      expect((await fetch(`http://127.0.0.1:${port}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json`)).status).to.equal(200);
+      const inspectPort = await launcher.openInspector();
+      const target = await inspectorTarget(inspectPort);
+      const socket = new WebSocket(target.webSocketDebuggerUrl);
+      await new Promise((resolve, reject) => {
+        socket.addEventListener("open", resolve, {once: true});
+        socket.addEventListener("error", reject, {once: true});
+      });
+      client = new InspectorClient(socket);
+      await client.send("Debugger.enable");
+      const loaded = (name) => client.events.find((event) => event.method === "Debugger.scriptParsed" &&
+        event.params.url.endsWith(`/${name}.clas.mjs`))?.params;
+      const scripts = ["zcl_osd_classrun_demo", "zcl_zstg_demo_dpc_ext"].map(loaded);
+      expect(scripts.every(Boolean), "both modules are loaded in the serving process").to.equal(true);
+      // a home where another generation is live, over the same store
+      const home = join(dir, "home");
+      const other = join(home, "build", "other", "output");
+      mkdirSync(other, {recursive: true});
+      symlinkSync(join(ROOT, "build", "by-input"), join(home, "build", "by-input"), "dir");
+      symlinkSync(dirname(other), join(home, "build", "live"), "dir");
+      const config = debuggerConfiguration(inspectPort, {root: home, storageDir, layers: launcher.layers});
+      expect(config.outFiles[0]).to.equal(`${realpathSync(other)}/**/*.mjs`);
+      for (const script of scripts) {
+        const moduleFile = fileURLToPath(script.url);
+        expect(moduleFile.startsWith(realpathSync(join(ROOT, "build", "by-input")))).to.equal(true);
+        const mapFile = script.sourceMapURL.startsWith("file:")
+          ? fileURLToPath(script.sourceMapURL) : resolve(dirname(moduleFile), script.sourceMapURL);
+        expect(sourceMapAllowed(config, mapFile), `${mapFile} against ${config.resolveSourceMapLocations}`).to.equal(true);
+      }
+      expect(readlinkSync(join(ROOT, "build", "live")), "this checkout's live link is untouched").to.equal(rootLive);
+    } finally {
+      client?.socket.close();
+      await launcher.stop();
+      rmSync(dir, {recursive: true, force: true});
+      rmSync(storageDir, {recursive: true, force: true});
+    }
+  });
+});
+
 describe("VS Code debugger transport: serving DPC after earlier activity", function () {
   this.timeout(180000);
 
@@ -455,31 +602,10 @@ describe("VS Code debugger transport: serving DPC after earlier activity", funct
 });
 
 describe("VS Code controller: Attach and call across a generation switch", function () {
-  it("asks before a debugger call with no enabled DPC breakpoint, and honours both choices", async () => {
-    const commands = new Map();
-    const warnings = [];
-    const requests = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (url) => {
-      requests.push(url);
-      return {status: 200, text: async () => JSON.stringify({d: {results: []}})};
-    };
-    class SourceBreakpoint {
-      constructor(file, enabled) { this.enabled = enabled; this.location = {uri: {scheme: "file", fsPath: file}}; }
-    }
-    const api = {
-      SourceBreakpoint,
-      TreeItem: class {},
-      EventEmitter: class { event = () => ({dispose() {}}); fire() {} },
-      debug: {breakpoints: [new SourceBreakpoint("/w/zcl_demo_dpc_ext.clas.abap", false)]},
-      ViewColumn: {Beside: 2},
-      commands: {registerCommand(name, handler) { commands.set(name, handler); return {dispose() {}}; }},
-      workspace: {getConfiguration: () => ({get: (_key, fallback) => fallback})},
-      window: {showWarningMessage: async (message, ...choices) => {
-        warnings.push({message, choices});
-        return warnings.length === 1 ? "Cancel" : "Continue without stopping";
-      }, createWebviewPanel: () => ({webview: {html: ""}})},
-    };
+  // osg-demo under Xvfb (0.5.1467): nobody answers a notification, and the
+  // breakpoint's URI is the workspace copy while the command may name the
+  // same source through another path. Neither may stop the call.
+  function loadEntitySetCommands(api) {
     const require = createRequire(import.meta.url);
     const Module = require("node:module");
     const extensionPath = require.resolve("../editors/vscode/extension.js");
@@ -489,27 +615,162 @@ describe("VS Code controller: Attach and call across a generation switch", funct
       if (request === "vscode") return api;
       return originalLoad.call(this, request, parent, isMain);
     };
-    let registerEntitySetCommands;
-    try { ({registerEntitySetCommands} = require(extensionPath)); }
+    try { return require(extensionPath).registerEntitySetCommands; }
     finally { Module._load = originalLoad; }
+  }
+
+  function entitySetApi(breakpoints, warnings, commands) {
+    class SourceBreakpoint {
+      constructor(file, enabled = true) { this.enabled = enabled; this.location = {uri: {scheme: "file", fsPath: file}}; }
+    }
+    return {
+      SourceBreakpoint,
+      TreeItem: class {},
+      EventEmitter: class { event = () => ({dispose() {}}); fire() {} },
+      debug: {breakpoints: breakpoints.map(([file, enabled]) => new SourceBreakpoint(file, enabled))},
+      ViewColumn: {Beside: 2},
+      commands: {registerCommand(name, handler) { commands.set(name, handler); return {dispose() {}}; }},
+      workspace: {getConfiguration: () => ({get: (_key, fallback) => fallback})},
+      // an unattended UI: a notification is shown and never answered
+      window: {showWarningMessage: (message, ...choices) => { warnings.push({message, choices}); return new Promise(() => {}); },
+        createWebviewPanel: () => ({webview: {html: ""}})},
+    };
+  }
+
+  async function withFetch(requests, body) {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url) => {
+      requests.push(url);
+      return {status: 200, text: async () => JSON.stringify({d: {results: []}})};
+    };
+    try { return await body(); } finally { globalThis.fetch = originalFetch; }
+  }
+
+  it("calls without stopping, and says so, when no enabled DPC breakpoint matches: no prompt to answer", async () => {
+    const commands = new Map();
+    const warnings = [];
+    const requests = [];
+    const notes = [];
+    const api = entitySetApi([["/w/zcl_demo_dpc_ext.clas.abap", false]], warnings, commands);
+    const registerEntitySetCommands = loadEntitySetCommands(api);
     const calls = [];
     const controller = {attachSystemDebugger: async () => { calls.push("attach"); return true; },
-      waitForDebuggerReady: async () => { calls.push("ready"); return true; }};
-    try {
+      waitForDebuggerReady: async () => { calls.push("ready"); return true; }, debugNote: (line) => notes.push(line)};
+    await withFetch(requests, async () => {
       registerEntitySetCommands({subscriptions: []}, {appendLine() {}}, undefined, controller);
       const command = commands.get("osd.callEntitySetWithDebugger");
       const args = {service: "ZDEMO_SRV", set: "TravelSet", kind: "get_entityset", file: "/w/zcl_demo_dpc_ext.clas.abap"};
-      await command(args);
-      expect(requests).to.deep.equal([]);
-      expect(calls).to.deep.equal([]);
-      await command(args);
-      expect(warnings).to.have.length(2);
-      expect(warnings[0].message).to.include("no enabled breakpoint");
-      expect(warnings[0].choices).to.deep.equal(["Continue without stopping", "Cancel"]);
-      expect(calls).to.deep.equal(["attach", "ready"]);
-      expect(requests).to.have.length(1);
+      const done = command(args);
+      const outcome = await Promise.race([done.then(() => "done"), new Promise((resolve) => setTimeout(() => resolve("blocked"), 500))]);
+      expect(outcome, "the command must not wait for an answer nobody gives").to.equal("done");
+    });
+    expect(warnings).to.have.length(1);
+    expect(warnings[0].message).to.include("no enabled breakpoint");
+    expect(warnings[0].choices).to.deep.equal([]);
+    expect(notes.some((line) => line.includes("no enabled breakpoint matches"))).to.equal(true);
+    expect(calls).to.deep.equal(["attach", "ready"]);
+    expect(requests).to.have.length(1);
+  });
+
+  it("matches a DPC breakpoint set through a link or in the running copy, never in a shadowed copy", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-bp-identity-"));
+    try {
+      const real = join(dir, "osg-demo", "src");
+      mkdirSync(real, {recursive: true});
+      writeFileSync(join(real, "zcl_zosd_fleet_dpc_ext.clas.abap"), "");
+      symlinkSync(join(dir, "osg-demo"), join(dir, "linked"), "dir");
+      const viaLink = join(dir, "linked", "src", "zcl_zosd_fleet_dpc_ext.clas.abap");
+      // the copy the running generation was compiled from, as the command's
+      // file may name the store's path or another layer's
+      const runningCopy = join(dir, "packs", "ws-osg-demo", "src", "zcl_zosd_fleet_dpc_ext.clas.abap");
+      // a shadowed copy: same object, never compiled (packs/, .worktrees, .local/lars, output/)
+      const shadowed = join(dir, ".local", "lars", "src", "zcl_zosd_fleet_dpc_ext.clas.abap");
+      const running = {files: new Map([[runningCopy, runningCopy]])};
+      for (const [breakpointFile, counts] of [[viaLink, true], [runningCopy, true], [shadowed, false]]) {
+        const commands = new Map();
+        const warnings = [];
+        const requests = [];
+        const api = entitySetApi([[breakpointFile, true]], warnings, commands);
+        const registerEntitySetCommands = loadEntitySetCommands(api);
+        const waited = [];
+        const controller = {attachSystemDebugger: async () => true, runningSources: () => running,
+          waitForDebuggerReady: async (file) => { waited.push(file); return true; }, debugNote() {}};
+        await withFetch(requests, async () => {
+          registerEntitySetCommands({subscriptions: []}, {appendLine() {}}, undefined, controller);
+          await commands.get("osd.callEntitySetWithDebugger")({service: "ZOSD_FLEET_SRV", set: "ShipSet",
+            kind: "get_entityset", file: join(real, "zcl_zosd_fleet_dpc_ext.clas.abap")});
+        });
+        expect(warnings.length, `${breakpointFile} ${counts ? "is" : "is not"} the source that runs`).to.equal(counts ? 0 : 1);
+        expect(waited).to.deep.equal([join(real, "zcl_zosd_fleet_dpc_ext.clas.abap")]);
+        expect(requests).to.have.length(1);
+      }
     } finally {
-      globalThis.fetch = originalFetch;
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it("is ready once js-debug's child session verifies the breakpoint, which its attach session never does", async () => {
+    // Measured with the js-debug DAP server: the attach session named
+    // "OSD: ABAP (<port>)" answers every setBreakpoints unverified and sends
+    // no breakpoint event; only the child it starts ("Remote Process [0]")
+    // binds and stops. 0.5.1467 asked the named session only, waited 15 s,
+    // and then dropped the call.
+    const dir = mkdtempSync(join(tmpdir(), "osd-bp-family-"));
+    try {
+      const real = join(dir, "osg-demo", "src");
+      mkdirSync(real, {recursive: true});
+      const file = join(real, "zcl_osd_fleet_report.clas.abap");
+      writeFileSync(file, "");
+      symlinkSync(join(dir, "osg-demo"), join(dir, "linked"), "dir");
+      class SourceBreakpoint {
+        constructor(at) { this.enabled = true; this.location = {uri: {scheme: "file", fsPath: at}}; }
+      }
+      const starts = [];
+      const lines = [];
+      const api = {
+        SourceBreakpoint,
+        EventEmitter: class { event = () => ({dispose() {}}); fire() {} },
+        TreeItem: class {},
+        ViewColumn: {Beside: 2},
+        commands: {registerCommand() { return {dispose() {}}; }},
+        workspace: {onDidChangeWorkspaceFolders: () => ({dispose() {}}), getConfiguration: () => ({get: (_key, fallback) => fallback})},
+        window: {setStatusBarMessage: () => ({dispose() {}}), createWebviewPanel: () => ({webview: {html: ""}})},
+        debug: {
+          // the breakpoint was set on the file opened through the link
+          breakpoints: [new SourceBreakpoint(join(dir, "linked", "src", "zcl_osd_fleet_report.clas.abap"))],
+          onDidStartDebugSession(fn) { starts.push(fn); return {dispose() {}}; },
+          onDidTerminateDebugSession() { return {dispose() {}}; },
+        },
+      };
+      const require = createRequire(import.meta.url);
+      const Module = require("node:module");
+      const extensionPath = require.resolve("../editors/vscode/extension.js");
+      delete require.cache[extensionPath];
+      const originalLoad = Module._load;
+      Module._load = function (request, parent, isMain) {
+        if (request === "vscode") return api;
+        return originalLoad.call(this, request, parent, isMain);
+      };
+      let SystemController;
+      try { ({SystemController} = require(extensionPath)); }
+      finally { Module._load = originalLoad; }
+      const controller = new SystemController({subscriptions: []}, {appendLine: (line) => lines.push(line)});
+      controller.launcher = {state: "running", inspectPort: 9402, osdHome: dir};
+      const parent = {id: "attach", name: "OSD: ABAP (9402)",
+        getDebugProtocolBreakpoint: async () => ({verified: false, message: "breakpoint.provisionalBreakpoint"})};
+      const child = {id: "target", name: "Remote Process [0]", parentSession: parent,
+        getDebugProtocolBreakpoint: async () => ({verified: true})};
+      starts.forEach((fn) => fn(parent));
+      starts.forEach((fn) => fn(child));
+      expect(await controller.waitForDebuggerReady(file, 1000)).to.equal(true);
+      expect(lines.some((line) => line.includes("matches") && line.includes("(realpath)"))).to.equal(true);
+      expect(lines.some((line) => line.includes("ready after") && line.includes("Remote Process [0]"))).to.equal(true);
+      // and a wait that gives up says why
+      child.getDebugProtocolBreakpoint = async () => ({verified: false});
+      expect(await controller.waitForDebuggerReady(file, 120)).to.equal(false);
+      expect(lines.at(-1)).to.match(/gave up waiting after 120 ms: sessions .*verified: false/);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
     }
   });
 
@@ -604,7 +865,7 @@ describe("VS Code controller: Attach and call across a generation switch", funct
       expect(finished).to.equal(true);
       expect(controller.activeSystemSessionId).to.equal("new");
       expect(controller.debuggerState.systemPort).to.equal(9401);
-      expect(output).to.deep.equal([]);
+      expect(output.filter((line) => /gave up|failed|could not|without/.test(line))).to.deep.equal([]);
     } finally {
       globalThis.fetch = originalFetch;
       rmSync(home, {recursive: true, force: true});

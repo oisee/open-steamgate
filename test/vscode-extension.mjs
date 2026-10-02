@@ -198,7 +198,9 @@ describe("editors/vscode: the extension's logic", function () {
   it("builds the attach profile and keeps a supervised restart on one debugger session", () => {
     const config = debuggerConfiguration(9341);
     expect(config).to.include({name: "OSD: ABAP (9341)", type: "node", request: "attach", address: "127.0.0.1", port: 9341, restart: true, timeout: 30000});
-    expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/live/output/**", "!**/node_modules/**"]);
+    // Maps are read from the whole build: the serving process can run a
+    // generation other than the live one (docs/debugging-abap.md).
+    expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/**", "!**/node_modules/**"]);
     expect(config.outFiles).to.deep.equal(["${workspaceFolder}/build/live/output/**/*.mjs"]);
     expect(config.pauseForSourceMap).to.equal(true);
     expect(debuggerConfiguration(9342, {target: "unit", restart: false}))
@@ -224,7 +226,8 @@ describe("editors/vscode: the extension's logic", function () {
       symlinkSync(second, path.join(home, "output"), "dir");
       const swapped = debuggerConfiguration(9341, {root: home});
       expect(swapped.outFiles).to.deep.equal([`${second}/**/*.mjs`]);
-      expect(swapped.resolveSourceMapLocations).to.deep.equal([`${second}/**`, "!**/node_modules/**"]);
+      expect(swapped.resolveSourceMapLocations).to.deep.equal(
+        [...new Set([`${build}/**`, `${realpathSync(build)}/**`]), "!**/node_modules/**"]);
     } finally {
       rmSync(home, {recursive: true, force: true});
     }
@@ -916,7 +919,8 @@ describe("editors/vscode: the extension's logic", function () {
     const waiting = controller.waitForDebuggerReady(file, 1000);
     await new Promise((resolve) => setTimeout(resolve, 20));
     cancel();
-    expect(await waiting).to.equal(false);
+    // a cancel is not a give-up: the caller sends nothing
+    expect(await waiting).to.equal("cancelled");
   });
 
   it("reports an absent enabled DPC breakpoint, but verifies one when present", async () => {
@@ -931,12 +935,13 @@ describe("editors/vscode: the extension's logic", function () {
       getDebugProtocolBreakpoint: async () => ({verified})});
     api.debug.breakpoints = [new api.SourceBreakpoint(file, false)];
     expect(await controller.waitForDebuggerReady(file, 100, {reportMissingBreakpoint: true})).to.equal(true);
-    expect(output).to.deep.equal([`osd debugger: no enabled breakpoint in ${file}; calling without a verified breakpoint`]);
+    const said = () => output.filter((line) => line.includes("calling without a verified breakpoint"));
+    expect(said()).to.deep.equal([`osd debugger: no enabled breakpoint in ${file}; calling without a verified breakpoint`]);
     api.debug.breakpoints = [new api.SourceBreakpoint(file)];
     expect(await controller.waitForDebuggerReady(file, 80, {reportMissingBreakpoint: true})).to.equal(false);
     verified = true;
     expect(await controller.waitForDebuggerReady(file, 100, {reportMissingBreakpoint: true})).to.equal(true);
-    expect(output).to.have.length(1);
+    expect(said()).to.have.length(1);
   });
 
   it("serializes a generation refresh with a following attach and ignores the old termination", async () => {
@@ -982,22 +987,127 @@ describe("editors/vscode: the extension's logic", function () {
     }
   });
 
-  it("classrun with debugger waits for its class breakpoint before sending the run", async () => {
+  it("classrun with debugger waits for its class breakpoint, then sends the run even when the wait gives up", async () => {
     const api = debugApi();
-    api.window.showWarningMessage = () => {};
+    // an unattended run: nobody ever answers a notification
+    api.window.showWarningMessage = () => new Promise(() => {});
     const {classrunObject} = loadExtension(api);
     const lines = [];
+    const notes = [];
     const output = {show() {}, appendLine(line) { lines.push(line); }};
     const calls = [];
     const options = {attach: async () => true,
-      controller: {waitForDebuggerReady: async (file) => { calls.push(file); return false; }},
+      controller: {waitForDebuggerReady: async (file) => { calls.push(file); return false; },
+        debugNote: (line) => notes.push(line)},
       client: () => ({classrun: async () => { calls.push("run"); return {text: "ok", ms: 1}; }})};
     await classrunObject("ZCL_X", output, true, "/w/src/zcl_x.clas.abap", options);
-    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap"]);
+    // 0.5.1467 returned here: nothing sent, nothing in any output channel
+    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap", "run"]);
+    expect(notes).to.include("classrun ZCL_X: running without a verified breakpoint");
     options.controller.waitForDebuggerReady = async (file) => { calls.push(file); return true; };
     await classrunObject("ZCL_X", output, true, "/w/src/zcl_x.clas.abap", options);
-    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap", "/w/src/zcl_x.clas.abap", "run"]);
-    expect(lines).to.include("ok");
+    expect(calls).to.deep.equal(["/w/src/zcl_x.clas.abap", "run", "/w/src/zcl_x.clas.abap", "run"]);
+    expect(lines.filter((line) => line === "ok")).to.have.length(2);
+  });
+
+  it("waits for one verified breakpoint per object, and never for a shadowed copy of it", async () => {
+    const api = debugApi();
+    const file = "/w/src/zcl_demo_dpc_ext.clas.abap";
+    const shadow = "/w/.local/lars/src/zcl_demo_dpc_ext.clas.abap";
+    const lines = [];
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {appendLine: (line) => lines.push(line)});
+    controller.launcher = fakeLauncher({inspectPort: 9401, osdHome: undefined});
+    // two breakpoints in the file (one on a line that never binds), and one
+    // in a never-compiled copy of the same class
+    const bound = new api.SourceBreakpoint(file);
+    const neverBinds = new api.SourceBreakpoint(file);
+    const inShadow = new api.SourceBreakpoint(shadow);
+    api.debug.breakpoints = [bound, neverBinds, inShadow];
+    controller.debugSessions.add({id: "dpc", name: "OSD: ABAP (9401)",
+      getDebugProtocolBreakpoint: async (bp) => ({verified: bp === bound})});
+    const started = Date.now();
+    expect(await controller.waitForDebuggerReady(file, 1500)).to.equal(true);
+    expect(Date.now() - started, "no wait for the unbound line or the shadow").to.be.lessThan(1000);
+    expect(lines.some((line) => line.includes(`${shadow}:0 is ignored for ${file} (object, not the running copy)`))).to.equal(true);
+  });
+
+  it("a cancelled breakpoint wait sends nothing; a wait that gave up still sends", async () => {
+    const api = debugApi();
+    api.window.showWarningMessage = () => new Promise(() => {});
+    const {classrunObject, WAIT_CANCELLED} = loadExtension(api);
+    expect(WAIT_CANCELLED).to.equal("cancelled");
+    const calls = [];
+    const notes = [];
+    const options = {attach: async () => true,
+      controller: {waitForDebuggerReady: async () => "cancelled", debugNote: (line) => notes.push(line)},
+      client: () => ({classrun: async () => { calls.push("run"); return {text: "ok", ms: 1}; }})};
+    const output = {show() {}, appendLine() {}};
+    await classrunObject("ZCL_X", output, true, "/w/src/zcl_x.clas.abap", options);
+    expect(calls, "cancel must cancel").to.deep.equal([]);
+    expect(notes).to.include("classrun ZCL_X: the wait was cancelled; nothing sent");
+    options.controller.waitForDebuggerReady = async () => false;
+    await classrunObject("ZCL_X", output, true, "/w/src/zcl_x.clas.abap", options);
+    expect(calls).to.deep.equal(["run"]);
+  });
+
+  it("lets a queued debugger step run longer than every bound of an attach added up", () => {
+    const {INSPECTOR_STEP_ESCAPE_MS} = loadExtension(debugApi());
+    // inspector 15 + previous stop 15 + refresh stop 10 + second bound 10 +
+    // refresh start 35 + plain start 35 = 120 s
+    expect(INSPECTOR_STEP_ESCAPE_MS).to.be.greaterThan(120000);
+  });
+
+  it("keeps a start that outlived its bound in flight, so a second attach does not start beside it", async () => {
+    const api = debugApi();
+    let starts = 0;
+    let finish;
+    api.debug.startDebugging = () => { starts++; return new Promise((resolve) => { finish = resolve; }); };
+    const SystemController = loadSystemController(api);
+    const controller = new SystemController(controllerContext(), {appendLine() {}});
+    controller.launcher = fakeLauncher({inspectPort: 9401, inspectorOpen: true});
+    controller.debuggerBounds = {start: 50, stop: 50};
+    expect(await controller.applyDebuggerEvent({type: "system-started", enabled: true, port: 9401})).to.equal(false);
+    controller.debuggerState = {};
+    expect(await controller.applyDebuggerEvent({type: "system-started", enabled: true, port: 9401})).to.equal(false);
+    expect(starts, "one start in flight, not two").to.equal(1);
+    finish(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(controller.debuggerStarts.size, "forgotten once it settles").to.equal(0);
+  });
+
+  it("does not start the new generation's session beside an old one that would not stop", async () => {
+    const api = debugApi();
+    const listeners = {start: [], end: []};
+    api.debug.onDidStartDebugSession = (fn) => { listeners.start.push(fn); return {dispose() {}}; };
+    api.debug.onDidTerminateDebugSession = (fn) => { listeners.end.push(fn); return {dispose() {}}; };
+    const home = mkdtempSync(path.join(tmpdir(), "osd-debug-stuck-stop-"));
+    try {
+      const first = path.join(home, "build", "by-input", "first", "output");
+      const second = path.join(home, "build", "by-input", "second", "output");
+      mkdirSync(first, {recursive: true});
+      mkdirSync(second, {recursive: true});
+      symlinkSync(second, path.join(home, "output"), "dir");
+      const lines = [];
+      const SystemController = loadSystemController(api);
+      const controller = new SystemController(controllerContext(), {appendLine: (line) => lines.push(line)});
+      controller.launcher = fakeLauncher({osdHome: home, inspectPort: 9401, inspectorOpen: true});
+      controller.debuggerBounds = {start: 1000, stop: 80};
+      controller.debuggerState = {systemPort: 9401};
+      controller.debuggerOutputPattern = `${first}/**/*.mjs`;
+      const old = {id: "old", name: "OSD: ABAP (9401)"};
+      listeners.start.forEach((fn) => fn(old));
+      api.debug.stopDebugging = () => new Promise(() => {});
+      const refresh = controller.refreshDebuggerGeneration();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      expect(api.debug.started, "not while the old session is still there").to.have.length(0);
+      listeners.end.forEach((fn) => fn(old));
+      await refresh;
+      expect(api.debug.started).to.have.length(1);
+      expect(lines.some((line) => line.includes("did not stop within 80 ms"))).to.equal(true);
+    } finally {
+      rmSync(home, {recursive: true, force: true});
+    }
   });
 
   it("the debugger on demand says why it cannot attach: not running, or the door refused", async () => {

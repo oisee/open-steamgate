@@ -10,7 +10,7 @@ const vscode = require("vscode");
 const path = require("node:path");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
-const {objectOf, adtObjectOf, fileOf, Osd, outcomes, runActionFor, osdRunCommandLine, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
+const {objectOf, adtObjectOf, breakpointMatches, fileOf, Osd, outcomes, runActionFor, osdRunCommandLine, entitySetLenses, methodAtLine, resultRows, stripMetadata, keyOf,
   readersLensLine, readersLensTitle, readersQuickPickItems, readerFilePattern,
   freestyleTableHtml, freestyleOutputItems, notebookAbapSource, notebookFromJson, notebookToJson, sqlNotebookStarter, htmlEscape,
   hotspotBucket, hotspotColor, hotspotBadge, hotspotHoverText, implementsClassrun,
@@ -355,6 +355,12 @@ function osdDebugEnabled() {
     || /^(1|true)$/.test(process.env.OSD_INSPECT ?? "");
 }
 
+/** waitForDebuggerReady's answer when the person cancelled the wait: the
+ *  command then sends nothing (a give-up after the timeout still sends). */
+const WAIT_CANCELLED = "cancelled";
+/** How long one queued debugger step may hold the next (#inspectorStep). */
+const INSPECTOR_STEP_ESCAPE_MS = 150000;
+
 /** The enabled source breakpoints in .abap files: while there is one, the
  *  debugger is wanted (docs/debugging-abap.md, "On demand"). */
 function abapBreakpoints(breakpoints = vscode.debug.breakpoints ?? [], {enabledOnly = true} = {}) {
@@ -491,6 +497,8 @@ class SystemController {
     this.debuggerState = {};
     this.debuggerStarts = new Map();
     this.debuggerTransition = Promise.resolve();
+    // the bounds of the attach path's VS Code calls, in ms (INSPECTOR_STEP_ESCAPE_MS adds them up)
+    this.debuggerBounds = {start: 35000, stop: 10000};
     this.debuggerOutputPattern = undefined;
     this.activeSystemSessionId = undefined;
     // The stable VS Code API has no list of running debug sessions (only
@@ -502,10 +510,17 @@ class SystemController {
         this.debugSessions.add(session);
         if (session.name === `OSD: ABAP (${this.launcher?.inspectPort})`)
           this.activeSystemSessionId = session.id;
+        if (/^OSD: /.test(session.name ?? "") || this.#inFamilyOfOsd(session)) {
+          this.#debugLog(`session started: ${session.name} (${session.id})` +
+            (session.parentSession ? ` under ${session.parentSession.name} (${session.parentSession.id})` : ""));
+        }
       }));
     }
+    this.terminatedSessionIds = new Set();
     context.subscriptions.push(vscode.debug.onDidTerminateDebugSession((session) => {
       this.debugSessions.delete(session);
+      this.terminatedSessionIds.add(session.id);
+      if (this.terminatedSessionIds.size > 64) this.terminatedSessionIds.delete(this.terminatedSessionIds.values().next().value);
       if (this.retiredDebugSessionIds.delete(session.id)) return;
       if (this.activeSystemSessionId !== undefined && session.id === this.activeSystemSessionId &&
           session.name === `OSD: ABAP (${this.debuggerState.systemPort})`) {
@@ -575,6 +590,101 @@ class SystemController {
     return this.launcher;
   }
 
+  /** runningAbapSources() of the serving home, read again only when the
+   *  live generation changes; undefined when there is none. */
+  runningSources() {
+    const launcher = this.launcher;
+    if (launcher?.osdHome === undefined) return undefined;
+    let generation;
+    try { generation = fs.realpathSync(path.join(launcher.osdHome, "output")); } catch { return undefined; }
+    if (this.runningSourcesCache?.generation !== generation) {
+      try {
+        this.runningSourcesCache = runningAbapSources(launcher.osdHome, {storageDir: launcher.storageDir, layers: launcher.layers});
+      } catch {
+        this.runningSourcesCache = undefined;
+      }
+    }
+    return this.runningSourcesCache;
+  }
+
+  /** A line on the "osd system" channel, from a command outside the class. */
+  debugNote(line) {
+    this.#debugLog(line);
+  }
+
+  #debugLog(line) {
+    try { this.output?.appendLine?.(`osd debugger: ${line}`); } catch { /* a closed channel */ }
+  }
+
+  #inFamilyOfOsd(session) {
+    for (let one = session?.parentSession; one !== undefined; one = one.parentSession) {
+      if (/^OSD: /.test(one.name ?? "")) return true;
+    }
+    return false;
+  }
+
+  /** `promise`, or `undefined` once `ms` have passed: no await on the debug
+   *  path may hang a command for good (osg-demo, 0.5.1467: a command stopped
+   *  after "inspector opened" and logged nothing). Logs the start, the end and
+   *  a give-up to the "osd system" channel. */
+  async #bounded(promise, ms, label) {
+    const started = Date.now();
+    this.#debugLog(`${label}: waiting (at most ${ms} ms)`);
+    let timer;
+    const timedOut = Symbol("timeout");
+    try {
+      const value = await Promise.race([Promise.resolve(promise),
+        new Promise((resolve) => { timer = setTimeout(() => resolve(timedOut), ms); })]);
+      if (value === timedOut) {
+        this.#debugLog(`${label}: gave up after ${ms} ms`);
+        return undefined;
+      }
+      this.#debugLog(`${label}: done in ${Date.now() - started} ms`);
+      return value;
+    } catch (error) {
+      this.#debugLog(`${label}: failed after ${Date.now() - started} ms: ${String(error?.message ?? error)}`);
+      return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Resolves true once `session` has terminated (or its stop resolved). */
+  #sessionGone(session, stopping) {
+    return new Promise((resolve) => {
+      const check = setInterval(() => {
+        const sessions = Array.isArray(vscode.debug.sessions) ? vscode.debug.sessions : [...this.debugSessions];
+        if (!sessions.some((one) => one.id === session.id) || this.terminatedSessionIds?.has(session.id)) {
+          clearInterval(check);
+          resolve(true);
+        }
+      }, 100);
+      stopping.then(() => { clearInterval(check); resolve(true); }, () => undefined);
+      setTimeout(() => clearInterval(check), 20000);
+    });
+  }
+
+  #describeConfig(config) {
+    return `${config.name}: outFiles ${JSON.stringify(config.outFiles)}, ` +
+      `resolveSourceMapLocations ${JSON.stringify(config.resolveSourceMapLocations)}`;
+  }
+
+  /** The OSD session named `name` and every session js-debug started under
+   *  it. js-debug's attach session is only a parent: the target is a child
+   *  session ("Remote Process [0]"), and only the child ever verifies a
+   *  breakpoint -- asking the parent alone waits forever. */
+  #sessionFamily(name) {
+    const sessions = this.runningDebugSessions();
+    const roots = sessions.filter((one) => one.name === name);
+    const inFamily = (session) => {
+      for (let one = session; one !== undefined; one = one.parentSession) {
+        if (roots.some((root) => root === one || root.id === one.id)) return true;
+      }
+      return false;
+    };
+    return {root: roots.at(-1), members: sessions.filter(inFamily)};
+  }
+
   /** Running debug sessions: VS Code's own list where a runtime has one,
    *  otherwise the sessions this controller saw start and not yet end. */
   runningDebugSessions() {
@@ -605,13 +715,14 @@ class SystemController {
           this.retiredDebugSessionIds.add(session.id);
           this.debugSessions.delete(session);
           if (session.id === this.activeSystemSessionId) this.activeSystemSessionId = undefined;
-          await vscode.debug.stopDebugging(session);
+          await this.#bounded(vscode.debug.stopDebugging(session), this.debuggerBounds.stop, `stop ${name}`);
         }
         this.debuggerStarts.delete(name);
         this.debuggerOutputPattern = undefined;
         continue;
       }
       if (this.runningDebugSessions().some((candidate) => candidate.name === name)) {
+        this.#debugLog(`${name} is already attached`);
         if (action.target === "system") {
           this.debuggerState = debugAttachPlan(this.debuggerState, {type: "system-attached", port: action.port}).state;
           this.debuggerOutputPattern = config.outFiles[0];
@@ -619,24 +730,26 @@ class SystemController {
         continue;
       }
       if (this.debuggerStarts.has(name)) {
-        if (await this.debuggerStarts.get(name) !== true) return false;
+        if (await this.#bounded(this.debuggerStarts.get(name), this.debuggerBounds.start, `the attach already in flight for ${name}`) !== true) return false;
         continue;
       }
-      const starting = vscode.debug.startDebugging(undefined, config);
+      this.#debugLog(`attaching ${this.#describeConfig(config)}`);
+      const starting = Promise.resolve(vscode.debug.startDebugging(undefined, config));
       this.debuggerStarts.set(name, starting);
-      try {
-        const started = await starting;
-        if (started !== true) {
-          this.output.appendLine(`debugger did not start for ${name}`);
-          vscode.window.showErrorMessage(`osd: VS Code could not attach to ${name}`);
-          return false;
-        }
-        if (action.target === "system") {
-          this.debuggerState = debugAttachPlan(this.debuggerState, {type: "system-attached", port: action.port}).state;
-          this.debuggerOutputPattern = config.outFiles[0];
-        }
-      } finally {
-        this.debuggerStarts.delete(name);
+      // The entry goes when the start itself settles, not when this caller
+      // stops waiting for it: a later attach must find a start still in
+      // flight and not begin a second one beside it.
+      const forget = () => { if (this.debuggerStarts.get(name) === starting) this.debuggerStarts.delete(name); };
+      starting.then(forget, forget);
+      const started = await this.#bounded(starting, this.debuggerBounds.start, `startDebugging ${name}`);
+      if (started !== true) {
+        this.output.appendLine(`debugger did not start for ${name}`);
+        vscode.window.showErrorMessage(`osd: VS Code could not attach to ${name}`);
+        return false;
+      }
+      if (action.target === "system") {
+        this.debuggerState = debugAttachPlan(this.debuggerState, {type: "system-attached", port: action.port}).state;
+        this.debuggerOutputPattern = config.outFiles[0];
       }
     }
     return true;
@@ -668,9 +781,19 @@ class SystemController {
       this.retiredDebugSessionIds.add(session.id);
       this.debugSessions.delete(session);
       if (session.id === this.activeSystemSessionId) this.activeSystemSessionId = undefined;
-      await vscode.debug.stopDebugging(session);
+      this.#debugLog(`generation changed (${this.debuggerOutputPattern} -> ${config.outFiles[0]}): reattaching`);
+      const stopping = Promise.resolve(vscode.debug.stopDebugging(session)).then(() => true);
+      if (await this.#bounded(stopping, this.debuggerBounds.stop, `stop ${session.name} for the new generation`) !== true) {
+        // Two sessions on one inspector port fight over the target. Give the
+        // old one a second bound to go before starting the new one.
+        this.#debugLog(`${session.name} (${session.id}) did not stop within ${this.debuggerBounds.stop} ms; waiting once more before reattaching`);
+        if (await this.#bounded(this.#sessionGone(session, stopping), this.debuggerBounds.stop, `${session.name} (${session.id}) to go`) !== true) {
+          this.#debugLog(`${session.name} (${session.id}) is still there; reattaching anyway`);
+        }
+      }
       this.debuggerOutputPattern = undefined;
-      if (await vscode.debug.startDebugging(undefined, config) === true) {
+      this.#debugLog(`attaching ${this.#describeConfig(config)}`);
+      if (await this.#bounded(vscode.debug.startDebugging(undefined, config), this.debuggerBounds.start, `startDebugging ${config.name}`) === true) {
         this.debuggerState = {systemPort: port};
         this.debuggerOutputPattern = config.outFiles[0];
         return true;
@@ -692,7 +815,22 @@ class SystemController {
   // were asked: a close in flight and a new breakpoint's open would otherwise
   // reach the system on two connections, in either order
   #inspectorStep(step) {
-    const next = (this.inspectorSteps ?? Promise.resolve()).then(step, step);
+    // One at a time, but a step that never ends must not hold every later
+    // attach for good. The escape sits above the longest a legitimate step
+    // can take, the sum of its own bounds. An attach: open the inspector
+    // (15 s, Launcher inspectorOnce), then the previous system stop (15 s).
+    // Then a generation refresh: stop the old session (10 s), wait for it to
+    // go (10 s), start the new one (35 s). If that fails, the plain attach
+    // starts one (35 s). 15 + 15 + 10 + 10 + 35 + 35 = 120 s. A release is
+    // 15 + 10 + 15 = 40 s. So 150 s.
+    const previous = this.inspectorSteps ?? Promise.resolve();
+    let timer;
+    const next = Promise.race([previous, new Promise((resolve) => {
+      timer = setTimeout(() => {
+        this.#debugLog(`the previous debugger step did not finish within ${INSPECTOR_STEP_ESCAPE_MS / 1000} s; going on without it`);
+        resolve();
+      }, INSPECTOR_STEP_ESCAPE_MS);
+    })]).finally(() => clearTimeout(timer)).then(step, step);
     this.inspectorSteps = next.catch(() => undefined);
     return next;
   }
@@ -705,6 +843,8 @@ class SystemController {
    *  applying source maps. A request sent then can pass a loaded DPC before
    *  its breakpoint binds. Ask VS Code for this session's DAP breakpoint,
    *  which is the same verified state shown by the filled editor glyph. */
+  /** true once ready, false when the wait gave up (the caller goes on),
+   *  WAIT_CANCELLED when the person cancelled it (the caller sends nothing). */
   async waitForDebuggerReady(file, timeoutMs = 15000, {reportMissingBreakpoint = false, output = this.output} = {}) {
     const wait = (token) => this.#waitForDebuggerReady(file, timeoutMs, token, reportMissingBreakpoint, output);
     if (typeof vscode.window.withProgress === "function") {
@@ -718,25 +858,61 @@ class SystemController {
     const port = this.launcher?.inspectPort;
     const name = `OSD: ABAP (${port})`;
     const target = file && path.resolve(file);
-    const breakpoints = (vscode.debug.breakpoints ?? []).filter((bp) =>
-      bp instanceof vscode.SourceBreakpoint && bp.enabled && bp.location.uri.scheme === "file" &&
-      target !== undefined && path.resolve(bp.location.uri.fsPath) === target);
+    // The breakpoint's URI and the file the command acts on need not be
+    // spelled alike: the same file through a link, or the same object in the
+    // copy the running generation was compiled from (lib.js
+    // breakpointMatches). A shadowed copy of the object never binds and is
+    // not waited for. Matched, and said why.
+    const enabled = abapBreakpoints();
+    const breakpoints = [];
+    const matches = target === undefined ? []
+      : breakpointMatches(enabled.map((bp) => bp.location.uri.fsPath), target, this.runningSources());
+    for (const bp of enabled) {
+      const match = matches.find((one) => one.file === bp.location.uri.fsPath);
+      if (match === undefined) continue;
+      this.#debugLog(`breakpoint ${bp.location.uri.fsPath}:${(bp.location.range?.start?.line ?? -1) + 1} ` +
+        `${match.counts ? "matches" : "is ignored for"} ${target} (${match.why})`);
+      if (match.counts) breakpoints.push(bp);
+    }
+    // ready once one breakpoint of each object is verified: a second
+    // breakpoint in a line that never compiles must not hold the call
+    const objectOfBreakpoint = (bp) => {
+      const object = adtObjectOf(bp.location.uri.fsPath);
+      return object ? `${object.type}:${object.name}:${object.include}` : path.resolve(bp.location.uri.fsPath);
+    };
+    if (target !== undefined && breakpoints.length === 0) {
+      this.#debugLog(`no enabled breakpoint matches ${target}; ${enabled.length} enabled .abap breakpoint(s): ` +
+        (enabled.map((bp) => bp.location.uri.fsPath).join(", ") || "none"));
+    }
+    const generation = (() => {
+      if (this.launcher?.osdHome === undefined) return "?";
+      try { return path.basename(path.dirname(fs.realpathSync(path.join(this.launcher.osdHome, "output")))); } catch { return "?"; }
+    })();
+    this.#debugLog(`waiting up to ${timeoutMs} ms for ${name} and ${breakpoints.length} verified breakpoint(s) (live generation ${generation})`);
     const status = vscode.window.setStatusBarMessage?.("osd: waiting for the debugger…");
-    const deadline = Date.now() + timeoutMs;
+    const started = Date.now();
+    const deadline = started + timeoutMs;
     let cancelled = token?.isCancellationRequested === true;
     const subscription = token?.onCancellationRequested?.(() => { cancelled = true; });
+    let last = "no debug session yet";
+    const pause = () => new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))));
     try {
       while (!cancelled && Date.now() < deadline) {
-        const session = this.runningDebugSessions().find((one) => one.name === name);
-        if (session !== undefined && typeof session.getDebugProtocolBreakpoint === "function") {
+        const {root, members} = this.#sessionFamily(name);
+        if (root !== undefined) {
           if (breakpoints.length === 0) {
             if (reportMissingBreakpoint && target !== undefined)
               output.appendLine(`osd debugger: no enabled breakpoint in ${target}; calling without a verified breakpoint`);
+            this.#debugLog(`ready after ${Date.now() - started} ms (no breakpoint to verify)`);
             return true;
           }
-          const check = Promise.all(breakpoints.map(async (bp) => {
-            try { return await session.getDebugProtocolBreakpoint(bp); } catch { return undefined; }
-          }));
+          const askable = members.filter((one) => typeof one.getDebugProtocolBreakpoint === "function");
+          // js-debug verifies in the child session it starts for the target,
+          // not in the attach session the name belongs to: a breakpoint is
+          // ready once any session of the family says so.
+          const check = Promise.all(breakpoints.map((bp) => Promise.all(askable.map(async (one) => {
+            try { return await one.getDebugProtocolBreakpoint(bp); } catch { return undefined; }
+          }))));
           // A DAP request can remain pending after the session disappears.
           // Race each check against the remaining deadline and cancellation.
           let timer;
@@ -744,15 +920,28 @@ class SystemController {
             timer = setTimeout(() => resolve(undefined), Math.min(50, Math.max(0, deadline - Date.now())));
           })]);
           clearTimeout(timer);
-          if (cancelled || Date.now() >= deadline) return false;
-          if (states?.every((bp) => bp?.verified === true) &&
-              this.runningDebugSessions().some((one) => one.id === session.id)) return true;
-          if (states !== undefined)
-            await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))));
+          if (cancelled || Date.now() >= deadline) break;
+          const alive = this.runningDebugSessions().some((one) => one.id === root.id);
+          if (states !== undefined) {
+            last = `sessions ${askable.map((one) => `${one.name} (${one.id})`).join(", ") || "none"}; verified: ` +
+              breakpoints.map((bp, i) => states[i].some((dap) => dap?.verified === true)).join(", ");
+          }
+          const verifiedObjects = new Set(breakpoints.filter((bp, i) => states?.[i]?.some((dap) => dap?.verified === true))
+            .map(objectOfBreakpoint));
+          if (alive && states !== undefined && breakpoints.every((bp) => verifiedObjects.has(objectOfBreakpoint(bp)))) {
+            this.#debugLog(`ready after ${Date.now() - started} ms (${last})`);
+            return true;
+          }
+          if (states !== undefined) await pause();
           continue;
         }
-        await new Promise((resolve) => setTimeout(resolve, Math.min(50, Math.max(0, deadline - Date.now()))));
+        await pause();
       }
+      if (cancelled) {
+        this.#debugLog(`wait cancelled after ${Date.now() - started} ms: ${last}`);
+        return WAIT_CANCELLED;
+      }
+      this.#debugLog(`gave up waiting after ${timeoutMs} ms: ${last}`);
       return false;
     } finally {
       subscription?.dispose();
@@ -778,7 +967,7 @@ class SystemController {
       }
       this.output.appendLine(`--- osd debugger: inspector opened on 127.0.0.1:${launcher.inspectPort} ---`);
     }
-    await this.debuggerTransition;
+    await this.#bounded(this.debuggerTransition, 15000, "the previous system stop");
     // Attach and call must inspect the serving link now, while this attach
     // owns the inspector queue; the status bar's periodic refresh can be late.
     if (await this.#refreshDebuggerGeneration() === true) return true;
@@ -801,7 +990,7 @@ class SystemController {
     if (abapBreakpoints().length > 0) return false;
     const name = `OSD: ABAP (${launcher.inspectPort})`;
     if (this.runningDebugSessions().some((session) => session.name === name)) return false;
-    await this.debuggerTransition;
+    await this.#bounded(this.debuggerTransition, 15000, "the previous system stop (release)");
     await this.applyDebuggerEvent({type: "system-detach"});
     const closed = await launcher.closeInspector();
     if (closed) this.output.appendLine("--- osd debugger: inspector closed (no .abap breakpoint left) ---");
@@ -2899,7 +3088,9 @@ async function activateCurrent(diagnostics, output) {
 // server work its turn would add.
 
 async function requireDebugSystem(output, action, controller = activeController) {
+  controller?.debugNote?.(`${action} with debugger: attaching`);
   const attached = await controller?.attachSystemDebugger({onDemand: true});
+  controller?.debugNote?.(`${action} with debugger: attach ${attached === true ? "done" : "failed"}`);
   if (attached === true) return true;
   const reason = controller?.debuggerError ?? "the system is not running; start it with osd: Start";
   const message = `${action} with debugger: ${reason}`;
@@ -3119,10 +3310,18 @@ async function resetTaxiData() {
 async function classrunObject(name, classrunOutput, withDebugger = false, file,
   {attach = requireDebugSystem, controller = activeController, client = osd} = {}) {
   if (withDebugger && !(await attach(classrunOutput, "Classrun"))) return;
-  if (withDebugger && !(await controller.waitForDebuggerReady(file))) {
-    vscode.window.showWarningMessage(`osd: debugger or breakpoints for ${name} did not become ready within 15 s`);
+  // A wait that gives up says so and runs anyway, as 0.4 did: an unattended
+  // run must never end with nothing sent and nothing said (osg-demo, 0.5.1467).
+  const ready = withDebugger ? await controller.waitForDebuggerReady(file) : true;
+  if (ready === WAIT_CANCELLED) {
+    controller.debugNote?.(`classrun ${name}: the wait was cancelled; nothing sent`);
     return;
   }
+  if (ready !== true) {
+    controller.debugNote?.(`classrun ${name}: running without a verified breakpoint`);
+    void vscode.window.showWarningMessage(`osd: the breakpoints for ${name} were not verified within 15 s; running anyway`);
+  }
+  if (withDebugger) controller.debugNote?.(`classrun ${name}: sending the run`);
   classrunOutput.show(true);
   classrunOutput.appendLine(`--- classrun ${name} ---`);
   try {
@@ -3418,19 +3617,28 @@ function registerEntitySetCommands(context, output, classrunOutput, controller) 
 
 async function callEntitySet({service, set, kind, file, withDebugger = false}, output, controller = activeController) {
   const source = file ?? vscode.window.activeTextEditor?.document?.fileName;
-  if (withDebugger && !abapBreakpoints().some((bp) => source && path.resolve(bp.location.uri.fsPath) === path.resolve(source))) {
-    const choice = await vscode.window.showWarningMessage(
-      `osd: no enabled breakpoint in ${source ?? "the DPC file"}; ${set} will run without stopping`,
-      "Continue without stopping", "Cancel");
-    if (choice !== "Continue without stopping") return;
+  // Never a prompt that waits for an answer: an unattended run (a test, a
+  // screenshot suite) has nobody to click it. The breakpoint is matched by
+  // path, real path or the running copy of the ABAP object (lib.js
+  // breakpointMatches; a shadowed copy never binds and does not count), and a miss is
+  // said and the call goes on.
+  if (withDebugger && !(source && breakpointMatches(abapBreakpoints().map((bp) => bp.location.uri.fsPath), source,
+    controller?.runningSources?.()).some((match) => match.counts))) {
+    controller?.debugNote?.(`call ${set}: no enabled breakpoint matches ${source ?? "the DPC file"}; calling without stopping`);
+    void vscode.window.showWarningMessage(`osd: no enabled breakpoint in ${source ?? "the DPC file"}; ${set} runs without stopping`);
   }
   if (withDebugger && !(await requireDebugSystem(output, "Call EntitySet", controller))) return;
   if (withDebugger) {
-    if (!(await controller.waitForDebuggerReady(source,
-      15000, {reportMissingBreakpoint: true, output}))) {
-      vscode.window.showWarningMessage(`osd: debugger or breakpoints for ${set} did not become ready within 15 s`);
+    const ready = await controller.waitForDebuggerReady(source, 15000, {reportMissingBreakpoint: true, output});
+    if (ready === WAIT_CANCELLED) {
+      controller.debugNote?.(`call ${set}: the wait was cancelled; nothing sent`);
       return;
     }
+    if (ready !== true) {
+      controller.debugNote?.(`call ${set}: calling without a verified breakpoint`);
+      void vscode.window.showWarningMessage(`osd: the breakpoints for ${set} were not verified within 15 s; calling anyway`);
+    }
+    controller.debugNote?.(`call ${set}: sending the request`);
   }
   try {
     if (kind === "get_entity") {
@@ -4198,7 +4406,7 @@ async function deactivate() {
   await activeController?.stop();
 }
 
-module.exports = {activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
   httpLensProvider, openEntitySetMethod, statusBar,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,

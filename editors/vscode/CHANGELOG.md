@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix (0.5.1467 regression): **Run as ABAP Application with debugger** and **Attach debugger and call** stop again at a bound breakpoint when the serving process runs a generation other than the live one (a build ahead of the recycle, a warm swap). The debugger reads source maps from the whole `build/` again; it still predicts breakpoints in the live generation only.
+- Fix (0.5.1467 regression): the wait for verified breakpoints asked only js-debug's attach session, which never verifies one, so both commands gave up after 15 s and dropped the run or the call without a word. The wait now asks the target's child session too, matches breakpoints by path, real path or ABAP object, and on giving up runs anyway. **Attach debugger and call** no longer asks "Continue without stopping?" and waits for an answer; it says so and calls. Every attach step is logged to the **osd system** channel.
 - Show DPC_EXT entity-set redefinitions and their source lines on service Details, using the same owner lookup as the HTTP lens; count services registered directly to a class in its readers lens.
 - Register `.abap` as ABAP with breakpoint support, so VS Code accepts breakpoint toggles in a fresh profile.
 - Refresh the Test Explorer and test-count lenses after Start and workspace layer changes.

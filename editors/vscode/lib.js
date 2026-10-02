@@ -142,9 +142,34 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
   const normalizedRoot = typeof root === "string" && root !== "" ? root.replaceAll("\\", "/").replace(/\/+$/, "") : undefined;
   const buildRoot = normalizedRoot === undefined ? "${workspaceFolder}/build" : `${normalizedRoot}/build`;
   // Node loads modules through output/, but resolves that link to the immutable
-  // by-input generation. Predict only those scripts, never cached generations.
+  // by-input generation. outFiles predicts only the generation that is live
+  // now, never the cached ones. Source maps, though, are allowed from the
+  // whole build tree: the serving process can run code from a generation
+  // other than the live one -- a build that went live before the recycle, a
+  // warm swap (changed modules under build/hot/, the rest still in the
+  // generation the process booted from) -- and js-debug never reads the map
+  // of a script outside resolveSourceMapLocations, so a breakpoint there
+  // looks bound and never stops (0.5.1467, osg-demo).
   let outputRoot = `${buildRoot}/live/output`;
+  // Node reports scripts by real path. build/ itself may be a link, and so
+  // may the generation store inside it (by-input/, hot/, shared with
+  // another checkout): each is admitted by where it really is.
+  let realBuildRoot = buildRoot;
+  const realStores = [];
   if (root !== undefined) {
+    try {
+      realBuildRoot = fs.realpathSync(path.join(root, "build")).replaceAll("\\", "/");
+    } catch {
+      // No build yet: the literal path is the only one there is.
+    }
+    for (const store of ["by-input", "hot"]) {
+      try {
+        const real = fs.realpathSync(path.join(root, "build", store)).replaceAll("\\", "/");
+        if (!real.startsWith(`${realBuildRoot}/`)) realStores.push(real);
+      } catch {
+        // not there yet
+      }
+    }
     try {
       outputRoot = fs.realpathSync(path.join(root, "build", "live", "output")).replaceAll("\\", "/");
     } catch {
@@ -173,7 +198,8 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
     restart,
     ...(target === "unit" ? {continueOnAttach: true} : {}),
     timeout: 30000,
-    resolveSourceMapLocations: [`${outputRoot}/**`, "!**/node_modules/**"],
+    resolveSourceMapLocations: [...new Set([`${buildRoot}/**`, `${realBuildRoot}/**`, ...realStores.map((store) => `${store}/**`)])]
+      .concat("!**/node_modules/**"),
     skipFiles: ["<node_internals>/**", `${modulesRoot}/@abaplint/runtime/**`],
     outFiles: [`${outputRoot}/**/*.mjs`],
     pauseForSourceMap: true,
@@ -417,6 +443,48 @@ function objectOf(file) {
     base: m[1].toLowerCase(),
     include: m[3] === undefined ? "main" : INCLUDE[m[3].toLowerCase()],
   };
+}
+
+/** Whether a breakpoint's file and the file a command acts on are the same
+ *  ABAP source, and why: the same path, the same file through a link (a
+ *  workspace opened through a symlink, a pack projection), or the same object
+ *  and include in another folder (the breakpoint's URI and the editor's or
+ *  the store's path need not be spelled alike). Returns the reason, or
+ *  undefined when they differ. */
+function sameAbapSource(a, b, realpath = fs.realpathSync) {
+  if (typeof a !== "string" || typeof b !== "string" || a === "" || b === "") return undefined;
+  if (path.resolve(a) === path.resolve(b)) return "path";
+  const real = (file) => { try { return realpath(file); } catch { return undefined; } };
+  const ra = real(a);
+  if (ra !== undefined && ra === real(b)) return "realpath";
+  const oa = adtObjectOf(a);
+  const ob = adtObjectOf(b);
+  if (oa && ob && oa.type === ob.type && oa.name === ob.name && oa.include === ob.include) return "object";
+  return undefined;
+}
+
+/** Which of the breakpoint `files` are in the source a command acts on
+ *  (`target`), each with `{file, why, counts}`. A match by path or real path
+ *  counts. A match by object alone counts only when the breakpoint's file is
+ *  the copy the running generation was compiled from (`running`, from
+ *  runningAbapSources()). A shadowed copy of the same object, such as a
+ *  packs/ copy, a worktree, .local/lars or output/, never binds, so it must
+ *  neither make a call look covered nor hold a wait for 15 s. Files that do
+ *  not match at all are left out. */
+function breakpointMatches(files, target, running) {
+  const matches = [];
+  for (const file of files) {
+    const why = sameAbapSource(file, target);
+    if (why === undefined) continue;
+    if (why !== "object") {
+      matches.push({file, why, counts: true});
+      continue;
+    }
+    const isRunning = running?.files?.has(sourceKey(realOrSelf(file))) === true;
+    matches.push({file, why: isRunning ? "object, the running copy" : "object, not the running copy",
+      counts: isRunning});
+  }
+  return matches;
 }
 
 /** `{type, name, base, include}` for a file Check or Activate can reach
@@ -2610,7 +2678,7 @@ function serviceDetailsHtml(details, nonce = "") {
     </style></head><body>${body}${script}</body></html>`;
 }
 
-module.exports = {osdRunCommandLine, unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning, objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor,
+module.exports = {osdRunCommandLine, unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning, objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor, sameAbapSource, breakpointMatches,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
   packSourceMappings, runningAbapSources, breakpointWarning, sourceKey,
   warmStatusText, activationBuildText, closureTestsText,

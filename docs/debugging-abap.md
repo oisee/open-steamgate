@@ -250,7 +250,7 @@ inspected after the fact.
       "port": 9229,
       "restart": true,
       "resolveSourceMapLocations": [
-        "${workspaceFolder}/build/live/output/**",
+        "${workspaceFolder}/build/**",
         "!**/node_modules/**"
       ],
       "skipFiles": [
@@ -272,7 +272,7 @@ inspected after the fact.
       "autoAttachChildProcesses": true,
       "console": "integratedTerminal",
       "resolveSourceMapLocations": [
-        "${workspaceFolder}/build/live/output/**",
+        "${workspaceFolder}/build/**",
         "!**/node_modules/**"
       ],
       "skipFiles": [
@@ -286,6 +286,11 @@ inspected after the fact.
 }
 ```
 
+If `build/` is a symbolic link to a directory outside the workspace, Node reports
+the real path of each module, so add that real path too (for example
+`"/data/osd-build/**"`) to `resolveSourceMapLocations`. The extension's own
+"Attach and call" configuration does this by itself.
+
 The attach config is the manual alternative: start the server by hand
 (`OSD_INSPECT=9229 npm start`, or `npm run osd:serve` with the same env)
 and attach to port 9229. The launch config runs `npm start` from VS Code
@@ -296,13 +301,47 @@ starts itself.
 The extension resolves `output/` to the current `build/by-input/<generation>/output`
 when it attaches, so `outFiles` predicts one generation. It refreshes the
 debug session when the serving generation changes. The manual profile uses
-`build/live/output` as a movable alias. js-debug documents `outFiles` as the
+`build/live/output` as a movable alias. `resolveSourceMapLocations` is the
+whole `build/` on purpose, in both: the serving process can run code from a
+generation other than the live one (a build that went live before the
+recycle; a warm swap, whose changed modules load from `build/hot/` and whose
+others stay in the generation the process booted from), Node reports every
+module by its real path, and js-debug does not read the map of a script
+outside these globs. A breakpoint there shows as bound and never stops: that
+was the 0.5.1467 regression, where the globs named the live generation only.
+js-debug documents `outFiles` as the
 generated JavaScript search globs, `resolveSourceMapLocations` as the places
 whose maps it may use, and `pauseForSourceMap` as waiting for an incoming
 script's map before continuing ([js-debug options](https://github.com/microsoft/vscode-js-debug/blob/main/OPTIONS.md)).
 The latter matters for a DPC imported before attach: enabling the debugger
 replays `scriptParsed` for scripts already known to the VM
 ([Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/tot/Debugger/#event-scriptParsed)).
+
+**Run with debugger** and **Attach debugger and call** wait up to 15 s for
+the breakpoints in the file they act on to be verified before sending the
+run or the request. Two facts govern that wait.
+- The session named `OSD: ABAP (<port>)` is js-debug's attach session. It only
+  parents the target, which is a child session (`Remote Process [0] « OSD:
+  ABAP (<port>)`), and only the child ever verifies a breakpoint. The attach
+  session answers every breakpoint as provisional, unverified, for good. That
+  was measured with the js-debug DAP server and in a VS Code 1.106 extension
+  host. The wait therefore asks the named session and every session under
+  it.
+- A breakpoint matches the command's file by path, by real path, or by the
+  same ABAP object and include, but only in the copy the running generation
+  was compiled from (`lib.js` `breakpointMatches`). A shadowed copy never
+  binds and is ignored: packs/, a worktree, .local/lars, output/. The wait
+  is over once one breakpoint per object is verified.
+- Cancelling the wait sends nothing. Giving up after 15 s sends anyway.
+
+A wait that gives up is reported, and the run or call goes ahead anyway.
+There is no prompt to answer, since an unattended run has nobody to answer
+one. Every step of an attach is written to the **osd system** output channel
+as `osd debugger: ...`: the attach configuration, each wait's start and end
+or timeout, which breakpoints matched and why, the sessions asked and their
+verified state, and the live generation. The 0.5.1467 regression showed
+nothing after "inspector opened": the wait asked only the attach session,
+gave up after 15 s and then dropped the run.
 
 `customDescriptionGenerator` was checked the same way as the breakpoint,
 not through the UI: the expression above, wrapped as
