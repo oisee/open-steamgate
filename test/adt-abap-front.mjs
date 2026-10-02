@@ -195,7 +195,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
   // token stay; the dead handle writes nothing (409, as on main), and a read
   // just works. It needs #471 (BIND revives an ended key, ZCL_OSD_ENQ_KERNEL=>REVIVE)
   // and is pending until that is in the tree.
-  it("an ENQ context ended behind the session: the PUT with the old handle is 409, a GET is 200", async function () {
+  it("an ENQ context ended behind the session: the old handle is 409, a GET is 200, a relock a new handle", async function () {
     if (readFileSync(new URL("../output/zcl_osd_enq_kernel.clas.mjs", import.meta.url), "utf8").includes("async revive(") === false) {
       this.skip();
     }
@@ -213,6 +213,16 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     expect(await get.text()).to.not.contain("not written");
     expect(get.headers.get("x-csrf-token"), "the same session and token").to.equal(one.token);
     expect((await sessionRow(one.id))?.token).to.equal(one.token);
+    // the client locks again and gets a new handle; the old one stays dead
+    const relocked = await as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`);
+    expect(relocked.status).to.equal(200);
+    const fresh = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await relocked.text())?.[1];
+    expect(fresh).to.match(/^[0-9a-f-]{36}$/);
+    expect(fresh, "a relock returns a new handle").to.not.equal(handle);
+    const late = await as(one, "PUT", `/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`,
+      {headers: {"content-type": "text/plain"}, body: SOURCE + "* not written\n"});
+    expect(late.status, "the old handle is still 409").to.equal(409);
+    expect((await as(one, "POST", `/oo/classes/${LOCKED}?_action=UNLOCK&lockHandle=${fresh}`)).status).to.equal(200);
     await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
   });
 
