@@ -1556,6 +1556,8 @@ Labels follow the release rule: only a must blocks its tag.
 - nice: a writable `$TMP` and LOCK on a package, so a test can create and clean up its own package.
 
 **0.7**
-- nice: **E3, an SM12 view.** The lock table in the VS Code tree and in webgui, with a manual release.
+- nice: **E3, an SM12 view.** The lock table in the VS Code tree and as a Fiori app over an OData service
+  (`ENQUEUE_READ` underneath), with a manual release -- not a webgui screen (docs/backlog/webgui.md, "Where a new
+  service app goes").
 - generous: a lock table that survives the lock server's restart (replication, as a standalone enqueue server
   keeps it). Only if a measured case needs it.
