@@ -2982,6 +2982,8 @@ function statement(node, ctx) {
  * other additions (MESSAGE-ID, INCLUDE, OFFSET, SHORTDUMP-ID) are left
  * alone. The same refusal as the transpiler's JS runtime. */
 const GENERATE_REFUSED = "GENERATE SUBROUTINE POOL is not supported";
+// what the emitters spell as a place (emit-go.mjs place()), constants and sy excluded
+const PLACES = new Set(["var", "attr", "static", "field", "dref_field", "fs", "refattr", "row", "row_key"]);
 function generateSubroutine(node, ctx) {
   const kids = node.getChildren();
   const after = (kw) => {
@@ -2991,9 +2993,10 @@ function generateSubroutine(node, ctx) {
   const body = [];
   const name = after("NAME");
   if (name !== undefined) {
-    // NAME is a Source in abaplint's grammar and a field the kernel writes
-    if (!/^[A-Z_][A-Z0-9_]*$/i.test(name.concatTokens())) throw new Unsupported(`GENERATE SUBROUTINE POOL NAME ${name.concatTokens()}`);
-    const target = variable(name.concatTokens(), ctx);
+    // NAME is a Source in abaplint's grammar and a field the kernel writes:
+    // read through the ordinary operand machinery, kept only when it is a place
+    const target = source(name, ctx);
+    if (!PLACES.has(target.e)) throw new Unsupported(`GENERATE SUBROUTINE POOL NAME ${name.concatTokens()}: not a writable field`);
     body.push({s: target.type.k === "data" ? "clear_data" : "clear", target});
   }
   const message = after("MESSAGE");

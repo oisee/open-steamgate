@@ -309,5 +309,5 @@ test("GENERATE SUBROUTINE POOL is refused with sy-subrc 8 and its method still r
   });
   assert.equal(run.status, 0, run.stderr || run.error?.message);
   const rows = JSON.parse(run.stdout).rows;
-  assert.deepEqual(rows.map((r) => `${r.method}:${r.status}`), ["REFUSED:SUCCESS", "NAME_ONLY:SUCCESS"]);
+  assert.deepEqual(rows.map((r) => `${r.method}:${r.status}`), ["REFUSED:SUCCESS", "NAME_ONLY:SUCCESS", "NAME_COMPONENT:SUCCESS"]);
 });
