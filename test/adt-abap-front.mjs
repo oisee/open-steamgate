@@ -129,7 +129,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     expect(served).to.deep.equal([`HOST GET ${BASE}/core/discovery`]);
   });
 
-  it("a HOST route serves under the session ABAP resolved", async () => {
+  it("the poll route serves in ABAP under the session it resolved", async () => {
     const one = await logon({authorization: "Basic " + Buffer.from("front:x").toString("base64")});
     const row = await sessionRow(one.id);
     expect(row.user).to.equal("FRONT");
@@ -142,7 +142,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     // a stateful session's cookies go on every answer, as Node's did, and the token is the row's
     expect(res.headers.getSetCookie()).to.have.length(2);
     expect(res.headers.get("x-csrf-token")).to.equal(row.token);
-    expect(served).to.include(`HOST GET ${BASE}/core/http/sessions`);
+    expect(served).to.include(`ABAP GET ${BASE}/core/http/sessions`);
     await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
   });
 

@@ -109,7 +109,7 @@ The original port difficulty ranking is superseded by variant C (2026-10-03); ac
 
 1. **ICF node and handler.**
    - `/sap/bc/adt` gets a `*.sicf.xml` modelled on `src/rfc/zosd_rfc.sicf.xml`.
-   - `/sap/public/bc/icf/logoff` is a second node with the same handler.
+   - `/sap/public/bc/icf/logoff` is a Node-host mount of the same front. No SICF object is shipped for SAP's standard logoff node.
    - The handler applies session lookup, CSRF and `X-OSD-Generation` **only under `/sap/bc/adt`**. In the JS, logoff sits outside `router.use(BASE, …)`. It gets no middleware, no token, no cookies and no generation header, and only reads the cookies to find the session to end.
    - `/osd/not-served` retains miss reporting from both ABAP documents and the Node facade behind the HOST catch-all.
    - `src/icf/nodes.json:51` and `test/osd-routes.mjs:176-184` (which asserts `handler === 'adt-facade'` for `/sap/bc/adt`) change together. Each document slice adds its ABAP rows; host orchestration stays behind the catch-all.
@@ -164,9 +164,9 @@ The original port difficulty ranking is superseded by variant C (2026-10-03); ac
    - Exported to group A: `holds( handle, type, name )`, `holder_of( type, name )`, `release( type, name )`.
    - Session end, logoff and expiry release all of that owner's locks.
 9. **Session routes.**
-   - `core/http/sessions`: the security-session id is the first 32 hex of SHA-256 of the **middleware-chosen** session id, upper-cased.
-   - DELETE `core/http/sessions/:id`: always 200 with an empty body. It ends the session only if `:id` matches.
-   - GET `/sap/public/bc/icf/logoff`: ends only the session the cookies name (same precedence), 200 `text/plain` `logged off`.
+   - **PORTED A3a** `core/http/sessions` (`ZCL_OSD_ADT_SESSIONS`): the security-session id is the first 32 hex of SHA-256 of the **middleware-chosen** session id, upper-cased.
+   - **PORTED A3a** DELETE `core/http/sessions/:id` (`ZCL_OSD_ADT_SESSIONS`): always 200 with an empty body. It ends the session only if `:id` matches.
+   - **PORTED A3a** GET `/sap/public/bc/icf/logoff` (`ZCL_OSD_ADT_LOGOFF`): ends only the session the cookies name (same precedence), 200 `text/plain` `logged off`.
    - `core/http/reentranceticket` (`:777-808`):
      - 400 `text/plain` for a missing redirect-url ("redirect-url is required"), an unparsable one ("… is not a URL") and a non-loopback one ("… must point at loopback"; host is `localhost`, `127.0.0.1` or `[::1]`).
      - Mints a ticket of 24 random bytes, base64url.
@@ -341,6 +341,28 @@ host tests `adt-devloop :609` and `:688` remain; no ABAP UNIT/JOB poll loop
 or cancellation continuation is planned.
 
 ADR 0007 names three host families: store, git and build. This map needs two more: **SYSTEM** and **SQLCHECK** (the DatabaseClient seam). Running SQL is native: ADBC `cl_sql_statement` is in open-abap-core.
+
+### PORTED A3a: sessions and logoff
+
+| method | path | ABAP route |
+|---|---|---|
+| GET (HEAD fallback) | `/sap/bc/adt/core/http/sessions` | `ZCL_OSD_ADT_SESSIONS` |
+| DELETE | `/sap/bc/adt/core/http/sessions/:id` | `ZCL_OSD_ADT_SESSIONS` |
+| GET (HEAD fallback) | `/sap/public/bc/icf/logoff` | `ZCL_OSD_ADT_LOGOFF` |
+
+The explicit core/http rows precede generated object rows and the sole HOST
+catch-all. Logoff uses the same non-empty context-cookie precedence as
+RESOLVE but never resolves, sweeps, stamps or opens a session. END is guarded
+by exactly 24 lowercase hexadecimal characters, so a foreign cookie cannot
+end an arbitrary ENQ owner. No STORE command or SYSTEM kind was added.
+The Node oracle and child-mode routes live in `tools/adt-session-routes.mjs`;
+the facade and front no longer perform a delegated session END.
+A3a parity tests assert ABAP served-by for every row, ordered cookies and
+response bytes, unchanged row counts for no-op logoff, and old-token refusal
+after END. Express ETags are disabled in the diff harness as in production;
+poll and logoff have no implicit weak ETag or conditional 304.
+The generic S0 `HOST_ALLOWED` coverage suite is absent at this slice's base;
+A3a's cases cover all three rows directly in `test/adt-abap-diff.mjs`.
 
 ## 4. Groups
 

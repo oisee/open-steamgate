@@ -25,12 +25,13 @@ import {readFileSync, appendFileSync} from "node:fs";
 import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
-import {Sessions, parseCookies, refuseToken, sessionIdOf} from "./adt-session.mjs";
+import {Sessions, refuseToken} from "./adt-session.mjs";
 import {virtualFoldersDocument} from "./adt-vfs.mjs";
 import {answered, refuse} from "./adt-refusal.mjs";
 export {answered, refuse} from "./adt-refusal.mjs";
 import {abapFront} from "./adt-abap-front.mjs";
 import {RemoteSessions} from "./adt-remote-sessions.mjs";
+import {sessionRoutes} from "./adt-session-routes.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
 import {abapSession, statelessLock} from "./adt-enq.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
@@ -724,20 +725,11 @@ export function adtRouter(options = {}) {
     });
   }
 
-  // Mixed phase only: A3a will move END into the ABAP logoff route.
-  // A delegated logoff must finish in the same FIFO turn as its verdict.
-  const endLogoff = async (req) => {
-    const id = sessionIdOf(parseCookies(req.headers.cookie));
-    if (id) await sessions.end(id);
-  };
-  const endedLogoffs = new WeakSet();
-
   // ADR 0007: every request enters ZCL_OSD_ADT_HANDLER (adt-abap-front.mjs),
   // which resolves the session, gates and answers or hands over; locks go
   // to ENQ (adt-enq.mjs)
   if (options.abap !== undefined) pass("abap-front", [BASE, "/sap/public/bc/icf/logoff"], abapFront({...options.abap, served: options.abapServed, refuse, store, facadeOptions: options,
     miss: (req, kind) => record(req, kind, undefined, (req.originalUrl ?? req.url).split("?")[0]),
-    hostLogoff: async (req) => { await endLogoff(req); endedLogoffs.add(req); },
     generation: () => liveHash(store.root),
     sessions, ...abapSession(sessions, (kind, name) => {
       if (kind === "IDENTITY") return identity;
@@ -819,28 +811,7 @@ export function adtRouter(options = {}) {
     res.redirect(307, url.toString());
   });
 
-  // Polled for the life of the project. The security-session link is what the
-  // client watches; the timeout is advertised and never enforced here,
-  // because there is nothing to expire.
-  router.get(`${BASE}/core/http/sessions`, (req, res) => {
-    const id = sessionIdentifier(req);
-    res.type("application/vnd.sap.adt.core.http.session.v3+xml; charset=utf-8").send(
-      '<?xml version="1.0" encoding="utf-8"?>' +
-      '<http:session xmlns:http="http://www.sap.com/adt/http" xmlns:atom="http://www.w3.org/2005/Atom">' +
-      `<atom:link href="${BASE}/core/http/sessions/${id}"` +
-      ' rel="http://www.sap.com/adt/categories/core/http/sessions/securitysession"' +
-      ' title="Security session"/>' +
-      '<atom:link href="/sap/public/bc/icf/logoff"' +
-      ' rel="http://www.sap.com/adt/categories/core/http/sessions/logoff"' +
-      ' title="Logoff resource"/>' +
-      `<atom:link href="${BASE}/core/http/systeminformation"` +
-      ' rel="http://www.sap.com/adt/categories/core/http/system/systeminformation"' +
-      ' type="application/vnd.sap.adt.core.http.systeminformation.v1+json"' +
-      ' title="System information resource"/>' +
-      '<http:properties><http:property name="inactivityTimeout">1800</http:property></http:properties>' +
-      "</http:session>",
-    );
-  });
+  sessionRoutes(router, sessions, answer);
 
   // ---- Virtual folders: how a cloud project builds its tree.
   //
@@ -1436,25 +1407,6 @@ export function adtRouter(options = {}) {
       refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e));
     }
   });
-
-  // Ending a session. A client that gets 404 here reports a failed logoff.
-  // Both are the explicit end the session layer waits for before it lets go
-  // of a session's locks (the other is expiry): DELETE on the security
-  // session the poll named, when it names the caller's own, and the logoff
-  // resource for whichever session the cookies carry.
-  router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => answer(res, async () => {
-    if (String(req.params.id).toUpperCase() === sessionIdentifier(req)) {
-      await sessions.end(req.adt.session.id);
-    }
-    res.status(200).end();
-  }));
-  router.get("/sap/public/bc/icf/logoff", (req, res) => answer(res, async () => {
-    // exactly the one session the cookies name, by the middleware's own
-    // precedence: two cookies naming two sessions end only the one the
-    // client is using, never the other
-    if (endedLogoffs.has(req) === false) await endLogoff(req);
-    res.status(200).type("text/plain").send("logged off");
-  }));
 
   // ---- The workbench type list, which the client pre-loads before it will
   // open anything.
@@ -2849,20 +2801,6 @@ function typeOf(asked) {
     return undefined;
   }
   return String(asked).toUpperCase().split("/")[0];
-}
-
-// sessionIdentifier names the security session in the sessions document.
-//
-// Stable for as long as the client's session is and changed when that is,
-// because the client treats it as an identity and polls it.
-//
-// Derived from the session the middleware chose for this request
-// (req.adt.session), never from one cookie read on its own: a request can
-// carry a context cookie for one session and a session cookie for another,
-// and the middleware picks the context one. An id built from the session
-// cookie then advertised a URL whose DELETE ended the other session.
-function sessionIdentifier(req) {
-  return createHash("sha256").update(req.adt.session.id).digest("hex").slice(0, 32).toUpperCase();
 }
 
 // asXmlTypeFor echoes back the vnd.sap.as+xml dataname a client asked for.
