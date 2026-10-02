@@ -1,5 +1,8 @@
 "! Host-replaced kernel bridge, installed before generated classes load.
 "! Without the host, ENQ session operations refuse through a named factory.
+"! On a system without this host the stubs of END, CONTEXT_ALIVE, OWNS and
+"! SESSION_ID raise it undeclared, which is a short dump there: loud, not
+"! silent, and the ADT session is ICF's own on a system anyway.
 CLASS zcl_osd_enq_kernel DEFINITION PUBLIC FINAL CREATE PRIVATE.
   PUBLIC SECTION.
     CLASS-METHODS bind
