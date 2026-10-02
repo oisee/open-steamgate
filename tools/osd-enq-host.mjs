@@ -17,7 +17,15 @@
 //   update module (UPDATE_TASK in its *.fugr.xml) marks the LUW as updated
 //   when it runs, and COMMIT WORK then hands the update owner's locks to
 //   that update, which has already run: they go at the COMMIT.
-// - A step that ends in a dump rolls back: its update halves go.
+// - A step that ends in a dump rolls back: its update halves go. A dump ends
+//   the context on a system, and with it the context's dialog locks: a bound
+//   session that dumps is ended too, and the key's next step opens a new one.
+// - A key ended by its host (logoff, expiry, a closed channel) stays ended: a
+//   step of that key still queued or parked in a WAIT when the end came
+//   cannot open a fresh session under it and take a lock nobody will ever
+//   end. Binding it or enqueuing under it throws EnqSessionEnded, which the
+//   host answers as a clean error; DEQUEUE, COMMIT and ROLLBACK under it
+//   have nothing to touch and do nothing.
 // - _WAIT sleeps through WAIT UP TO, which gives the work process up inside
 //   a step (tools/osd-dialog-step.mjs) -- and, as WAIT does, commits.
 import {locks} from "./osd-enq.mjs";
@@ -26,6 +34,35 @@ import {currentStepToken, holderToken, onEveryStep, stepContextTracked} from "./
 const PROCESS = {what: "the process, outside any step"};
 const sessions = new Map(); // a session key (a step token, or a bound key) -> handle
 const updated = new Set(); // session handles whose LUW ran an update module
+
+/** a bound key its host has ended; the host answers it as an error of its
+ * protocol (the ADT front: an exception document), never as a fresh session */
+export class EnqSessionEnded extends Error {
+  constructor(key) {
+    super(`the session ${typeof key === "string" ? key : "bound by the host"} has ended`);
+    this.name = "EnqSessionEnded";
+    this.code = "ENQ_SESSION_ENDED";
+    this.key = key;
+  }
+}
+
+// ended keys: an object key is held weakly; a primitive one (a cookie id) in
+// insertion order, the oldest forgotten past ENDED_KEEP -- long after any
+// step queued behind its end has run
+const ENDED_KEEP = 10000;
+const endedObjects = new WeakSet();
+const endedValues = new Set();
+const isObject = (key) => (typeof key === "object" && key !== null) || typeof key === "function";
+const isEnded = (key) => (isObject(key) ? endedObjects.has(key) : endedValues.has(key));
+function markEnded(key) {
+  if (isObject(key)) {
+    endedObjects.add(key);
+    return;
+  }
+  endedValues.delete(key);
+  endedValues.add(key);
+  if (endedValues.size > ENDED_KEEP) endedValues.delete(endedValues.values().next().value);
+}
 
 const value = (v) => (v === undefined || v === null ? "" : typeof v.get === "function" ? String(v.get()) : String(v));
 const upper = (s) => String(s).toUpperCase();
@@ -51,9 +88,11 @@ function user() {
   }
 }
 
-/** the lock server's handle of the session running now */
+/** the lock server's handle of the session running now, opened if need be;
+ * throws EnqSessionEnded under a key its host has ended */
 export function currentEnqSession() {
   const key = sessionKey();
+  if (isEnded(key)) throw new EnqSessionEnded(key);
   let sid = sessions.get(key);
   if (sid === undefined || sid === 0) {
     sid = locks().open(user());
@@ -62,14 +101,31 @@ export function currentEnqSession() {
   return sid;
 }
 
+/** the handle of the session running now if it has one, opening none:
+ * what a release needs (an ended key has nothing left to release) */
+function existingEnqSession() {
+  const key = sessionKey();
+  return isEnded(key) ? undefined : sessions.get(key);
+}
+
 /** a host's longer session: the step running now belongs to key (any value
- * the host keeps for its connection) until endEnqSession(key) */
+ * the host keeps for its connection) until endEnqSession(key); a key already
+ * ended throws EnqSessionEnded */
 export function bindEnqSession(key) {
+  if (isEnded(key)) throw new EnqSessionEnded(key);
   const t = token();
   if (t !== undefined) t.enqSession = key;
 }
 
+/** the host ends key's session (logoff, expiry, a closed channel): its locks
+ * go, and the key stays ended */
 export function endEnqSession(key) {
+  markEnded(key);
+  dropEnqSession(key);
+}
+
+/** the session behind key goes, with its locks; the key may open a new one */
+function dropEnqSession(key) {
   const sid = sessions.get(key);
   if (sid === undefined) return;
   sessions.delete(key);
@@ -80,6 +136,7 @@ export function endEnqSession(key) {
 /** an update module ran in the session's LUW (what the wrapped update
  * modules call; a host or a test that runs one some other way says so here) */
 export function noteUpdateTask() {
+  if (isEnded(sessionKey())) return;
   updated.add(currentEnqSession());
 }
 
@@ -155,7 +212,8 @@ export function installEnq(abap, {updateModules = []} = {}) {
       abap.builtin.sy.get().subrc.set(0);
     },
     async dequeue({table_name: table, enqueue_name: object, input}) {
-      locks().dequeue(currentEnqSession(), request(abap, value(table), value(object), input));
+      const sid = existingEnqSession();
+      if (sid !== undefined) locks().dequeue(sid, request(abap, value(table), value(object), input));
       abap.builtin.sy.get().subrc.set(0);
     },
   };
@@ -172,7 +230,8 @@ export function installEnq(abap, {updateModules = []} = {}) {
   });
 
   abap.FunctionModules.DEQUEUE_ALL = async () => {
-    locks().dequeueAll(currentEnqSession());
+    const sid = existingEnqSession();
+    if (sid !== undefined) locks().dequeueAll(sid);
   };
 
   // ENQUEUE_READ: NUMBER, SUBRC and the rows into ENQ, field by field as far
@@ -226,7 +285,8 @@ export function installEnq(abap, {updateModules = []} = {}) {
   statements.commit = async (options) => {
     const result = await commit(options);
     if (options?.connection === undefined) {
-      const sid = currentEnqSession();
+      const sid = existingEnqSession();
+      if (sid === undefined) return result; // no session: no lock to hand over
       const ended = locks().commit(sid, updated.has(sid));
       updated.delete(sid);
       // the runtime ran the update when it was called: it is done now
@@ -238,22 +298,29 @@ export function installEnq(abap, {updateModules = []} = {}) {
   statements.rollback = async (options) => {
     const result = await rollback(options);
     if (options?.connection === undefined) {
-      const sid = currentEnqSession();
-      updated.delete(sid);
-      locks().rollback(sid);
+      const sid = existingEnqSession();
+      if (sid !== undefined) {
+        updated.delete(sid);
+        locks().rollback(sid);
+      }
     }
     return result;
   };
 
   onEveryStep({
     onEnd(stepToken, {dumped}) {
-      const sid = sessions.get(stepToken.enqSession ?? stepToken);
+      const bound = stepToken.enqSession;
+      const sid = sessions.get(bound ?? stepToken);
       if (sid !== undefined && dumped) {
         updated.delete(sid);
         locks().rollback(sid);
+        // a dump ends the context, and its dialog locks with it; the bound
+        // key is not ended -- its next step is a new context, as on a system
+        if (bound !== undefined) dropEnqSession(bound);
       }
-      // a step's own session ends with it; a bound one goes on
-      if (stepToken.enqSession === undefined) endEnqSession(stepToken);
+      // a step's own session ends with it (its token is never seen again, so
+      // it is not remembered as ended); a bound one goes on
+      if (bound === undefined) dropEnqSession(stepToken);
     },
   });
 }
