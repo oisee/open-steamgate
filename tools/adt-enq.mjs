@@ -19,7 +19,7 @@
 import {adtEnqOwner} from "./adt-enq-key.mjs";
 import {randomUUID} from "node:crypto";
 import {bindEnqSession, endEnqSession, enqDrop, enqHolder, enqTake, onEnqContextEnded} from "./osd-enq-host.mjs";
-import {refuseToken} from "./adt-session.mjs";
+import {Sessions, refuseToken} from "./adt-session.mjs";
 
 export const LOCK_TABLE = "ZOSD_ADT_LOCK";
 export const LOCK_OBJECT = "EZOSD_ADT_OBJ";
@@ -102,7 +102,9 @@ export function abapSession(sessions, other) {
   // The logon session itself stays (its token, its cookies): a write with an
   // old handle is then the 409 of a handle that holds nothing, not a CSRF
   // refusal, and the client locks again.
-  onEnqContextEnded((key) => {
+  // ABAP clears persisted handles when its next resolve sees the ended
+  // context. Only the Node table needs immediate in-memory cleanup here.
+  if (sessions instanceof Sessions) onEnqContextEnded((key) => {
     const prefix = sessions.owners.prefix;
     if (typeof key !== "string" || prefix === undefined || key.startsWith(prefix) === false) return;
     sessions.byId.get(key.slice(prefix.length))?.locks.clear();
@@ -113,14 +115,14 @@ export function abapSession(sessions, other) {
       if (session?.stateful === true) bindEnqSession(sessions.owners.key(session.id), {user: session.user});
     },
     ended: refuseToken,
-    system(kind, name, req) {
+    async system(kind, name, req) {
       const session = req.adt?.session;
       if (kind === "LOCK_HANDLE" && session !== undefined) {
         const [type, ...rest] = String(name).split(" ");
-        return {handle: sessions.adopt(session, type, rest.join(" "), () => randomUUID())};
+        return {handle: await sessions.adopt(session, type, rest.join(" "), () => randomUUID())};
       }
       if (kind === "LOCK_RELEASE" && session !== undefined) {
-        const lock = sessions.forget(session, String(name));
+        const lock = await sessions.forget(session, String(name));
         return lock === undefined ? {} : {type: lock.type, name: lock.name};
       }
       if (kind === "SESSION" && session !== undefined) {
@@ -128,7 +130,7 @@ export function abapSession(sessions, other) {
       }
       if (kind === "LOCK_HOLDER") {
         const [type, ...rest] = String(name).split(" ");
-        return {alive: sessions.holderOf(type, rest.join(" ")) !== undefined};
+        return {alive: await sessions.holderOf(type, rest.join(" ")) !== undefined};
       }
       return other(kind, name, req);
     },

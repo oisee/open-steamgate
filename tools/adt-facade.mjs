@@ -2108,6 +2108,15 @@ export function adtRouter(options = {}) {
     router.delete(`${BASE}/${adt}/:name`, (req, res) => {
       answer(res, async () => {
         const name = decodeURIComponent(req.params.name);
+        if (req.adt.sessions.deleteObject !== undefined) {
+          const result = await req.adt.sessions.deleteObject(req.adt.session, type, name, store);
+          if (result.holder !== undefined) {
+            res.status(403).type("application/xml").send(lockedByOtherDocument(result.holder.session.user, String(name).toUpperCase()));
+            return;
+          }
+          res.status(200).end();
+          return;
+        }
         // an object another session holds is not this one's to delete
         const holder = await req.adt.sessions.holderOf(type, store.find(type, name)?.name ?? name);
         if (holder !== undefined && holder.session.id !== req.adt.session.id) {
@@ -3039,6 +3048,11 @@ function typeOf(asked) {
 // SAP framework has a name for; it answers in this project's namespace so
 // that nobody reading it mistakes our bug for a system's.
 export function answered(res, body, record) {
+  const safeFailed = (e) => {
+    try { failed(e); } catch (failure) {
+      console.error(`ADT response error after headers were sent: ${String(failure?.message ?? failure)}`);
+    }
+  };
   const failed = (e) => {
     if (e instanceof NotFound) {
       // a 404 from here is a different animal from a 404 off the catch-all:
@@ -3064,9 +3078,9 @@ export function answered(res, body, record) {
   };
   try {
     const result = body();
-    return result?.catch(failed);
+    return result?.catch(safeFailed);
   } catch (e) {
-    failed(e);
+    safeFailed(e);
   }
 }
 

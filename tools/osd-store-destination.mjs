@@ -188,7 +188,7 @@ export class StoreDestination {
     }
   }
 
-  #system(kind, name) {
+  async #system(kind, name) {
     if (SYSTEM_KINDS.includes(kind) === false) {
       return {EV_ERROR: `unknown SYSTEM kind ${kind || "(none)"}`};
     }
@@ -197,7 +197,7 @@ export class StoreDestination {
       return {EV_ERROR: `nothing answers SYSTEM ${kind} for this call: it is bound per ADT facade instance (withSystem)`};
     }
     try {
-      const value = bound.answers(kind, name);
+      const value = await bound.answers(kind, name);
       if (value === undefined) return {EV_ERROR: `SYSTEM ${kind} has no answer here`};
       return {EV_JSON: JSON.stringify(value)};
     } catch (error) {

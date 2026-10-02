@@ -1,6 +1,7 @@
 // Slice 3 parity through the real generated ABAP in dialog steps. Sessions
 // remains the reference; this test does not wire the production front.
 import {expect} from "chai";
+import "./start.mjs";
 import {randomUUID} from "node:crypto";
 import {Sessions, SESSION_COOKIE, CONTEXT_COOKIE} from "../tools/adt-session.mjs";
 import {dialogStep, currentStepToken} from "../tools/osd-dialog-step.mjs";
@@ -108,11 +109,7 @@ async function pair(ttl = 1800) {
 
 describe("ADT session slice 3: ABAP / Node parity and ENQ", function () {
   this.timeout(60000);
-  before(async function () {
-    const {initializeABAP} = await import("../output/init.mjs");
-    await initializeABAP();
-    abap = globalThis.abap;
-  });
+  before(() => { abap = globalThis.abap; });
 
   it("resolves fresh sessions, each cookie, conflicting cookies and an empty context", async () => {
     const p = await pair();

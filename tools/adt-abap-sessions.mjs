@@ -1,5 +1,7 @@
 // Optional Sessions adapter. Persistent rows are authoritative; views are
 // request snapshots. Every lookup at use runs under the work-process lock.
+// withSystem needs AsyncLocalStorage, so this adapter runs on Node and Bun,
+// not the browser preview.
 import {Sessions, parseCookies, refuseToken, FETCH} from "./adt-session.mjs";
 import {claimAdtSessions} from "./adt-enq-key.mjs";
 import {EnqOwners} from "./adt-enq.mjs";
@@ -140,6 +142,19 @@ export class AbapSessions {
       if (holder === undefined || holder.session.id === undefined) return;
       if (holder.handle !== undefined) await this.#forget(obj, holder.session, holder.handle);
       this.owners.drop(holder.session, type, name);
+    });
+  }
+
+  deleteObject(session, type, name, store) {
+    return this.#run(async (obj) => {
+      const holder = await this.#holder(obj, type, store.find(type, name)?.name ?? name);
+      if (holder !== undefined && holder.session.id !== session.id) return {holder};
+      const gone = store.delete(type, name);
+      if (holder !== undefined && holder.handle !== undefined) {
+        await this.#forget(obj, holder.session, holder.handle);
+        this.owners.drop(holder.session, gone.type, gone.name);
+      }
+      return {gone};
     });
   }
 

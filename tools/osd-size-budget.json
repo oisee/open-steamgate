@@ -151,8 +151,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/adt-facade.mjs": {
-      "lines": 3115,
-      "reason": "2026-10-02 +13: the ABAP sessions adapter needs awaited lock and session calls on the remaining Node routes, plus async error handling; these routes move to ABAP in later slices"
+      "lines": 3136,
+      "reason": "2026-10-02 +34 against origin/main: the ABAP sessions adapter awaits Node route calls, handles async failures, and deletes objects with lock release in one dialog step; these routes move to ABAP in later slices"
     },
     "tools/cds2ddic.mjs": {
       "lines": 1100,
