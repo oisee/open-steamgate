@@ -866,7 +866,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
     });
 
     it("schedule( ) replaces a waiting doctor job when its tuned period changes", async () => {
-      const waiting = () => store.db.prepare("SELECT job_count, prd_mins FROM batch_runs WHERE job_name = 'L3_FLEET2_DOC' AND state = 'WAITING'").all();
+      const waiting = () => store.db.prepare("SELECT id, job_count, prd_mins FROM batch_runs WHERE job_name = 'L3_FLEET2_DOC' AND state = 'WAITING'").all();
       store.db.prepare("DELETE FROM batch_runs WHERE job_name IN ('L3_FLEET2_D', 'L3_FLEET2_DOC')").run();
       const call = () => dialogStep(async () => (await cls().schedule()).get());
       await call();
@@ -880,7 +880,11 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
       await drainJobOutbox(store);
       const changed = waiting();
       expect(changed).to.have.length(1);
-      expect(changed[0].job_count).to.not.equal(original[0].job_count);
+      // a new job, not the old one retimed: compare the run, not the count. A
+      // system hands a deleted top count out again in the same second (A4H,
+      // ANOMALY-2026-10-02-jobcount-unique-per-name), so the count may repeat
+      expect(changed[0].id).to.not.equal(original[0].id);
+      expect(store.db.prepare("SELECT state FROM batch_runs WHERE id = ?").get(original[0].id).state).to.equal("DELETED");
       expect(Number(changed[0].prd_mins)).to.equal(20);
       await dialogStep(() => cls().unschedule());
     });
