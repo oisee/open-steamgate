@@ -954,7 +954,24 @@ export class ObjectStore {
   //
   // Recycling is skipped when nothing is serving, so a command line or a
   // test suite pays only for the transpile.
-  async publish(options = {}) {
+  //
+  // One activation at a time per store. A save has two activators -- the
+  // dev loop (tools/osd-dev.mjs) and the ADT façade's own activation
+  // (tools/adt-facade.mjs) -- and side by side they shared one build and
+  // both swapped from its base, or the second swapped from a base the
+  // first had already replaced: refused, and the process recycled
+  // (vsp-i7, 2026-10-02). In line, the second builds on what the first
+  // made live: the same source is a no-op on that generation, a later edit
+  // a build and a swap of its own. Every caller needs this, so it is here.
+  publish(options = {}) {
+    const run = this.#publishing.then(() => this.#publish(options));
+    this.#publishing = run.catch(() => undefined);
+    return run;
+  }
+
+  #publishing = Promise.resolve();
+
+  async #publish(options) {
     const transpile = await this.transpile(options);
     if (transpile?.ok === false) {
       return {ok: false, transpile};

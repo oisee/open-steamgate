@@ -239,6 +239,116 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
     expect(h.build).to.match(/^cold; recycled after a warm build: the swap was refused: the runtime carries h0/);
     expect(h.swap).to.equal(null);
   });
+
+  // Two activators per save -- the dev loop and the façade's activation --
+  // call publish() side by side. They shared one build and both swapped
+  // from its base; the second swap was refused ("the runtime carries h1,
+  // and the swap is from h0") and recycled (vsp-i7, 2026-10-02). The real
+  // transpile() runs here over a stand-in warm compiler that, like the real
+  // one, moves its base to every generation it builds.
+  describe("two publish() calls at once", () => {
+    const setup = () => {
+      const dir = mkdtempSync(join(tmpdir(), "osd-warm-concurrent-"));
+      const store = new ObjectStore({root: dir, libs: []});
+      const src = {text: "rv = 1."};
+      const compiler = {
+        primed: true, unverified: new Set(), hash: "h0", built: src.text, n: 0, builds: 0,
+        async build() {
+          this.builds++;
+          const text = src.text;
+          await new Promise((done) => setTimeout(done, 20));
+          const from = this.hash;
+          if (text === this.built) {
+            return {ok: true, hash: from, from, cached: true, modules: [], hostHeld: [], stale: 0};
+          }
+          this.built = text;
+          this.hash = `h${++this.n}`;
+          return {ok: true, hash: this.hash, from, modules: ["zcl_a.clas.mjs"], hostHeld: [], stale: 1};
+        },
+      };
+      store.warmState = {on: true, compiler, reason: undefined};
+      const log = [];
+      store.served = {
+        running: true, generation: "h0", swaps: 0, recycles: 0,
+        async hot(swap) {
+          if (swap.from !== this.generation) {
+            throw new Error(`the runtime carries ${this.generation}, and the swap is from ${swap.from}`);
+          }
+          await new Promise((done) => setTimeout(done, 30));
+          this.generation = swap.generation;
+          log.push(`swap ${swap.from}->${swap.generation}`);
+          return {ms: 30, swaps: ++this.swaps};
+        },
+        async recycle() {
+          this.recycles++;
+          log.push("recycle");
+          return {generation: compiler.hash, ms: 900};
+        },
+      };
+      const done = () => {
+        clearTimeout(store.warmState.timer);
+        rmSync(dir, {recursive: true, force: true});
+      };
+      return {store, src, compiler, log, done};
+    };
+
+    it("the same save: one swap, the second answer warm, nothing recycled", async () => {
+      const {store, src, log, done} = setup();
+      try {
+        src.text = "rv = 2.";
+        const [devLoop, facade] = await Promise.all([store.publish(), store.publish()]);
+        expect(log).to.deep.equal(["swap h0->h1"]);
+        expect(store.served.recycles).to.equal(0);
+        expect(store.served.generation).to.equal("h1");
+        for (const r of [devLoop, facade]) {
+          expect(r).to.include({ok: true, recycled: false, generation: "h1"});
+          expect(r.why).to.equal(undefined);
+          expect(await activateWith(r)).to.have.property("build", "warm");
+        }
+        expect(devLoop.hot).to.equal(true);
+      } finally {
+        done();
+      }
+    });
+
+    it("a later edit while the first is in flight gets its own build and swap", async () => {
+      const {store, src, compiler, log, done} = setup();
+      try {
+        src.text = "rv = 2.";
+        const first = store.publish();
+        await new Promise((r) => setTimeout(r, 5));
+        src.text = "rv = 3.";
+        const second = store.publish();
+        const [a, b] = await Promise.all([first, second]);
+        expect(log).to.deep.equal(["swap h0->h1", "swap h1->h2"]);
+        expect(store.served.recycles).to.equal(0);
+        expect(a).to.include({ok: true, hot: true, generation: "h1"});
+        expect(b).to.include({ok: true, hot: true, generation: "h2"});
+        expect(store.served.generation).to.equal("h2");
+        expect(compiler.built).to.equal("rv = 3.");
+      } finally {
+        done();
+      }
+    });
+
+    it("a publish() that throws does not stop the next one", async () => {
+      const {store, src, log, done} = setup();
+      try {
+        const transpile = store.transpile;
+        store.transpile = async () => { store.transpile = transpile; throw new Error("the disk went away"); };
+        src.text = "rv = 2.";
+        const first = store.publish();
+        const second = store.publish();
+        let thrown;
+        await first.catch((e) => { thrown = e; });
+        expect(thrown?.message).to.equal("the disk went away");
+        expect(await second).to.include({ok: true, hot: true, generation: "h1"});
+        expect(log).to.deep.equal(["swap h0->h1"]);
+      } finally {
+        done();
+      }
+    });
+  });
 });
 
 describe("tools/osd-warm: where the filesystem will not link", () => {
