@@ -4,8 +4,10 @@
 import {resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 
-const binaries = new Set(["osd-linux-x64", "osd-linux-arm64", "osd-darwin-arm64", "osd-windows-x64.exe"]);
-const goBinaries = new Set(["osgo-linux-x64", "osgo-linux-arm64", "osgo-darwin-arm64", "osgo-windows-x64.exe"]);
+const binaries = new Set(["osd-linux-x64", "osd-linux-arm64", "osd-darwin-arm64", "osd-darwin-x64",
+  "osd-windows-x64.exe", "osd-windows-arm64.exe"]);
+const goBinaries = new Set(["osgo-linux-x64", "osgo-linux-arm64", "osgo-darwin-arm64", "osgo-darwin-x64",
+  "osgo-windows-x64.exe", "osgo-windows-arm64.exe"]);
 const compose = new Set(["sqlite.yml", "duckdb.yml", "postgres.yml", "hana.yml"]);
 
 export function renderReadme(assets) {
@@ -46,7 +48,7 @@ export function renderReadme(assets) {
           "",
         );
       }
-      if (name === "osd-darwin-arm64") {
+      if (name.startsWith("osd-darwin-")) {
         lines.push("If macOS Gatekeeper quarantines the download, run `xattr -d com.apple.quarantine osd` after checking its checksum.", "");
       }
       if (name === "osd-linux-x64") {

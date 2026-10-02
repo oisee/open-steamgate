@@ -22,7 +22,8 @@ if (args.length > 2) throw new Error("Usage: bun scripts/build-binary.mjs [--see
 const outfile = args[0] ?? resolve(root, "build", "osd");
 const target = args[1];
 const releaseTargets = new Set([
-  "bun-linux-x64-baseline", "bun-linux-arm64", "bun-windows-x64-baseline", "bun-darwin-arm64",
+  "bun-linux-x64-baseline", "bun-linux-arm64", "bun-windows-x64-baseline", "bun-windows-arm64",
+  "bun-darwin-arm64", "bun-darwin-x64-baseline",
 ]);
 if (target !== undefined && !releaseTargets.has(target)) {
   throw new Error(`Unsupported release target ${target}; expected one of ${[...releaseTargets].join(", ")}`);

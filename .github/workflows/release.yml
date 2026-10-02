@@ -102,8 +102,8 @@ jobs:
           fi
           node scripts/release-readme.mjs \
             "open-steamgate-$version.vsix" \
-            osd-linux-x64 osd-linux-arm64 osd-darwin-arm64 osd-windows-x64.exe \
-            osgo-linux-x64 osgo-linux-arm64 osgo-darwin-arm64 osgo-windows-x64.exe \
+            osd-linux-x64 osd-linux-arm64 osd-darwin-arm64 osd-darwin-x64 osd-windows-x64.exe osd-windows-arm64.exe \
+            osgo-linux-x64 osgo-linux-arm64 osgo-darwin-arm64 osgo-darwin-x64 osgo-windows-x64.exe osgo-windows-arm64.exe \
             sqlite.yml duckdb.yml postgres.yml hana.yml > build/vsix/README.md
           node scripts/release-readme.mjs --diz "$version" > build/vsix/FILE_ID.DIZ
           { cat build/vsix/README.md; printf '\nChanges: see CHANGELOG.md\n'; } > build/vsix/release-body.md
@@ -205,8 +205,14 @@ jobs:
             asset: osd-linux-arm64
           - target: bun-darwin-arm64
             asset: osd-darwin-arm64
+          # baseline like the other x64 targets: no AVX2, so pre-Haswell
+          # Intel Macs and Rosetta 2 before macOS 15 can run it
+          - target: bun-darwin-x64-baseline
+            asset: osd-darwin-x64
           - target: bun-windows-x64-baseline
             asset: osd-windows-x64.exe
+          - target: bun-windows-arm64
+            asset: osd-windows-arm64.exe
     permissions:
       actions: read
       contents: write
@@ -319,7 +325,9 @@ jobs:
           - {goos: linux, goarch: amd64, asset: osgo-linux-x64}
           - {goos: linux, goarch: arm64, asset: osgo-linux-arm64}
           - {goos: darwin, goarch: arm64, asset: osgo-darwin-arm64}
+          - {goos: darwin, goarch: amd64, asset: osgo-darwin-x64}
           - {goos: windows, goarch: amd64, asset: osgo-windows-x64.exe}
+          - {goos: windows, goarch: arm64, asset: osgo-windows-arm64.exe}
     permissions:
       actions: read
       contents: write
@@ -469,8 +477,8 @@ jobs:
           node scripts/release-version.mjs --check-target "$RELEASE_TAG"
           gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name' > "$RUNNER_TEMP/release-assets.txt"
           for asset in \
-            osd-linux-x64 osd-linux-arm64 osd-darwin-arm64 osd-windows-x64.exe \
-            osgo-linux-x64 osgo-linux-arm64 osgo-darwin-arm64 osgo-windows-x64.exe; do
+            osd-linux-x64 osd-linux-arm64 osd-darwin-arm64 osd-darwin-x64 osd-windows-x64.exe osd-windows-arm64.exe \
+            osgo-linux-x64 osgo-linux-arm64 osgo-darwin-arm64 osgo-darwin-x64 osgo-windows-x64.exe osgo-windows-arm64.exe; do
             grep -Fxq "$asset" "$RUNNER_TEMP/release-assets.txt"
             grep -Fxq "$asset.sha256" "$RUNNER_TEMP/release-assets.txt"
           done

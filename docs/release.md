@@ -118,7 +118,8 @@ by hand after a local `npm run leak`. A match (exit 1) always stops the release.
 | Asset | Build or source |
 | --- | --- |
 | `open-steamgate-<version>.vsix` and `.sha256` | Universal VS Code extension, version checked against the tag |
-| `osd-linux-x64`, `osd-linux-arm64`, `osd-darwin-arm64`, `osd-windows-x64.exe`, each with `.sha256` | `npm run bootstrap`, then `npm run binary -- --seed <output> <bun-target>` with Bun 1.4.2 |
+| `osd-linux-x64`, `osd-linux-arm64`, `osd-darwin-arm64`, `osd-darwin-x64`, `osd-windows-x64.exe`, `osd-windows-arm64.exe`, each with `.sha256` | `npm run bootstrap`, then `npm run binary -- --seed <output> <bun-target>` with Bun 1.4.2 (`bun-darwin-x64-baseline` and `bun-windows-arm64` for the two added 2026-10-02) |
+| `osgo-linux-x64`, `osgo-linux-arm64`, `osgo-darwin-arm64`, `osgo-darwin-x64`, `osgo-windows-x64.exe`, `osgo-windows-arm64.exe`, each with `.sha256` | `go build` with `CGO_ENABLED=0` per `GOOS`/`GOARCH` ([docs/osgo-release.md](osgo-release.md)) |
 | `sqlite.yml`, `duckdb.yml`, `postgres.yml`, `hana.yml` | [Tracked Compose sources](../docker/compose/), validated with `docker compose config` |
 | `README.md` | Short instructions for starting every asset, also included in the release notes |
 | `CHANGELOG.md` | Merged PR titles since the previous prerelease; the release body points to it |
@@ -144,7 +145,7 @@ requires the bootstrapped libraries and packs and embeds the seed. Run
 
 **Every binary is checked by its content before it is uploaded**
 (`scripts/release-verify.mjs`, 2026-09-30): the header must name the target
-(ELF x86-64 / aarch64, Mach-O arm64, PE x64) and the `.sha256` must be the
+(ELF x86-64 / aarch64, Mach-O arm64 / x86-64, PE x64 / ARM64) and the `.sha256` must be the
 file's own digest. The Linux x64 binary, the one the runner can execute, is
 also run the way a user runs it: `./osd up` outside any checkout, with an empty
 data home. It must boot from its embedded seed, answer the demo service's
@@ -159,7 +160,15 @@ name the commit and its `sw.js` must carry the stamp `build.json` names.
 The measured seeded Linux x64 binary is 316.4 MB (decimal, 2026-09-30; it was 109.5 MB on 2026-09-16). All four requested Bun targets cross-compiled on Linux x64 with Bun 1.4.2
 in the local release check. No target failed to build. Only Linux x64 was
 built on its native host; cross-compilation does not prove that Linux arm64,
-macOS arm64, or Windows x64 starts successfully. The binaries contain the
+macOS arm64, or Windows x64 starts successfully. macOS x64 and Windows arm64
+were added on 2026-10-02 (the six platforms the vsp sibling ships): both
+cross-compiled on Linux x64 with Bun 1.4.2 to a Mach-O x86_64 and a PE32+
+ARM64, and both pass `release-verify.mjs binary`; neither has been started on
+its own host. macOS x64 uses `bun-darwin-x64-baseline`, like the other x64
+targets: no AVX2, so a pre-Haswell Intel Mac and Rosetta 2 before macOS 15
+can run it. The binary's only native module, DuckDB, is stubbed out at build
+time for every target; SQLite is sql.js (WebAssembly), and open-rfc and hdb
+are plain JavaScript, so no target carries a platform-specific addon. The binaries contain the
 system seed, including source, selected packs, tools, data, and pinned library
 sources. On first start outside a checkout, the seed is copied into a
 content-keyed `osd-home-<seedId>` under `$XDG_DATA_HOME/open-steamgate` or
