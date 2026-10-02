@@ -429,11 +429,11 @@ The design stays a thin layer over the files: versions are not stored anywhere, 
 
 ## Logon: open by design now, checked credentials later (2026-10-02)
 
-- **Now (Alice, 2026-10-02): the system is open on purpose.** The ADT façade accepts any user and password, or
-  none (`tools/adt-session.mjs`), and that stays so. The VS Code extension only runs the system on the local
-  machine, so nothing reaches it from outside. Clients such as ABAP-FS and vsp may send a placeholder user, and
-  OSG must keep accepting it. vsp skips the password only for a loopback `osd.url` and asks for one otherwise.
-  It still accepts any answer; that is the client's choice, not a check on our side.
+- **Now (Alice, 2026-10-02): the system is open on purpose.** The ADT façade accepts any user and password,
+  or none (`tools/adt-session.mjs`). What keeps it local is the bind: every listener goes through `OSD_BIND`,
+  which defaults to loopback (127.0.0.1 and ::1), so a system started by the VS Code extension, `osd up` or
+  `npm start` is not reachable from the network. Opening it is deliberate: set `OSD_BIND=0.0.0.0`. Clients
+  such as ABAP-FS and vsp may send a placeholder user, and the system accepts it.
 - **Docker Compose is a separate question.** A container can listen beyond loopback. Its exposure is settled in
   the compose files and the deployment docs when we get there, not in the façade.
 - **Later: checked credentials, opt in.** A system setting holds a user and a password (or several users). When
