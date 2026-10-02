@@ -1000,7 +1000,8 @@ function place(p, ctx) {
   switch (p.e) {
     case "var": return p.ref && !ctx.valueOutputs?.has(p.name) ? `(*${ident(p.name)})` : ident(p.name);
     case "attr": return `me.${ident(p.name)}`;
-    case "static": return p.go;
+    case "static": return p.owner && CLASSES.has(p.owner) && chainCctor(CLASSES.get(p.owner))
+      ? `(*func() *${goType(p.type)} { Ensure_${typeName(p.owner)}(s); return &${p.go} }())` : p.go;
     case "const": return p.go;
     case "sy": return `s.Sy.${p.field}`;
     case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
@@ -1860,6 +1861,7 @@ ${t}	}`));
         ...(bind ? [`${t}\t\t\t${bind}`] : []), `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\ts.Sy.Tabix = ${st.hashed ? "0" : `int32(i${n} + 1)`}`,
         `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
+    case "replace_chars": HELPER_IMPORTS.add("charsection"); return emitByteStatement(st, ctx, t, {expr, place});
     case "find_bytes":
     case "replace_bytes":
     case "find_bytes_all": return emitByteStatement(st, ctx, t, {expr, place});
@@ -1976,11 +1978,7 @@ function expr(e, ctx) {
   const owned = ownedExpression(e, ctx, {ownership: OWNERSHIP, expr, place});
   if (owned !== null) return owned;
   switch (e.e) {
-    case "static": {
-      const cls = e.owner && CLASSES.get(e.owner);
-      if (cls && chainCctor(cls)) return `func() ${goType(e.type)} { Ensure_${typeName(e.owner)}(s); return ${place(e, ctx)} }()`;
-      return place(e, ctx);
-    }
+    case "static": return place(e, ctx);
     case "var": case "attr": case "field": case "fs": case "row": case "row_key": case "refattr": case "dref_field": return place(e, ctx);
     case "zero": return zero(e.type) === "nil" ? `(${goType(e.type)})(nil)` : zero(e.type);
     case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;

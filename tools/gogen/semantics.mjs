@@ -15,6 +15,8 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  ZCL_GOGEN_T_STATICWRITE: "1/00ABCD00/4/00EE/aXYd!/0000EE00/7/19/0/9000000000/2/7",
+  ZCL_GOGEN_T_STATICREC: "2001",
   // Supplied byte oracles plus documentation, unmeasured extensions (fixture NOTES.md).
   ZCL_GOGEN_T_INT8X: "0000000000000000FFFFFFFFFFFFFFFE/-2/0708/65535/-9223372036854775808/8000000000000000/0/00000000FFFFFFFE/-2/FFFFFFFE/documented",
   // Unmeasured regression: character bases, int8 concat and shared i formatting.

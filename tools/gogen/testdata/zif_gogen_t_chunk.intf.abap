@@ -1,0 +1,3 @@
+INTERFACE zif_gogen_t_chunk PUBLIC.
+  METHODS step IMPORTING depth TYPE i.
+ENDINTERFACE.

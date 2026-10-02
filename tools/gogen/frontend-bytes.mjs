@@ -1,5 +1,6 @@
 export function replaceStatement(node, ctx, text, h) {
   const {Nodes, Expressions, upper, isExpr, source, lvalue, convert, charlike, Unsupported, I, S, XS} = h;
+  const section = /^REPLACE SECTION(?: OFFSET)?(?: LENGTH)? OF WITH(?: IN (?:BYTE|CHARACTER) MODE)?$/.test(node.getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(k.concatTokens())).filter((w) => w !== ".").join(" "));
   const bytes = /^REPLACE SECTION(?: OFFSET)?(?: LENGTH)? OF WITH IN BYTE MODE$/.test(node.getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(k.concatTokens())).filter((w) => w !== ".").join(" "));
   // REPLACE [FIRST OCCURRENCE OF | ALL OCCURRENCES OF] [REGEX] p IN
   // [SECTION [OFFSET o] [LENGTH l] OF] v WITH w [IGNORING CASE]; every rule
@@ -7,7 +8,7 @@ export function replaceStatement(node, ctx, text, h) {
   if (!bytes && /\b(PCRE|RESPECTING|IN\s+BYTE\s+MODE|REPLACEMENT|RESULTS|INTO)\b/i.test(text)) throw new Unsupported(`REPLACE form: ${text}`);
   const kids = node.getChildren();
   const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
-  if (!bytes && words.includes("SECTION") && !words.includes("OCCURRENCE") && !words.includes("OCCURRENCES")) throw new Unsupported(`REPLACE SECTION form: ${text}`);
+  if (!section && words.includes("SECTION") && !words.includes("OCCURRENCE") && !words.includes("OCCURRENCES")) throw new Unsupported(`REPLACE SECTION form: ${text}`);
   const ft = node.findDirectExpression(Expressions.FindType);
   const kind = ft ? upper(ft.concatTokens()) : "";
   if (kind && kind !== "REGEX" && kind !== "SUBSTRING") throw new Unsupported(`REPLACE ${kind}`);
@@ -30,6 +31,12 @@ export function replaceStatement(node, ctx, text, h) {
     const w = wth ? source(wth, ctx) : null;
     if (!["x", "xstring"].includes(target.type.k) || !w || !["x", "xstring"].includes(w.type.k)) throw new Unsupported(`REPLACE byte SECTION operands: ${text}`);
     return {s: "replace_bytes", target, with: convert(w, XS), off: off ? convert(source(off, ctx, I), I) : null, len: len ? convert(source(len, ctx, I), I) : null};
+  }
+  if (section) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    const w = wth ? source(wth, ctx) : null;
+    if (!["string", "c"].includes(target.type.k) || !w || !charlike(w.type)) throw new Unsupported(`REPLACE character SECTION operands: ${text}`);
+    return {s: "replace_chars", target, with: convert(w, S), off: off ? convert(source(off, ctx, I), I) : null, len: len ? convert(source(len, ctx, I), I) : null};
   }
   if (pat === null || wth === null) throw new Unsupported(`REPLACE operands: ${text}`);
   if (regex && (off || len)) throw new Unsupported(`REPLACE REGEX IN SECTION: what an anchor sees there is not measured: ${text}`);

@@ -11,6 +11,7 @@
 // Everything outside the subset is a named refusal (Unsupported), never a
 // guess. A method whose body or signature is outside it is skipped and says
 // why; a method that calls a skipped one is refused in turn.
+import {resolveStatic as lowerStatic} from "./frontend-static.mjs";
 import {syntaxDiagnostics} from "./frontend-diagnostics.mjs";
 import {sourceOwnershipSafety} from "./frontend-owned.mjs";
 import {lowerBoolx} from "./frontend-boolx.mjs";
@@ -3299,7 +3300,10 @@ function lvalue(target, ctx) {
   let place;
   let i = 0;
   const first = kids[0];
-  if (isExpr(first, Expressions.InlineData)) {
+  if (isExpr(first, Expressions.ClassName) && isTok(kids[1], "=>")) {
+    place = resolveStatic(upper(first.concatTokens()), upper(kids[2].concatTokens()), ctx, true);
+    i = 3;
+  } else if (isExpr(first, Expressions.InlineData)) {
     place = variable(first.findFirstExpression(Expressions.TargetField).concatTokens(), ctx);
     i = 1;
   } else if (upper(first.concatTokens()) === "ME" && isTok(kids[1], "->")) {
@@ -4008,49 +4012,8 @@ function localInterfaceConstant(id, attr, local, reg) {
 }
 
 /** zif_x=>c_y or zcl_x=>attr */
-function resolveStatic(owner, attr, ctx) {
-  if (owner === "CL_ABAP_CHAR_UTILITIES" && CHAR_UTILITIES[attr] !== undefined) return {e: "chars", value: CHAR_UTILITIES[attr], type: C(1)};
-  const intf = ctx.reg.getObject("INTF", owner)?.getDefinition();
-  const clas = clasDef(ctx.reg, owner);
-  const local = ctx.program.localInterfaces.get(`${ctx.program.currentOwner}|${owner}`);
-  const def = intf ?? clas ?? local?.def;
-  if (def === undefined) throw new Unsupported(`${owner}=>${attr}: ${owner} is not in the program`);
-  const c = def.getAttributes().getConstants().find((x) => upper(x.getName()) === attr);
-  if (c !== undefined) {
-    const go = registerConst(ctx.program, `${ctx.program.currentOwner ?? owner}:${owner}~${attr}`,
-      local ? localInterfaceConstant(c, attr, local, ctx.reg) : c, owner);
-    if (go === undefined) throw new Unsupported(`constant ${owner}=>${attr} is outside the subset`);
-    return {e: "const", go, type: ctx.program.consts.get(go).type};
-  }
-  // a constant a superclass declares, named through the subclass
-  // (/IWBEP/CX_MGW_NOT_IMPL_EXC=>METHOD_NOT_IMPLEMENTED, declared by
-  // /IWBEP/CX_MGW_TECH_EXCEPTION): the same constant; a constant is fixed
-  // at compile time, so no class constructor runs for it (ultra/zvdb)
-  if (clas !== undefined && intf === undefined) {
-    for (const anc of ancestors(ctx.reg, owner)) {
-      const ac = clasDef(ctx.reg, anc)?.getAttributes().getConstants().find((x) => upper(x.getName()) === attr);
-      if (ac === undefined) continue;
-      const go = registerConst(ctx.program, `${anc}~${attr}`, ac, anc);
-      if (go === undefined) throw new Unsupported(`constant ${anc}=>${attr} is outside the subset`);
-      return {e: "const", go, type: ctx.program.consts.get(go).type};
-    }
-  }
-  if (owner === ctx.className) {
-    const a = findAttribute(ctx, attr);
-    if (a) return a;
-  }
-  // an alias of an interface for a constant of an interface it includes
-  // (IF_APC_WSP_EXTENSION=>CO_CONNECT_MODE_REJECT for
-  // IF_APC_WSP_EXTENSION_COMMON~CO_CONNECT_MODE_REJECT)
-  const alias = (def.getAliases?.() ?? []).find((x) => upper(x.getName()) === attr);
-  const comp = alias === undefined ? [] : upper(alias.getComponent()).split("~");
-  if (comp.length === 2 && comp[0] !== owner) return resolveStatic(comp[0], comp[1], ctx);
-  const a = clas?.getAttributes().getStatic().find((x) => upper(x.getName()) === attr);
-  if (a && a.getVisibility?.() === abaplint.Visibility.Public) {
-    return {e: "static", go: goName(`${owner}=>${attr}`), owner,
-      type: typeOf(a.getType(), `${owner}=>${attr}`, ctx.program)};
-  }
-  throw new Unsupported(`${owner}=>${attr}`);
+function resolveStatic(owner, attr, ctx, write = false) {
+  return lowerStatic(owner, attr, ctx, {CHAR_UTILITIES, C, upper, clasDef, registerConst, localInterfaceConstant, Unsupported, ancestors, goName, typeOf, abaplint, notInProgram}, write);
 }
 
 /* ------------------------------------------------------------- constructors */

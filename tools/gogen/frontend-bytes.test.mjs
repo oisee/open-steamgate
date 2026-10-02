@@ -57,8 +57,16 @@ test("other byte FIND and REPLACE forms keep their refusals", () => {
     assert.equal(p.partial.length, 1);
     assert.match(p.partial[0], /(?:REPLACE|FIND) form:/);
   }
-  const p = compile("REPLACE SECTION OFFSET 1 LENGTH 2 OF xs WITH p.", "DATA xs TYPE string. DATA p TYPE string.");
-  assert.match(p.partial[0], /REPLACE SECTION form:/);
+
+});
+
+test("character REPLACE SECTION accepts fixed targets and either default operand", () => {
+  for (const section of ["OFFSET 1 LENGTH 2", "LENGTH 2", "OFFSET 1"]) for (const type of ["string", "c LENGTH 4"]) {
+    const p = compile(`REPLACE SECTION ${section} OF xs WITH p IN CHARACTER MODE.`, `DATA xs TYPE ${type}. DATA p TYPE string.`);
+    assert.deepEqual(p.partial, []);
+    assert.equal(p.classes[0].methods[0].body[0].s, "replace_chars");
+    assert.match(emitGo(p), /hCharsection.Replace/);
+  }
 });
 
 test("P2 ALL byte occurrences reuse RESULTS and accept MATCH COUNT", () => {
