@@ -49,7 +49,8 @@ CLASS zcl_l3_fleet_seed IMPLEMENTATION.
     DATA lv_num TYPE n LENGTH 5.
     DATA lv_num3 TYPE n LENGTH 3.
 
-    gv_state = iv_seed.
+*   the state lives in 1..2147483646: zero would stay zero forever
+    gv_state = iv_seed MOD 2147483647.
     IF gv_state <= 0.
       gv_state = 1.
     ENDIF.

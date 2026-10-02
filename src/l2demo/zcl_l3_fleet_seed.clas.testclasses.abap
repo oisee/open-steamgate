@@ -35,6 +35,16 @@ CLASS ltcl_seed IMPLEMENTATION.
     DATA lv_count TYPE i.
     ls_counts = zcl_l3_fleet_seed=>generate( iv_ships = 200 iv_seed = 42 iv_date = '20261001' ).
     cl_abap_unit_assert=>assert_number_between( number = ls_counts-voyages lower = 200 upper = 600 ).
+    SELECT COUNT(*) FROM zosd_l2_voy INTO lv_count.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = ls_counts-voyages ).
+    SELECT COUNT(*) FROM zosd_l2_crew INTO lv_count.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = ls_counts-crew ).
+    cl_abap_unit_assert=>assert_number_between( number = lv_count lower = 200 upper = 800 ).
+    SELECT COUNT(*) FROM zosd_l2_crew INTO lv_count WHERE role = 'C'.
+    cl_abap_unit_assert=>assert_number_between( number = lv_count lower = 50 upper = 200 ).
+    SELECT COUNT(*) FROM zosd_l2_cargo INTO lv_count.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = ls_counts-cargo ).
+    cl_abap_unit_assert=>assert_number_between( number = lv_count lower = 100 upper = 500 ).
     SELECT COUNT(*) FROM zosd_l2_voy INTO lv_count
       WHERE dep_date < '20260921' OR dep_date > '20261031'.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 ).
