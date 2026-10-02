@@ -212,8 +212,9 @@ activate through ADT, so the API gives such a client nothing new. The new risks 
 
 ## 8. Open questions for Alice
 
-1. Pools outside `$TMP` (transient, not repository objects), as recommended here, or in `$TMP` as first
-   sketched?
+1. ~~Pools outside `$TMP` or in `$TMP`?~~ **Decided (Alice, 2026-10-02): a transient area outside `$TMP`.**
+   On a system the generated pools are believed to be transient and not repository objects at all (no TADIR
+   row); UNMEASURED, to be confirmed by a sandbox probe (TADIR / TRDIR after GENERATE).
 2. Must a CLAS or PROG that ABAPiti creates be callable in the same step, or is "live after this step" enough
    for M2?
 3. Which signal means development: `CCCATEGORY`, `CCNOCLIIND`, or both? And what should OSG's own client say
