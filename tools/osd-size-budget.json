@@ -477,6 +477,10 @@
     "tools/stg-compile.mjs": {
       "lines": 1242,
       "reason": "baseline 2026-10-01"
+    },
+    "go:intpower": {
+      "lines": 120,
+      "reason": "758 IPOW oracle: negative exponent float path and numeric assignment text in the pure helper; go/abap budgets unchanged"
     }
   },
   "readmeMissing": [

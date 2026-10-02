@@ -17,6 +17,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
   // A4H negative x16 padding plus documentation-backed widths (fixture NOTES.md).
   ZCL_GOGEN_T_INT8X: "0000000000000000FFFFFFFFFFFFFFFE/-2/0708/65535/-9223372036854775808/8000000000000000/0/00000000FFFFFFFE/-2/FFFFFFFE",
+  // Unmeasured regression: character bases, int8 concat and shared i formatting.
+  ZCL_GOGEN_T_IPOWTEXT: "a42/42a/a42a/a5-/c:10/n:10/5-/2147483648-",
+  // Unmeasured: documented integer power and packed assignment rounding.
+  ZCL_GOGEN_T_IPOW: "1073741824/overflow/4611686018427387904/3.38/bytes:2/negative:-1/1/0.50/5.0000000000000000E-01/minimum:2147483648-/wide:4611686018427387904/zero-overflow/wide-overflow",
   // A raised exception retains reference writes and attributes, but discards
   // VALUE output and RETURNING copy-back (the same fixture runs in both hosts).
   // Unmeasured (SAP docs): classic exceptions retain by-reference TABLES writes.

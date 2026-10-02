@@ -13,6 +13,8 @@
 // why; a method that calls a skipped one is refused in turn.
 import {syntaxDiagnostics} from "./frontend-diagnostics.mjs";
 import {sourceOwnershipSafety} from "./frontend-owned.mjs";
+import {lowerBoolx} from "./frontend-boolx.mjs";
+import {builtin} from "./frontend-builtins.mjs";
 import {replaceStatement, lowerByteFind} from "./frontend-bytes.mjs";
 import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
@@ -144,7 +146,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
       else if (/\.(abap|xml)$/i.test(e.name)) {
         const source = readFileSync(path, "utf8");
         reg.addFile(new abaplint.MemoryFile(e.name, wanted.includes(objName(e.name))
-          ? lowerNarrowSubmit(source, e.name, abaplint) : source));
+          ? lowerNarrowSubmit(lowerBoolx(source, e.name, abaplint), e.name, abaplint) : source));
       }
       // a CDS view's source: its SQL view name, for the table registry
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
@@ -3821,7 +3823,7 @@ function arith(node, ctx, calc, hint) {
     if (item.descr) { const v = descrAttr(item.descr.call, item.descr.attr, ctx); return t === undefined ? v : convert(v, t); }
     if (item.group !== undefined) return arith(item.group, ctx, t);
     if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
-    let v = sourceOperand(item.node, ctx, item.hint);
+    let v = sourceOperand(item.node, ctx, t === undefined ? item.hint : t);
     if (item.comps) v = componentsOf(v, item.comps, ctx);
     // an x operand of arithmetic that is not a bit operation: through i
     if (t !== undefined && (v.type.k === "x" || v.type.k === "xstring") && t.k !== "x" && t.k !== "xstring" && t.k !== "i") v = convert(v, I);
@@ -5780,7 +5782,7 @@ function template(n, ctx) {
 const FUNCTIONS = {
   SIN: "f", COS: "f", TAN: "f", SQRT: "f", EXP: "f", LOG: "f", LOG10: "f",
   ABS: "same", SIGN: "same", FLOOR: "same", CEIL: "same", TRUNC: "same", FRAC: "same",
-  NMAX: "max", NMIN: "max",
+  NMAX: "max", NMIN: "max", IPOW: "power", BOOLX: "boolx",
 };
 
 /*
@@ -5917,7 +5919,7 @@ function call(chain, ctx, statement, hint) {
   // generator, whose sequence would be the contract, is refused
   if (owner === "CL_ABAP_RANDOM" && name === "CREATE" && (direct || named || full)) throw new Unsupported(`CL_ABAP_RANDOM=>CREATE with a SEED: the host generator ignores it`);
 
-  if (receiver === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx);
+  if (receiver === null && owner === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx, {FUNCTIONS, Expressions, source, convert, Unsupported, upper, I, F, P31, S, XS, numeric}, name === "IPOW" && ["i", "int8", "p", "f"].includes(hint?.k) ? hint : undefined);
   if (receiver === null && name === "LINES" && !ctx.signatures.has(name)) {
     const t = source(direct, ctx);
     if (t.type.k === "data") return {e: "lines_data", x: t, type: I};
@@ -6171,30 +6173,6 @@ function defaultValue(p, ctx) {
   throw new Unsupported(`DEFAULT ${t}`);
 }
 
-function builtin(name, direct, named, ctx) {
-  const kind = FUNCTIONS[name];
-  if (kind === "max") {
-    if (named === undefined) throw new Unsupported(`${name}( ) without val1 / val2`);
-    const vals = named.findDirectExpressions(Expressions.ParameterS).map((p) => source(p.findDirectExpression(Expressions.Source), ctx));
-    const t = vals.some((v) => v.type.k === "f") ? F : vals.every((v) => v.type.k === "i") ? I : null;
-    if (t === null) throw new Unsupported(`${name}( ) over ${vals.map((v) => v.type.k).join(",")}`);
-    return {e: "fn", name, args: vals.map((v) => convert(v, t)), type: t};
-  }
-  const argNode = direct ?? named?.findDirectExpressions(Expressions.ParameterS).find((p) => upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()) === "VAL")?.findDirectExpression(Expressions.Source);
-  if (argNode === undefined) throw new Unsupported(`${name}( ) arguments`);
-  if (kind === "f") return {e: "fn", name, args: [convert(source(argNode, ctx, F), F)], type: F};
-  const arg = source(argNode, ctx);
-  // of a p (A4H PDFMT fn:, PDCMP f:): abs( ) and frac( ) keep its type,
-  // sign( ) is an i, ceil( ) floor( ) trunc( ) have no decimals (-1.5 gives
-  // -1, -2, -1 in a template, -1.0 and -2.0 in a p(8,1))
-  if (arg.type.k === "p") {
-    if (name === "SIGN") return {e: "fn", name, args: [arg], type: I};
-    if (["CEIL", "FLOOR", "TRUNC"].includes(name)) return {e: "fn", name, args: [arg], type: arg.type.calc ? P31 : {k: "p", len: arg.type.len, dec: 0}};
-    return {e: "fn", name, args: [arg], type: arg.type};
-  }
-  if (!numeric(arg.type)) throw new Unsupported(`${name}( ) of a ${arg.type.k}`);
-  return {e: "fn", name, args: [arg], type: arg.type};
-}
 
 /* ------------------------------------------------------------------- conversion */
 
@@ -6366,6 +6344,8 @@ export function convert(expr, to) {
   // i -> string, measured on A4H: the digits and then a place for the sign,
   // 42 is "42 ", -5 is "5-" (a template writes -5; a move does not)
   if (to.k === "string" && from.k === "i") return ok("i2s");
+  if (to.k === "string" && from.k === "int8") return ok("i82s");
+  if (to.k === "string" && from.k === "f") return ok("f2s");
   // Four/eight big-endian bytes, zero-padded or truncated on the left.
   if (["x", "xstring"].includes(to.k) && ["i", "int8"].includes(from.k)) return ok(from.k === "i" ? "i2x" : "i82x");
   // An exact upper-case hex literal supplies the bytes directly.
@@ -6384,7 +6364,7 @@ export function convert(expr, to) {
   // that does not fit raises CX_SY_ARITHMETIC_OVERFLOW after arithmetic and
   // CX_SY_CONVERSION_OVERFLOW after a move
   if (to.k === "p") {
-    const arith = expr.e === "bin" || expr.e === "neg";
+    const arith = expr.e === "bin" || expr.e === "neg" || (expr.e === "fn" && expr.name === "IPOW");
     if (from.k === "p") return {...ok("p2p"), arith};
     if (from.k === "i" || from.k === "int8") return ok("i2p");
     if (from.k === "f") return ok("f2p");
@@ -6401,7 +6381,7 @@ export function convert(expr, to) {
     throw new Unsupported(`conversion ${from.k} -> p`);
   }
   if (from.k === "p") {
-    const arith = expr.e === "bin" || expr.e === "neg";
+    const arith = expr.e === "bin" || expr.e === "neg" || (expr.e === "fn" && expr.name === "IPOW");
     if (to.k === "i" || to.k === "int8") return {...ok(to.k === "i" ? "p2i" : "p2i8"), arith};
     if (to.k === "f") return ok("p2f");
     // into characters and n: the field's own decimals (a calculation type

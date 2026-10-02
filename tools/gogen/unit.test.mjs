@@ -475,3 +475,35 @@ test("GENERATE SUBROUTINE POOL is refused with sy-subrc 8 and its method still r
   const rows = JSON.parse(run.stdout).rows;
   assert.deepEqual(rows.map((r) => `${r.method}:${r.status}`), ["REFUSED:SUCCESS", "NAME_ONLY:SUCCESS", "NAME_COMPONENT:SUCCESS"]);
 });
+
+test("a Go compiler refusal is retried without losing unrelated Unit methods", {timeout:120000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-retry-"));
+  try {
+    writeFileSync(join(dir,"zcl_unit_retry.clas.abap"), `CLASS zcl_unit_retry DEFINITION PUBLIC FINAL CREATE PUBLIC. ENDCLASS.
+CLASS zcl_unit_retry IMPLEMENTATION. ENDCLASS.\n`);
+    // SIGN over int8 is accepted by the existing IR but refused by Go's
+    // float helper signature. Exercise the real compiler recovery path.
+    writeFileSync(join(dir,"zcl_unit_retry.clas.testclasses.abap"), `CLASS ltcl_retry DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
+PRIVATE SECTION. METHODS good FOR TESTING. METHODS bad FOR TESTING. ENDCLASS.
+CLASS ltcl_retry IMPLEMENTATION.
+METHOD good. ASSERT 1 = 1. ENDMETHOD.
+METHOD bad. DATA wide TYPE int8 VALUE 1. wide = sign( wide ). ENDMETHOD.
+ENDCLASS.\n`);
+    const run = await unitRun([join(here,"unit.mjs"),"--fixture",dir,"--no-cache","--out",join(dir,"out")]);
+    assert.equal(run.status,2,run.stderr || run.stdout);
+    const good = run.result.rows.find((row)=>row.method === "GOOD");
+    const bad = run.result.rows.find((row)=>row.method === "BAD");
+    assert.equal(good.status,"SUCCESS",run.stdout);
+    assert.equal(bad.status,"NOT_COMPILED",run.stdout);
+    assert.match(bad.message,/Go compiler:/);
+  } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+test("integer power and numeric/logical built-ins run through ABAP Unit", {timeout:120000}, async () => {
+  const run = await unitRun([join(here,"unit.mjs"),"--fixture",join(here,"testdata"),
+    "--class","ZCL_GOGEN_T_IPOW","--no-cache"]);
+  assert.equal(run.status,0,run.stderr || run.stdout);
+  assert.equal(run.result.compiled,1);
+  assert.equal(run.result.rows.length,10);
+  assert.ok(run.result.rows.every((row)=>row.status === "SUCCESS"),run.stdout);
+});

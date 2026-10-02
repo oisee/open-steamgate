@@ -473,7 +473,7 @@ if (process.env.GOGEN_GO_BUILD_X) writeFileSync(join(runDir, "go-build-x.log"), 
 // that raises NOT_COMPILED when reached. The next build reports any further
 // errors, so unrelated owners can still share this one binary.
 function stubGoErrors(diagnostics) {
-  let changed = 0;
+  const pending = new Map();
   for (const line of diagnostics.split("\n")) {
     const match = /^([^:\n]+\.abap):(\d+):\s*(.+)$/.exec(line);
     if (!match) continue;
@@ -488,11 +488,15 @@ function stubGoErrors(diagnostics) {
     if (!target) continue;
     const {cls, method} = target;
     if (method.name === "CONSTRUCTOR") continue;
+    if (!pending.has(method)) pending.set(method, {cls, method, reason});
+  }
+  // Resolve all diagnostics before removing methods: a second error in one
+  // method must not be attributed to the preceding, still-valid method.
+  for (const {cls, method, reason} of pending.values()) {
     cls.methods.splice(cls.methods.indexOf(method), 1);
     cls.stubs.push({...method, reason: `Go compiler: ${reason}`});
-    changed++;
   }
-  return changed;
+  return pending.size;
 }
 let build;
 for (let attempt = 0; attempt < 100; attempt++) {
