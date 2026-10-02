@@ -51,8 +51,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:cmd/metrics": {
-      "lines": 140,
-      "reason": "recorded by --update"
+      "lines": 160,
+      "reason": "re-taken after #418 (metrics) merged after the baseline was recorded; a cmd, not runtime code"
     },
     "go:cmd/o4dserve": {
       "lines": 83,
@@ -155,8 +155,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/cds2ddic.mjs": {
-      "lines": 1097,
-      "reason": "baseline 2026-10-01"
+      "lines": 1100,
+      "reason": "re-taken after #419 (pins): +3 lines routing library paths through tools/osd-lib-path.mjs"
     },
     "tools/dsl-l2-eval.mjs": {
       "lines": 1277,
