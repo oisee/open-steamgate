@@ -1,6 +1,8 @@
 package objstore
 
 import (
+	"encoding/json"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -27,11 +29,11 @@ func TestCollateIsLocaleCompare(t *testing.T) {
 }
 
 // CAPABILITIES names what this host does, so the editor draws no Check or
-// Activate button here; with no store it is the same named error as any call
+// Activate button here; discovery is independent of the source tree
 func TestStoreCapabilities(t *testing.T) {
 	cmd := "CAPABILITIES"
-	if a := Call(map[string]*string{"IV_COMMAND": &cmd}); a.Scalars["EV_ERROR"] == "" {
-		t.Fatalf("no store, and yet capabilities: %v", a.Scalars)
+	if a := Call(map[string]*string{"IV_COMMAND": &cmd}); a.Scalars["EV_ERROR"] != "" || a.Scalars["EV_NOTE"] != strings.Join(Capabilities, " ") {
+		t.Fatalf("capabilities without a store: %v", a.Scalars)
 	}
 	storeState.cfg = &Config{Roots: []Root{{Path: "src", Writable: true}}}
 	defer func() { storeState.cfg = nil }()
@@ -61,4 +63,28 @@ func TestStoreConfined(t *testing.T) {
 			t.Errorf("%s: confined %v, want %v", file, got, want)
 		}
 	}
+}
+
+func TestStoreCommandsAndUnknownWithoutTree(t *testing.T) {
+	defer func() { storeState.cfg = nil }()
+	for _, cfg := range []*Config{nil, {}} {
+		storeState.cfg = cfg
+		cmd := "COMMANDS"
+		a := Call(map[string]*string{"IV_COMMAND": &cmd})
+		var discovery struct {
+			Commands []string `json:"commands"`
+		}
+		if err := json.Unmarshal([]byte(a.Scalars["EV_JSON"]), &discovery); err != nil || !reflect.DeepEqual(discovery.Commands, Commands) || a.Scalars["EV_ERROR"] != "" {
+			t.Fatalf("COMMANDS: %v, %v", a.Scalars, err)
+		}
+		cmd = "PARSE"
+		a = Call(map[string]*string{"IV_COMMAND": &cmd})
+		var refusal struct {
+			Error struct{ Code, Message string }
+		}
+		if err := json.Unmarshal([]byte(a.Scalars["EV_JSON"]), &refusal); err != nil || refusal.Error.Code != "NOT_SUPPORTED" || refusal.Error.Message != "unknown store command PARSE" || a.Scalars["EV_ERROR"] != refusal.Error.Message {
+			t.Fatalf("unknown command: %v, %v", a.Scalars, err)
+		}
+	}
+	storeState.cfg = nil
 }

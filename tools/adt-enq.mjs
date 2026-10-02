@@ -91,7 +91,7 @@ export class EnqOwners {
  */
 export function abapSession(sessions, other) {
   return {
-    async system(kind, name, req) {
+    async system(kind, name, req, json) {
       const session = req.adt?.session;
       if (kind === "LOCK_HANDLE" && session !== undefined) {
         const [type, ...rest] = String(name).split(" ");
@@ -108,7 +108,7 @@ export function abapSession(sessions, other) {
         const [type, ...rest] = String(name).split(" ");
         return {alive: await sessions.holderOf(type, rest.join(" ")) !== undefined};
       }
-      return other(kind, name, req);
+      return other(kind, name, req, json);
     },
   };
 }

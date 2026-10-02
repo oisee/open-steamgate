@@ -145,7 +145,7 @@ type Answer struct {
 
 func storeEmpty() Answer {
 	a := Answer{Scalars: map[string]string{}, Objects: []Row{}, Issues: []Issue{}, Types: []Tally{}}
-	for _, k := range []string{"EV_LIVE", "EV_NOTE", "EV_SOURCE", "EV_FILE", "EV_PACKAGE", "EV_VERSION", "EV_WRITABLE", "EV_ACTIVE", "EV_ERROR"} {
+	for _, k := range []string{"EV_LIVE", "EV_NOTE", "EV_SOURCE", "EV_FILE", "EV_PACKAGE", "EV_VERSION", "EV_WRITABLE", "EV_ACTIVE", "EV_ERROR", "EV_JSON"} {
 		a.Scalars[k] = ""
 	}
 	a.Scalars["EV_COUNT"], a.Scalars["EV_MS"] = "0", "0"
@@ -171,6 +171,10 @@ func storeNotFound(typ, name string) error { return storeRefusal(typ + " " + nam
 // as opposed to the ones it only refuses (CHECK, ACTIVATE: storeNoCompiler).
 var Capabilities = []string{"LIST", "READ", "WRITE", "HISTORY", "REVISION"}
 
+// Commands lists the implemented protocol commands, including discovery.
+// CHECK, ACTIVATE and TOKENS answer a compiler refusal on this host.
+var Commands = []string{"LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "CAPABILITIES", "HISTORY", "REVISION", "COMMANDS"}
+
 // Call answers one call of ZOSD_STORE. in holds the importing values
 // that were passed (IV_*), present or absent the way the caller passed them.
 func Call(in map[string]*string) Answer {
@@ -184,14 +188,14 @@ func Call(in map[string]*string) Answer {
 		return fallback
 	}
 	command := strings.ToUpper(text("IV_COMMAND", "LIST"))
-	if storeState.cfg == nil {
-		// named, and with the reason: an empty list would say the system
-		// has no objects, which is a different and false statement
-		a.Scalars["EV_ERROR"] = "no object store here: " + storeState.reason
-		return a
-	}
+
 	switch command {
 	case "LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "TOKENS", "HISTORY", "REVISION":
+	case "COMMANDS":
+		value, _ := json.Marshal(map[string]any{"commands": Commands})
+		a.Scalars["EV_JSON"] = string(value)
+		a.Scalars["EV_NOTE"] = strings.Join(Commands, " ")
+		return a
 	case "CAPABILITIES":
 		// what this host can do, for a screen that draws a button only for
 		// a command named here (ZCL_OSD_EDIT): no CHECK and no ACTIVATE,
@@ -201,8 +205,17 @@ func Call(in map[string]*string) Answer {
 		return a
 	default:
 		a.Scalars["EV_ERROR"] = "unknown store command " + command
+		value, _ := json.Marshal(map[string]any{"error": map[string]string{"code": "NOT_SUPPORTED", "message": a.Scalars["EV_ERROR"]}})
+		a.Scalars["EV_JSON"] = string(value)
 		return a
 	}
+	if storeState.cfg == nil {
+		// named, and with the reason: an empty list would say the system
+		// has no objects, which is a different and false statement
+		a.Scalars["EV_ERROR"] = "no object store here: " + storeState.reason
+		return a
+	}
+
 	typ := strings.ToUpper(text("IV_TYPE", ""))
 	name := strings.ToUpper(text("IV_NAME", ""))
 	include := text("IV_INCLUDE", "main")

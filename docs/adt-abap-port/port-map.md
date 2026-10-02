@@ -572,3 +572,54 @@ Every landing also:
     - Identity escaping in feeds: fix in OSG-JS first, or keep it.
     - Which uncovered rows get tests first: vfs facets, releasestates, objectproperties, packages/settings, feeds, users, abapunit/metadata, checkruns/reporters, inactiveobjects, valuehelps, include PUT `/source/main`, the INCL/SRVD bare path, and `includes/:include` on a non-CLAS type.
     - ADR 0007 should record five host families (store, git, build, system, SQL check) and 17 destination commands.
+## Rules decided in S0
+
+Slice 0b establishes the host seam without adding route rows. `ZOSD_STORE`
+accepts optional `IV_JSON`; every STORE operation uses the request-bound
+store before the destination default. Refusals carry
+`EV_JSON {error:{code,message}}` with the original message and no command or
+object prefix. `EV_ERROR` remains for existing screens. ADT maps NOT_FOUND,
+CONFLICT, READ_ONLY, NOT_SUPPORTED, INVALID_NAME and INTERNAL to its exception
+factories (404, 409, 405, 501, 400 and 500). An unknown code is INTERNAL.
+`READ` adds name, changedBy and empty to EV_JSON; `OBJECT` adds package,
+packages (the chain), changedAt, changedBy, version and includes.
+
+`CAPABILITIES` drives screen buttons only. `COMMANDS` returns
+`{commands:[...]}` for the commands the destination implements, independent
+of whether a source tree is available. A missing command is a 501, including
+on an older host that answers only `EV_ERROR`. A SYSTEM answer with a string
+`raw` travels in `EV_SOURCE` untouched; completed bodies never pass through
+ajson. Structured SYSTEM answers continue to use EV_JSON.
+
+The following decisions govern later slices; their implementations land with
+their first users or with slice 0a/the front, rather than in the host seam:
+
+- PARSE is one STORE command, with `IV_JSON {kind: OUTLINE | DDLS | UNIT_PLAN,
+  ...}`. Dell owns its dispatcher. `structureOf`, the `cdsEntityOf` halves and
+  `runner.classes` become shared exports used by Node and PARSE.
+- PACKAGE is one command: `IV_JSON {name, mode: raw | local, user}` gives
+  EV_JSON. PACKAGES (OBJECTS) and SEARCH are separate commands. ET_OBJECT
+  never carries names for these commands: CHAR40/CHAR30 would truncate them.
+- Git stays on STORE in the HISTORY/REVISION family (ADR 0007). GIT_STATE
+  and GIT_BLOB are the new commands. The revision route uses
+  `gitObjectRevision`, whose message and lack of rename following differ
+  from `gitObjectRevisionAt`.
+- A route may return a non-2xx response with its own non-document body only
+  where Node does: the reentranceticket's text/plain 400s and the notebook's
+  JSON refusals. The route interface contract will record this common rule.
+- Content types are already normalized wire values: the front replays a
+  Buffer with `res.set`. Production uses `app etag false`; the diff harness
+  will use that too. Harness-only weak ETags and 304s are removed from the
+  specs; only strong ENTITY tags are contractual.
+- ABAP never re-sorts a host list ordered with localeCompare/ICU. ABAP may
+  SORT only where JavaScript uses plain `.sort()`.
+- The ABAP-FS conformance baseline will be re-measured on main in S0 and
+  recorded in `docs/abapfs-conformance.md`, superseding both 29/2/16 and
+  30/1/16. Later slices compare with their merge-base figure.
+- The planned `test/adt-abap-coverage.mjs` walks the Express adtRouter stack
+  by method and sample path and checks the front's MATCH. HOST_ALLOWED
+  starts with all unported routes; each slice removes its entries. Completion
+  means an empty allow-list and exactly one HOST row.
+
+Acceptance across S0 remains green versions, LOCK and SYSINFO byte diffs,
+TYPES parity, ASCII/7.02 lint and coverage with the initial full allow-list.

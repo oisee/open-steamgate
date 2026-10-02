@@ -22,10 +22,11 @@ import {join} from "node:path";
 import "./start.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {adtRouter, answered} from "../tools/adt-facade.mjs";
-import {abapRunner} from "../tools/adt-abap-front.mjs";
+import {abapRunner, abapFront} from "../tools/adt-abap-front.mjs";
+import {abapSession} from "../tools/adt-enq.mjs";
 import {AbapSessions} from "../tools/adt-abap-sessions.mjs";
 import {exceptionDocument} from "../tools/adt-documents.mjs";
-import {StoreDestination} from "../tools/osd-store-destination.mjs";
+import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {SESSION_COOKIE} from "../tools/adt-session.mjs";
 
@@ -292,7 +293,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     }}));
     const reference = express();
     reference.get(SYSINFO, (req, res) => answered(res, () => {
-      throw new Error("SYSTEM IDENTITY: no identity on this host");
+      throw new Error("no identity on this host");
     }));
     const referenceServer = await listen(reference);
     servers.push(referenceServer);
@@ -324,6 +325,76 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     expect(JSON.parse(answers[1][1].body).systemID).to.equal("OSY");
   });
 
+  it("the ABAP host receives SYSTEM raw bytes and OBJECT's extended metadata", async () => {
+    await output("zcl_osd_adt_host.clas.mjs");
+    const host = abap.Classes.ZCL_OSD_ADT_HOST;
+    const string = (v) => new abap.types.String().set(v);
+    const raw = ' {"z":1,"a":"\\u0061"} \r\n';
+    const actual = await dialogStep(() => withSystem(() => ({raw}),
+      () => host.system({iv_kind: string("IDENTITY")})));
+    expect(actual.get()).to.equal(raw);
+    const shared = new ObjectStore({root: process.cwd(), libs: []});
+    const expected = shared.find("CLAS", "ZCL_ZSTG_DEMO_MPC");
+    const object = await dialogStep(() => withSystem(() => ({}),
+      () => host.object({iv_type: string("CLAS"), iv_name: string(expected.name)}), {store: shared}));
+    expect(object.get().found.get()).to.equal("X");
+    expect(object.get().package.get()).to.equal(expected.package ?? "");
+    expect(object.get().packages.array().map((v) => v.get())).to.deep.equal(expected.packages);
+    expect(object.get().includes.array().map((v) => v.get())).to.deep.equal(shared.classIncludes(expected.name));
+    expect(object.get().version.get()).to.equal(shared.stateOf(expected).version);
+    expect(object.get().changed_at.get()).to.equal(shared.stateOf(expected).changedAt ?? "");
+    try {
+      await dialogStep(() => host.store({iv_command: string("UNIMPLEMENTED")}));
+      throw new Error("expected missing command to raise");
+    } catch (error) {
+      expect(error.status.get()).to.equal(501);
+      expect(error.message_text.get()).to.equal("unknown store command UNIMPLEMENTED");
+    }
+  });
+
+  it("SYSTEM IV_JSON sent from ABAP through the front reaches the host byte-equal to Node", async () => {
+    await output("zcl_osd_adt_host.clas.mjs");
+    const payload = '{"kind":"probe","text":"a < b"}';
+    const path = "/sap/bc/adt/system-payload-probe";
+    const answer = (kind, name, req, json) => ({raw: JSON.stringify({kind, name, path: req.originalUrl, json})});
+    const nodeApp = express();
+    nodeApp.get(path, (req, res) => res.type("application/json").send(answer("IDENTITY", "probe", req, payload).raw));
+    const portedApp = express();
+    portedApp.use(abapFront({step: dialogStep, ...abapSession({}, answer),
+      refuse: (res, status, type, message) => res.status(status).send(message),
+      answer: async () => {
+        const string = (v) => new abap.types.String().set(v);
+        const body = await abap.Classes.ZCL_OSD_ADT_HOST.system({iv_kind: string("IDENTITY"), iv_name: string("probe"), iv_json: string(payload)});
+        return {status: 200, contentType: "application/json; charset=utf-8", headers: [], body: Buffer.from(body.get()), servedBy: "ABAP"};
+      }}));
+    const node = await listen(nodeApp);
+    const ported = await listen(portedApp);
+    servers.push(node, ported);
+    const expected = await call(node, "GET", path);
+    expect(JSON.parse(expected.body).json).to.equal(payload);
+    expect(await call(ported, "GET", path)).to.deep.equal(expected);
+  });
+
+  it("OBJECT treats absent metadata arrays as empty", async () => {
+    await output("zcl_osd_adt_host.clas.mjs");
+    // The destination is the seam; emulate an older host's slim OBJECT answer.
+    const destination = abap.context.RFCDestinations.STORE;
+    const call = destination.call;
+    try {
+      destination.call = async (name, signature) => {
+        signature.importing.ev_json.set('{"found":true,"type":"CLAS","name":"ZCL_SLIM","writable":true}');
+        signature.importing.ev_error.set("");
+      };
+      const string = (v) => new abap.types.String().set(v);
+      const object = await dialogStep(() => abap.Classes.ZCL_OSD_ADT_HOST.object({iv_type: string("CLAS"), iv_name: string("ZCL_SLIM")}));
+      expect(object.get().found.get()).to.equal("X");
+      expect(object.get().packages.array()).to.deep.equal([]);
+      expect(object.get().includes.array()).to.deep.equal([]);
+    } finally {
+      destination.call = call;
+    }
+  });
+
   it("SYSTEM that no façade instance bound is refused, not answered from the environment", async () => {
     const box = () => new abap.types.String();
     const signature = {
@@ -331,7 +402,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       importing: {EV_JSON: box(), EV_ERROR: box()},
     };
     await new StoreDestination({store: undefined}).call("ZOSD_STORE", signature);
-    expect(signature.importing.EV_JSON.get()).to.equal("");
+    expect(JSON.parse(signature.importing.EV_JSON.get()).error.code).to.equal("INTERNAL");
     expect(signature.importing.EV_ERROR.get()).to.match(/^nothing answers SYSTEM IDENTITY/);
   });
 
@@ -607,6 +678,25 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
         expect(locks().read({table: "ZOSD_ADT_LOCK"}).map((r) => `${r.user} ${r.arg}`), "rows left in the lock table").to.deep.equal([]);
       });
     }
+
+    it("LOCK carries a failing OBJECT's raw refusal without a command prefix", async () => {
+      const failingTree = () => {
+        const shared = tree();
+        shared.find = () => { throw new Error("object lookup refused <raw>"); };
+        return shared;
+      };
+      const node = await mount({store: failingTree()});
+      const ported = await mount(withAbap({store: failingTree()}));
+      const answers = [];
+      for (const server of [node, ported]) {
+        const one = await logon(server);
+        answers.push(await lock(one));
+        await logoff(one);
+      }
+      expect(answers[0].status).to.equal(500);
+      expect(answers[1]).to.deep.equal(answers[0]);
+      expect(answers[1].body).to.contain("object lookup refused &lt;raw&gt;");
+    });
 
     it("a write without the token is refused by the handler, with the Node middleware's bytes", async () => {
       const node = await mount({store: tree()});
