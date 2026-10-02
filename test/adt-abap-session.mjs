@@ -295,7 +295,7 @@ describe("ADT session slice 3: ABAP / Node parity and ENQ", function () {
     } finally { if (session) await dialogStep(() => sap.call("end", {iv_id: session.id}), "cleanup"); }
   });
 
-  it("refuses an ended bind by name and recovers with a fresh session after rolled-back logoff", async () => {
+  it("an ENQ context the lock server ended keeps the session and token and drops the handles (a rolled-back logoff)", async () => {
     const sap = await create();
     let session, handle;
     try {
@@ -307,23 +307,10 @@ describe("ADT session slice 3: ABAP / Node parity and ENQ", function () {
         await sap.call("end", {iv_id: session.id});
         throw new Error("logoff dump");
       }, "rolled back logoff").catch((e) => expect(e.message).to.equal("logoff dump"));
-      expect(plain(await dialogStep(() => sap.obj.peek(argsOf({iv_id: session.id})), "peek before refusal")).id).to.equal(session.id);
-      let error;
-      // A handler catches the protocol refusal inside its step; cleanup commits.
-      await dialogStep(async () => {
-        try { await sap.resolve({[CONTEXT_COOKIE]: session.id}); } catch (e) { error = e; }
-      }, "ended bind");
-      expect(error).to.be.instanceOf(abap.Classes.ZCX_OSD_ADT);
-      expect(error.status.get()).to.equal(403);
-      expect(error.type_id.get()).to.equal(abap.Classes.ZCX_OSD_ADT.c_session_ended.get());
-      expect(error.namespace.get()).to.equal(abap.Classes.ZCX_OSD_ADT.c_namespace_osd.get());
+      const again = await dialogStep(() => sap.resolve({[CONTEXT_COOKIE]: session.id}), "next context");
+      expect([again.fresh, again.id, again.token]).to.deep.equal([false, session.id, session.token]);
       expect((await dialogStep(() => sap.call("holds", {iv_id: session.id, iv_handle: handle,
         iv_type: "CLAS", iv_name: "ZENDED"}), "ended handles cleared")).get()).to.equal(" ");
-      const fresh = await dialogStep(() => sap.resolve({[CONTEXT_COOKIE]: session.id}), "recovery after refusal");
-      expect(fresh.fresh).to.equal(true);
-      expect(fresh.id).to.not.equal(session.id);
-      expect(fresh.token).to.not.equal(session.token);
-      await dialogStep(() => sap.call("end", {iv_id: fresh.id}), "fresh cleanup");
     } finally { if (session) await dialogStep(() => sap.call("end", {iv_id: session.id}), "cleanup"); }
   });
 
