@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/url"
 	"osg/gogen/abaperr"
+	"osg/gogen/intbytes"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,24 +59,8 @@ func FmtI(v int32) string { return strconv.FormatInt(int64(v), 10) }
 // FmtI8 is FmtI for int8.
 func FmtI8(v int64) string { return strconv.FormatInt(v, 10) }
 
-// IToX moves an i into an x field of n bytes: the big-endian two's
-// complement of the four bytes of i, the rightmost n of them.
-func IToX(v int32, n int) string {
-	b := []byte{byte(uint32(v) >> 24), byte(uint32(v) >> 16), byte(uint32(v) >> 8), byte(uint32(v))}
-	if n <= 4 {
-		return string(b[4-n:])
-	}
-	pad := byte(0)
-	if v < 0 {
-		pad = 0xFF
-	}
-	out := make([]byte, n)
-	for i := range out[:n-4] {
-		out[i] = pad
-	}
-	copy(out[n-4:], b)
-	return string(out)
-}
+// IToX uses the integer-width bytes, padded on the left with zero.
+func IToX(v int32, n int) string { return intbytes.ToX(int64(v), 4, n) }
 
 // XToHex is an x field as text: two upper-case hex digits per byte.
 func XToHex(v string) string { return strings.ToUpper(hex.EncodeToString([]byte(v))) }
@@ -562,15 +547,8 @@ func BitXS(op, a, b string) string {
 
 // XToI reads an x or xstring as an i: the last four bytes, 00 on the left,
 // a signed int32 (A4H 2026-09-24, ZCL_GOGEN_T_XCMPN: FF 255, FFFFFFFF -1,
-// 0100000002 2, empty 0; a move the same, ZCL_GOGEN_T_XMOVI); the shift
-// drops the bytes before the last four.
-func XToI(v string) int32 {
-	var r int32
-	for i := 0; i < len(v); i++ {
-		r = r<<8 | int32(v[i])
-	}
-	return r
-}
+// 0100000002 2, empty 0; a move the same, ZCL_GOGEN_T_XMOVI).
+func XToI(v string) int32 { return int32(intbytes.FromX(v, 4)) }
 
 // A character offset into a string is a byte offset only when every
 // character is one byte. For a long string asked about again (a parser

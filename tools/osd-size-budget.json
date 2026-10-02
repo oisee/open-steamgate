@@ -114,6 +114,10 @@
       "lines": 499,
       "reason": "recorded by --update"
     },
+    "go:intbytes": {
+      "lines": 45,
+      "reason": "Pure integer/byte assignment conversions, separated from abap to retain its existing size ceiling."
+    },
     "go:nodehdr": {
       "lines": 19,
       "reason": "recorded by --update"
