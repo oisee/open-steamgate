@@ -2,9 +2,13 @@
 
 `Buffer` holds mutable bytes for an individual xstring that the Go compiler
 proves never escapes through an ABAP reference. Its zero value is empty.
-It must never be copied as a Go value. Local declarations and private instance
-attributes can use it; parameters, static/interface attributes, components,
+It must never be copied as a Go value. Local declarations and private instance or static
+attributes can use it; parameters, public/protected/interface attributes, components,
 table rows and uncertain access retain the existing string representation.
+
+Private static attributes use the same escape proof as instance attributes.
+Qualified accesses from their own static/instance methods and class constructor
+are plain uses. FRIENDS and LOCAL FRIENDS retain the string ABI for the pool.
 
 Whole reads return independent string snapshots and whole writes copy in.
 Substring reads copy only the selected bytes. Equal-length replacement uses

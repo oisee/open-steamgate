@@ -82,3 +82,66 @@ test("JS section replacement validates bounds and fits fixed byte and character 
     }
   }
 });
+
+test("LOCAL FRIENDS writes private and READ-ONLY statics through the string ABI", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-local-friend-"));
+  try {
+    writeFileSync(join(dir, "zcl_pv.clas.abap"), `CLASS zcl_pv DEFINITION PUBLIC CREATE PUBLIC.
+PUBLIC SECTION. CLASS-DATA gv_ro TYPE xstring READ-ONLY.
+PRIVATE SECTION. CLASS-DATA gv_priv TYPE xstring.
+ENDCLASS.
+CLASS zcl_pv IMPLEMENTATION. ENDCLASS.`);
+    writeFileSync(join(dir, "zcl_pv.clas.testclasses.abap"), `CLASS ltc DEFINITION DEFERRED.
+CLASS zcl_pv DEFINITION LOCAL FRIENDS ltc.
+CLASS ltc DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+PUBLIC SECTION. CLASS-METHODS run RETURNING VALUE(r) TYPE xstring.
+ENDCLASS.
+CLASS ltc IMPLEMENTATION.
+METHOD run. zcl_pv=>gv_priv = '0102'. zcl_pv=>gv_ro = '0304'.
+CONCATENATE zcl_pv=>gv_priv zcl_pv=>gv_ro INTO r IN BYTE MODE.
+ENDMETHOD. ENDCLASS.`);
+    const p = compileProgram({folders: [dir], objects: ["ZCL_PV"], includeTests: true, tolerant: true});
+    assert.deepEqual(p.partial, []);
+    assert.equal(analyzeOwnership(p).declarations.has(p.classes.find(c => c.name === "ZCL_PV").attributes.find(a => a.name === "GV_PRIV")), false);
+    const file = join(dir, "generated.mjs"); writeFileSync(file, emitJs(p, new URL("./js/abap.mjs", import.meta.url).href));
+    const m = await import(pathToFileURL(file).href);
+    assert.equal(Buffer.from(m.ZCL_PV_LTC.RUN({sy: {}}), "latin1").toString("hex"), "01020304");
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("private statics refuse outsiders and subclasses with the declaring owner", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-private-static-"));
+  try {
+    writeFileSync(join(dir, "zcl_pv.clas.abap"), `CLASS zcl_pv DEFINITION PUBLIC CREATE PUBLIC.
+PUBLIC SECTION.
+PROTECTED SECTION. CLASS-DATA gv_prot TYPE xstring.
+PRIVATE SECTION. CLASS-DATA gv_priv TYPE xstring.
+ENDCLASS. CLASS zcl_pv IMPLEMENTATION. ENDCLASS.`);
+    for (const inheritance of ["", "INHERITING FROM zcl_pv"]) {
+      writeFileSync(join(dir, "zcl_out.clas.abap"), `CLASS zcl_out DEFINITION PUBLIC ${inheritance} CREATE PUBLIC.
+PUBLIC SECTION. CLASS-METHODS run.
+ENDCLASS. CLASS zcl_out IMPLEMENTATION. METHOD run. zcl_pv=>gv_priv = '01'. ENDMETHOD. ENDCLASS.`);
+      const p = compileProgram({folders: [dir], objects: ["ZCL_PV", "ZCL_OUT"], tolerant: true});
+      assert.match(p.partial.join("\n"), /ZCL_PV=>GV_PRIV is private to ZCL_PV/);
+      assert.equal(analyzeOwnership(p).declarations.has(p.classes.find(c => c.name === "ZCL_PV").attributes.find(a => a.name === "GV_PROT")), false);
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("global FRIENDS may write private and READ-ONLY statics", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-global-friend-"));
+  try {
+    writeFileSync(join(dir, "zcl_pv.clas.abap"), `CLASS zcl_pv DEFINITION PUBLIC CREATE PUBLIC GLOBAL FRIENDS zcl_friend.
+PUBLIC SECTION. CLASS-DATA gv_ro TYPE xstring READ-ONLY.
+PRIVATE SECTION. CLASS-DATA gv_priv TYPE xstring.
+ENDCLASS. CLASS zcl_pv IMPLEMENTATION. ENDCLASS.`);
+    writeFileSync(join(dir, "zcl_friend.clas.abap"), `CLASS zcl_friend DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION. CLASS-METHODS run.
+ENDCLASS. CLASS zcl_friend IMPLEMENTATION. METHOD run.
+zcl_pv=>gv_priv = '01'. zcl_pv=>gv_ro = '02'. ENDMETHOD. ENDCLASS.`);
+    const p = compileProgram({folders: [dir], objects: ["ZCL_PV", "ZCL_FRIEND"], tolerant: true});
+    assert.deepEqual(p.partial, []);
+    assert.deepEqual(p.skipped, []);
+    assert.equal(analyzeOwnership(p).declarations.size, 0);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});

@@ -1728,7 +1728,10 @@ goroutine coordination.
 `class=>attr` resolves to the declaring class's storage for reads and writes,
 including an explicit name of the current class. The target class constructor
 runs before an assignment, CLEAR, a table mutation or a reference actual.
-External READ-ONLY writes are compilation refusals. REPLACE SECTION supports
+The owning class uses the bare variable after its constructor has run.
+External READ-ONLY writes are compilation refusals except for declared friends.
+LOCAL FRIENDS test classes may write private and READ-ONLY static attributes;
+private-access refusals name the declaring class. REPLACE SECTION supports
 byte and character mode; CONCATENATE supports both modes. Fixed hex attributes
 also accept offset/length assignment. Offset reads and XSTRLEN use the same
 static attribute resolution.
@@ -1738,4 +1741,8 @@ covers constructor ordering, character sections, tables and output actuals.
 The chunk fixtures alternate interface calls through static references to depth
 2000 and count 2001 calls. Go ABAP Unit and the JS emitter check the same answers.
 Public static xstrings keep the string ABI; they are outside owned-buffer
-selection. Static buffer ownership across classes remains future work.
+selection. Private static xstrings qualify under the same escape rules as
+private instance attributes. The static owned fixture checks constructor
+initialization, snapshots, section reads, stores, self-append and reset between
+test classes. Friend pools and reference actuals keep string storage. The
+generated 16-page equal-length store allocates zero bytes.

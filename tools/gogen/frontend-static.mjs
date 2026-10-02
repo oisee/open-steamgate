@@ -1,3 +1,5 @@
+export const staticSlot = (owner, name, type, goName) => ({e: "static", owner, name, type, go: goName(`${owner}=>${name}`)});
+
 // Static attributes share storage in their declaring class, including inherited names.
 export function resolveStatic(owner, attr, ctx, deps, write = false) {
   const {CHAR_UTILITIES, C, upper, clasDef, registerConst, localInterfaceConstant, Unsupported, ancestors, goName, typeOf, abaplint, notInProgram} = deps;
@@ -38,8 +40,18 @@ export function resolveStatic(owner, attr, ctx, deps, write = false) {
   for (const at of [owner, ...(clas ? ancestors(ctx.reg, owner) : [])]) {
     const a = clasDef(ctx.reg, at)?.getAttributes().getStatic().find((x) => upper(x.getName()) === attr);
     if (!a) continue;
-    const inside = ctx.className === at || ancestors(ctx.reg, ctx.className).includes(at);
-    if (a.getVisibility() !== abaplint.Visibility.Public && !(inside && (ctx.className === at || a.getVisibility() === abaplint.Visibility.Protected))) break;
+    const pool = ctx.reg.getObject("CLAS", at.split(":")[0]);
+    const friendName = ctx.className.split(":").at(-1);
+    const globalFriend = (clasDef(ctx.reg, at)?.getFriends?.() ?? []).some((f) => upper(typeof f === "string" ? f : f.getName()) === ctx.className);
+    const localFriend = ctx.className.startsWith(`${at.split(":")[0]}:`) && (pool?.getABAPFiles() ?? []).some((f) => f.getStatements().some((st) => {
+      const text = st.concatTokens().toUpperCase();
+      return text.startsWith(`CLASS ${at.split(":").at(-1)} DEFINITION LOCAL FRIENDS `) && text.split(/\bLOCAL FRIENDS\b/)[1].match(/[A-Z_][A-Z0-9_]*/g)?.includes(friendName);
+    }));
+    const friend = globalFriend || localFriend;
+    const inside = friend || ctx.className === at || ancestors(ctx.reg, ctx.className).includes(at);
+    if (a.getVisibility() !== abaplint.Visibility.Public && !(inside && (friend || ctx.className === at || a.getVisibility() === abaplint.Visibility.Protected))) {
+      throw new Unsupported(`${owner}=>${attr} is ${a.getVisibility() === abaplint.Visibility.Private ? "private" : "protected"} to ${at}`);
+    }
     const file = ctx.reg.getObject("CLAS", at.split(":")[0])?.getABAPFiles().find((f) => f.getFilename() === a.getFilename());
     const declaration = file?.getStatements().find((st) => st.getTokens().some((t) => t.getStart().getRow() === a.getToken().getStart().getRow() && t.getStart().getCol() === a.getToken().getStart().getCol()));
     const readOnly = /\bREAD\s*-\s*ONLY\b/i.test(declaration?.concatTokens() ?? "");
@@ -47,8 +59,7 @@ export function resolveStatic(owner, attr, ctx, deps, write = false) {
       throw new Unsupported(`${owner}=>${attr}: a write to a READ-ONLY attribute outside ${at}`);
     }
     if (!ctx.program.wanted.has(at)) throw notInProgram(ctx, at, `${owner}=>${attr}: ${at} is not compiled in this program`);
-    return {e: "static", go: goName(`${at}=>${attr}`), owner: at,
-      type: typeOf(a.getType(), `${at}=>${attr}`, ctx.program)};
+    return staticSlot(at, attr, typeOf(a.getType(), `${at}=>${attr}`, ctx.program), goName);
   }
   throw new Unsupported(`${owner}=>${attr}`);
 }
