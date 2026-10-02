@@ -153,7 +153,10 @@ const EXPECT = {
   // (ANORMALIES byte-to-i-move)
   ZCL_GOGEN_T_XMOVI: "a:11 b:-1 c:255 d:258 e:0 f:-2147483648 g:-2 h:255 x5:2 xs5:2",
   ZCL_GOGEN_T_BYTECAT: "cat:FFAB00CD00/5/0 zeros:0000AB00CD00/6 empty:0/0",
-  // FIND ... IN [SECTION OFFSET o OF] xs IN BYTE MODE [MATCH OFFSET m]
+  // FIND ... IN [SECTION [OFFSET o] [LENGTH l] OF] xs IN BYTE MODE
+  // [MATCH OFFSET m] [MATCH LENGTH ml]; bounded byte spans and REPLACE SECTION
+  // are covered by the ABAP Unit fixtures and frontend-bytes.test.mjs.
+  // See testdata/byte-section-notes.md for JS differences and provenance.
   // (A4H 2026-10-01, execute_abap): byte offsets, a miss leaves m alone with
   // sy-subrc 4, a section offset at the end is a miss and not an error, an
   // empty pattern is found where the search starts, an offset past the end

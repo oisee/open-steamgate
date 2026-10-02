@@ -1,3 +1,4 @@
+import {emitByteStatement} from "./emit-bytes.mjs";
 // IR -> Go source, for the Go backend spike.
 //
 // Nothing here decides semantics: the IR already says which calculation type
@@ -1860,14 +1861,8 @@ ${t}	}`));
         ...(bind ? [`${t}\t\t\t${bind}`] : []), `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\ts.Sy.Tabix = ${st.hashed ? "0" : `int32(i${n} + 1)`}`,
         `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
-    // FIND ... IN BYTE MODE: see abap.FindBytes
-    case "find_bytes": {
-      const lines = [`${t}if fb, ok := abap.FindBytes(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.secOff ? expr(st.secOff, ctx) : "0"}); ok {`, `${t}\ts.Sy.Subrc = 0`];
-      if (st.off) lines.push(`${t}\t${place(st.off, ctx)} = fb`);
-      else lines.push(`${t}\t_ = fb`);
-      lines.push(`${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`);
-      return lines;
-    }
+    case "find_bytes":
+    case "replace_bytes": return emitByteStatement(st, ctx, t, {expr, place});
     case "find": {
       // IN TABLE and IN SECTION (ultra/sadl): see abap.FindTable / abap.FindSection
       const call = st.table ? `fok, fline, foff, flen, fsub := abap.FindTable(${expr(st.table, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length})`

@@ -1,6 +1,7 @@
 package abap
 
 import (
+	"osg/gogen/bytesection"
 	"regexp"
 	"strings"
 	"sync"
@@ -121,19 +122,18 @@ func checkLines(p, s, where string) {
 	}
 }
 
-// FindBytes is FIND p IN [SECTION OFFSET off OF] s IN BYTE MODE over xstrings:
-// the byte offset of p in s from off on, false when it is not there. An
-// offset past the end is CX_SY_RANGE_OUT_OF_BOUNDS, as for a section of a
-// string.
-func FindBytes(s, p string, off int32) (int32, bool) {
-	if off < 0 || int(off) > len(s) {
-		rangeError()
+// FindBytes uses absolute byte offsets (ABAPiti f2).
+func FindBytes(s, p string, off, n int32) (int32, bool) {
+	return bytesection.Find(s, p, off, n)
+}
+
+// ReplaceBytes validates before assignment, then splices all bytes (r1-r6).
+func ReplaceBytes(s, with string, off, n int32, xLen int) (string, int32) {
+	out := bytesection.Replace(s, with, off, n)
+	if xLen >= 0 {
+		out = XFit(out, xLen)
 	}
-	i := strings.Index(s[off:], p)
-	if i < 0 {
-		return 0, false
-	}
-	return off + int32(i), true
+	return out, 0
 }
 
 // FindSection is FIND p IN SECTION [OFFSET off] [LENGTH n] OF s for a
@@ -320,8 +320,8 @@ func plainResults(s, p string, all bool) [][]int32 {
 // pcreRefused are the PCRE constructs Go's RE2 does not have: refused by
 // name rather than read as something else
 var pcreRefused = []struct {
-	re	*regexp.Regexp
-	what	string
+	re   *regexp.Regexp
+	what string
 }{
 	{regexp.MustCompile(`\(\?=`), "a lookahead (?=...)"},
 	{regexp.MustCompile(`\(\?!`), "a negative lookahead (?!...)"},

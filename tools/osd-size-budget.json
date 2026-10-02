@@ -30,6 +30,10 @@
       "lines": 436,
       "reason": "baseline 2026-10-01"
     },
+    "go:bytesection": {
+      "lines": 40,
+      "reason": "byte REPLACE/FIND section spans; independent of go/abap"
+    },
     "go:charsearch": {
       "lines": 58,
       "reason": "baseline 2026-10-01"
