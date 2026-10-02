@@ -466,6 +466,8 @@ function webviewHtml(nonce) {
 }
 
 export async function activate(context) {
+  context.subscriptions.push(vscode.commands.registerCommand("osd.prepareAbapgitZip", () =>
+    vscode.window.showErrorMessage("osd: Preparing an abapGit zip needs a desktop open-steamgate checkout with deploy/manifest.json, source files and Node tools. The web build has no file system or process runner.")));
   const started = performance.now();
   await vscode.commands.executeCommand("setContext", "osd.web", true);
   const output = vscode.window.createOutputChannel("OSD Web Probe");

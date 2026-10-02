@@ -2620,6 +2620,7 @@ function debugOnDemand(context, controllerOf = () => activeController) {
 function activate(context) {
   const output = vscode.window.createOutputChannel("osd");
   context.subscriptions.push(output);
+  require("./abapgit-zip-command.js").registerAbapgitZipCommand(vscode, context, output, osdHomeOf, isOpenSteamgatePath);
   // The cleanup is synchronous and precedes this window's own launcher.
   // A live lock from another window protects its home.
   try {
