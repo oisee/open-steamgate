@@ -22,7 +22,7 @@ CLASS zcl_osd_adt_typestructure IMPLEMENTATION.
         && `<CAPABILITIES/><USER_AUTHORIZATIONS/></SEU_ADT_OBJECT_TYPE_DESCRIPTOR>`.
     ENDLOOP.
     rs_response-status = 200.
-    rs_response-content_type = zcl_osd_adt_lock=>as_xml_type(
+    rs_response-content_type = zcl_osd_adt_xml=>as_xml_type(
       it_headers = is_request-headers iv_fallback = `com.sap.adt.RepositoryTypeList` ).
     rs_response-body = `<?xml version="1.0" encoding="utf-8"?>`
       && `<asx:abap version="1.0" xmlns:asx="http://www.sap.com/abapxml"><asx:values><DATA>`

@@ -113,7 +113,7 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
     DATA lx_error TYPE REF TO zcx_osd_adt.
 
     rs_response-status = 200.
-    rs_response-content_type = as_xml_type( it_headers = is_request-headers iv_fallback = c_result_type ).
+    rs_response-content_type = zcl_osd_adt_xml=>as_xml_type( it_headers = is_request-headers iv_fallback = c_result_type ).
 *   a library object is not ours to change: the envelope with no handle,
 *   which a client reads as "not modifiable" before it tries a write
     IF is_object-writable = abap_false.
@@ -255,15 +255,7 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD as_xml_type.
-    DATA lv_accept TYPE string.
-    DATA lv_name TYPE string.
-
-    lv_accept = field( it_fields = it_headers iv_name = `accept` iv_any_case = abap_true ).
-    FIND FIRST OCCURRENCE OF REGEX `dataname=([A-Za-z0-9_.]+)` IN lv_accept SUBMATCHES lv_name.
-    IF sy-subrc <> 0.
-      lv_name = iv_fallback.
-    ENDIF.
-    rv_type = |application/vnd.sap.as+xml; charset=utf-8; dataname={ lv_name }|.
+    rv_type = zcl_osd_adt_xml=>as_xml_type( it_headers = it_headers iv_fallback = iv_fallback ).
   ENDMETHOD.
 
   METHOD field.

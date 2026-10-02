@@ -1,8 +1,24 @@
 CLASS ltcl_ddic DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
   PRIVATE SECTION.
+    METHODS unknown_pattern FOR TESTING RAISING cx_static_check.
     METHODS parser_miss FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_ddic IMPLEMENTATION.
+  METHOD unknown_pattern.
+    DATA li_route TYPE REF TO zif_osd_adt_route.
+    DATA ls_request TYPE zif_osd_adt_route=>ty_request.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+    CREATE OBJECT li_route TYPE zcl_osd_adt_ddic.
+    ls_request-pattern = `/sap/bc/adt/ddic/unknown`.
+    TRY.
+        li_route->handle( ls_request ).
+        cl_abap_unit_assert=>fail( `expected an internal error for an unknown pattern` ).
+      CATCH zcx_osd_adt INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 500 ).
+        cl_abap_unit_assert=>assert_equals( act = lx_error->miss exp = zcx_osd_adt=>c_miss_none ).
+        cl_abap_unit_assert=>assert_char_cp( act = lx_error->document( ) exp = `*ExceptionInternalError*` ).
+    ENDTRY.
+  ENDMETHOD.
   METHOD parser_miss.
     DATA li_route TYPE REF TO zif_osd_adt_route.
     DATA ls_request TYPE zif_osd_adt_route=>ty_request.

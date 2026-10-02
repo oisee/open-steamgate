@@ -98,6 +98,9 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
                       ev_served_by = lv_served_by ).
 
     LOOP AT ls_response-headers INTO ls_header.
+      IF to_lower( ls_header-name ) = `x-osd-miss`.
+        CONTINUE.
+      ENDIF.
       server->response->set_header_field( name  = ls_header-name
                                           value = ls_header-value ).
     ENDLOOP.
