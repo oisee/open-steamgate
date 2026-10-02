@@ -3371,7 +3371,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Affected ABAP statement, runtime API or adapter: `ASSIGN <row>+off(4) TO <i> CASTING.` with `<row> TYPE x LENGTH 4096` and `<i> TYPE i`
 - Minimal ABAP reproducer: `FIELD-SYMBOLS <row> TYPE x4096. FIELD-SYMBOLS <i> TYPE i. READ TABLE mt_mem INDEX 1 ASSIGNING <row>. ASSIGN <row>+0(4) TO <i> CASTING. <i> = 16909060.` then read the four bytes back with `<row>+0(1)` … `<row>+3(1)`, and read `<i>` back
 - Exact command used to run it: oisee/abapiti `abap/bench/zcl_abapiti_bench_mem`, model C (`st_i32` / `ld_i32` with `mv_model = 'C'`), deployed to OSD with vsp and run as ABAP Unit; the same class run on a system (release 758, 2026-10-02) through ABAP Unit
-- Expected SAP behaviour: runtime error `ASSIGN_BASE_WRONG_ALIGNMENT`, already at offset 0 (x has 1-byte alignment, i needs 4)
+- Expected SAP behaviour: observed on a system, release 758: runtime error `ASSIGN_BASE_WRONG_ALIGNMENT`, already at offset 0 of a table row of type x LENGTH 4096. Whether other x fields or offsets are aligned on 4 was not measured; this is the observation, not a general rule
 - Actual open-abap behaviour: no runtime error; the write through `<i>` leaves the bytes unchanged (they read back as 00), and reading `<i>` fails with "Conversion no number"
 - Impact on open-steamgate: code that relies on CASTING over byte fields passes or fails differently from a system; a program that would dump on a system runs on with wrong data
 - Smallest safe workaround: do not CASTING into i over an x field; move the bytes with offset access and convert x LENGTH 4 to i
@@ -3379,16 +3379,16 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Regression-test location: none yet; abapiti dropped model C after the measurement
 - Upstream version containing a fix: `unknown`
 
-### ANOMALY-2026-10-02-get-run-time-units — GET RUN TIME FIELD counts in milliseconds and can go backwards
+### ANOMALY-2026-10-02-get-run-time-units — GET RUN TIME FIELD returns milliseconds since the previous call, not microseconds since the first
 
 - Status: `open` (osgo measures in monotonic microseconds since #473; the JS runtime does not)
 - Discovery date: `2026-10-02`
 - Affected versions: OSD `vscode-v0.6.1511` (JS runtime)
 - Affected ABAP statement, runtime API or adapter: `GET RUN TIME FIELD lv_t0. … GET RUN TIME FIELD lv_t1. lv_d = lv_t1 - lv_t0.`
-- Minimal ABAP reproducer: two `GET RUN TIME FIELD` around a loop of a few thousand statements, repeated; compare the difference with the wall-clock time of the run
-- Exact command used to run it: oisee/abapiti `abap/bench/zcl_abapiti_bench_mem` console run (`if_oo_adt_classrun`) on OSD; the same class on a system (release 758, 2026-10-02), three runs and `run_one( )` per memory size
-- Expected SAP behaviour: microseconds, never negative; the sum of the measured differences matches the run time
-- Actual open-abap behaviour: the ABAP Unit run of one model took 7.7 s while its measured differences summed to about 7,800, so the unit is milliseconds; several differences came out negative (shown as `15-`, `79-`, `132-`, `482-`)
+- Minimal ABAP reproducer: `GET RUN TIME FIELD lv_t0. <work>. GET RUN TIME FIELD lv_t1. lv_d = lv_t1 - lv_t0.`, repeated; on a system lv_d is the elapsed microseconds
+- Exact command used to run it: oisee/abapiti `abap/bench/zcl_abapiti_bench_mem`. On OSD: the console run (`if_oo_adt_classrun`) printed the `GET RUN TIME` differences; separately, the class's ABAP Unit run reported the wall-clock duration per test method. On a system (release 758, 2026-10-02): the same console code through `run( )` three times and `run_one( )` per memory size
+- Expected SAP behaviour: microseconds since the first call in the internal session (https://help.sap.com/docs/SUPPORT_CONTENT/abapfaq/3353526147.html), so `t1 - t0` is the elapsed time and never negative
+- Actual open-abap behaviour: the runtime's `get_run_time` returns milliseconds since the PREVIOUS call and moves its reference on every call, so `t0` is the time since some earlier reading, `t1` the time since `t0`, and `t1 - t0` is meaningless; with readings such as 0, 10, 2, 6 it goes negative even though the clock only moves forward. Observed on OSD: the ABAP Unit run of model A took 7.7 s (ABAP Unit duration) while the console run's differences for it summed to about 7,800, and several differences were negative (`15-`, `79-`, `132-`, `482-`). A clock going backwards was not shown
 - Impact on open-steamgate: timings measured on OSD cannot be compared with a system, and a negative difference can break code that divides by it or uses it as a timeout
 - Smallest safe workaround: measure performance on a system or on osgo
 - Upstream issue: none yet
