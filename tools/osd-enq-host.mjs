@@ -239,8 +239,12 @@ export function enqTake(key, owner, table, object, input) {
 /** DEQUEUE_<object> on behalf of the bound session key, without a step */
 export function enqDrop(key, table, object, input) {
   if (isEnded(key)) throw new EnqSessionEnded(key);
+  const r = request(globalThis.abap, table, object, input);
+  // the key's session now, and any retired by a dump that a parked step
+  // still holds: enqHolder names those under the key too
   const sid = sessions.get(key);
-  if (sid !== undefined) locks().dequeue(sid, request(globalThis.abap, table, object, input));
+  if (sid !== undefined) locks().dequeue(sid, r);
+  for (const [retired, k] of doomed) if (k === key) locks().dequeue(retired, r);
 }
 
 /** an update module ran in the session's LUW (what the wrapped update
