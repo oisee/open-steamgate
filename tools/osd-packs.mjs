@@ -34,7 +34,7 @@ import {existsSync, readFileSync, readdirSync, statSync} from "node:fs";
 import {basename, delimiter, isAbsolute, join, relative, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 import {readLock} from "./osd-lock.mjs";
-import {TMP_FOLDER} from "./osd-tmp.mjs";
+import {TMP_FOLDER, tmpDisabled} from "./osd-tmp.mjs";
 
 export const MANIFEST = "osd-pack.json";
 export const PACKS_DIR = "packs";
@@ -229,7 +229,11 @@ export function inputFoldersOf(root, config, env = process.env) {
     : [...listed.slice(0, generated), ...added, ...listed.slice(generated)];
   // $TMP (tools/osd-tmp.mjs) is a layer once something was created in it,
   // after the system and before the user's explicit layers.
-  const tmp = existsSync(join(root, TMP_FOLDER)) && !system.includes(TMP_FOLDER) ? [TMP_FOLDER] : [];
+  // OSD_TMP=off (a preview, a published build) leaves it out, listed or not.
+  const tmp = !tmpDisabled(env) && existsSync(join(root, TMP_FOLDER)) && !system.includes(TMP_FOLDER) ? [TMP_FOLDER] : [];
+  if (tmpDisabled(env)) {
+    return [...system.filter((f) => f !== TMP_FOLDER), ...userFoldersOf(root, env).filter((f) => f !== TMP_FOLDER)];
+  }
   // The user's explicit layers are last, including after generated overlays.
   // This is the same later-wins ordering as input_folder in the config.
   return [...system, ...tmp, ...userFoldersOf(root, env)];

@@ -53,6 +53,22 @@ CLASS zcl_stg_segw_repo DEFINITION PUBLIC CREATE PUBLIC.
     CLASS-METHODS bom
       RETURNING
         VALUE(rv_bom) TYPE string.
+
+* An object of $TMP is never transported, and this export is a route to a
+* system: refused here, before a file is made, for RepoSet and RepoFileSet
+* alike (tools/osd-tmp.mjs; TADIR says $TMP only for a local object).
+    CLASS-METHODS refuse_local
+      IMPORTING
+        is_model TYPE zcl_stg_segw_gen=>ty_model
+      RAISING
+        /iwbep/cx_mgw_busi_exception.
+
+    CLASS-METHODS is_local
+      IMPORTING
+        iv_object       TYPE string
+        iv_name         TYPE string
+      RETURNING
+        VALUE(rv_local) TYPE abap_bool.
 ENDCLASS.
 
 CLASS zcl_stg_segw_repo IMPLEMENTATION.
@@ -144,12 +160,55 @@ CLASS zcl_stg_segw_repo IMPLEMENTATION.
       && |</abapGit>\n|.
   ENDMETHOD.
 
+  METHOD is_local.
+    DATA lv_devclass TYPE tadir-devclass.
+    DATA lv_object   TYPE tadir-object.
+    DATA lv_name     TYPE tadir-obj_name.
+
+    IF iv_name IS INITIAL.
+      RETURN.
+    ENDIF.
+    lv_object = iv_object.
+    lv_name = to_upper( iv_name ).
+    SELECT SINGLE devclass FROM tadir INTO lv_devclass
+      WHERE pgmid = 'R3TR' AND object = lv_object AND obj_name = lv_name.
+    IF sy-subrc = 0 AND lv_devclass = '$TMP'.
+      rv_local = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD refuse_local.
+    DATA lv_hit TYPE string.
+
+    IF is_local( iv_object = 'IWPR' iv_name = is_model-project ) = abap_true.
+      lv_hit = |IWPR { is_model-project }|.
+    ELSEIF is_local( iv_object = 'IWSV' iv_name = is_model-service ) = abap_true.
+      lv_hit = |IWSV { is_model-service }|.
+    ELSEIF is_local( iv_object = 'IWMO' iv_name = is_model-model ) = abap_true.
+      lv_hit = |IWMO { is_model-model }|.
+    ELSEIF is_local( iv_object = 'CLAS' iv_name = is_model-mpc ) = abap_true.
+      lv_hit = |CLAS { is_model-mpc }|.
+    ELSEIF is_local( iv_object = 'CLAS' iv_name = is_model-mpc_ext ) = abap_true.
+      lv_hit = |CLAS { is_model-mpc_ext }|.
+    ELSEIF is_local( iv_object = 'CLAS' iv_name = is_model-dpc ) = abap_true.
+      lv_hit = |CLAS { is_model-dpc }|.
+    ELSEIF is_local( iv_object = 'CLAS' iv_name = is_model-dpc_ext ) = abap_true.
+      lv_hit = |CLAS { is_model-dpc_ext }|.
+    ENDIF.
+    IF lv_hit IS NOT INITIAL.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING
+          message = |{ lv_hit } is an object of $TMP, which is never transported|.
+    ENDIF.
+  ENDMETHOD.
+
   METHOD files.
     DATA ls_model TYPE zcl_stg_segw_gen=>ty_model.
     DATA ls_file  TYPE zcl_stg_segw_gen=>ty_file.
     DATA lt_gen   TYPE zcl_stg_segw_gen=>tt_file.
 
     ls_model = zcl_stg_segw_gen=>build_model( iv_project ).
+    refuse_local( ls_model ).
 
     ls_file-name    = '.abapgit.xml'.
     ls_file-content = bom( )

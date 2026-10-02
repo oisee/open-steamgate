@@ -27,7 +27,7 @@
 //
 // Who created an object is not something an abapGit file says, so it is kept
 // beside the objects in TMP_AUTHORS, the TADIR of this one package.
-import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {isAbsolute, join, relative, resolve} from "node:path";
 
 export const TMP_PACKAGE = "$TMP";
@@ -75,23 +75,33 @@ export function ensureTmp(root) {
   return folder;
 }
 
-/** "TYPE NAME" -> {author, createdAt}, for the objects of $TMP */
+/** "TYPE NAME" -> {author, createdAt}, for the objects of $TMP. `{}` when
+ *  nothing was recorded yet; `null` when the record exists and cannot be
+ *  read, which the store answers by showing nobody anything (fail closed):
+ *  an unreadable ownership record is not a licence to show every user's
+ *  objects to everyone. Said loudly, once per reading. */
 export function tmpAuthors(root) {
+  const file = join(root, TMP_FOLDER, TMP_AUTHORS);
+  if (!existsSync(file)) return {};
   try {
-    return JSON.parse(readFileSync(join(root, TMP_FOLDER, TMP_AUTHORS), "utf8"));
-  } catch {
-    return {};
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    return parsed;
+  } catch (e) {
+    console.error(`osd-tmp: ${join(TMP_FOLDER, TMP_AUTHORS)} cannot be read (${e.message}); `
+      + `no object of ${TMP_PACKAGE} is shown to anyone until it is repaired or removed`);
+    return null;
   }
 }
 
 export function recordAuthor(root, type, name, author) {
-  const all = tmpAuthors(root);
+  const all = readForUpdate(root);
   all[`${type} ${String(name).toUpperCase()}`] = {author: String(author).toUpperCase(), createdAt: new Date().toISOString()};
   writeAuthors(root, all);
 }
 
 export function forgetAuthor(root, type, name) {
-  const all = tmpAuthors(root);
+  const all = readForUpdate(root);
   const key = `${type} ${String(name).toUpperCase()}`;
   if (all[key] !== undefined) {
     delete all[key];
@@ -99,17 +109,31 @@ export function forgetAuthor(root, type, name) {
   }
 }
 
+// a broken record is not overwritten with a fresh one: that would make the
+// loss of everybody's ownership permanent
+function readForUpdate(root) {
+  const all = tmpAuthors(root);
+  if (all === null) {
+    throw new Error(`${join(TMP_FOLDER, TMP_AUTHORS)} cannot be read; repair or remove it before changing ${TMP_PACKAGE}`);
+  }
+  return all;
+}
+
+// temp file + rename: an interrupted write leaves the old record or the new
+// one, never a truncated file
 function writeAuthors(root, all) {
   ensureTmp(root);
   const sorted = Object.fromEntries(Object.entries(all).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
-  writeFileSync(join(root, TMP_FOLDER, TMP_AUTHORS), JSON.stringify(sorted, undefined, 1) + "\n");
+  const file = join(root, TMP_FOLDER, TMP_AUTHORS);
+  const temp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(temp, JSON.stringify(sorted, undefined, 1) + "\n");
+  renameSync(temp, file);
 }
 
-/** The object keys ("PROG ZX") of every abapGit file under $TMP. What the
- *  deploy gate refuses by name, so a copy of a $TMP object made somewhere
- *  else does not travel either while the original is still local. */
-export function tmpObjectKeys(root) {
-  const keys = new Set();
+/** every file under $TMP, relative to its folder, sorted; the deploy gate
+ *  names the objects in them (tools/osd-deploy-manifest.mjs localObjectKeys) */
+export function tmpFiles(root) {
+  const out = [];
   const walk = (dir) => {
     let entries;
     try {
@@ -119,16 +143,66 @@ export function tmpObjectKeys(root) {
     }
     for (const entry of entries) {
       const full = join(dir, entry);
-      if (statSync(full).isDirectory()) {
-        walk(full);
-        continue;
-      }
-      const m = /^(.+?)\.([a-z0-9]+)\.(abap|xml|asddls)$/i.exec(entry);
-      if (m !== null && entry !== "package.devc.xml") {
-        keys.add(`${m[2].toUpperCase()} ${m[1].replace(/#/g, "/").toUpperCase()}`);
-      }
+      if (statSync(full).isDirectory()) walk(full);
+      else if (entry !== TMP_AUTHORS && !entry.endsWith(".tmp")) out.push(full);
     }
   };
   walk(join(root, TMP_FOLDER));
-  return keys;
+  return out;
+}
+
+/** OSD_TMP=off leaves $TMP out of the layers and the store: what a preview
+ *  or any other published build runs with (scripts/build-preview.mjs) */
+export const tmpDisabled = (env = process.env) => String(env.OSD_TMP ?? "").toLowerCase() === "off";
+
+// ------------------------------------------------------------ names
+//
+// SAP's character set for repository names: A-Z, 0-9 and _, an optional
+// /NAMESPACE/ in front, and for a local package a leading $. Anything else --
+// a dot, a slash outside a namespace, a space -- is not a name, and a name
+// here becomes a path, so the check is also what keeps a create inside its
+// folder.
+const OBJECT_NAME = /^(\/[A-Z0-9_]{1,10}\/)?[A-Z0-9_]{1,40}$/;
+const PACKAGE_NAME = /^(\$|\/[A-Z0-9_]{1,10}\/)?[A-Z0-9_]{1,30}$/;
+
+export function nameProblem(type, name) {
+  const upper = String(name ?? "");
+  if (upper !== upper.toUpperCase()) return `${type} ${name}: a repository name is upper case`;
+  const ok = type === "DEVC" ? PACKAGE_NAME.test(upper) && upper.length <= 30 : OBJECT_NAME.test(upper);
+  return ok ? undefined : `${type} "${name}" is not a repository name (A-Z, 0-9, _${type === "DEVC" ? ", a leading $" : ""}, an optional /NAMESPACE/)`;
+}
+
+// ------------------------------------------------------------ the generation
+
+/** The modules of a transpiled generation that came from $TMP: a preview
+ *  that carries one publishes a local object. `keys` are "TYPE NAME". */
+export function tmpModulesIn(outputDir, keys) {
+  let files;
+  try {
+    files = new Set(readdirSync(outputDir));
+  } catch {
+    return [];
+  }
+  const found = [];
+  for (const key of keys) {
+    const [type, ...rest] = key.split(" ");
+    const stem = rest.join(" ").toLowerCase().replace(/\//g, "#");
+    if (files.has(`${stem}.${type.toLowerCase()}.mjs`)) found.push(key);
+  }
+  return found.sort();
+}
+
+/** The transpiler files every object under devclass $TMP. Here that is the
+ *  package of a few objects only, so the TADIR rows it hands over are
+ *  rewritten: $TMP for an object of $TMP (`keys`, "TYPE NAME"), empty --
+ *  "not known to the build" -- for the rest. ABAP that asks TADIR whether an
+ *  object is local (zcl_stg_segw_repo) then gets a true answer. */
+export function tadirWithTmp(statements, keys) {
+  const re = /^(\s*INSERT INTO "tadir" \([^)]*\)\s*VALUES \('R3TR', '([^']*)', '([^']*)', )'\$TMP'/;
+  return statements.map((statement) => {
+    const m = re.exec(statement);
+    if (m === null) return statement;
+    const key = `${m[2].toUpperCase()} ${m[3].toUpperCase()}`;
+    return statement.replace(re, `$1'${keys.has(key) ? TMP_PACKAGE : ""}'`);
+  });
 }

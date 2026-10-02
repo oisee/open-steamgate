@@ -28,7 +28,7 @@ import {Sessions, parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {abapFront} from "./adt-abap-front.mjs";
 import {EnqOwners, abapSession, statelessLock} from "./adt-enq.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
-import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
+import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict, InvalidName} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
 import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
@@ -3051,6 +3051,8 @@ export function answered(res, body, record) {
       refuse(res, 404, "ExceptionResourceNotFound", e.message);
     } else if (e instanceof ReadOnly) {
       refuse(res, 405, "ExceptionResourceNoAccess", e.message);
+    } else if (e instanceof InvalidName) {
+      refuse(res, 400, "ExceptionInvalidRequest", e.message);
     } else if (e instanceof NotSupported) {
       refuse(res, 501, "ExceptionResourceNoAccess", e.message);
     } else if (e instanceof Conflict) {

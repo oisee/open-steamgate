@@ -128,4 +128,132 @@ describe("$TMP, the local package", () => {
       else process.env.OSD_ROOT = previous;
     }
   });
+
+  // ---- review round (codex on b3f68a9b)
+
+  const createPackage = (call, name, parent = "$TMP") => call("/packages", {method: "POST", body:
+    `<pack:package xmlns:pack="http://www.sap.com/adt/packages" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="${name}" adtcore:description="x"><pack:superPackage adtcore:name="${parent}"/></pack:package>`});
+
+  it("refuses a name that is not a repository name, and never writes outside its root", async () => {
+    const call = await logon("ALICE");
+    for (const name of ["$TMP_../../src", "$TMP_..", "$TMP_A/../../B", "$TMP_A B"]) {
+      const res = await createPackage(call, name);
+      expect(res.status, name).to.be.oneOf([400, 501]);
+      expect(res.status, name).to.not.equal(201);
+    }
+    for (const name of ["../ZX", "ZX/../../Y", "Z.X", "Z X"]) {
+      expect((await createProg(call, name)).status, name).to.equal(400);
+    }
+    expect(existsSync(join(root, "src", "package.devc.xml")), "src/package.devc.xml was not written").to.equal(false);
+    expect(existsSync(join(root, "package.devc.xml"))).to.equal(false);
+    expect(existsSync(join(root, "local", "package.devc.xml"))).to.equal(false);
+  });
+
+  it("takes an ordinary local package as a child, as A4H does, and shows it to its author", async () => {
+    expect(A4H.subpackage.EXPECT).to.equal("A4H");
+    const alice = await logon("ALICE");
+    const bob = await logon("BOB");
+    const res = await createPackage(alice, "$ZOSD_KID");
+    expect(res.status, await res.clone().text()).to.equal(201);
+    expect(existsSync(join(root, TMP_FOLDER, "$zosd_kid", "package.devc.xml"))).to.equal(true);
+    const store = new ObjectStore({root, libs: []});
+    expect(store.package("$ZOSD_KID").parent).to.equal("$TMP");
+    expect(await treeOf(alice)).to.include("DEVC/K $ZOSD_KID");
+    expect(await treeOf(bob), "another user's package is not in the tree").to.not.include("DEVC/K $ZOSD_KID");
+    // and a program goes into it
+    expect((await createProg(alice, "ZOSD_IN_KID", "$ZOSD_KID")).status).to.equal(201);
+    expect(existsSync(join(root, TMP_FOLDER, "$zosd_kid", "zosd_in_kid.prog.abap"))).to.equal(true);
+  });
+
+  it("refuses a $TMP object in every key form the manifest can list it", async () => {
+    mkdirSync(join(root, TMP_FOLDER), {recursive: true});
+    writeFileSync(join(root, TMP_FOLDER, "zosd_srv                           0001.iwsv.xml"), "<TECHNICAL_NAME>ZOSD_SRV</TECHNICAL_NAME><VERSION>0001</VERSION>");
+    writeFileSync(join(root, TMP_FOLDER, "zosd_node.sicf.xml"), "<URL>/sap/bc/zosd/</URL><ICF_NAME>ZOSD_NODE</ICF_NAME>");
+    writeFileSync(join(root, TMP_FOLDER, "zosd_fg.fugr.xml"), "<FUNCNAME>ZOSD_TMP_FM</FUNCNAME>");
+    const unit = {name: "probe", objects: ["IWSV ZOSD_SRV 0001", "SICF /sap/bc/zosd", "FUGR ZOTHER"]};
+    const text = {
+      "zosd_srv 0001.iwsv.xml": "<TECHNICAL_NAME>ZOSD_SRV</TECHNICAL_NAME><VERSION>0001</VERSION>",
+      "zcopy.sicf.xml": "<URL>/sap/bc/zosd/</URL><ICF_NAME>ZCOPY</ICF_NAME>",
+      "zother.fugr.xml": "<FUNCNAME>ZOSD_TMP_FM</FUNCNAME>",
+    };
+    const refusals = admit({files: Object.keys(text), read: (f) => text[f], unit, root});
+    const local = refusals.filter((r) => r.rule === "local-object").map((r) => r.key);
+    expect(local, "padding normalised").to.include("IWSV ZOSD_SRV 0001");
+    expect(local, "SICF by its URL").to.include("SICF /sap/bc/zosd");
+    expect(local.some((k) => k.includes("FUNC ZOSD_TMP_FM")), "a module a local group creates").to.equal(true);
+  });
+
+  it("stays out of a preview: OSD_TMP=off drops the layer and the store root, and a generation with it is named", async () => {
+    const call = await logon("ALICE");
+    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(201);
+    const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
+    expect(inputFoldersOf(root, config, {OSD_TMP: "off"})).to.not.include(TMP_FOLDER);
+    const previous = process.env.OSD_TMP;
+    process.env.OSD_TMP = "off";
+    try {
+      const store = new ObjectStore({root, libs: []});
+      expect(store.roots.map((r) => r.path)).to.not.include(TMP_FOLDER);
+      expect(store.find("PROG", "ZOSD_TMP_PROBE")).to.equal(undefined);
+    } finally {
+      if (previous === undefined) delete process.env.OSD_TMP;
+      else process.env.OSD_TMP = previous;
+    }
+    const {tmpModulesIn} = await import("../tools/osd-tmp.mjs");
+    const {localObjectKeys} = await import("../tools/osd-deploy-manifest.mjs");
+    mkdirSync(join(root, "output"));
+    writeFileSync(join(root, "output", "zosd_tmp_probe.prog.mjs"), "");
+    expect(tmpModulesIn(join(root, "output"), localObjectKeys(root))).to.deep.equal(["PROG ZOSD_TMP_PROBE"]);
+    const preview = readFileSync(new URL("../scripts/build-preview.mjs", import.meta.url), "utf8");
+    expect(preview, "the preview build sets it and checks output/").to.match(/OSD_TMP = "off"[\s\S]*tmpModulesIn\(/);
+  });
+
+  it("shows nothing of $TMP to a caller without a user, nor an object nobody authored", async () => {
+    const call = await logon("ALICE");
+    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(201);
+    writeFileSync(join(root, TMP_FOLDER, "zosd_by_hand.prog.abap"), "REPORT zosd_by_hand.\n");
+    const {packageOf} = await import("../tools/adt-documents.mjs");
+    const store = new ObjectStore({root, libs: []});
+    expect(packageOf(store, "$TMP").objects, "no user, nothing").to.deep.equal([]);
+    expect(packageOf(store, "$TMP", {user: "ALICE"}).objects.map((o) => o.name)).to.deep.equal(["ZOSD_TMP_PROBE"]);
+  });
+
+  it("keeps its ownership record whole, and fails closed when it cannot read it", async () => {
+    const call = await logon("ALICE");
+    expect((await createProg(call, "ZOSD_TMP_ONE")).status).to.equal(201);
+    expect((await createProg(call, "ZOSD_TMP_TWO")).status).to.equal(201);
+    const {readdirSync} = await import("node:fs");
+    expect(readdirSync(join(root, TMP_FOLDER)).filter((f) => f.endsWith(".tmp")), "no temp file left").to.deep.equal([]);
+    const record = readFileSync(join(root, TMP_FOLDER, "tadir.json"), "utf8");
+    expect(Object.keys(JSON.parse(record))).to.deep.equal(["PROG ZOSD_TMP_ONE", "PROG ZOSD_TMP_TWO"]);
+    const source = readFileSync(new URL("../tools/osd-tmp.mjs", import.meta.url), "utf8");
+    expect(source, "written by rename").to.match(/renameSync\(temp, file\)/);
+    // truncated, the way an interrupted write would leave it
+    writeFileSync(join(root, TMP_FOLDER, "tadir.json"), record.slice(0, 20));
+    const errors = [];
+    const original = console.error;
+    console.error = (...a) => errors.push(a.join(" "));
+    try {
+      const fresh = await logon("ALICE");
+      expect(await treeOf(fresh), "nothing of $TMP is shown").to.not.include("PROG/P ZOSD_TMP_ONE");
+      expect(errors.join("\n"), "and it says so").to.match(/tadir\.json cannot be read/);
+      expect((await createProg(fresh, "ZOSD_TMP_THREE")).status, "nor overwritten by the next create").to.not.equal(201);
+      expect(readFileSync(join(root, TMP_FOLDER, "tadir.json"), "utf8")).to.equal(record.slice(0, 20));
+    } finally {
+      console.error = original;
+    }
+  });
+
+  it("tells ABAP which TADIR rows are local: $TMP only for an object of $TMP", async () => {
+    const call = await logon("ALICE");
+    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(201);
+    const {tadirWithTmp} = await import("../tools/osd-tmp.mjs");
+    const {localObjectKeys} = await import("../tools/osd-deploy-manifest.mjs");
+    const row = (type, name) => `INSERT INTO "tadir" ("pgmid", "object", "obj_name", "devclass", "korrnum")\n      VALUES ('R3TR', '${type}', '${name}', '$TMP', '');`;
+    const out = tadirWithTmp([row("PROG", "ZOSD_TMP_PROBE"), row("CLAS", "ZCL_TMP_NEIGHBOUR"), "INSERT INTO \"other\" VALUES ('$TMP');"], localObjectKeys(root));
+    expect(out[0]).to.contain("'ZOSD_TMP_PROBE', '$TMP'");
+    expect(out[1]).to.contain("'ZCL_TMP_NEIGHBOUR', ''");
+    expect(out[2]).to.contain("'$TMP'");
+    const setup = readFileSync(new URL("./setup.mjs", import.meta.url), "utf8");
+    expect(setup, "the database setup applies it").to.match(/insert = await withTmpPackages\(insert\)/);
+  });
 });

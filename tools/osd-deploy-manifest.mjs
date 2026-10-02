@@ -22,9 +22,9 @@
 // Every refusal names the file, the object and the rule it broke, and nothing
 // is copied on the way to refusing.
 import {existsSync, readFileSync} from "node:fs";
-import {isAbsolute, join, relative, resolve} from "node:path";
+import {basename, isAbsolute, join, relative, resolve} from "node:path";
 import {rename} from "./osd-rename.mjs";
-import {TMP_FOLDER, TMP_PACKAGE, insideTmp, tmpObjectKeys} from "./osd-tmp.mjs";
+import {TMP_FOLDER, TMP_PACKAGE, insideTmp, tmpFiles} from "./osd-tmp.mjs";
 
 export const MANIFEST = "deploy/manifest.json";
 
@@ -249,6 +249,22 @@ export function nameTagProblem(obj, xml) {
 // case (every SICF URL is), and a sentinel with letters would not survive it
 const SENTINEL = "\u0001\u0002\u0001";
 
+/** The keys of every object of $TMP, made by the same objectOf the
+ *  admission below uses, so a padded IWSV name or a SICF known by its URL
+ *  is one key on both sides (tools/osd-tmp.mjs). A function group's modules
+ *  and a view's SQL view are refused with it. */
+export function localObjectKeys(root) {
+  const keys = new Set();
+  for (const full of tmpFiles(root)) {
+    const file = basename(full);
+    const obj = objectOf(file, () => readFileSync(full, "utf8"));
+    if (obj === undefined || obj.structural === true) continue;
+    keys.add(obj.key);
+    for (const c of createdNames(file, () => readFileSync(full, "utf8"))) keys.add(`${c.kind} ${c.name}`);
+  }
+  return keys;
+}
+
 /** A matcher for one listed entry. `{nnn}` stands for an attempt number
  *  (three digits); a unit with `attempt: {from, to}` also accepts each name
  *  renamed the way `tools/osd-rename.mjs` renames an attempt. */
@@ -281,7 +297,7 @@ export function admit({files, read, tables = [], unit, customerNamespaces, root 
   }
   // An object of $TMP is never transported (tools/osd-tmp.mjs), whatever a
   // unit lists: by name, so a copy of it in another folder stays too.
-  const local = tmpObjectKeys(root);
+  const local = localObjectKeys(root);
   const namespaces = customerNamespaces ?? unit.customerNamespaces ?? [];
   const entries = entriesOf(unit);
   const refusals = [];
@@ -304,6 +320,10 @@ export function admit({files, read, tables = [], unit, customerNamespaces, root 
         why: `an ${obj.type} enhances an SAP object rather than adding one of ours`});
     }
     for (const c of obj.creates ?? []) {
+      if (local.has(`${c.kind} ${c.name}`)) {
+        refusals.push({file, key: `${obj.key} creates ${c.kind} ${c.name}`, rule: "local-object",
+          why: `${c.kind} ${c.name} belongs to ${TMP_PACKAGE} (${TMP_FOLDER}), which is never transported`});
+      }
       const rule = sapNameRule(c.name, namespaces);
       if (rule !== undefined && !intended) {
         refusals.push({file, key: `${obj.key} creates ${c.kind} ${c.name}`, rule: rule.rule, why: rule.why});

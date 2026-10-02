@@ -293,6 +293,15 @@ export async function setup(abap, schemas, insert) {
   }
 }
 
+async function withTmpPackages(insert) {
+  if (globalThis.__stgPreview !== undefined || !Array.isArray(insert)) return insert;
+  const root = globalThis.process?.env?.OSD_ROOT ?? globalThis.process?.cwd?.();
+  if (root === undefined) return insert;
+  const {tadirWithTmp} = await import("../tools/osd-tmp.mjs");
+  const {localObjectKeys} = await import("../tools/osd-deploy-manifest.mjs");
+  return tadirWithTmp(insert, localObjectKeys(root));
+}
+
 async function setupDatabase(abap, schemas, insert) {
   let db;
   // The transpiler hands over the object directory and the sources one row
@@ -301,6 +310,10 @@ async function setupDatabase(abap, schemas, insert) {
   // statement costs its parse, so consecutive rows of one shape are merged
   // into one. Here rather than in each branch below: all six of them execute
   // this same array.
+  // TADIR says $TMP only for an object of $TMP (tools/osd-tmp.mjs): the
+  // transpiler files everything there, and ABAP that refuses to export a
+  // local object (zcl_stg_segw_repo) reads it
+  insert = await withTmpPackages(insert);
   const given = insert;
   insert = batchInserts(insert);
   // the browser preview (web/preview-backend.mjs): seed rows come from the

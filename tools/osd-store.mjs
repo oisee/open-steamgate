@@ -12,7 +12,7 @@
 // registry, because a class that compiles alone can still break the system
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
-import {closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync, writeSync} from "node:fs";
+import {closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync, writeSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
@@ -22,9 +22,9 @@ import {libraryFiles} from "./osd-inputs.mjs";
 import {hashOf, inputsOf, loadConfig, normalPath} from "./osd-build.mjs";
 import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
-import {TMP_FOLDER, TMP_PACKAGE, TMP_TEXT, ensureTmp, forgetAuthor, isTmpPackage, recordAuthor, tmpAuthors, tmpRoot} from "./osd-tmp.mjs";
+import {TMP_FOLDER, TMP_PACKAGE, TMP_TEXT, ensureTmp, forgetAuthor, isTmpPackage, nameProblem, recordAuthor, tmpAuthors, tmpDisabled, tmpRoot} from "./osd-tmp.mjs";
 
-import {basename, dirname, join, relative, resolve} from "node:path";
+import {basename, dirname, isAbsolute, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
 import {Data} from "./osd-data.mjs";
 import {ServingRuntime} from "./osd-runtime.mjs";
@@ -163,9 +163,27 @@ export function rootsOf(root, env = process.env) {
 // $TMP is a root whether or not anything was created in it yet: the build
 // reads its folder once it exists (inputFoldersOf), the store needs it
 // before, so that the first create has somewhere to go. Last, so that a
-// write that names no root never lands in it.
+// write that names no root never lands in it. OSD_TMP=off (a preview, any
+// published build) leaves it out altogether.
 function withTmp(roots) {
+  if (tmpDisabled()) return roots.filter((r) => r.path !== TMP_FOLDER);
   return roots.some((r) => r.path === TMP_FOLDER) ? roots : [...roots, tmpRoot()];
+}
+
+// whether `target` (relative to `base`) stays inside `inside`, by path and,
+// for whatever of it already exists, by the real path a symlink resolves to
+function contained(base, inside, target) {
+  const within = (outer, inner) => {
+    const rel = relative(outer, inner);
+    return rel === "" || (!isAbsolute(rel) && rel.split(/[\\/]/)[0] !== "..");
+  };
+  const outer = resolve(base, inside);
+  const full = resolve(base, target);
+  if (!within(outer, full)) return false;
+  let existing = full;
+  while (!existsSync(existing) && existing !== dirname(existing)) existing = dirname(existing);
+  const realOuter = existsSync(outer) ? realpathSync(outer) : outer;
+  return within(realOuter, realpathSync(existing)) || within(realpathSync(existing), realOuter);
 }
 
 export class ObjectStore {
@@ -589,6 +607,12 @@ export class ObjectStore {
     inside.pop();
     const chain = [...bases];
     for (const folder of inside) {
+      // under $TMP a folder that starts with $ is a package of that name:
+      // A4H takes any local package as a child of $TMP, not only $TMP_<X>
+      if (root.tmp === true && chain.length === 1 && /^\$[a-z0-9_]+$/i.test(folder)) {
+        chain.push(folder.toUpperCase());
+        continue;
+      }
       chain.push(`${chain[chain.length - 1]}_${folder.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`);
     }
     return chain;
@@ -639,7 +663,9 @@ export class ObjectStore {
         synthetic: true});
     }
     // and what is in it says who made it (tools/osd-tmp.mjs)
-    const authors = tmpAuthors(this.root);
+    // (null: the record is unreadable, nobody is the author of anything,
+    // and so nobody is shown anything -- tools/osd-tmp.mjs)
+    const authors = tmpAuthors(this.root) ?? {};
     for (const entry of index.values()) {
       if (entry.root === TMP_FOLDER && authors[`${entry.type} ${entry.name}`] !== undefined) {
         entry.changedBy = authors[`${entry.type} ${entry.name}`].author;
@@ -804,6 +830,12 @@ export class ObjectStore {
       throw new Error(`${type} ${name} already belongs to ${entry.root}, not ${requestedRoot.path}`);
     }
     if (entry === undefined) {
+      // the kinds a client creates by name; other kinds keep their own
+      // naming (a W3MI object id, an IWSV with its version)
+      const problem = CREATABLE[type] === undefined ? undefined : nameProblem(type, String(name).toUpperCase());
+      if (problem !== undefined) {
+        throw new InvalidName(problem);
+      }
       const root = requestedRoot ?? this.roots.find((r) => r.writable);
       const file = join(root.path, "osd", fileOf(name) + meta.ext);
       const packages = this.#packagesOf(file, root);
@@ -854,6 +886,12 @@ export class ObjectStore {
       throw new NotSupported(`creating an object of type ${type}`);
     }
     const upper = String(name).toUpperCase();
+    // a name becomes a path: one outside SAP's character set is refused
+    // before it is anywhere near the file system
+    const problem = nameProblem(type, upper);
+    if (problem !== undefined) {
+      throw new InvalidName(problem);
+    }
     if (this.find(type, upper) !== undefined) {
       throw new Conflict(type, upper);
     }
@@ -873,12 +911,20 @@ export class ObjectStore {
     const description = String(options.description ?? "");
     let file;
     if (type === "DEVC") {
-      if (!upper.startsWith(parent + "_") || upper.length === parent.length + 1) {
+      if (isTmpPackage(parent) && upper.startsWith("$") && !upper.startsWith(parent + "_")) {
+        // a local package of any name under $TMP, as on A4H: its folder is its name
+        file = join(folder, upper.toLowerCase(), "package.devc.xml");
+      } else if (!upper.startsWith(parent + "_") || upper.length === parent.length + 1) {
         throw new NotSupported(`a package under ${parent} is named ${parent}_<FOLDER>; ${upper}`);
+      } else {
+        file = join(folder, upper.slice(parent.length + 1).toLowerCase(), "package.devc.xml");
       }
-      file = join(folder, upper.slice(parent.length + 1).toLowerCase(), "package.devc.xml");
     } else {
       file = join(folder, fileOf(upper) + meta.ext);
+    }
+    // and whatever the name was, the file stays inside the root it is filed under
+    if (root === undefined || !contained(this.root, root.path, file)) {
+      throw new InvalidName(`${type} ${upper} would be written outside ${root?.path ?? "every root"}`);
     }
     if (existsSync(join(this.root, file))) {
       throw new Conflict(type, upper);
@@ -1133,16 +1179,30 @@ export class ObjectStore {
       throw new NotFound("DEVC", wanted);
     }
     const objects = [];
+    // who made what in $TMP, read now rather than at the last index build:
+    // the record is what decides who sees an object, and a stale copy of it
+    // would keep showing what an unreadable record must hide
+    const authors = [...this.#entries().values()].some((e) => e.package === wanted && e.root === TMP_FOLDER)
+      ? (tmpAuthors(this.root) ?? {}) : {};
     for (const entry of this.#entries().values()) {
       if (entry.package === wanted && !(entry.type === "DEVC" && entry.name === wanted)) {
+        const author = entry.root === TMP_FOLDER ? authors[`${entry.type} ${entry.name}`]?.author : entry.changedBy;
         objects.push({type: entry.type, name: entry.name, library: entry.library, writable: entry.writable,
-          version: this.stateOf(entry).version, ...(entry.changedBy === undefined ? {} : {author: entry.changedBy})});
+          version: this.stateOf(entry).version, ...(author === undefined ? {} : {author})});
       }
     }
     return {
       ...node,
       objects: objects.sort((a, b) => (a.type + a.name).localeCompare(b.type + b.name)),
     };
+  }
+
+  /** who created an object of $TMP, from the record as it is now; undefined
+   *  for an object outside $TMP, one nobody recorded, or an unreadable record */
+  authorOf(type, name) {
+    const entry = this.find(type, name);
+    if (entry === undefined || entry.root !== TMP_FOLDER) return undefined;
+    return (tmpAuthors(this.root) ?? {})[`${entry.type} ${entry.name}`]?.author;
   }
 
   // the text of a package: a real one carries it in package.devc.xml, and
@@ -1990,6 +2050,13 @@ export class ReadOnly extends Error {
     this.code = "READ_ONLY";
     this.objectType = type;
     this.objectName = name;
+  }
+}
+
+export class InvalidName extends Error {
+  constructor(message) {
+    super(message);
+    this.code = "INVALID_NAME";
   }
 }
 

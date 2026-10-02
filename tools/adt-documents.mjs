@@ -1055,14 +1055,20 @@ export function packageOf(store, name, options = {}) {
     .filter((node) => node.name !== LOCAL_PACKAGE)
     .filter((node) => (asked.length > 0 ? asked.includes(node.name) : node.library !== true))
     .map((node) => node.name);
-  // and of the objects, the user's: the tree of $TMP on a system is the
-  // logged-on user's unless the client names another. An object nobody is
-  // recorded as the author of (a file put there by hand) is everybody's.
+  // and of what is in it, the user's: the tree of $TMP on a system is the
+  // logged-on user's unless the client names another (A4H). Always: a
+  // caller that names no user sees nothing of $TMP's own, and an object or
+  // package nobody is recorded as the author of -- a file put there by hand,
+  // or a record that could not be read -- is nobody's to see in the tree
+  // (it still opens by its URI). An ADT session always has a user: the
+  // Basic one, or the system's own name for a logon without one, so an
+  // anonymous session sees what was created anonymously and nothing else.
   const user = String(options.user ?? "").toUpperCase();
-  const objects = user === "" ? pkg.objects
-    : pkg.objects.filter((object) => object.author === undefined || object.author === user);
+  const mine = (author) => user !== "" && author !== undefined && author === user;
+  const objects = pkg.objects.filter((object) => mine(object.author));
+  const owned = (pkg.subpackages ?? []).filter((child) => mine(store.authorOf("DEVC", child)));
   return {...pkg, description: pkg.description ?? "Local objects", objects,
-    subpackages: [...new Set([...(pkg.subpackages ?? []), ...roots])]};
+    subpackages: [...new Set([...owned, ...roots])]};
 }
 
 export function nodesOf(store, name, type, options = {}) {
