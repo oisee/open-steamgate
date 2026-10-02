@@ -135,7 +135,32 @@ export function unitClasses(store, type, name) {
   return {object: entry, classes};
 }
 
+// Warm-up can be slow while doing synchronous work, but an unresolved
+// async stage must not keep discovery waiting forever. Reset the silence
+// deadline when a stage finishes, and let queued completion run before timing out.
+async function waitUnitWarmup(store) {
+  if (store.unitReady === undefined) return;
+  const silenceMs = Number(process.env.OSD_TRANSITION_MS ?? 30000);
+  const started = Date.now();
+  const late = Symbol("late");
+  let settled = false;
+  store.unitReady.then(() => {settled = true;}, () => {settled = true;});
+  for (;;) {
+    let timer;
+    const deadline = (store.unitWarmHeard ?? started) + silenceMs;
+    const result = await Promise.race([store.unitReady, new Promise((resolve) => {
+      timer = setTimeout(() => resolve(late), Math.max(0, deadline - Date.now()));
+    })]).finally(() => clearTimeout(timer));
+    if (result !== late) return;
+    await new Promise((resolve) => setImmediate(resolve));
+    if (settled) {await store.unitReady;return;}
+    if ((store.unitWarmHeard ?? started) + silenceMs > Date.now()) continue;
+    throw new Error(`unit plan pre-warm silent for ${silenceMs} ms`);
+  }
+}
+
 export async function unitPlan(store, type, name, {risk = false} = {}) {
+  await waitUnitWarmup(store);
   const runner = await store.unit();
   const plan = runner.classes(type, name);
   return risk ? runner.withRisk(plan) : plan;
@@ -145,9 +170,12 @@ export async function unitPlan(store, type, name, {risk = false} = {}) {
 // Pre-warm the same runner/registry/graph the first discovery request uses.
 export async function warmUnitPlan(store) {
   const started = performance.now();
+  store.unitWarmHeard = Date.now();
   const runner = await store.unit();
+  store.unitWarmHeard = Date.now();
   runner.risk ??= new UnitRisk(store);
   await runner.risk.writesReached("");
+  store.unitWarmHeard = Date.now();
   return {ms: performance.now() - started, objects: Array.from(store.registry().getObjects()).length};
 }
 

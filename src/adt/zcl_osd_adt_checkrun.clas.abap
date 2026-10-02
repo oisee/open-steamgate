@@ -200,12 +200,12 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
       iv_name = is_object-name iv_include = is_object-include iv_source = is_object-source iv_filter = lv_filter ).
     rs_report-uri = is_object-uri.
     TRY.
-        lo_json = zcl_ajson=>parse( ls_answer-json ).
+        lo_json = zcl_ajson=>parse( iv_json = ls_answer-json iv_keep_item_order = abap_true ).
         rs_report-status = lo_json->get_string( `/status` ).
         rs_report-status_text = lo_json->get_string( `/statusText` ).
         rs_report-has_status = lo_json->exists( `/status` ).
         rs_report-has_status_text = lo_json->exists( `/statusText` ).
-        lt_members = lo_json->members( `/issues` ).
+        lt_members = zcl_osd_adt_json=>ordered_members( io_json = lo_json iv_path = `/issues` ).
         LOOP AT lt_members INTO lv_member.
           lv_path = `/issues/` && lv_member.
           CLEAR ls_issue.
@@ -345,8 +345,8 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
           lo_input->add( iv_name = `name` iv_value = lv_name ).
           lo_input->add( iv_name = `mode` iv_value = `raw` ).
           ls_answer = zcl_osd_adt_host=>store( iv_command = `PACKAGE` iv_json = lo_input->document( ) ).
-          lo_json = zcl_ajson=>parse( ls_answer-json ).
-          lt_members = lo_json->members( `/objects` ).
+          lo_json = zcl_ajson=>parse( iv_json = ls_answer-json iv_keep_item_order = abap_true ).
+          lt_members = zcl_osd_adt_json=>ordered_members( io_json = lo_json iv_path = `/objects` ).
           LOOP AT lt_members INTO lv_member.
             lv_path = `/objects/` && lv_member.
             CLEAR ls_object.

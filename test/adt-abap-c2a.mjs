@@ -87,8 +87,45 @@ describe("C2a PARSE dispatcher destination",() => {
     const signature={exporting:{iv_command:box("PARSE"),iv_json:box(JSON.stringify(input))},importing:{ev_json:box(""),ev_error:box("")}};
     await withSystem(() => ({}),() => destination.call("ZOSD_STORE",signature),{store});return answerOf(signature);
   }
-  for (const kind of ["OUTLINE","DDLS","unknown",undefined]) it(`unsupported kind ${kind}`,async () => {
+  for (const kind of ["OUTLINE","DDLS","unknown","toString","__proto__",undefined]) it(`unsupported kind ${kind}`,async () => {
     const result=await call(new StoreDestination({store:() => {throw new Error("unsupported kind must not open a store");}}),{kind});expect(JSON.parse(result.EV_JSON).error.code).to.equal("NOT_SUPPORTED");
+  });
+  for (const json of ["", "{", "null"]) it(`bad PARSE JSON ${JSON.stringify(json)} refuses without opening a store`,async () => {
+    const destination=new StoreDestination({store:() => {throw new Error("bad JSON must not open a store");}});
+    const signature={exporting:{iv_command:box("PARSE"),iv_json:box(json)},importing:{ev_json:box(""),ev_error:box("")}};
+    await destination.call("ZOSD_STORE",signature);
+    const result=answerOf(signature);
+    expect(JSON.parse(result.EV_JSON)).to.have.property("error");
+    expect(result.EV_ERROR).not.to.include("must not open");
+  });
+  it("a silent warm-up refuses the STORE request within its bound",async () => {
+    const previous=process.env.OSD_TRANSITION_MS;
+    process.env.OSD_TRANSITION_MS="20";
+    try {
+      const store={unitReady:new Promise(() => {}),unit:() => {throw new Error("must await warm-up first");}};
+      const result=await call(new StoreDestination(),{kind:"UNIT_PLAN",type:"CLAS",name:"ZCL_X"},store);
+      expect(result.EV_ERROR).to.include("pre-warm silent for 20 ms");
+    } finally {
+      if(previous===undefined) delete process.env.OSD_TRANSITION_MS;else process.env.OSD_TRANSITION_MS=previous;
+    }
+  });
+  it("warm-up progress extends the silence bound",async () => {
+    const previous=process.env.OSD_TRANSITION_MS;
+    process.env.OSD_TRANSITION_MS="40";
+    const store={unit:async () => ({classes:(t,n) => plan(t,n)})};
+    store.unitWarmHeard=Date.now();
+    let release;
+    store.unitReady=new Promise((resolve) => {release=resolve;});
+    const progress=setInterval(() => {store.unitWarmHeard=Date.now();},10);
+    const complete=setTimeout(release,100);
+    try {
+      const result=await call(new StoreDestination(),{kind:"UNIT_PLAN",type:"CLAS",name:"ZCL_X"},store);
+      expect(result.EV_ERROR).to.equal("");
+      expect(JSON.parse(result.EV_JSON).object.name).to.equal("ZCL_X");
+    } finally {
+      clearInterval(progress);clearTimeout(complete);release();
+      if(previous===undefined) delete process.env.OSD_TRANSITION_MS;else process.env.OSD_TRANSITION_MS=previous;
+    }
   });
   it("bound runner is used; risk false skips enrichment and risk true invokes it",async () => {
     const destination=new StoreDestination({store:() => {throw new Error("default must not open");}});
@@ -110,25 +147,44 @@ describe("C2a focused ABAP Unit",() => {
 
 describe("C2a serving startup",function () {
   this.timeout(30000);
-  it("does not listen until the unit graph is warm",async () => {
+  for (const front of ["js","abap"]) for (const outcome of ["warm","silent","rejected"])
+    it(`${front}: listens before warm-up; first unit/object request handles ${outcome}`,async () => {
     const originalUnit=ObjectStore.prototype.unit, originalRegistry=ObjectStore.prototype.registry;
-    const tls=process.env.STG_TLS;
-    let release,store,server;
-    const ready=new Promise((resolve) => {release=resolve;});
-    ObjectStore.prototype.unit=async function () {store=this;return {risk:{writesReached:() => ready}};};
+    const tls=process.env.STG_TLS, adt=process.env.OSD_ADT, silence=process.env.OSD_TRANSITION_MS;
+    const originalError=console.error, errors=[];
+    console.error=(...args) => errors.push(args.join(" "));
+    let release,reject,store,server,entered;
+    const waiting=new Promise((resolve) => {entered=resolve;});
+    const ready=new Promise((resolve,fail) => {release=resolve;reject=fail;});
+    ObjectStore.prototype.unit=async function () {store=this;return {risk:{writesReached:() => {entered();return ready;}},classes:(type,name) => ({object:{type,name},classes:[]}),withRisk:async (p) => ({...p,writes:[],writesTotal:0})};};
     ObjectStore.prototype.registry=() => ({getObjects:() => ["fixture"]});
-    process.env.STG_TLS="0";
+    process.env.STG_TLS="0";process.env.OSD_ADT=front;
+    process.env.OSD_TRANSITION_MS=outcome==="silent" ? "100" : "30000";
     try {
       server=startServer(false);
-      expect(server.listening).to.equal(false);
-      const listening=once(server,"listening");
-      release();await listening;
+      if (!server.listening) await once(server,"listening");
       expect(server.listening).to.equal(true);
+      await waiting;
+      const origin=`http://127.0.0.1:${server.address().port}`;
+      expect((await fetch(origin+"/osd/ready")).status).to.equal(200);
+      let answered=false;
+      const response=fetch(origin+base+"core/http/unit/object?type=CLAS&name=ZCL_X").then((r) => {answered=true;return r;});
+      await new Promise((resolve) => setTimeout(resolve,50));
+      expect(answered).to.equal(false);
+      if(outcome==="warm") release();
+      if(outcome==="rejected") reject(new Error("fixture warm failure"));
+      const result=await response;
+      expect(result.status).to.equal(outcome==="silent" ? 500 : 200);
+      if(outcome==="silent") expect(await result.text()).to.include("pre-warm silent for 100 ms");
+      if(outcome==="rejected") expect(errors).to.deep.equal(["unit plan: pre-warm failed: fixture warm failure"]);
     } finally {
       release();
       if(server) await server.close();
       store?.unwatch();
       ObjectStore.prototype.unit=originalUnit;ObjectStore.prototype.registry=originalRegistry;
+      console.error=originalError;
+      if(silence===undefined) delete process.env.OSD_TRANSITION_MS;else process.env.OSD_TRANSITION_MS=silence;
+      if(adt===undefined) delete process.env.OSD_ADT;else process.env.OSD_ADT=adt;
       if(tls===undefined) delete process.env.STG_TLS;else process.env.STG_TLS=tls;
     }
   });

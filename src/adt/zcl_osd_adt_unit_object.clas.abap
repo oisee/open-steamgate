@@ -6,8 +6,6 @@ CLASS zcl_osd_adt_unit_object DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS document IMPORTING io_plan TYPE REF TO zcl_ajson
       RETURNING VALUE(rv_json) TYPE string RAISING zcx_ajson_error.
   PRIVATE SECTION.
-    CLASS-METHODS ordered_members IMPORTING io_json TYPE REF TO zcl_ajson iv_path TYPE string
-      RETURNING VALUE(rt_members) TYPE string_table.
     CLASS-METHODS value IMPORTING io_json TYPE REF TO zcl_ajson iv_path TYPE string
       RETURNING VALUE(rv_json) TYPE string RAISING zcx_ajson_error.
     CLASS-METHODS project IMPORTING io_json TYPE REF TO zcl_ajson iv_path TYPE string iv_keys TYPE string
@@ -76,18 +74,6 @@ CLASS zcl_osd_adt_unit_object IMPLEMENTATION.
     rs_response-status = 200.
     rs_response-content_type = `application/json; charset=utf-8`.
   ENDMETHOD.
-  METHOD ordered_members.
-    DATA lv_path TYPE string.
-    DATA ls_node TYPE zif_ajson_types=>ty_node.
-    DATA lv_key TYPE string VALUE `item_order`.
-    IF io_json->zif_ajson~get_node_type( iv_path ) = `array`.
-      lv_key = `array_index`.
-    ENDIF.
-    lv_path = iv_path && `/`.
-    LOOP AT io_json->mt_json_tree INTO ls_node USING KEY (lv_key) WHERE path = lv_path.
-      APPEND ls_node-name TO rt_members.
-    ENDLOOP.
-  ENDMETHOD.
   METHOD value.
     DATA lt_members TYPE string_table.
     DATA lv_member TYPE string.
@@ -102,7 +88,7 @@ CLASS zcl_osd_adt_unit_object IMPLEMENTATION.
         rv_json = io_json->get( iv_path ).
       WHEN `array`.
         rv_json = `[`.
-        lt_members = ordered_members( io_json = io_json iv_path = iv_path ).
+        lt_members = zcl_osd_adt_json=>ordered_members( io_json = io_json iv_path = iv_path ).
         LOOP AT lt_members INTO lv_member.
           IF sy-tabix > 1.
             rv_json = rv_json && `,`.
@@ -113,7 +99,7 @@ CLASS zcl_osd_adt_unit_object IMPLEMENTATION.
         rv_json = rv_json && `]`.
       WHEN `object`.
         CREATE OBJECT lo_writer.
-        lt_members = ordered_members( io_json = io_json iv_path = iv_path ).
+        lt_members = zcl_osd_adt_json=>ordered_members( io_json = io_json iv_path = iv_path ).
         LOOP AT lt_members INTO lv_member.
           lv_child = value( io_json = io_json iv_path = iv_path && `/` && lv_member ).
           lo_writer->add_raw( iv_name = lv_member iv_json = lv_child ).
@@ -159,7 +145,7 @@ CLASS zcl_osd_adt_unit_object IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
     lv_classes = `[`.
-    lt_classes = ordered_members( io_json = io_plan iv_path = `/classes` ).
+    lt_classes = zcl_osd_adt_json=>ordered_members( io_json = io_plan iv_path = `/classes` ).
     LOOP AT lt_classes INTO lv_class.
       IF sy-tabix > 1.
         lv_classes = lv_classes && `,`.
@@ -172,7 +158,7 @@ CLASS zcl_osd_adt_unit_object IMPLEMENTATION.
           lo_class->add_raw( iv_name = lv_key iv_json = value( io_json = io_plan iv_path = lv_path && `/` && lv_key ) ).
         ENDIF.
       ENDLOOP.
-      lt_methods = ordered_members( io_json = io_plan iv_path = lv_path && `/testMethods` ).
+      lt_methods = zcl_osd_adt_json=>ordered_members( io_json = io_plan iv_path = lv_path && `/testMethods` ).
       lv_methods = `[`.
       LOOP AT lt_methods INTO lv_method.
         IF sy-tabix > 1.

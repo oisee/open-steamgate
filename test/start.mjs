@@ -312,20 +312,6 @@ export function startServer(quiet) {
   // and now everything the registry declares for this host, in its order
   const declaredNodeList = nodes(process.cwd(), {proxies: false});
   mountHost(app, declaredNodeList, hostNodes, {host: "test/start.mjs"});
-  // parsing the system is the expensive part of a syntax check or an object
-  // structure, and it is shared once paid. A served instance pays it at
-  // startup so the first client does not buy it for the second; it is
-  // seconds of a blocked loop over a big system, which is why a test
-  // harness, where nothing waits on it, does not.
-  const unitReady = quiet === true ? undefined : warmUnitPlan(facade.store).then((warmed) => {
-    console.log(`unit plan: pre-warmed ${warmed.objects} objects and xref graph in ${Math.round(warmed.ms)} ms`);
-  });
-  const listenReady = (listener, port) => {
-    if (unitReady === undefined) listenBound(listener, port);
-    else void unitReady.then(() => listenBound(listener, port));
-    return listener;
-  };
-
   // SICF: every other ICF service this tree carries.
   //
   // The OData front is one if_http_extension on one path; a system has many,
@@ -586,7 +572,7 @@ export function startServer(quiet) {
   // The host is OSD_BIND, loopback unless said otherwise (tools/osd-bind.mjs):
   // the ADT facade takes any credentials, which is only fine while nothing
   // but this machine reaches it. A container sets OSD_BIND=0.0.0.0.
-  const server = listenReady(createHttpServer(app), PORT);
+  const server = listenBound(createHttpServer(app), PORT);
   server.on("error", (error) => {
     if (error?.code !== "EADDRINUSE" || closing === undefined) throw error;
     void closing.then(() => relisten(server, PORT));
@@ -631,7 +617,19 @@ export function startServer(quiet) {
   const tls = process.env.STG_TLS === "0" ? undefined : tlsCredentials();
   let secure;
   if (tls !== undefined) {
-    secure = listenReady(createHttpsServer(tls, app), TLS_PORT);
+    secure = listenBound(createHttpsServer(tls, app), TLS_PORT);
+  }
+
+  // Open the sockets first. Discovery waits for this same warm-up on both
+  // fronts, with a silence bound; readiness and unrelated routes can answer.
+  if (quiet !== true) {
+    facade.store.unitReady = new Promise((resolve) => setImmediate(resolve))
+      .then(() => warmUnitPlan(facade.store))
+      .then((warmed) => {
+        console.log(`unit plan: pre-warmed ${warmed.objects} objects and xref graph in ${Math.round(warmed.ms)} ms`);
+      }).catch((error) => {
+        console.error(`unit plan: pre-warm failed: ${error?.message ?? error}`);
+      });
   }
 
   // what the snapshot reports as this instance's ports: what was opened here

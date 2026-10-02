@@ -58,7 +58,7 @@ ENDCLASS.`;
   });
   it("5 dictionary presence and missing",async () => { for (const name of ["zt_value","missing"]) await post(block(base+"ddic/dataelements/"+name)); });
   it("6 missing class with and without overlay",async () => { await post(block(base+"oo/classes/zcl_new")); await post(block(base+"oo/classes/zcl_new",clean.replaceAll("zcl_check","zcl_new"))); });
-  it("7 empty overlay differs from absent",async () => { await post(block(uri,"")); await post(block(uri)); });
+  it("7 empty overlay differs from absent",async () => { await post(block(uri,"")); expect((await post(block(uri))).status).to.equal(200); });
   it("8 package DEVC quirk and host ordering with namespaced child",async () => { const r = await post(block(base+"packages/%24tmp")); const body = r.body.toString(); expect(body).to.include("%2Fdemo%2Fx"); expect(body.match(/triggeringUri="\/sap\/bc\/adt\/packages\/[^\"]+"/g)).to.have.length(2); });
   it("9 missing package preserves original spelling",async () => { const r = await post(block(base+"packages/ZNoPe")); expect(r.body.toString()).to.include("package ZNoPe does not exist"); });
   it("10 legacy references canonical URI",async () => { await post(`<adtcore:objectReference adtcore:uri="${uri.toUpperCase().replace("/SAP/BC/ADT/OO/CLASSES/","/sap/bc/adt/oo/classes/")}/source/main?x#f"/>`); });
@@ -69,6 +69,20 @@ ENDCLASS.`;
   it("15 UTF8 issue text",async () => {
     const original = store.check; store.check = () => ({issues:[{message:'é & < > " apostrophe\'',line:2,column:3}]});
     try { const r = await post(block(uri,"")); expect(r.body.toString()).to.include("é &amp;"); } finally { store.check = original; }
+  });
+  it("12 issues retain Node byte order",async () => {
+    const original = store.check;
+    store.check = () => ({issues:Array.from({length:12},(_,i) => ({message:`issue ${i}`,line:i+1,column:1}))});
+    try { const r = await post(block(uri,"")); expect(r.body.toString().match(/chkrun:type="E"/g)).to.have.length(12); }
+    finally { store.check = original; }
+  });
+  it("package check with 12 objects retains Node byte order",async () => {
+    const original = store.package;
+    const objects = Array.from({length:12},(_,i) => ({type:"PROG",name:`ZT_ORDER_${String(i).padStart(2,"0")}`}));
+    for (const object of objects) store.create(object.type,object.name,{package:"$TMP"});
+    store.package = () => ({name:"$TMP",objects});
+    try { const r = await post(block(base+"packages/%24tmp")); expect(r.body.toString().match(/chkrun:triggeringUri="\/sap\/bc\/adt\/programs\/programs\/zt_order_/g)).to.have.length(12); }
+    finally { store.package = original; }
   });
   it("absent CHECKRUN refuses instead of falling through",async () => {
     const at = COMMANDS.indexOf("CHECKRUN"); COMMANDS.splice(at,1);

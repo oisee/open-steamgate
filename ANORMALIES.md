@@ -3424,3 +3424,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: no issue or PR requested; this is the local gogen backend.
 - Regression tests: the fixture folder above, `go/intbytes/intbytes_test.go`, and `testdata/zcl_gogen_t_int8x.clas.abap`.
 - Round-4 validation: the supplied int8x/int8y oracles remain 6/6 and 4/4 SUCCESS on Go; the IR-as-JS conversion tests and semantics row also pass. An additional `node tools/osgjs-unit.mjs src/zabapiti_tmp --json --class ZCL_ABAPITI_INT8X ZCL_ABAPITI_INT8Y` run (temporary local copies) reports 4/6 and 2/4 SUCCESS in the separate Node-transpiler runtime: positive int8 to x4 retains the wrong bytes, negative int8 to x16 pads on the right, and two x16-to-int8 rows retain unsigned/leading bytes. That runner, its transpile path and runtime dependency pins are unchanged by this branch. The local gogen fix does not cover those Node-runtime discrepancies.
+
+### NOTE-2026-10-02-checkrun-absent-content -- a checkObject without content checks stored source
+
+- Status: `not-an-anomaly` (fixed local Node ADT defect)
+- Discovery date: `2026-10-02`
+- Affected versions: Node ADT checkruns before slice C1 (`tools/adt-documents.mjs`)
+- Affected ABAP statement, runtime API or adapter: Node `checkObjects` request scanner; JavaScript `String.match` returns null when `<chkrun:content>` is absent
+- Minimal ABAP reproducer: not applicable; POST `<chkrun:checkObject adtcore:uri="/sap/bc/adt/oo/classes/zcl_check"></chkrun:checkObject>` to `/sap/bc/adt/checkruns`
+- Exact command used to run it: `OSD_HEAVY_RANGE=80-89 tools/osd-heavy.sh npx mocha test/adt-abap-c1.mjs --grep "empty overlay differs from absent"`
+- Expected SAP behaviour: no overlay means check the stored source; system behaviour not measured here
+- Actual open-abap behaviour: Node returned HTTP 500 because null passed the `artifact === undefined` check and was indexed; C1 normalizes the absent match with `?? undefined`, and Node now checks stored source and returns HTTP 200
+- Impact on open-steamgate: ordinary checkObject requests without inline content work; an explicitly empty content element still supplies an empty overlay
+- Smallest safe workaround: none needed; keep the null-to-undefined normalization in `checkObjects`
+- Upstream issue: none; a local scanner defect, not an open-abap or transpiler discrepancy
+- Regression-test location: `test/adt-abap-c1.mjs`, "7 empty overlay differs from absent"
+- Upstream version containing a fix: not applicable
