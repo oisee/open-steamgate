@@ -1,7 +1,7 @@
 // metrics: the cyclomatic complexity of every function in the Go packages
 // under a directory, per package, as JSON (tools/osd-metrics.mjs reads it).
 //
-//	go run ./cmd/metrics [dir]
+//	go run ./cmd/metrics [dir] [-]     (-: stdin lists the files to read)
 //
 // A function's complexity is 1 plus one for each if, for, range, case and
 // comm clause with a condition, and each && and ||: the McCabe count gocyclo
@@ -14,6 +14,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -63,8 +64,21 @@ func complexity(body ast.Node) int {
 
 func main() {
 	root := "."
-	if len(os.Args) > 1 {
+	if len(os.Args) > 1 && os.Args[1] != "-" {
 		root = os.Args[1]
+	}
+	// with "-" as the last argument, stdin names the files to read (one path
+	// per line, relative to root): what git tracks, so a local run and CI
+	// count the same code
+	var only map[string]bool
+	if os.Args[len(os.Args)-1] == "-" {
+		only = map[string]bool{}
+		data, _ := io.ReadAll(os.Stdin)
+		for _, line := range strings.Split(string(data), "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				only[filepath.ToSlash(line)] = true
+			}
+		}
 	}
 	out := map[string]*pkg{}
 	fset := token.NewFileSet()
@@ -83,6 +97,12 @@ func main() {
 		rel = filepath.ToSlash(rel)
 		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") || (strings.HasPrefix(name, "zz_") && strings.HasPrefix(rel, "cmd/")) {
 			return nil
+		}
+		if only != nil {
+			file, _ := filepath.Rel(root, path)
+			if !only[filepath.ToSlash(file)] {
+				return nil
+			}
 		}
 		file, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {

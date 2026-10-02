@@ -35,13 +35,18 @@ jobs:
       - name: Snapshot
         run: node tools/osd-metrics.mjs --coverage > "$RUNNER_TEMP/snapshot.json"
       - name: Append to the metrics branch
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           dir="$RUNNER_TEMP/metrics"
+          # the token travels as a header, never in a URL or an argv
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          url="https://github.com/${{ github.repository }}.git"
           if git ls-remote --exit-code --heads origin metrics >/dev/null; then
-            git clone --quiet --depth 1 --branch metrics "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" "$dir"
+            git -c http.extraheader="$auth" clone --quiet --depth 1 --branch metrics "$url" "$dir"
           else
-            mkdir -p "$dir" && cd "$dir" && git init --quiet -b metrics && git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" && cd -
+            mkdir -p "$dir" && git -C "$dir" init --quiet -b metrics && git -C "$dir" remote add origin "$url"
           fi
           node -e 'process.stdout.write(JSON.stringify(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))) + "\n")' "$RUNNER_TEMP/snapshot.json" >> "$dir/history.ndjson"
           node tools/osd-metrics-page.mjs "$dir/history.ndjson" > "$dir/osd-code-gauge.html"
@@ -50,4 +55,4 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add history.ndjson osd-code-gauge.html
           git commit --quiet -m "metrics: ${GITHUB_SHA::8}"
-          git push --quiet origin HEAD:metrics
+          git -c http.extraheader="$auth" push --quiet origin HEAD:metrics

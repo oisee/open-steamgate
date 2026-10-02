@@ -91,6 +91,8 @@ function goCoverage() {
       if (m) out[m[1]] = Number(m[2]);
     }
   } catch (e) {
+    // some package failed or did not build: the others still count, and it is said
+    console.error(`osd-metrics: go test -cover failed for some packages (${String(e.stderr ?? "").trim().split("\n")[0]})`);
     for (const line of String(e.stdout ?? "").split("\n")) {
       const m = /^ok\s+osg\/gogen\/(\S+)\s.*coverage: ([\d.]+)% of statements/.exec(line);
       if (m) out[m[1]] = Number(m[2]);
@@ -102,7 +104,14 @@ function goCoverage() {
 export function snapshot({coverage = false} = {}) {
   const budget = JSON.parse(readFileSync(join(ROOT, "tools", "osd-size-budget.json"), "utf8"));
   const sizes = measure(budget);
-  const goFns = JSON.parse(execFileSync("go", ["run", "./cmd/metrics", "."], {cwd: GO, encoding: "utf8", maxBuffer: 1e8}));
+  // the Go files git tracks, as the size budget measures (a local run and CI
+  // count the same code; generated files on disk do not count)
+  let goTracked = "";
+  try {
+    goTracked = execFileSync("git", ["ls-files", "--", "."], {cwd: GO, encoding: "utf8", maxBuffer: 1e8});
+  } catch { /* not a checkout: every file on disk */ }
+  const goFns = JSON.parse(execFileSync("go", ["run", "./cmd/metrics", ".", ...(goTracked ? ["-"] : [])],
+    {cwd: GO, encoding: "utf8", maxBuffer: 1e8, input: goTracked}));
   const cov = coverage ? goCoverage() : {};
   const go = {};
   for (const [pkg, m] of Object.entries(goFns)) {
