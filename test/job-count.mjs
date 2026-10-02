@@ -1,8 +1,8 @@
 // JOBCOUNT as a system allocates it (0.6 should): hhmmss of the creation
-// second, then NN counted per (job name, second). The A4H sequences of
+// second, then two base-36 digits counted per (job name, second). The A4H sequences of
 // 2026-10-02 are the fixture (test/fixtures/job-count/contract.json,
 // EXPECT = A4H); the rest checks what follows from them here: a count alone
-// is not a key, the 100th open of a name in one second is refused, the
+// is not a key, the 1297th open of a name in one second is refused, the
 // periodic successor takes its creation second from the same allocator.
 import {expect} from "chai";
 import {mkdtempSync, readFileSync, rmSync} from "node:fs";
@@ -16,7 +16,7 @@ import {msStamp, stampMs, successorIntentId} from "../tools/osd-job-schedule.mjs
 import {identity as runtimeIdentity} from "../tools/osd-identity.mjs";
 import {readJobSnapshot} from "../tools/osd-job-snapshot.mjs";
 import {reorgJobs, retentionDays} from "../tools/osd-job-reorg.mjs";
-import {nextJobCount, JobCountExhausted} from "../tools/osd-job-count.mjs";
+import {nextJobCount, JobCountExhausted, suffixOf, suffixValue} from "../tools/osd-job-count.mjs";
 import {jobHeaderType} from "./fixtures/job-header.mjs";
 
 const root = resolve(".");
@@ -119,6 +119,25 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
   });
   const identity = (name) => readBusiness(`SELECT TRIM(jobcount) AS count FROM zosd_job_identity
     WHERE jobname = ? ORDER BY jobcount`, name).map((row) => row.count);
+  const selected = async (name, count) => dialogStep(async () => {
+    const jobs = new abap.types.Table(jobHeaderType(abap), {withHeader: false, keyType: "DEFAULT",
+      primaryKey: {name: "primary_key", type: "STANDARD", keyFields: [], isUnique: false}, secondary: []});
+    const selector = new abap.types.Structure({
+      jobname: new abap.types.Character(32).set(name), jobcount: new abap.types.Character(8).set(count),
+      jobgroup: new abap.types.Character(12), username: new abap.types.Character(12),
+      from_date: new abap.types.Date(), from_time: new abap.types.Time(),
+      to_date: new abap.types.Date(), to_time: new abap.types.Time(),
+      no_date: new abap.types.Character(1), with_pred: new abap.types.Character(1),
+      eventid: new abap.types.Character(32), eventparm: new abap.types.Character(64),
+      prelim: new abap.types.Character(1), schedul: new abap.types.Character(1),
+      ready: new abap.types.Character(1), running: new abap.types.Character(1),
+      finished: new abap.types.Character(1), aborted: new abap.types.Character(1),
+      abapname: new abap.types.Character(40),
+    });
+    await abap.FunctionModules.BP_JOB_SELECT({exporting: {jobselect_dialog: box("N"), jobsel_param_in: selector},
+      tables: {jobselect_joblist: jobs}});
+    return jobs.array().map((row) => row.get());
+  });
 
   for (const fixture of contract.cases) {
     it(`${fixture.id} (EXPECT ${fixture.EXPECT})`, async () => {
@@ -133,8 +152,14 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
       }
       const got = [];
       for (const call of fixture.opens) {
+        if (typeof call === "object") {
+          await w.scheduler.tick();
+          expect(await deleteJob(w.name(call.delete), msStamp(w.t0).slice(8) + call.count)).to.equal(0);
+          got.push(null);
+          continue;
+        }
         if (call.startsWith("+")) { w.clock.set(w.clock.now() + Number(call.slice(1)) * 1000); got.push(null); continue; }
-        got.push(await open(w.name(call)));
+        got.push(fixture.deletable ? await schedule(w.name(call), w.at(3600)) : await open(w.name(call)));
       }
       expect(got).to.deep.equal(fixture.counts);
     });
@@ -146,6 +171,34 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
     const second = await open(w.name("FROZEN"));
     expect([first, second]).to.deep.equal(["11223300", "11223301"]);
     expect(identity(w.name("FROZEN"))).to.deep.equal([first, second]);
+  });
+
+  it("a letter suffix survives status, read, select, delete, snapshot, and predecessor import", async () => {
+    const w = world("2026-10-02T11:22:33Z");
+    const name = w.name("LETTERS");
+    for (let i = 0; i < 10; i++) await schedule(name, w.at(3600));
+    const count = await schedule(name, w.at(3600));
+    expect(count).to.equal("1122330A");
+    expect(await status(name, count)).to.equal("S");
+    expect((await header(name, count)).jobcount.get().trim()).to.equal(count);
+    expect((await selected(name, count)).map((row) => row.jobcount.get().trim())).to.deep.equal([count]);
+    const who = runtimeIdentity(process.env);
+    const caller = {client: who.client, user: who.user, sid: who.sid};
+    expect(readJobSnapshot({sourceDb: dbPath, jobName: name, jobCount: count, caller, root}).jobCount).to.equal(count);
+    const waiter = w.name("WAITER");
+    await dialogStep(async () => {
+      const next = await openIn(waiter);
+      await abap.FunctionModules.JOB_SUBMIT({exporting: {jobname: box(waiter), jobcount: box(next),
+        report: box("ZGG_EX_012"), authcknam: box(user())}});
+      await abap.FunctionModules.JOB_CLOSE({exporting: {jobname: box(waiter), jobcount: box(next),
+        pred_jobname: box(name), pred_jobcount: box(count), predjob_checkstat: box("X")},
+      importing: {job_was_released: new abap.types.String()}});
+    });
+    await w.scheduler.tick();
+    expect(w.store.db.prepare("SELECT after_job_count FROM batch_runs WHERE job_name = ?").get(waiter).after_job_count)
+      .to.equal(count);
+    expect(await deleteJob(name, count)).to.equal(0);
+    w.scheduler.stop();
   });
 
   it("a count alone is not a key: two names share one, a lookup by count alone is wrong, the pair is right", async () => {
@@ -170,13 +223,14 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
     expect(await status(a, countA)).to.equal("S");
   });
 
-  it("the 100th open of one name in one second is refused, with a message, and borrows no other second", async () => {
+  it("1296 opens of one name in one second fill 00 to ZZ; the next is refused", async function () {
+    this.timeout(600000);
     const w = world("2026-10-02T05:06:07Z");
     const name = w.name("HUNDRED");
     const counts = [];
     let refused;
     await dialogStep(async () => {
-      for (let i = 0; i < 100; i++) counts.push(await openIn(name));
+      for (let i = 0; i < 1296; i++) counts.push(await openIn(name));
       const returned = box();
       try { await abap.FunctionModules.JOB_OPEN({exporting: {jobname: box(name)}, importing: {jobcount: returned}}); }
       catch (error) {
@@ -186,27 +240,36 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
       expect(returned.get()).to.equal("");
     });
     expect(counts[0]).to.equal("05060700");
-    expect(counts[99]).to.equal("05060799");
-    expect(new Set(counts).size).to.equal(100);
+    expect(counts[10]).to.equal("0506070A");
+    expect(counts[1295]).to.equal("050607ZZ");
+    expect(new Set(counts).size).to.equal(1296);
     expect(refused?.classic).to.include("cant_create_job");
     expect(refused.text).to.match(/^No free JOBCOUNT/);
-    expect(identity(name)).to.have.length(100);
+    expect(identity(name)).to.have.length(1296);
     // another name in that second is untouched; the next second is free again
     expect(await open(w.name("OTHER"))).to.equal("05060700");
     w.clock.set(w.clock.now() + 1000);
     expect(await open(name)).to.equal("05060800");
   });
 
-  it("the allocator itself takes the lowest free NN, refuses past 99 and does not wrap", () => {
+  it("the allocator compares suffixes in base 36 and takes max+1 over identity rows", () => {
     const db = new DatabaseSync(":memory:");
     db.exec("CREATE TABLE zosd_job_identity (mandt TEXT, jobname TEXT, jobcount TEXT)");
     const put = db.prepare("INSERT INTO zosd_job_identity VALUES ('123', 'N', ?)");
     const ms = Date.parse("2026-10-02T01:20:00Z");
-    for (let nn = 0; nn < 100; nn++) put.run(`012000${String(nn).padStart(2, "0")}`);
+    expect(suffixValue("0A")).to.equal(10);
+    expect(suffixValue("2R")).to.equal(99);
+    expect(suffixOf(1295)).to.equal("ZZ");
+    for (let nn = 0; nn < 100; nn++) put.run(`012000${suffixOf(nn)}`);
+    expect(nextJobCount(db, {client: "123", jobname: "N", ms}).count).to.equal("0120002S");
+    // Removing a middle row does not lower the next value.
+    db.exec("DELETE FROM zosd_job_identity WHERE jobcount = '0120000A'");
+    expect(nextJobCount(db, {client: "123", jobname: "N", ms}).count).to.equal("0120002S");
+    // Removing the top row makes that top value available again.
+    db.exec("DELETE FROM zosd_job_identity WHERE jobcount = '0120002R'");
+    expect(nextJobCount(db, {client: "123", jobname: "N", ms}).count).to.equal("0120002R");
+    put.run("012000ZZ");
     expect(() => nextJobCount(db, {client: "123", jobname: "N", ms})).to.throw(JobCountExhausted);
-    // a pair that left (the reorganisation, a delete) is the next one used
-    db.exec("DELETE FROM zosd_job_identity WHERE jobcount = '01200037'");
-    expect(nextJobCount(db, {client: "123", jobname: "N", ms}).count).to.equal("01200037");
     expect(nextJobCount(db, {client: "123", jobname: "M", ms}).count).to.equal("01200000");
     // a count held elsewhere (a definition in this LUW) is skipped, not reused
     expect(nextJobCount(db, {client: "123", jobname: "M", ms, taken: (c) => c === "01200000"}).count).to.equal("01200001");
@@ -254,14 +317,16 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
     expect(await open(name)).to.equal("09010002");
     w.scheduler.stop();
   });
-  describe("the job reorganisation keeps a fixed-second daily job from using up its counts", () => {
+  describe("fixed-second daily jobs and reorganisation", () => {
     const DAY = 24 * 3600;
     const now = () => Math.floor(Date.now() / 1000) * 1000;
     const daily = (w, job) => schedule(w.name(job), w.at(60), {prddays: 1});
 
-    it("a daily chain over 120 days with the reorganisation on never exhausts and keeps every pair unique", async function () {
+    it("a daily chain climbs by one for 120 days despite reorganisation", async function () {
       this.timeout(600000);
       const w = world(now(), {retention: 14});
+      const proposals = [];
+      w.scheduler.candidate = (proposal) => { proposals.push(proposal.count); return proposal.count; };
       const first = await daily(w, "DAILY");
       await w.scheduler.start();
       await w.clock.advance(120 * DAY * 1000);
@@ -274,32 +339,41 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
       expect(waiting.map((run) => stampMs(run.sdl_at) - w.t0)).to.deep.equal([(120 * DAY + 60) * 1000]);
       const rows = identity(name);
       expect(new Set(rows).size).to.equal(rows.length);
-      expect(rows.length).to.be.below(20); // history was removed: not one row of every day
-      const completed = runs.filter((run) => run.state === "COMPLETED").length;
-      expect(completed).to.be.below(20); // 119 instances ran; the reorganisation took the old ones
-      expect(first).to.match(/^\d{8}$/);
+      const successorSecond = w.at(60).slice(8);
+      expect(proposals.map((count) => count.slice(6)))
+        .to.deep.equal(Array.from({length: 120}, (_, i) => suffixOf(i)));
+      expect(proposals.every((count) => count.startsWith(successorSecond))).to.equal(true);
+      expect(rows).to.include(successorSecond + suffixOf(119));
+      expect(rows.length).to.be.below(20);
+      expect(runs.filter((run) => run.state === "COMPLETED").length).to.be.below(20);
+      expect(first).to.match(/^[0-9]{6}[0-9A-Z]{2}$/);
       w.scheduler.stop();
     });
 
-    it("with the reorganisation off the 101st start is refused cleanly and retried, the other timed jobs run and the scheduler re-arms", async function () {
+    it("a chain reaching ZZ refuses once, retries in the next second, and other jobs run", async function () {
       this.timeout(600000);
       const w = world(now(), {retention: null});
-      await daily(w, "DAILY");
+      const name = w.name("DAILY");
+      const first = await daily(w, "DAILY");
+      const writer = new DatabaseSync(dbPath);
+      try {
+        for (let i = 0; i < 1295; i++) writer.prepare(`INSERT INTO zosd_job_identity (mandt, jobname, jobcount, owner, intent_id)
+          VALUES ('123', ?, ?, ?, '')`).run(name, w.at(60).slice(8) + suffixOf(i), user());
+      } finally { writer.close(); }
       await w.scheduler.start();
       w.scheduler.onFailure = () => {};
-      await w.clock.advance((100 * DAY + 600) * 1000);
-      expect(w.scheduler.failures.length).to.be.at.least(1);
+      await w.clock.advance((DAY + 600) * 1000);
+      expect(w.scheduler.failures).to.have.length(1);
       expect(w.scheduler.failures[0].error).to.match(/No free JOBCOUNT/);
       expect(w.scheduler.failures[0].name).to.equal(w.name("DAILY"));
       // the failed run stays RELEASING, to be retried; nothing else is lost
       // the run stays RELEASING for the retry a minute on, and that retry is a new second:
       // the successor takes the count of the moment it is made
-      const retried = w.store.db.prepare("SELECT job_count, state FROM batch_runs WHERE job_name = ? ORDER BY sdl_at DESC LIMIT 2")
-        .all(w.name("DAILY"));
-      expect(retried.map((row) => row.state)).to.deep.equal(["WAITING", "COMPLETED"]);
-      expect(retried[1].job_count.slice(6)).to.equal("99");
-      expect(retried[0].job_count.slice(0, 6)).to.not.equal(retried[1].job_count.slice(0, 6));
-      await schedule(w.name("OTHER"), w.at(100 * DAY + 700));
+      const capped = w.store.db.prepare("SELECT id, job_count FROM batch_runs WHERE job_name = ? AND job_count LIKE '%ZZ'").get(name);
+      expect(capped.job_count.slice(6)).to.equal("ZZ");
+      const retried = w.store.db.prepare("SELECT job_count FROM batch_runs WHERE chain_pred = ?").get(capped.id);
+      expect(retried.job_count.slice(0, 6)).to.not.equal(capped.job_count.slice(0, 6));
+      await schedule(w.name("OTHER"), w.at(DAY + 700));
       await w.scheduler.tick(); // imports it
       await w.clock.advance(1000 * 1000);
       expect(w.store.db.prepare("SELECT state FROM batch_runs WHERE job_name = ?").all(w.name("OTHER")).map((r) => r.state))
@@ -327,7 +401,7 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
       expect(identity(w.name("GONE"))).to.deep.equal([]);
       expect(identity(w.name("WAITING"))).to.deep.equal([b]);
       expect(identity(w.name("LATEST"))).to.deep.equal([c]);
-      expect(a).to.match(/^\d{8}$/);
+      expect(a).to.match(/^[0-9]{6}[0-9A-Z]{2}$/);
       w.scheduler.stop();
     });
     it("the reorganisation finds the runs when the connection's path is relative, as the default STG_DB_PATH is", async () => {

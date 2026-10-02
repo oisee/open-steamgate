@@ -197,7 +197,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     await dialogStep(async () => { abandoned = await open("IDENTITY_ABANDONED"); });
     expect(identityRows("IDENTITY_ABANDONED").map((row) => row.jobcount.trim())).to.deep.equal([abandoned]);
     expect(identityRows("IDENTITY_ABANDONED")[0].intent_id.trim()).to.equal("");
-    expect(rolledBack).to.match(/^\d{8}$/);
+    expect(rolledBack).to.match(/^[0-9]{6}[0-9A-Z]{2}$/);
   });
 
   it("retries reserved and legacy completed counts, including after port restart", async () => {
@@ -650,7 +650,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     expect((await drainJobOutbox(store)).imported).to.equal(0);
     const queued = store.list().find((run) => run.state === "QUEUED");
     expect(queued.jobName).to.equal("OSD_ONE_STEP");
-    expect(queued.jobCount).to.match(/^\d{8}$/);
+    expect(queued.jobCount).to.match(/^[0-9]{6}[0-9A-Z]{2}$/);
     expect(queued.input).to.deep.equal([]);
     expect(queued.state).to.equal("QUEUED");
     expect(queued.program).to.equal("ZGG_EX_012");
@@ -1815,7 +1815,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
 
   it("accepts DDIC typed customer JOB_* and SHOW_JOBSTATE calls", async () => {
     const result = await dialogStep(() => abap.Classes.ZCL_OSD_JOB_TYPED_PROBE.run());
-    expect(result.get().trim()).to.match(/^\d{8}$/);
+    expect(result.get().trim()).to.match(/^[0-9]{6}[0-9A-Z]{2}$/);
   });
 
 

@@ -315,7 +315,7 @@ export class BatchRuns {
         !["jobcount,jobname", "intentId,jobcount,jobname"].includes(Object.keys(after).sort().join(",")) ||
         typeof after.jobname !== "string" || !after.jobname || after.jobname.length > 32 ||
         after.jobname !== after.jobname.trim() || after.jobname !== after.jobname.toUpperCase() ||
-        !/^\d{8}$/.test(after.jobcount) ||
+        !/^[0-9]{6}[0-9A-Z]{2}$/.test(after.jobcount) ||
         (after.intentId !== undefined && !/^[0-9a-f]{32}$/.test(after.intentId)) ||
         (after.jobname === intent.jobname && after.jobcount === intent.jobcount))) {
       throw new TypeError("invalid predecessor job event");

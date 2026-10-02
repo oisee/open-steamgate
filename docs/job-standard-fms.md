@@ -7,7 +7,7 @@ names and classic exceptions for `JOB_OPEN`, `JOB_SUBMIT`, `JOB_CLOSE`,
 facade uses the retained job identity and `ZOSD_JOB_READ`/`ZOSD_JOB_STATUS`
 bridge. A read cannot create a job or import pending work.
 
-`JOB_OPEN` reserves a local job key; its `JOBCOUNT` is `hhmmss` of the creation second plus `NN` counted per (job name, second) as on the sandbox, so two names share a count and only (name, count) is a key (docs/job-identity.md). `JOB_SUBMIT` accepts supported static ABAP
+`JOB_OPEN` reserves a local job key; its `JOBCOUNT` is `hhmmss` of the creation second plus two base-36 digits (`0`-`9`, then `A`-`Z`) counted per (job name, second) as on the sandbox, so two names share a count and only (name, count) is a key (docs/job-identity.md). In 103 opens of one name in one second, #11 was `0A`, #98 `2P`, #100 `2R`, and #103 `2U`, with no refusal. The suffix is max+1 over existing rows: open `00`, `01`, `02`, delete `01`, then open gets `03`; open `00`, `01`, `02`, delete `02`, then open gets `02` again. Past `ZZ` is unmeasured and refused locally. `JOB_SUBMIT` accepts supported static ABAP
 reports and returns step number 1. `JOB_CLOSE` accepts immediate, predecessor,
 named event and date/time starts, the latter once or periodic (see
 [Periodic jobs](#periodic-jobs)); it releases the intent. `BP_EVENT_RAISE`
@@ -99,7 +99,7 @@ four it had.
 
 **The chain.** The sandbox makes the successor of a periodic job **when an
 instance starts**, as a new job of the same name and steps with status `S`
-and a count from the one allocator (`JOBCOUNT` = creation time `hhmmss` + a two-digit counter per job
+and a count from the one allocator (`JOBCOUNT` = creation time `hhmmss` + two base-36 digits per job
 name and second, here as there; docs/job-identity.md has the A4H sequence). Its start time is the predecessor's
 **scheduled** time plus the period, not its actual start: an instance due at
 224501 started at 22:45:51 and its successor was due at 224701. A start in the
@@ -135,7 +135,8 @@ successor it made instead of making a second one. The intent is a unique key
 there (a partial index, `zosd_job_identity_intent`, made on first use), and
 the reservation is one statement, insert or return the row already there, so
 two workers racing for one successor end with one count; duplicates an older
-build left are reduced first to the count an import used, else the lowest.
+build left are reduced first to the count an import used, else the lexically
+lowest existing row. This duplicate-intent repair does not allocate a new count.
 A worker releases only its own source's jobs (its business database, client,
 system, user and source instance): several business databases may share one
 operations store, and another's job is skipped, never an error. The worker
