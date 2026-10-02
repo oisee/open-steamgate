@@ -90,7 +90,7 @@ async function each(hooks, phase, errors) {
 /**
  * Runs every entry; `load(filename)` returns the imported test module. Never
  * throws for a failing test: returns {ran, failed: [{name, errors, error}]},
- * where `errors` are phase-labelled (class_setup, setup, method, teardown,
+ * where `errors` are phase-labelled (import, class_setup, setup, method, teardown,
  * class_teardown) and `error` is the first of them, the original failure.
  *
  * Phases are kept apart: a setup failure skips the method but not the
@@ -111,14 +111,15 @@ export async function runAll(entries, load, {mode, log = console.log} = {}) {
       localClass = (await load(st.filename))[st.localClass];
       if (typeof localClass !== "function") throw new Error(`no local class ${st.localClass} in ${st.filename}`);
     } catch (error) {
-      classErrors.push({phase: "class_setup", error});
+      classErrors.push({phase: "import", error});
     }
     if (classErrors.length === 0) await each([localClass.class_setup && (() => localClass.class_setup())], "class_setup", classErrors);
     if (classErrors.length > 0) {
+      // one failure for the class, whatever its methods: a class of hooks
+      // only has methods: [], and a loop over them would record nothing
+      fail(`${st.objectName}: ${st.localClass}`, classErrors, `${st.objectName}: FAILED ${st.localClass}`);
       for (const m of st.methods) {
-        log(`${st.objectName}: running ${st.localClass}->${m.name}`);
-        fail(`${st.objectName}: ${st.localClass}->${m.name}`, classErrors,
-          `${st.objectName}: FAILED ${st.localClass}->${m.name}`);
+        log(`${st.objectName}: running ${st.localClass}->${m.name}, not run: the class failed`);
       }
       // what class_setup did before it failed is still cleaned up
       if (localClass) {

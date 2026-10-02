@@ -1,7 +1,8 @@
 import {expect} from "chai";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, resolve} from "node:path";
+import {spawnSync} from "node:child_process";
 import {testClassesIn, reported, missing, runCaptured, exitCodeOf} from "../tools/osd-unit-run.mjs";
 import {harnessEntries, invalidEntries, runAll} from "../tools/osd-unit-all.mjs";
 
@@ -207,5 +208,47 @@ describe("a unit run killed by a signal is not a pass", () => {
     expect(exitCodeOf({code: 0, signal: null})).to.equal(0);
     expect(exitCodeOf({code: 3, signal: null})).to.equal(3);
     expect(exitCodeOf({code: null, signal: null})).to.equal(1);
+  });
+});
+
+// A test class of hooks only is generated with methods: [], so a class-level
+// failure recorded per method recorded nothing and the run passed.
+describe("a class that fails before its methods fails the run, even with no methods", () => {
+  const driver = resolve("tools/osd-unit-all.mjs");
+  const runDriver = (entry, files) => {
+    const root = mkdtempSync(join(tmpdir(), "osd-unit-all-"));
+    try {
+      mkdirSync(join(root, "output"));
+      writeFileSync(join(root, "output", "index.mjs"), [
+        "function getData() {",
+        "  const ret = [];",
+        `  ret.push(${JSON.stringify(entry)});`,
+        "  return ret;",
+        "}",
+        "",
+      ].join("\n"));
+      for (const [name, text] of Object.entries(files)) writeFileSync(join(root, "output", name), text);
+      return spawnSync("node", [driver], {cwd: root, encoding: "utf8"});
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  };
+  const hooksOnly = {objectName: "ZCL_HOOKS", localClass: "ltcl_hooks", methods: [], riskLevel: "HARMLESS", filename: "./hooks.mjs"};
+
+  it("an import that fails", async () => {
+    const {failed} = await runAll([hooksOnly], async () => { throw new Error("no module"); }, {log: () => {}});
+    expect(failed.map((f) => `${f.name} ${f.errors.map((e) => e.phase)}`)).to.deep.equal(["ZCL_HOOKS: ltcl_hooks import"]);
+    const run = runDriver(hooksOnly, {});
+    expect(run.status, run.stdout + run.stderr).to.equal(1);
+    expect(run.stdout).to.match(/FAILED ltcl_hooks \[import\]/);
+  });
+
+  it("a class_setup that fails", async () => {
+    const Local = class { static async class_setup() { throw new Error("no fixture"); } };
+    const {failed} = await runAll([hooksOnly], async () => ({ltcl_hooks: Local}), {log: () => {}});
+    expect(failed.map((f) => `${f.name} ${f.errors.map((e) => e.phase)}`)).to.deep.equal(["ZCL_HOOKS: ltcl_hooks class_setup"]);
+    const run = runDriver(hooksOnly, {"hooks.mjs": "export class ltcl_hooks { static async class_setup() { throw new Error('no fixture'); } }\n"});
+    expect(run.status, run.stdout + run.stderr).to.equal(1);
+    expect(run.stdout).to.match(/FAILED ltcl_hooks \[class_setup\]: Error: no fixture/);
   });
 });
