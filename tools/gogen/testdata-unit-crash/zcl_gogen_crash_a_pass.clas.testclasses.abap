@@ -1,0 +1,9 @@
+CLASS ltcl_test DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+  PRIVATE SECTION.
+    METHODS check FOR TESTING.
+ENDCLASS.
+CLASS ltcl_test IMPLEMENTATION.
+  METHOD check.
+    cl_abap_unit_assert=>assert_equals( act = 1 exp = 1 ).
+  ENDMETHOD.
+ENDCLASS.
