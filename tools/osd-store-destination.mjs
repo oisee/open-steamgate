@@ -74,12 +74,12 @@ try {
   systemCalls = undefined;
 }
 
-/** Run work with `answers` ((kind, name) => value; throw to refuse) bound
+/** Run work with `answers` ((kind, name, json) => value; throw to refuse) bound
  *  as the SYSTEM answers of every STORE call it makes, and `store` (the
  *  facade instance's ObjectStore, port-map risk 12) for every STORE command. */
 export function withSystem(answers, work, {store} = {}) {
   if (systemCalls === undefined) throw new Error("SYSTEM needs an async context (Node or Bun)");
-  return systemCalls.run({answers, store}, work);
+  return systemCalls.run({answers, store: store ?? systemCalls.getStore()?.store}, work);
 }
 
 export class StoreDestination {

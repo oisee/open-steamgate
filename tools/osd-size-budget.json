@@ -15,8 +15,8 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 11289,
-      "reason": "baseline 2026-10-01"
+      "lines": 11293,
+      "reason": "S0b: four binding lines for the tested STORE importing-parameter adapter"
     },
     "go:abaperr": {
       "lines": 13,
@@ -119,8 +119,8 @@
       "reason": "recorded by --update"
     },
     "go:objstore": {
-      "lines": 1028,
-      "reason": "carved out of go/abap/store.go and store_history.go (wave 2, docs/gogen-go-packages.md)"
+      "lines": 1039,
+      "reason": "S0b: tree-independent COMMANDS discovery and typed NOT_SUPPORTED errors for absent commands"
     },
     "go:reportargs": {
       "lines": 209,
@@ -391,8 +391,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/store.go": {
-      "lines": 109,
-      "reason": "baseline 2026-10-01"
+      "lines": 113,
+      "reason": "S0b: extract the importing-parameter adapter so IV_JSON forwarding is tested"
     },
     "tools/gogen/go/abap/strings.go": {
       "lines": 544,

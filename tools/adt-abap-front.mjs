@@ -236,7 +236,7 @@ function dumped(generation, message) {
  * @param {object} options.sessions AbapSessions: sessionFor(req) gives the ZIF_OSD_ADT_SESSION
  *   whose RESOLVE sets req.adt
  * @param {Function} options.refuse the façade's refusal: (res, status, type, message, options)
- * @param {Function} [options.system] (kind, name, req) => value: this façade's SYSTEM answers
+ * @param {Function} [options.system] (kind, name, req, json) => value: this façade's SYSTEM answers
  * @param {object} [options.store] this façade's ObjectStore, what OBJECT reads
  * @param {Function} [options.hostLogoff] ends a delegated logoff inside its front step, until A3a
  * @param {Function} [options.miss] (req, kind) => void, records the stripped X-OSD-Miss marker
@@ -266,7 +266,7 @@ export function abapFront(options) {
     const system = options.system ?? (() => undefined);
     let record;
     try {
-      record = await withSystem((kind, name) => system(kind, name, req),
+      record = await withSystem((kind, name, json) => system(kind, name, req, json),
         () => options.step(async () => {
           const answer = await options.answer(view, await options.sessions?.sessionFor?.(req));
           // Until A3a ports logoff, its HOST fallback must end the session

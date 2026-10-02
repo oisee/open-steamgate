@@ -22,7 +22,8 @@ import {join} from "node:path";
 import "./start.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {adtRouter, answered} from "../tools/adt-facade.mjs";
-import {abapRunner} from "../tools/adt-abap-front.mjs";
+import {abapRunner, abapFront} from "../tools/adt-abap-front.mjs";
+import {abapSession} from "../tools/adt-enq.mjs";
 import {AbapSessions} from "../tools/adt-abap-sessions.mjs";
 import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
@@ -348,6 +349,49 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     } catch (error) {
       expect(error.status.get()).to.equal(501);
       expect(error.message_text.get()).to.equal("unknown store command UNIMPLEMENTED");
+    }
+  });
+
+  it("SYSTEM IV_JSON sent from ABAP through the front reaches the host byte-equal to Node", async () => {
+    await output("zcl_osd_adt_host.clas.mjs");
+    const payload = '{"kind":"probe","text":"a < b"}';
+    const path = "/sap/bc/adt/system-payload-probe";
+    const answer = (kind, name, req, json) => ({raw: JSON.stringify({kind, name, path: req.originalUrl, json})});
+    const nodeApp = express();
+    nodeApp.get(path, (req, res) => res.type("application/json").send(answer("IDENTITY", "probe", req, payload).raw));
+    const portedApp = express();
+    portedApp.use(abapFront({step: dialogStep, ...abapSession({}, answer),
+      refuse: (res, status, type, message) => res.status(status).send(message),
+      answer: async () => {
+        const string = (v) => new abap.types.String().set(v);
+        const body = await abap.Classes.ZCL_OSD_ADT_HOST.system({iv_kind: string("IDENTITY"), iv_name: string("probe"), iv_json: string(payload)});
+        return {status: 200, contentType: "application/json; charset=utf-8", headers: [], body: Buffer.from(body.get()), servedBy: "ABAP"};
+      }}));
+    const node = await listen(nodeApp);
+    const ported = await listen(portedApp);
+    servers.push(node, ported);
+    const expected = await call(node, "GET", path);
+    expect(JSON.parse(expected.body).json).to.equal(payload);
+    expect(await call(ported, "GET", path)).to.deep.equal(expected);
+  });
+
+  it("OBJECT treats absent metadata arrays as empty", async () => {
+    await output("zcl_osd_adt_host.clas.mjs");
+    // The destination is the seam; emulate an older host's slim OBJECT answer.
+    const destination = abap.context.RFCDestinations.STORE;
+    const call = destination.call;
+    try {
+      destination.call = async (name, signature) => {
+        signature.importing.ev_json.set('{"found":true,"type":"CLAS","name":"ZCL_SLIM","writable":true}');
+        signature.importing.ev_error.set("");
+      };
+      const string = (v) => new abap.types.String().set(v);
+      const object = await dialogStep(() => abap.Classes.ZCL_OSD_ADT_HOST.object({iv_type: string("CLAS"), iv_name: string("ZCL_SLIM")}));
+      expect(object.get().found.get()).to.equal("X");
+      expect(object.get().packages.array()).to.deep.equal([]);
+      expect(object.get().includes.array()).to.deep.equal([]);
+    } finally {
+      destination.call = call;
     }
   });
 

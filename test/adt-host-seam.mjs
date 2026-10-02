@@ -48,6 +48,19 @@ describe("ADT host seam", () => {
     });
   }
 
+  it("nested withSystem without a store retains the outer store", async () => {
+    const destination = new StoreDestination({store: store("default")});
+    await withSystem(() => ({outer: true}), async () => {
+      const nested = await withSystem(() => ({inner: true}), async () => {
+        const read = await call(destination, "READ");
+        expect(read.EV_SOURCE).to.equal("outer");
+        return call(destination, "SYSTEM", {iv_type: "IDENTITY"});
+      });
+      expect(JSON.parse(nested.EV_JSON)).to.deep.equal({inner: true});
+      expect(JSON.parse((await call(destination, "SYSTEM", {iv_type: "IDENTITY"})).EV_JSON)).to.deep.equal({outer: true});
+    }, {store: store("outer")});
+  });
+
   it("successful ACTIVATE publishes and completes on the bound store too", async () => {
     const bound = store(".local/seam-bound-unused");
     const calls = [];

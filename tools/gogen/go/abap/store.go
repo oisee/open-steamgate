@@ -29,9 +29,8 @@ func SetStore(root string, config []byte, reason string) error {
 // StoreCall answers one call of ZOSD_STORE (objstore.Call).
 func StoreCall(in map[string]*string) StoreAnswer { return objstore.Call(in) }
 
-// ZOSD_STORE, called with DESTINATION 'STORE' (frontend callFunction): the
-// caller's values in, every exporting parameter and table it passed filled
-func ZOSD_STORE(s *Session, args map[string]Data) {
+// storeInputs preserves every importing parameter the caller passed.
+func storeInputs(args map[string]Data) map[string]*string {
 	in := map[string]*string{}
 	for _, k := range []string{"IV_COMMAND", "IV_TYPE", "IV_NAME", "IV_INCLUDE", "IV_SOURCE", "IV_FILTER", "IV_LIMIT", "IV_REVISION", "IV_JSON"} {
 		if d, ok := fmArg(args, k); ok {
@@ -39,7 +38,12 @@ func ZOSD_STORE(s *Session, args map[string]Data) {
 			in[k] = &v
 		}
 	}
-	a := StoreCall(in)
+	return in
+}
+
+// ZOSD_STORE adapts DESTINATION 'STORE': inputs in, scalars and tables out.
+func ZOSD_STORE(s *Session, args map[string]Data) {
+	a := StoreCall(storeInputs(args))
 	for k, v := range a.Scalars {
 		if d, ok := fmArg(args, k); ok {
 			v := v

@@ -68,6 +68,7 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS system
       IMPORTING iv_kind        TYPE string
                 iv_name        TYPE string OPTIONAL
+                iv_json        TYPE string OPTIONAL
       RETURNING VALUE(rv_json) TYPE string
       RAISING   zcx_osd_adt.
 
@@ -144,15 +145,15 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
     DATA lv_code TYPE string.
     DATA lv_message TYPE string.
     DATA lx_error TYPE REF TO zcx_osd_adt.
+    IF iv_error IS INITIAL.
+      RETURN.
+    ENDIF.
     IF iv_json IS NOT INITIAL.
       lo_json = parse( iv_what = `STORE` iv_json = iv_json ).
       lv_code = lo_json->get_string( `/error/code` ).
       lv_message = lo_json->get_string( `/error/message` ).
     ENDIF.
     IF lv_code IS INITIAL.
-      IF iv_error IS INITIAL.
-        RETURN.
-      ENDIF.
 *     Older hosts only carry EV_ERROR. An absent command is always 501.
       lv_message = iv_error.
       IF iv_error CP `unknown store command *`.
@@ -178,7 +179,7 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
 
   METHOD system.
     DATA ls_answer TYPE ty_answer.
-    ls_answer = store( iv_command = `SYSTEM` iv_type = iv_kind iv_name = iv_name ).
+    ls_answer = store( iv_command = `SYSTEM` iv_type = iv_kind iv_name = iv_name iv_json = iv_json ).
     IF ls_answer-json IS INITIAL.
       rv_json = ls_answer-source.
     ELSE.
@@ -202,8 +203,12 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
     rs_object-writable = lo_json->get_boolean( `/writable` ).
     rs_object-package = lo_json->get_string( `/package` ).
     TRY.
-        rs_object-packages = lo_json->array_to_string_table( `/packages` ).
-        rs_object-includes = lo_json->array_to_string_table( `/includes` ).
+        IF lo_json->exists( `/packages` ) = abap_true.
+          rs_object-packages = lo_json->array_to_string_table( `/packages` ).
+        ENDIF.
+        IF lo_json->exists( `/includes` ) = abap_true.
+          rs_object-includes = lo_json->array_to_string_table( `/includes` ).
+        ENDIF.
       CATCH zcx_ajson_error INTO lx_json.
         lx_error = zcx_osd_adt=>internal( lx_json->get_text( ) ).
         RAISE EXCEPTION lx_error.

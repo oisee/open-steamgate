@@ -47,6 +47,8 @@ CLASS ltcl_host IMPLEMENTATION.
   METHOD success.
     zcl_osd_adt_host=>check_error( `{ "found": false }` ).
     zcl_osd_adt_host=>check_error( `` ).
+*   Success is not parsed again, including raw non-JSON answers.
+    zcl_osd_adt_host=>check_error( `raw body` ).
   ENDMETHOD.
 
   METHOD legacy_command.
