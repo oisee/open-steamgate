@@ -302,3 +302,12 @@ test("byte section replacement, bounded FIND and memory spans run through ABAP U
   assert.equal(run.result.rows.length, 57);
   assert.ok(run.result.rows.every((row) => row.status === "SUCCESS"), run.stdout);
 });
+
+test("GENERATE SUBROUTINE POOL is refused with sy-subrc 8 and its method still runs", {timeout: 120000}, () => {
+  const run = spawnSync("node", [join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit-generate"), "--no-cache"], {
+    cwd: join(here, "..", ".."), encoding: "utf8", timeout: 110000, maxBuffer: 5e6,
+  });
+  assert.equal(run.status, 0, run.stderr || run.error?.message);
+  const rows = JSON.parse(run.stdout).rows;
+  assert.deepEqual(rows.map((r) => `${r.method}:${r.status}`), ["REFUSED:SUCCESS", "NAME_ONLY:SUCCESS"]);
+});

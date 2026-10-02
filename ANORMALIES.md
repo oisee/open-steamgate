@@ -3345,3 +3345,20 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream issue: none, the step's WAIT and the clock seam are this repository's
 - Regression-test location: `test/dsl-l3-sim.mjs` ("WAIT UP TO inside a step waits on the injected clock", and the long twin)
 - Upstream version containing a fix: `n/a`
+
+### ANOMALY-2026-10-02-generate-subroutine-pool — GENERATE SUBROUTINE POOL is refused with sy-subrc 8
+
+- Status: `workaround` (a deliberate refusal; the statement cannot be supported without a compiler at run time)
+- Discovery date: `2026-10-02`
+- Affected versions: `@abaplint/transpiler 2.13.96` (`packages/transpiler/src/statements/generate_subroutine.ts` emits a plain JS `throw new Error(...)`), gogen before this entry (the method holding the statement was NOT_COMPILED)
+- Affected ABAP statement, runtime API or adapter: `GENERATE SUBROUTINE POOL itab NAME prog [MESSAGE mess] [LINE lin] [WORD wrd] [...]`, and `PERFORM form IN PROGRAM (prog)` after it
+- Minimal ABAP reproducer: `tools/gogen/testdata/zcl_gogen_t_genpool.clas.abap`; `tools/gogen/testdata-unit-generate/`
+- Exact command used to run it: `node tools/gogen/semantics.mjs`; `node --test --test-name-pattern="GENERATE SUBROUTINE" tools/gogen/unit.test.mjs`
+- Expected SAP behaviour (measured on the sandbox, open-steamgate PR #467, `test/fixtures/kernel-oracle/`): the pool is generated; a semantic error in it is sy-subrc 4 with MESSAGE / LINE / WORD set, a syntax error sy-subrc 4 with WORD `SYS$$INCOMPLETE$$`; no exception either way. SAP documents sy-subrc 8 as "other generation error"
+- Actual open-abap behaviour: the transpiler throws an uncatchable JS Error, sy-subrc / NAME / MESSAGE untouched. Now, in gogen (Go and its JS emitter) and on the transpiler branch `generate-subroutine-pool-refusal`: no exception, sy-subrc 8, NAME initial, MESSAGE `GENERATE SUBROUTINE POOL is not supported`, LINE 0, WORD initial, MESSAGE-ID / INCLUDE / OFFSET / SHORTDUMP-ID untouched. A caller checking `sy-subrc <> 0` takes its error path
+- PERFORM IN PROGRAM with an initial or unknown name: **UNMEASURED** on a system. The transpiler branch raises `CX_SY_DYN_CALL_ILLEGAL_FORM` without IF FOUND (the pattern CALL FUNCTION uses for `CX_SY_DYN_CALL_ILLEGAL_FUNC`) and does nothing with IF FOUND. gogen has no PERFORM at all, so a method holding one stays NOT_COMPILED
+- Impact on open-steamgate: code that generates a pool and checks sy-subrc now compiles and runs its error path instead of losing the method (gogen) or dumping uncatchably (JS)
+- Smallest safe workaround: none needed beyond the refusal
+- Upstream issue: none; branch `generate-subroutine-pool-refusal` in abaplint/transpiler, PR held for the critic gate
+- Regression-test location: `tools/gogen/semantics.mjs` (`ZCL_GOGEN_T_GENPOOL`), `tools/gogen/unit.test.mjs`; upstream `test/statements/generate_subroutine.ts`, `test/statements/perform.ts`
+- Upstream version containing a fix: `unknown`

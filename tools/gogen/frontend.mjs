@@ -2970,7 +2970,49 @@ function statement(node, ctx) {
     if (/'@KERNEL/i.test(node.concatTokens())) throw new Unsupported(`@KERNEL: host code of the transpiler runtime`);
     return {s: "nop"};
   }
+  if (isStmt(node, Statements.GenerateSubroutine)) return generateSubroutine(node, ctx);
   throw new Unsupported(`statement ${node.get().constructor.name}: ${text}`);
+}
+
+/* GENERATE SUBROUTINE POOL: there is no compiler at run time, so the
+ * statement is refused the way a system reports a pool it could not
+ * generate, without an exception: sy-subrc 8 (documented as "other
+ * generation error"; 4 is a syntax error in the pool, measured on A4H),
+ * NAME initial, MESSAGE set to a fixed text, LINE 0, WORD initial. The
+ * other additions (MESSAGE-ID, INCLUDE, OFFSET, SHORTDUMP-ID) are left
+ * alone. The same refusal as the transpiler's JS runtime. */
+const GENERATE_REFUSED = "GENERATE SUBROUTINE POOL is not supported";
+function generateSubroutine(node, ctx) {
+  const kids = node.getChildren();
+  const after = (kw) => {
+    const i = kids.findIndex((k, j) => isTok(k, kw) && kids[j + 1] instanceof Nodes.ExpressionNode);
+    return i < 0 ? undefined : kids[i + 1];
+  };
+  const body = [];
+  const name = after("NAME");
+  if (name !== undefined) {
+    // NAME is a Source in abaplint's grammar and a field the kernel writes
+    if (!/^[A-Z_][A-Z0-9_]*$/i.test(name.concatTokens())) throw new Unsupported(`GENERATE SUBROUTINE POOL NAME ${name.concatTokens()}`);
+    const target = variable(name.concatTokens(), ctx);
+    body.push({s: target.type.k === "data" ? "clear_data" : "clear", target});
+  }
+  const message = after("MESSAGE");
+  if (message !== undefined) {
+    const target = lvalue(message, ctx);
+    body.push({s: "assign", target, value: convert({e: "str", value: GENERATE_REFUSED, type: S}, target.type)});
+  }
+  const line = after("LINE");
+  if (line !== undefined) {
+    const target = lvalue(line, ctx);
+    body.push({s: "assign", target, value: convert({e: "int", value: 0, type: I}, target.type)});
+  }
+  const word = after("WORD");
+  if (word !== undefined) {
+    const target = lvalue(word, ctx);
+    body.push({s: target.type.k === "data" ? "clear_data" : "clear", target});
+  }
+  body.push({s: "assign", target: {e: "sy", field: "Subrc", type: I}, value: {e: "int", value: 8, type: I}});
+  return {s: "seq", body};
 }
 
 /* ------------------------------------------------------------ strings (A4H) */

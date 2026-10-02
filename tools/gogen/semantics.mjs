@@ -33,6 +33,12 @@ const EXPECT = {
     JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
   ZCL_GOGEN_T_WLIN: "0/2/0/1/0/0/4/0",
   ZCL_GOGEN_T_XATTR: "X",
+  // GENERATE SUBROUTINE POOL, refused without an exception (not an A4H
+  // value: there GENERATE works; a pool with an error is sy-subrc 4). Both
+  // emitters and the transpiler's runtime give sy-subrc 8 ("other generation
+  // error" in SAP's documentation), NAME initial, MESSAGE the fixed text,
+  // LINE 0, WORD initial, MESSAGE-ID and OFFSET untouched
+  ZCL_GOGEN_T_GENPOOL: "8::GENERATE SUBROUTINE POOL is not supported:0::ID:5",
   ZCL_GOGEN_T_SUBX: "X",
   ZCL_GOGEN_T_DELRANGE: "0/3/4 0/2 4/2",
   ZCL_GOGEN_T_FMDEFAULT: "7/9",
