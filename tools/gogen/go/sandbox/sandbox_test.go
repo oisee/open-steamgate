@@ -47,7 +47,7 @@ func TestRootsAndRefusals(t *testing.T) {
 		h.Close()
 	}
 	for _, name := range []string{filepath.Join(beyond, "secret.txt"), filepath.Join(in, "link.txt"), filepath.Join(in, "..", "beyond", "secret.txt")} {
-		if h, msg := sb.Open(name, Input); h != nil || !strings.Contains(msg, "outside") && msg == "" {
+		if h, msg := sb.Open(name, Input); h != nil || !strings.Contains(msg, "outside") {
 			t.Fatalf("%s: opened (%q)", name, msg)
 		}
 	}

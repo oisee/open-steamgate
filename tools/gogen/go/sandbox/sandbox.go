@@ -49,10 +49,13 @@ type Host interface {
 // resolves a relative name (default the first write root, else the first
 // read root). Audit, when set, gets every OPEN and DELETE.
 type Sandbox struct {
-	Read, Write             []string
-	Home                    string
-	Audit                   func(entry map[string]any)
-	CreatePerm              os.FileMode
+	Read, Write []string
+	Home        string
+	Audit       func(entry map[string]any)
+	CreatePerm  os.FileMode
+	// BeforeOpen runs between the path checks and the open or unlink; only
+	// tests set it, to stand in for another process at that moment
+	BeforeOpen              func()
 	once                    sync.Once
 	read, write, browseRead []string
 	// one os.Root per real root: every open and unlink goes through the
@@ -351,10 +354,6 @@ func (sb *Sandbox) place(name string, roots, given []string) (real, named, refus
 	return real, named, "", false
 }
 
-// SwapHook runs between the path checks and the open or unlink; only
-// the tests set it, to stand in for another process at that moment
-var SwapHook func()
-
 // beneath is the os.Root of the outermost of roots that holds path, and
 // path relative to it; the outermost, so that a symlink from a nested
 // root into the one around it resolves as the path checks allowed it
@@ -411,8 +410,8 @@ func (sb *Sandbox) Open(name string, mode Mode) (Handle, string) {
 	default:
 		flags = os.O_RDWR
 	}
-	if SwapHook != nil {
-		SwapHook()
+	if sb.BeforeOpen != nil {
+		sb.BeforeOpen()
 	}
 	root, rel, ok := sb.beneath(real, roots)
 	if !ok {
@@ -464,8 +463,8 @@ func (sb *Sandbox) Delete(name string) bool {
 		sb.note(map[string]any{"op": "DELETE", "name": name, "allowed": false})
 		return false
 	}
-	if SwapHook != nil {
-		SwapHook()
+	if sb.BeforeOpen != nil {
+		sb.BeforeOpen()
 	}
 	root, rel, ok := sb.beneath(named, write)
 	if !ok {

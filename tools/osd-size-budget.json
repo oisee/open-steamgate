@@ -111,7 +111,7 @@
       "reason": "baseline 2026-10-01"
     },
     "go:sandbox": {
-      "lines": 534,
+      "lines": 533,
       "reason": "carved out of go/abap/dataset.go (wave 2, docs/gogen-go-packages.md)"
     },
     "go:session": {

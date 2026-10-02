@@ -5,7 +5,7 @@ What: deny-by-default file roots (`OSD_DATASET_READ` / `OSD_DATASET_WRITE`, `OSD
 these types as `DatasetMode`, `DatasetHandle`, `DatasetHost`, `Sandbox`, `SandboxFromEnv`.
 
 API: `FromEnv() *Sandbox`; `(*Sandbox).Open(name, mode) (Handle, message)` and `Delete(name)`, the `Host`
-interface; `Browse*` for the file dialogs; `Close()`. `SwapHook` is a test seam between the checks and the open.
+interface; `Browse*` for the file dialogs; `Close()`. `BeforeOpen` (per sandbox) is a test seam between the checks and the open.
 
 Invariants: nothing is reachable outside a root; every open and unlink goes through an `os.Root` of the
 root that holds the path, so a parent swapped for a symlink cannot take it outside; a refusal is a

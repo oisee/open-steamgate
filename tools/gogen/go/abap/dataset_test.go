@@ -2,7 +2,6 @@ package abap
 
 import (
 	"os"
-	"osg/gogen/sandbox"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -15,6 +14,7 @@ type datasetFixture struct {
 	s                     *Session
 	base, in, out, beyond string
 	audit                 []map[string]any
+	sb                    *Sandbox
 }
 
 func newDatasetFixture(t *testing.T) *datasetFixture {
@@ -28,7 +28,8 @@ func newDatasetFixture(t *testing.T) *datasetFixture {
 	}
 	os.WriteFile(filepath.Join(f.in, "a.txt"), []byte("one\ntwo\n"), 0o644)
 	os.WriteFile(filepath.Join(f.beyond, "secret.txt"), []byte("no\n"), 0o644)
-	SetDatasetHost(&Sandbox{Read: []string{f.in}, Write: []string{f.out}, Audit: func(e map[string]any) { f.audit = append(f.audit, e) }})
+	f.sb = &Sandbox{Read: []string{f.in}, Write: []string{f.out}, Audit: func(e map[string]any) { f.audit = append(f.audit, e) }}
+	SetDatasetHost(f.sb)
 	t.Cleanup(func() { SetDatasetHost(nil); datasetFiles.Delete(f.s) })
 	return f
 }
@@ -280,8 +281,7 @@ func TestDatasetParentSwappedWhileOpening(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sandbox.SwapHook = swap
-	t.Cleanup(func() { sandbox.SwapHook = nil })
+	f.sb.BeforeOpen = swap
 	name := filepath.Join(sub, "new.txt")
 	if rc, msg := f.open(name, DatasetOutput, false); rc == 0 || !strings.Contains(msg, "outside the dataset roots") {
 		t.Fatalf("OUTPUT through a swapped parent: rc %d %q", rc, msg)
