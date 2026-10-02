@@ -5,6 +5,7 @@
     "test/osd-abapgit-zip.mjs",
     "test/osd-enq.mjs",
     "test/osd-size-budget.mjs",
+    "test/osd-enq-abap.mjs",
     "test/osd-binary.mjs",
     "test/osd-branch.mjs",
     "test/osd-build.mjs",
