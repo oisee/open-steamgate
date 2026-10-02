@@ -3722,9 +3722,11 @@ describe("editors/vscode: T7 warm status and build text", function () {
     expect(warmStatusText({state: "cold"})).to.equal("cold: not primed");
   });
 
-  it("activationBuildText: a warm build that swapped, one that recycled a host-held module, and a cold one", () => {
+  it("activationBuildText: a warm build that swapped, one already live, one recycled, and a cold one", () => {
     expect(activationBuildText({build: "warm", swapMs: 12})).to.equal("hot-swapped in 12 ms (warm)");
-    expect(activationBuildText({build: "warm", swapMs: undefined})).to.equal("recycled (host-held module)");
+    expect(activationBuildText({build: "warm", swapMs: undefined})).to.equal("warm, already live");
+    expect(activationBuildText({build: "cold; recycled after a warm build: the swap was refused: x"}))
+      .to.equal("cold build: recycled after a warm build: the swap was refused: x");
     expect(activationBuildText({build: "cold"})).to.equal("cold build");
     expect(activationBuildText({build: "cold; the transpiler has no `only` option (abaplint/transpiler#1900)"}))
       .to.equal("cold build: the transpiler has no `only` option (abaplint/transpiler#1900)");

@@ -954,7 +954,24 @@ export class ObjectStore {
   //
   // Recycling is skipped when nothing is serving, so a command line or a
   // test suite pays only for the transpile.
-  async publish(options = {}) {
+  //
+  // One activation at a time per store. A save has two activators -- the
+  // dev loop (tools/osd-dev.mjs) and the ADT façade's own activation
+  // (tools/adt-facade.mjs) -- and side by side they shared one build and
+  // both swapped from its base, or the second swapped from a base the
+  // first had already replaced: refused, and the process recycled
+  // (vsp-i7, 2026-10-02). In line, the second builds on what the first
+  // made live: the same source is a no-op on that generation, a later edit
+  // a build and a swap of its own. Every caller needs this, so it is here.
+  publish(options = {}) {
+    const run = this.#publishing.then(() => this.#publish(options));
+    this.#publishing = run.catch(() => undefined);
+    return run;
+  }
+
+  #publishing = Promise.resolve();
+
+  async #publish(options) {
     const transpile = await this.transpile(options);
     if (transpile?.ok === false) {
       return {ok: false, transpile};
@@ -965,27 +982,38 @@ export class ObjectStore {
     }
     // a warm build is loaded into the process that serves, not a new one
     // (tools/osd-hot.mjs); when that cannot be done, the recycle below does
+    let why;
     if (transpile.warm === true && (transpile.hostHeld ?? []).length === 0) {
       if (transpile.modules.length === 0 && transpile.hash === runtime.generation) {
-        return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash};
+        // nothing to load: another caller (the dev loop, beside the façade's
+        // activation of the same save) already brought this generation in --
+        // and if that was a recycle, this answer must not read as a swap
+        const last = this.lastLoad?.generation === transpile.hash ? this.lastLoad : undefined;
+        return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash,
+          ...(last?.why === undefined ? {} : {why: `the runtime was recycled onto it: ${last.why}`})};
       }
       try {
         const swap = await runtime.hot({generation: transpile.hash, from: transpile.from,
           modules: transpile.modules, verified: transpile.unverified !== true});
         this.#afterSwap(transpile.hash, swap);
+        this.lastLoad = {generation: transpile.hash};
         return {ok: true, transpile, recycled: false, hot: true, generation: transpile.hash, ms: swap.ms, swaps: swap.swaps};
       } catch (error) {
         console.log(`warm: the swap was refused, recycling instead: ${error.message}`);
+        why = `the swap was refused: ${error.message}`;
       }
     }
     if (transpile.warm === true && (transpile.hostHeld ?? []).length > 0) {
       console.log(`warm: ${transpile.hostHeld.join(", ")} is held by the serving process itself, recycling instead of swapping`);
+      why = `${transpile.hostHeld.join(", ")} is held by the serving process itself`;
     }
     try {
       const recycle = await runtime.recycle();
       this.#cleanHot();
       if (this.warmState !== undefined) this.warmState.heapBase = undefined;
-      return {ok: true, transpile, recycled: true, generation: recycle.generation, ms: recycle.ms};
+      // a warm build loaded by a recycle says why, so no answer reports it as a swap
+      this.lastLoad = {generation: recycle.generation, why};
+      return {ok: true, transpile, recycled: true, generation: recycle.generation, ms: recycle.ms, ...(why === undefined ? {} : {why})};
     } catch (error) {
       // the modules are good and the process that should carry them is not:
       // that is a failure of the activation, not a detail to log quietly

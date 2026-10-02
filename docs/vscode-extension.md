@@ -1671,10 +1671,14 @@ real vocabulary in `test/vscode-extension.mjs`.
 `X-OSD-Build`, `X-OSD-Swap-Ms`, `X-OSD-Closure` and `X-OSD-Closure-Tests`
 off the activation answer (`tools/adt-facade.mjs` `warmHeaders()`) into
 `{build, swapMs, closure, closureTests}`; `activationBuildText(result)`
-turns that into "hot-swapped in `<ms>` ms (warm)", "recycled (host-held
-module)" (a warm build with no swap header -- a `HOST_HELD` module
-recycled the process instead, `docs/warm-compile.md` "What the process
-holds itself", not a failure) or "cold build" / "cold build: `<reason>`".
+turns that into "hot-swapped in `<ms>` ms (warm)", "warm, already live"
+(a warm build with no swap header: the generation was already serving)
+or "cold build" / "cold build: `<reason>`". `warm` means the build **and**
+the load: a warm build the runtime was recycled for -- a refused swap, or a
+`HOST_HELD` module (`docs/warm-compile.md` "What the process holds
+itself") -- answers `cold; recycled after a warm build: <why>`. It used to
+answer `warm` while osd.log said the swap was refused (vsp-i7,
+2026-10-02; `test/warm.mjs`).
 `closureTestsText(result)` is "`<n>` test(s) in the closure", kept on the
 result for a later use (B1) and shown in the status-bar message
 alongside the build text.

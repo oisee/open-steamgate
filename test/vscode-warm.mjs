@@ -109,11 +109,13 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
     if (serving.warm.state === "primed") {
       // the registry was primed on this transpiler: the edit is a class's
       // own content, no AMDP, no INTERFACES change, so it must have built warm
-      expect(result.build).to.equal("warm");
-      if (result.swapMs === undefined) {
-        // only if the demo DPC (or one of its readers) turned out to be a
-        // HOST_HELD module -- a recycle, not a failure (docs/warm-compile.md)
-        console.log("T7 live test: warm build recycled rather than swapped (host-held module)");
+      // -- swapped ("warm"), or recycled after a warm build (a HOST_HELD
+      // module or a refused swap, not a failure, docs/warm-compile.md),
+      // which names itself and never says "warm"
+      expect(result.build).to.match(/^(warm|cold; recycled after a warm build: .+)$/);
+      if (result.build !== "warm") {
+        expect(result.swapMs).to.equal(undefined);
+        console.log(`T7 live test: ${result.build}`);
       } else {
         expect(result.swapMs).to.be.a("number").and.be.at.least(0);
         console.log(`T7 live test: warm, hot-swapped in ${result.swapMs} ms`);

@@ -3050,7 +3050,7 @@ async function activateCurrent(diagnostics, output) {
       const generation = String(result.generation ?? "?").slice(0, 8);
       // T7 (docs/vscode-extension.md "Warm"): what the build behind this
       // activation was, off X-OSD-Build/X-OSD-Swap-Ms -- "hot-swapped in
-      // <ms> ms (warm)", "recycled (host-held module)" or "cold build:
+      // <ms> ms (warm)", "warm, already live" or "cold build:
       // <reason>" -- plus the closure-tests count (kept on the result for
       // B1, shown here as the line the task asks for).
       const build = activationBuildText(result);

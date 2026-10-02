@@ -2484,7 +2484,12 @@ export function adtRouter(options = {}) {
     const w = store.warm?.();
     // a header value is one line of printable ASCII, whatever a reason says
     const header = (v) => String(v).replace(/[^\x20-\x7e]+/g, " ").slice(0, 300);
-    res.set("X-OSD-Build", header(t.warm === true ? "warm" : `cold${w?.on === true && w.reason ? `; ${w.reason}` : ""}`));
+    // "warm" is the build AND the load: a warm build the runtime was
+    // recycled for (a refused swap, a host-held module) is a cold activation
+    // and says why -- ObjectStore#publish sets result.why exactly then
+    res.set("X-OSD-Build", header(t.warm === true && result?.recycled !== true && result?.why === undefined ? "warm"
+      : t.warm === true ? `cold; recycled after a warm build: ${result?.why ?? "the runtime was recycled"}`
+        : `cold${w?.on === true && w.reason ? `; ${w.reason}` : ""}`));
     if (result?.hot === true) res.set("X-OSD-Swap-Ms", String(result.ms));
     if (Array.isArray(t.closure)) {
       const tests = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
