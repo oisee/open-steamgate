@@ -18,7 +18,10 @@ is not emitted. The emitter then checks IR use positions conservatively; an
 unknown write/reference position disqualifies the variable. Dynamic names,
 friend access, exposed attributes, opaque native methods and whole-object
 actuals also retain ordinary storage conservatively. This does not
-change any method signature or generic `abap.Data` descriptor. Calls by value
-receive snapshots, while reference actuals retain the normal representation.
+change any method signature or generic `abap.Data` descriptor. Any statement
+that reads a slot beside a method or function call retains ordinary storage, preserving Go operand evaluation order for whole, substring
+and length reads. Call-free byte stores and appends keep owned storage.
+Small whole-value assignments release backing arrays larger than four times
+the new value.
 Buffers belong to the same serialized ABAP session/object as their variables;
 this package does not add independent concurrency or reference semantics.

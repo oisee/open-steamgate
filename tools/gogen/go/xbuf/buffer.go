@@ -11,7 +11,12 @@ type Buffer struct{ bytes []byte }
 func (b *Buffer) Snapshot() string { return string(b.bytes) }
 func (b *Buffer) Len() int32       { return int32(len(b.bytes)) }
 func (b *Buffer) Clear()           { b.bytes = nil }
-func (b *Buffer) Set(value string) { b.bytes = append(b.bytes[:0], value...) }
+func (b *Buffer) Set(value string) {
+	if len(value) < cap(b.bytes)/4 {
+		b.bytes = nil
+	}
+	b.bytes = append(b.bytes[:0], value...)
+}
 
 // Sub copies only the requested span, never the entire linear memory.
 func (b *Buffer) Sub(off, n int32) string {

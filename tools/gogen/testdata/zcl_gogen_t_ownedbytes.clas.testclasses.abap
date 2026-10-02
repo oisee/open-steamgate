@@ -2,6 +2,7 @@ CLASS ltcl_owned DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     DATA mv_mem TYPE xstring.
     METHODS snapshots FOR TESTING.
+    METHODS self_append FOR TESTING.
     METHODS value_input FOR TESTING.
     METHODS append_and_clear FOR TESTING.
     METHODS stores FOR TESTING.
@@ -11,6 +12,14 @@ CLASS ltcl_owned DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
       RETURNING VALUE(rv_mem) TYPE xstring.
 ENDCLASS.
 CLASS ltcl_owned IMPLEMENTATION.
+  METHOD self_append.
+    DATA mem TYPE xstring.
+    DATA saved TYPE xstring.
+    mem = '01AB'.
+    CONCATENATE mem mem INTO mem IN BYTE MODE.
+    saved = mem.
+    cl_abap_unit_assert=>assert_equals( act = saved exp = '01AB01AB' ).
+  ENDMETHOD.
   METHOD snapshots.
     DATA replacement TYPE x LENGTH 2 VALUE 'ABCD'.
     DATA b TYPE xstring.

@@ -163,8 +163,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:xbuf": {
-      "lines": 45,
-      "reason": "Owned bytes for statically unescaped xstrings; snapshot boundaries, selected-span reads and allocation-free equal-length stores. No abap or emitter budget increase."
+      "lines": 50,
+      "reason": "Owned bytes for statically unescaped xstrings; snapshot boundaries, selected-span reads and allocation-free equal-length stores. Includes release of oversized capacity on small assignments. No abap or emitter budget increase."
     },
     "tools/adt-documents.mjs": {
       "lines": 1621,

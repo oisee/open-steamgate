@@ -117,3 +117,21 @@ func TestStoreAndSubstringAllocation(t *testing.T) {
 		t.Fatalf("four-byte load allocated %d bytes/op", bytes)
 	}
 }
+
+func TestSetReleasesLargeCapacity(t *testing.T) {
+	var b Buffer
+	b.Set(strings.Repeat("x", 16*65536))
+	capacity := cap(b.bytes)
+	b.Set(strings.Repeat("y", capacity/2))
+	if cap(b.bytes) != capacity {
+		t.Fatal("ordinary overwrite lost reusable capacity")
+	}
+	b.Set("small")
+	if b.Snapshot() != "small" || cap(b.bytes) >= capacity/4 {
+		t.Fatal("small assignment retained large backing array")
+	}
+	b.Set("")
+	if cap(b.bytes) != 0 {
+		t.Fatal("empty assignment retained backing array")
+	}
+}

@@ -264,9 +264,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   program.exceptionSupers = exceptionSupers(reg, program);
   program.cdsViews = cdsViewsByRegistry.get(reg) ?? {};
   program.tables = tableRegistry(reg, program);
-  program.amcChannels = samcOf(folders);
-  program.ownershipSafety = sourceOwnershipSafety(reg);
-  return program;
+  return Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: sourceOwnershipSafety(reg)});
 }
 
 /**

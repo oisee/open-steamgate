@@ -74,15 +74,20 @@ export function analyzeOwnership(program) {
     const write = (n, supported) => {
       if (!supported || !["var", "attr"].includes(n?.e) || n.ref) reject(n);
     };
-    const calls = (n) => n && typeof n === "object" && (n.e === "call" || n.e === "new" || (Array.isArray(n) ? n : children(n)).some(calls));
+    const calls = (n) => n && typeof n === "object" && (n.e === "call" || n.e === "new" || n.s === "call_fm" || n.s === "call_dyn_static" || (Array.isArray(n) ? n : children(n)).some(calls));
     const statements = (n) => {
       if (Array.isArray(n)) { n.forEach(statements); return; }
       if (!n || typeof n !== "object") return;
-      if (!n.s) { if (n.e || n.c) read(n); else for (const v of children(n)) statements(v); return; }
+      if (!n.s) { if (n.e || n.c) { if (calls(n)) reject(n); read(n); } else for (const v of children(n)) statements(v); return; }
+      // Snapshot/Sub/Len introduce Go calls where string operands had none.
+      // Keep string storage whenever a sibling call could change a read slot.
+      // Nested bodies are separate statements, not siblings of the condition.
+      const operands = Object.entries(n).filter(([k]) => !["target", "body", "then", "else", "branches", "catches", "finally", "cleanup", "pos", "type"].includes(k)).map(([, v]) => v);
+      if (operands.some(calls)) operands.forEach(reject);
       if (["assign", "clear", "replace_bytes", "concat_bytes"].includes(n.s)) {
         // Reading the target before side-effecting operands needs a snapshot;
         // preserve the ordinary representation for that uncertain form.
-        write(n.target, !(n.s === "replace_bytes" && n.target.e === "attr" && [n.with, n.off, n.len].some(calls)));
+        write(n.target, !(n.s === "replace_bytes" && [n.with, n.off, n.len].some(calls)));
         for (const [k, v] of Object.entries(n)) if (!["target", "pos", "type"].includes(k)) read(v);
       } else if (["if", "case", "do", "while", "seq", "try"].includes(n.s)) {
         // Conditions are reads, bodies contain independently checked writes.
