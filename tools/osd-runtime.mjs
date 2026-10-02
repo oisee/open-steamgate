@@ -532,6 +532,10 @@ export class ServingRuntime {
       let booted = false;
       const heard = () => {
         if (booted) return;
+        // when the boot last said anything: a publish waiting for this
+        // runtime to change hands waits on that, not on a fixed limit
+        // (ObjectStore#bounded)
+        if (this.bootingChild === child) this.booting.heard = Date.now();
         clearTimeout(timer);
         timer = setTimeout(() => giveUp(`said nothing for ${this.timeout} ms while starting (last: ${phase})`), this.timeout);
         timer.unref?.();

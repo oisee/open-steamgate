@@ -296,6 +296,62 @@ export class ObjectStore {
     }
   }
 
+  // Whether `file` (relative to the root) belongs to an object that is
+  // inactive and still holds exactly the version saved through this store:
+  // an ADT save (or create) waiting for its activation. The dev loop
+  // (tools/osd-dev.mjs) never builds such a file -- a save is not an
+  // activation, and building it there was a cold build and a recycle per
+  // create and per PUT, besides the activation's (vsp-i7, 0.6.1511: 21
+  // recycles), and would have made a saved-only version live.
+  // This is the persistent inactive set, not a record of the write: it
+  // ends with the activation, the delete, or bytes that differ from the
+  // saved version (`outside`, which the dev loop builds like any change).
+  // So the same bytes again -- another editor, a checkout, a watcher event
+  // that comes late -- are that same inactive source, and wait for it to be
+  // activated, however long.
+  // The inactive objects other than `activating`, each with its files'
+  // active copy (empty when it never had one) and saved text: what a warm
+  // build asks to refuse a generator input the build view cannot cover
+  // (WarmCompiler#generatorInput).
+  inactiveSources(activating = new Set()) {
+    const out = [];
+    for (const key of this.inactive) {
+      if (activating.has(key)) continue;
+      const [type, ...rest] = key.split(" ");
+      const entry = this.find(type, rest.join(" "));
+      if (entry === undefined) continue;
+      const files = this.#filesOfEntry(entry).map((file) => {
+        const copy = join(this.root, this.#snapshotOf(file));
+        const tree = join(this.root, file);
+        return {file, before: existsSync(copy) ? readFileSync(copy, "utf8") : "", after: existsSync(tree) ? readFileSync(tree, "utf8") : ""};
+      });
+      out.push({key, type, files});
+    }
+    return out;
+  }
+
+  // the object a file of the tree belongs to, "TYPE NAME", among the
+  // inactive ones (what a warm prime asks of a file read from its copy)
+  objectKeyOf(file) {
+    const wanted = join(String(file));
+    for (const key of this.inactive) {
+      const [type, ...rest] = key.split(" ");
+      const entry = this.find(type, rest.join(" "));
+      if (entry !== undefined && this.#filesOfEntry(entry).some((f) => join(f) === wanted)) return key;
+    }
+    return undefined;
+  }
+
+  savedInactive(file) {
+    const wanted = join(String(file));
+    for (const key of this.inactive) {
+      const record = this.#saved.get(key);
+      if (record === undefined || record.outside === true || !record.files.some((f) => join(f) === wanted)) continue;
+      return this.#digestOf(record.files) === record.digest;
+    }
+    return false;
+  }
+
   #digestOf(files, override = new Map()) {
     const hash = createHash("sha256");
     for (const file of files) {
@@ -1348,26 +1404,59 @@ export class ObjectStore {
   }
 
   // A runtime changing hands -- a recycle already underway, the one this
-  // publish asks for, the catch-up a swap brings -- is waited for at most
-  // transitionMs (OSD_TRANSITION_MS), and then the publish answers that it
-  // is still changing rather than hold the chain: the next publish meets
-  // the same transition and is bounded the same way, and once it settles
-  // publishes load again. {late: false, value} or {late: true, error};
-  // a rejection is the caller's.
+  // publish asks for, the catch-up a swap brings -- is waited for for as
+  // long as it is starting and says so, and is late once it has said
+  // nothing for transitionMs (OSD_TRANSITION_MS): silence, not slowness,
+  // the rule the runtime's own boot already keeps (tools/osd-runtime.mjs,
+  // `timeout` of silence, `bootTimeout` in all, after which it gives the
+  // boot up itself and the recycle rejects). A fixed limit turned a boot
+  // that was slow and correct into a failed activation: vsp-i7 on 0.6.1511
+  // measured a boot of more than 60 s under load (the generation 6.6 s, the
+  // cross-reference 21.6 s, the registrations after them) and every 60-s
+  // wait for it answered "still changing hands". A transition with no boot
+  // to hear from (a stop, a supervisor that never settles) is late after
+  // transitionMs as before, so the chain still moves on. {late: false,
+  // value} or {late: true, error}; a rejection is the caller's.
   async #bounded(promise, what, deadline = Date.now() + this.transitionMs) {
-    let timer;
     const late = Symbol("late");
-    const value = await Promise.race([
-      promise,
-      new Promise((done) => {
-        timer = setTimeout(() => done(late), Math.max(0, deadline - Date.now()));
-        timer.unref?.();
-      }),
-    ]).finally(() => clearTimeout(timer));
-    if (value !== late) return {late: false, value};
+    const started = Date.now();
+    for (;;) {
+      let timer;
+      const value = await Promise.race([
+        promise,
+        new Promise((done) => {
+          timer = setTimeout(() => done(late), Math.max(0, deadline - Date.now()));
+          timer.unref?.();
+        }),
+      ]).finally(() => clearTimeout(timer));
+      if (value !== late) return {late: false, value};
+      // what the boot said while this process was busy itself (a prime
+      // holds it for seconds) is still queued: let it land before reading
+      await new Promise((r) => setImmediate(r));
+      const heard = this.#heard();
+      if (heard !== undefined && heard + this.transitionMs > Date.now()) {
+        deadline = heard + this.transitionMs;
+        continue;
+      }
+      break;
+    }
     // whatever it settles to later is nobody's answer, and not unhandled
     Promise.resolve(promise).catch(() => undefined);
-    return {late: true, error: `the runtime is still changing hands after ${this.transitionMs} ms (${what}); nothing was loaded`};
+    return {late: true, error: `the runtime is still changing hands after ${Date.now() - started} ms, ` +
+      `${this.transitionMs} ms of it without a word (${what}); nothing was loaded`};
+  }
+
+  // when a runtime (or any work process of a pool) that is booting last said
+  // anything; undefined when none is booting
+  #heard() {
+    const runtime = this.served;
+    const members = Array.isArray(runtime?.runtimes) ? runtime.runtimes : runtime === undefined ? [] : [runtime];
+    let at;
+    for (const m of members) {
+      const h = m?.booting?.heard;
+      if (typeof h === "number" && (at === undefined || h > at)) at = h;
+    }
+    return at;
   }
 
   // ---- the warm compile (tools/osd-warm.mjs, docs/warm-compile.md) --------
@@ -1445,16 +1534,23 @@ export class ObjectStore {
     const w = this.warm();
     if (w.on !== true) return undefined;
     if (w.priming !== undefined) return w.priming;
-    // the warm registry primes on the tree as saved; while some of it is
-    // inactive and kept out of the build, it would prime on what is not live.
-    // The next cold build schedules another try.
-    if (this.overlay() !== undefined) {
-      w.reason = `${this.inactive.size} inactive object(s) are kept out of the build`;
-      return undefined;
+    // not while the runtime changes hands: the prime holds this process for
+    // seconds (11 s on vsp-i7, 17-30 s here under load), and a boot the
+    // supervisor cannot hear meanwhile is a recycle that reads as that much
+    // slower -- the reprime five seconds after a cold build landed in the
+    // middle of that build's recycle every time. Not as `priming` either: a
+    // build awaits that, and must not wait on a transition through it.
+    const changing = this.served?.recycling ?? this.served?.starting;
+    if (changing !== undefined) {
+      return changing.catch(() => undefined).then(() => this.warmUp());
     }
+    w.primeDue = false;
+    clearTimeout(w.reprime);
     w.priming = (async () => {
       const {WarmCompiler} = await import("./osd-warm.mjs");
-      w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m)});
+      // primed on the build view: inactive objects as their active copies
+      w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m), overlay: (activating) => this.overlay(activating),
+        keyOf: (file) => this.objectKeyOf(file), inactiveSources: (activating) => this.inactiveSources(activating)});
       try {
         const r = await w.compiler.prime();
         w.reason = undefined;
@@ -1888,18 +1984,25 @@ export class ObjectStore {
         const digests = new Map([...read].map(([file, digest]) => [normalPath(file), digest]));
         return Object.fromEntries([...activating].map((key) => [key, this.#builtRevision(key, digests)]));
       };
-      if (w.on === true && overlay !== undefined && w.compiler !== undefined) {
-        // the warm registry holds the tree as saved, inactive objects
-        // included; a build that must leave some out is a cold one
-        w.reason = `${this.inactive.size} inactive object(s) are kept out of the build`;
-        w.compiler.drop?.();
-        w.compiler = undefined;
+      // the warm registry holds the build view (#460's overlay), and a build
+      // of `activating` is a warm edit of it: those objects' saved sources
+      // replace their active copies, every other inactive object keeps its
+      // copy (WarmCompiler#overlayOf) -- an ADT save makes its object
+      // inactive, so without this every activation through ADT was cold
+      // a prime that is due (after a cold build) and not yet run is run now,
+      // when nothing is changing hands: it costs a parse of the tree, and the
+      // cold build it saves costs that, the transpile and a recycle. An ADT
+      // client saves and activates in one breath, so the activation after a
+      // create's cold build used to come before the reprime and go cold too.
+      if (w.on === true && options.force !== true && w.primeDue === true && w.priming === undefined &&
+          (this.served?.recycling ?? this.served?.starting) === undefined) {
+        await this.warmUp();
       }
-      if (w.on === true && options.force !== true && overlay === undefined) {
+      if (w.on === true && options.force !== true) {
         await w.priming;
         if (w.compiler?.primed === true) {
           try {
-            const r = await w.compiler.build();
+            const r = await w.compiler.build(activating);
             return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, warm: true,
               built: built(w.compiler.digests),
               modules: r.modules, hostHeld: r.hostHeld, from: r.from, stale: r.stale, steps: r.steps,
@@ -1918,9 +2021,17 @@ export class ObjectStore {
           }
         }
       }
+      // a comparison of a warm generation the tree has left would end
+      // inconclusive, and meanwhile it is a second cold transpile beside
+      // this one (WarmCompiler#cancelVerify)
+      if (w.compiler?.verifying !== undefined) w.compiler.cancelVerify(await this.sourceKey());
       try {
         const {build} = await import("./osd-build.mjs");
         const r = await build({...this.buildOptions, root: this.root, force: options.force === true, replace: options.replace === true, overlay});
+        // only a build that made a generation live is one to prime on: after
+        // a failed one the tree is not the live generation, and a prime on
+        // demand would parse it to be told so
+        w.primeDue = w.on === true;
         return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, built: built(r.digests)};
       } catch (error) {
         // the transpiler's refusal names each object and line; the rest of

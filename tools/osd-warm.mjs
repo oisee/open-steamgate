@@ -28,7 +28,7 @@
 import {spawn} from "node:child_process";
 import {createHash} from "node:crypto";
 import {copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync} from "node:fs";
-import {basename, join, relative, resolve, sep} from "node:path";
+import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {generatorIdentity, hashOf, inputsOf, layout, liveHash, lock, linkRoots, ownConfig, prepare, rootsWanted, switchTo} from "./osd-build.mjs";
 import {describeBuild} from "./osd-transpiler.mjs";
@@ -241,6 +241,61 @@ export class WarmCompiler {
     // the same, on disk beside the generation (<hash>.warm.json), so a warm
     // generation found again later is still known to be unchecked
     this.swaps = 0;
+    // **The build view, not the raw tree** (#460): the store keeps inactive
+    // objects out of every build -- each as its last active copy, or absent
+    // when it never had one -- and names the generation by that view. The
+    // registry is primed from the same view, and an activation of a set S is
+    // a warm edit of it: S's saved sources replace their copies, every other
+    // inactive object keeps serving its copy. `overlay(S)` is the store's
+    // (ObjectStore#overlay); without a store, the tree as it is.
+    this.overlayOf = options.overlay ?? (() => undefined);
+    // the object a file belongs to, "TYPE NAME" (ObjectStore#objectKeyOf)
+    this.keyOf = options.keyOf ?? (() => undefined);
+    // the inactive objects and their copies (ObjectStore#inactiveSources)
+    this.inactiveSources = options.inactiveSources ?? (() => []);
+    // the view each generation this made was built from, for its comparison
+    this.views = new Map();
+  }
+
+  // **The generators read the raw tree, not the build view** (#460's known
+  // limit): cds2ddic reads a saved DDLS, stg-compile a saved YAML, the
+  // registries a saved class's INTERFACES lines, whether or not the object
+  // is active. A warm build trusts gen/ as the last cold build left it, so
+  // an inactive object a generator would read differently than its active
+  // copy says makes every build cold -- a cold build is what runs the
+  // generators over it, and fails where they fail (critic on d75d8fdc: a
+  // DDLS inactive at the live build, saved again with an invalid source,
+  // and a class activation built warm over it). Any inactive object that is
+  // not a class or interface counts, and a class or interface whose saved
+  // source the warm rule would not take as an edit of its copy.
+  #generatorInput(activating = new Set()) {
+    for (const {key, type, files} of this.inactiveSources(activating)) {
+      if (type !== "CLAS" && type !== "INTF") return `${key} is inactive, and the generators read its saved source`;
+      for (const {file, before, after} of files) {
+        if (before === after) continue;
+        const reason = warmRule({path: file, before, after, amdpText: this.amdpText ?? ""});
+        if (reason !== undefined) return `${key} is inactive, and the generators read its saved source (${reason})`;
+      }
+    }
+    return undefined;
+  }
+
+  // A file is known by where it lives in the tree, whichever copy the view
+  // reads it from: an inactive object's active copy under
+  // build/inactive/active/<file> and its promoted source at <file> are one
+  // file whose contents changed, which is what makes a promotion warm.
+  #logical(path, overlay) {
+    const folder = resolve(this.root, overlay?.folder ?? join("build", "inactive", "active")) + sep;
+    return path.startsWith(folder) ? resolve(this.root, path.slice(folder.length)) : path;
+  }
+
+  // the view's files by their logical path: {actual: logical -> path, digests}
+  #view(overlay, digests, config, stack) {
+    const listing = ownConfig(this.root, config, stack, join(layout(this.root).tmp, "warm", "output"), overlay);
+    const {wanted} = listFiles(this.root, listing);
+    const actual = new Map(wanted.map((p) => [this.#logical(p, overlay), p]));
+    const logicalDigests = new Map([...digests].map(([p, d]) => [this.#logical(p, overlay), d]));
+    return {wanted, actual, digests: logicalDigests};
   }
 
   get primed() {
@@ -272,14 +327,25 @@ export class WarmCompiler {
     if (live === undefined) {
       throw new NotWarm("there is no live generation to start from");
     }
+    const input = this.#generatorInput();
+    if (input !== undefined) throw new NotWarm(input);
     const {config, stack} = prepare(root);
     // the libraries are pinned clones and most of the inputs; a watcher per
     // library lets a build reuse their walk until something moves in one
     this.#watchLibraries(inputsOf(root, config).libs);
     const transpiler = String(describeBuild(root));
-    const digests = new Map();
-    const hash = hashOf(root, inputsOf(root, config), {digests, folders: this.folders, transpiler});
-    if (hash !== live) {
+    const overlay = this.overlayOf(new Set());
+    const raw = new Map();
+    const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
+    // the view names the generation it would build; one saved since the live
+    // generation was built names it differently (an object now inactive is
+    // read from its active copy, the bytes the live generation was built
+    // from, under another path) -- so a name that differs is only a reason
+    // to look closer when inactive objects are read from copies, and the
+    // full run below, byte for byte, is the premise either way
+    const copied = overlay?.folder !== undefined;
+    const proved = hash === live;
+    if (!proved && !copied) {
       throw new NotWarm(`the tree is not the live generation (${hash} on disk, ${live} live); a cold build comes first`);
     }
     const paths = layout(root);
@@ -289,10 +355,68 @@ export class WarmCompiler {
     if ((config.libs ?? []).some((l) => l.folder === undefined || l.folder === "" || !existsSync(root + l.folder))) {
       throw new NotWarm("a library is cloned from its URL rather than read from a folder");
     }
-    const {wanted} = listFiles(root, own);
+    const view = this.#view(overlay, raw, config, stack);
+    const wanted = view.wanted;
+    const digests = view.digests;
     const read = await readAll(wanted, resolve(root, own.output_folder),
       (source, filename) => lowerNarrowSubmit(source, filename, core));
-    this.files = new Map(wanted.map((path, i) => [path, read[i]]));
+    this.files = new Map(wanted.map((path, i) => [this.#logical(path, overlay), read[i]]));
+    this.actual = new Map(view.actual);
+    // where the live generation read each copied file from: its copy, when
+    // the object was inactive at that build, or its source in the tree, when
+    // it was saved since -- read off the live source map, so the full run
+    // reproduces it and the next build that reads the copy rebuilds it
+    const liveOut = join(paths.byInput, live, "output");
+    const copiesAt = relative(resolve(root, own.output_folder), resolve(root, overlay?.folder ?? join("build", "inactive", "active")));
+    for (const [logical, path] of view.actual) {
+      if (logical === path) continue;
+      const name = basename(logical).split(".").slice(0, 2).join(".");
+      let map = "";
+      try {
+        map = readFileSync(join(liveOut, `${name}.mjs.map`), "utf8");
+      } catch {
+        // no map: where it was read from names nothing
+      }
+      if (map.includes(copiesAt.split(sep).join("/"))) continue;
+      this.actual.set(logical, logical);
+      this.files.get(logical).relative = relative(resolve(root, own.output_folder), dirname(logical));
+    }
+    // A view that names the live generation differently is primed only on
+    // proof that the difference is the saves since and nothing else: the
+    // live view rebuilt -- those objects read from the tree, as live read
+    // them, each file counted with the digest of its active copy, the bytes
+    // live was built from -- must hash to the live name exactly. Every other
+    // input is in that hash as it is now: a YAML or any other generator
+    // input changed since, a library, the config, the generators. A full run
+    // of the registry could not see those (it transpiles today's gen/), and
+    // neither can the comparison, so without this a corrupt .stg.yaml was
+    // built warm over (critic on ab4ded7c).
+    if (!proved) {
+      const keys = new Set();
+      const substitute = new Map();
+      for (const [logical, path] of view.actual) {
+        if (this.actual.get(logical) !== logical || logical === path) continue;
+        const key = this.keyOf(relative(root, logical));
+        if (key === undefined) throw new NotWarm(`${relative(root, logical)} is read from a copy and belongs to no object`);
+        keys.add(key);
+        substitute.set(resolve(logical), createHash("sha256").update(readFileSync(path)).digest("hex"));
+      }
+      const back = hashOf(root, inputsOf(root, config), {transpiler, overlay: this.overlayOf(keys), substitute});
+      if (back !== live) {
+        throw new NotWarm(`the tree is not the live generation (${hash} on disk, ${live} live, ${back} with the saves since put back); a cold build comes first`);
+      }
+      // and in the order live read them: a file read from its copy is listed
+      // after the tree, and the order the registry holds its objects in is
+      // the order init.mjs loads them
+      const order = listFiles(root, ownConfig(root, config, stack, join(paths.tmp, "warm", "output"), this.overlayOf(keys))).wanted;
+      const files = new Map();
+      for (const p of order) {
+        const logical = this.#logical(p, overlay);
+        if (this.files.has(logical)) files.set(logical, this.files.get(logical));
+      }
+      for (const [logical, f] of this.files) if (!files.has(logical)) files.set(logical, f);
+      this.files = files;
+    }
     const libs = await loadLibs(root, own);
     const reg = new core.Registry();
     for (const f of this.files.values()) reg.addFile(new core.MemoryFile(f.filename, f.contents));
@@ -303,7 +427,6 @@ export class WarmCompiler {
 
     // the premise, checked rather than assumed: this registry gives the live
     // generation's bytes
-    const liveOut = join(paths.byInput, live, "output");
     const differing = outputFiles(output, own, liveOut, [...this.files.values()])
       .filter((f) => !existsSync(f.path) || readFileSync(f.path, isBinaryFilename(f.path) ? "latin1" : "utf8") !== f.contents)
       .map((f) => basename(f.path));
@@ -455,7 +578,7 @@ export class WarmCompiler {
 
   // what changed on disk since the registry was last brought in line with it,
   // and whether all of it may be built warm; throws NotWarm with the reason
-  #changes() {
+  #changes(activating = new Set()) {
     const root = this.root;
     const {config, stack} = prepare(root);
     // the transpiler that builds this is the one loaded when it was primed;
@@ -464,8 +587,15 @@ export class WarmCompiler {
       throw new NotWarm("the transpiler on disk changed since the registry was primed");
     }
     const transpiler = this.identity.transpiler;
-    const digests = new Map();
-    const hash = hashOf(root, inputsOf(root, config), {digests, folders: this.folders, transpiler});
+    // the view this build makes live: S promoted, every other inactive
+    // object as its copy -- the overlay a cold build of S would read
+    const input = this.#generatorInput(activating);
+    if (input !== undefined) throw new NotWarm(input);
+    const overlay = this.overlayOf(activating);
+    const raw = new Map();
+    const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
+    const view = this.#view(overlay, raw, config, stack);
+    const digests = view.digests;
     // what the digests say changed, and what the registry holds ahead of the
     // generation (an edit refused, since reverted: the same digest again)
     const changed = [...new Set([...[...digests.keys()].filter((p) => this.digests.get(p) !== digests.get(p)), ...this.held.keys()])];
@@ -477,11 +607,19 @@ export class WarmCompiler {
       if (identity[k] !== this.identity[k]) throw new NotWarm(`the ${k} changed`);
     }
     if (stack.duplicates.length > 0) throw new NotWarm("duplicates");
-    const {wanted} = listFiles(root, this.own);
-    const now = new Set(wanted);
-    for (const path of wanted) if (!this.files.has(path)) throw new NotWarm(`${relative(root, path)} is new`);
+    const now = new Set(view.actual.keys());
+    for (const path of now) if (!this.files.has(path)) throw new NotWarm(`${relative(root, path)} is new`);
     for (const path of this.files.keys()) if (!now.has(path)) throw new NotWarm(`${relative(root, path)} is gone`);
     const edits = [];
+    // a file the view now reads from elsewhere -- an inactive object's copy
+    // in place of its source, or its source again -- with the same bytes:
+    // nothing to compile differently, but its source map points where it is
+    // read from, and a cold build of this view would say the copy
+    for (const [path, now] of view.actual) {
+      const known = this.files.get(path);
+      if (known === undefined || changed.includes(path) || this.actual.get(path) === now) continue;
+      edits.push({path, file: known, after: known.contents, held: this.held.get(path) ?? known.contents, moved: true});
+    }
     for (const path of changed) {
       const known = this.files.get(path);
       if (known === undefined) {
@@ -489,7 +627,7 @@ export class WarmCompiler {
       }
       // the bytes the generation is named by are the bytes it is built from:
       // read once, and refused when a save landed between the hash and here
-      const bytes = readFileSync(path);
+      const bytes = readFileSync(view.actual.get(path));
       if (createHash("sha256").update(bytes).digest("hex") !== digests.get(path)) {
         throw new NotWarm(`${relative(root, path)} changed while it was read`);
       }
@@ -503,7 +641,7 @@ export class WarmCompiler {
       if (reason !== undefined) throw new NotWarm(reason);
       edits.push({path, file: known, after, held});
     }
-    return {hash, edits, digests, transpiler};
+    return {hash, edits, digests, transpiler, overlay, actual: view.actual};
   }
 
   // The build: the edited objects and their readers, into a generation of
@@ -514,7 +652,7 @@ export class WarmCompiler {
   // then nothing is switched and the registry keeps the edit to build with
   // the next save. What this knows about the tree -- the files' contents, the
   // digests, the live hash -- changes only once the new generation is live.
-  async build() {
+  async build(activating = new Set()) {
     const started = Date.now();
     if (!this.primed) throw new NotWarm("not primed");
     const root = this.root;
@@ -530,7 +668,7 @@ export class WarmCompiler {
       const marks = [];
       const mark = (what) => marks.push([what, Date.now()]);
       mark("start");
-      const {hash, edits, digests, transpiler} = this.#changes();
+      const {hash, edits, digests, transpiler, overlay, actual} = this.#changes(activating);
       mark("changes");
       const changed = [];
       for (const {path, file, after, held} of edits) {
@@ -540,12 +678,19 @@ export class WarmCompiler {
         }
         changed.push(this.owner.get(file.filename));
       }
+      // where each file is read from in this view: a promoted file from the
+      // tree, an inactive one from its copy -- what its source map names,
+      // as a cold build of the view would
+      const out = resolve(root, this.own.output_folder);
+      const located = (path, f) => (actual.has(path) ? {...f, relative: relative(out, dirname(actual.get(path)))} : f);
       const commit = () => {
         for (const {path, file, after} of edits) {
           file.contents = after;
+          file.relative = located(path, file).relative;
           this.held.delete(path);
         }
         this.digests = digests;
+        this.actual = actual;
         this.pending = new Set();
       };
       const stale = this.#closure([...changed, ...this.pending]);
@@ -574,7 +719,7 @@ export class WarmCompiler {
 
       // the modules this replaces, and the check that nothing else holds one
       const liveOut = join(paths.byInput, from, "output");
-      const written = outputFiles(output, this.own, liveOut, [...this.files.values()]);
+      const written = outputFiles(output, this.own, liveOut, [...this.files].map(([path, f]) => located(path, f)));
       // the modules a serving process loads: not the scripts, and not the test
       // classes, which only a unit run imports
       const modules = written.map((f) => basename(f.path))
@@ -631,6 +776,7 @@ export class WarmCompiler {
       }
       mark("generation");
       if (warmVerdict(target) === false) this.unverified.add(hash);
+      this.views.set(hash, overlay);
       switchTo(root, hash, undefined, {wanted});
       mark("switch");
       commit();
@@ -664,14 +810,32 @@ export class WarmCompiler {
     }
   }
 
+  // A comparison of a generation the tree has left is inconclusive by the
+  // time it ends (verifyMain checks the hash before and after), and a cold
+  // transpile of the whole tree meanwhile is a second one beside the cold
+  // build that replaced it: the two share the cores, and the activation
+  // waiting on the build pays for both. So the cold build stops it, unless
+  // the tree is still the generation it compares (`keep`).
+  cancelVerify(keep, why = "a cold build replaced the tree it compared") {
+    const child = this.verifying;
+    if (child === undefined || child.osdHash === keep || child.exitCode !== null) return false;
+    child.osdCancelled = why;
+    child.kill("SIGTERM");
+    return true;
+  }
+
   // Compare a generation this made with a cold transpile of the same inputs,
   // in a child process so nobody waits for it. Inconclusive when the tree
   // changed while it ran.
   verify(hash) {
     return new Promise((done) => {
       const [cmd, ...args] = toolCommand(join(TOOLS, "osd-warm.mjs"), ["verify", hash]);
-      const child = spawn(cmd, args, {cwd: this.root, env: {...process.env, OSD_ROOT: this.root}, stdio: ["ignore", "pipe", "pipe"]});
+      // compared with a cold transpile of the same view, not of the raw tree
+      const view = this.views.get(hash);
+      const child = spawn(cmd, args, {cwd: this.root, stdio: ["ignore", "pipe", "pipe"],
+        env: {...process.env, OSD_ROOT: this.root, OSD_VERIFY_OVERLAY: view === undefined ? "" : JSON.stringify({exclude: [...(view.exclude ?? [])], folder: view.folder})}});
       this.verifying = child;
+      child.osdHash = hash;
       let out = "";
       child.stdout.on("data", (d) => { out += d; });
       child.stderr.on("data", (d) => { out += d; });
@@ -679,7 +843,8 @@ export class WarmCompiler {
         this.verifying = undefined;
         let result;
         try {
-          result = JSON.parse(out.trim().split("\n").pop());
+          result = child.osdCancelled !== undefined ? {verdict: "inconclusive", why: child.osdCancelled}
+            : JSON.parse(out.trim().split("\n").pop());
         } catch {
           result = {verdict: "failed", code, output: out.slice(-2000)};
         }
@@ -702,7 +867,8 @@ async function verifyMain(hash) {
   const {compareGenerations} = await import("./osd-generation-diff.mjs");
   const {transpile} = await import("./osd-transpile.mjs");
   const {config, stack} = prepare(root);
-  if (hashOf(root, inputsOf(root, config)) !== hash) {
+  const overlay = process.env.OSD_VERIFY_OVERLAY ? JSON.parse(process.env.OSD_VERIFY_OVERLAY) : undefined;
+  if (hashOf(root, inputsOf(root, config), {overlay}) !== hash) {
     return {verdict: "inconclusive", why: "the tree is not that generation any more"};
   }
   const tmp = join(paths.tmp, `${hash}.${process.pid}.verify`);
@@ -710,8 +876,8 @@ async function verifyMain(hash) {
     rmSync(tmp, {recursive: true, force: true});
     mkdirSync(join(tmp, "output"), {recursive: true});
     const started = Date.now();
-    await transpile({root, config: ownConfig(root, config, stack, join(tmp, "output"))});
-    if (hashOf(root, inputsOf(root, config)) !== hash) {
+    await transpile({root, config: ownConfig(root, config, stack, join(tmp, "output"), overlay)});
+    if (hashOf(root, inputsOf(root, config), {overlay}) !== hash) {
       return {verdict: "inconclusive", why: "the tree changed while it was compared"};
     }
     const v = compareGenerations(join(paths.byInput, hash, "output"), join(tmp, "output"));

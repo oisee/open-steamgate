@@ -337,8 +337,12 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
   const digests = options instanceof Map ? options : options.digests;
   const overlay = options instanceof Map ? undefined : activeOverlay(options.overlay);
   // a folder walk cached for a tree without an overlay is not this list
-  const folders = options instanceof Map || overlay !== undefined ? undefined : options.folders;
+  const folders = options instanceof Map || overlay !== undefined || options.substitute !== undefined ? undefined : options.folders;
   const kept = overlay === undefined ? () => true : (f) => !overlay.exclude.has(resolve(f));
+  // a proof, not a build: these files counted with these digests (a warm
+  // prime asking whether its view is the live generation with saves since
+  // put back to the bytes they replaced, tools/osd-warm.mjs)
+  const substitute = options instanceof Map ? undefined : options.substitute;
   const h = createHash("sha256");
   h.update("transpiler\0").update(String(options.transpiler ?? describeBuild(root))).update("\0");
   // the rule that decides a name held by two inputs is part of what the
@@ -348,7 +352,7 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
   const folder = (label, dir, list) => {
     let entries = folders?.get(dir);
     if (entries === undefined) {
-      entries = list().map((f) => [f, digestOf(f)]);
+      entries = list().map((f) => [f, substitute?.get(resolve(f)) ?? digestOf(f)]);
       folders?.set(dir, entries);
     }
     // an empty folder builds nothing, so its path does not name the generation

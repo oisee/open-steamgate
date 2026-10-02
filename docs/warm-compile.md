@@ -57,6 +57,41 @@ watcher and a 30 ms debounce.
    source maps read as files and a generation swapped back to is evaluated
    again.
 
+## The build view, with objects inactive
+
+An ADT save makes its object inactive, and an inactive object is kept out
+of every build (`ObjectStore#overlay`, #460): its last active copy from
+`build/inactive/active/`, or nothing when it never had one. The registry is
+primed from that view and not from the raw tree, and an activation of a set
+S is a warm edit of it: S's saved sources replace their copies, every other
+inactive object keeps serving its copy, before and after. A file is known by
+its place in the tree, whichever copy the view reads (`#logical`), so a
+promotion is a content edit and the warm rule applies to it as to any save
+(a new object, `INTERFACES`, AMDP and generator inputs stay cold). A file
+the view reads from elsewhere with the same bytes is rebuilt for its source
+map, which names where it was read. A refused build leaves the registry on
+the old view (the edit held, reverted by the next build that does not
+activate it). The comparison runs a cold transpile of the same view
+(`OSD_VERIFY_OVERLAY`). A prime that is due after a cold build runs at the
+next activation if the five seconds have not passed, since an ADT client
+saves and activates at once. A prime whose view names the live generation
+differently (an object saved since, read from its copy) is accepted only on
+proof that the saves since are the whole difference: the live view rebuilt
+-- those objects read from the tree as live read them, each file counted
+with its active copy's digest -- must hash to the live name exactly, so a
+generator input (a `.stg.yaml`), a library, the config or a generator that
+changed since refuses the prime and the build goes cold. A full run of the
+registry cannot see those (it transpiles today's `gen/`), and neither can
+the comparison. The registry then takes live's file order (a copy is listed
+after the tree, and `init.mjs` loads objects in that order), and each
+copied file is placed where the live source map says it was read from.
+
+Before this every activation through ADT was cold. Measured on the stand-in
+(create, two edits, delete, twice; `OSD_WARM=1 STG_DEV=1`): 110 s and 7
+boots with every activation cold, then 77 s and 4 boots with both edits
+warm (1.5 s each); with the proof, 103 s and 5 boots, both edits warm (the
+second after a prime on demand, 18 s in all).
+
 ## What is warm, and what is cold
 
 The generators read the tree too, and a change one of them would see has to
@@ -119,8 +154,35 @@ registry is primed again.
   recycle, sessions kept -- and says how that process got it. A catch-up
   recycle a swap brings (the swap limit, the heap) is awaited by that
   swap's activation, which then answers cold with the reason. A runtime
-  changing hands is waited for, at most `OSD_TRANSITION_MS` (60 s), and
-  then the activation fails saying so rather than hang.
+  changing hands is waited for while its boot keeps talking, and the
+  activation fails, saying so rather than hang, once it has said nothing
+  for `OSD_TRANSITION_MS` (60 s) -- silence, not slowness, as the
+  runtime's own boot limit already was. A fixed 60 s had turned a boot
+  that was slow and correct into a failed activation (vsp-i7, 0.6.1511: a
+  boot past 60 s under load, the cross-reference alone 21.6 s).
+- **A save is not an activation.** The dev loop (`STG_DEV=1`) never builds
+  a file of an object that is inactive and still holds the version saved
+  through the store (`ObjectStore#savedInactive`): an ADT create or save,
+  whose activation is the façade's. Without this every create and PUT
+  through the façade was a cold build and a recycle of its own -- 21
+  recycles in vsp-i7's suite, 1.52x the cold run's wall time, and the
+  activation behind them timed out -- and the build made a saved-only
+  version live. The rule reads the store's persistent inactive set, not a
+  record of the write: it ends with the activation, the delete, or bytes
+  that differ from the saved version (`outside`, which the dev loop builds
+  and activates like any other editor's change). So the same bytes again
+  -- another editor, a checkout, a watcher event that comes late, a retry
+  after a failed activation -- stay that inactive source until somebody
+  activates it. A delete is not covered: it takes effect at once, as on a
+  system, and the dev loop builds the tree without the object.
+  Measured on a create, two edits and a delete, twice
+  (`OSD_WARM=1 STG_DEV=1`): 290 s and 10 recycles before, 83-90 s and 2
+  recycles after, both edits warm (1.3-1.5 s).
+- **The prime waits for a runtime changing hands**, and a cold build stops
+  a comparison of a warm generation the tree has left (it could only end
+  inconclusive, and it was a second cold transpile beside the build). The
+  prime blocks the process that supervises the runtime; landing in the
+  middle of a recycle, it made that recycle read 17-30 s slower.
 
 ## What a swap means, compared with a system
 
@@ -145,9 +207,23 @@ them cherry-picked).
 
 ## Not yet
 
+- **Generators should read the build view; until then, any inactive
+  generator input forces cold.** They read the raw tree (a saved DDLS, YAML,
+  TABL, a class's `INTERFACES` or AMDP), so while such an object is
+  inactive, or a class's saved source differs from its copy in a way the
+  warm rule refuses, every build is cold (`WarmCompiler#generatorInput`).
+
 - **The cross-reference after a swap** stays at the generation the process
   started on until the catch-up recycle: where-used over a class edited
   since reads the old rows. Incremental over the closure is the follow-up.
+- **The cross-reference is still a full parse per new generation** at every
+  start (~5 s alone, 21.6 s on vsp-i7 under load). `build/xref/` now keeps
+  the last eight generations' rows rather than one, so a tree that goes
+  back to a generation (an object created and deleted again) is a hit.
+  Seeding after the runtime answers would not take the parse off the
+  child's single thread, only move the stall to the first requests and
+  leave where-used empty meanwhile; per-object rows keyed by the file
+  digest are the follow-up.
 - **The dev loop's cold path** still reparses the tree three times (the
   parent's check, the build, the child's cross-reference seed; foreman-dell's
   measurement) and runs every generator on every save. The warm path skips

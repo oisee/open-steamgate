@@ -33,8 +33,16 @@ export function devLoop(options = {}) {
 
   // one pass: the files that changed since the last one, as objects
   async function run() {
-    const files = [...pending.keys()];
+    const changed = [...pending.keys()];
     pending.clear();
+    // a file of an object saved through the store and not activated since,
+    // still holding the saved bytes, is the activation's to load, never this
+    // loop's: a save is not an activation (ObjectStore#savedInactive)
+    const files = changed.filter((file) => store.savedInactive?.(file) !== true);
+    if (files.length === 0) {
+      log(`${changed.length} file${changed.length === 1 ? "" : "s"} saved and not activated; left to its activation`);
+      return {ok: true, stage: "inactive"};
+    }
     const objects = new Map();
     for (const file of files) {
       const key = objectOf(basename(file));

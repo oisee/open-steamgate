@@ -470,6 +470,15 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     return {store, src, compiler, events, done};
   };
 
+  // a save by an editor that is not the store (VS Code, vim): other bytes on
+  // disk, which the dev loop takes as a change -- the store's own write it
+  // leaves to the activation that owns it (ObjectStore#ownWrite)
+  const editorSave = (store, text) => {
+    writeFileSync(join(store.root, "src/osd/zcl_a.clas.abap"),
+      `CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\nCLASS zcl_a IMPLEMENTATION. ENDCLASS.\n* ${text}\n`);
+    return "src/osd/zcl_a.clas.abap";
+  };
+
   // an ADT activation of ZCL_A through the real façade router
   const activate = async (store) => {
     const express = (await import("express")).default;
@@ -528,7 +537,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     try {
       src.text = "rv = 2.";
       const loop = devLoop({store, watch: false, log: () => {}});
-      const dev = loop.touch("src/osd/zcl_a.clas.abap");
+      const dev = loop.touch(editorSave(store, src.text));
       await sleep(5);
       const [d, a] = await Promise.all([dev, activate(store)]);
       expect(d).to.include({ok: true, stage: "live"});
@@ -549,7 +558,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     try {
       src.text = "rv = 2.";
       const loop = devLoop({store, watch: false, log: () => {}});
-      await loop.touch("src/osd/zcl_a.clas.abap");
+      await loop.touch(editorSave(store, src.text));
       const a = await activate(store);
       expect(swaps(events)).to.deep.equal(["swap g1->g2"]);
       expect(a).to.include({status: 200, build: "warm", swap: String(SWAP_MS)});
@@ -634,6 +643,84 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
       expect(r, "hung").to.not.equal("hung");
       expect(r).to.include({ok: false});
       expect(r.error).to.match(/still changing hands/);
+    } finally {
+      done();
+    }
+  });
+
+  // vsp-i7 on 0.6.1511: a boot of more than 60 s under load (the
+  // cross-reference alone 21.6 s) and a fixed 60-s limit answered a slow,
+  // correct recycle as a failed activation. A boot that keeps saying it is
+  // booting is waited for; only silence is late.
+  it("a boot that keeps talking is waited for past the limit, then loaded", async () => {
+    const {store, src, events, done} = setup();
+    const runtime = store.served;
+    let talking;
+    try {
+      store.transitionMs = 100;
+      runtime.running = false;
+      runtime.booting = {phase: "seeding the cross-reference", since: Date.now(), heard: Date.now()};
+      talking = setInterval(() => { runtime.booting.heard = Date.now(); }, 30);
+      runtime.recycling = sleep(400).then(() => {
+        clearInterval(talking);
+        runtime.booting = undefined;
+        runtime.recycling = undefined;
+        runtime.running = true;
+        runtime.epoch = 2;
+        return {generation: runtime.generation, ms: 400};
+      });
+      src.text = "rv = 2.";
+      const r = await Promise.race([store.publish(), sleep(3000).then(() => "hung")]);
+      expect(r, "hung").to.not.equal("hung");
+      expect(r.error).to.equal(undefined);
+      expect(r).to.include({ok: true, hot: true, generation: "g2"});
+      expect(swaps(events)).to.deep.equal(["swap g1->g2"]);
+    } finally {
+      clearInterval(talking);
+      done();
+    }
+  });
+
+  it("a boot that falls silent is late after the limit, however long it talked before", async () => {
+    const {store, src, done} = setup();
+    const runtime = store.served;
+    let talking;
+    try {
+      store.transitionMs = 100;
+      runtime.running = false;
+      runtime.booting = {phase: "starting", since: Date.now(), heard: Date.now()};
+      talking = setInterval(() => { runtime.booting.heard = Date.now(); }, 30);
+      setTimeout(() => clearInterval(talking), 250);
+      runtime.recycling = new Promise(() => {});
+      src.text = "rv = 2.";
+      const began = Date.now();
+      const r = await Promise.race([store.publish(), sleep(3000).then(() => "hung")]);
+      expect(r, "hung").to.not.equal("hung");
+      expect(r).to.include({ok: false});
+      expect(r.error).to.match(/still changing hands after \d+ ms, 100 ms of it without a word/);
+      expect(Date.now() - began, "waited while it talked").to.be.at.least(300);
+    } finally {
+      clearInterval(talking);
+      done();
+    }
+  });
+
+  it("the warm registry is not primed while the runtime changes hands, and a build does not wait on that", async () => {
+    const {store, done} = setup();
+    const runtime = store.served;
+    try {
+      let primed = 0;
+      store.warmState.compiler = {primed: false, async prime() { primed++; this.primed = true; return {}; }};
+      let settle;
+      runtime.recycling = new Promise((ok) => { settle = ok; });
+      const prime = store.warmUp();
+      await sleep(20);
+      expect(primed, "primed during the recycle").to.equal(0);
+      expect(store.warmState.priming, "a build would wait on it").to.equal(undefined);
+      runtime.recycling = undefined;
+      settle({generation: runtime.generation, ms: 1});
+      await prime;
+      expect(primed).to.equal(1);
     } finally {
       done();
     }
@@ -730,7 +817,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     const {store, src, done} = setup();
     try {
       src.text = "rv = 2.";
-      await devLoop({store, watch: false, log: () => {}}).touch("src/osd/zcl_a.clas.abap");
+      await devLoop({store, watch: false, log: () => {}}).touch(editorSave(store, src.text));
       // a catch-up recycle onto g2, outside any publish: a new process
       store.served.epoch = 2;
       const a = await activate(store);
@@ -815,6 +902,23 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
   });
 });
 
+describe("tools/osd-warm: a comparison the tree has left", () => {
+  // vsp's pattern: a warm edit starts a comparison (a cold transpile in a
+  // child), and the next create is a cold build beside it; the comparison
+  // can only end inconclusive, and the activation waiting on the build paid
+  // for both transpiles
+  it("is stopped by a cold build, and one of the tree as it is is kept", () => {
+    const kills = [];
+    const child = (hash) => ({osdHash: hash, exitCode: null, kill: (s) => kills.push(`${hash} ${s}`)});
+    const compiler = {verifying: child("g2")};
+    expect(WarmCompiler.prototype.cancelVerify.call(compiler, "g2"), "the tree is still g2").to.equal(false);
+    expect(WarmCompiler.prototype.cancelVerify.call(compiler, "g3")).to.equal(true);
+    expect(kills).to.deep.equal(["g2 SIGTERM"]);
+    expect(compiler.verifying.osdCancelled).to.match(/a cold build replaced the tree/);
+    expect(WarmCompiler.prototype.cancelVerify.call({verifying: undefined}, "g3")).to.equal(false);
+  });
+});
+
 describe("tools/osd-warm: where the filesystem will not link", () => {
   it("copies instead, for the errors that mean 'not here', and rethrows the rest", () => {
     const dir = mkdtempSync(join(tmpdir(), "osd-link-"));
@@ -843,6 +947,268 @@ describe("tools/osd-warm: where the filesystem will not link", () => {
       if (before !== undefined) process.env.OSD_WARM = before;
       rmSync(dir, {recursive: true, force: true});
     }
+  });
+});
+
+// #460 keeps every inactive object out of the build (its active copy, or
+// nothing), and an ADT save makes its object inactive: with the registry on
+// the raw tree, every activation through ADT went cold. The registry is now
+// on the build view, and an activation of S is a warm edit of it.
+describe("tools/osd-warm: the build view, with other objects inactive", function () {
+  this.timeout(180000);
+  let root;
+  let store;
+  const A = "ZCL_WV_A";
+  const B = "ZCL_WV_B";
+  const src = (name, v) => `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS v RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD v.\n    rv = ${v}.\n  ENDMETHOD.\nENDCLASS.\n`;
+  const out = (name) => readFileSync(join(root, "output", `${name.toLowerCase()}.clas.mjs`), "utf8");
+  const activate = async (name) => {
+    const checked = store.warmActivation("CLAS", name);
+    const r = await store.publish({activate: [{type: "CLAS", name}]});
+    if (r.ok === true) expect(store.completeActivations([checked], r.transpile.built), "promoted").to.equal(true);
+    return r;
+  };
+
+  before(async function () {
+    const {Transpiler, core, plugin} = modulesOf(REPO);
+    const missing = plugin !== undefined ? "a transpiler plugin is installed" : await probe(Transpiler, core);
+    if (missing !== undefined) {
+      console.log(`      (skipped: ${missing})`);
+      this.skip();
+    }
+    root = realpathSync(mkdtempSync(join(tmpdir(), "osd-warm-view-")));
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "zcl_wv_a.clas.abap"), src(A, 1));
+    writeFileSync(join(root, "src", "zcl_wv_b.clas.abap"), src(B, 1));
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+      input_folder: "src", input_filter: [], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
+      options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+    }));
+    writeFileSync(join(root, "package.json"), "{}");
+    symlinkSync(join(REPO, "node_modules"), join(root, "node_modules"));
+    store = new ObjectStore({root, roots: [{path: "src", writable: true}], libs: [], build: {generators: false}});
+    expect(await store.publish()).to.include({ok: true});
+    store.warmState = {on: true, compiler: undefined, priming: undefined, reason: undefined, verifying: undefined, next: undefined, last: undefined, timer: undefined};
+    expect(await store.warmUp()).to.not.equal(undefined, store.warmState.reason);
+  });
+  after(() => {
+    store?.warmState?.compiler?.drop();
+    clearTimeout(store?.warmState?.timer);
+    clearTimeout(store?.warmState?.reprime);
+    if (root !== undefined) rmSync(root, {recursive: true, force: true});
+  });
+
+  it("with B inactive, activating an edit of A is warm, and B keeps its active copy", async () => {
+    store.write("CLAS", B, src(B, 20));
+    store.write("CLAS", A, src(A, 2));
+    const r = await activate(A);
+    expect(r.ok, JSON.stringify(r.transpile)).to.equal(true);
+    expect(r.transpile.warm, store.warmState.reason).to.equal(true);
+    // A's edit, and B, now read from its copy: the same code, a source map
+    // that names the copy, as a cold build of this view writes it
+    expect(r.transpile.modules.sort()).to.deep.equal(["zcl_wv_a.clas.mjs", "zcl_wv_b.clas.mjs"]);
+    expect(out(A)).to.include("IntegerFactory.get(2)");
+    expect(out(B), "B serves its active copy").to.include("IntegerFactory.get(1)").and.not.include("get(20)");
+    expect(store.stateOf(store.find("CLAS", B)).version).to.equal("inactive");
+    expect(store.stateOf(store.find("CLAS", A)).version).to.equal("active");
+    // the verifier compares it with a cold transpile of the same view
+    const v = await store.warmState.compiler.verify(r.transpile.hash);
+    expect(v.verdict, JSON.stringify(v)).to.equal("same");
+  });
+
+  it("a failed warm activation leaves the registry on the old view, and the next activation is warm", async () => {
+    store.write("CLAS", A, src(A, 3).replace("rv = 3.", "rv = nope."));
+    const failed = await activate(A);
+    expect(failed.ok).to.equal(false);
+    expect(failed.transpile).to.include({warm: true, check: true});
+    expect(out(A)).to.include("IntegerFactory.get(2)");
+    store.write("CLAS", A, src(A, 4));
+    const r = await activate(A);
+    expect(r.ok, JSON.stringify(r.transpile)).to.equal(true);
+    expect(r.transpile.warm, store.warmState.reason).to.equal(true);
+    expect(out(A)).to.include("IntegerFactory.get(4)");
+    expect(out(B)).to.include("IntegerFactory.get(1)");
+    // and B, activated at last, is a warm edit too: its copy gives way to its source
+    const b = await activate(B);
+    expect(b.transpile.warm, store.warmState.reason).to.equal(true);
+    expect(out(B)).to.include("IntegerFactory.get(20)");
+    const v = await store.warmState.compiler.verify(b.transpile.hash);
+    expect(v.verdict, JSON.stringify(v)).to.equal("same");
+  });
+
+  // an ADT client creates, saves and activates (cold: the object is new),
+  // then saves and activates again at once -- before the reprime five
+  // seconds later, so that one went cold as well (the stand-in, round 2)
+  it("the activation right after a cold one primes on demand and is warm", async () => {
+    writeFileSync(join(root, "src", "zcl_wv_c.clas.abap"), src("ZCL_WV_C", 1));
+    store.index = undefined;
+    const made = await activate("ZCL_WV_C");
+    expect(made.ok, JSON.stringify(made.transpile)).to.equal(true);
+    expect(made.transpile.warm).to.not.equal(true);
+    store.write("CLAS", "ZCL_WV_C", src("ZCL_WV_C", 2));
+    const r = await activate("ZCL_WV_C");
+    expect(r.transpile.warm, store.warmState.reason).to.equal(true);
+    expect(out("ZCL_WV_C")).to.include("IntegerFactory.get(2)");
+    const v = await store.warmState.compiler.verify(r.transpile.hash);
+    expect(v.verdict, JSON.stringify(v)).to.equal("same");
+  });
+});
+
+// critic on ab4ded7c: a prime whose view names the live generation
+// differently (a class saved since, read from its copy) was accepted on a
+// full run of the registry alone, which transpiles today's gen/ and cannot
+// see a generator input that changed. A .stg.yaml corrupted before the
+// reprime became the warm baseline, and a class activation built warm over
+// it where a cold build would refuse it.
+describe("tools/osd-warm: a renamed view is primed only on proof", function () {
+  this.timeout(180000);
+  let root;
+  let store;
+  const src = (name, v) => `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS v RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD v.\n    rv = ${v}.\n  ENDMETHOD.\nENDCLASS.\n`;
+  const fresh = () => new WarmCompiler({root, overlay: (s) => store.overlay(s), keyOf: (f) => store.objectKeyOf(f)});
+
+  before(async function () {
+    const {Transpiler, core, plugin} = modulesOf(REPO);
+    const missing = plugin !== undefined ? "a transpiler plugin is installed" : await probe(Transpiler, core);
+    if (missing !== undefined) {
+      console.log(`      (skipped: ${missing})`);
+      this.skip();
+    }
+    root = realpathSync(mkdtempSync(join(tmpdir(), "osd-warm-proof-")));
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "zcl_wp_a.clas.abap"), src("ZCL_WP_A", 1));
+    writeFileSync(join(root, "src", "zcl_wp_b.clas.abap"), src("ZCL_WP_B", 1));
+    writeFileSync(join(root, "src", "zwp_svc.stg.yaml"), "service: ZWP_SVC\nentities: []\n");
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+      input_folder: "src", input_filter: [], exclude_filter: ["\\.stg\\.yaml$"], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
+      options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+    }));
+    writeFileSync(join(root, "package.json"), "{}");
+    symlinkSync(join(REPO, "node_modules"), join(root, "node_modules"));
+    store = new ObjectStore({root, roots: [{path: "src", writable: true}], libs: [], build: {generators: false}});
+    const first = await store.publish();
+    expect(first.ok, JSON.stringify(first.transpile)).to.equal(true);
+    // a class saved since the live build: read from its copy now
+    store.write("CLAS", "ZCL_WP_B", src("ZCL_WP_B", 2));
+  });
+  after(() => {
+    if (root !== undefined) rmSync(root, {recursive: true, force: true});
+  });
+
+  it("primes when the only difference is a save since, put back to its active bytes", async () => {
+    const w = fresh();
+    const r = await w.prime();
+    expect(r.files).to.equal(2);
+    w.drop();
+  });
+
+  // the copy is listed after the tree, and live read the file from the
+  // tree: the registry takes live's order, and a build of the view that
+  // reads the copy compares equal with a cold build of that view
+  it("a save since that sorts first: primed in live's order, the next build verified", async () => {
+    store.write("CLAS", "ZCL_WP_A", src("ZCL_WP_A", 5));
+    const w = fresh();
+    await w.prime();
+    store.write("CLAS", "ZCL_WP_B", src("ZCL_WP_B", 6));
+    const built = await w.build(new Set(["CLAS ZCL_WP_B"]));
+    const v = await w.verify(built.hash);
+    expect(v.verdict, JSON.stringify(v)).to.equal("same");
+    w.drop();
+  });
+
+  it("refuses when a generator input changed as well, and the activation goes cold", async () => {
+    writeFileSync(join(root, "src", "zwp_svc.stg.yaml"), "service: [ this is not yaml\n");
+    let error;
+    try {
+      await fresh().prime();
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.code, error?.message).to.equal("NOT_WARM");
+    expect(error.message).to.match(/with the saves since put back/);
+    // and through the store: the activation of a class is not built warm over it
+    store.warmState = {on: true, compiler: undefined, priming: undefined, reason: undefined, verifying: undefined, next: undefined, last: undefined, timer: undefined};
+    await store.warmUp();
+    expect(store.warmState.compiler?.primed, store.warmState.reason).to.not.equal(true);
+    store.write("CLAS", "ZCL_WP_A", src("ZCL_WP_A", 2));
+    const r = await store.publish({activate: [{type: "CLAS", name: "ZCL_WP_A"}]});
+    expect(r.transpile.warm, "built warm over a changed generator input").to.not.equal(true);
+    clearTimeout(store.warmState.reprime);
+  });
+
+  it("a valid edit of a generator input is not left stale either", async () => {
+    writeFileSync(join(root, "src", "zwp_svc.stg.yaml"), "service: ZWP_SVC\nentities: [one]\n");
+    store.write("CLAS", "ZCL_WP_B", src("ZCL_WP_B", 3));
+    let error;
+    try {
+      await fresh().prime();
+    } catch (e) {
+      error = e;
+    }
+    expect(error?.code, error?.message).to.equal("NOT_WARM");
+  });
+});
+
+// critic on d75d8fdc: the generators read the raw tree, not the build view.
+// A DDLS inactive when live was built, saved again with a source cds2ddic
+// refuses, hashes as its unchanged active copy -- and a class activation
+// built warm over the gen/ of the last cold build, where a cold build runs
+// cds2ddic over the saved source and fails. Until the generators read the
+// build view, an inactive generator input forces cold.
+describe("tools/osd-warm: an inactive generator input forces cold", function () {
+  this.timeout(180000);
+  let root;
+  let store;
+  const src = (name, v) => `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS v RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD v.\n    rv = ${v}.\n  ENDMETHOD.\nENDCLASS.\n`;
+  const view = (field) => `define view ZWG_V as select from t000 { ${field} }\n`;
+  const activate = async (name) => {
+    const checked = store.warmActivation("CLAS", name);
+    const r = await store.publish({activate: [{type: "CLAS", name}]});
+    if (r.ok === true) store.completeActivations([checked], r.transpile.built);
+    return r;
+  };
+
+  before(async function () {
+    const {Transpiler, core, plugin} = modulesOf(REPO);
+    const missing = plugin !== undefined ? "a transpiler plugin is installed" : await probe(Transpiler, core);
+    if (missing !== undefined) {
+      console.log(`      (skipped: ${missing})`);
+      this.skip();
+    }
+    root = realpathSync(mkdtempSync(join(tmpdir(), "osd-warm-gen-")));
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "zcl_wg_a.clas.abap"), src("ZCL_WG_A", 1));
+    writeFileSync(join(root, "src", "zwg_v.ddls.asddls"), view("mandt"));
+    writeFileSync(join(root, "src", "zwg_v.ddls.xml"), "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<abapGit version=\"v1.0.0\" serializer=\"LCL_OBJECT_DDLS\" serializer_version=\"v1.0.0\">\n <asx:abap xmlns:asx=\"http://www.sap.com/abapxml\" version=\"1.0\">\n  <asx:values>\n   <DDLS>\n    <DDLNAME>ZWG_V</DDLNAME>\n   </DDLS>\n  </asx:values>\n </asx:abap>\n</abapGit>\n");
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+      input_folder: "src", input_filter: [], exclude_filter: ["\\.ddls\\."], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
+      options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+    }));
+    writeFileSync(join(root, "package.json"), "{}");
+    symlinkSync(join(REPO, "node_modules"), join(root, "node_modules"));
+    store = new ObjectStore({root, roots: [{path: "src", writable: true}], libs: [], build: {generators: false}});
+    expect((await store.publish()).ok).to.equal(true);
+    // the DDLS saved and not activated, and live built over it
+    store.write("DDLS", "ZWG_V", view("mtext"));
+    store.write("CLAS", "ZCL_WG_A", src("ZCL_WG_A", 2));
+    const r = await activate("ZCL_WG_A");
+    expect(r.ok, JSON.stringify(r.transpile)).to.equal(true);
+    expect(store.stateOf(store.find("DDLS", "ZWG_V")).version).to.equal("inactive");
+  });
+  after(() => {
+    store?.warmState?.compiler?.drop?.();
+    clearTimeout(store?.warmState?.reprime);
+    if (root !== undefined) rmSync(root, {recursive: true, force: true});
+  });
+
+  it("the DDLS saved again with a source a generator refuses: the class activation is not warm", async () => {
+    store.warmState = {on: true, compiler: undefined, priming: undefined, reason: undefined, verifying: undefined, next: undefined, last: undefined, timer: undefined};
+    await store.warmUp();
+    store.write("DDLS", "ZWG_V", "define view ZWG_V as select from { this is not cds\n");
+    store.write("CLAS", "ZCL_WG_A", src("ZCL_WG_A", 3));
+    const r = await activate("ZCL_WG_A");
+    expect(r.transpile.warm, "built warm over an inactive generator input").to.not.equal(true);
+    expect(store.warmState.reason).to.match(/DDLS ZWG_V is inactive, and the generators read its saved source/);
   });
 });
 
