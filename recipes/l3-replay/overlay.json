@@ -1,0 +1,42 @@
+[
+  {
+    "from": "lv_work = 'sim'.",
+    "to": "( lv_work = 'sim' OR lv_work = 'replay' ).",
+    "scope": "both"
+  },
+  {
+    "from": "iv_bind = lv_run_bind ) = 'sim'.",
+    "to": "iv_bind = lv_run_bind ) = 'sim'\n       OR {{ports_class}}=>variant( iv_port = 'work' iv_bind = lv_run_bind ) = 'replay'.",
+    "scope": "runner"
+  },
+  {
+    "from": "iv_bind = lv_bound ) = 'sim'.",
+    "to": "iv_bind = lv_bound ) = 'sim'\n       OR {{ports_class}}=>variant( iv_port = 'work' iv_bind = lv_bound ) = 'replay'.",
+    "scope": "runner"
+  },
+  {
+    "from": "iv_bind = iv_bind ) = 'sim'.",
+    "to": "iv_bind = iv_bind ) = 'sim'\n       OR variant( iv_port = {{port | literal}} iv_bind = iv_bind ) = 'replay'.",
+    "scope": "factory"
+  },
+  {
+    "from": "IMPORTING iv_hash TYPE csequence\n",
+    "to": "IMPORTING iv_hash TYPE csequence\n                iv_work TYPE string DEFAULT 'sim'\n",
+    "scope": "runner"
+  },
+  {
+    "from": "sim_hash( rs_rule-model_hash )",
+    "to": "sim_hash( iv_hash = rs_rule-model_hash iv_work = lv_work )",
+    "scope": "runner"
+  },
+  {
+    "from": "lv_hash = sim_hash( iv_hash ).",
+    "to": "lv_hash = sim_hash( iv_hash = iv_hash iv_work = {{ports_class}}=>variant( iv_port = 'work' iv_bind = lv_bound ) ).",
+    "scope": "runner"
+  },
+  {
+    "from": "      CONCATENATE 'sim256:' rv_hash+7 INTO rv_hash.",
+    "to": "      IF iv_work = 'replay'.\n        CONCATENATE 'rpl256:' rv_hash+7 INTO rv_hash.\n      ELSE.\n        CONCATENATE 'sim256:' rv_hash+7 INTO rv_hash.\n      ENDIF.",
+    "scope": "runner"
+  }
+]

@@ -78,7 +78,8 @@ CLASS zcl_l3_fleet2_work_sim DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_u TYPE i
       RETURNING VALUE(rv_hits) TYPE i.
     CLASS-METHODS act
-      IMPORTING is_draw TYPE ty_draw.
+      IMPORTING is_draw TYPE ty_draw
+                is_pile TYPE zif_l3_fleet2_work=>ty_pile.
 ENDCLASS.
 
 CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
@@ -478,9 +479,33 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
 
   METHOD act.
     " the work is done for real: the wait, then a normal end or an abnormal one
-    IF is_draw-wait > 0.
-      WAIT UP TO is_draw-wait SECONDS.
-    ENDIF.
+    DATA ls_audit TYPE zosd_l3_doctor.
+    DATA lv_hits TYPE i.
+    ls_audit-mandt = sy-mandt.
+    ls_audit-run_id = is_pile-run_id.
+    ls_audit-set_name = 'fleet2'.
+    ls_audit-rule_name = is_pile-rule.
+    ls_audit-pile_no = is_pile-pile_no.
+    SELECT SINGLE check_date stage_no FROM zosd_l3_pile
+      INTO (ls_audit-check_date, ls_audit-stage_no)
+      WHERE run_id = is_pile-run_id
+        AND rule_name = is_pile-rule
+        AND pile_no = is_pile-pile_no.
+    ls_audit-doc_action = 'WORK'.
+    lv_hits = lines( is_draw-keys ).
+    ls_audit-reason = |{ is_draw-outcome } { is_draw-wait } { lv_hits }|.
+    GET TIME STAMP FIELD ls_audit-acted.
+    " negative audit keys keep simultaneous work apart from doctor actions
+    SELECT MIN( seq ) FROM zosd_l3_doctor INTO ls_audit-seq
+      WHERE run_id = is_pile-run_id.
+    DO.
+      ls_audit-seq = ls_audit-seq - 1.
+      INSERT zosd_l3_doctor FROM ls_audit.
+      IF sy-subrc = 0.
+        EXIT.
+      ENDIF.
+    ENDDO.
+    WAIT UP TO is_draw-wait SECONDS.
     IF is_draw-outcome = 'DUMP' OR is_draw-outcome = 'HANG'.
       RAISE EXCEPTION TYPE zcx_l3_fleet2_port
         EXPORTING iv_port = 'work'
@@ -496,7 +521,7 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
     DATA lv_text TYPE string.
     ls_draw = draw( is_pile = is_pile
                     it_keys = it_keys ).
-    act( ls_draw ).
+    act( is_draw = ls_draw is_pile = is_pile ).
     ls_config = config( is_pile-rule ).
     LOOP AT ls_draw-keys INTO lv_key.
       lv_text = alert( is_pile = is_pile
@@ -511,7 +536,7 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
     ls_draw = draw( is_pile = is_pile
                     it_keys = it_keys
                     iv_filter = abap_true ).
-    act( ls_draw ).
+    act( is_draw = ls_draw is_pile = is_pile ).
     rt_keys = ls_draw-keys.
   ENDMETHOD.
 ENDCLASS.

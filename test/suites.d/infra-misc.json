@@ -46,6 +46,7 @@
     "test/dsl-l3-governor.mjs",
     "test/dsl-l3-sim.mjs",
     "test/dsl-l3-graph.mjs",
+    "test/dsl-l3-replay.mjs",
     "test/xml-wellformed.mjs",
     "test/prove-on-system.mjs",
     "test/prove-inplace.mjs",

@@ -16,7 +16,7 @@
 // time does no floating point. tools/dsl-l3.mjs calls this; it knows the set
 // language and nothing of any domain.
 
-export const SIM_KEYS = ["seed", "time_scale", "allow_sink", "default", "rules", "stages"];
+export const SIM_KEYS = ["seed", "time_scale", "allow_sink", "default", "rules", "stages", "profile"];
 export const FIELDS = ["duration", "outcome", "slow_factor", "hits", "autoclose", "keep"];
 // the order of the outcome thresholds: u below ok is OK, below ok + slow SLOW, ...
 export const OUTCOMES = ["ok", "slow", "dump", "hang"];
@@ -83,6 +83,7 @@ function duration(config, u) {
 }
 
 function hits(config, u) {
+  if (config.hits === "Q") return duration({dist: "L", knots: config.cdf}, u);
   if (config.hits === "F") return config.hits_a;
   if (config.hits === "U") return config.hits_a + scaled(config.hits_b - config.hits_a + 1, u, MILLION);
   const cdf = config.cdf.split(" ").map(Number);
@@ -100,7 +101,7 @@ export function draw(config, {run, rule, pile, attempt, seed, scale, stale}, key
   const base = duration(config, stream.next());
   const count = hits(config, stream.next());
   let chosen;
-  if (filter) {
+  if (filter && !config.empirical) {
     chosen = keys.filter(() => stream.next() < config.keep);
   } else {
     const pool = [...keys];
@@ -111,7 +112,7 @@ export function draw(config, {run, rule, pile, attempt, seed, scale, stale}, key
     }
     chosen = pool.slice(0, k).sort();
   }
-  let seconds = outcome === "SLOW" ? base * config.slow_factor : outcome === "DUMP" ? Math.floor(base / 2)
+  let seconds = config.empirical ? base : outcome === "SLOW" ? base * config.slow_factor : outcome === "DUMP" ? Math.floor(base / 2)
     : outcome === "HANG" ? stale + Math.floor(stale / 2) : base;
   seconds = Math.min(seconds, MODULUS);
   const wait = Number((big(seconds) * big(scale) + big(MILLION / 2)) / big(MILLION));
@@ -150,7 +151,7 @@ export const precedence = (sets, rule, stage, name) => sets.rules[rule]?.[name] 
 export function sinkSafety({bindings, sink, allow}) {
   const work = bindings[WORK_PORT];
   const bound = sink.variants.find((v) => v.name === bindings[sink.name]);
-  if (work === "sim" && bound && (bound.is_log || bound.hand) && !allow.includes(bound.name)) return bound.name;
+  if (["sim", "replay"].includes(work) && bound && (bound.is_log || bound.hand) && !allow.includes(bound.name)) return bound.name;
   return undefined;
 }
 
@@ -178,7 +179,7 @@ export function compileSimulate(doc, model, all, {line, fail, bindings}) {
   const unsafe = sinkSafety({bindings, sink, allow});
   if (unsafe) fail(line(`bindings/${WORK_PORT}`), `work is bound to sim and sink ${sink.name} to ${unsafe}, a production variant; a simulated run writes there only when simulate.allow_sink names it`);
   for (const port of model.ports) {
-    if (bindings[port.name] === "sim" && port.name !== WORK_PORT && bindings[WORK_PORT] !== "sim") fail(line(`bindings/${port.name}`), `${port.name} is bound to sim, which closes alerts by chance; a sim variant is bound only beside work: sim`);
+    if (["sim", "replay"].includes(bindings[port.name]) && port.name !== WORK_PORT && !["sim", "replay"].includes(bindings[WORK_PORT])) fail(line(`bindings/${port.name}`), `${port.name} is bound to sim, which closes alerts by chance; a sim variant is bound only beside work: sim`);
   }
 
   // one field of a field set: its parsed value and the line it came from
@@ -330,6 +331,11 @@ export function simPorts(doc, portDocs, bindingDocs, {line, fail}) {
   if (declared !== undefined && declared?.kind !== "work") fail(line(`ports/${WORK_PORT}`), `port ${WORK_PORT} is the work of a pile in a set with simulate: (kind: work)`);
   const injected = {port: declared === undefined, binding: bindingDocs[WORK_PORT] === undefined};
   if (injected.port) portDocs[WORK_PORT] = {kind: "work", variants: {real: "generated", sim: "generated"}};
+  if (doc.simulate.profile === undefined && Object.values(portDocs).some((p) => (p?.kind === "work" || p?.kind === "autoclose") && p?.variants?.replay === "generated")) fail(line("simulate"), "a replay variant needs simulate.profile");
+  if (doc.simulate.profile !== undefined) {
+    portDocs[WORK_PORT].variants.replay = "generated";
+    for (const def of Object.values(portDocs)) if (def.kind === "autoclose" && def.variants?.sim) def.variants.replay = "generated";
+  }
   if (injected.binding) bindingDocs[WORK_PORT] = "real";
   return injected;
 }
@@ -338,11 +344,11 @@ export function simPorts(doc, portDocs, bindingDocs, {line, fail}) {
 export function simVariant({kind, vname, generated, simulate, at, fail}) {
   if (kind === "work") {
     if (!generated) fail(at, `the variants of the work port are generated (real, sim); ${vname} cannot be a class of its own`);
-    return {is_inline: vname === "real", is_sim: vname === "sim"};
+    return {is_inline: vname === "real", is_sim: vname === "sim", is_replay: vname === "replay"};
   }
-  if (generated && vname === "sim") {
+  if (generated && ["sim", "replay"].includes(vname)) {
     if (!simulate) fail(at, "a sim variant comes with simulate:, which gives its probabilities");
-    return {is_sim: true, sim_only: true};
+    return {is_sim: true, is_replay: vname === "replay", sim_only: true};
   }
   return {};
 }
@@ -353,7 +359,7 @@ export const configOf = (node) => ({
   ok: Number(node.outcome.ok), slow: Number(node.outcome.slow), dump: Number(node.outcome.dump), hang: Number(node.outcome.hang),
   slow_factor: Number(node.slow_factor.value), hits: node.hits.dist, hits_a: Number(node.hits.a), hits_b: Number(node.hits.b),
   cdf: (node.hits.chunks ?? []).map((c) => c.text).join(""), autoclose: Number(node.autoclose.value), keep: Number(node.keep.value),
-  prefix: node.layout.prefix, key_length: Number(node.layout.length),
+  empirical: !!node.empirical, prefix: node.layout.prefix, key_length: Number(node.layout.length),
 });
 
 // What the orchestration does with one pile, as the twin sees it: attempts

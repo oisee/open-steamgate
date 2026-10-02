@@ -25,6 +25,8 @@ import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
 import {compileSchedule, compileStages, explainStage, readStages, worklistVariants} from "./dsl-l3-stages.mjs";
 import {compileResilience, resilienceNodes} from "./dsl-l3-resilience.mjs";
 import {compileGovernor, governorTemplate} from "./dsl-l3-governor.mjs";
+import {replayOverlay} from "./dsl-l3-replay-overlay.mjs";
+import {compileReplay} from "./dsl-l3-replay.mjs";
 import {compileSettings} from "./dsl-l3-settings.mjs";
 import {compileSimulate, simPorts, simVariant, WORK_PORT} from "./dsl-l3-sim.mjs";
 import {docDrift, graphJson, graphMermaid, graphOf} from "./dsl-l3-graph.mjs";
@@ -44,7 +46,7 @@ export const PORT_TEMPLATES = {
 // the opt-in recipe overlays of a set (docs/dsl-l3.md, "Governor" and "Simulated twin")
 const OVERLAY = {governor: "recipes/l3-governor", simulate: "recipes/l3-sim"};
 // what a port of each kind may be served by without a class of its own
-export const GENERATED = {source: ["table", "dummy", "capture"], sink: ["log", "dummy", "capture"], autoclose: ["none", "capture", "sim"], work: ["real", "sim"]};
+export const GENERATED = {source: ["table", "dummy", "capture"], sink: ["log", "dummy", "capture"], autoclose: ["none", "capture", "sim", "replay"], work: ["real", "sim", "replay"]};
 // the methods a hand-written variant class must implement through the port's interface
 export const PORT_METHODS = {source: ["read"], sink: ["put"], autoclose: ["apply"], work: ["check", "keys"]};
 // the alert log is the one sink the runner knows how to fill
@@ -373,6 +375,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
       if (generated) {
         if (!GENERATED[kind].includes(vname)) fail(vat, `a generated variant of a ${kind} is one of ${GENERATED[kind].join(", ")}; ${vname} needs a class of its own (${vname}: <class>)`);
         className = `zcl_l3_${set}_${name}_${vname}`;
+        if (vname === "replay" && className.length > 30) className = `zcl_l3_${set}_${name}_rpl`;
         tooLong(className, vkey);
       } else {
         className = value.toLowerCase();
@@ -488,9 +491,11 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   if (ports.some((p) => p.has_worklist)) model.with_worklist = {"@id": `${id}/stages`, set_line: line("stages")};
   if (doc.governor !== undefined) model.governor = compileGovernor(doc, model, all, {line, fail});
   if (doc.simulate !== undefined) model.simulate = compileSimulate(doc, model, all, {line, fail, bindings: bindingDocs});
+  if (doc.simulate?.profile !== undefined) compileReplay(doc.simulate, model.simulate, model, {file, line, fail});
   if (doc.settings !== undefined) model.settings = compileSettings(doc, model, {line, fail});
   // a tunable seed is the run's: the chance autoclose reads it from the run's snapshot
   if (model.simulate && model.settings?.simulate_seed) model.simulate.seed_conf = {"@id": model.simulate["@id"], set_line: model.simulate.set_line, conf: model.settings.class};
+  if (model.replay) model.replay.seed_conf = model.simulate.seed_conf;
   Object.defineProperty(model, "where", {value: where});
   return model;
 }
@@ -511,6 +516,7 @@ function sidecar(model, template, rendered) {
     generator: "dsl-l3", set: model.source, template,
     ...(model.governor && [SET_TEMPLATE, JOB_TEMPLATE].includes(template) ? {overlay: `recipes/l3-governor/${template === SET_TEMPLATE ? "runner" : "job"}.patch.json`} : {}),
     ...(rendered.simOverlays?.length ? {sim_overlay: rendered.simOverlays} : {}),
+    ...(rendered.replayOverlays?.length ? {replay_overlay: rendered.replayOverlays} : {}),
     model: `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`,
     ...(model.rules ? {rules: Object.fromEntries(model.rules.map((r) => [r.name, {file: r.file, class: r.check_class, model: r.hash}]))} : {}),
     lines: rendered.trace.map((entry) => ({line: entry.line, template_line: entry.template_line, path: entry.path,
@@ -570,13 +576,16 @@ function overlaid(model, template, patches) {
   if (!files.length) return undefined;
   let text = readFileSync(template, "utf8");
   for (const file of files) text = governorTemplate(text, JSON.parse(readFileSync(file, "utf8")));
-  return {templateText: text, sim: files.filter((f) => f.startsWith(OVERLAY.simulate))};
+  if (model.replay && patches.simulate) {
+    text = replayOverlay(text, template === PORT_TEMPLATES.factory ? "factory" : "runner");
+  }
+  return {templateText: text, replay: model.replay && patches.simulate ? ["recipes/l3-replay/overlay.json"] : [], sim: files.filter((f) => f.startsWith(OVERLAY.simulate))};
 }
 async function renderWith(model, template, patches) {
   const {renderRecipe} = await import("./dsl-abap.mjs");
   const over = overlaid(model, template, patches);
   const result = await renderRecipe(model, template, {profile: "abap", ...(over ? {templateText: over.templateText} : {})});
-  return over?.sim.length ? {...result, simOverlays: over.sim} : result;
+  return over?.sim.length ? {...result, simOverlays: over.sim, replayOverlays: over.replay} : result;
 }
 
 // The files of a set, name -> content. What the abap profile refuses is a
@@ -597,7 +606,7 @@ export async function renderSet(model) {
   const extra = await renderPorts(model);
   // nothing the runner or a generated variant holds may end the unit of work while a table is swapped
   for (const [name, text] of [[`${model.class}.clas.abap`, runner.text], ...extra.results.map(([n, r]) => [n, r.text])]) {
-    const [first] = unitFindings(text, name, {writes: true, jobs: name === `${model.class}.clas.abap`, waits: name === `${model.simulate?.work_class}.clas.abap`});
+    const [first] = unitFindings(text, name, {writes: true, jobs: name === `${model.class}.clas.abap`, waits: [model.simulate?.work_class, model.replay?.work_class].some((c) => name === `${c}.clas.abap`)});
     if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
   }
   const results = [[`${model.class}.clas.abap`, runner], [`${model.report}.prog.abap`, job], ...extra.results];
@@ -664,8 +673,8 @@ async function renderPorts(model) {
     for (const variant of variants) {
       // a hand-written class is its author's; the work's real variant is the runner's own calls
       if (!variant.generated || variant.is_inline) continue;
-      const root = {...portRoot, "@id": variant["@id"], set_line: variant.set_line, variant: variant.name, class: variant.class,
-        capture: variant.is_capture, dummy: variant.is_dummy};
+      const root = {...portRoot, "@id": variant["@id"], set_line: variant.set_line, variant: variant.name, ...(port.is_work ? {"variant@type": CHAR(30)} : {}), class: variant.class,
+        capture: variant.is_capture, dummy: variant.is_dummy, ...(variant.is_replay ? {sim: model.replay, replay: model.replay} : {})};
       const template = port.is_autoclose ? (variant.is_sim ? "autoclose-sim" : "autoclose") : port.is_work ? "work-sim"
         : port.is_source ? (variant.is_table ? "source-table" : variant.is_worklist ? "source-worklist" : "source-mem")
         : variant.is_log ? "sink-log" : variant.is_dummy ? "sink-dummy" : "sink-capture";
@@ -853,8 +862,9 @@ async function main(args) {
   const [command, target, ...rest] = args;
   const ddic = [];
   const sets = [];
-  let out, db, docs;
+  let out, db, docs, run, profile;
   const formats = [];
+  const settings = {};
   for (let i = 0; i < rest.length; i++) {
     if (rest[i] === "--out") out = rest[++i];
     else if (command === "graph" && ["--mermaid", "--json"].includes(rest[i])) formats.push(rest[i].slice(2));
@@ -863,6 +873,13 @@ async function main(args) {
     else if (rest[i] === "--ddic") ddic.push(rest[++i]);
     else if (rest[i] === "--set") sets.push(rest[++i]);
     else if (rest[i] === "--db") db = rest[++i];
+    else if (rest[i] === "--run") run = rest[++i];
+    else if (rest[i] === "--profile") profile = rest[++i];
+    else if (rest[i] === "--setting") {
+      const pair = /^(\S+)=(.+)$/.exec(rest[++i] ?? "");
+      if (!pair) throw new Error("--setting is name=value");
+      settings[pair[1]] = pair[2];
+    }
     else throw new Error(`unknown argument ${rest[i]}`);
   }
   if (command === "graph" && target) {
@@ -877,6 +894,22 @@ async function main(args) {
     if (out) writeFileSync(out, text); else process.stdout.write(text);
     return 0;
   }
+  if (command === "profile" && target) {
+    const {profileRun} = await import("./dsl-l3-profile.mjs");
+    const text = JSON.stringify(profileRun(compileSet(target), {run, db}), null, 2) + "\n";
+    if (out) writeFileSync(out, text); else process.stdout.write(text);
+    return 0;
+  }
+  if (command === "whatif" && target) {
+    if (!db || (!run && !profile)) throw new Error("whatif needs --db and --run or --profile");
+    const {whatif} = await import("./dsl-l3-whatif.mjs");
+    const log = console.log;
+    let result;
+    try { console.log = (...items) => console.error(...items); result = await whatif(target, {run, db, profile, settings}); }
+    finally { console.log = log; }
+    console.log(JSON.stringify(result, null, 2));
+    return 0;
+  }
   if (command === "explain" && target) {
     const {text} = await explainAlert(target, {...(sets.length ? {sets} : {}), db});
     console.log(text);
@@ -885,6 +918,8 @@ async function main(args) {
   if (!["build", "check"].includes(command) || !target || !out) {
     console.error("Usage: node tools/dsl-l3.mjs <build|check> <set.l3.yaml> --out <dir> [--ddic <folder>]...\n"
       + "       node tools/dsl-l3.mjs graph <set.l3.yaml> [--mermaid|--json] [--out <file>] [--docs <doc.md>]\n"
+      + "       node tools/dsl-l3.mjs profile <set.l3.yaml> --run <id> --db <sqlite> [--out <profile.json>]\n"
+      + "       node tools/dsl-l3.mjs whatif <set.l3.yaml> --db <sqlite> <--run <id>|--profile <json>> [--setting name=value]...\n"
       + "       node tools/dsl-l3.mjs explain <set>/<rule>/<model hash>/<date>/<pile>/<seq> [--set <set.l3.yaml>]... [--db <sqlite file>]");
     return 2;
   }
