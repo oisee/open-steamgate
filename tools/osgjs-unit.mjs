@@ -8,6 +8,8 @@ import {unitInputs} from "./gogen/unit-inputs.mjs";
 import {stageInput, summarize, printResult, run} from "./osd-unit-ci.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+// Unit CI uses checkout layers only, regardless of installed or external packs.
+const unitEnv = {OSD_PACKS: "", OSD_WEB_PACKS: ""};
 const help = `Usage: npm run osgjs:unit -- <dir> [--json] [--class NAME...]
 Reads the immediate directory only (no recursion). Requires a checkout and synced libraries.
 Builds the whole system in a temporary directory; runs only the selected owners.
@@ -18,11 +20,11 @@ function isolatedSystem(staging, input) {
   const home = join(staging, "checkout");
   mkdirSync(home);
   const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
-  const folders = inputFoldersOf(root, config);
+  const folders = inputFoldersOf(root, config, {...process.env, ...unitEnv});
   for (const entry of readdirSync(root, {withFileTypes: true})) {
     if (entry.isFile() && !entry.name.startsWith(".")) cpSync(join(root, entry.name), join(home, entry.name));
   }
-  for (const dir of new Set(["src", "test", "tools", "scripts", "packs", "webapp", "web", "data", "deploy", ...folders])) {
+  for (const dir of new Set(["src", "test", "tools", "scripts", "webapp", "web", "data", "deploy", ...folders])) {
     if (!existsSync(resolve(root, dir))) continue;
     // External input folders are copied into a numbered private layer below.
     if (resolve(root, dir).startsWith(root + "/")) cpSync(resolve(root, dir), resolve(home, dir), {recursive: true, dereference: true});
@@ -34,8 +36,7 @@ function isolatedSystem(staging, input) {
     const path = existsSync(join(root, "libs.lock.json")) ? libraryPath(root, name) : root + lib.folder;
     symlinkSync(path, join(home, ".local", "lars", name), "dir");
   }
-  // Flatten discovered packs into explicit input layers, preserving their order.
-  // Packs remain available in the copy for generators and seed data.
+  // Copy external configured input layers into the private checkout.
   const privateFolders = folders.map((dir, i) => {
     if (resolve(root, dir).startsWith(root + "/")) return dir;
     const own = `inputs/${i}`;
@@ -71,11 +72,11 @@ export async function main(args = process.argv.slice(2)) {
     result = staged.result;
     if (!result) {
       const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
-      const {overrides} = unitInputs({home: root, config, extraInputs: [staged.input]});
+      const {overrides} = unitInputs({home: root, config, extraInputs: [staged.input], env: {...process.env, ...unitEnv}});
       for (const o of overrides) console.error(`Override ${o.object}: ${o.hidden} hidden by ${o.input}`);
       const home = isolatedSystem(staging, staged.input);
       const child = await run([process.execPath, join(home, "tools/osgjs-unit-run.mjs"), staged.input, ...staged.chosen], home, {
-        OSD_PACKS: "", OSD_LAYERS: "", STG_DB: "sqlite", STG_DB_PATH: "",
+        ...unitEnv, OSD_LAYERS: "", STG_DB: "sqlite", STG_DB_PATH: "",
       });
       if (child.stderr) process.stderr.write(child.stderr);
       if (child.signal) throw new Error(`unit runner terminated by ${child.signal}`);

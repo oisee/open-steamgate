@@ -155,7 +155,8 @@ Exit codes are 0 for at least one test and all SUCCESS, 1 for assertion FAILURE,
 2 for NOT_COMPILED/ERROR/SKIPPED, and 3 when there are no tests.
 
 The JS command requires installed Node dependencies and synced libraries. It
-copies the system into a disposable checkout, runs the generators and transpiles
+copies the configured checkout layers into a disposable checkout, excluding all
+content packs (including `OSD_PACKS`), runs the generators and transpiles
 the **whole tree** (roughly 20 seconds for transpilation), then runs ABAP Unit
 only for the selected owners, including class and instance lifecycle hooks.
 The pinned transpiler lacks the `only` option needed for a smaller build.

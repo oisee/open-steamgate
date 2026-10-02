@@ -1,4 +1,4 @@
-// Real isolated JS builds. Run with osgo-unit under flock /tmp/osd-heavy.lock.
+// Real isolated JS builds. Run with osgo-unit through tools/osd-heavy.sh.
 import assert from "node:assert/strict";
 import {spawn, spawnSync} from "node:child_process";
 import {createHash} from "node:crypto";
@@ -29,8 +29,8 @@ const invoke = (dir, args = [], options = {}) => {
   assert.equal(run.error, undefined, run.stderr);
   return run;
 };
-const parallel = (dir) => new Promise((resolveRun, reject) => {
-  const child = spawn(process.execPath, [join(root, "tools/osgjs-unit.mjs"), dir, "--json"], {cwd: root});
+const parallel = (dir, args = []) => new Promise((resolveRun, reject) => {
+  const child = spawn(process.execPath, [join(root, "tools/osgjs-unit.mjs"), dir, "--json", ...args], {cwd: root});
   let stdout = "", stderr = "";
   child.stdout.on("data", (data) => { stdout += data; });
   child.stderr.on("data", (data) => { stderr += data; });
@@ -44,7 +44,9 @@ const parsed = (run, code = 0) => {
 
 describe("osgjs unit CI entry point", function () {
   this.timeout(300000);
-  let temp, input, live, output, config, ownedPaths;
+  let temp, input, live, output, config, ownedPaths, started;
+  before(() => { started = performance.now(); });
+  after(() => { console.error(`osgjs suite wall time: ${((performance.now() - started) / 1000).toFixed(2)}s`); });
   beforeEach(() => {
     temp = mkdtempSync(join(root, ".local/osgjs-ci-test-"));
     input = join(temp, "input"); mkdirSync(input);
@@ -84,32 +86,18 @@ describe("osgjs unit CI entry point", function () {
       writeFileSync(join(input, `zcl_abapiti_${name}.clas.testclasses.abap`), readFileSync(join(fixtures, `${name}-testclasses.abap`)));
     }
     const before = fingerprint(dir);
-    const result = parsed(invoke(dir, ["--json"]));
+    const pack = join(temp, "packs/unfetched");
+    mkdirSync(pack, {recursive: true});
+    writeFileSync(join(pack, "osd-pack.json"), JSON.stringify({name: "unfetched", sources: [{folder: "upstream", repo: "https://example.invalid/fixture.git"}]}));
+    assert.equal(existsSync(join(pack, "upstream")), false);
+    // Its overlay must be ignored too, rather than flattened into checkout layers.
+    mkdirSync(join(pack, "src"));
+    fixture(join(pack, "src"), "zcl_osgjs_pack", "DATA x TYPE i. x = .");
+    writeFileSync(join(pack, "src/zcl_osgjs_pack.clas.xml"), metadata("ZCL_OSGJS_PACK"));
+    const result = parsed(invoke(dir, ["--json"], {env: {...process.env, OSD_PACKS: join(temp, "packs")}}));
     assert.deepEqual(result.totals, {success: 14, failure: 0, not_compiled: 0, error: 0, tests: 14});
     assert.equal(result.classes, 2); assert.equal(result.compiled, 2);
     assert.equal(fingerprint(dir), before);
-  });
-  it("returns FAILURE and exit 1 for an assertion", () => {
-    fixture(input, "zcl_osgjs_ci", "cl_abap_unit_assert=>assert_equals( act = 1 exp = 2 ).");
-    const run = invoke(input);
-    assert.equal(run.status, 1, run.stdout + run.stderr);
-    assert.match(run.stdout, /ZCL_OSGJS_CI\/LTCL_TEST\/CHECK: FAILURE/);
-    assert.match(run.stdout, /Expected \[2\].*Actual \[1\]/);
-  });
-  it("returns ERROR for a dump rather than an assertion failure", () => {
-    fixture(input, "zcl_osgjs_ci", "ASSERT 1 = 2.");
-    const result = parsed(invoke(input, ["--json"]), 2);
-    assert.equal(result.totals.error, 1);
-    assert.equal(result.totals.failure, 0);
-    assert.equal(result.totals.tests, 1, "the method must execute before dumping");
-    assert.equal(result.rows[0].method, "CHECK");
-    assert.match(result.rows[0].message, /ASSERT|assertion/i);
-  });
-  it("carries syntax diagnostics with file:line and exit 2", () => {
-    fixture(input, "zcl_osgjs_ci", "DATA x TYPE i. x = .");
-    const result = parsed(invoke(input, ["--json"]), 2);
-    assert.equal(result.rows[0].status, "NOT_COMPILED");
-    assert.match(result.rows[0].message, /zcl_osgjs_ci\.clas\.testclasses\.abap:3/);
   });
   it("rejects 256 characters before any build", () => {
     fixture(input);
@@ -117,36 +105,21 @@ describe("osgjs unit CI entry point", function () {
     const result = parsed(invoke(input, ["--json"], {env: {...process.env, PATH: ""}}), 2);
     assert.deepEqual(result.rows, [{status: "ERROR", message: "zcl_osgjs_ci.clas.locals_imp.abap:1: line exceeds 255 characters (the kernel refuses it)"}]);
   });
-  it("accepts exactly 255 characters, CRLF and caller metadata from another cwd", () => {
+  it("returns 3 for empty, nonrecursive and methodless input", () => {
+    mkdirSync(join(input, "nested")); fixture(join(input, "nested"));
+    assert.equal(parsed(invoke(input, ["--json"], {env: {...process.env, PATH: ""}}), 3).totals.tests, 0);
+    fixture(input); writeFileSync(join(input, "zcl_osgjs_ci.clas.testclasses.abap"), "");
+    assert.equal(parsed(invoke(input, ["--json"]), 3).totals.tests, 0);
+  });
+  it("shares one build for success, failure, dumps, line boundary and lifecycle cases", () => {
     fixture(input);
     const file = join(input, "zcl_osgjs_ci.clas.testclasses.abap");
     writeFileSync(file, "*" + "x".repeat(254) + "\r\n" + readFileSync(file, "utf8"));
     writeFileSync(join(input, "zcl_osgjs_ci.clas.xml"), metadata("ZCL_OSGJS_CI").replace("<FIXPT>X</FIXPT>", "<FIXPT></FIXPT>"));
-    const before = fingerprint(input);
-    assert.equal(parsed(invoke(input, ["--json"], {cwd: temp})).totals.success, 1);
-    assert.equal(fingerprint(input), before);
-    assert.equal(existsSync(join(temp, ".local")), false);
-  });
-  it("returns 3 for empty, nonrecursive and methodless input", () => {
-    mkdirSync(join(input, "nested")); fixture(join(input, "nested"));
-    assert.equal(parsed(invoke(input, ["--json"]), 3).totals.tests, 0);
-    fixture(input); writeFileSync(join(input, "zcl_osgjs_ci.clas.testclasses.abap"), "");
-    assert.equal(parsed(invoke(input, ["--json"]), 3).totals.tests, 0);
-  });
-  it("warns about an override and filters out the unselected failing owner", () => {
-    fixture(input, "zcl_stg_phase0_test");
-    fixture(input, "zcl_osgjs_fail", "cl_abap_unit_assert=>fail( ).");
-    const run = invoke(input, ["--json", "--class", "zcl_stg_phase0_test"]);
-    const result = parsed(run);
-    assert.equal(result.totals.success, 1);
-    assert.match(run.stderr, /Override CLAS ZCL_STG_PHASE0_TEST:/);
-    const overrides = result.overrides.filter((o) => o.object === "CLAS ZCL_STG_PHASE0_TEST");
-    assert.equal(overrides.length, 1);
-    assert.ok(overrides[0].hidden.startsWith(root + "/"));
-  });
-  it("runs class and instance lifecycle hooks in order and keeps fresh instances", () => {
-    fixture(input);
-    writeFileSync(join(input, "zcl_osgjs_ci.clas.testclasses.abap"), `CLASS ltcl_test DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+    fixture(input, "zcl_osgjs_fail", "cl_abap_unit_assert=>assert_equals( act = 1 exp = 2 ).");
+    fixture(input, "zcl_osgjs_dump", "ASSERT 1 = 2.");
+    fixture(input, "zcl_osgjs_lifecycle");
+    writeFileSync(join(input, "zcl_osgjs_lifecycle.clas.testclasses.abap"), `CLASS ltcl_test DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
  PRIVATE SECTION.
  CLASS-DATA count TYPE i.
  DATA instance_count TYPE i.
@@ -172,33 +145,61 @@ describe("osgjs unit CI entry point", function () {
  METHOD class_teardown. cl_abap_unit_assert=>assert_equals( act = count exp = 14 ). ENDMETHOD.
  ENDCLASS.
  `);
-    assert.equal(parsed(invoke(input, ["--json"])).totals.success, 2);
-  });
-  it("counts tests blocked by a class_setup assertion as failures", () => {
-    fixture(input);
-    const file = join(input, "zcl_osgjs_ci.clas.testclasses.abap");
-    writeFileSync(file, readFileSync(file, "utf8")
-      .replace("METHODS check", "CLASS-METHODS class_setup. METHODS check")
-      .replace("CLASS ltcl_test IMPLEMENTATION.", "CLASS ltcl_test IMPLEMENTATION. METHOD class_setup. cl_abap_unit_assert=>fail( ). ENDMETHOD."));
-    const result = parsed(invoke(input, ["--json"]), 1);
-    assert.equal(result.totals.failure, 1); assert.equal(result.totals.tests, 1);
-    assert.match(result.rows[0].message, /class_setup/);
-  });
-  it("does not silently lose class_teardown failures", () => {
-    fixture(input);
-    const file = join(input, "zcl_osgjs_ci.clas.testclasses.abap");
-    writeFileSync(file, readFileSync(file, "utf8")
-      .replace("METHODS check", "CLASS-METHODS class_teardown. METHODS check")
-      .replace("CLASS ltcl_test IMPLEMENTATION.", "CLASS ltcl_test IMPLEMENTATION. METHOD class_teardown. ASSERT 1 = 2. ENDMETHOD."));
-    const result = parsed(invoke(input, ["--json"]), 2);
-    assert.equal(result.totals.success, 1); assert.equal(result.totals.error, 1);
-    assert.match(result.rows.at(-1).message, /class_teardown/);
-  });
-  it("runs two invocations in parallel without shared build output", async () => {
-    fixture(input);
+    for (const [name, hook, body] of [
+      ["zcl_osgjs_setup", "class_setup", "cl_abap_unit_assert=>fail( )."],
+      ["zcl_osgjs_teardown", "class_teardown", "ASSERT 1 = 2."],
+    ]) {
+      fixture(input, name);
+      const path = join(input, `${name}.clas.testclasses.abap`);
+      writeFileSync(path, readFileSync(path, "utf8")
+        .replace("METHODS check", `CLASS-METHODS ${hook}. METHODS check`)
+        .replace("CLASS ltcl_test IMPLEMENTATION.", `CLASS ltcl_test IMPLEMENTATION. METHOD ${hook}. ${body} ENDMETHOD.`));
+    }
     const before = fingerprint(input);
-    const results = await Promise.all([parallel(input), parallel(input)]);
-    for (const run of results) assert.equal(parsed(run).totals.success, 1);
+    const result = parsed(invoke(input, ["--json"], {cwd: temp}), 2);
+    assert.deepEqual(result.totals, {success: 4, failure: 2, not_compiled: 0, error: 2, tests: 7});
+    const rows = (name) => result.rows.filter((row) => row.class === name);
+    assert.equal(rows("ZCL_OSGJS_CI")[0].status, "SUCCESS");
+    assert.equal(rows("ZCL_OSGJS_FAIL")[0].status, "FAILURE");
+    assert.match(rows("ZCL_OSGJS_FAIL")[0].message, /Expected \[2\].*Actual \[1\]/);
+    assert.equal(rows("ZCL_OSGJS_DUMP")[0].status, "ERROR");
+    assert.equal(rows("ZCL_OSGJS_DUMP")[0].method, "CHECK");
+    assert.match(rows("ZCL_OSGJS_DUMP")[0].message, /ASSERT|assertion/i);
+    assert.equal(rows("ZCL_OSGJS_LIFECYCLE").filter((row) => row.status === "SUCCESS").length, 2);
+    assert.match(rows("ZCL_OSGJS_SETUP")[0].message, /class_setup/);
+    assert.equal(rows("ZCL_OSGJS_SETUP")[0].status, "FAILURE");
+    assert.equal(rows("ZCL_OSGJS_TEARDOWN")[0].status, "SUCCESS");
+    assert.equal(rows("ZCL_OSGJS_TEARDOWN")[1].status, "ERROR");
+    assert.match(rows("ZCL_OSGJS_TEARDOWN")[1].message, /class_teardown/);
+    assert.equal(fingerprint(input), before);
+    assert.equal(existsSync(join(temp, ".local")), false);
+  });
+  it("carries syntax diagnostics with file:line and exit 2 before building", () => {
+    fixture(input, "zcl_osgjs_ci", "DATA x TYPE i. x = .");
+    const result = parsed(invoke(input, ["--json"]), 2);
+    assert.equal(result.rows[0].status, "NOT_COMPILED");
+    assert.match(result.rows[0].message, /zcl_osgjs_ci\.clas\.testclasses\.abap:3/);
+  });
+  it("runs two filtered invocations in parallel and warns about checkout overrides", async () => {
+    fixture(input);
+    fixture(input, "zcl_stg_phase0_test");
+    fixture(input, "zcl_osgjs_fail", "cl_abap_unit_assert=>assert_equals( act = 1 exp = 2 ).");
+    const before = fingerprint(input);
+    const results = await Promise.all([
+      parallel(input, ["--class", "zcl_osgjs_fail"]),
+      parallel(input, ["--class", "zcl_stg_phase0_test"]),
+    ]);
+    const failed = parsed(results[0], 1);
+    assert.equal(failed.totals.failure, 1);
+    assert.match(failed.rows[0].message, /Expected \[2\].*Actual \[1\]/);
+    for (const run of results.slice(1)) {
+      const result = parsed(run);
+      assert.equal(result.totals.success, 1);
+      assert.match(run.stderr, /Override CLAS ZCL_STG_PHASE0_TEST:/);
+      const overrides = result.overrides.filter((o) => o.object === "CLAS ZCL_STG_PHASE0_TEST");
+      assert.equal(overrides.length, 1);
+      assert.ok(overrides[0].hidden.startsWith(root + "/"));
+    }
     assert.equal(fingerprint(input), before);
   });
   it("returns parseable ERROR JSON on invalid arguments", () => {
