@@ -239,6 +239,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_range TO lt_range.
 {{/range_args}}
 {{/range}}
+{{#keys_check}}
+    DATA lt_keys TYPE {{class}}=>tt_range.
+    DATA lt_keys_exp TYPE {{class}}=>tt_range.
+    DATA ls_key LIKE LINE OF lt_keys_exp.
+{{/keys_check}}
 {{#long_expect}}
     DATA lv_exp TYPE string.
 {{/long_expect}}
@@ -270,6 +275,17 @@ CLASS ltcl_examples IMPLEMENTATION.
     lt_ref = check_reference( iv_date = {{date.value | literal}}{{#range}} it_range = lt_range{{/range}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = {{ref_label | literal}} ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = {{label | literal}} ).
+{{#keys_check}}
+    " keys( ): the driving keys of the same rows, sorted, each once
+{{#values}}
+    ls_key-sign = 'I'.
+    ls_key-option = 'EQ'.
+    ls_key-low = {{value | literal}}.
+    APPEND ls_key TO lt_keys_exp.
+{{/values}}
+    lt_keys = {{call}}( iv_date = {{date.value | literal}}{{#range}} it_range = lt_range{{/range}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
+    cl_abap_unit_assert=>assert_equals( act = lt_keys exp = lt_keys_exp msg = {{label | literal}} ).
+{{/keys_check}}
   ENDMETHOD.
 {{/tests}}
 ENDCLASS.

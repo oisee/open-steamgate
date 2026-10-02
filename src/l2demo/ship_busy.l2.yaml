@@ -1,0 +1,74 @@
+# DSL L2 with keys: true (docs/dsl-l2.md, "Keys"): a ship still in the fleet
+# with a voyage ahead. Its alerts are the voyages; keys( ) hands back the
+# ships, each once, which the two-stage set fleet2 uses as its worklist.
+# `node tools/dsl-l2.mjs build src/l2demo/ship_busy.l2.yaml --out src/l2demo`
+rule: ship-busy
+class: zcl_l2_ship_busy
+title: A ship that is not decommissioned has a voyage departing after the check date
+for: ZOSD_L2_SHIP as ship
+range: ship.ship_id
+keys: true
+when: ship.status <> 'D'
+forbid:
+  exists: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+alert: "{ship.ship_id} {ship.name}: voyage {voy.voyage_id} departs {voy.dep_date}"
+boundaries: auto
+examples:
+  - name: a voyage ahead
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+    expect:
+      - "S001 Albatross: voyage V00001 departs 20261005"
+    expect_keys: [S001]
+  - name: only past voyages
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00002, ship_id: S001, dep_date: 20261001}]
+    expect: []
+    expect_keys: []
+  - name: decommissioned
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: D}]
+      ZOSD_L2_VOY: [{voyage_id: V00003, ship_id: S002, dep_date: 20261005}]
+    expect: []
+    expect_keys: []
+  - name: several voyages one key
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S003, name: Petrel, status: M}
+        - {ship_id: S001, name: Albatross, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00005, ship_id: S003, dep_date: 20261010}
+        - {voyage_id: V00006, ship_id: S003, dep_date: 20261003}
+        - {voyage_id: V00007, ship_id: S001, dep_date: 20261002}
+        - {voyage_id: V00008, ship_id: S003, dep_date: 20261004}
+    expect:
+      - "S001 Albatross: voyage V00007 departs 20261002"
+      - "S003 Petrel: voyage V00005 departs 20261010"
+      - "S003 Petrel: voyage V00006 departs 20261003"
+      - "S003 Petrel: voyage V00008 departs 20261004"
+    expect_keys: [S001, S003]
+
+  - name: the range keeps the inner ship
+    date: 20261001
+    range: [{sign: I, option: BT, low: S002, high: S003}]
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: A}
+        - {ship_id: S002, name: Petrel, status: A}
+        - {ship_id: S004, name: Dove, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00001, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00002, ship_id: S002, dep_date: 20261005}
+        - {voyage_id: V00003, ship_id: S002, dep_date: 20261006}
+        - {voyage_id: V00004, ship_id: S004, dep_date: 20261005}
+    expect:
+      - "S002 Petrel: voyage V00002 departs 20261005"
+      - "S002 Petrel: voyage V00003 departs 20261006"
+    expect_keys: [S002]

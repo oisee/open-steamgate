@@ -20,7 +20,7 @@ import {pathToFileURL} from "node:url";
 import yaml from "js-yaml";
 import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor, unresolvedDeep} from "./dsl-ddic.mjs";
 import {compileParams} from "./dsl-l2-params.mjs";
-import {compileRange, exampleRange} from "./dsl-l2-range.mjs";
+import {compileKeys, compileRange, exampleRange, keysCheck} from "./dsl-l2-range.mjs";
 import {lineIndex, lineOf} from "./dsl-yaml-lines.mjs";
 import {INT_RANGE, PACKED, allReferences, canonical, compareValues, deriveCases, evaluate, kindOf, shiftDate} from "./dsl-l2-eval.mjs";
 
@@ -499,7 +499,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     return value;
   };
   need(doc, "", "a mapping of the rule's keys", "map");
-  const known = new Set(["rule", "class", "title", "params", "for", "range", "when", "forbid", "require", "limit", "alert", "boundaries", "examples"]);
+  const known = new Set(["rule", "class", "title", "params", "for", "range", "keys", "when", "forbid", "require", "limit", "alert", "boundaries", "examples"]);
   for (const key of Object.keys(doc)) if (!known.has(key)) failAt(line(key))(`unknown key ${key}`);
 
   const name = need(doc.rule, "rule", "the rule's name");
@@ -552,6 +552,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   if (present.length === 0) failAt(line("rule"))("a rule needs forbid: (no row may match) or require: (a row must match) or limit: (an aggregate must meet a threshold)");
   if (present.length !== 1) failAt(line(present[1] ?? "rule"))("a rule needs exactly one of forbid:, require:, or limit:");
   const kind = present[0];
+  const keys = compileKeys({doc, range, kind, id, line, failAt});
   need(doc[kind], kind, kind === "limit" ? "a mapping with count, sum, min or max, where and a threshold" : "a mapping with exists and where", "map");
   let threshold, aggregate;
   // `count` is the original row-count aggregate. `sum`, `min` and `max`
@@ -1027,7 +1028,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     const base = `examples/${e}`;
     const fail = failAt(line(base));
     need(example, base, "a mapping with name, date, rows and expect", "map");
-    for (const key of Object.keys(example)) if (!["name", "date", "params", "range", "rows", "expect"].includes(key)) failAt(line(`${base}/${key}`))(`unknown key ${key} in an example`);
+    for (const key of Object.keys(example)) if (!["name", "date", "params", "range", "rows", "expect", "expect_keys"].includes(key)) failAt(line(`${base}/${key}`))(`unknown key ${key} in an example`);
     const label = need(example.name, `${base}/name`, "the example's name");
     const labelWhy = misfit(label, {built_in: "STRG"});
     if (labelWhy) failAt(line(`${base}/name`))(`example name: ${labelWhy}`);
@@ -1124,7 +1125,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   const model = {
     "@id": id, rule_line: line("rule"), rule: name, title, source: recorded, class: className, kind, combine, comment,
     ...(params.size ? {params: [...params.values()]} : {}), ...(windows.size ? {windows: [...windows.values()]} : {}),
-    ...(range ? {range} : {}),
+    ...(range ? {range} : {}), ...(keys ? {driving_keys: keys} : {}),
     for: forNode,
     when: {"@id": `${id}/when`, rule_line: line(doc.when === undefined ? "for" : "when"), conditions: when.conditions,
       ...(when.tree ? {tree: when.tree} : {})},
@@ -1147,6 +1148,8 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     if (JSON.stringify([...got].sort()) !== JSON.stringify([...want].sort())) {
       failAt(line(`examples/${e}/expect`))(`example ${JSON.stringify(example.name)} expects ${JSON.stringify(want)} but the rule gives ${JSON.stringify(got)}`);
     }
+    const kc = keysCheck({model, keys, rows: raw[e], params: exampleParams[e], given: doc.examples[e].expect_keys, at: `examples/${e}/expect_keys`, line, failAt, evaluate, compareValues, testId: example["@id"], label: example.label});
+    if (kc) example.keys_check = kc;
   });
 
   // boundaries: derived cases, their expected alerts from the interpreter
@@ -1165,6 +1168,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
       paramArgs: first.param_args ?? [], example: raw[0], reserved: methods});
     model.skipped = derived.skipped;
     model.cases = derived.cases.map((c) => caseNode(model, c));
+    if (keys) model.cases.forEach((node, i) => { node.keys_check = keysCheck({model, keys, rows: derived.cases[i].rows, params: {...exampleParams[0], $range: []}, line, failAt, evaluate, compareValues, testId: node["@id"], label: node.label}); });
   }
   // the path as given, for messages: not part of the model, so not hashed
   Object.defineProperty(model, "where", {value: where});

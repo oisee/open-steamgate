@@ -14,6 +14,16 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 {{ref}} TYPE {{type_name}}{{#default}} DEFAULT {{default | literal}}{{/default}}
 {{/params}}
       RETURNING VALUE(rt_alerts) TYPE string_table.
+{{#driving_keys}}
+    " the driving keys check( ) flags: one I EQ row per key, sorted, each once
+    CLASS-METHODS keys
+      IMPORTING iv_date TYPE d
+                it_range TYPE tt_range OPTIONAL
+{{#params}}
+                {{ref}} TYPE {{type_name}}{{#default}} DEFAULT {{default | literal}}{{/default}}
+{{/params}}
+      RETURNING VALUE(rt_keys) TYPE tt_range.
+{{/driving_keys}}
 ENDCLASS.
 
 CLASS {{class}} IMPLEMENTATION.
@@ -388,4 +398,45 @@ CLASS {{class}} IMPLEMENTATION.
 {{/zero}}
 {{/queries}}
   ENDMETHOD.
+{{#driving_keys}}
+
+  METHOD keys.
+    " the query of check( ) with the driving key only, DISTINCT: one query,
+    " never a SELECT per row; a key flagged by several rows is one row
+    DATA lt_keys TYPE STANDARD TABLE OF {{table}}-{{field}} WITH DEFAULT KEY.
+    DATA lv_key TYPE {{table}}-{{field}}.
+    DATA ls_key LIKE LINE OF rt_keys.
+{{#windows}}
+    DATA {{name}} TYPE d.
+{{/windows}}
+{{#windows}}
+    {{name}} = iv_date {{sign}} {{offset_ref}}.
+{{/windows}}
+{{#queries}}
+    SELECT DISTINCT {{driving_keys.source}}
+{{#from}}
+      FROM {{table}} AS {{alias}}
+{{/from}}
+{{#joins}}
+        INNER JOIN {{table}} AS {{alias}}
+{{#on}}
+          {{#@first}}ON{{/@first}}{{^@first}} AND{{/@first}} {{lhs}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{sref}}{{/is_literal}}
+{{/on}}
+{{/joins}}
+      APPENDING TABLE lt_keys
+{{#where}}
+      {{pre}}{{#is_cmp}}{{lhs}} {{op}} {{#is_literal}}{{value | literal}}{{/is_literal}}{{^is_literal}}{{sref}}{{/is_literal}}{{/is_cmp}}{{^is_cmp}}{{text}}{{/is_cmp}}{{post}}
+{{/where}}
+      ORDER BY {{driving_keys.source}}.
+{{/queries}}
+    SORT lt_keys.
+    DELETE ADJACENT DUPLICATES FROM lt_keys.
+    LOOP AT lt_keys INTO lv_key.
+      ls_key-sign = 'I'.
+      ls_key-option = 'EQ'.
+      ls_key-low = lv_key.
+      APPEND ls_key TO rt_keys.
+    ENDLOOP.
+  ENDMETHOD.
+{{/driving_keys}}
 ENDCLASS.

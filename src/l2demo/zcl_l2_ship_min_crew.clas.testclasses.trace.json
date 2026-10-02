@@ -790,147 +790,147 @@
   },
   {
    "line": 113,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_ship",
    "rule_line": 17
   },
   {
    "line": 114,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_ship",
    "rule_line": 17
   },
   {
    "line": 115,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_ship",
    "rule_line": 17
   },
   {
    "line": 116,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_ship",
    "rule_line": 17
   },
   {
    "line": 117,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_ship",
    "rule_line": 17
   },
   {
    "line": 118,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_ship",
    "rule_line": 17
   },
   {
    "line": 119,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/1/tables/1/table",
    "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_ship",
    "rule_line": 17
   },
   {
    "line": 120,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/1/tables/2/wa",
    "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
    "rule_line": 18
   },
   {
    "line": 121,
-   "template_line": 249,
-   "path": "/tests/1/tables/2/wa",
-   "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
-   "rule_line": 18
-  },
-  {
-   "line": 122,
-   "template_line": 252,
-   "path": "/tests/1/tables/2/wa",
-   "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
-   "rule_line": 18
-  },
-  {
-   "line": 123,
-   "template_line": 252,
-   "path": "/tests/1/tables/2/wa",
-   "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
-   "rule_line": 18
-  },
-  {
-   "line": 124,
-   "template_line": 252,
-   "path": "/tests/1/tables/2/wa",
-   "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
-   "rule_line": 18
-  },
-  {
-   "line": 125,
-   "template_line": 252,
-   "path": "/tests/1/tables/2/wa",
-   "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
-   "rule_line": 18
-  },
-  {
-   "line": 126,
    "template_line": 254,
    "path": "/tests/1/tables/2/wa",
    "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
    "rule_line": 18
   },
   {
+   "line": 122,
+   "template_line": 257,
+   "path": "/tests/1/tables/2/wa",
+   "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
+   "rule_line": 18
+  },
+  {
+   "line": 123,
+   "template_line": 257,
+   "path": "/tests/1/tables/2/wa",
+   "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
+   "rule_line": 18
+  },
+  {
+   "line": 124,
+   "template_line": 257,
+   "path": "/tests/1/tables/2/wa",
+   "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
+   "rule_line": 18
+  },
+  {
+   "line": 125,
+   "template_line": 257,
+   "path": "/tests/1/tables/2/wa",
+   "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
+   "rule_line": 18
+  },
+  {
+   "line": 126,
+   "template_line": 259,
+   "path": "/tests/1/tables/2/wa",
+   "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
+   "rule_line": 18
+  },
+  {
    "line": 127,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/1/tables/2/table",
    "node": "rule/ship-min-crew/example/one crew member/table/zosd_l2_crew",
    "rule_line": 18
   },
   {
    "line": 128,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/1/expect/1/value",
    "node": "rule/ship-min-crew/example/one crew member/expect/1",
    "rule_line": 19
   },
   {
    "line": 129,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/1/date/call",
    "node": "rule/ship-min-crew/example/one crew member/date",
    "rule_line": 15
   },
   {
    "line": 130,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/1/date/value",
    "node": "rule/ship-min-crew/example/one crew member/date",
    "rule_line": 15
   },
   {
    "line": 131,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/1/ref_label",
    "node": "rule/ship-min-crew/example/one crew member",
    "rule_line": 14
   },
   {
    "line": 132,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/1/label",
    "node": "rule/ship-min-crew/example/one crew member",
    "rule_line": 14
   },
   {
    "line": 133,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/1",
    "node": "rule/ship-min-crew/example/one crew member",
    "rule_line": 14
@@ -993,91 +993,91 @@
   },
   {
    "line": 142,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/2/tables/1/wa",
    "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
    "rule_line": 23
   },
   {
    "line": 143,
-   "template_line": 249,
-   "path": "/tests/2/tables/1/wa",
-   "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
-   "rule_line": 23
-  },
-  {
-   "line": 144,
-   "template_line": 252,
-   "path": "/tests/2/tables/1/wa",
-   "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
-   "rule_line": 23
-  },
-  {
-   "line": 145,
-   "template_line": 252,
-   "path": "/tests/2/tables/1/wa",
-   "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
-   "rule_line": 23
-  },
-  {
-   "line": 146,
-   "template_line": 252,
-   "path": "/tests/2/tables/1/wa",
-   "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
-   "rule_line": 23
-  },
-  {
-   "line": 147,
    "template_line": 254,
    "path": "/tests/2/tables/1/wa",
    "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
    "rule_line": 23
   },
   {
+   "line": 144,
+   "template_line": 257,
+   "path": "/tests/2/tables/1/wa",
+   "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
+   "rule_line": 23
+  },
+  {
+   "line": 145,
+   "template_line": 257,
+   "path": "/tests/2/tables/1/wa",
+   "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
+   "rule_line": 23
+  },
+  {
+   "line": 146,
+   "template_line": 257,
+   "path": "/tests/2/tables/1/wa",
+   "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
+   "rule_line": 23
+  },
+  {
+   "line": 147,
+   "template_line": 259,
+   "path": "/tests/2/tables/1/wa",
+   "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
+   "rule_line": 23
+  },
+  {
    "line": 148,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/2/tables/1/table",
    "node": "rule/ship-min-crew/example/no crew/table/zosd_l2_ship",
    "rule_line": 23
   },
   {
    "line": 149,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/2/expect/1/value",
    "node": "rule/ship-min-crew/example/no crew/expect/1",
    "rule_line": 24
   },
   {
    "line": 150,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/2/date/call",
    "node": "rule/ship-min-crew/example/no crew/date",
    "rule_line": 21
   },
   {
    "line": 151,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/2/date/value",
    "node": "rule/ship-min-crew/example/no crew/date",
    "rule_line": 21
   },
   {
    "line": 152,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/2/ref_label",
    "node": "rule/ship-min-crew/example/no crew",
    "rule_line": 20
   },
   {
    "line": 153,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/2/label",
    "node": "rule/ship-min-crew/example/no crew",
    "rule_line": 20
   },
   {
    "line": 154,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/2",
    "node": "rule/ship-min-crew/example/no crew",
    "rule_line": 20
@@ -1147,189 +1147,189 @@
   },
   {
    "line": 164,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_ship",
    "rule_line": 28
   },
   {
    "line": 165,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_ship",
    "rule_line": 28
   },
   {
    "line": 166,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_ship",
    "rule_line": 28
   },
   {
    "line": 167,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_ship",
    "rule_line": 28
   },
   {
    "line": 168,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_ship",
    "rule_line": 28
   },
   {
    "line": 169,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_ship",
    "rule_line": 28
   },
   {
    "line": 170,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/3/tables/1/table",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_ship",
    "rule_line": 28
   },
   {
    "line": 171,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
    "rule_line": 29
   },
   {
    "line": 172,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
    "rule_line": 29
   },
   {
    "line": 173,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
    "rule_line": 29
   },
   {
    "line": 174,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
    "rule_line": 29
   },
   {
    "line": 175,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
    "rule_line": 29
   },
   {
    "line": 176,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
    "rule_line": 29
   },
   {
    "line": 177,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
    "rule_line": 29
   },
   {
    "line": 178,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
    "rule_line": 29
   },
   {
    "line": 179,
-   "template_line": 249,
-   "path": "/tests/3/tables/2/wa",
-   "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
-   "rule_line": 29
-  },
-  {
-   "line": 180,
-   "template_line": 252,
-   "path": "/tests/3/tables/2/wa",
-   "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
-   "rule_line": 29
-  },
-  {
-   "line": 181,
-   "template_line": 252,
-   "path": "/tests/3/tables/2/wa",
-   "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
-   "rule_line": 29
-  },
-  {
-   "line": 182,
-   "template_line": 252,
-   "path": "/tests/3/tables/2/wa",
-   "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
-   "rule_line": 29
-  },
-  {
-   "line": 183,
-   "template_line": 252,
-   "path": "/tests/3/tables/2/wa",
-   "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
-   "rule_line": 29
-  },
-  {
-   "line": 184,
    "template_line": 254,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
    "rule_line": 29
   },
   {
+   "line": 180,
+   "template_line": 257,
+   "path": "/tests/3/tables/2/wa",
+   "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
+   "rule_line": 29
+  },
+  {
+   "line": 181,
+   "template_line": 257,
+   "path": "/tests/3/tables/2/wa",
+   "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
+   "rule_line": 29
+  },
+  {
+   "line": 182,
+   "template_line": 257,
+   "path": "/tests/3/tables/2/wa",
+   "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
+   "rule_line": 29
+  },
+  {
+   "line": 183,
+   "template_line": 257,
+   "path": "/tests/3/tables/2/wa",
+   "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
+   "rule_line": 29
+  },
+  {
+   "line": 184,
+   "template_line": 259,
+   "path": "/tests/3/tables/2/wa",
+   "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
+   "rule_line": 29
+  },
+  {
    "line": 185,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/3/tables/2/table",
    "node": "rule/ship-min-crew/example/two crew members/table/zosd_l2_crew",
    "rule_line": 29
   },
   {
    "line": 186,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/3/date/call",
    "node": "rule/ship-min-crew/example/two crew members/date",
    "rule_line": 26
   },
   {
    "line": 187,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/3/date/value",
    "node": "rule/ship-min-crew/example/two crew members/date",
    "rule_line": 26
   },
   {
    "line": 188,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/3/ref_label",
    "node": "rule/ship-min-crew/example/two crew members",
    "rule_line": 25
   },
   {
    "line": 189,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/3/label",
    "node": "rule/ship-min-crew/example/two crew members",
    "rule_line": 25
   },
   {
    "line": 190,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/3",
    "node": "rule/ship-min-crew/example/two crew members",
    "rule_line": 25
@@ -1399,238 +1399,238 @@
   },
   {
    "line": 200,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_ship",
    "rule_line": 36
   },
   {
    "line": 201,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_ship",
    "rule_line": 36
   },
   {
    "line": 202,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_ship",
    "rule_line": 36
   },
   {
    "line": 203,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_ship",
    "rule_line": 36
   },
   {
    "line": 204,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_ship",
    "rule_line": 36
   },
   {
    "line": 205,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_ship",
    "rule_line": 36
   },
   {
    "line": 206,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/4/tables/1/table",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_ship",
    "rule_line": 36
   },
   {
    "line": 207,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 208,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 209,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 210,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 211,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 212,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 213,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 214,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 215,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 216,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 217,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 218,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 219,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 220,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 221,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 222,
-   "template_line": 249,
-   "path": "/tests/4/tables/2/wa",
-   "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
-   "rule_line": 37
-  },
-  {
-   "line": 223,
-   "template_line": 252,
-   "path": "/tests/4/tables/2/wa",
-   "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
-   "rule_line": 37
-  },
-  {
-   "line": 224,
-   "template_line": 252,
-   "path": "/tests/4/tables/2/wa",
-   "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
-   "rule_line": 37
-  },
-  {
-   "line": 225,
-   "template_line": 252,
-   "path": "/tests/4/tables/2/wa",
-   "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
-   "rule_line": 37
-  },
-  {
-   "line": 226,
-   "template_line": 252,
-   "path": "/tests/4/tables/2/wa",
-   "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
-   "rule_line": 37
-  },
-  {
-   "line": 227,
    "template_line": 254,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
+   "line": 223,
+   "template_line": 257,
+   "path": "/tests/4/tables/2/wa",
+   "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
+   "rule_line": 37
+  },
+  {
+   "line": 224,
+   "template_line": 257,
+   "path": "/tests/4/tables/2/wa",
+   "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
+   "rule_line": 37
+  },
+  {
+   "line": 225,
+   "template_line": 257,
+   "path": "/tests/4/tables/2/wa",
+   "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
+   "rule_line": 37
+  },
+  {
+   "line": 226,
+   "template_line": 257,
+   "path": "/tests/4/tables/2/wa",
+   "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
+   "rule_line": 37
+  },
+  {
+   "line": 227,
+   "template_line": 259,
+   "path": "/tests/4/tables/2/wa",
+   "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
+   "rule_line": 37
+  },
+  {
    "line": 228,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/4/tables/2/table",
    "node": "rule/ship-min-crew/example/three crew members/table/zosd_l2_crew",
    "rule_line": 37
   },
   {
    "line": 229,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/4/date/call",
    "node": "rule/ship-min-crew/example/three crew members/date",
    "rule_line": 34
   },
   {
    "line": 230,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/4/date/value",
    "node": "rule/ship-min-crew/example/three crew members/date",
    "rule_line": 34
   },
   {
    "line": 231,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/4/ref_label",
    "node": "rule/ship-min-crew/example/three crew members",
    "rule_line": 33
   },
   {
    "line": 232,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/4/label",
    "node": "rule/ship-min-crew/example/three crew members",
    "rule_line": 33
   },
   {
    "line": 233,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/4",
    "node": "rule/ship-min-crew/example/three crew members",
    "rule_line": 33
@@ -1700,196 +1700,196 @@
   },
   {
    "line": 243,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_ship",
    "rule_line": 45
   },
   {
    "line": 244,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_ship",
    "rule_line": 45
   },
   {
    "line": 245,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_ship",
    "rule_line": 45
   },
   {
    "line": 246,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_ship",
    "rule_line": 45
   },
   {
    "line": 247,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_ship",
    "rule_line": 45
   },
   {
    "line": 248,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_ship",
    "rule_line": 45
   },
   {
    "line": 249,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/5/tables/1/table",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_ship",
    "rule_line": 45
   },
   {
    "line": 250,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
    "rule_line": 46
   },
   {
    "line": 251,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
    "rule_line": 46
   },
   {
    "line": 252,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
    "rule_line": 46
   },
   {
    "line": 253,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
    "rule_line": 46
   },
   {
    "line": 254,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
    "rule_line": 46
   },
   {
    "line": 255,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
    "rule_line": 46
   },
   {
    "line": 256,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
    "rule_line": 46
   },
   {
    "line": 257,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
    "rule_line": 46
   },
   {
    "line": 258,
-   "template_line": 249,
-   "path": "/tests/5/tables/2/wa",
-   "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
-   "rule_line": 46
-  },
-  {
-   "line": 259,
-   "template_line": 252,
-   "path": "/tests/5/tables/2/wa",
-   "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
-   "rule_line": 46
-  },
-  {
-   "line": 260,
-   "template_line": 252,
-   "path": "/tests/5/tables/2/wa",
-   "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
-   "rule_line": 46
-  },
-  {
-   "line": 261,
-   "template_line": 252,
-   "path": "/tests/5/tables/2/wa",
-   "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
-   "rule_line": 46
-  },
-  {
-   "line": 262,
-   "template_line": 252,
-   "path": "/tests/5/tables/2/wa",
-   "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
-   "rule_line": 46
-  },
-  {
-   "line": 263,
    "template_line": 254,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
    "rule_line": 46
   },
   {
+   "line": 259,
+   "template_line": 257,
+   "path": "/tests/5/tables/2/wa",
+   "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
+   "rule_line": 46
+  },
+  {
+   "line": 260,
+   "template_line": 257,
+   "path": "/tests/5/tables/2/wa",
+   "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
+   "rule_line": 46
+  },
+  {
+   "line": 261,
+   "template_line": 257,
+   "path": "/tests/5/tables/2/wa",
+   "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
+   "rule_line": 46
+  },
+  {
+   "line": 262,
+   "template_line": 257,
+   "path": "/tests/5/tables/2/wa",
+   "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
+   "rule_line": 46
+  },
+  {
+   "line": 263,
+   "template_line": 259,
+   "path": "/tests/5/tables/2/wa",
+   "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
+   "rule_line": 46
+  },
+  {
    "line": 264,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/5/tables/2/table",
    "node": "rule/ship-min-crew/example/one not yet aboard/table/zosd_l2_crew",
    "rule_line": 46
   },
   {
    "line": 265,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/5/expect/1/value",
    "node": "rule/ship-min-crew/example/one not yet aboard/expect/1",
    "rule_line": 49
   },
   {
    "line": 266,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/5/date/call",
    "node": "rule/ship-min-crew/example/one not yet aboard/date",
    "rule_line": 43
   },
   {
    "line": 267,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/5/date/value",
    "node": "rule/ship-min-crew/example/one not yet aboard/date",
    "rule_line": 43
   },
   {
    "line": 268,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/5/ref_label",
    "node": "rule/ship-min-crew/example/one not yet aboard",
    "rule_line": 42
   },
   {
    "line": 269,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/5/label",
    "node": "rule/ship-min-crew/example/one not yet aboard",
    "rule_line": 42
   },
   {
    "line": 270,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/5",
    "node": "rule/ship-min-crew/example/one not yet aboard",
    "rule_line": 42
@@ -1952,84 +1952,84 @@
   },
   {
    "line": 279,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
    "rule_line": 53
   },
   {
    "line": 280,
-   "template_line": 249,
-   "path": "/tests/6/tables/1/wa",
-   "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
-   "rule_line": 53
-  },
-  {
-   "line": 281,
-   "template_line": 252,
-   "path": "/tests/6/tables/1/wa",
-   "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
-   "rule_line": 53
-  },
-  {
-   "line": 282,
-   "template_line": 252,
-   "path": "/tests/6/tables/1/wa",
-   "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
-   "rule_line": 53
-  },
-  {
-   "line": 283,
-   "template_line": 252,
-   "path": "/tests/6/tables/1/wa",
-   "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
-   "rule_line": 53
-  },
-  {
-   "line": 284,
    "template_line": 254,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
    "rule_line": 53
   },
   {
+   "line": 281,
+   "template_line": 257,
+   "path": "/tests/6/tables/1/wa",
+   "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
+   "rule_line": 53
+  },
+  {
+   "line": 282,
+   "template_line": 257,
+   "path": "/tests/6/tables/1/wa",
+   "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
+   "rule_line": 53
+  },
+  {
+   "line": 283,
+   "template_line": 257,
+   "path": "/tests/6/tables/1/wa",
+   "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
+   "rule_line": 53
+  },
+  {
+   "line": 284,
+   "template_line": 259,
+   "path": "/tests/6/tables/1/wa",
+   "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
+   "rule_line": 53
+  },
+  {
    "line": 285,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/6/tables/1/table",
    "node": "rule/ship-min-crew/example/filtered ship/table/zosd_l2_ship",
    "rule_line": 53
   },
   {
    "line": 286,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/6/date/call",
    "node": "rule/ship-min-crew/example/filtered ship/date",
    "rule_line": 51
   },
   {
    "line": 287,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/6/date/value",
    "node": "rule/ship-min-crew/example/filtered ship/date",
    "rule_line": 51
   },
   {
    "line": 288,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/6/ref_label",
    "node": "rule/ship-min-crew/example/filtered ship",
    "rule_line": 50
   },
   {
    "line": 289,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/6/label",
    "node": "rule/ship-min-crew/example/filtered ship",
    "rule_line": 50
   },
   {
    "line": 290,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/6",
    "node": "rule/ship-min-crew/example/filtered ship",
    "rule_line": 50
@@ -2099,238 +2099,238 @@
   },
   {
    "line": 300,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 301,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 302,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 303,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 304,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 305,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 306,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 307,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 308,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 309,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 310,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 311,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 312,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/7/tables/1/table",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_ship",
    "rule_line": 58
   },
   {
    "line": 313,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
    "rule_line": 61
   },
   {
    "line": 314,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
    "rule_line": 61
   },
   {
    "line": 315,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
    "rule_line": 61
   },
   {
    "line": 316,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
    "rule_line": 61
   },
   {
    "line": 317,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
    "rule_line": 61
   },
   {
    "line": 318,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
    "rule_line": 61
   },
   {
    "line": 319,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
    "rule_line": 61
   },
   {
    "line": 320,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
    "rule_line": 61
   },
   {
    "line": 321,
-   "template_line": 249,
-   "path": "/tests/7/tables/2/wa",
-   "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
-   "rule_line": 61
-  },
-  {
-   "line": 322,
-   "template_line": 252,
-   "path": "/tests/7/tables/2/wa",
-   "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
-   "rule_line": 61
-  },
-  {
-   "line": 323,
-   "template_line": 252,
-   "path": "/tests/7/tables/2/wa",
-   "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
-   "rule_line": 61
-  },
-  {
-   "line": 324,
-   "template_line": 252,
-   "path": "/tests/7/tables/2/wa",
-   "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
-   "rule_line": 61
-  },
-  {
-   "line": 325,
-   "template_line": 252,
-   "path": "/tests/7/tables/2/wa",
-   "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
-   "rule_line": 61
-  },
-  {
-   "line": 326,
    "template_line": 254,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
    "rule_line": 61
   },
   {
+   "line": 322,
+   "template_line": 257,
+   "path": "/tests/7/tables/2/wa",
+   "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
+   "rule_line": 61
+  },
+  {
+   "line": 323,
+   "template_line": 257,
+   "path": "/tests/7/tables/2/wa",
+   "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
+   "rule_line": 61
+  },
+  {
+   "line": 324,
+   "template_line": 257,
+   "path": "/tests/7/tables/2/wa",
+   "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
+   "rule_line": 61
+  },
+  {
+   "line": 325,
+   "template_line": 257,
+   "path": "/tests/7/tables/2/wa",
+   "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
+   "rule_line": 61
+  },
+  {
+   "line": 326,
+   "template_line": 259,
+   "path": "/tests/7/tables/2/wa",
+   "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
+   "rule_line": 61
+  },
+  {
    "line": 327,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/7/tables/2/table",
    "node": "rule/ship-min-crew/example/other ships crew/table/zosd_l2_crew",
    "rule_line": 61
   },
   {
    "line": 328,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/7/expect/1/value",
    "node": "rule/ship-min-crew/example/other ships crew/expect/1",
    "rule_line": 64
   },
   {
    "line": 329,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/7/date/call",
    "node": "rule/ship-min-crew/example/other ships crew/date",
    "rule_line": 56
   },
   {
    "line": 330,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/7/date/value",
    "node": "rule/ship-min-crew/example/other ships crew/date",
    "rule_line": 56
   },
   {
    "line": 331,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/7/ref_label",
    "node": "rule/ship-min-crew/example/other ships crew",
    "rule_line": 55
   },
   {
    "line": 332,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/7/label",
    "node": "rule/ship-min-crew/example/other ships crew",
    "rule_line": 55
   },
   {
    "line": 333,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/7",
    "node": "rule/ship-min-crew/example/other ships crew",
    "rule_line": 55
@@ -2400,567 +2400,567 @@
   },
   {
    "line": 343,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 344,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 345,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 346,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 347,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 348,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 349,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 350,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 351,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 352,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 353,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 354,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 355,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 356,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 357,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 358,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 359,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 360,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 361,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 362,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 363,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 364,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 365,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 366,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 367,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 368,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 369,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 370,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 371,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 372,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 373,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/8/tables/1/table",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_ship",
    "rule_line": 68
   },
   {
    "line": 374,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 375,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 376,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 377,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 378,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 379,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 380,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 381,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 382,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 383,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 384,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 385,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 386,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 387,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 388,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 389,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 390,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 391,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 392,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 393,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 394,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 395,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 396,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 397,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 398,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 399,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 400,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 401,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 402,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 403,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 404,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 405,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 406,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 407,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 408,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 409,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 410,
-   "template_line": 249,
-   "path": "/tests/8/tables/2/wa",
-   "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
-   "rule_line": 74
-  },
-  {
-   "line": 411,
-   "template_line": 252,
-   "path": "/tests/8/tables/2/wa",
-   "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
-   "rule_line": 74
-  },
-  {
-   "line": 412,
-   "template_line": 252,
-   "path": "/tests/8/tables/2/wa",
-   "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
-   "rule_line": 74
-  },
-  {
-   "line": 413,
-   "template_line": 252,
-   "path": "/tests/8/tables/2/wa",
-   "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
-   "rule_line": 74
-  },
-  {
-   "line": 414,
-   "template_line": 252,
-   "path": "/tests/8/tables/2/wa",
-   "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
-   "rule_line": 74
-  },
-  {
-   "line": 415,
    "template_line": 254,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
+   "line": 411,
+   "template_line": 257,
+   "path": "/tests/8/tables/2/wa",
+   "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
+   "rule_line": 74
+  },
+  {
+   "line": 412,
+   "template_line": 257,
+   "path": "/tests/8/tables/2/wa",
+   "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
+   "rule_line": 74
+  },
+  {
+   "line": 413,
+   "template_line": 257,
+   "path": "/tests/8/tables/2/wa",
+   "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
+   "rule_line": 74
+  },
+  {
+   "line": 414,
+   "template_line": 257,
+   "path": "/tests/8/tables/2/wa",
+   "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
+   "rule_line": 74
+  },
+  {
+   "line": 415,
+   "template_line": 259,
+   "path": "/tests/8/tables/2/wa",
+   "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
+   "rule_line": 74
+  },
+  {
    "line": 416,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/8/tables/2/table",
    "node": "rule/ship-min-crew/example/fleet out of key order/table/zosd_l2_crew",
    "rule_line": 74
   },
   {
    "line": 417,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/8/expect/1/value",
    "node": "rule/ship-min-crew/example/fleet out of key order/expect/1",
    "rule_line": 81
   },
   {
    "line": 418,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/8/expect/2/value",
    "node": "rule/ship-min-crew/example/fleet out of key order/expect/2",
    "rule_line": 81
   },
   {
    "line": 419,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/8/date/call",
    "node": "rule/ship-min-crew/example/fleet out of key order/date",
    "rule_line": 66
   },
   {
    "line": 420,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/8/date/value",
    "node": "rule/ship-min-crew/example/fleet out of key order/date",
    "rule_line": 66
   },
   {
    "line": 421,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/8/ref_label",
    "node": "rule/ship-min-crew/example/fleet out of key order",
    "rule_line": 65
   },
   {
    "line": 422,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/8/label",
    "node": "rule/ship-min-crew/example/fleet out of key order",
    "rule_line": 65
   },
   {
    "line": 423,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/8",
    "node": "rule/ship-min-crew/example/fleet out of key order",
    "rule_line": 65
@@ -3065,175 +3065,175 @@
   },
   {
    "line": 438,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 439,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 440,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 441,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 442,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 443,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 444,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 445,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 446,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 447,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 448,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 449,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 450,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 451,
-   "template_line": 249,
-   "path": "/tests/9/tables/1/wa",
-   "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
-   "rule_line": 87
-  },
-  {
-   "line": 452,
-   "template_line": 252,
-   "path": "/tests/9/tables/1/wa",
-   "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
-   "rule_line": 87
-  },
-  {
-   "line": 453,
-   "template_line": 252,
-   "path": "/tests/9/tables/1/wa",
-   "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
-   "rule_line": 87
-  },
-  {
-   "line": 454,
-   "template_line": 252,
-   "path": "/tests/9/tables/1/wa",
-   "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
-   "rule_line": 87
-  },
-  {
-   "line": 455,
    "template_line": 254,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
+   "line": 452,
+   "template_line": 257,
+   "path": "/tests/9/tables/1/wa",
+   "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
+   "rule_line": 87
+  },
+  {
+   "line": 453,
+   "template_line": 257,
+   "path": "/tests/9/tables/1/wa",
+   "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
+   "rule_line": 87
+  },
+  {
+   "line": 454,
+   "template_line": 257,
+   "path": "/tests/9/tables/1/wa",
+   "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
+   "rule_line": 87
+  },
+  {
+   "line": 455,
+   "template_line": 259,
+   "path": "/tests/9/tables/1/wa",
+   "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
+   "rule_line": 87
+  },
+  {
    "line": 456,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/9/tables/1/table",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 87
   },
   {
    "line": 457,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/9/expect/1/value",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/expect/1",
    "rule_line": 92
   },
   {
    "line": 458,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/9/date/call",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/date",
    "rule_line": 84
   },
   {
    "line": 459,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/9/date/value",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/date",
    "rule_line": 84
   },
   {
    "line": 460,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/9/ref_label",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship",
    "rule_line": 83
   },
   {
    "line": 461,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/9/label",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship",
    "rule_line": 83
   },
   {
    "line": 462,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/9",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship",
    "rule_line": 83
@@ -3303,147 +3303,147 @@
   },
   {
    "line": 472,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 473,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 474,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 475,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 476,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 477,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 478,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/10/tables/1/table",
    "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 479,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/10/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
    "rule_line": 6
   },
   {
    "line": 480,
-   "template_line": 249,
-   "path": "/tests/10/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 481,
-   "template_line": 252,
-   "path": "/tests/10/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 482,
-   "template_line": 252,
-   "path": "/tests/10/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 483,
-   "template_line": 252,
-   "path": "/tests/10/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 484,
-   "template_line": 252,
-   "path": "/tests/10/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 485,
    "template_line": 254,
    "path": "/tests/10/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
    "rule_line": 6
   },
   {
+   "line": 481,
+   "template_line": 257,
+   "path": "/tests/10/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 482,
+   "template_line": 257,
+   "path": "/tests/10/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 483,
+   "template_line": 257,
+   "path": "/tests/10/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 484,
+   "template_line": 257,
+   "path": "/tests/10/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 485,
+   "template_line": 259,
+   "path": "/tests/10/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
    "line": 486,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/10/tables/2/table",
    "node": "rule/ship-min-crew/case/b_status_eq/table/zosd_l2_crew",
    "rule_line": 6
   },
   {
    "line": 487,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/10/expect/1/value",
    "node": "rule/ship-min-crew/case/b_status_eq/expect/1",
    "rule_line": 6
   },
   {
    "line": 488,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/10/date/call",
    "node": "rule/ship-min-crew/case/b_status_eq/date",
    "rule_line": 6
   },
   {
    "line": 489,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/10/date/value",
    "node": "rule/ship-min-crew/case/b_status_eq/date",
    "rule_line": 6
   },
   {
    "line": 490,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/10/ref_label",
    "node": "rule/ship-min-crew/case/b_status_eq",
    "rule_line": 6
   },
   {
    "line": 491,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/10/label",
    "node": "rule/ship-min-crew/case/b_status_eq",
    "rule_line": 6
   },
   {
    "line": 492,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/10",
    "node": "rule/ship-min-crew/case/b_status_eq",
    "rule_line": 6
@@ -3513,140 +3513,140 @@
   },
   {
    "line": 502,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 503,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 504,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 505,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 506,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 507,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 508,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/11/tables/1/table",
    "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 509,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/11/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
    "rule_line": 6
   },
   {
    "line": 510,
-   "template_line": 249,
-   "path": "/tests/11/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 511,
-   "template_line": 252,
-   "path": "/tests/11/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 512,
-   "template_line": 252,
-   "path": "/tests/11/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 513,
-   "template_line": 252,
-   "path": "/tests/11/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 514,
-   "template_line": 252,
-   "path": "/tests/11/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 515,
    "template_line": 254,
    "path": "/tests/11/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
    "rule_line": 6
   },
   {
+   "line": 511,
+   "template_line": 257,
+   "path": "/tests/11/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 512,
+   "template_line": 257,
+   "path": "/tests/11/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 513,
+   "template_line": 257,
+   "path": "/tests/11/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 514,
+   "template_line": 257,
+   "path": "/tests/11/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 515,
+   "template_line": 259,
+   "path": "/tests/11/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
    "line": 516,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/11/tables/2/table",
    "node": "rule/ship-min-crew/case/b_status_ne/table/zosd_l2_crew",
    "rule_line": 6
   },
   {
    "line": 517,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/11/date/call",
    "node": "rule/ship-min-crew/case/b_status_ne/date",
    "rule_line": 6
   },
   {
    "line": 518,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/11/date/value",
    "node": "rule/ship-min-crew/case/b_status_ne/date",
    "rule_line": 6
   },
   {
    "line": 519,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/11/ref_label",
    "node": "rule/ship-min-crew/case/b_status_ne",
    "rule_line": 6
   },
   {
    "line": 520,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/11/label",
    "node": "rule/ship-min-crew/case/b_status_ne",
    "rule_line": 6
   },
   {
    "line": 521,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/11",
    "node": "rule/ship-min-crew/case/b_status_ne",
    "rule_line": 6
@@ -3716,140 +3716,140 @@
   },
   {
    "line": 531,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 532,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 533,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 534,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 535,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 536,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 537,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/12/tables/1/table",
    "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 6
   },
   {
    "line": 538,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/12/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
    "rule_line": 6
   },
   {
    "line": 539,
-   "template_line": 249,
-   "path": "/tests/12/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 540,
-   "template_line": 252,
-   "path": "/tests/12/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 541,
-   "template_line": 252,
-   "path": "/tests/12/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 542,
-   "template_line": 252,
-   "path": "/tests/12/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 543,
-   "template_line": 252,
-   "path": "/tests/12/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
-   "rule_line": 6
-  },
-  {
-   "line": 544,
    "template_line": 254,
    "path": "/tests/12/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
    "rule_line": 6
   },
   {
+   "line": 540,
+   "template_line": 257,
+   "path": "/tests/12/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 541,
+   "template_line": 257,
+   "path": "/tests/12/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 542,
+   "template_line": 257,
+   "path": "/tests/12/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 543,
+   "template_line": 257,
+   "path": "/tests/12/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
+   "line": 544,
+   "template_line": 259,
+   "path": "/tests/12/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
+   "rule_line": 6
+  },
+  {
    "line": 545,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/12/tables/2/table",
    "node": "rule/ship-min-crew/case/b_status_blank/table/zosd_l2_crew",
    "rule_line": 6
   },
   {
    "line": 546,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/12/date/call",
    "node": "rule/ship-min-crew/case/b_status_blank/date",
    "rule_line": 6
   },
   {
    "line": 547,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/12/date/value",
    "node": "rule/ship-min-crew/case/b_status_blank/date",
    "rule_line": 6
   },
   {
    "line": 548,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/12/ref_label",
    "node": "rule/ship-min-crew/case/b_status_blank",
    "rule_line": 6
   },
   {
    "line": 549,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/12/label",
    "node": "rule/ship-min-crew/case/b_status_blank",
    "rule_line": 6
   },
   {
    "line": 550,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/12",
    "node": "rule/ship-min-crew/case/b_status_blank",
    "rule_line": 6
@@ -3919,189 +3919,189 @@
   },
   {
    "line": 560,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 561,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 562,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 563,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 564,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 565,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 566,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/13/tables/1/table",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 567,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 568,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 569,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 570,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 571,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 572,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 573,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 574,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 575,
-   "template_line": 249,
-   "path": "/tests/13/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 576,
-   "template_line": 252,
-   "path": "/tests/13/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 577,
-   "template_line": 252,
-   "path": "/tests/13/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 578,
-   "template_line": 252,
-   "path": "/tests/13/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 579,
-   "template_line": 252,
-   "path": "/tests/13/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 580,
    "template_line": 254,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
+   "line": 576,
+   "template_line": 257,
+   "path": "/tests/13/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 577,
+   "template_line": 257,
+   "path": "/tests/13/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 578,
+   "template_line": 257,
+   "path": "/tests/13/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 579,
+   "template_line": 257,
+   "path": "/tests/13/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 580,
+   "template_line": 259,
+   "path": "/tests/13/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
    "line": 581,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/13/tables/2/table",
    "node": "rule/ship-min-crew/case/b_ship_id_match/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 582,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/13/date/call",
    "node": "rule/ship-min-crew/case/b_ship_id_match/date",
    "rule_line": 9
   },
   {
    "line": 583,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/13/date/value",
    "node": "rule/ship-min-crew/case/b_ship_id_match/date",
    "rule_line": 9
   },
   {
    "line": 584,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/13/ref_label",
    "node": "rule/ship-min-crew/case/b_ship_id_match",
    "rule_line": 9
   },
   {
    "line": 585,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/13/label",
    "node": "rule/ship-min-crew/case/b_ship_id_match",
    "rule_line": 9
   },
   {
    "line": 586,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/13",
    "node": "rule/ship-min-crew/case/b_ship_id_match",
    "rule_line": 9
@@ -4171,196 +4171,196 @@
   },
   {
    "line": 596,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 597,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 598,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 599,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 600,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 601,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 602,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/14/tables/1/table",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 603,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 604,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 605,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 606,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 607,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 608,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 609,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 610,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 611,
-   "template_line": 249,
-   "path": "/tests/14/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 612,
-   "template_line": 252,
-   "path": "/tests/14/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 613,
-   "template_line": 252,
-   "path": "/tests/14/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 614,
-   "template_line": 252,
-   "path": "/tests/14/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 615,
-   "template_line": 252,
-   "path": "/tests/14/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 616,
    "template_line": 254,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
+   "line": 612,
+   "template_line": 257,
+   "path": "/tests/14/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 613,
+   "template_line": 257,
+   "path": "/tests/14/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 614,
+   "template_line": 257,
+   "path": "/tests/14/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 615,
+   "template_line": 257,
+   "path": "/tests/14/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 616,
+   "template_line": 259,
+   "path": "/tests/14/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
    "line": 617,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/14/tables/2/table",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 618,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/14/expect/1/value",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/expect/1",
    "rule_line": 9
   },
   {
    "line": 619,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/14/date/call",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/date",
    "rule_line": 9
   },
   {
    "line": 620,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/14/date/value",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch/date",
    "rule_line": 9
   },
   {
    "line": 621,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/14/ref_label",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch",
    "rule_line": 9
   },
   {
    "line": 622,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/14/label",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch",
    "rule_line": 9
   },
   {
    "line": 623,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/14",
    "node": "rule/ship-min-crew/case/b_ship_id_nomatch",
    "rule_line": 9
@@ -4430,189 +4430,189 @@
   },
   {
    "line": 633,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 634,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 635,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 636,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 637,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 638,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 639,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/15/tables/1/table",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 640,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/15/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 641,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/15/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 642,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/15/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 643,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/15/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 644,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/15/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 645,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/15/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 646,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/15/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 647,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/15/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 648,
-   "template_line": 249,
-   "path": "/tests/15/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 649,
-   "template_line": 252,
-   "path": "/tests/15/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 650,
-   "template_line": 252,
-   "path": "/tests/15/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 651,
-   "template_line": 252,
-   "path": "/tests/15/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 652,
-   "template_line": 252,
-   "path": "/tests/15/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 653,
    "template_line": 254,
    "path": "/tests/15/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
+   "line": 649,
+   "template_line": 257,
+   "path": "/tests/15/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 650,
+   "template_line": 257,
+   "path": "/tests/15/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 651,
+   "template_line": 257,
+   "path": "/tests/15/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 652,
+   "template_line": 257,
+   "path": "/tests/15/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 653,
+   "template_line": 259,
+   "path": "/tests/15/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
    "line": 654,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/15/tables/2/table",
    "node": "rule/ship-min-crew/case/b_since_lt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 655,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/15/date/call",
    "node": "rule/ship-min-crew/case/b_since_lt/date",
    "rule_line": 9
   },
   {
    "line": 656,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/15/date/value",
    "node": "rule/ship-min-crew/case/b_since_lt/date",
    "rule_line": 9
   },
   {
    "line": 657,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/15/ref_label",
    "node": "rule/ship-min-crew/case/b_since_lt",
    "rule_line": 9
   },
   {
    "line": 658,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/15/label",
    "node": "rule/ship-min-crew/case/b_since_lt",
    "rule_line": 9
   },
   {
    "line": 659,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/15",
    "node": "rule/ship-min-crew/case/b_since_lt",
    "rule_line": 9
@@ -4682,189 +4682,189 @@
   },
   {
    "line": 669,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 670,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 671,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 672,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 673,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 674,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 675,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/16/tables/1/table",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 676,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 677,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 678,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 679,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 680,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 681,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 682,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 683,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 684,
-   "template_line": 249,
-   "path": "/tests/16/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 685,
-   "template_line": 252,
-   "path": "/tests/16/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 686,
-   "template_line": 252,
-   "path": "/tests/16/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 687,
-   "template_line": 252,
-   "path": "/tests/16/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 688,
-   "template_line": 252,
-   "path": "/tests/16/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 689,
    "template_line": 254,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
+   "line": 685,
+   "template_line": 257,
+   "path": "/tests/16/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 686,
+   "template_line": 257,
+   "path": "/tests/16/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 687,
+   "template_line": 257,
+   "path": "/tests/16/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 688,
+   "template_line": 257,
+   "path": "/tests/16/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 689,
+   "template_line": 259,
+   "path": "/tests/16/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
    "line": 690,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/16/tables/2/table",
    "node": "rule/ship-min-crew/case/b_since_eq/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 691,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/16/date/call",
    "node": "rule/ship-min-crew/case/b_since_eq/date",
    "rule_line": 9
   },
   {
    "line": 692,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/16/date/value",
    "node": "rule/ship-min-crew/case/b_since_eq/date",
    "rule_line": 9
   },
   {
    "line": 693,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/16/ref_label",
    "node": "rule/ship-min-crew/case/b_since_eq",
    "rule_line": 9
   },
   {
    "line": 694,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/16/label",
    "node": "rule/ship-min-crew/case/b_since_eq",
    "rule_line": 9
   },
   {
    "line": 695,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/16",
    "node": "rule/ship-min-crew/case/b_since_eq",
    "rule_line": 9
@@ -4934,196 +4934,196 @@
   },
   {
    "line": 705,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/17/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 706,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/17/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 707,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/17/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 708,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/17/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 709,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/17/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 710,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/17/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 711,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/17/tables/1/table",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 712,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/17/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 713,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/17/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 714,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/17/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 715,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/17/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 716,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/17/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 717,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/17/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 718,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/17/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 719,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/17/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 720,
-   "template_line": 249,
-   "path": "/tests/17/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 721,
-   "template_line": 252,
-   "path": "/tests/17/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 722,
-   "template_line": 252,
-   "path": "/tests/17/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 723,
-   "template_line": 252,
-   "path": "/tests/17/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 724,
-   "template_line": 252,
-   "path": "/tests/17/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
-   "rule_line": 9
-  },
-  {
-   "line": 725,
    "template_line": 254,
    "path": "/tests/17/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
+   "line": 721,
+   "template_line": 257,
+   "path": "/tests/17/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 722,
+   "template_line": 257,
+   "path": "/tests/17/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 723,
+   "template_line": 257,
+   "path": "/tests/17/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 724,
+   "template_line": 257,
+   "path": "/tests/17/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
+   "line": 725,
+   "template_line": 259,
+   "path": "/tests/17/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
+   "rule_line": 9
+  },
+  {
    "line": 726,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/17/tables/2/table",
    "node": "rule/ship-min-crew/case/b_since_gt/table/zosd_l2_crew",
    "rule_line": 9
   },
   {
    "line": 727,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/17/expect/1/value",
    "node": "rule/ship-min-crew/case/b_since_gt/expect/1",
    "rule_line": 9
   },
   {
    "line": 728,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/17/date/call",
    "node": "rule/ship-min-crew/case/b_since_gt/date",
    "rule_line": 9
   },
   {
    "line": 729,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/17/date/value",
    "node": "rule/ship-min-crew/case/b_since_gt/date",
    "rule_line": 9
   },
   {
    "line": 730,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/17/ref_label",
    "node": "rule/ship-min-crew/case/b_since_gt",
    "rule_line": 9
   },
   {
    "line": 731,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/17/label",
    "node": "rule/ship-min-crew/case/b_since_gt",
    "rule_line": 9
   },
   {
    "line": 732,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/17",
    "node": "rule/ship-min-crew/case/b_since_gt",
    "rule_line": 9
@@ -5193,147 +5193,147 @@
   },
   {
    "line": 742,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/18/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 743,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/18/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 744,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/18/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 745,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/18/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 746,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/18/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 747,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/18/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 748,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/18/tables/1/table",
    "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 749,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/18/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 750,
-   "template_line": 249,
-   "path": "/tests/18/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 751,
-   "template_line": 252,
-   "path": "/tests/18/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 752,
-   "template_line": 252,
-   "path": "/tests/18/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 753,
-   "template_line": 252,
-   "path": "/tests/18/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 754,
-   "template_line": 252,
-   "path": "/tests/18/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 755,
    "template_line": 254,
    "path": "/tests/18/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
+   "line": 751,
+   "template_line": 257,
+   "path": "/tests/18/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 752,
+   "template_line": 257,
+   "path": "/tests/18/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 753,
+   "template_line": 257,
+   "path": "/tests/18/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 754,
+   "template_line": 257,
+   "path": "/tests/18/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 755,
+   "template_line": 259,
+   "path": "/tests/18/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
    "line": 756,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/18/tables/2/table",
    "node": "rule/ship-min-crew/case/b_count_below/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 757,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/18/expect/1/value",
    "node": "rule/ship-min-crew/case/b_count_below/expect/1",
    "rule_line": 10
   },
   {
    "line": 758,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/18/date/call",
    "node": "rule/ship-min-crew/case/b_count_below/date",
    "rule_line": 10
   },
   {
    "line": 759,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/18/date/value",
    "node": "rule/ship-min-crew/case/b_count_below/date",
    "rule_line": 10
   },
   {
    "line": 760,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/18/ref_label",
    "node": "rule/ship-min-crew/case/b_count_below",
    "rule_line": 10
   },
   {
    "line": 761,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/18/label",
    "node": "rule/ship-min-crew/case/b_count_below",
    "rule_line": 10
   },
   {
    "line": 762,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/18",
    "node": "rule/ship-min-crew/case/b_count_below",
    "rule_line": 10
@@ -5403,189 +5403,189 @@
   },
   {
    "line": 772,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/19/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 773,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/19/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 774,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/19/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 775,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/19/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 776,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/19/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 777,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/19/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 778,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/19/tables/1/table",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 779,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/19/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 780,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/19/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 781,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/19/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 782,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/19/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 783,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/19/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 784,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/19/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 785,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/19/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 786,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/19/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 787,
-   "template_line": 249,
-   "path": "/tests/19/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 788,
-   "template_line": 252,
-   "path": "/tests/19/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 789,
-   "template_line": 252,
-   "path": "/tests/19/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 790,
-   "template_line": 252,
-   "path": "/tests/19/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 791,
-   "template_line": 252,
-   "path": "/tests/19/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 792,
    "template_line": 254,
    "path": "/tests/19/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
+   "line": 788,
+   "template_line": 257,
+   "path": "/tests/19/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 789,
+   "template_line": 257,
+   "path": "/tests/19/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 790,
+   "template_line": 257,
+   "path": "/tests/19/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 791,
+   "template_line": 257,
+   "path": "/tests/19/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 792,
+   "template_line": 259,
+   "path": "/tests/19/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
    "line": 793,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/19/tables/2/table",
    "node": "rule/ship-min-crew/case/b_count_at/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 794,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/19/date/call",
    "node": "rule/ship-min-crew/case/b_count_at/date",
    "rule_line": 10
   },
   {
    "line": 795,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/19/date/value",
    "node": "rule/ship-min-crew/case/b_count_at/date",
    "rule_line": 10
   },
   {
    "line": 796,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/19/ref_label",
    "node": "rule/ship-min-crew/case/b_count_at",
    "rule_line": 10
   },
   {
    "line": 797,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/19/label",
    "node": "rule/ship-min-crew/case/b_count_at",
    "rule_line": 10
   },
   {
    "line": 798,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/19",
    "node": "rule/ship-min-crew/case/b_count_at",
    "rule_line": 10
@@ -5648,91 +5648,91 @@
   },
   {
    "line": 807,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/20/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 808,
-   "template_line": 249,
-   "path": "/tests/20/tables/1/wa",
-   "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
-   "rule_line": 10
-  },
-  {
-   "line": 809,
-   "template_line": 252,
-   "path": "/tests/20/tables/1/wa",
-   "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
-   "rule_line": 10
-  },
-  {
-   "line": 810,
-   "template_line": 252,
-   "path": "/tests/20/tables/1/wa",
-   "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
-   "rule_line": 10
-  },
-  {
-   "line": 811,
-   "template_line": 252,
-   "path": "/tests/20/tables/1/wa",
-   "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
-   "rule_line": 10
-  },
-  {
-   "line": 812,
    "template_line": 254,
    "path": "/tests/20/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
+   "line": 809,
+   "template_line": 257,
+   "path": "/tests/20/tables/1/wa",
+   "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
+   "rule_line": 10
+  },
+  {
+   "line": 810,
+   "template_line": 257,
+   "path": "/tests/20/tables/1/wa",
+   "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
+   "rule_line": 10
+  },
+  {
+   "line": 811,
+   "template_line": 257,
+   "path": "/tests/20/tables/1/wa",
+   "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
+   "rule_line": 10
+  },
+  {
+   "line": 812,
+   "template_line": 259,
+   "path": "/tests/20/tables/1/wa",
+   "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
+   "rule_line": 10
+  },
+  {
    "line": 813,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/20/tables/1/table",
    "node": "rule/ship-min-crew/case/b_count_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 814,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/20/expect/1/value",
    "node": "rule/ship-min-crew/case/b_count_zero/expect/1",
    "rule_line": 10
   },
   {
    "line": 815,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/20/date/call",
    "node": "rule/ship-min-crew/case/b_count_zero/date",
    "rule_line": 10
   },
   {
    "line": 816,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/20/date/value",
    "node": "rule/ship-min-crew/case/b_count_zero/date",
    "rule_line": 10
   },
   {
    "line": 817,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/20/ref_label",
    "node": "rule/ship-min-crew/case/b_count_zero",
    "rule_line": 10
   },
   {
    "line": 818,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/20/label",
    "node": "rule/ship-min-crew/case/b_count_zero",
    "rule_line": 10
   },
   {
    "line": 819,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/20",
    "node": "rule/ship-min-crew/case/b_count_zero",
    "rule_line": 10
@@ -5802,238 +5802,238 @@
   },
   {
    "line": 829,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 830,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 831,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 832,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 833,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 834,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 835,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 836,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 837,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 838,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 839,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 840,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/21/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 841,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/21/tables/1/table",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 842,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/21/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 843,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/21/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 844,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/21/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 845,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/21/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 846,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/21/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 847,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/21/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 848,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/21/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 849,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/21/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 850,
-   "template_line": 249,
-   "path": "/tests/21/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 851,
-   "template_line": 252,
-   "path": "/tests/21/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 852,
-   "template_line": 252,
-   "path": "/tests/21/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 853,
-   "template_line": 252,
-   "path": "/tests/21/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 854,
-   "template_line": 252,
-   "path": "/tests/21/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 855,
    "template_line": 254,
    "path": "/tests/21/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
+   "line": 851,
+   "template_line": 257,
+   "path": "/tests/21/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 852,
+   "template_line": 257,
+   "path": "/tests/21/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 853,
+   "template_line": 257,
+   "path": "/tests/21/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 854,
+   "template_line": 257,
+   "path": "/tests/21/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 855,
+   "template_line": 259,
+   "path": "/tests/21/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
    "line": 856,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/21/tables/2/table",
    "node": "rule/ship-min-crew/case/b_count_next_zero/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 857,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/21/expect/1/value",
    "node": "rule/ship-min-crew/case/b_count_next_zero/expect/1",
    "rule_line": 10
   },
   {
    "line": 858,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/21/date/call",
    "node": "rule/ship-min-crew/case/b_count_next_zero/date",
    "rule_line": 10
   },
   {
    "line": 859,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/21/date/value",
    "node": "rule/ship-min-crew/case/b_count_next_zero/date",
    "rule_line": 10
   },
   {
    "line": 860,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/21/ref_label",
    "node": "rule/ship-min-crew/case/b_count_next_zero",
    "rule_line": 10
   },
   {
    "line": 861,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/21/label",
    "node": "rule/ship-min-crew/case/b_count_next_zero",
    "rule_line": 10
   },
   {
    "line": 862,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/21",
    "node": "rule/ship-min-crew/case/b_count_next_zero",
    "rule_line": 10
@@ -6103,294 +6103,294 @@
   },
   {
    "line": 872,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 873,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 874,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 875,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 876,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 877,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 878,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 879,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 880,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 881,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 882,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 883,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/22/tables/1/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 884,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/22/tables/1/table",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_ship",
    "rule_line": 10
   },
   {
    "line": 885,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 886,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 887,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 888,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 889,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 890,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 891,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 892,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 893,
-   "template_line": 249,
+   "template_line": 254,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 894,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 895,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 896,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 897,
-   "template_line": 252,
+   "template_line": 257,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 898,
-   "template_line": 254,
+   "template_line": 259,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 899,
-   "template_line": 247,
+   "template_line": 252,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 900,
-   "template_line": 249,
-   "path": "/tests/22/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 901,
-   "template_line": 252,
-   "path": "/tests/22/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 902,
-   "template_line": 252,
-   "path": "/tests/22/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 903,
-   "template_line": 252,
-   "path": "/tests/22/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 904,
-   "template_line": 252,
-   "path": "/tests/22/tables/2/wa",
-   "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
-   "rule_line": 10
-  },
-  {
-   "line": 905,
    "template_line": 254,
    "path": "/tests/22/tables/2/wa",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
+   "line": 901,
+   "template_line": 257,
+   "path": "/tests/22/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 902,
+   "template_line": 257,
+   "path": "/tests/22/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 903,
+   "template_line": 257,
+   "path": "/tests/22/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 904,
+   "template_line": 257,
+   "path": "/tests/22/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
+   "line": 905,
+   "template_line": 259,
+   "path": "/tests/22/tables/2/wa",
+   "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
+   "rule_line": 10
+  },
+  {
    "line": 906,
-   "template_line": 256,
+   "template_line": 261,
    "path": "/tests/22/tables/2/table",
    "node": "rule/ship-min-crew/case/b_count_groups/table/zosd_l2_crew",
    "rule_line": 10
   },
   {
    "line": 907,
-   "template_line": 260,
+   "template_line": 265,
    "path": "/tests/22/expect/1/value",
    "node": "rule/ship-min-crew/case/b_count_groups/expect/1",
    "rule_line": 10
   },
   {
    "line": 908,
-   "template_line": 269,
+   "template_line": 274,
    "path": "/tests/22/date/call",
    "node": "rule/ship-min-crew/case/b_count_groups/date",
    "rule_line": 10
   },
   {
    "line": 909,
-   "template_line": 270,
+   "template_line": 275,
    "path": "/tests/22/date/value",
    "node": "rule/ship-min-crew/case/b_count_groups/date",
    "rule_line": 10
   },
   {
    "line": 910,
-   "template_line": 271,
+   "template_line": 276,
    "path": "/tests/22/ref_label",
    "node": "rule/ship-min-crew/case/b_count_groups",
    "rule_line": 10
   },
   {
    "line": 911,
-   "template_line": 272,
+   "template_line": 277,
    "path": "/tests/22/label",
    "node": "rule/ship-min-crew/case/b_count_groups",
    "rule_line": 10
   },
   {
    "line": 912,
-   "template_line": 273,
+   "template_line": 289,
    "path": "/tests/22",
    "node": "rule/ship-min-crew/case/b_count_groups",
    "rule_line": 10
   },
   {
    "line": 913,
-   "template_line": 275,
+   "template_line": 291,
    "path": "/",
    "node": "rule/ship-min-crew",
    "rule_line": 1
