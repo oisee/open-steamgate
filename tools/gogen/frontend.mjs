@@ -11,6 +11,7 @@
 // Everything outside the subset is a named refusal (Unsupported), never a
 // guess. A method whose body or signature is outside it is skipped and says
 // why; a method that calls a skipped one is refused in turn.
+import {syntaxDiagnostics} from "./frontend-diagnostics.mjs";
 import {replaceStatement, lowerByteFind} from "./frontend-bytes.mjs";
 import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
@@ -154,13 +155,10 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
     cdsViewsByRegistry.set(reg, cdsSqlViews(ddls));
   }
   REG = reg;
-  const ours = (fn) => wanted.includes(objName(fn));
-  const errors = reg.findIssues().filter((i) => (i.getKey() === "check_syntax" || i.getKey() === "parser_error") && ours(i.getFilename()));
-  // tolerant (a survey): an object with syntax errors is left out and named,
-  // instead of refusing the whole program
-  const broken = new Set();
-  if (errors.length > 0 && !tolerant) throw new Error(errors.map((e) => `${e.getFilename()}: ${e.getMessage()}`).join("\n"));
-  for (const e of errors) broken.add(objName(e.getFilename()));
+  const diagnostics = syntaxDiagnostics(reg, (fn) => wanted.includes(objName(fn)), objName);
+  // Tolerant surveys leave broken objects out, retaining their diagnostics.
+  if (diagnostics.length && !tolerant) throw new Error(diagnostics.map((d) => d.message).join("\n"));
+  const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
   if (broken.size > 0) wanted.splice(0, wanted.length, ...wanted.filter((w) => !broken.has(w)));
 
   // A literal CALL FUNCTION is a dependency on its function group. The
@@ -190,7 +188,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   }
 
   const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
-    interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
+    diagnostics, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
   program.supplied = suppliedParams(reg, program.wanted);
   PROGRAM = program;
   const ctx0 = {reg, program};

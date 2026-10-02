@@ -15,6 +15,7 @@ export function unitInputs({home, config, fixture, extraInputs = []}) {
     .map((x) => join(existsSync(join(home, "libs.lock.json")) ? libraryPath(home, x.split("/")[0]) : join(home, ".local/lars", x.split("/")[0]), x.slice(x.indexOf("/") + 1))).filter(existsSync);
   const folders = (extraInputs.length ? [...libDirs, ...sourceFolders] : [...sourceFolders, ...libDirs]).filter(existsSync);
   const hidden = new Set();
+  const overrides = [];
   if (extraInputs.length) {
     const winner = new Map();
     const layers = folders.map((folder) => ({folder, files: walk(folder)}));
@@ -24,7 +25,12 @@ export function unitInputs({home, config, fixture, extraInputs = []}) {
     }
     for (const {folder, files} of layers) for (const file of files) {
       const object = objectOf(basename(file));
-      if (object && winner.get(object) !== folder) hidden.add(file);
+      if (object && winner.get(object) !== folder) {
+        hidden.add(file);
+        const input = winner.get(object);
+        if (extraInputs.includes(input) && !overrides.some((o) => o.object === object && o.hidden === folder))
+          overrides.push({object, input, hidden: folder});
+      }
     }
   }
   const excluded = (config.exclude_filter ?? []).map((p) => new RegExp(p));
@@ -32,5 +38,5 @@ export function unitInputs({home, config, fixture, extraInputs = []}) {
   // Last include wins, and an owner replaced without a test include loses its tests.
   const sources = [...new Map(sourceFolders.flatMap(walk).filter((file) => !skip(file)).map((file) => [basename(file), file])).values()]
     .filter((file) => file.endsWith(".clas.testclasses.abap") && !file.includes("/test/fixtures/"));
-  return {sources, folders, libDirs, skip};
+  return {sources, folders, libDirs, skip, overrides};
 }

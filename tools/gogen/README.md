@@ -1578,14 +1578,20 @@ From an open-steamgate checkout pinned to the SHA your CI uses:
 
 ```sh
 git checkout <pinned-sha>
-node tools/osd-libs.mjs --sync
 npm ci
+# GitHub Actions: load source pins into later steps' environment.
+node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+node tools/osd-libs.mjs
+node tools/osd-libs.mjs --check
 export GOTOOLCHAIN=go1.26.0
 npm run osgo:unit -- <generated-classes-dir> --json
 ```
 
-Install Go 1.26 (and Node) on the runner. The directory is read without
-recursion; each `*.clas.testclasses.abap` owner with a matching
+Install Go 1.26 (and Node) on the runner. `osd-lock github-env` loads the
+tracked source pins, as in `.github/workflows/tests.yml`; outside GitHub
+Actions, export the assignments it prints before syncing libraries.
+
+The directory is read without recursion; each `*.clas.testclasses.abap` owner with a matching
 `*.clas.abap` is selected. `--jobs N` defaults to 4. `--class NAME...`
 filters owners; put the directory before the filter. Immediate ABAP/XML
 files, including helper classes and local includes, are copied into a
@@ -1593,6 +1599,10 @@ temporary layer after the checkout's inputs and packs. The caller's directory
 and `abap_transpile.json` are unchanged, and the staging/build tree is
 removed on completion. The underlying runner also accepts repeatable
 `--input <dir>` overlays, with the last layer winning the complete object.
+Overrides are reported on stderr and in JSON as `{object, input, hidden}`.
+All immediate `.abap` files are checked before compilation: lines longer
+than 255 characters, including comments and test includes, produce ERROR
+(exit 2) without a Go build. Exactly 255 characters is accepted.
 
 Missing class XML gets a default `VSEOCLASS`: EXPOSURE 2, STATE 1,
 UNICODE X, FIXPT X, WITH_UNIT_TESTS X, and the class name as DESCRIPT.
@@ -1604,11 +1614,13 @@ source-only generators. A real abapGit import creates a class from the
 abapGit import repository.
 
 JSON keeps the runner's fields (`classes`, `compiled`, `rows`, `timingMs`,
-`layers`, `cache`, `buildDir`) and adds
+`layers`, `cache`, `buildDir`, `overrides`) and adds
 `totals: {success, failure, not_compiled, error, tests}`. Rows contain
 `{class, testclass, method, status, message}` and may include diagnostics.
 `FAILED` is normalized to `FAILURE`; runner crashes, skipped methods, and
-unknown statuses become `ERROR`. `tests` counts method rows. `buildDir`
+unknown statuses become `ERROR`. In particular, `SKIPPED` counts as ERROR
+(exit 2), because a configured skip provides no evidence that the generated
+test passed. `tests` counts method rows. `buildDir`
 is diagnostic only: that temporary directory has already been removed.
 Human output prints each non-SUCCESS method on one line, then totals.
 Use `npm run --silent osgo:unit -- <dir> --json` when piping stdout to a

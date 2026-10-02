@@ -32,7 +32,8 @@ const skipped = new Set((config.options?.skip ?? config.skip ?? []).map((s) =>
   `${s.object}/${s.class}/${s.method}`.toUpperCase()));
 const walk = (dir) => !existsSync(dir) ? [] : readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((e) => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
-const {sources, folders, libDirs, skip} = unitInputs({home, config, fixture, extraInputs});
+const {sources, folders, libDirs, skip, overrides} = unitInputs({home, config, fixture, extraInputs});
+for (const o of overrides) console.error(`Override ${o.object}: ${o.input} hides ${o.hidden}`);
 const owners = [...new Set(sources.map((f) => f.split("/").at(-1).replace(/\.clas\.testclasses\.abap$/, "").replaceAll("#", "/").toUpperCase()))]
   .filter((o) => selected.size === 0 || selected.has(o));
 if (selected.size && owners.length !== selected.size) throw new Error(`unknown test owner: ${[...selected].filter((x) => !owners.includes(x)).join(", ")}`);
@@ -65,7 +66,7 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
     return own.some((r) => r.status === "SUCCESS" || r.status === "FAILED")
       && own.every((r) => r.status !== "NOT_COMPILED");
   });
-  console.log(JSON.stringify({classes: owners.length, compiled: compiled.length, rows, timingMs,
+  console.log(JSON.stringify({classes: owners.length, compiled: compiled.length, rows, timingMs, overrides,
     cache: {status: cacheCounts.miss ? "miss" : cacheCounts.hit ? "hit" : "bypass", reason: "per-owner snapshots", counts: cacheCounts}}));
   process.exit(rows.some((r) => r.status === "FAILED") ? 1 : rows.some((r) => r.status === "NOT_COMPILED" || r.status === "NEEDS_DB") ? 2 : 0);
 }
@@ -162,7 +163,8 @@ function testsOf(program) {
           const compiled = cls?.methods.some((x) => x.name === method);
           const why = cls?.stubs.find((x) => x.name === method)?.reason
             ?? program.skipped.find((x) => x.startsWith(`${owner}:${testclass}=>${method}:`))
-            ?? (compiled ? "" : "test method missing from generated class");
+            ?? (compiled ? "" : program.diagnostics.filter((d) => d.object === owner).map((d) => d.message).join("\n")
+              || "test method missing from generated class");
           const skip = skipped.has(`${owner}/${testclass}/${method}`);
           rows.push({class: owner, testclass, method, status: skip ? "SKIPPED" : compiled ? "READY" : "NOT_COMPILED",
             message: skip ? "skipped due to configuration" : why});
@@ -449,7 +451,7 @@ timingMs.emit = Math.round(performance.now() - emitStarted);
 const {collectMedia, writeMedia} = await import("./media.mjs");
 const media = collectMedia(folders.filter(existsSync));
 writeMedia(media, join(runDir, "media"));
-const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs, layers: layerInfo, cache, buildDir: goDir};
+const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs, overrides, layers: layerInfo, cache, buildDir: goDir};
 const updateCompiledCount = () => {
   summary.compiled = owners.filter((owner) => {
     const own = rows.filter((r) => r.class === owner);

@@ -13,9 +13,9 @@ const fixture = (dir, name = "zcl_osgo_ci", body = "cl_abap_unit_assert=>assert_
   writeFileSync(join(dir, `${name}.clas.testclasses.abap`), `CLASS ltcl_test DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.\n PRIVATE SECTION. METHODS check FOR TESTING. ENDCLASS.\nCLASS ltcl_test IMPLEMENTATION. METHOD check. ${body} ENDMETHOD. ENDCLASS.\n`);
 };
 const snapshot = (dir) => Object.fromEntries(readdirSync(dir).sort().map((name) => [name, readFileSync(join(dir, name), "utf8")]));
-const invoke = (dir, args = [], script = "tools/osgo-unit.mjs") => {
-  const run = spawnSync(process.execPath, [script, ...(script.startsWith("bin/") ? ["unit", "--go"] : []), dir, ...args],
-    {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 5e6});
+const invoke = (dir, args = [], script = "tools/osgo-unit.mjs", options = {}) => {
+  const run = spawnSync(process.execPath, [join(root, script), ...(script.startsWith("bin/") ? ["unit", "--go"] : []), dir, ...args],
+    {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 5e6, ...options});
   assert.equal(run.error, undefined, run.stderr);
   return run;
 };
@@ -98,8 +98,9 @@ describe("osgo unit CI entry point", function () {
     fixture(base); fixture(overlay);
     writeFileSync(join(base, "zcl_osgo_ci.clas.xml"), metadata("ZCL_OSGO_CI"));
     writeFileSync(join(base, "zcl_osgo_ci.clas.locals_def.abap"), "earlier include");
-    const {skip, sources, folders} = unitInputs({home: temp, config: {input_folder: ["base"]}, extraInputs: [overlay]});
+    const {skip, sources, folders, overrides} = unitInputs({home: temp, config: {input_folder: ["base"]}, extraInputs: [overlay]});
     assert.equal(folders.at(-1), overlay);
+    assert.deepEqual(overrides, [{object: "CLAS ZCL_OSGO_CI", input: overlay, hidden: base}]);
     for (const file of readdirSync(base)) assert.equal(skip(join(base, file)), true);
     assert.deepEqual(sources, [join(overlay, "zcl_osgo_ci.clas.testclasses.abap")]);
     // Exercise the actual option by replacing a checkout owner and its test include.
@@ -109,6 +110,66 @@ describe("osgo unit CI entry point", function () {
     {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 5e6});
     assert.equal(run.status, 0, run.stdout + run.stderr);
     assert.deepEqual(JSON.parse(run.stdout).rows.map((row) => row.status), ["SUCCESS"]);
+    assert.match(run.stderr, /Override CLAS ZCL_OSD_STATICS_TEST:/);
+    assert.deepEqual(JSON.parse(run.stdout).overrides, [{object: "CLAS ZCL_OSD_STATICS_TEST", input: overlay,
+      hidden: "test/fixtures/unit-statics"}]);
+  });
+  it("reports a checkout collision on stderr and in JSON", () => {
+    fixture(input, "zcl_osd_adt_handler");
+    const run = invoke(input, ["--json"]);
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.match(run.stderr, /Override CLAS ZCL_OSD_ADT_HANDLER:/);
+    const overrides = JSON.parse(run.stdout).overrides.filter((o) => o.object === "CLAS ZCL_OSD_ADT_HANDLER");
+    assert.equal(overrides.length, 1);
+    assert.ok(overrides[0].input.endsWith("/input"));
+    assert.ok(overrides[0].hidden.startsWith(root + "/"));
+  });
+  it("carries abaplint syntax errors with the source file and line", () => {
+    fixture(input, "zcl_osgo_ci", "DATA x TYPE i. x = .");
+    const run = invoke(input, ["--json"]);
+    assert.equal(run.status, 2, run.stdout + run.stderr);
+    const result = JSON.parse(run.stdout);
+    assert.equal(result.rows[0].status, "NOT_COMPILED");
+    assert.match(result.rows[0].message, /zcl_osgo_ci\.clas\.testclasses\.abap:3:.*(parse|syntax|statement)/i);
+  });
+  for (const [length, comment, file] of [[256, false, "clas.abap"], [300, false, "clas.testclasses.abap"], [300, true, "clas.locals_imp.abap"]]) {
+    it(`rejects a ${length}-character ${comment ? "comment" : "code"} line in ${file} before building`, () => {
+      fixture(input);
+      const name = `zcl_osgo_ci.${file}`;
+      const line = comment ? "*" + "x".repeat(length - 1) : "WRITE '" + "x".repeat(length - 9) + "'.";
+      assert.equal(line.length, length);
+      writeFileSync(join(input, name), line + "\n");
+      // No Go toolchain is reachable: validation must still yield the precise error.
+      const run = invoke(input, ["--json"], "tools/osgo-unit.mjs", {env: {...process.env, PATH: ""}});
+      assert.equal(run.status, 2, run.stdout + run.stderr);
+      const result = JSON.parse(run.stdout);
+      assert.deepEqual(result.rows, [{status: "ERROR", message: `${name}:1: line exceeds 255 characters (the kernel refuses it)`}]);
+      assert.equal(result.compiled, 0);
+      assert.equal(result.totals.error, 1);
+      assert.equal(result.buildDir, undefined);
+    });
+  }
+  it("accepts exactly 255 characters and CRLF lines", () => {
+    fixture(input);
+    const name = "zcl_osgo_ci.clas.testclasses.abap";
+    writeFileSync(join(input, name), "*" + "x".repeat(254) + "\r\n" + readFileSync(join(input, name), "utf8"));
+    const run = invoke(input, ["--json"]);
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.equal(JSON.parse(run.stdout).totals.success, 1);
+  });
+  it("runs from another directory without leaving .local there", () => {
+    fixture(input);
+    const run = invoke(input, ["--json"], "tools/osgo-unit.mjs", {cwd: temp});
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.equal(JSON.parse(run.stdout).totals.success, 1);
+    assert.equal(existsSync(join(temp, ".local")), false);
+  });
+  it("rewrites only the hosted dispatch argument when the host prefix contains gen", () => {
+    fixture(input);
+    const env = {...process.env, OSD_SELF: JSON.stringify([process.execPath, "--title", "gen", join(root, "bin/osd.mjs")])};
+    const run = invoke(input, ["--json"], "tools/osgo-unit.mjs", {env});
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.equal(JSON.parse(run.stdout).totals.success, 1);
   });
   it("classifies infrastructure, skipped methods, and mixed outcomes conservatively", () => {
     for (const row of [{status: "FAILED", message: "runner: crashed", method: "CHECK"}, {status: "SKIPPED", method: "CHECK"}]) {

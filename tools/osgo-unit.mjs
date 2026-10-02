@@ -1,8 +1,9 @@
 // CI entry point for generated abapGit classes. The caller's directory is read only.
 import {spawn} from "node:child_process";
-import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync} from "node:fs";
-import {join, resolve} from "node:path";
-import {compiled, toolCommand} from "./osd-host.mjs";
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {dirname, join, resolve} from "node:path";
+import {fileURLToPath} from "node:url";
+import {compiled, hosted, toolCommand} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
 
 const help = `Usage: npm run osgo:unit -- <dir> [--json] [--jobs N] [--class NAME...]
@@ -40,7 +41,7 @@ export function summarize(result) {
 }
 
 const run = (command, cwd) => new Promise((resolveRun, reject) => {
-  const child = spawn(command[0], command.slice(1), {cwd, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"]});
+  const child = spawn(command[0], command.slice(1), {cwd, env: {...process.env, OSG_HOME: cwd, OSD_ROOT: cwd}, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"]});
   let stdout = "", stderr = "", interrupted;
   // Only this invocation's process group is ours. Let its children finish before cleanup.
   const stop = (signal) => {
@@ -92,26 +93,37 @@ export async function main(args = process.argv.slice(2)) {
     if (!chosen.length) result = {classes: 0, compiled: 0, rows: [], timingMs: {}};
     else {
       // Under the checkout, and removed even if compilation or JSON decoding fails.
-      const root = resolve(process.env.OSG_HOME ?? process.env.OSD_ROOT ?? process.cwd());
+      const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
       mkdirSync(join(root, ".local"), {recursive: true});
       staging = mkdtempSync(join(root, ".local", "osgo-unit-"));
       const input = join(staging, "input");
       mkdirSync(input);
-      for (const file of files.filter((file) => /\.(abap|xml)$/.test(file))) copyFileSync(join(directory, file), join(input, file));
-      for (const file of files.filter((file) => file.endsWith(".clas.abap"))) {
-        const name = file.replace(/\.clas\.abap$/, "");
-        if (!existsSync(join(input, `${name}.clas.xml`))) writeFileSync(join(input, `${name}.clas.xml`), metadata(name.replaceAll("#", "/").toUpperCase()));
+      const errors = [];
+      for (const file of files.filter((file) => /\.(abap|xml)$/.test(file))) {
+        // Only osgo-unit enforces this for now; src/ needs a whole-tree audit first.
+        if (file.endsWith(".abap")) readFileSync(join(directory, file), "utf8").split(/\r\n|\n|\r/).forEach((line, i) => {
+          if ([...line].length > 255) errors.push({status: "ERROR", message: `${file}:${i + 1}: line exceeds 255 characters (the kernel refuses it)`});
+        });
+        copyFileSync(join(directory, file), join(input, file));
       }
-      const command = toolCommand(join(root, "tools", "gogen", "unit.mjs"),
-        ["--input", input, "--jobs", String(jobs), "--out", join(staging, "out"), "--no-cache", ...chosen.flatMap((name) => ["--class", name])]);
-      // Hosted dispatch uses a unique name: gogen's unit.mjs and osd-unit.mjs differ.
-      if (command.includes("gen")) command[command.indexOf("gen") + 1] = "gogen-unit.mjs";
-      const child = await run(command, root);
-      if (child.signal) throw new Error(`unit runner terminated by ${child.signal}`);
-      try { result = JSON.parse(child.stdout); }
-      catch { throw new Error(child.stderr.trim() || `invalid unit result (exit ${child.status})`); }
-      if (!Array.isArray(result.rows)) throw new Error("unit result has no rows");
-      if (child.status && child.status !== 2 && !result.rows.length) throw new Error(child.stderr.trim() || `unit runner exited ${child.status} without results`);
+      if (errors.length) result = {classes: chosen.length, compiled: 0, rows: errors, timingMs: {}};
+      else {
+        for (const file of files.filter((file) => file.endsWith(".clas.abap"))) {
+          const name = file.replace(/\.clas\.abap$/, "");
+          if (!existsSync(join(input, `${name}.clas.xml`))) writeFileSync(join(input, `${name}.clas.xml`), metadata(name.replaceAll("#", "/").toUpperCase()));
+        }
+        const command = toolCommand(join(root, "tools", "gogen", "unit.mjs"),
+          ["--input", input, "--jobs", String(jobs), "--out", join(staging, "out"), "--no-cache", ...chosen.flatMap((name) => ["--class", name])]);
+        // Hosted dispatch uses a unique name: gogen's unit.mjs and osd-unit.mjs differ.
+        if (hosted()) command[JSON.parse(process.env.OSD_SELF).length + 1] = "gogen-unit.mjs";
+        const child = await run(command, root);
+        if (child.stderr) process.stderr.write(child.stderr);
+        if (child.signal) throw new Error(`unit runner terminated by ${child.signal}`);
+        try { result = JSON.parse(child.stdout); }
+        catch { throw new Error(child.stderr.trim() || `invalid unit result (exit ${child.status})`); }
+        if (!Array.isArray(result.rows)) throw new Error("unit result has no rows");
+        if (child.status && child.status !== 2 && !result.rows.length) throw new Error(child.stderr.trim() || `unit runner exited ${child.status} without results`);
+      }
     }
   } catch (error) {
     result = {classes: 0, compiled: 0, rows: [{status: "ERROR", message: error.message}], timingMs: {}};
