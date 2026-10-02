@@ -388,10 +388,13 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
         const transpile = store.transpile;
         store.transpile = async () => { store.transpile = transpile; throw new Error("the disk went away"); };
         src.text = "rv = 2.";
-        const first = store.publish();
-        const second = store.publish();
         let thrown;
-        await first.catch((e) => { thrown = e; });
+        const first = store.publish().catch((e) => { thrown = e; });
+        // in its turn, not queued: a caller in the same turn as the first
+        // joins it and shares its outcome, the throw included
+        await new Promise((r) => setImmediate(r));
+        const second = store.publish();
+        await first;
         expect(thrown?.message).to.equal("the disk went away");
         expect(await second).to.include({ok: true, hot: true, generation: "h1"});
         expect(log).to.deep.equal(["swap h0->h1"]);
@@ -399,6 +402,198 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
         done();
       }
     });
+  });
+});
+
+// After #440 the two activators of a save ran one after the other, and the
+// second built the same tree again to find it live: "warm, already live"
+// with no X-OSD-Swap-Ms, and an activation queued behind whatever the dev
+// loop was building (vsp-i7, 2026-10-02). Here the real ObjectStore, the
+// real façade router and the real dev loop, over a stand-in warm compiler
+// that names a generation after its source, as hashOf names one after the
+// inputs, and a stand-in runtime whose swap takes a while.
+describe("tools/osd-warm: an activation answers once its source is live", () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const SWAP_MS = 150;
+  const nameOf = (text) => `g${text.replace(/\D/g, "")}`;
+
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-warm-live-"));
+    mkdirSync(join(dir, "src"));
+    const store = new ObjectStore({root: dir, roots: [{path: "src", writable: true}], libs: []});
+    store.write("CLAS", "ZCL_A", "CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\nCLASS zcl_a IMPLEMENTATION. ENDCLASS.\n");
+    const src = {text: "rv = 1."};
+    store.sourceKey = async () => nameOf(src.text);
+    const events = [];
+    const compiler = {
+      primed: true, unverified: new Set(), hash: nameOf(src.text), built: src.text, builds: 0,
+      async build() {
+        this.builds++;
+        const text = src.text;
+        await sleep(20);
+        const from = this.hash;
+        if (text === this.built) {
+          return {ok: true, hash: from, from, cached: true, modules: [], hostHeld: [], stale: 0};
+        }
+        this.built = text;
+        this.hash = nameOf(text);
+        return {ok: true, hash: this.hash, from, modules: ["zcl_a.clas.mjs"], hostHeld: [], stale: 1};
+      },
+    };
+    store.warmState = {on: true, compiler, reason: undefined};
+    store.served = {
+      running: true, generation: nameOf(src.text), swaps: 0, recycling: undefined, starting: undefined,
+      async hot(swap) {
+        if (this.running !== true || this.recycling !== undefined) throw new Error("nothing to swap into");
+        if (swap.from !== this.generation) {
+          throw new Error(`the runtime carries ${this.generation}, and the swap is from ${swap.from}`);
+        }
+        await sleep(SWAP_MS);
+        this.generation = swap.generation;
+        events.push({what: `swap ${swap.from}->${swap.generation}`, at: Date.now()});
+        return {ms: SWAP_MS, swaps: ++this.swaps};
+      },
+      async recycle() {
+        events.push({what: "recycle", at: Date.now()});
+        this.generation = compiler.hash;
+        return {generation: compiler.hash, ms: 900};
+      },
+    };
+    const done = () => {
+      clearTimeout(store.warmState.timer);
+      rmSync(dir, {recursive: true, force: true});
+    };
+    return {store, src, compiler, events, done};
+  };
+
+  // an ADT activation of ZCL_A through the real façade router
+  const activate = async (store) => {
+    const express = (await import("express")).default;
+    const {adtRouter} = await import("../tools/adt-facade.mjs");
+    const app = express();
+    app.use(adtRouter({store, data: {}, logMisses: false}).router);
+    const server = await new Promise((ok) => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
+    try {
+      const base = `http://127.0.0.1:${server.address().port}/sap/bc/adt`;
+      const login = await fetch(base + "/core/discovery", {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+      const cookie = (login.headers.getSetCookie?.() ?? []).map((v) => v.split(";", 1)[0]).join("; ");
+      const res = await fetch(base + "/activation?method=activate", {
+        method: "POST", headers: {"x-csrf-token": login.headers.get("x-csrf-token"), cookie},
+        body: `<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_a" adtcore:name="ZCL_A"/>
+</adtcore:objectReferences>`,
+      });
+      const body = await res.text();
+      return {status: res.status, at: Date.now(), body,
+        build: res.headers.get("x-osd-build"), swap: res.headers.get("x-osd-swap-ms")};
+    } finally {
+      await new Promise((ok) => server.close(ok));
+    }
+  };
+  const swaps = (events) => events.filter((e) => e.what.startsWith("swap")).map((e) => e.what);
+
+  it("waits for a runtime changing hands, then swaps, rather than answering at once", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      const runtime = store.served;
+      // a catch-up recycle in flight, on the generation live before the save
+      let finish;
+      runtime.running = false;
+      runtime.recycling = new Promise((r) => { finish = r; }).then(() => {
+        runtime.recycling = undefined;
+        runtime.running = true;
+        events.push({what: "recycled", at: Date.now()});
+        return {generation: runtime.generation, ms: 900};
+      });
+      src.text = "rv = 2.";
+      const answer = activate(store);
+      const early = await Promise.race([answer.then(() => "answered"), sleep(150).then(() => "waiting")]);
+      finish();
+      const a = await answer;
+      expect(early, "answered while no process served the code").to.equal("waiting");
+      expect(events.map((e) => e.what)).to.deep.equal(["recycled", "swap g1->g2"]);
+      expect(a.at).to.be.at.least(events[1].at);
+      expect(a).to.include({status: 200, build: "warm", swap: String(SWAP_MS)});
+    } finally {
+      done();
+    }
+  });
+
+  it("the dev loop and the activation of one save: one build, one swap, and the answer waits for it", async () => {
+    const {store, src, compiler, events, done} = setup();
+    try {
+      src.text = "rv = 2.";
+      const loop = devLoop({store, watch: false, log: () => {}});
+      const dev = loop.touch("src/osd/zcl_a.clas.abap");
+      await sleep(5);
+      const [d, a] = await Promise.all([dev, activate(store)]);
+      expect(d).to.include({ok: true, stage: "live"});
+      // in line (#440) the answer already waited for the swap; what it
+      // lacked was the swap's ms, and it built the same tree a second time
+      expect(swaps(events)).to.deep.equal(["swap g1->g2"]);
+      expect(a.at, "answered before the swap landed").to.be.at.least(events[0].at);
+      expect(compiler.builds, "builds").to.equal(1);
+      expect(a).to.include({status: 200, build: "warm", swap: String(SWAP_MS)});
+      expect(d.result.hot).to.equal(true);
+    } finally {
+      done();
+    }
+  });
+
+  it("an activation after the dev loop's swap says the source went live by that swap", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      src.text = "rv = 2.";
+      const loop = devLoop({store, watch: false, log: () => {}});
+      await loop.touch("src/osd/zcl_a.clas.abap");
+      const a = await activate(store);
+      expect(swaps(events)).to.deep.equal(["swap g1->g2"]);
+      expect(a).to.include({status: 200, build: "warm", swap: String(SWAP_MS)});
+    } finally {
+      done();
+    }
+  });
+
+  it("an edit saved while a build is in flight is not joined to it", async () => {
+    const {store, src, compiler, events, done} = setup();
+    try {
+      src.text = "rv = 2.";
+      const first = store.publish();
+      await sleep(5);
+      src.text = "rv = 3.";
+      const second = store.publish();
+      const [a, b] = await Promise.all([first, second]);
+      expect(compiler.builds).to.equal(2);
+      expect(swaps(events)).to.deep.equal(["swap g1->g2", "swap g2->g3"]);
+      expect(a).to.include({hot: true, generation: "g2"});
+      expect(b).to.include({hot: true, generation: "g3"});
+    } finally {
+      done();
+    }
+  });
+
+  // An ADT save goes through the store and is activated by the client; the
+  // dev loop publishing it as well was the second activator, and for a new
+  // object a cold build of the create's skeleton the activation queued behind
+  it("the dev loop leaves a save through the store to its activation, and takes another editor's", async function () {
+    this.timeout(10000);
+    const dir = mkdtempSync(join(tmpdir(), "osd-warm-own-"));
+    mkdirSync(join(dir, "src"));
+    const store = new ObjectStore({root: dir, roots: [{path: "src", writable: true}], libs: []});
+    const passes = [];
+    const loop = devLoop({store, debounce: 10, log: (m) => { if (/changed/.test(m)) passes.push(m); },
+      publish: async () => ({ok: true, transpile: {}})});
+    try {
+      store.write("CLAS", "ZCL_B", "CLASS zcl_b DEFINITION PUBLIC. ENDCLASS.\n");
+      await sleep(400);
+      expect(passes, "a pass for the store's own write").to.deep.equal([]);
+      writeFileSync(join(dir, "src", "osd", "zcl_b.clas.abap"), "CLASS zcl_b DEFINITION PUBLIC. ENDCLASS.\n* vim\n");
+      for (let i = 0; i < 40 && passes.length === 0; i++) await sleep(50);
+      expect(passes.length, "a pass for another editor's save").to.equal(1);
+    } finally {
+      loop.stop();
+      rmSync(dir, {recursive: true, force: true});
+    }
   });
 });
 

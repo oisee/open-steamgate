@@ -109,6 +109,15 @@ registry is primed again.
   larger than at the first swap, or a minute without a save
   (`OSD_WARM_SWAPS`, `OSD_WARM_HEAP_MB`, `OSD_WARM_QUIET_MS`), the process
   is replaced by one started on the live generation, and `build/hot/` goes.
+- **One activation per save, answered once it is live.** `publish()` runs
+  one at a time per store, and a caller whose tree is the one already
+  queued, or the one a build in flight named its generation after, takes
+  that publish's answer instead of building again behind it: the dev loop
+  and VS Code's activation of one disk save are one build and one swap, and
+  both answers carry `X-OSD-Swap-Ms`. A save through the store itself (an
+  ADT PUT or create) is left to the client's activation; the dev loop takes
+  only what another editor wrote. An activation that finds a runtime
+  changing hands waits for it rather than answering with nothing serving.
 
 ## What a swap means, compared with a system
 

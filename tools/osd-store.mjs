@@ -18,7 +18,7 @@ import {parseDDLS, viewFieldsOf} from "./cds2ddic.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
-import {loadConfig} from "./osd-build.mjs";
+import {hashOf, inputsOf, loadConfig} from "./osd-build.mjs";
 
 import {basename, dirname, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -605,7 +605,9 @@ export class ObjectStore {
     // and a save that wrote it as it came turned a one-line comment into a
     // sixty-three-line diff with no comment in it. A system stores source
     // by line, not by terminator, and so does this tree.
-    writeFileSync(join(this.root, file), String(source).replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
+    const text = String(source).replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+    writeFileSync(join(this.root, file), text);
+    this.#wrote(file, text);
     this.inactive.add(`${entry.type} ${entry.name}`);
     this.#forget();
     return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8")};
@@ -661,6 +663,7 @@ export class ObjectStore {
     for (const [suffix, content] of Object.entries(made)) {
       const target = type === "DEVC" ? file : file.slice(0, -meta.ext.length) + suffix;
       writeFileSync(join(this.root, target), content);
+      this.#wrote(target, content);
     }
     // filed the way build() files it, so the entry a create makes is the
     // entry the next rebuild makes: a package sits in the package above it,
@@ -698,8 +701,9 @@ export class ObjectStore {
           }
           this.index = undefined;
           this.#forget();
+          const own = this.#ownWrite(join(root.path, String(file)));
           for (const listener of this.listeners ?? []) {
-            listener({event, file: join(root.path, String(file)), root: root.path});
+            listener({event, file: join(root.path, String(file)), root: root.path, own});
           }
         });
         watcher.on("error", () => {});
@@ -710,6 +714,41 @@ export class ObjectStore {
       }
     }
     return this;
+  }
+
+  // What this store wrote itself (write(), create()), by file, as the
+  // digest of the bytes it wrote. Every caller that writes through the
+  // store activates through it as well -- the ADT façade's PUT and create
+  // are followed by the client's activation, the notebook and the store
+  // destination publish what they wrote -- so a watcher event that finds
+  // exactly those bytes is not another editor's save, and the dev loop
+  // leaves it to that activation (`own` below). Under STG_DEV=1 the dev
+  // loop used to publish every ADT save as well: a second activator per
+  // save, and for a new object a cold build of the create's skeleton that
+  // the activation then queued behind (vsp-i7, 2026-10-02). A delete is not
+  // recorded: no activation follows one, and the dev loop makes it live.
+  #written = new Map();
+
+  #wrote(file, content) {
+    this.#written.set(resolve(this.root, file), createHash("sha256").update(content).digest("hex"));
+  }
+
+  // true while the file still holds the bytes this store wrote to it; the
+  // first event that finds other bytes (another editor saved over it) ends
+  // that, so a later save of the same text is somebody else's again
+  #ownWrite(file) {
+    const path = resolve(this.root, file);
+    const wrote = this.#written.get(path);
+    if (wrote === undefined) return false;
+    let now;
+    try {
+      now = createHash("sha256").update(readFileSync(path)).digest("hex");
+    } catch {
+      now = undefined;
+    }
+    if (now === wrote) return true;
+    this.#written.delete(path);
+    return false;
   }
 
   // who wants to know when the disk changed: the dev loop, which turns a
@@ -963,40 +1002,107 @@ export class ObjectStore {
   // (vsp-i7, 2026-10-02). In line, the second builds on what the first
   // made live: the same source is a no-op on that generation, a later edit
   // a build and a swap of its own. Every caller needs this, so it is here.
-  publish(options = {}) {
-    const run = this.#publishing.then(() => this.#publish(options));
-    this.#publishing = run.catch(() => undefined);
-    return run;
+  //
+  // In line is not in turn, though: a caller whose tree is the one already
+  // queued or in flight takes THAT publish's answer, its load included,
+  // instead of building the same thing again behind it. A queued publish has
+  // not read the tree yet, so it reads this caller's too; one in flight is
+  // joined when its build named the generation by the same hash the tree
+  // has now (sourceKey()). Two activators of one save are then one build and
+  // one swap, and both answers wait for the swap and carry its ms.
+  async publish(options = {}) {
+    const forced = options.force === true || options.replace === true;
+    if (!forced) {
+      if (this.#queued !== undefined) return this.#queued.promise;
+      const running = this.#running;
+      if (running !== undefined && running.forced !== true) {
+        // the name first: what the tree is now, before waiting on anything
+        const key = await this.sourceKey();
+        const built = await running.built.catch(() => undefined);
+        if (key !== undefined && built?.ok !== false && built?.hash === key) return running.promise;
+        if (this.#queued !== undefined) return this.#queued.promise;
+      }
+    }
+    const entry = {forced};
+    entry.built = new Promise((resolve, reject) => {
+      entry.resolveBuilt = resolve;
+      entry.rejectBuilt = reject;
+    });
+    entry.built.catch(() => undefined);
+    entry.promise = this.#publishing.then(() => {
+      if (this.#queued === entry) this.#queued = undefined;
+      this.#running = entry;
+      return this.#publish(options, entry);
+    }).finally(() => {
+      if (this.#running === entry) this.#running = undefined;
+      entry.rejectBuilt(new Error("the publish ended before its build"));
+    });
+    if (!forced) this.#queued = entry;
+    this.#publishing = entry.promise.catch(() => undefined);
+    return entry.promise;
   }
 
   #publishing = Promise.resolve();
+  // the publish waiting for its turn (not forced), and the one in its turn
+  #queued = undefined;
+  #running = undefined;
 
-  async #publish(options) {
-    const transpile = await this.transpile(options);
+  // the name a build of the tree as it is now would give its generation:
+  // the hash of the inputs (tools/osd-build.mjs hashOf), the same one a warm
+  // build names its generation by. undefined when the tree cannot be named,
+  // and then nothing is joined.
+  async sourceKey() {
+    try {
+      return hashOf(this.root, inputsOf(this.root));
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #publish(options, entry = {}) {
+    let transpile;
+    try {
+      transpile = await this.transpile(options);
+    } finally {
+      entry.resolveBuilt?.(transpile);
+    }
     if (transpile?.ok === false) {
       return {ok: false, transpile};
     }
-    const runtime = this.served;
-    if (runtime === undefined || runtime.running === false) {
+    let runtime = this.served;
+    // a runtime changing hands (a catch-up recycle, a start) is waited for:
+    // answering now would say "active" while no process serves the code,
+    // and the one coming up may have read the live generation before this
+    // build switched it
+    const changing = runtime?.running === true ? undefined : runtime?.recycling ?? runtime?.starting;
+    if (changing !== undefined) {
+      await changing.catch(() => undefined);
+      runtime = this.served;
+    }
+    if (runtime === undefined || runtime.running !== true) {
       return {ok: true, transpile, recycled: false};
     }
     // a warm build is loaded into the process that serves, not a new one
     // (tools/osd-hot.mjs); when that cannot be done, the recycle below does
     let why;
     if (transpile.warm === true && (transpile.hostHeld ?? []).length === 0) {
-      if (transpile.modules.length === 0 && transpile.hash === runtime.generation) {
-        // nothing to load: another caller (the dev loop, beside the façade's
-        // activation of the same save) already brought this generation in --
-        // and if that was a recycle, this answer must not read as a swap
+      if (transpile.hash === runtime.generation) {
+        // nothing to load: the process already serves this generation. Say
+        // how it got there -- by a swap (its ms), or by a recycle, which
+        // must not read as a swap: one this store did after a refused swap,
+        // or one that came up on the live generation after this build
+        // switched it (modules this build did not load itself)
         const last = this.lastLoad?.generation === transpile.hash ? this.lastLoad : undefined;
-        return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash,
-          ...(last?.why === undefined ? {} : {why: `the runtime was recycled onto it: ${last.why}`})};
+        const how = last?.why !== undefined ? {why: `the runtime was recycled onto it: ${last.why}`}
+          : last?.hot === true ? {swapMs: last.ms}
+            : transpile.modules.length > 0 ? {why: "the runtime was recycled onto it"} : {};
+        return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash, ...how};
       }
       try {
         const swap = await runtime.hot({generation: transpile.hash, from: transpile.from,
           modules: transpile.modules, verified: transpile.unverified !== true});
         this.#afterSwap(transpile.hash, swap);
-        this.lastLoad = {generation: transpile.hash};
+        this.lastLoad = {generation: transpile.hash, hot: true, ms: swap.ms};
         return {ok: true, transpile, recycled: false, hot: true, generation: transpile.hash, ms: swap.ms, swaps: swap.swaps};
       } catch (error) {
         console.log(`warm: the swap was refused, recycling instead: ${error.message}`);

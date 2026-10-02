@@ -2490,7 +2490,11 @@ export function adtRouter(options = {}) {
     res.set("X-OSD-Build", header(t.warm === true && result?.recycled !== true && result?.why === undefined ? "warm"
       : t.warm === true ? `cold; recycled after a warm build: ${result?.why ?? "the runtime was recycled"}`
         : `cold${w?.on === true && w.reason ? `; ${w.reason}` : ""}`));
-    if (result?.hot === true) res.set("X-OSD-Swap-Ms", String(result.ms));
+    // the swap that made the source live: this activation's own, or the one
+    // that had already brought the same generation in (the dev loop's, for a
+    // save it saw first) -- ObjectStore#publish answers only once it landed
+    const swapMs = result?.hot === true ? result.ms : result?.swapMs;
+    if (swapMs !== undefined) res.set("X-OSD-Swap-Ms", String(swapMs));
     if (Array.isArray(t.closure)) {
       const tests = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
       res.set("X-OSD-Closure", String(t.closure.length));

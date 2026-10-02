@@ -145,7 +145,11 @@ export function devLoop(options = {}) {
   // which is what a test wants and what a one-shot run wants
   let unsubscribe = () => {};
   if (options.watch !== false) {
-    unsubscribe = store.onChange(({file, event}) => {
+    unsubscribe = store.onChange(({file, event, own}) => {
+      // what the store wrote itself (an ADT save or create through the
+      // façade) is activated by whoever wrote it; publishing it here too was
+      // a second activator per save (tools/osd-store.mjs #written)
+      if (own === true) return;
       pending.set(file, event);
       clearTimeout(timer);
       timer = setTimeout(() => {
