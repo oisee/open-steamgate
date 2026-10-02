@@ -43,6 +43,7 @@
     "osd:tls": "node tools/osd-tls.mjs",
     "osd:tls-proxy": "node tools/osd-tls-proxy.mjs",
     "conformance": "node test/conformance/run.mjs",
+    "conformance:abapfs": "node tools/abapfs-conformance.mjs",
     "probe": "node tools/closure-probe.mjs",
     "amdp:oracle": "node tools/amdp-oracle.mjs",
     "amdp:demo": "node tools/amdp-demo.mjs",
