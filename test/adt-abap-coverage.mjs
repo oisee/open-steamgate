@@ -12,13 +12,14 @@
 // exactly one HOST row in the table, the catch-all.
 import {expect} from "chai";
 import {mkdtempSync, rmSync} from "node:fs";
+import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import "./start.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import express from "express";
 import {adtRouter} from "../tools/adt-facade.mjs";
-import {abapFront, abapRunner} from "../tools/adt-abap-front.mjs";
+import {abapRunner} from "../tools/adt-abap-front.mjs";
 
 const CATCH_ALL = "* /sap/bc/adt/*";
 
@@ -178,36 +179,46 @@ const SAMPLE = {name: "zosd_coverage", include: "testclasses", stamp: "197001011
   id: "0123456789abcdef01234567", what: "softwarecomponents"};
 
 // The layers of adtRouter that are not routes: middleware every request
-// passes through and none answers. Each is named by a phrase of its own
-// source, with the reason it is not a registration. A `use` layer that is not
-// here fails the gate: an endpoint mounted with use() answers requests, and a
-// walk that skipped it would count it as nothing.
-const MIDDLEWARE = [
-  {id: "sessions", reason: "Node Sessions' gate, mounted only without the ABAP front (OSD_ADT=js, child mode)",
-    is: (src) => src.includes("this.#sweep()")},
-  {id: "generation", reason: "stamps X-OSD-Generation on every answer and passes on",
-    is: (src) => src.includes('res.set("X-OSD-Generation"')},
-  {id: "dump", reason: "STG_ADT_DUMP: records the exchange and passes on, only when a dump file is named",
-    is: (src) => src.includes("appendFileSync(dump")},
-  {id: "abap-front", reason: "the ABAP front itself: every request enters ZCL_OSD_ADT_HANDLER, which is what this gate asks",
-    is: (src) => src === abapFront({}).toString()},
-];
+// passes through and none answers. adtRouter mounts each through one helper
+// and returns them ({id, path, fn}); the walk accepts a layer only when its
+// handler IS one of those functions, mounted on that path, so an endpoint
+// mounted with use() cannot pass by resembling one. Every id needs a reason.
+const MIDDLEWARE = {
+  "sessions": "Node Sessions' gate, mounted only without the ABAP front (OSD_ADT=js, child mode)",
+  "generation": "stamps X-OSD-Generation on every answer and passes on",
+  "dump": "STG_ADT_DUMP: records the exchange and passes on, only when a dump file is named",
+  "abap-front": "the ABAP front itself: every request enters ZCL_OSD_ADT_HANDLER, which is what this gate asks",
+};
+
+/** the expression express builds for a use() on this path, to compare with */
+function useRegexpOf(path) {
+  const r = express.Router();
+  r.use(path, () => {});
+  return String(r.stack[0].regexp);
+}
 
 /** the path a router is mounted on, read back from the layer's expression
- *  (express 4 keeps no string); anything else fails loudly */
+ *  (express 4 keeps no string). path-to-regexp 0.1 escapes only "/" and "."
+ *  in a literal path; any other escape or operator throws */
 function mountPathOf(layer) {
   if (layer.keys?.length > 0) throw new Error(`a router mounted on a path with parameters: ${String(layer.regexp)}`);
   if (layer.regexp?.fast_slash) return "";
   const m = /^\^(.*)\\\/\?\(\?=\\\/\|\$\)$/.exec(layer.regexp?.source ?? "");
-  if (m === null || /[()|[\]*+?{}^$]/.test(m[1].replace(/\\[/.-]/g, ""))) {
-    throw new Error(`a router mounted on a path this walk cannot read: ${String(layer.regexp)}`);
+  if (m === null) throw new Error(`a router mounted on a path this walk cannot read: ${String(layer.regexp)}`);
+  let path = "";
+  for (let i = 0; i < m[1].length; i++) {
+    const c = m[1][i];
+    if (c === "\\" && (m[1][i + 1] === "/" || m[1][i + 1] === ".")) path += m[1][++i];
+    else if (/[A-Za-z0-9_~%!'&=:,;@-]/.test(c)) path += c;
+    else throw new Error(`a router mounted on a path this walk cannot read (${c} at ${i}): ${String(layer.regexp)}`);
   }
-  return m[1].replace(/\\(.)/g, "$1");
+  return path;
 }
 
 /** method and path of every registration on the router's stack, in order,
- *  mounted routers included; non-route layers are classified or reported */
-function walk(router, prefix = "", out = {registrations: [], middleware: [], unclassified: []}) {
+ *  mounted routers included; non-route layers are matched by reference
+ *  against `known` ({id, path, fn}) or reported */
+function walk(router, known = [], prefix = "", out = {registrations: [], middleware: [], unclassified: []}) {
   for (const layer of router.stack) {
     if (layer.route !== undefined) {
       const {path} = layer.route;
@@ -216,20 +227,26 @@ function walk(router, prefix = "", out = {registrations: [], middleware: [], unc
         out.registrations.push({method: method === "_all" ? "*" : method.toUpperCase(), path: prefix + path});
       }
     } else if (Array.isArray(layer.handle?.stack)) {
-      walk(layer.handle, prefix + mountPathOf(layer), out);
+      walk(layer.handle, known, prefix + mountPathOf(layer), out);
     } else {
-      const src = String(layer.handle);
-      const known = MIDDLEWARE.find((m) => m.is(src));
-      if (known === undefined) out.unclassified.push(`use ${prefix}${String(layer.regexp)}: ${src.slice(0, 80).replace(/\s+/g, " ")}`);
-      else out.middleware.push(known.id);
+      const entry = known.find((k) => k.fn === layer.handle);
+      const at = `use ${prefix}${String(layer.regexp)}`;
+      if (entry === undefined) {
+        out.unclassified.push(`${at}: not a function adtRouter reported as middleware`);
+      } else if (prefix !== "" || useRegexpOf(entry.path) !== String(layer.regexp)) {
+        out.unclassified.push(`${at}: ${entry.id} mounted off its path ${JSON.stringify(entry.path)}`);
+      } else {
+        out.middleware.push(entry.id);
+      }
     }
   }
   return out;
 }
 
-// the methods a registration for every method is asked with: an all() row is
-// ported only when each of them reaches ABAP
-const ALL_METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
+// the methods an all() registration is asked with: the list Express itself
+// routes all() over, its "methods" dependency, taken from where express sits
+const require = createRequire(import.meta.url);
+const ALL_METHODS = createRequire(require.resolve("express"))("methods").map((m) => m.toUpperCase());
 
 /** ask the ABAP router for each method a registration answers */
 async function verdictsOf(regs, rows) {
@@ -287,12 +304,14 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
   before(async () => {
     root = mkdtempSync(join(tmpdir(), "osd-adt-coverage-"));
     const base = {root, data: {}, logMisses: false, watch: false};
-    // the three shapes a host mounts: Node alone, with a dump, with the ABAP front
-    walks = {
-      node: walk(adtRouter(base).router),
-      dump: walk(adtRouter({...base, dump: join(root, "dump.ndjson")}).router),
-      abap: walk(adtRouter({...base, abap: abapRunner({handler: globalThis.abap.Classes.ZCL_OSD_ADT_HANDLER, step: dialogStep})}).router),
-    };
+    const abapOption = {abap: abapRunner({handler: globalThis.abap.Classes.ZCL_OSD_ADT_HANDLER, step: dialogStep})};
+    const dumpOption = {dump: join(root, "dump.ndjson")};
+    // every mount a host can make: Node alone, with a dump, with the ABAP front, both
+    walks = {};
+    for (const [name, extra] of Object.entries({node: {}, dump: dumpOption, abap: abapOption, "dump+abap": {...dumpOption, ...abapOption}})) {
+      const made = adtRouter({...base, ...extra});
+      walks[name] = {...walk(made.router, made.middleware), reported: made.middleware.map((m) => m.id)};
+    }
     regs = walks.abap.registrations;
     ({table, verdicts} = await dialogStep(async () => {
       const rows = await globalThis.abap.Classes.ZCL_OSD_ADT_ROUTER.routes();
@@ -305,15 +324,17 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
   after(() => { if (root !== undefined) rmSync(root, {recursive: true, force: true}); });
 
   it("every layer that is not a route is known middleware, and the registrations do not depend on the mount", () => {
-    for (const [name, w] of Object.entries(walks)) {
-      expect(w.unclassified, `${name}: use layers that are neither a router nor known middleware`).to.deep.equal([]);
-    }
+    const expected = {node: ["sessions", "generation"], dump: ["sessions", "generation", "dump"],
+      abap: ["generation", "abap-front"], "dump+abap": ["generation", "dump", "abap-front"]};
     const keys = (w) => w.registrations.map((r) => `${r.method} ${r.path}`);
-    expect(keys(walks.node)).to.deep.equal(keys(walks.abap));
-    expect(keys(walks.dump)).to.deep.equal(keys(walks.abap));
-    const seen = new Set(Object.values(walks).flatMap((w) => w.middleware));
-    expect(MIDDLEWARE.map((m) => m.id).filter((id) => !seen.has(id)), "MIDDLEWARE entries no mount has: remove them")
-      .to.deep.equal([]);
+    for (const [name, w] of Object.entries(walks)) {
+      expect(w.unclassified, `${name}: use layers that are not the middleware adtRouter mounted`).to.deep.equal([]);
+      expect(w.reported.filter((id) => MIDDLEWARE[id] === undefined), `${name}: middleware with no reason here`).to.deep.equal([]);
+      // each reported layer found on the stack exactly once, and only those
+      expect(w.middleware, `${name}: middleware on the stack`).to.deep.equal(w.reported);
+      expect(w.middleware, `${name}: middleware for this mount`).to.deep.equal(expected[name]);
+      expect(keys(w), `${name}: registrations`).to.deep.equal(keys(walks.abap));
+    }
   });
 
   it("the router table has exactly one HOST row, the catch-all, and it is last", () => {
@@ -358,10 +379,31 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
 
   // the gate's own red proofs: what the walk and the probe must refuse
   describe("the gate guards itself", () => {
-    it("an endpoint mounted with use() is reported, not skipped", () => {
+    it("an endpoint mounted with use() is reported, also one that looks like known middleware", () => {
+      const {middleware} = adtRouter({root, data: {}, logMisses: false, watch: false});
+      const generation = middleware.find((m) => m.id === "generation");
       const r = express.Router();
-      r.use("/sap/bc/adt/core/http/systeminformation", (req, res) => res.end());
-      expect(walk(r).unclassified).to.have.lengthOf(1);
+      r.use("/sap/bc/adt", (req, res) => { res.set("X-OSD-Generation", "x"); res.end(); });
+      r.use("/sap/bc/adt/core", generation.fn);
+      r.use("/sap/bc/adt", generation.fn);
+      const w = walk(r, middleware);
+      expect(w.unclassified).to.have.lengthOf(2);
+      expect(w.unclassified[0]).to.match(/not a function adtRouter reported/);
+      expect(w.unclassified[1]).to.match(/generation mounted off its path/);
+      expect(w.middleware).to.deep.equal(["generation"]);
+    });
+
+    it("a mount path is decoded from literal escapes only; a regex operator throws", () => {
+      const inner = express.Router();
+      inner.get("/x", (req, res) => res.end());
+      const literal = express.Router();
+      literal.use("/sap/bc/adt/a.b-c", inner);
+      expect(walk(literal).registrations).to.deep.equal([{method: "GET", path: "/sap/bc/adt/a.b-c/x"}]);
+      for (const regexp of [/^\/sap\/bc\/adt\S\/?(?=\/|$)/i, /^\/sap\/bc\/ad.\/?(?=\/|$)/i, /^\/sap\/b[c]\/adt\/?(?=\/|$)/i]) {
+        const r = express.Router();
+        r.use(regexp, inner);
+        expect(() => walk(r), String(regexp)).to.throw(/cannot read/);
+      }
     });
 
     it("a mounted router is walked with its mount path, and an array path fails loudly", () => {
@@ -385,6 +427,24 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
       expect(v.probes.find((p) => p.sample.startsWith("GET ")).row.servedBy).to.equal("ABAP");
       expect(anyAbap(v)).to.equal(true);
       expect(abapServed(v)).to.equal(false);
+    });
+
+    it("an all() route is asked with every method Express routes, one left out is not ABAP-served", async () => {
+      expect(ALL_METHODS).to.include.members(["GET", "POST", "LOCK", "MKCOL", "SEARCH"]);
+      const SYSINFO = "/sap/bc/adt/core/http/systeminformation";
+      const reg = [{method: "*", path: SYSINFO}];
+      const verdict = (except) => dialogStep(async () => {
+        const rows = globalThis.abap.Classes.ZCL_OSD_ADT_ROUTER.METHODS.DISPATCH.parameters.IT_ROUTES.type();
+        for (const method of ALL_METHODS.filter((m) => m !== except)) {
+          const row = rows.appendInitial().get();
+          row.method.set(method); row.pattern.set(SYSINFO); row.handler.set("ZCL_OSD_ADT_SYSINFO"); row.served_by.set("ABAP");
+        }
+        return (await verdictsOf(reg, rows))[0];
+      }, "test: the coverage gate's method list");
+      expect(abapServed(await verdict(undefined))).to.equal(true);
+      const missing = await verdict("LOCK");
+      expect(abapServed(missing)).to.equal(false);
+      expect(missing.probes.filter((p) => !probeAbap(p)).map((p) => p.sample)).to.deep.equal([`LOCK ${SYSINFO}`]);
     });
   });
 });
