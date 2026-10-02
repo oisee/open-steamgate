@@ -155,16 +155,21 @@ await zcl_stg_shlp_registry.register();
 bootStep("demo data");
 await ensureDemoData((await from("zcl_osd_demo_data.clas.mjs")).zcl_osd_demo_data, {say: announce});
 
-bootStep("restoring ADT state and rebuilding locks");
 const {snapshotAdtRows, restoreAdtRows, rebuildAdtLocks} = await import("./adt-runtime-state.mjs");
-const initial = await initialAdtState;
-await dialogStep(() => restoreAdtRows(globalThis.abap.context.databaseConnections.DEFAULT, initial.state,
-  {replace: initial.replace === true, say: announce}), "restoring ADT carry");
-try {
-  const rebuilt = await rebuildAdtLocks(globalThis.abap.context.databaseConnections.DEFAULT);
-  announce(`ADT rehydrate: ${rebuilt.sessions} sessions, ${rebuilt.handles} handles, ${rebuilt.skipped} skipped, ${rebuilt.ms.toFixed(2)} ms`);
-} catch (error) {
-  announce(`ADT rehydrate failed: ${error.message}; continuing boot`);
+// B0 is off unless the supervisor opted in (OSD_ADT_ONE_RUNTIME=1 sets
+// OSD_ADT_CARRY=1): with it off, ADT rows already in this database (an inline
+// run on the same file) must not turn into mirror locks or lose handles
+if (process.env.OSD_ADT_CARRY === "1") {
+  bootStep("restoring ADT state and rebuilding locks");
+  const initial = await initialAdtState;
+  await dialogStep(() => restoreAdtRows(globalThis.abap.context.databaseConnections.DEFAULT, initial.state,
+    {replace: initial.replace === true, say: announce}), "restoring ADT carry");
+  try {
+    const rebuilt = await rebuildAdtLocks(globalThis.abap.context.databaseConnections.DEFAULT);
+    announce(`ADT rehydrate: ${rebuilt.sessions} sessions, ${rebuilt.handles} handles, ${rebuilt.skipped} skipped, ${rebuilt.ms.toFixed(2)} ms`);
+  } catch (error) {
+    announce(`ADT rehydrate failed: ${error.message}; continuing boot`);
+  }
 }
 
 const app = express();
