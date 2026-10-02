@@ -97,17 +97,43 @@ describe("locked library paths", () => {
       const at = join(shared, "lars/example");
       git(f.home, "clone", "-q", f.bare, at);
       assert.throws(() => run(f.home, f.bare), (error) =>
-        error.message.includes(`cd ${join(f.root, "shared")} && node tools/osd-libs.mjs --sync`));
+        error.message.includes("node tools/osd-libs.mjs --sync --shared"));
       assert.equal(git(at, "rev-parse", "HEAD"), git(f.source, "rev-parse", "HEAD"));
       assert(!lstatSync(at).isSymbolicLink());
       assert.throws(() => lstatSync(join(shared, `pins/example@${f.ref}`)), {code: "ENOENT"});
       assert.throws(() => lstatSync(join(shared, "dev/example")), {code: "ENOENT"});
-      const sharedRoot = join(f.root, "shared");
-      copyFileSync(join(f.home, "libs.lock.json"), join(sharedRoot, "libs.lock.json"));
-      copyFileSync(join(f.home, "abap_transpile.json"), join(sharedRoot, "abap_transpile.json"));
-      run(sharedRoot, f.bare);
+      // --shared from the worktree itself (no primary-checkout script needed)
+      materialise(f.home, () => {}, {ci: false, shared: true, remote: {example: f.bare}});
       assert.equal(realpathSync(at), realpathSync(join(shared, `pins/example@${f.ref}`)));
+      assert.equal(readlinkSync(at), join(shared, `pins/example@${f.ref}`));
       assert.equal(readFileSync(join(shared, "dev/example/file.txt"), "utf8"), "two");
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("--sync --shared from a worktree CLI migrates, even with CI=true; refuses dirty and existing dev", () => {
+    const f = fixture();
+    try {
+      const shared = join(f.root, "shared", ".local");
+      mkdirSync(join(shared, "lars"), {recursive: true});
+      mkdirSync(join(f.home, ".local"), {recursive: true});
+      symlinkSync(join(shared, "lars"), join(f.home, ".local/lars"), "dir");
+      const at = join(shared, "lars/example");
+      git(f.home, "clone", "-q", f.bare, at);
+      writeFileSync(join(at, "wip.txt"), "wip");
+      assert.throws(() => materialise(f.home, () => {}, {ci: false, shared: true, remote: {example: f.bare}}), /uncommitted/);
+      assert(!lstatSync(at).isSymbolicLink());
+      rmSync(join(at, "wip.txt"));
+      mkdirSync(join(shared, "dev/example"), {recursive: true});
+      assert.throws(() => materialise(f.home, () => {}, {ci: false, shared: true, remote: {example: f.bare}}), /destination exists/);
+      rmSync(join(shared, "dev/example"), {recursive: true});
+      // the real CLI, from the worktree, with CI=true; the lock's github url is rewritten to the bare repo
+      const cli = new URL("../tools/osd-libs.mjs", import.meta.url).pathname;
+      const env = {...process.env, CI: "true", GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: `url.${f.bare}.insteadOf`, GIT_CONFIG_VALUE_0: "https://github.com/test/example.git"};
+      execFileSync(process.execPath, [cli, "--sync", "--shared"], {cwd: f.home, env, stdio: "pipe"});
+      assert.equal(readlinkSync(at), join(shared, `pins/example@${f.ref}`));
+      assert.equal(readFileSync(join(shared, "dev/example/file.txt"), "utf8"), "two");
+      assert.equal(readFileSync(join(at, "file.txt"), "utf8"), "one");
     } finally { rmSync(f.root, {recursive: true, force: true}); }
   });
 

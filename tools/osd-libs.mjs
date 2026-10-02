@@ -9,6 +9,7 @@ import {librariesFromLock, libraryPath} from "./osd-lock.mjs";
 const git = (cwd, ...args) => execFileSync("git", args, {cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
 const exists = (path) => { try { lstatSync(path); return true; } catch { return false; } };
 const head = (path) => { try { return git(path, "rev-parse", "HEAD"); } catch { return "missing"; } };
+const SHARED_CMD = "node tools/osd-libs.mjs --sync --shared";
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 export function libraries(root = ".") {
@@ -64,7 +65,7 @@ function ensurePin(lib) {
   }
 }
 
-function pointAtPin(lib) {
+function pointAtPin(lib, shared = false) {
   mkdirSync(dirname(lib.at), {recursive: true});
   const lock = `${lib.at}.lock`;
   let fd;
@@ -78,7 +79,8 @@ function pointAtPin(lib) {
   if (fd === undefined) throw new Error(`${lib.name}: timed out waiting for ${lock}`);
   try {
     if (exists(lib.at) && !lstatSync(lib.at).isSymbolicLink()) {
-      if (lib.external) throw new Error(`${lib.name}: ${lib.at} is shared by worktrees; cd ${lib.sharedRoot} && node tools/osd-libs.mjs --sync`);
+      if (lib.external && !shared) throw new Error(`${lib.name}: ${lib.at} is shared by worktrees; run ${SHARED_CMD} to migrate it (from any checkout)`);
+      if (shared && git(lib.at, "status", "--porcelain")) throw new Error(`${lib.name}: ${lib.at} has uncommitted changes; commit or stash them before migrating`);
       if (exists(lib.dev)) throw new Error(`${lib.name}: cannot move ${lib.at} to ${lib.dev}: destination exists; move it aside manually`);
       mkdirSync(dirname(lib.dev), {recursive: true});
       renameSync(lib.at, lib.dev);
@@ -96,12 +98,13 @@ function pointAtPin(lib) {
 }
 
 /** CI keeps real .local/lars clones for the existing artifact and restore path. */
-export function materialise(root = ".", say = () => {}, {ci = process.env.CI === "true", remote = {}} = {}) {
+export function materialise(root = ".", say = () => {}, {ci = process.env.CI === "true", remote = {}, shared = false} = {}) {
+  if (shared) ci = false; // an explicit migration is never the CI clone path
   const made = [];
   const libs = libraries(root);
-  if (!ci) {
+  if (!ci && !shared) {
     const sharedClone = libs.find((lib) => lib.external && exists(lib.at) && !lstatSync(lib.at).isSymbolicLink());
-    if (sharedClone) throw new Error(`${sharedClone.name}: ${sharedClone.at} is shared by worktrees; cd ${sharedClone.sharedRoot} && node tools/osd-libs.mjs --sync`);
+    if (sharedClone) throw new Error(`${sharedClone.name}: ${sharedClone.at} is shared by worktrees; run ${SHARED_CMD} to migrate it (from any checkout)`);
   }
   for (const lib of libs) {
     if (remote[lib.name]) lib.url = remote[lib.name];
@@ -115,7 +118,7 @@ export function materialise(root = ".", say = () => {}, {ci = process.env.CI ===
       }
     } else {
       ensurePin(lib);
-      pointAtPin(lib);
+      pointAtPin(lib, shared);
       made.push(lib.name);
     }
     libraryPath(root, lib.name);
@@ -139,5 +142,5 @@ if (runsAs("osd-libs.mjs")) {
   else if (process.argv.includes("--check")) {
     for (const lib of libraries(root)) libraryPath(root, lib.name);
     console.log(`${libraries(root).length} libraries at locked commits`);
-  } else materialise(root, console.log);
+  } else materialise(root, console.log, {shared: process.argv.includes("--shared")});
 }
