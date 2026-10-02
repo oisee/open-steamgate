@@ -500,7 +500,7 @@ for (let attempt = 0; attempt < 100; attempt++) {
   if (build.status === 0) break;
   if (!program || !stubGoErrors(build.stderr ?? "")) break;
   const emitRetryStarted = performance.now();
-  writeGeneratedGo(dir);
+  writeGeneratedGo(join(goDir, "cmd", "unit"));
   timingMs.emit += Math.round(performance.now() - emitRetryStarted);
 }
 if (build.status !== 0) {
