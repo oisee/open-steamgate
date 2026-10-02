@@ -1325,6 +1325,26 @@ identified from the code; `doctor_heals` and `doctor_keeps_run_values` now name 
 rule, number, state, reason and attempt when the run does not end `DONE`, so the next system run
 says which pile ended how.
 
+It did (516df864): stage 1 `DONE` (the doctor's pile at attempt 2), and all six stage 2 piles
+`FAILED` at attempt 0 with no reason, the mark only `collect( )` writes (`heal( )` and `submit( )`
+always set a reason or an attempt). The job the doctor submitted again ended stage 1 and planned
+stage 2, and `collect( )` in the proof's wait took the piles for lost before they had jobs. On a
+system the plan is committed before its jobs exist (by this evidence `JOB_OPEN` commits; inferred,
+not measured with a probe of its own): the plan rows `advance( )` inserts are visible from the first
+`JOB_OPEN` on, while all but the first pile still have no job, and `collect( )` read "PLANNED,
+no job" as lost (`NO-JOB`) and wrote `FAILED` from its own read of the row, overwriting the job
+the planner gave the pile meanwhile. `doctor_heals` meets that window every time and
+`stages_mode_p` does not: there the wait polls once a second, while after the doctor's `COMMIT`
+the wait's first `collect( )` starts at the very moment the resubmitted job, which was waiting
+on the doctor's claim of its pile (`FOR UPDATE`), goes on, opens stage 2 and starts submitting.
+Locally `JOB_OPEN` does not commit and no job runs inside a step, so the window never opens.
+The fix, in a set with `resilience:`: `collect( )` leaves a `PLANNED` pile without a job alone
+while its stage opened less than `stale` ago (the doctor resubmits it after that, `STALE-PLAN`),
+and marks a pile `FAILED` with one conditional `UPDATE` on the row as read (status and job
+count), so a job given to it meanwhile is never overwritten. `collect_waits_for_submit` is the
+state on its own, with no job: red before the fix
+(`'a pile its planner is still submitting is not lost'`), green after.
+
 `ZCL_L3_<SET>=>set_setting( iv_param, iv_value, iv_note )` validates with the
 same type and bounds rule as reading, writes a USER row and audit row, and
 returns false for an unknown or invalid setting. `reset_setting( iv_param )`

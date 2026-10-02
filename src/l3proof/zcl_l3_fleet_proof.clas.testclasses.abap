@@ -48,6 +48,7 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS settle.
     METHODS cleanup.
     " in the order a system runs them: alphabetical
+    METHODS collect_waits_for_submit FOR TESTING.
     METHODS doctor_heals FOR TESTING.
     METHODS doctor_keeps_run_values FOR TESTING.
     METHODS fuse_stops FOR TESTING.
@@ -1041,6 +1042,45 @@ CLASS ltcl_proof IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
     COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD collect_waits_for_submit.
+    " a stage as its planner leaves it between the plan and the jobs: on a
+    " system JOB_OPEN commits, so stage 2's plan rows are visible before all
+    " but the first have a job (A4H, 2026-10-02: the job the doctor submitted
+    " again opened stage 2, and collect( ) in the wait took all six piles for
+    " lost, FAILED at attempt 0). collect( ) leaves such a pile PLANNED while
+    " its stage opened less than stale ago, and takes it for lost after that
+    DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
+    DATA lt_piles TYPE zcl_l3_fleet2=>tt_pile.
+    DATA lv_now TYPE zosd_l3_stage-opened.
+    DATA lv_count TYPE i.
+    DATA lv_status TYPE zosd_l3_stage-status.
+    ls_result = open_run( abap_false ).
+    GET TIME STAMP FIELD lv_now.
+    UPDATE zosd_l3_stage SET status = 'DONE' WHERE run_id = ls_result-run_id AND stage_no = 1.
+    UPDATE zosd_l3_stage SET status = 'OPEN' opened = lv_now WHERE run_id = ls_result-run_id AND stage_no = 2.
+    lt_piles = zcl_l3_fleet2=>plan( iv_run = ls_result-run_id
+                                    iv_date = zcl_l3_fleet_proof=>c_check_date
+                                    iv_stage = 2 ).
+    INSERT zosd_l3_pile FROM TABLE lt_piles.
+    " what JOB_OPEN does on a system before the first pile's job exists
+    COMMIT WORK.
+    ls_result = zcl_l3_fleet2=>collect( ls_result ).
+    COMMIT WORK.
+    SELECT COUNT(*) FROM zosd_l3_pile
+      WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = ls_result-run_id AND stage_no = 2 AND status = 'FAILED'.
+    lv_count = sy-dbcnt.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'a pile its planner is still submitting is not lost' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'RUNNING' msg = 'the run is still running' ).
+    " the same plan long after its stage opened: lost, and the run final
+    UPDATE zosd_l3_stage SET opened = '20000101000000' WHERE run_id = ls_result-run_id AND stage_no = 2.
+    COMMIT WORK.
+    ls_result = zcl_l3_fleet2=>collect( ls_result ).
+    COMMIT WORK.
+    SELECT SINGLE status FROM zosd_l3_stage INTO lv_status WHERE run_id = ls_result-run_id AND stage_no = 2.
+    cl_abap_unit_assert=>assert_equals( act = lv_status exp = 'PARTIAL' msg = 'a stale plan without jobs is lost' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'PARTIAL' msg = 'and the run final, PARTIAL' ).
   ENDMETHOD.
 
   METHOD doctor_heals.

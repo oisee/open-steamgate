@@ -1862,6 +1862,10 @@ CLASS {{class}} IMPLEMENTATION.
 {{#settings}}
     DATA ls_pass TYPE {{settings.class}}=>ty_values.
 {{/settings}}
+{{#resilience}}
+    DATA lv_now TYPE timestamp.
+    DATA lv_stale TYPE timestamp.
+{{/resilience}}
 {{/staged}}
 {{#fused}}
     DATA lv_fused TYPE abap_bool.
@@ -2046,6 +2050,13 @@ CLASS {{class}} IMPLEMENTATION.
     gs_settings-vals = {{settings.class}}=>scope( iv_run = is_result-run_id is_vals = ls_pass ).
 {{/settings}}
     CLEAR rs_result-stages.
+{{#resilience}}
+    GET TIME STAMP FIELD lv_now.
+    lv_stale = ago( iv_now = lv_now iv_secs = {{#settings.stale}}gs_settings-vals-stale{{/settings.stale}}{{^settings.stale}}c_stale{{/settings.stale}} ).
+    SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
+      WHERE run_id = is_result-run_id
+      ORDER BY PRIMARY KEY.
+{{/resilience}}
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = c_set
         AND run_id = is_result-run_id
@@ -2077,6 +2088,19 @@ CLASS {{class}} IMPLEMENTATION.
           lv_state = 'OPEN'.
         ENDIF.
       ENDIF.
+{{#resilience}}
+      " PLANNED and no job yet: its planner may still be submitting it. On a
+      " system the plan rows of a stage are visible before the jobs of all
+      " but the first are made (JOB_OPEN commits, A4H 2026-10-02); such
+      " a pile is lost only once its stage opened longer than stale ago, as
+      " heal( ) sees it, and the doctor submits it then
+      IF lv_state = 'NO-JOB' AND ls_pile-status = 'PLANNED'.
+        READ TABLE lt_gates INTO ls_gate WITH KEY stage_no = ls_pile-stage_no.
+        IF sy-subrc = 0 AND ls_gate-opened > lv_stale.
+          lv_state = 'OPEN'.
+        ENDIF.
+      ENDIF.
+{{/resilience}}
       IF lv_state <> 'OPEN'.
         " the job is over: the row as it left it, DONE or not
         SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
@@ -2085,9 +2109,15 @@ CLASS {{class}} IMPLEMENTATION.
             AND rule_name = ls_pile-rule_name
             AND pile_no = ls_pile-pile_no.
         IF ls_pile-status <> 'DONE'{{#fused}} AND ls_pile-status <> 'FUSED'{{/fused}}.
-          ls_pile-status = 'FAILED'.
+          " one UPDATE on the row as read: a job given to the pile meanwhile
+          " (its planner's UPDATE) is not overwritten with this stale copy
           GET TIME STAMP FIELD ls_pile-ended.
-          UPDATE zosd_l3_pile FROM ls_pile.
+          UPDATE zosd_l3_pile SET status = 'FAILED' ended = ls_pile-ended
+            WHERE run_id = ls_pile-run_id
+              AND rule_name = ls_pile-rule_name
+              AND pile_no = ls_pile-pile_no
+              AND status = ls_pile-status
+              AND job_count = ls_pile-job_count.
         ENDIF.
       ENDIF.
     ENDLOOP.
