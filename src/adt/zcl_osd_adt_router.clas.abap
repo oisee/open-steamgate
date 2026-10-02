@@ -34,6 +34,7 @@ CLASS zcl_osd_adt_router DEFINITION PUBLIC FINAL CREATE PUBLIC.
              pattern   TYPE string,
              handler   TYPE string,
              served_by TYPE string,
+             excluded_name TYPE string,
            END OF ty_route.
     TYPES tt_route TYPE STANDARD TABLE OF ty_route WITH DEFAULT KEY.
 
@@ -65,6 +66,7 @@ CLASS zcl_osd_adt_router DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_method    TYPE string
                 iv_pattern   TYPE string
                 iv_handler   TYPE string OPTIONAL
+                iv_excluded_name TYPE string OPTIONAL
                 iv_served_by TYPE string DEFAULT c_abap
       CHANGING  ct_routes    TYPE tt_route.
     CLASS-METHODS match_pattern
@@ -108,6 +110,11 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/ddic/dataelements/:name` iv_handler = `ZCL_OSD_ADT_DDIC` CHANGING ct_routes = rt_routes ).
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/ddic/tables/:name` iv_handler = `ZCL_OSD_ADT_DDIC` CHANGING ct_routes = rt_routes ).
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/ddic/tables/:name/source/main` iv_handler = `ZCL_OSD_ADT_DDIC` CHANGING ct_routes = rt_routes ).
+*   B1 packages/settings MUST precede packages/:name. Until B1 lands,
+*   this row reserves the literal settings name for the HOST catch-all.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/packages/:name` iv_handler = `ZCL_OSD_ADT_PACKAGE` iv_excluded_name = `settings` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/repository/nodepath` iv_handler = `ZCL_OSD_ADT_TREE` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/repository/nodestructure` iv_handler = `ZCL_OSD_ADT_TREE` CHANGING ct_routes = rt_routes ).
 *   LOCK and UNLOCK, one row per lockable type, from the type table
     lt_types = zcl_osd_adt_types=>lockable( ).
     LOOP AT lt_types INTO ls_type.
@@ -150,12 +157,14 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     ls_route-pattern = iv_pattern.
     ls_route-handler = iv_handler.
     ls_route-served_by = iv_served_by.
+    ls_route-excluded_name = iv_excluded_name.
     APPEND ls_route TO ct_routes.
   ENDMETHOD.
 
   METHOD match.
     DATA ls_route TYPE ty_route.
     DATA lv_match TYPE abap_bool.
+    DATA ls_param TYPE zif_osd_adt_route=>ty_param.
 
     CLEAR: ev_found, es_route, et_params.
     LOOP AT it_routes INTO ls_route.
@@ -168,6 +177,15 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
                      IMPORTING ev_match   = lv_match
                                et_params  = et_params ).
       IF lv_match = abap_true.
+*       A row may reserve a literal :name for a static registered on Node.
+*       Compare raw spelling: encoded names still reach the parameter row.
+        IF ls_route-excluded_name IS NOT INITIAL.
+          READ TABLE et_params INTO ls_param WITH KEY name = `name`.
+          IF sy-subrc = 0 AND to_lower( ls_param-value ) = to_lower( ls_route-excluded_name ).
+            CLEAR et_params.
+            CONTINUE.
+          ENDIF.
+        ENDIF.
         ev_found = abap_true.
         es_route = ls_route.
         RETURN.

@@ -32,7 +32,7 @@ import {basename, join} from "node:path";
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
-export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM"];
+export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE"];
 
 /** What this host can do, as the screen asks it (CAPABILITIES, EV_NOTE):
  *  the editor draws a button only for a command named here. Node holds the
@@ -159,6 +159,18 @@ export class StoreDestination {
     const started = Date.now();
     try {
       switch (command) {
+        case "PACKAGE": {
+          const input = JSON.parse(givenText(signature, "IV_JSON"));
+          if (!["raw", "local"].includes(input.mode)) return refusal("PACKAGE mode must be raw or local", "INVALID_NAME");
+          const wanted = String(input.name ?? "").toUpperCase();
+          const {packageOf} = await import("./adt-documents.mjs");
+          const pkg = input.mode === "local" ? packageOf(store, wanted, {user: input.user}) : store.package(wanted);
+          const descriptions = new Map(store.packages().map((p) => [p.name, p.description ?? ""]));
+          return {EV_JSON: JSON.stringify({found: true, name: pkg.name, parent: pkg.parent,
+            description: pkg.description, library: pkg.library === true,
+            subpackages: (pkg.subpackages ?? []).map((name) => ({name, description: descriptions.get(name) ?? ""})),
+            objects: (pkg.objects ?? []).map((o) => ({type: o.type, name: o.name, library: o.library === true, version: o.version}))})};
+        }
         case "LIST": return this.#list(signature, store);
         case "READ": return this.#read(type, name, include, store);
         case "WRITE": return this.#write(type, name, include, source, started, store);

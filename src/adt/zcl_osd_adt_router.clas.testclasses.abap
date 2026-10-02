@@ -17,11 +17,23 @@ CLASS ltcl_match DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL
     METHODS a_param_is_never_empty FOR TESTING RAISING cx_static_check.
     METHODS the_rest_is_the_hosts FOR TESTING RAISING cx_static_check.
     METHODS a_host_row_is_not_served FOR TESTING RAISING cx_static_check.
+    METHODS settings_shadow FOR TESTING.
     METHODS versions_rows FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_match IMPLEMENTATION.
 
+  METHOD settings_shadow.
+    DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
+    DATA ls_route TYPE zcl_osd_adt_router=>ty_route.
+    lt_routes = zcl_osd_adt_router=>routes( ).
+    zcl_osd_adt_router=>match( EXPORTING it_routes = lt_routes iv_method = `GET` iv_path = `/sap/bc/adt/packages/SETTINGS` IMPORTING es_route = ls_route ).
+    cl_abap_unit_assert=>assert_equals( act = ls_route-served_by exp = zcl_osd_adt_router=>c_host ).
+    cl_abap_unit_assert=>assert_equals( act = ls_route-pattern exp = `/sap/bc/adt/*` ).
+    zcl_osd_adt_router=>match( EXPORTING it_routes = lt_routes iv_method = `GET` iv_path = `/sap/bc/adt/packages/%73ettings` IMPORTING es_route = ls_route ).
+    cl_abap_unit_assert=>assert_equals( act = ls_route-served_by exp = zcl_osd_adt_router=>c_abap ).
+    cl_abap_unit_assert=>assert_equals( act = ls_route-pattern exp = `/sap/bc/adt/packages/:name` ).
+  ENDMETHOD.
   METHOD versions_rows.
     DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
     DATA ls_route TYPE zcl_osd_adt_router=>ty_route.

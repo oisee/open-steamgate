@@ -1,0 +1,366 @@
+"! B5: ADT repository tree. Host lists retain their supplied order.
+CLASS zcl_osd_adt_tree DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES zif_osd_adt_route.
+    TYPES: BEGIN OF ty_node,
+      type TYPE string, name TYPE string, uri TYPE string, description TYPE string,
+      version TYPE string, expandable TYPE abap_bool,
+    END OF ty_node.
+    TYPES tt_node TYPE STANDARD TABLE OF ty_node WITH DEFAULT KEY.
+    CLASS-METHODS document IMPORTING it_nodes TYPE tt_node iv_flat TYPE abap_bool DEFAULT abap_false
+      it_keys TYPE string_table OPTIONAL RETURNING VALUE(rv_body) TYPE string.
+    CLASS-METHODS path_document IMPORTING it_nodes TYPE tt_node RETURNING VALUE(rv_body) TYPE string.
+  PRIVATE SECTION.
+    CLASS-METHODS element IMPORTING iv_name TYPE string iv_value TYPE string RETURNING VALUE(rv_xml) TYPE string.
+    CLASS-METHODS uri IMPORTING iv_type TYPE string iv_name TYPE string RETURNING VALUE(rv_uri) TYPE string.
+ENDCLASS.
+CLASS zcl_osd_adt_tree IMPLEMENTATION.
+  METHOD uri.
+    DATA lt_types TYPE zcl_osd_adt_types=>tt_type.
+    DATA ls_type TYPE zcl_osd_adt_types=>ty_type.
+    lt_types = zcl_osd_adt_types=>all( ).
+    READ TABLE lt_types INTO ls_type WITH KEY type = iv_type.
+    IF sy-subrc <> 0.
+      ls_type-collection = `unknown`.
+    ENDIF.
+    rv_uri = `/sap/bc/adt/` && ls_type-collection && `/` && zcl_osd_adt_uri=>encode_component( to_lower( iv_name ) ).
+  ENDMETHOD.
+  METHOD element.
+    IF iv_value IS INITIAL.
+      IF iv_name <> `OBJECT_URI` AND iv_name <> `OBJECT_VIT_URI`.
+        rv_xml = `<` && iv_name && `/>`.
+      ENDIF.
+    ELSE.
+      rv_xml = `<` && iv_name && `>` && zcl_osd_adt_xml=>esc( iv_value ) && `</` && iv_name && `>`.
+    ENDIF.
+  ENDMETHOD.
+  METHOD zif_osd_adt_route~handle.
+    DATA lt_nodes TYPE tt_node.
+    DATA ls_node TYPE ty_node.
+    DATA ls_object TYPE zcl_osd_adt_host=>ty_object.
+    DATA ls_parsed TYPE zcl_osd_adt_types=>ty_object.
+    DATA lv_name TYPE string.
+    DATA lv_type TYPE string.
+    DATA lv_user TYPE string.
+    DATA lv_found TYPE abap_bool.
+    DATA lv_flat TYPE abap_bool.
+    DATA lv_uri TYPE string.
+    DATA lv_off TYPE i.
+    DATA lv_accept TYPE string.
+    DATA lv_folders TYPE abap_bool.
+    DATA lo_json TYPE REF TO zcl_ajson.
+    DATA lt_members TYPE string_table.
+    DATA lv_member TYPE string.
+    DATA lv_path TYPE string.
+    DATA lv_key TYPE string.
+    DATA lt_keys TYPE string_table.
+    DATA lv_body TYPE string.
+    DATA lv_rest TYPE string.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+    DATA lt_query TYPE string_table.
+    DATA lv_query TYPE string.
+    DATA lv_qname TYPE string.
+    DATA lv_qvalue TYPE string.
+    DATA lv_count TYPE i.
+    DATA lv_ok TYPE abap_bool.
+    DATA lo_decoder TYPE REF TO cl_abap_conv_in_ce.
+    IF is_request-pattern = `/sap/bc/adt/repository/nodepath`.
+      zcl_osd_adt_package=>require_command( `OBJECT` ).
+      zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `uri` IMPORTING ev_value = lv_uri ).
+*     Node only accepts a scalar uri; use raw query to detect repeats/arrays.
+      lv_rest = is_request-uri.
+      FIND FIRST OCCURRENCE OF `?` IN lv_rest MATCH OFFSET lv_off.
+      IF sy-subrc = 0.
+        lv_rest = substring( val = lv_rest off = lv_off + 1 ).
+        SPLIT lv_rest AT `&` INTO TABLE lt_query.
+        LOOP AT lt_query INTO lv_query.
+          SPLIT lv_query AT `=` INTO lv_qname lv_qvalue.
+          REPLACE ALL OCCURRENCES OF `+` IN lv_qname WITH ` `.
+          zcl_osd_adt_uri=>decode_component( EXPORTING iv_text = lv_qname IMPORTING ev_text = lv_qvalue ev_ok = lv_ok ).
+          IF lv_ok = abap_true.
+            lv_qname = lv_qvalue.
+          ENDIF.
+          IF lv_qname = `uri`.
+            lv_count = lv_count + 1.
+          ELSEIF lv_qname CP `uri[*`.
+            CLEAR lv_uri.
+          ENDIF.
+        ENDLOOP.
+        IF lv_count > 1.
+          CLEAR lv_uri.
+        ENDIF.
+      ENDIF.
+      FIND FIRST OCCURRENCE OF `/includes/` IN lv_uri MATCH OFFSET lv_off.
+      IF sy-subrc = 0.
+        lv_uri = lv_uri(lv_off).
+      ENDIF.
+      ls_parsed = zcl_osd_adt_types=>object_from_uri( lv_uri ).
+      IF ls_parsed-found = abap_false OR ls_parsed-ok = abap_false
+          OR ( ls_parsed-type <> `CLAS` AND ls_parsed-type <> `INTF` AND ls_parsed-type <> `PROG`
+          AND ls_parsed-type <> `DDLS` AND ls_parsed-type <> `SRVD` AND ls_parsed-type <> `INCL` ).
+        lx_error = zcx_osd_adt=>invalid_request( `an object uri is required` ).
+        RAISE EXCEPTION lx_error.
+      ENDIF.
+      ls_object = zcl_osd_adt_host=>object( iv_type = ls_parsed-type iv_name = ls_parsed-name ).
+      IF ls_object-found = abap_false.
+        lx_error = zcx_osd_adt=>not_found( iv_message = |{ ls_parsed-type } { ls_parsed-name } does not exist| iv_miss = zcx_osd_adt=>c_miss_none ).
+        RAISE EXCEPTION lx_error.
+      ENDIF.
+      LOOP AT ls_object-packages INTO lv_name.
+        CLEAR ls_node.
+        ls_node-type = `DEVC/K`.
+        ls_node-name = lv_name.
+        ls_node-uri = uri( iv_type = `DEVC` iv_name = lv_name ).
+        APPEND ls_node TO lt_nodes.
+      ENDLOOP.
+      FIND FIRST OCCURRENCE OF REGEX `[?#]` IN lv_uri MATCH OFFSET lv_off.
+      IF sy-subrc = 0.
+        lv_uri = lv_uri(lv_off).
+      ENDIF.
+      lv_off = strlen( lv_uri ) - 12.
+      IF lv_off >= 0 AND substring( val = lv_uri off = lv_off ) = `/source/main`.
+        lv_uri = lv_uri(lv_off).
+      ENDIF.
+      CLEAR ls_node.
+      ls_node-type = zcl_osd_adt_types=>adt_type( ls_object-type ).
+      ls_node-name = ls_object-name.
+      ls_node-uri = lv_uri.
+      APPEND ls_node TO lt_nodes.
+      rs_response-status = 200.
+      rs_response-content_type = `application/xml; charset=utf-8`.
+      rs_response-body = path_document( lt_nodes ).
+      RETURN.
+    ENDIF.
+    zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `parent_name` IMPORTING ev_value = lv_name ev_found = lv_found ).
+    IF lv_found = abap_false.
+      zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `parentName` IMPORTING ev_value = lv_name ev_found = lv_found ).
+    ENDIF.
+    IF lv_found = abap_false.
+      zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `package` IMPORTING ev_value = lv_name ).
+    ENDIF.
+    zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `parent_type` IMPORTING ev_value = lv_type ev_found = lv_found ).
+    IF lv_found = abap_false.
+      zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `parentType` IMPORTING ev_value = lv_type ).
+    ENDIF.
+    lv_flat = boolc( lv_name IS INITIAL AND lv_type = `DEVC` ).
+    zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `user_name` IMPORTING ev_value = lv_user ).
+    IF lv_user IS INITIAL.
+      lv_user = is_request-session-user.
+    ENDIF.
+    lv_accept = zcl_osd_adt_csrf=>header( it_headers = is_request-headers iv_name = `accept` ).
+    FIND FIRST OCCURRENCE OF REGEX `dataname=com\.sap\.adt\.RepositoryObjectTreeContent` IN lv_accept IGNORING CASE.
+    lv_folders = boolc( sy-subrc <> 0 ).
+    SPLIT lv_type AT `/` INTO lv_type lv_rest.
+    IF lv_type = `CLAS`.
+      zcl_osd_adt_package=>require_command( `OBJECT` ).
+      ls_object = zcl_osd_adt_host=>object( iv_type = `CLAS` iv_name = lv_name ).
+      IF ls_object-found = abap_false.
+        lx_error = zcx_osd_adt=>not_found( |CLAS { lv_name } does not exist| ).
+        RAISE EXCEPTION lx_error.
+      ENDIF.
+      CLEAR ls_node.
+      ls_node-type = `CLAS/I`.
+      ls_node-name = ls_object-name && `.main`.
+      ls_node-uri = uri( iv_type = `CLAS` iv_name = ls_object-name ) && `/source/main`.
+      APPEND ls_node TO lt_nodes.
+      LOOP AT ls_object-includes INTO lv_member.
+        ls_node-name = ls_object-name && `.` && lv_member.
+        ls_node-uri = uri( iv_type = `CLAS` iv_name = ls_object-name ) && `/includes/` && lv_member.
+        APPEND ls_node TO lt_nodes.
+      ENDLOOP.
+    ELSE.
+      lo_json = zcl_osd_adt_package=>get( iv_name = lv_name iv_user = lv_user ).
+      lt_members = lo_json->members( `/subpackages` ).
+      LOOP AT lt_members INTO lv_member.
+        CLEAR ls_node.
+        ls_node-type = `DEVC/K`.
+        ls_node-name = lo_json->get_string( `/subpackages/` && lv_member && `/name` ).
+        ls_node-uri = uri( iv_type = `DEVC` iv_name = ls_node-name ).
+        ls_node-expandable = abap_true.
+        APPEND ls_node TO lt_nodes.
+      ENDLOOP.
+      lt_members = lo_json->members( `/objects` ).
+      LOOP AT lt_members INTO lv_member.
+        lv_path = `/objects/` && lv_member.
+        lv_type = lo_json->get_string( lv_path && `/type` ).
+        IF lv_type = `DEVC`.
+          CONTINUE.
+        ENDIF.
+        CLEAR ls_node.
+        ls_node-type = zcl_osd_adt_types=>adt_type( lv_type ).
+        ls_node-name = lo_json->get_string( lv_path && `/name` ).
+        ls_node-uri = uri( iv_type = lv_type iv_name = ls_node-name ).
+        ls_node-version = lo_json->get_string( lv_path && `/version` ).
+        ls_node-expandable = boolc( lv_type = `CLAS` AND lv_folders = abap_true ).
+        IF lo_json->get_boolean( lv_path && `/library` ) = abap_true.
+          ls_node-description = `library object`.
+        ENDIF.
+        APPEND ls_node TO lt_nodes.
+      ENDLOOP.
+    ENDIF.
+    lo_decoder = cl_abap_conv_in_ce=>create( encoding = `UTF-8` ignore_cerr = abap_true ).
+    lo_decoder->convert( EXPORTING input = is_request-body IMPORTING data = lv_rest ).
+    DO.
+      FIND FIRST OCCURRENCE OF `<TV_NODEKEY>` IN lv_rest MATCH OFFSET lv_off.
+      IF sy-subrc <> 0.
+        EXIT.
+      ENDIF.
+      lv_rest = substring( val = lv_rest off = lv_off + 12 ).
+      FIND FIRST OCCURRENCE OF `</TV_NODEKEY>` IN lv_rest MATCH OFFSET lv_off.
+      IF sy-subrc <> 0.
+        EXIT.
+      ENDIF.
+      lv_key = lv_rest(lv_off).
+      lv_rest = substring( val = lv_rest off = lv_off + 13 ).
+      IF lv_key IS NOT INITIAL AND lv_key <> `000000` AND lv_key NS `<`.
+        APPEND lv_key TO lt_keys.
+      ENDIF.
+    ENDDO.
+    rs_response-status = 200.
+    rs_response-content_type = zcl_osd_adt_xml=>as_xml_type( it_headers = is_request-headers iv_fallback = `com.sap.adt.RepositoryObjectTreeContent` ).
+    rs_response-body = document( it_nodes = lt_nodes iv_flat = lv_flat it_keys = lt_keys ).
+  ENDMETHOD.
+  METHOD path_document.
+    DATA ls_node TYPE ty_node.
+    DATA lv_lines TYPE string.
+    LOOP AT it_nodes INTO ls_node.
+      IF sy-tabix > 1.
+        lv_lines = lv_lines && cl_abap_char_utilities=>newline.
+      ENDIF.
+      lv_lines = lv_lines && |    <objectLinkReference adtcore:uri="{ zcl_osd_adt_xml=>esc( ls_node-uri ) }" adtcore:type="{ zcl_osd_adt_xml=>esc( ls_node-type ) }" adtcore:name="{ zcl_osd_adt_xml=>esc( ls_node-name ) }" projectexplorer:category=""/>|.
+    ENDLOOP.
+    rv_body = |<?xml version="1.0" encoding="utf-8"?>\n|
+      && |<projectexplorer:nodepath xmlns:projectexplorer="http://www.sap.com/adt/projectexplorer" xmlns:adtcore="http://www.sap.com/adt/core">\n|
+      && |  <projectexplorer:objectLinkReferences>\n{ lv_lines }\n  </projectexplorer:objectLinkReferences>\n</projectexplorer:nodepath>\n|.
+  ENDMETHOD.
+  METHOD document.
+    TYPES: BEGIN OF ty_kind,
+      kind TYPE string, type TYPE string, id TYPE string,
+    END OF ty_kind.
+    DATA lt_kinds TYPE STANDARD TABLE OF ty_kind WITH DEFAULT KEY.
+    DATA ls_kind TYPE ty_kind.
+    DATA lt_categories TYPE string_table.
+    DATA lt_filtered TYPE tt_node.
+    DATA ls_node TYPE ty_node.
+    DATA lt_types TYPE zcl_osd_adt_types=>tt_type.
+    DATA ls_type TYPE zcl_osd_adt_types=>ty_type.
+    DATA lv_kind TYPE string.
+    DATA lv_rest TYPE string.
+    DATA lv_category TYPE string.
+    DATA lv_label TYPE string.
+    DATA lv_types TYPE string.
+    DATA lv_categories TYPE string.
+    DATA lv_rows TYPE string.
+    DATA lv_row TYPE string.
+    DATA lv_expand TYPE string.
+    DATA lv_version TYPE string.
+    DATA lv_num TYPE n LENGTH 6.
+    DATA lv_id TYPE string.
+    lt_types = zcl_osd_adt_types=>all( ).
+*   First appearance defines ids and category order. Never sort host lists.
+    LOOP AT it_nodes INTO ls_node.
+      SPLIT ls_node-type AT `/` INTO lv_kind lv_rest.
+      IF lv_kind = `DEVC`.
+        CONTINUE.
+      ENDIF.
+      READ TABLE lt_kinds WITH KEY kind = lv_kind TRANSPORTING NO FIELDS.
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
+      lv_num = lines( lt_kinds ) + 1.
+      ls_kind-kind = lv_kind.
+      ls_kind-type = ls_node-type.
+      ls_kind-id = lv_num.
+      APPEND ls_kind TO lt_kinds.
+    ENDLOOP.
+    IF iv_flat = abap_false AND it_keys IS NOT INITIAL.
+      LOOP AT it_nodes INTO ls_node.
+        SPLIT ls_node-type AT `/` INTO lv_kind lv_rest.
+        READ TABLE lt_kinds INTO ls_kind WITH KEY kind = lv_kind.
+        IF sy-subrc = 0.
+          READ TABLE it_keys WITH KEY table_line = ls_kind-id TRANSPORTING NO FIELDS.
+          IF sy-subrc = 0.
+            APPEND ls_node TO lt_filtered.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+      rv_body = document( lt_filtered ).
+      RETURN.
+    ENDIF.
+    LOOP AT lt_kinds INTO ls_kind.
+      CLEAR ls_type.
+      READ TABLE lt_types INTO ls_type WITH KEY type = ls_kind-kind.
+      lv_category = ls_type-tree_category.
+      IF lv_category IS INITIAL.
+        lv_category = `other`.
+      ENDIF.
+      READ TABLE lt_categories WITH KEY table_line = lv_category TRANSPORTING NO FIELDS.
+      IF sy-subrc <> 0.
+        APPEND lv_category TO lt_categories.
+      ENDIF.
+      IF sy-tabix > 0 AND lv_types IS NOT INITIAL.
+        lv_types = lv_types && cl_abap_char_utilities=>newline.
+      ENDIF.
+      lv_types = lv_types && `    <SEU_ADT_OBJECT_TYPE_INFO>`
+        && element( iv_name = `OBJECT_TYPE` iv_value = ls_kind-type )
+        && element( iv_name = `CATEGORY_TAG` iv_value = lv_category )
+        && element( iv_name = `OBJECT_TYPE_LABEL` iv_value = ls_type-tree_label )
+        && element( iv_name = `NODE_ID` iv_value = ls_kind-id ) && `</SEU_ADT_OBJECT_TYPE_INFO>`.
+    ENDLOOP.
+    LOOP AT lt_categories INTO lv_category.
+      CASE lv_category.
+        WHEN `source_library`.
+          lv_label = `Source Code Library`.
+        WHEN `dictionary`.
+          lv_label = `Dictionary`.
+        WHEN OTHERS.
+          lv_label = `Others`.
+      ENDCASE.
+      IF sy-tabix > 1.
+        lv_categories = lv_categories && cl_abap_char_utilities=>newline.
+      ENDIF.
+      lv_categories = lv_categories && `    <SEU_ADT_OBJECT_CATEGORY_INFO>`
+        && element( iv_name = `CATEGORY` iv_value = lv_category )
+        && element( iv_name = `CATEGORY_LABEL` iv_value = lv_label ) && `</SEU_ADT_OBJECT_CATEGORY_INFO>`.
+    ENDLOOP.
+    LOOP AT it_nodes INTO ls_node.
+      lv_expand = ``.
+      IF ls_node-expandable = abap_true.
+        lv_expand = `X`.
+      ENDIF.
+      lv_row = `    <SEU_ADT_REPOSITORY_OBJ_NODE>`
+        && element( iv_name = `OBJECT_TYPE` iv_value = ls_node-type )
+        && element( iv_name = `OBJECT_NAME` iv_value = ls_node-name )
+        && element( iv_name = `TECH_NAME` iv_value = ls_node-name )
+        && element( iv_name = `OBJECT_URI` iv_value = ls_node-uri )
+        && element( iv_name = `EXPANDABLE` iv_value = lv_expand ).
+      IF iv_flat = abap_false.
+        lv_row = lv_row && `<NODE_ID/><PARENT_NAME/>`.
+      ENDIF.
+      lv_row = lv_row && element( iv_name = `DESCRIPTION` iv_value = ls_node-description ).
+      IF iv_flat = abap_false.
+        lv_version = `A`.
+        IF ls_node-version = `inactive`.
+          lv_version = `I`.
+        ENDIF.
+        lv_row = lv_row && `<DESCRIPTION_TYPE/>` && element( iv_name = `VERSION` iv_value = lv_version ) && `<INACTIVE_TYPE/>`.
+      ENDIF.
+      lv_row = lv_row && `</SEU_ADT_REPOSITORY_OBJ_NODE>`.
+      IF sy-tabix > 1.
+        lv_rows = lv_rows && cl_abap_char_utilities=>newline.
+      ENDIF.
+      lv_rows = lv_rows && lv_row.
+    ENDLOOP.
+    IF iv_flat = abap_true.
+      rv_body = |<?xml version="1.0" encoding="utf-8"?>\n|
+        && |<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">\n|
+        && |  <asx:values><DATA><TREE_CONTENT>\n{ lv_rows }\n  </TREE_CONTENT></DATA></asx:values>\n</asx:abap>\n|.
+    ELSE.
+      rv_body = |<?xml version="1.0" encoding="utf-8"?>\n|
+        && |<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">\n|
+        && |  <asx:values>\n    <DATA>\n      <TREE_CONTENT>\n{ lv_rows }\n      </TREE_CONTENT>\n|
+        && |      <CATEGORIES>\n{ lv_categories }\n      </CATEGORIES>\n|
+        && |      <OBJECT_TYPES>\n{ lv_types }\n      </OBJECT_TYPES>\n    </DATA>\n  </asx:values>\n</asx:abap>\n|.
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
