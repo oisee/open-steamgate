@@ -320,7 +320,7 @@ process.exit(run.status ?? 1);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
-test("runner deaths keep the first stderr line and spawn errors remain actionable", {timeout: 120000}, async () => {
+test("runner errors and signals take precedence over earlier stderr", {timeout: 120000}, async () => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-unit-run-errors-"));
   const wrapper = join(dir, "runner.mjs");
   writeFileSync(wrapper, `#!/usr/bin/env node
@@ -330,16 +330,95 @@ process.kill(process.pid, "SIGTERM");
   chmodSync(wrapper, 0o755);
   try {
     for (const [label, jobs, runner, expected] of [
-      ["single-signal", "1", wrapper, "runner died: earlier stderr"],
+      ["single-signal", "1", wrapper, "runner died: terminated by SIGTERM: earlier stderr"],
       ["seed-error", "2", join(dir, "absent"), "seed image: spawnSync"],
       ["single-error", "1", join(dir, "absent"), "runner died: spawn"],
     ]) {
       const run = await unitRun([...staticsArgs.slice(0, -2), "--jobs", jobs, "--out", join(dir, label)], {GOGEN_UNIT_RUNNER: runner});
       assert.equal(run.status, 1, run.stderr || run.stdout);
       assert.ok(run.result.rows.every((row) => row.message.includes(expected)), JSON.stringify(run.result.rows));
-      if (label !== "single-signal") assert.ok(run.result.rows.every((row) => !row.message.includes("earlier stderr")));
+      assert.equal(run.result.timingMs.runDetail.retries, label === "single-error" ? 0 : label === "single-signal" ? 1 : undefined);
     }
   } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("interrupting a multi-class single run exits without retry processes", {timeout: 120000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-interrupt-"));
+  const wrapper = join(dir, "runner.mjs");
+  writeFileSync(wrapper, `#!/usr/bin/env node
+import {appendFileSync} from "node:fs";
+appendFileSync(process.env.GOGEN_UNIT_TEST_LOG, process.cwd() + "\\n");
+process.stderr.write("earlier stderr\\n");
+setTimeout(() => process.kill(process.ppid, process.env.GOGEN_UNIT_TEST_SIGNAL), 50);
+setInterval(() => {}, 1000);
+`);
+  chmodSync(wrapper, 0o755);
+  try {
+    for (const signal of ["SIGINT", "SIGTERM"]) {
+      const log = join(dir, `${signal}.ndjson`);
+      const run = await unitRun([join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit-crash"),
+        "--jobs", "1", "--out", join(dir, signal)],
+      {GOGEN_UNIT_RUNNER: wrapper, GOGEN_UNIT_TEST_LOG: log, GOGEN_UNIT_TEST_SIGNAL: signal});
+      assert.equal(run.status, 1, run.stderr || run.stdout);
+      assert.equal(run.result.rows.length, 4);
+      assert.ok(run.result.rows.every((row) => row.status === "FAILED" && row.message === "runner died: interrupted"));
+      assert.equal(run.result.timingMs.runDetail.retries, 0);
+      assert.equal(readFileSync(log, "utf8").trim().split("\n").length, 1, "only the original process started");
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("an invalid stack limit stops after exactly one retry", {timeout: 120000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-startup-"));
+  const wrapper = join(dir, "runner.mjs"), log = join(dir, "processes.ndjson");
+  writeFileSync(wrapper, `#!/usr/bin/env node
+import {spawnSync} from "node:child_process";
+import {appendFileSync} from "node:fs";
+appendFileSync(process.env.GOGEN_UNIT_TEST_LOG, process.cwd() + "\\n");
+const run = spawnSync(process.env.GOGEN_UNIT_BINARY, process.argv.slice(2), {stdio: "inherit"});
+process.exit(run.status ?? 1);
+`);
+  chmodSync(wrapper, 0o755);
+  try {
+    const run = await unitRun([join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit-crash"),
+      "--jobs", "1", "--out", join(dir, "out")],
+    {GOGEN_UNIT_MAX_STACK: "invalid", GOGEN_UNIT_RUNNER: wrapper, GOGEN_UNIT_TEST_LOG: log});
+    assert.equal(run.status, 1, run.stderr || run.stdout);
+    assert.equal(run.result.rows.length, 4);
+    assert.ok(run.result.rows.every((row) => row.status === "FAILED"
+      && row.message === "runner died: panic: invalid GOGEN_UNIT_MAX_STACK"));
+    assert.equal(run.result.timingMs.runDetail.retries, 1);
+    const processes = readFileSync(log, "utf8").trim().split("\n");
+    assert.equal(processes.length, 2);
+    assert.equal(processes.filter((line) => /retry-/.test(line)).length, 1);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("shard end timings include recovery from a repeated startup failure", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-retry-timing-"));
+  const wrapper = join(dir, "runner.mjs");
+  const ready = ["A", "B", "C", "D"].map((owner) =>
+    ({class: owner, testclass: "LOCAL", method: "CHECK", status: "READY", message: ""}));
+  const groups = ready.map((row) => ({key: `${row.class}:LOCAL`, methods: [row]}));
+  writeFileSync(wrapper, `#!/usr/bin/env node
+import {writeFileSync} from "node:fs";
+const args = process.argv.slice(2);
+if (args.includes("--seed-image-out")) { writeFileSync(args[args.indexOf("--seed-image-out") + 1], ""); process.exit(0); }
+setTimeout(() => { process.stderr.write("startup panic\\n"); process.exit(7); }, /retry-/.test(process.cwd()) ? 200 : 0);
+`);
+  chmodSync(wrapper, 0o755);
+  const oldRunner = process.env.GOGEN_UNIT_RUNNER;
+  try {
+    process.env.GOGEN_UNIT_RUNNER = wrapper;
+    const result = await runUnit({bin: wrapper, groups, ready, jobs: 2, out: dir, runDir: dir});
+    assert.equal(result.runDetail.retries, 2, "one retry for each dead shard");
+    assert.ok(result.actual.every((row) => row.message === "runner died: startup panic"));
+    assert.equal(result.actual.length, 4);
+    for (const phase of result.runDetail.shards) assert.ok(phase.endMs - phase.startMs >= 200, JSON.stringify(phase));
+  } finally {
+    if (oldRunner === undefined) delete process.env.GOGEN_UNIT_RUNNER; else process.env.GOGEN_UNIT_RUNNER = oldRunner;
+    rmSync(dir, {recursive: true, force: true});
+  }
 });
 
 test("unit statics parity labels only reviewed Node assertions as nodeAnomaly", () => {

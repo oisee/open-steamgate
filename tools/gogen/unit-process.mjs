@@ -71,8 +71,10 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
     shard.weight += weightOf(group.key);
   }
   const runner = process.env.GOGEN_UNIT_RUNNER ?? bin;
+  let interrupted = false;
   const runFailure = (run) => run.error?.message || (run.signal ? `terminated by ${run.signal}` : "") || run.stderr || `exit ${run.status}`;
   const runProcess = (argv, env, cwd) => new Promise((resolveRun) => {
+    if (interrupted) { resolveRun({killReason: "interrupted"}); return; }
     const child = spawn(runner, argv, {encoding: "utf8", env: {...env, GOGEN_UNIT_BINARY: bin}, cwd, detached: true});
     let stdout = "", stderr = "", error, killReason;
     const kill = (reason) => {
@@ -83,7 +85,7 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
         catch (e) { if (e.code !== "ESRCH") throw e; }
       }
     };
-    const onSignal = () => kill("interrupted");
+    const onSignal = () => { interrupted = true; kill("interrupted"); };
     process.on("SIGINT", onSignal); process.on("SIGTERM", onSignal);
     const timer = setTimeout(() => kill("timeout after 120000 ms"), 120000);
     child.stdout.on("data", (chunk) => { stdout += chunk; if (stdout.length > 20e6) kill("stdout limit exceeded (20 MB)"); });
@@ -106,15 +108,29 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
         && row.method === method.method && ["SUCCESS", "FAILED", "SKIPPED", "NOT_COMPILED"].includes(row.status))));
     const completeKeys = complete.map((g) => g.key);
     return {rows: reported.filter((row) => row && completeKeys.includes(`${row.class}:${row.testclass}`)),
-      pending: keys.filter((key) => !completeKeys.includes(key)), durations: checkpoint.durations ?? {}};
+      pending: keys.filter((key) => !completeKeys.includes(key)), durations: checkpoint.durations ?? {},
+      started: keys.includes(checkpoint.active)};
   };
-  const died = (run) => run.killReason || run.error?.message
-    || run.stderr?.trim().split("\n")[0] || runFailure(run);
+  const died = (run) => {
+    const firstLine = run.stderr?.trim().split("\n")[0];
+    return run.killReason || run.error?.message
+      || (run.signal ? `terminated by ${run.signal}${firstLine ? `: ${firstLine}` : ""}` : firstLine) || runFailure(run);
+  };
   let retryIndex = 0;
   const recover = async (keys, run, resultsFile, seedFile) => {
     const result = completed(keys, run, resultsFile);
+    const failPending = (pending, reason) => {
+      for (const key of pending) result.rows.push(...groups.find((g) => g.key === key).methods.map((r) =>
+        ({...r, status: "FAILED", message: `runner died: ${reason}`})));
+    };
+    const emptyCheckpoint = result.rows.length === 0 && !result.started;
+    let firstRetry = true;
     // One isolated re-run per unfinished class. This is deliberately not recursive.
-    for (const key of result.pending) {
+    for (const [index, key] of result.pending.entries()) {
+      if (interrupted || run.killReason === "interrupted" || run.error) {
+        failPending(result.pending.slice(index), interrupted ? "interrupted" : died(run));
+        break;
+      }
       const retryDir = join(runDir, `retry-${retryIndex++}`);
       const tempDir = join(retryDir, "tmp"), datasetDir = join(retryDir, "dataset");
       mkdirSync(tempDir, {recursive: true}); mkdirSync(datasetDir);
@@ -131,6 +147,15 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
       if (own.pending.length) result.rows.push(...groups.find((g) => g.key === key).methods.map((r) =>
         ({...r, status: "FAILED", message: `runner died: ${retry.status === 0 && !retry.killReason ? "incomplete result" : died(retry)}`})));
       rmSync(retryDir, {recursive: true, force: true});
+      // An empty checkpoint followed by the same initial failure indicates a
+      // broken startup, not a class-specific crash. Do not retry every class.
+      if (retry.killReason === "interrupted" || retry.error
+        || (firstRetry && emptyCheckpoint && !own.started && own.pending.length
+          && (retry.status !== 0 || retry.killReason) && died(retry) === died(run))) {
+        failPending(result.pending.slice(index + 1), died(retry));
+        break;
+      }
+      firstRetry = false;
     }
     runDetail.retries = retryIndex;
     return result;
@@ -194,9 +219,10 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
         OSD_DATASET_AUDIT: join(datasetDir, "audit.ndjson")};
       const run = await runProcess(["--classes-file", classesFile, "--seed-image", seedFile,
         "--timings-out", durationsFile, "--phases-out", phasesFile, "--results-out", resultsFile], env, shardDir);
-      const phase = {index, startMs: Math.round(started - runStarted), endMs: Math.round(performance.now() - runStarted), classes: shard.keys.length};
+      const phase = {index, startMs: Math.round(started - runStarted), classes: shard.keys.length};
       runDetail.shards.push(phase);
       const result = await recover(shard.keys, run, resultsFile, seedFile);
+      phase.endMs = Math.round(performance.now() - runStarted);
       const latest = {...readJSON(durationsFile, {}), ...result.durations};
       phase.classMs = Object.values(latest).reduce((a, b) => a + b, 0);
       phase.startupSeedMs = readJSON(phasesFile, {}).startupSeedMs;
