@@ -154,11 +154,19 @@ the business outbox like every other job, with an import payload of their own
 (version 7) that the read model checks. Jobs run only on `STG_DB=file`, as
 before; on the other databases `JOB_CLOSE` refuses as it did.
 
-**Downtime** (unmeasured: an assumption, marked so in the fixture). At host
-start every overdue released job starts once. Because the successor is made
-when an instance starts, with the scheduled time plus the period, an overdue
-chain catches up instance by instance, as it does on an overrun, until the
-next start lies in the future.
+**Downtime** (unmeasured: an assumption, marked so in the fixture). A system
+started after an outage does not replay the periodic runs it missed. At host
+start (the worker's first pass) every released job that is overdue starts
+once, and its successor goes to the first scheduled time + k * period that
+lies after that moment: the chain keeps its phase and stays aligned with the
+original schedule, and the slots in between are skipped. A one-minute job
+after a two-day stop therefore starts once, not about 2880 times. The slot is
+decided in the same update that takes the start decision (WAITING to
+RELEASING, `batch_runs.next_sdl_at`), so a crash and restart finish that
+decision with the same slot and never make a second successor elsewhere.
+This applies only to a start that was overdue at host start; while the
+scheduler is up, an overrun skips nothing and each successor is due at its
+predecessor's scheduled time + one period, as measured.
 
 **A latest start reached while waiting** (unmeasured: an assumption). The
 instance is not started; it ends `A` with result status `EXPIRED`, and its

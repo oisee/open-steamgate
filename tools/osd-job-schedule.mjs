@@ -73,12 +73,22 @@ export function scheduleOfOutbox(row) {
  *  224501 -> 224701 for an instance that started at 22:45:51). The latest
  *  start keeps its distance to the start (an assumption: only the refusal
  *  at JOB_CLOSE was measured). */
-export function nextSchedule(schedule) {
-  const step = periodMinutes(schedule.period) * MINUTE;
+export function nextSchedule(schedule, periods = 1) {
+  const step = periodMinutes(schedule.period) * MINUTE * periods;
   if (step <= 0) throw new Error("a job that runs once has no successor");
   return {start: msStamp(stampMs(schedule.start) + step),
     last: schedule.last ? msStamp(stampMs(schedule.last) + step) : "",
     period: {...schedule.period}};
+}
+
+/** after downtime (an assumption, not measured): how many periods after
+ *  `start` the first slot lies that is later than `nowStamp`. A system
+ *  started after an outage does not replay the periodic runs it missed; the
+ *  chain keeps its phase (scheduled + k * period). At least 1. */
+export function periodsToFuture(start, period, nowStamp) {
+  const step = periodMinutes(period) * MINUTE;
+  if (step <= 0) throw new Error("a job that runs once has no successor");
+  return Math.max(1, Math.floor((stampMs(nowStamp) - stampMs(start)) / step) + 1);
 }
 
 /** the import payload of a time-scheduled job (version 7), the bytes the

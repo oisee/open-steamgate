@@ -898,8 +898,8 @@ async function main(args) {
     for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { stopping = true; });
     // a worker start is a host start (overdue time jobs start once); later passes poll
     try {
-      while (!stopping) {
-        const outcomes = await scheduler.start();
+      for (let first = true; !stopping; first = false) {
+        const outcomes = await (first ? scheduler.start() : scheduler.tick());
         for (const result of outcomes) console.log(JSON.stringify(result));
         if (outcomes.length === 0) await delay(250);
       }

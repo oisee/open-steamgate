@@ -4,7 +4,7 @@
 // methods on itself, so callers see one store and one API. Nothing here
 // imports osd-batch-runs.mjs.
 import {resolve} from "node:path";
-import {checkSchedule} from "./osd-job-schedule.mjs";
+import {checkSchedule, nextSchedule, periodsToFuture} from "./osd-job-schedule.mjs";
 
 // Only a source's own timed jobs: the operations store can be shared by
 // several business databases, and another's job is not this worker's to
@@ -19,7 +19,8 @@ export function migrateTimedColumns(db) {
   // Start by date and time (sdl_at, last_at: system-time stamps), the
   // period, and the chain: chain_pred is the run whose start made this one.
   for (const [column, type] of [["sdl_at", "TEXT"], ["last_at", "TEXT"], ["prd_mins", "INTEGER"],
-    ["prd_hours", "INTEGER"], ["prd_days", "INTEGER"], ["prd_weeks", "INTEGER"], ["chain_pred", "TEXT"]]) {
+    ["prd_hours", "INTEGER"], ["prd_days", "INTEGER"], ["prd_weeks", "INTEGER"], ["chain_pred", "TEXT"],
+    ["next_sdl_at", "TEXT"]]) {
     if (!db.prepare("PRAGMA table_info(batch_runs)").all().some((item) => item.name === column)) {
       db.exec(`ALTER TABLE batch_runs ADD COLUMN ${column} ${type}`);
     }
@@ -109,16 +110,26 @@ class TimedJobs {
    *  RELEASING in one conditional update. Only a job that wins it gets a
    *  successor; a job BP_JOB_DELETE took first does not, so deleting the
    *  waiting instance ends the chain (sandbox, 2026-10-01). A job already
-   *  RELEASING (a crash after the decision) answers true again: recovery
-   *  finishes the decision and never takes it twice. */
-  beginRelease(id, nowStamp) {
+   *  RELEASING (a crash after the decision) answers again with what was
+   *  decided: recovery finishes the decision and never takes it twice.
+   *  `skipFrom` (a stamp) marks a job overdue at host start: its successor
+   *  goes to the first slot of its phase after that stamp, and the slot is
+   *  decided here, in the same update, so a restart cannot move it.
+   *  Answers false (not this caller's to start) or {next}, the successor's
+   *  start when it is not the scheduled time + one period. */
+  beginRelease(id, nowStamp, skipFrom) {
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      const run = this.db.prepare("SELECT state, sdl_at FROM batch_runs WHERE id = ?").get(id);
-      let decided = run?.state === "RELEASING";
+      const run = this.db.prepare(`SELECT state, sdl_at, next_sdl_at, prd_mins, prd_hours, prd_days, prd_weeks
+        FROM batch_runs WHERE id = ?`).get(id);
+      let decided = run?.state === "RELEASING" ? {next: run.next_sdl_at ?? null} : false;
       if (run?.state === "WAITING" && run.sdl_at && run.sdl_at <= nowStamp) {
-        decided = this.db.prepare(`UPDATE batch_runs SET state = 'RELEASING'
-          WHERE id = ? AND state = 'WAITING'`).run(id).changes === 1;
+        const period = {mins: run.prd_mins ?? 0, hours: run.prd_hours ?? 0, days: run.prd_days ?? 0, weeks: run.prd_weeks ?? 0};
+        const periods = skipFrom && (period.mins || period.hours || period.days || period.weeks) ?
+          periodsToFuture(run.sdl_at, period, skipFrom) : 1;
+        const next = periods > 1 ? nextSchedule({start: run.sdl_at, last: "", period}, periods).start : null;
+        decided = this.db.prepare(`UPDATE batch_runs SET state = 'RELEASING', next_sdl_at = ?
+          WHERE id = ? AND state = 'WAITING'`).run(next, id).changes === 1 ? {next} : false;
       }
       this.db.exec("COMMIT");
       return decided;

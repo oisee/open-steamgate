@@ -528,4 +528,45 @@ describe("periodic and time-scheduled background jobs", function () {
     expect(identities(successorIntentId(w.runs("RELCRASH")[0].id))).to.have.length(1);
     w.scheduler.stop();
   });
+  it("starts a job overdue after a two-day stop once and puts its successor on the first future slot of its phase", async () => {
+    const w = world("2026-10-02T01:00:01Z", {execute: done});
+    await close(w, "GAP", {start: 60, period: {mins: 1}});
+    await w.scheduler.tick();
+    w.scheduler.stop();
+    w.clock.set(w.clock.now() + 2 * 24 * 3600 * 1000); // T0 + 172800 s
+    await w.hostStart();
+    expect([w.instances("GAP"), w.waiting("GAP"), w.runs("GAP").length]).to.deep.equal([[60], [172860], 2]);
+    await w.hostStart();
+    expect([w.instances("GAP"), w.waiting("GAP"), w.runs("GAP").length]).to.deep.equal([[60], [172860], 2]);
+    // up again: the next slots run one by one, as measured
+    w.clock.set(w.clock.now() + 120 * 1000);
+    await w.scheduler.tick();
+    expect([w.instances("GAP"), w.waiting("GAP")]).to.deep.equal([[60, 172860, 172920], [172980]]);
+    w.scheduler.stop();
+  });
+
+  it("keeps the slot decided at host start when a crash interrupts the release", async () => {
+    const w = world("2026-10-02T02:00:01Z", {execute: done});
+    await close(w, "GAPCRASH", {start: 60, period: {mins: 1}});
+    await w.scheduler.tick();
+    w.scheduler.stop();
+    w.clock.set(w.clock.now() + 2 * 24 * 3600 * 1000);
+    // host start, the decision is taken, and the host dies before the successor
+    const crashing = new JobScheduler({root, store: w.store, env: process.env, clock: w.clock, execute: done});
+    crashing.ensureSuccessor = async () => { throw new Error("host stopped"); };
+    try { await crashing.start(); throw new Error("start did not fail"); }
+    catch (error) { expect(error.message).to.equal("host stopped"); }
+    crashing.stop();
+    expect(w.runs("GAPCRASH").map((run) => run.state)).to.deep.equal(["RELEASING"]);
+    w.clock.set(w.clock.now() + 300 * 1000); // restarted five minutes later
+    await w.hostStart();
+    const runs = w.runs("GAPCRASH");
+    // the successor is where the first host start put it, not recomputed from the restart
+    expect(runs.map((run) => w.offset(run.sdl_at)).slice(0, 2)).to.deep.equal([60, 172860]);
+    expect(runs[1].chain_pred).to.equal(runs[0].id);
+    expect(runs.filter((run) => run.chain_pred === runs[0].id)).to.have.length(1);
+    // that successor was itself overdue at the restart: it started once, and skipped on
+    expect([w.instances("GAPCRASH"), w.waiting("GAPCRASH")]).to.deep.equal([[60, 172860], [173160]]);
+    w.scheduler.stop();
+  });
 });

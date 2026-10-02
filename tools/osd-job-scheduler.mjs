@@ -166,6 +166,7 @@ export class JobScheduler {
     this.timer = undefined;
     this.stopped = false;
     this.running = undefined;
+    this.startedAt = undefined; // host start: start() sets it
     this.beforeReserve = undefined; // test seam, see reserveSuccessorCount
     this.afterDueRead = undefined; // test seam, see releaseDue
   }
@@ -174,6 +175,7 @@ export class JobScheduler {
    *  for the next start time is armed */
   start() {
     this.stopped = false;
+    this.startedAt ??= this.clock.now();
     return this.tick();
   }
 
@@ -215,8 +217,13 @@ export class JobScheduler {
     const released = [];
     for (const run of this.store.dueTimed(stamp, workerSource())) {
       await this.afterDueRead?.(run); // test seam: a BP_JOB_DELETE may commit here
-      if (!this.store.beginRelease(run.id, stamp)) continue; // deleted (or taken) meanwhile: no successor
-      if (periodMinutes(periodOf(run)) > 0) await this.ensureSuccessor(run);
+      // Overdue at host start (an assumption, not measured): it starts once,
+      // and its successor skips the missed slots. While the scheduler is up
+      // nothing is skipped, however late an overrun makes a start (measured).
+      const overdue = this.startedAt !== undefined && stampMs(run.sdl_at) < this.startedAt;
+      const decided = this.store.beginRelease(run.id, stamp, overdue ? stamp : undefined);
+      if (!decided) continue; // deleted (or taken) meanwhile: no successor
+      if (periodMinutes(periodOf(run)) > 0) await this.ensureSuccessor(run, decided.next);
       const result = this.store.releaseTimed(run.id, stamp, new Date(this.clock.now()).toISOString());
       if (result.kind !== "unchanged") released.push({id: run.id, kind: result.kind});
     }
@@ -226,12 +233,14 @@ export class JobScheduler {
   /** the successor of a periodic instance: a new job of the same name and
    *  steps, a count from the usual allocator, status S, start = this
    *  instance's scheduled time + period */
-  async ensureSuccessor(run) {
+  async ensureSuccessor(run, next = null) {
     const intentId = successorIntentId(run.id);
     if (this.store.successorOf(run.id)) return;
     const jobcount = await this.#reserveCount(run, intentId);
     const full = this.store.get(run.id, {revealInput: true});
-    const schedule = nextSchedule({start: run.sdl_at, last: run.last_at ?? "", period: periodOf(run)});
+    const step = periodMinutes(periodOf(run)) * 60 * 1000;
+    const periods = next ? Math.round((stampMs(next) - stampMs(run.sdl_at)) / step) : 1;
+    const schedule = nextSchedule({start: run.sdl_at, last: run.last_at ?? "", period: periodOf(run)}, periods);
     this.store.importIntent({intentId, sourceDb: run.source_db, client: run.source_client,
       sysid: run.source_sysid, jobname: run.job_name, jobcount, owner: run.source_owner,
       program: run.program, generation: run.generation,

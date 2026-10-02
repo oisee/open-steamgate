@@ -112,19 +112,20 @@
   {
    "id": "downtime",
    "EXPECT": "unmeasured: assumption",
-   "title": "after downtime every overdue released job starts once, and a periodic chain continues from scheduled time + period",
-   "assumption": "not measured: a missed start after scheduler or host downtime cannot be provoked on a shared sandbox. Chosen: at host start every overdue released job starts once, and since the successor is made when an instance starts, with the scheduled time + period, an overdue chain catches up instance by instance, as it does on an overrun, until the next start lies in the future.",
+   "title": "after downtime an overdue released job starts once, and its successor skips to the first future slot of its phase",
+   "assumption": "not measured: a missed start after scheduler or host downtime cannot be provoked on a shared sandbox. Chosen: a system started after an outage does not replay its missed periodic runs. At host start an overdue released job starts once; its successor goes to the first scheduled time + k * period that lies after the host start, so the chain keeps its phase and stays aligned with the original schedule; the slots in between are skipped. This applies only to a start overdue at host start: while the scheduler is up, an overrun skips nothing (no-skip-on-overrun, measured).",
    "clock": "2026-10-01T22:50:01Z",
    "steps": [
     {"close": "A", "start": 60, "period": {"mins": 2}},
     {"down": 300},
-    {"hostStart": true, "expect": {"instances": {"A": [60, 180, 300]}, "waiting": {"A": [420]}}},
-    {"hostStart": true, "expect": {"instances": {"A": [60, 180, 300]}, "waiting": {"A": [420]}}}
+    {"hostStart": true, "expect": {"instances": {"A": [60]}, "waiting": {"A": [420]}}},
+    {"hostStart": true, "expect": {"instances": {"A": [60]}, "waiting": {"A": [420]}}},
+    {"tick": 120, "expect": {"instances": {"A": [60, 420]}, "waiting": {"A": [540]}}}
    ]
   }
  ],
  "unmeasured": [
-  "a missed start after downtime (the downtime case is an assumption)",
+  "a missed start after downtime (the downtime case is an assumption: start once, skip to the first future slot of the phase)",
   "a latest start time reached while the job waits: here the job is not started and ends A with result EXPIRED; its periodic successor is still made",
   "PRDMONTHS: refused (JOB_CLOSE_FAILED) until calendar-month arithmetic is measured",
   "a periodic start with STRTIMMED = 'X': refused (JOB_CLOSE_FAILED)",
