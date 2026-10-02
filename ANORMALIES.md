@@ -29,6 +29,21 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-02-boolx-logical-argument -- BOOLX's logical argument does not parse as a method parameter
+
+- Status: `workaround`
+- Discovery date: `2026-10-02`
+- Affected versions: `@abaplint/core 2.120.59`, as resolved by the installed transpiler
+- Affected ABAP: `boolx( bool = 1 = 1 bit = 9 )`
+- Minimal reproducer: `tools/gogen/testdata/zcl_gogen_t_ipow.clas.testclasses.abap`, method LOGICAL
+- Expected SAP behaviour: BOOL takes a logical expression and returns an xstring with the selected bit set when true. This is the [documented contract (SAP keyword documentation, mirrored)](https://eduardocopat.github.io/abap-docs/7.40/abenboole_functions/), not a new A4H measurement.
+- Actual abaplint behaviour: the built-in table declares BOOL as CLIKE, and the ordinary method-parameter grammar accepts Source rather than Cond. The comparison inside BOOL is rejected by the parser.
+- Impact: otherwise supported logical conditions prevent the owning class from compiling in gogen.
+- Smallest safe workaround: gogen wraps BOOL's token-delimited logical expression in BOOLC before parsing and lowers the resulting BOOLX call to a byte-string helper. Comments, literals, nested calls and source line counts are preserved; qualified methods are left alone.
+- Upstream issue: no report filed
+- Regression tests: `node --test tools/gogen/builtins.test.mjs`; `node tools/gogen/unit.mjs --fixture tools/gogen/testdata --class ZCL_GOGEN_T_IPOW`
+- Upstream version containing a fix: unknown
+
 ### ANOMALY-2026-10-01-rule-reserved-word -- a table field named RULE builds and runs here and does not activate on a system
 
 - Status: `workaround`

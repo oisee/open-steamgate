@@ -477,6 +477,10 @@
     "tools/stg-compile.mjs": {
       "lines": 1242,
       "reason": "baseline 2026-10-01"
+    },
+    "go:intpower": {
+      "lines": 79,
+      "reason": "checked integer power and boolx in a pure helper; no go/abap growth"
     }
   },
   "readmeMissing": [

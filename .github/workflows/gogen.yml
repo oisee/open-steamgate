@@ -106,7 +106,7 @@ jobs:
         working-directory: tools/gogen/go
         run: |
           go vet ./abap/ ./termgui/ ./filepick/ ./amc/ ./session/... ./enq/ ./sandbox/ ./objstore/ ./osdbind/
-          go test ./xbuf/... ./bytesection/... ./abap/... ./termgui/... ./filepick/... ./session/... ./sandbox/... ./objstore/... ./osdbind/...
+          go test ./xbuf/... ./bytesection/... ./abap/... ./intpower/... ./termgui/... ./filepick/... ./session/... ./sandbox/... ./objstore/... ./osdbind/...
           # the sandbox builds for the browser too (nofollow_other.go)
           GOOS=js GOARCH=wasm go build ./sandbox/ ./objstore/
           # the AMC broker and the lock server are concurrent by nature: their
@@ -125,7 +125,7 @@ jobs:
         # the library clones must be the pinned ones (tools/gogen/lib-pins.mjs)
         env:
           OSABAP_STRICT_PINS: "1"
-        run: node --test tools/gogen/lib-pins.test.mjs tools/gogen/osabap-f4.test.mjs tools/gogen/osabap.test.mjs tools/gogen/osabap-sql-corpus.test.mjs tools/gogen/unit.test.mjs
+        run: node --test tools/gogen/builtins.test.mjs tools/gogen/lib-pins.test.mjs tools/gogen/osabap-f4.test.mjs tools/gogen/osabap.test.mjs tools/gogen/osabap-sql-corpus.test.mjs tools/gogen/unit.test.mjs
       - name: Generated-class ABAP Unit CI entry points (real Go and JS builds)
         run: flock /tmp/osd-heavy.lock node tools/osd-suites.mjs --group gogen
 

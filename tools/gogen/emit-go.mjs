@@ -1,5 +1,6 @@
 import {analyzeOwnership} from "./frontend-owned.mjs";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.mjs";
+import {emitBuiltinGo} from "./emit-builtins.mjs";
 import {emitByteStatement} from "./emit-bytes.mjs";
 // IR -> Go source, for the Go backend spike.
 //
@@ -2193,24 +2194,7 @@ function conv(e, ctx) {
 }
 
 function fn(e, ctx) {
-  const args = e.args.map((a) => expr(a, ctx));
-  if (FN_F[e.name]) return `${FN_F[e.name]}(${args[0]})`;
-  const k = e.type.k;
-  if (e.args[0]?.type.k === "p") {
-    const P_FN = {ABS: "abap.AbsP", SIGN: "abap.SignP", CEIL: "abap.CeilP", FLOOR: "abap.FloorP", TRUNC: "abap.TruncP", FRAC: "abap.FracP"};
-    if (P_FN[e.name]) return `${P_FN[e.name]}(${args[0]})`;
-  }
-  switch (e.name) {
-    case "NMAX": return k === "i" ? `abap.MaxI(${args.join(", ")})` : `abap.MaxF(${args.join(", ")})`;
-    case "NMIN": return k === "i" ? `abap.MinI(${args.join(", ")})` : `abap.MinF(${args.join(", ")})`;
-    case "ABS": return k === "i" ? `abap.AbsI(${args[0]})` : `math.Abs(${args[0]})`;
-    case "SIGN": return k === "i" ? `abap.SignI(${args[0]})` : `abap.SignF(${args[0]})`;
-    case "FLOOR": return k === "i" ? args[0] : `math.Floor(${args[0]})`;
-    case "CEIL": return k === "i" ? args[0] : `math.Ceil(${args[0]})`;
-    case "TRUNC": return k === "i" ? args[0] : `math.Trunc(${args[0]})`;
-    case "FRAC": return k === "i" ? "int32(0)" : `abap.FracF(${args[0]})`;
-    default: throw new Error(`no Go for function ${e.name}`);
-  }
+  return emitBuiltinGo(e, e.args.map((a) => expr(a, ctx)), FN_F, HELPER_IMPORTS);
 }
 
 function cond(c, ctx) {
