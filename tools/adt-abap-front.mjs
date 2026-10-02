@@ -129,6 +129,7 @@ export async function answerOf(handler, view, session) {
   const r = request.get();
   r.method.set(String(view.method).toUpperCase());
   r.path.set(view.path);
+  r.uri.set(view.url);
   const query = String(view.url).includes("?") ? String(view.url).slice(String(view.url).indexOf("?") + 1) : "";
   for (const [name, value] of new URLSearchParams(query)) {
     const row = r.query.appendInitial().get();

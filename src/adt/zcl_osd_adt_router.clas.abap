@@ -229,6 +229,7 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
       <ls_param>-value = zcl_osd_adt_uri=>decode_segment( <ls_param>-value ).
     ENDLOOP.
 
+    ls_request-pattern = ls_route-pattern.
     CREATE OBJECT li_route TYPE (ls_route-handler).
     rs_result-served_by = c_abap.
     rs_result-response = li_route->handle( ls_request ).

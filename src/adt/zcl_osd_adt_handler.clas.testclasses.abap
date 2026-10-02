@@ -61,6 +61,10 @@ CLASS ltcl_session_double IMPLEMENTATION.
     CLEAR: ev_type, ev_name.
   ENDMETHOD.
 
+  METHOD zif_osd_adt_session~release_object.
+    RETURN.
+  ENDMETHOD.
+
   METHOD zif_osd_adt_session~holds.
     rv_holds = abap_false.
   ENDMETHOD.
