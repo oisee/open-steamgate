@@ -1047,6 +1047,11 @@ function activationBuildText(result) {
   if (build === "warm") {
     return result.swapMs === undefined ? "warm, already live" : `hot-swapped in ${result.swapMs} ms (warm)`;
   }
+  // `failed; <why>`: nothing was loaded (a runtime still changing hands, a
+  // recycle that failed); the answer is a failure document, so the caller
+  // normally shows its issue and not this
+  const failed = /^failed;\s*(.*)$/.exec(build)?.[1];
+  if (failed !== undefined) return `nothing loaded: ${failed}`;
   const reason = /^cold;\s*(.*)$/.exec(build)?.[1];
   return reason ? `cold build: ${reason}` : "cold build";
 }

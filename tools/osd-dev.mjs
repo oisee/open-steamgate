@@ -110,7 +110,10 @@ export function devLoop(options = {}) {
       return {ok: false, stage: "changed", result};
     }
     const how = t.cached ? "reused" : "built";
-    const live = result.recycled ? `, recycled in ${result.ms} ms` : ", nothing serving to recycle";
+    // a build the serving process already runs is loaded by nobody
+    // (ObjectStore#publish): "already serving", not "nothing serving"
+    const live = result.recycled ? `, recycled in ${result.ms} ms`
+      : result.generation !== undefined && result.generation === t.hash ? ", already serving" : ", nothing serving to recycle";
     log(`${how} ${t.hash ?? ""} (${t.objects ?? "?"} objects, ${t.ms ?? "?"} ms)${live}`);
     const serving = store.served?.running === true ? store.served.generation : undefined;
     if (serving !== undefined && serving !== t.hash) {

@@ -18,7 +18,7 @@ import {parseDDLS, viewFieldsOf} from "./cds2ddic.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
-import {loadConfig} from "./osd-build.mjs";
+import {hashOf, inputsOf, loadConfig} from "./osd-build.mjs";
 
 import {basename, dirname, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -37,6 +37,9 @@ const WARM_QUIET_MS = Number(process.env.OSD_WARM_QUIET_MS ?? 60000);
 const WARM_HEAP_MB = Number(process.env.OSD_WARM_HEAP_MB ?? 512);
 // how long after a cold build the registry waits before it is primed again
 const WARM_REPRIME_MS = Number(process.env.OSD_WARM_REPRIME_MS ?? 5000);
+// how long a publish waits for a runtime changing hands (a recycle, a
+// start) before it answers that it is still changing rather than hang
+const TRANSITION_MS = Number(process.env.OSD_TRANSITION_MS ?? 60000);
 
 import {fileOf, nameOf, TYPES, STRUCTURE_TABCLASS, INCLUDES} from "./osd-store-types.mjs";
 export {fileOf, nameOf, TYPES, STRUCTURE_TABCLASS, INCLUDES} from "./osd-store-types.mjs";
@@ -925,40 +928,129 @@ export class ObjectStore {
   // (vsp-i7, 2026-10-02). In line, the second builds on what the first
   // made live: the same source is a no-op on that generation, a later edit
   // a build and a swap of its own. Every caller needs this, so it is here.
-  publish(options = {}) {
-    const run = this.#publishing.then(() => this.#publish(options));
-    this.#publishing = run.catch(() => undefined);
-    return run;
+  //
+  // In line is not in turn, though: a caller whose tree is the one already
+  // queued or in flight takes THAT publish's answer, its load included,
+  // instead of building the same thing again behind it. A queued publish has
+  // not read the tree yet, so it reads this caller's too; one in flight is
+  // joined when its build named the generation by the same hash the tree
+  // has now (sourceKey()). Two activators of one save are then one build and
+  // one swap, and both answers wait for the swap and carry its ms.
+  async publish(options = {}) {
+    const forced = options.force === true || options.replace === true;
+    if (!forced) {
+      if (this.#queued !== undefined) return this.#queued.promise;
+      const running = this.#running;
+      if (running !== undefined && running.forced !== true) {
+        // the name first: what the tree is now, before waiting on anything
+        const key = await this.sourceKey();
+        const built = await running.built.catch(() => undefined);
+        if (key !== undefined && built?.ok !== false && built?.hash === key) return running.promise;
+        if (this.#queued !== undefined) return this.#queued.promise;
+      }
+    }
+    const entry = {forced};
+    entry.built = new Promise((resolve, reject) => {
+      entry.resolveBuilt = resolve;
+      entry.rejectBuilt = reject;
+    });
+    entry.built.catch(() => undefined);
+    entry.promise = this.#publishing.then(() => {
+      if (this.#queued === entry) this.#queued = undefined;
+      this.#running = entry;
+      return this.#publish(options, entry);
+    }).finally(() => {
+      if (this.#running === entry) this.#running = undefined;
+      entry.rejectBuilt(new Error("the publish ended before its build"));
+    });
+    if (!forced) this.#queued = entry;
+    this.#publishing = entry.promise.catch(() => undefined);
+    return entry.promise;
   }
 
   #publishing = Promise.resolve();
+  // the publish waiting for its turn (not forced), and the one in its turn
+  #queued = undefined;
+  #running = undefined;
 
-  async #publish(options) {
-    const transpile = await this.transpile(options);
+  // the name a build of the tree as it is now would give its generation:
+  // the hash of the inputs (tools/osd-build.mjs hashOf), the same one a warm
+  // build names its generation by. undefined when the tree cannot be named,
+  // and then nothing is joined.
+  async sourceKey() {
+    try {
+      return hashOf(this.root, inputsOf(this.root));
+    } catch {
+      return undefined;
+    }
+  }
+
+  async #publish(options, entry = {}) {
+    let transpile;
+    try {
+      transpile = await this.transpile(options);
+    } finally {
+      entry.resolveBuilt?.(transpile);
+    }
     if (transpile?.ok === false) {
       return {ok: false, transpile};
     }
-    const runtime = this.served;
-    if (runtime === undefined || runtime.running === false) {
+    let runtime = this.served;
+    // a runtime changing hands (a catch-up recycle, a start; for a pool, any
+    // of its work processes) is waited for before its generation is read or
+    // loaded into: answering now would say "active" while no process serves
+    // the code, and the one coming up may have read the live generation
+    // before this build switched it
+    // -- but not for ever: a recycle that never settles is answered as one
+    const deadline = Date.now() + this.transitionMs;
+    for (let changing = runtime?.recycling ?? runtime?.starting; changing !== undefined;
+      changing = runtime?.recycling ?? runtime?.starting) {
+      const waited = await this.#bounded(changing.catch(() => undefined), "a runtime changing hands", deadline);
+      if (waited.late) return {ok: false, transpile, recycled: false, error: waited.error};
+      runtime = this.served;
+    }
+    if (runtime === undefined || runtime.running !== true) {
       return {ok: true, transpile, recycled: false};
+    }
+    // nothing to load: the process already serves the generation this build
+    // named (a no-op warm build, a cached cold one), so no swap and no
+    // recycle -- a recycle of unchanged code ends every session for nothing.
+    // Said how THIS process got it: by a swap (its ms), or by a load at its
+    // start, which must not read as a swap (a recycle after a refused swap,
+    // a catch-up recycle, a process that came up on the live generation
+    // after this build switched it). A load is the process's only while its
+    // epoch is the one serving. A forced build replaces the generation's
+    // files under the same name, and is always loaded.
+    // For a pool, every work process: one a partial recycle left on the old
+    // generation is loaded (swapped or recycled), not reported as served.
+    const members = Array.isArray(runtime.runtimes) ? runtime.runtimes : [runtime];
+    if (options.force !== true && options.replace !== true && (transpile.warm === true || transpile.cached === true) &&
+        members.every((m) => m.running === true && m.generation === transpile.hash)) {
+      const last = this.lastLoad?.generation === transpile.hash && this.lastLoad.epoch === runtime.epoch
+        ? this.lastLoad : undefined;
+      const how = last?.why !== undefined ? {why: `the runtime was recycled onto it: ${last.why}`}
+        : last?.hot === true ? {swapMs: last.ms}
+          : {why: "the serving process was started on it"};
+      return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash, ...how};
     }
     // a warm build is loaded into the process that serves, not a new one
     // (tools/osd-hot.mjs); when that cannot be done, the recycle below does
     let why;
     if (transpile.warm === true && (transpile.hostHeld ?? []).length === 0) {
-      if (transpile.modules.length === 0 && transpile.hash === runtime.generation) {
-        // nothing to load: another caller (the dev loop, beside the façade's
-        // activation of the same save) already brought this generation in --
-        // and if that was a recycle, this answer must not read as a swap
-        const last = this.lastLoad?.generation === transpile.hash ? this.lastLoad : undefined;
-        return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash,
-          ...(last?.why === undefined ? {} : {why: `the runtime was recycled onto it: ${last.why}`})};
-      }
       try {
         const swap = await runtime.hot({generation: transpile.hash, from: transpile.from,
           modules: transpile.modules, verified: transpile.unverified !== true});
-        this.#afterSwap(transpile.hash, swap);
-        this.lastLoad = {generation: transpile.hash};
+        this.lastLoad = {generation: transpile.hash, epoch: runtime.epoch, hot: true, ms: swap.ms};
+        // the swap limit or the heap: the catch-up recycle is part of this
+        // activation, and its answer is the load that recycle made
+        const after = this.#afterSwap(transpile.hash, swap);
+        const waited = after === undefined ? undefined : await this.#bounded(after, "the catch-up recycle");
+        const caught = waited === undefined ? undefined : waited.late ? {ok: false, error: waited.error} : waited.value;
+        if (caught !== undefined) {
+          if (caught.ok !== true) return {ok: false, transpile, recycled: false, error: caught.error};
+          return {ok: true, transpile, recycled: true, generation: caught.generation, ms: caught.ms,
+            why: `the swap (${swap.ms} ms) was followed by a catch-up recycle after ${caught.why}`};
+        }
         return {ok: true, transpile, recycled: false, hot: true, generation: transpile.hash, ms: swap.ms, swaps: swap.swaps};
       } catch (error) {
         console.log(`warm: the swap was refused, recycling instead: ${error.message}`);
@@ -970,17 +1062,42 @@ export class ObjectStore {
       why = `${transpile.hostHeld.join(", ")} is held by the serving process itself`;
     }
     try {
-      const recycle = await runtime.recycle();
+      const bounded = await this.#bounded(runtime.recycle(), "the recycle");
+      if (bounded.late) return {ok: false, transpile, recycled: false, error: bounded.error};
+      const recycle = bounded.value;
       this.#cleanHot();
       if (this.warmState !== undefined) this.warmState.heapBase = undefined;
       // a warm build loaded by a recycle says why, so no answer reports it as a swap
-      this.lastLoad = {generation: recycle.generation, why};
+      this.lastLoad = {generation: recycle.generation, epoch: runtime.epoch, why};
       return {ok: true, transpile, recycled: true, generation: recycle.generation, ms: recycle.ms, ...(why === undefined ? {} : {why})};
     } catch (error) {
       // the modules are good and the process that should carry them is not:
       // that is a failure of the activation, not a detail to log quietly
       return {ok: false, transpile, recycled: false, error: error.message};
     }
+  }
+
+  // A runtime changing hands -- a recycle already underway, the one this
+  // publish asks for, the catch-up a swap brings -- is waited for at most
+  // transitionMs (OSD_TRANSITION_MS), and then the publish answers that it
+  // is still changing rather than hold the chain: the next publish meets
+  // the same transition and is bounded the same way, and once it settles
+  // publishes load again. {late: false, value} or {late: true, error};
+  // a rejection is the caller's.
+  async #bounded(promise, what, deadline = Date.now() + this.transitionMs) {
+    let timer;
+    const late = Symbol("late");
+    const value = await Promise.race([
+      promise,
+      new Promise((done) => {
+        timer = setTimeout(() => done(late), Math.max(0, deadline - Date.now()));
+        timer.unref?.();
+      }),
+    ]).finally(() => clearTimeout(timer));
+    if (value !== late) return {late: false, value};
+    // whatever it settles to later is nobody's answer, and not unhandled
+    Promise.resolve(promise).catch(() => undefined);
+    return {late: true, error: `the runtime is still changing hands after ${this.transitionMs} ms (${what}); nothing was loaded`};
   }
 
   // ---- the warm compile (tools/osd-warm.mjs, docs/warm-compile.md) --------
@@ -1089,10 +1206,12 @@ export class ObjectStore {
     }
     const runtime = this.served;
     clearTimeout(w.timer);
-    if ((runtime?.swaps ?? 0) >= WARM_SWAPS) {
-      this.#catchUp("the swap limit");
+    // the limits are reached by a swap, so the recycle is the swap's
+    // publish's to await (undefined when nothing is recycled)
+    if ((runtime?.swaps ?? 0) >= this.warmSwapLimit) {
+      return this.#catchUp(`${runtime.swaps} swaps`);
     } else if (grown > WARM_HEAP_MB * 1024 * 1024) {
-      this.#catchUp(`a heap ${Math.round(grown / 1048576)} MB larger than at the first swap`);
+      return this.#catchUp(`a heap ${Math.round(grown / 1048576)} MB larger than at the first swap`);
     } else {
       w.timer = setTimeout(() => {
         // the live generation is compared once the saves have stopped, if
@@ -1106,7 +1225,13 @@ export class ObjectStore {
       }, WARM_QUIET_MS);
       w.timer.unref?.();
     }
+    return undefined;
   }
+
+  // the swap count that brings a catch-up recycle (OSD_WARM_SWAPS); a test lowers it
+  warmSwapLimit = WARM_SWAPS;
+  // how long a publish waits for a runtime changing hands (OSD_TRANSITION_MS)
+  transitionMs = TRANSITION_MS;
 
   #verifyNext() {
     const w = this.warm();
@@ -1144,14 +1269,18 @@ export class ObjectStore {
 
   async #catchUp(why) {
     const runtime = this.served;
-    if (runtime === undefined || runtime.running !== true || (runtime.swaps ?? 0) === 0) return;
+    if (runtime === undefined || runtime.running !== true || (runtime.swaps ?? 0) === 0) return undefined;
     try {
       const r = await runtime.recycle();
       this.#cleanHot();
       this.warm().heapBase = undefined;
+      // the process now serving loaded its generation at its start
+      this.lastLoad = {generation: r.generation, epoch: runtime.epoch, why: `a catch-up recycle after ${why}`};
       console.log(`warm: recycled after ${why} (${r.ms} ms)`);
+      return {ok: true, generation: r.generation, ms: r.ms, why};
     } catch (error) {
       console.log(`warm: the catch-up recycle failed: ${error.message}`);
+      return {ok: false, error: `the catch-up recycle after ${why} failed: ${error.message}`};
     }
   }
 

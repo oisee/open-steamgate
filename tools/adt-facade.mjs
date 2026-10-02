@@ -2478,10 +2478,23 @@ export function adtRouter(options = {}) {
     // "warm" is the build AND the load: a warm build the runtime was
     // recycled for (a refused swap, a host-held module) is a cold activation
     // and says why -- ObjectStore#publish sets result.why exactly then
+    // a publish that did not load anything -- the build refused, a runtime
+    // still changing hands, a recycle that failed -- is neither warm nor
+    // cold: "failed; <why>". The extensions read this header only on an
+    // activation that succeeded (editors/vscode/extension.js), and this one
+    // answers with a failure document, so they show its issue instead
+    if (result?.ok === false) {
+      res.set("X-OSD-Build", header(`failed; ${result.error ?? t.error ?? "the build after activation failed"}`));
+      return;
+    }
     res.set("X-OSD-Build", header(t.warm === true && result?.recycled !== true && result?.why === undefined ? "warm"
       : t.warm === true ? `cold; recycled after a warm build: ${result?.why ?? "the runtime was recycled"}`
         : `cold${w?.on === true && w.reason ? `; ${w.reason}` : ""}`));
-    if (result?.hot === true) res.set("X-OSD-Swap-Ms", String(result.ms));
+    // the swap that made the source live: this activation's own, or the one
+    // that had already brought the same generation in (the dev loop's, for a
+    // save it saw first) -- ObjectStore#publish answers only once it landed
+    const swapMs = result?.hot === true ? result.ms : result?.swapMs;
+    if (swapMs !== undefined) res.set("X-OSD-Swap-Ms", String(swapMs));
     if (Array.isArray(t.closure)) {
       const tests = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
       res.set("X-OSD-Closure", String(t.closure.length));

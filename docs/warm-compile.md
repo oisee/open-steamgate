@@ -109,6 +109,18 @@ registry is primed again.
   larger than at the first swap, or a minute without a save
   (`OSD_WARM_SWAPS`, `OSD_WARM_HEAP_MB`, `OSD_WARM_QUIET_MS`), the process
   is replaced by one started on the live generation, and `build/hot/` goes.
+- **One activation per save, answered once it is live.** `publish()` runs
+  one at a time per store, and a caller whose tree is the one already
+  queued, or the one a build in flight named its generation after, takes
+  that publish's answer instead of building again behind it: the dev loop
+  and VS Code's activation of one disk save are one build and one swap, and
+  both answers carry `X-OSD-Swap-Ms`. A build the serving process already
+  runs (same generation, same process) loads nothing -- no swap, no
+  recycle, sessions kept -- and says how that process got it. A catch-up
+  recycle a swap brings (the swap limit, the heap) is awaited by that
+  swap's activation, which then answers cold with the reason. A runtime
+  changing hands is waited for, at most `OSD_TRANSITION_MS` (60 s), and
+  then the activation fails saying so rather than hang.
 
 ## What a swap means, compared with a system
 

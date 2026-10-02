@@ -10,7 +10,7 @@ import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync,
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
-import {GENERATORS, build, liveHash, layout} from "../tools/osd-build.mjs";
+import {GENERATORS, build, hashOf, inputsOf, liveHash, layout} from "../tools/osd-build.mjs";
 import {GENERATORS_READ, HOST_HELD, WarmCompiler, importerRefusal, importsOf, linkOrCopy, probe, warmRule} from "../tools/osd-warm.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {statSync} from "node:fs";
@@ -388,10 +388,13 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
         const transpile = store.transpile;
         store.transpile = async () => { store.transpile = transpile; throw new Error("the disk went away"); };
         src.text = "rv = 2.";
-        const first = store.publish();
-        const second = store.publish();
         let thrown;
-        await first.catch((e) => { thrown = e; });
+        const first = store.publish().catch((e) => { thrown = e; });
+        // in its turn, not queued: a caller in the same turn as the first
+        // joins it and shares its outcome, the throw included
+        await new Promise((r) => setImmediate(r));
+        const second = store.publish();
+        await first;
         expect(thrown?.message).to.equal("the disk went away");
         expect(await second).to.include({ok: true, hot: true, generation: "h1"});
         expect(log).to.deep.equal(["swap h0->h1"]);
@@ -399,6 +402,412 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
         done();
       }
     });
+  });
+});
+
+// After #440 the two activators of a save ran one after the other, and the
+// second built the same tree again to find it live: "warm, already live"
+// with no X-OSD-Swap-Ms, and an activation queued behind whatever the dev
+// loop was building (vsp-i7, 2026-10-02). Here the real ObjectStore, the
+// real façade router and the real dev loop, over a stand-in warm compiler
+// that names a generation after its source, as hashOf names one after the
+// inputs, and a stand-in runtime whose swap takes a while.
+describe("tools/osd-warm: an activation answers once its source is live", () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const SWAP_MS = 150;
+  const nameOf = (text) => `g${text.replace(/\D/g, "")}`;
+
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-warm-live-"));
+    mkdirSync(join(dir, "src"));
+    const store = new ObjectStore({root: dir, roots: [{path: "src", writable: true}], libs: []});
+    store.write("CLAS", "ZCL_A", "CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\nCLASS zcl_a IMPLEMENTATION. ENDCLASS.\n");
+    const src = {text: "rv = 1."};
+    store.sourceKey = async () => nameOf(src.text);
+    const events = [];
+    const compiler = {
+      primed: true, unverified: new Set(), hash: nameOf(src.text), built: src.text, builds: 0,
+      async build() {
+        this.builds++;
+        const text = src.text;
+        await sleep(20);
+        const from = this.hash;
+        if (text === this.built) {
+          return {ok: true, hash: from, from, cached: true, modules: [], hostHeld: [], stale: 0};
+        }
+        this.built = text;
+        this.hash = nameOf(text);
+        return {ok: true, hash: this.hash, from, modules: ["zcl_a.clas.mjs"], hostHeld: [], stale: 1};
+      },
+    };
+    store.warmState = {on: true, compiler, reason: undefined};
+    store.served = {
+      running: true, epoch: 1, generation: nameOf(src.text), swaps: 0, recycling: undefined, starting: undefined,
+      async hot(swap) {
+        if (this.running !== true || this.recycling !== undefined) throw new Error("nothing to swap into");
+        if (swap.from !== this.generation) {
+          throw new Error(`the runtime carries ${this.generation}, and the swap is from ${swap.from}`);
+        }
+        await sleep(SWAP_MS);
+        this.generation = swap.generation;
+        events.push({what: `swap ${swap.from}->${swap.generation}`, at: Date.now()});
+        return {ms: SWAP_MS, swaps: ++this.swaps};
+      },
+      async recycle() {
+        events.push({what: "recycle", at: Date.now()});
+        this.generation = compiler.hash;
+        return {generation: compiler.hash, ms: 900};
+      },
+    };
+    const done = () => {
+      clearTimeout(store.warmState.timer);
+      rmSync(dir, {recursive: true, force: true});
+    };
+    return {store, src, compiler, events, done};
+  };
+
+  // an ADT activation of ZCL_A through the real façade router
+  const activate = async (store) => {
+    const express = (await import("express")).default;
+    const {adtRouter} = await import("../tools/adt-facade.mjs");
+    const app = express();
+    app.use(adtRouter({store, data: {}, logMisses: false}).router);
+    const server = await new Promise((ok) => { const s = app.listen(0, "127.0.0.1", () => ok(s)); });
+    try {
+      const base = `http://127.0.0.1:${server.address().port}/sap/bc/adt`;
+      const login = await fetch(base + "/core/discovery", {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+      const cookie = (login.headers.getSetCookie?.() ?? []).map((v) => v.split(";", 1)[0]).join("; ");
+      const res = await fetch(base + "/activation?method=activate", {
+        method: "POST", headers: {"x-csrf-token": login.headers.get("x-csrf-token"), cookie},
+        body: `<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_a" adtcore:name="ZCL_A"/>
+</adtcore:objectReferences>`,
+      });
+      const body = await res.text();
+      return {status: res.status, at: Date.now(), body,
+        build: res.headers.get("x-osd-build"), swap: res.headers.get("x-osd-swap-ms")};
+    } finally {
+      await new Promise((ok) => server.close(ok));
+    }
+  };
+  const swaps = (events) => events.filter((e) => e.what.startsWith("swap")).map((e) => e.what);
+
+  it("waits for a runtime changing hands, then swaps, rather than answering at once", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      const runtime = store.served;
+      // a catch-up recycle in flight, on the generation live before the save
+      let finish;
+      runtime.running = false;
+      runtime.recycling = new Promise((r) => { finish = r; }).then(() => {
+        runtime.recycling = undefined;
+        runtime.running = true;
+        events.push({what: "recycled", at: Date.now()});
+        return {generation: runtime.generation, ms: 900};
+      });
+      src.text = "rv = 2.";
+      const answer = activate(store);
+      const early = await Promise.race([answer.then(() => "answered"), sleep(150).then(() => "waiting")]);
+      finish();
+      const a = await answer;
+      expect(early, "answered while no process served the code").to.equal("waiting");
+      expect(events.map((e) => e.what)).to.deep.equal(["recycled", "swap g1->g2"]);
+      expect(a.at).to.be.at.least(events[1].at);
+      expect(a).to.include({status: 200, build: "warm", swap: String(SWAP_MS)});
+    } finally {
+      done();
+    }
+  });
+
+  it("the dev loop and the activation of one save: one build, one swap, and the answer waits for it", async () => {
+    const {store, src, compiler, events, done} = setup();
+    try {
+      src.text = "rv = 2.";
+      const loop = devLoop({store, watch: false, log: () => {}});
+      const dev = loop.touch("src/osd/zcl_a.clas.abap");
+      await sleep(5);
+      const [d, a] = await Promise.all([dev, activate(store)]);
+      expect(d).to.include({ok: true, stage: "live"});
+      // in line (#440) the answer already waited for the swap; what it
+      // lacked was the swap's ms, and it built the same tree a second time
+      expect(swaps(events)).to.deep.equal(["swap g1->g2"]);
+      expect(a.at, "answered before the swap landed").to.be.at.least(events[0].at);
+      expect(compiler.builds, "builds").to.equal(1);
+      expect(a).to.include({status: 200, build: "warm", swap: String(SWAP_MS)});
+      expect(d.result.hot).to.equal(true);
+    } finally {
+      done();
+    }
+  });
+
+  it("an activation after the dev loop's swap says the source went live by that swap", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      src.text = "rv = 2.";
+      const loop = devLoop({store, watch: false, log: () => {}});
+      await loop.touch("src/osd/zcl_a.clas.abap");
+      const a = await activate(store);
+      expect(swaps(events)).to.deep.equal(["swap g1->g2"]);
+      expect(a).to.include({status: 200, build: "warm", swap: String(SWAP_MS)});
+    } finally {
+      done();
+    }
+  });
+
+  // vsp's write test: the dev loop builds the create's skeleton, the client
+  // saves the real source and activates, and the dev loop sees that save too:
+  // the activation does not join the skeleton's build (another tree), and the
+  // dev loop's second pass joins the activation's (the same tree) -- two
+  // builds at most, one per tree
+  it("an edit saved while a build is in flight is not joined to it; the next activator of the edit is", async () => {
+    const {store, src, compiler, events, done} = setup();
+    try {
+      src.text = "rv = 2.";
+      const first = store.publish();
+      await sleep(5);
+      src.text = "rv = 3.";
+      const second = store.publish();
+      await sleep(5);
+      const third = store.publish();
+      const [a, b, c] = await Promise.all([first, second, third]);
+      expect(compiler.builds).to.equal(2);
+      expect(swaps(events)).to.deep.equal(["swap g1->g2", "swap g2->g3"]);
+      expect(a).to.include({hot: true, generation: "g2"});
+      expect(b).to.include({hot: true, generation: "g3"});
+      expect(c).to.equal(b);
+    } finally {
+      done();
+    }
+  });
+
+  it("a swap that reaches the swap limit answers once the catch-up recycle has landed, as that load", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      store.warmSwapLimit = 1;
+      const runtime = store.served;
+      runtime.recycle = async function () {
+        await sleep(100);
+        this.epoch++;
+        events.push({what: "recycle", at: Date.now()});
+        return {generation: this.generation, ms: 100};
+      };
+      src.text = "rv = 2.";
+      const a = await activate(store);
+      expect(events.map((e) => e.what)).to.deep.equal(["swap g1->g2", "recycle"]);
+      expect(a.at, "answered before the catch-up recycle landed").to.be.at.least(events[1].at);
+      expect(a.swap).to.equal(null);
+      expect(a.build).to.match(/^cold; recycled after a warm build: .*catch-up recycle after 1 swaps/);
+    } finally {
+      done();
+    }
+  });
+
+  it("a build the serving process already runs loads nothing: no recycle of unchanged code", async () => {
+    const {store, events, done} = setup();
+    try {
+      store.warmState.on = false;
+      store.transpile = async () => ({ok: true, hash: "g1", cached: true, objects: 1});
+      const r = await store.publish();
+      expect(r).to.include({ok: true, recycled: false, generation: "g1"});
+      expect(events, "a recycle of unchanged code").to.deep.equal([]);
+      // a forced build replaces the generation's files under its name: loaded
+      const forced = await store.publish({force: true, replace: true});
+      expect(forced).to.include({ok: true, recycled: true});
+      expect(events.map((e) => e.what)).to.deep.equal(["recycle"]);
+    } finally {
+      done();
+    }
+  });
+
+  it("a runtime that never stops changing hands is answered, not waited for for ever", async () => {
+    const {store, src, done} = setup();
+    try {
+      store.transitionMs = 100;
+      store.served.running = false;
+      store.served.recycling = new Promise(() => {});
+      src.text = "rv = 2.";
+      const r = await Promise.race([store.publish(), sleep(1500).then(() => "hung")]);
+      expect(r, "hung").to.not.equal("hung");
+      expect(r).to.include({ok: false});
+      expect(r.error).to.match(/still changing hands/);
+    } finally {
+      done();
+    }
+  });
+
+  // the recycle a publish asks for itself (here the verifier's forced
+  // rebuild) is bounded the same way, and the chain moves on: the next
+  // publish meets the transition and is bounded too, and once the recycle
+  // settles publishes load again
+  it("a recycle that does not settle is answered, the chain moves on, and recovers once it settles", async () => {
+    const {store, done} = setup();
+    try {
+      store.transitionMs = 50;
+      const runtime = store.served;
+      let finish;
+      let stuck = true;
+      runtime.recycle = function () {
+        if (!stuck) return Promise.resolve({generation: this.generation, ms: 1});
+        this.recycling ??= new Promise((ok) => { finish = ok; }).then(() => {
+          stuck = false;
+          this.recycling = undefined;
+          return {generation: this.generation, ms: 1};
+        });
+        return this.recycling;
+      };
+      store.transpile = async () => ({ok: true, hash: "g1", cached: false, objects: 1});
+      const first = await Promise.race([store.publish({force: true, replace: true}), sleep(1000).then(() => "hung")]);
+      expect(first, "the forced publish hung").to.not.equal("hung");
+      expect(first).to.include({ok: false});
+      expect(first.error).to.match(/still changing hands .*the recycle/);
+      const second = await Promise.race([store.publish(), sleep(1000).then(() => "hung")]);
+      expect(second, "the next publish hung").to.not.equal("hung");
+      expect(second).to.include({ok: false});
+      finish();
+      await sleep(10);
+      expect(await store.publish({force: true, replace: true})).to.include({ok: true, recycled: true});
+    } finally {
+      done();
+    }
+  });
+
+  it("a catch-up recycle that does not settle answers the activation as nothing loaded, not warm", async () => {
+    const {store, src, done} = setup();
+    try {
+      store.transitionMs = 50;
+      store.warmSwapLimit = 1;
+      store.served.recycle = () => new Promise(() => {});
+      src.text = "rv = 2.";
+      const a = await Promise.race([activate(store), sleep(1500).then(() => "hung")]);
+      expect(a, "the activation hung").to.not.equal("hung");
+      expect(a.build).to.match(/^failed; the runtime is still changing hands .*the catch-up recycle/);
+      expect(a.swap).to.equal(null);
+      expect(a.body).to.match(/still changing hands/);
+    } finally {
+      done();
+    }
+  });
+
+  // a partial recycle of a pool (one work process failed to come up on the
+  // new generation) is repaired by the next publish, not reported as served
+  it("a pool with one work process on the old generation is loaded, not reported as served", async () => {
+    const {store, src, compiler, events, done} = setup();
+    try {
+      src.text = "rv = 2.";
+      compiler.built = src.text;
+      compiler.hash = "g2";
+      const pool = new RuntimePool({size: 2, root: store.root});
+      pool.runtimes.forEach((r, i) => {
+        Object.defineProperty(r, "running", {get: () => true, configurable: true});
+        r.generation = i === 0 ? "g2" : "g1";
+        r.hot = async (swap) => {
+          if (swap.from !== r.generation) throw new Error(`the runtime carries ${r.generation}, and the swap is from ${swap.from}`);
+          r.generation = swap.generation;
+          return {ms: 1, swaps: 1};
+        };
+        r.recycle = async () => {
+          events.push({what: `recycle ${i}`, at: Date.now()});
+          r.generation = compiler.hash;
+          return {generation: compiler.hash, ms: 1, recycled: true};
+        };
+      });
+      store.served = pool;
+      const r = await store.publish();
+      expect(r.ok).to.equal(true);
+      expect(pool.runtimes.map((m) => m.generation)).to.deep.equal(["g2", "g2"]);
+      expect(events.map((e) => e.what)).to.deep.equal(["recycle 0", "recycle 1"]);
+      expect(r.recycled).to.equal(true);
+    } finally {
+      done();
+    }
+  });
+
+  it("a load belongs to the process that made it: after a catch-up recycle the answer is not a swap", async () => {
+    const {store, src, done} = setup();
+    try {
+      src.text = "rv = 2.";
+      await devLoop({store, watch: false, log: () => {}}).touch("src/osd/zcl_a.clas.abap");
+      // a catch-up recycle onto g2, outside any publish: a new process
+      store.served.epoch = 2;
+      const a = await activate(store);
+      expect(a.swap, "the old process's swap").to.equal(null);
+      expect(a.build).to.match(/^cold; recycled after a warm build: .*started on it/);
+    } finally {
+      done();
+    }
+  });
+
+  it("waits for any work process of a pool changing hands", async () => {
+    const {store, src, events, done} = setup();
+    try {
+      const pool = new RuntimePool({size: 2, root: store.root});
+      let finish;
+      pool.runtimes.forEach((r, i) => {
+        let running = i !== 0;
+        Object.defineProperty(r, "running", {get: () => running, configurable: true});
+        r.generation = "g1";
+        r.hot = async (swap) => {
+          if (running !== true || r.recycling !== undefined) throw new Error("nothing to swap into");
+          await sleep(20);
+          r.generation = swap.generation;
+          events.push({what: `swap ${i} ${swap.from}->${swap.generation}`, at: Date.now()});
+          return {ms: 20, swaps: 1};
+        };
+        if (i === 0) {
+          r.recycling = new Promise((ok) => { finish = ok; }).then(() => {
+            r.recycling = undefined;
+            running = true;
+            events.push({what: "recycled", at: Date.now()});
+          });
+        }
+      });
+      store.served = pool;
+      src.text = "rv = 2.";
+      const answer = store.publish();
+      const early = await Promise.race([answer.then(() => "answered"), sleep(150).then(() => "waiting")]);
+      finish();
+      const r = await answer;
+      expect(early, "answered while the primary was recycling").to.equal("waiting");
+      expect(events.map((e) => e.what)).to.deep.equal(["recycled", "swap 0 g1->g2", "swap 1 g1->g2"]);
+      expect(r).to.include({ok: true, hot: true, generation: "g2"});
+    } finally {
+      done();
+    }
+  });
+
+  // the same, with the real name of the tree (sourceKey(), osd-build
+  // hashOf) instead of a stand-in: a compiler that names its generation by
+  // it, as the warm compiler does
+  it("joins by the real name of the tree: one build for the dev loop and the activation", async () => {
+    const {store, events, done} = setup();
+    try {
+      const dir = store.root;
+      writeFileSync(join(dir, "abap_transpile.json"), JSON.stringify({input_folder: ["src"], libs: [], output_folder: "output"}));
+      delete store.sourceKey;
+      const name = () => hashOf(dir, inputsOf(dir));
+      const compiler = store.warmState.compiler;
+      compiler.hash = name();
+      store.served.generation = compiler.hash;
+      compiler.build = async function () {
+        this.builds++;
+        const hash = name();
+        await sleep(20);
+        const from = this.hash;
+        if (hash === from) return {ok: true, hash, from, cached: true, modules: [], hostHeld: [], stale: 0};
+        this.hash = hash;
+        return {ok: true, hash, from, modules: ["zcl_a.clas.mjs"], hostHeld: [], stale: 1};
+      };
+      writeFileSync(join(dir, "src", "osd", "zcl_a.clas.abap"), "CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\n* saved in vim\n");
+      const dev = devLoop({store, watch: false, log: () => {}}).touch("src/osd/zcl_a.clas.abap");
+      await sleep(5);
+      const [d, a] = await Promise.all([dev, activate(store)]);
+      expect(d).to.include({ok: true, stage: "live"});
+      expect(compiler.builds, "builds").to.equal(1);
+      expect(swaps(events)).to.have.length(1);
+      expect(a).to.include({status: 200, build: "warm", swap: String(SWAP_MS)});
+    } finally {
+      done();
+    }
   });
 });
 
