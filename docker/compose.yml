@@ -29,6 +29,9 @@ services:
     volumes: ["osd-data:/osd/data-run"]
     healthcheck:
       # Readiness is host memory, so the probe does not queue behind ABAP.
+      # The second question (TravelSet) is OData and does take a work
+      # process: a step longer than the retries allow still marks the
+      # container unhealthy, by design.
       # Two questions, because they have different answers and we have been
       # caught by the difference three times in one day: **is it serving**,
       # and **is it serving what it should**.
