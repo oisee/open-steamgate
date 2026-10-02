@@ -204,7 +204,7 @@ CLASS zcl_osd_adt_tree IMPLEMENTATION.
     DATA lt_members TYPE string_table.
     DATA lv_member TYPE string.
     DATA lv_path TYPE string.
-    lt_members = io_json->members( `/subpackages` ).
+    lt_members = zcl_osd_adt_json=>ordered_members( io_json = io_json iv_path = `/subpackages` ).
     LOOP AT lt_members INTO lv_member.
       CLEAR ls_node.
       ls_node-type = `DEVC/K`.
@@ -213,7 +213,7 @@ CLASS zcl_osd_adt_tree IMPLEMENTATION.
       ls_node-expandable = abap_true.
       APPEND ls_node TO rt_nodes.
     ENDLOOP.
-    lt_members = io_json->members( `/objects` ).
+    lt_members = zcl_osd_adt_json=>ordered_members( io_json = io_json iv_path = `/objects` ).
     LOOP AT lt_members INTO lv_member.
       lv_path = `/objects/` && lv_member.
       lv_type = io_json->get_string( lv_path && `/type` ).

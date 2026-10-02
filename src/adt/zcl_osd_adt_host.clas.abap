@@ -213,8 +213,8 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
   METHOD object.
     DATA ls_answer TYPE ty_answer.
     DATA lo_json TYPE REF TO zcl_ajson.
-    DATA lx_json TYPE REF TO zcx_ajson_error.
-    DATA lx_error TYPE REF TO zcx_osd_adt.
+    DATA lt_members TYPE string_table.
+    DATA lv_member TYPE string.
     ls_answer = store( iv_command = `OBJECT` iv_type = iv_type iv_name = iv_name ).
     lo_json = parse( iv_what = `OBJECT` iv_json = ls_answer-json ).
     rs_object-found = lo_json->get_boolean( `/found` ).
@@ -225,17 +225,14 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
     rs_object-name = lo_json->get_string( `/name` ).
     rs_object-writable = lo_json->get_boolean( `/writable` ).
     rs_object-package = lo_json->get_string( `/package` ).
-    TRY.
-        IF lo_json->exists( `/packages` ) = abap_true.
-          rs_object-packages = lo_json->array_to_string_table( `/packages` ).
-        ENDIF.
-        IF lo_json->exists( `/includes` ) = abap_true.
-          rs_object-includes = lo_json->array_to_string_table( `/includes` ).
-        ENDIF.
-      CATCH zcx_ajson_error INTO lx_json.
-        lx_error = zcx_osd_adt=>internal( lx_json->get_text( ) ).
-        RAISE EXCEPTION lx_error.
-    ENDTRY.
+    lt_members = zcl_osd_adt_json=>ordered_members( io_json = lo_json iv_path = `/packages` ).
+    LOOP AT lt_members INTO lv_member.
+      APPEND lo_json->get_string( `/packages/` && lv_member ) TO rs_object-packages.
+    ENDLOOP.
+    lt_members = zcl_osd_adt_json=>ordered_members( io_json = lo_json iv_path = `/includes` ).
+    LOOP AT lt_members INTO lv_member.
+      APPEND lo_json->get_string( `/includes/` && lv_member ) TO rs_object-includes.
+    ENDLOOP.
     rs_object-changed_at = lo_json->get_string( `/changedAt` ).
     rs_object-changed_by = lo_json->get_string( `/changedBy` ).
     rs_object-version = lo_json->get_string( `/version` ).
@@ -285,7 +282,7 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
     DATA lx_error TYPE REF TO zcx_osd_adt.
     DATA lv_text TYPE string.
     TRY.
-        ro_json = zcl_ajson=>parse( iv_json ).
+        ro_json = zcl_ajson=>parse( iv_json = iv_json iv_keep_item_order = abap_true ).
       CATCH zcx_ajson_error INTO lx_json.
         lv_text = |{ iv_what } is not JSON: { lx_json->get_text( ) }|.
         lx_error = zcx_osd_adt=>internal( lv_text ).

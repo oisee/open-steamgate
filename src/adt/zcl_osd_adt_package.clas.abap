@@ -29,7 +29,7 @@ CLASS zcl_osd_adt_package IMPLEMENTATION.
     lo_input->add( iv_name = `user` iv_value = iv_user ).
     ls_answer = zcl_osd_adt_host=>store( iv_command = `PACKAGE` iv_json = lo_input->document( ) ).
     TRY.
-        ro_json = zcl_ajson=>parse( ls_answer-json ).
+        ro_json = zcl_ajson=>parse( iv_json = ls_answer-json iv_keep_item_order = abap_true ).
       CATCH zcx_ajson_error.
         lx_error = zcx_osd_adt=>internal( `invalid PACKAGE answer` ).
         RAISE EXCEPTION lx_error.
@@ -64,7 +64,7 @@ CLASS zcl_osd_adt_package IMPLEMENTATION.
     IF lv_name IS NOT INITIAL.
       lv_parent = |\n  <pak:superPackage adtcore:uri="/sap/bc/adt/packages/{ zcl_osd_adt_uri=>encode_component( to_lower( lv_name ) ) }" adtcore:type="DEVC/K" adtcore:name="{ zcl_osd_adt_xml=>esc( lv_name ) }"/>|.
     ENDIF.
-    lt_children = io_json->members( `/subpackages` ).
+    lt_children = zcl_osd_adt_json=>ordered_members( io_json = io_json iv_path = `/subpackages` ).
     LOOP AT lt_children INTO lv_child.
       IF sy-tabix > 1.
         lv_children = lv_children && cl_abap_char_utilities=>newline.

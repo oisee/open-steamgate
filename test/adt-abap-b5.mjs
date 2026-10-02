@@ -44,6 +44,7 @@ describe("ADT B5: package and repository tree Node diff", function () {
     pkg("work/root", "$ROOT", "Root &amp; &lt; raw text");
     pkg("work/a", "$ZT_A"); pkg("work/b", "$ZTA"); pkg("work/ns", "/DEMO/PKG");
     pkg("lib", "$LIB");
+    pkg("work/order", "$ORDER");
     const source = (folder,name,kind,body) => writeFileSync(join(root,folder,name.toLowerCase()+"."+kind+".abap"),body);
     source("work/root", "ZCL_TREE", "clas", "CLASS zcl_tree DEFINITION PUBLIC. ENDCLASS. CLASS zcl_tree IMPLEMENTATION. ENDCLASS.");
     source("work/root", "ZCL_TREE", "clas.testclasses", ""); source("work/root", "ZCL_TREE", "clas.locals_imp", "");
@@ -52,11 +53,23 @@ describe("ADT B5: package and repository tree Node diff", function () {
     writeFileSync(join(root,"work/root","zt_include.prog.xml"), "<abapGit><PROGDIR><SUBC>I</SUBC></PROGDIR></abapGit>");
     writeFileSync(join(root,"work/root","zt_ddl.ddls.asddls"), "define view ZT_DDL as select from zt_tab { key id }");
     source("lib", "ZCL_LIBRARY", "clas", "CLASS zcl_library DEFINITION PUBLIC. ENDCLASS. CLASS zcl_library IMPLEMENTATION. ENDCLASS.");
-    const store = new ObjectStore({root, libs: ["lib"], roots: [["work/root","$ROOT"],["work/a","$ZT_A"],["work/b","$ZTA"],["work/ns","/DEMO/PKG"]].map(([path,packageName]) => ({path,package:packageName,writable:true,library:false}))});
+    const store = new ObjectStore({root, libs: ["lib"], roots: [["work/order","$ORDER"],["work/root","$ROOT"],["work/a","$ZT_A"],["work/b","$ZTA"],["work/ns","/DEMO/PKG"]].map(([path,packageName]) => ({path,package:packageName,writable:true,library:false}))});
     store.create("DEVC", "$ROOT_CHILD", {package:"$ROOT", description:"Child & raw text"});
     store.create("PROG", "ZT_USER_A", {package:"$TMP", author:"BUILDER_A"});
     store.create("PROG", "ZT_USER_B", {package:"$TMP", author:"BUILDER_B"});
     store.create("DEVC", "$TMP_KID", {package:"$TMP", author:"BUILDER_A"});
+    for (let i = 1; i <= 12; i++) {
+      const suffix = String(i).padStart(2, "0");
+      store.create("DEVC", "$ORDER_"+suffix, {package:"$ORDER"});
+      store.create("PROG", "ZT_ORDER_"+suffix, {package:"$ORDER"});
+    }
+    let parent = "$ROOT";
+    for (let i = 1; i <= 12; i++) {
+      const name = parent+"_D";
+      store.create("DEVC", name, {package:parent});
+      parent = name;
+    }
+    store.create("PROG", "ZT_DEEP", {package:parent});
     store.write("PROG", "ZT_PROG", "REPORT zt_prog. WRITE 'inactive'.");
     const mount = async (isAbap) => {
       const app = express();
@@ -123,14 +136,39 @@ describe("ADT B5: package and repository tree Node diff", function () {
   for (const user of ["BUILDER_A", "BUILDER_B"]) for (const name of ["%24tmp", "%24tmp_kid"])
     it(`local package ${name} ${user}`, async () => { await diff("/sap/bc/adt/packages/"+name,"GET",{},undefined,user); });
   it("literal settings shadows the package parameter, encoded SETTINGS remains a package name", async () => {
-    for (const name of ["settings", "SETTINGS", "%73ettings"]) for (const method of ["GET", "HEAD"]) {
+    for (const name of ["settings", "SETTINGS", "%73ettings", "%53ETTINGS"]) for (const method of ["GET", "HEAD"]) {
       const path = "/sap/bc/adt/packages/"+name;
       const expected = await wire(node,path,{method,headers:node.auth});
       served.length = 0;
       expect(await wire(ported,path,{method,headers:ported.auth})).to.deep.equal(expected);
-      expect(expected.status).to.equal(name === "%73ettings" ? 404 : 200);
-      expect(served).to.deep.equal([`${name === "%73ettings" ? "ABAP" : "HOST"} ${method} ${path}`]);
+      const encoded = name.startsWith("%");
+      expect(expected.status).to.equal(encoded ? 404 : 200);
+      expect(expected.headers["content-type"]).to.equal(encoded
+        ? "application/xml; charset=utf-8"
+        : "application/vnd.sap.adt.packages.settings+xml; charset=utf-8");
+      if (method === "GET") expect(expected.body.toString()).to.include(encoded
+        ? "SETTINGS does not exist" : 'pkcs:showPackageCheckErrors="false"');
+      expect(served).to.deep.equal([`ABAP ${method} ${path}`]);
     }
+  });
+  for (const accept of ["*/*", "application/vnd.sap.adt.packages.v2+xml"])
+    it(`12 subpackages package byte order ${accept}`, async () => {
+      const res = await diff("/sap/bc/adt/packages/%24order", "GET", {accept});
+      expect(res.status).to.equal(200);
+      expect((res.body.toString().match(/<pak:packageRef /g) ?? []).length).to.equal(12);
+    });
+  for (const accept of ["*/*", "dataname=com.sap.adt.RepositoryObjectTreeContent"])
+    it(`12 subpackages and 12 objects nodestructure byte order ${accept}`, async () => {
+      const res = await diff("/sap/bc/adt/repository/nodestructure?parent_name=%24ORDER", "POST", {accept}, "");
+      expect(res.status).to.equal(200);
+      const xml = res.body.toString();
+      expect((xml.match(/<OBJECT_NAME>\$ORDER_/g) ?? []).length).to.equal(12);
+      expect((xml.match(/<OBJECT_NAME>ZT_ORDER_/g) ?? []).length).to.equal(12);
+    });
+  it("12 ancestor packages nodepath byte order", async () => {
+    const res = await diff("/sap/bc/adt/repository/nodepath?uri=/sap/bc/adt/programs/programs/zt_deep", "POST", {}, "");
+    expect(res.status).to.equal(200);
+    expect((res.body.toString().match(/adtcore:name="\$ROOT_D/g) ?? []).length).to.equal(12);
   });
   it("absent PACKAGE or OBJECT in COMMANDS refuses each route with 501", async () => {
     for (const [command,path,method] of [["PACKAGE","/sap/bc/adt/packages/%24root","GET"],
