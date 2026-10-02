@@ -426,3 +426,19 @@ The design stays a thin layer over the files: versions are not stored anywhere, 
 - **Done 2026-09-30 (stoker): the ADT versions feed.** `…/source/main/versions` and `…/includes/<include>/versions`,
   each version's content, and the `relations/versions` links where the A4H corpus has them. Next: the `SVRS_*`
   substitutes on the provider registry.
+
+## Logon: open by design now, checked credentials later (2026-10-02)
+
+- **Now (Alice, 2026-10-02): the system is open on purpose.** The ADT façade accepts any user and password, or
+  none (`tools/adt-session.mjs`), and that stays so. The VS Code extension only runs the system on the local
+  machine, so nothing reaches it from outside. Clients such as ABAP-FS and vsp may send a placeholder user, and
+  OSG must keep accepting it. vsp skips the password only for a loopback `osd.url` and asks for one otherwise.
+  It still accepts any answer; that is the client's choice, not a check on our side.
+- **Docker Compose is a separate question.** A container can listen beyond loopback. Its exposure is settled in
+  the compose files and the deployment docs when we get there, not in the façade.
+- **Later: checked credentials, opt in.** A system setting holds a user and a password (or several users). When
+  it is set, the façade checks Basic credentials on logon and answers 401 to anything else. When it is not set,
+  the system stays open, as now. Points to settle then:
+  - where the secret lives: never in a tracked file, an argv or a log;
+  - whether the ABAP side sees the logged-on user as `sy-uname`;
+  - how the extension passes it to its own system, so the local case stays without a prompt.
