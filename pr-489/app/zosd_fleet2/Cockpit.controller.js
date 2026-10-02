@@ -24,8 +24,10 @@ function (Button, Dialog, Input, Label, VBox, Text, Series) {
       return new Promise(function (resolve, reject) {model.read("/" + set, {urlParameters: {$filter: filter || "", $top: "100000"}, success: function (r) {resolve(r.results);}, error: reject});});
     },
     refresh: function () {
-      var self = this, context = this.getView().getBindingContext();
-      if (!context) return;
+      var self = this, context = this.getView().getBindingContext(), dom = this.getView().getDomRef();
+      clearTimeout(this.timer);
+      // one polling chain per page, and none once the object page is no longer shown
+      if (!context || !dom || !dom.isConnected || !dom.getClientRects().length) return;
       var run = context.getObject(), filter = "RunId eq '" + run.RunId + "'";
       var names = ["Pile", "Stage"].concat(config.governor ? ["Event", "Budget"] : []);
       Promise.all(names.map(function (n) {return self.read(n + "Set", filter);})).then(function (rows) {
@@ -54,7 +56,7 @@ function (Button, Dialog, Input, Label, VBox, Text, Series) {
       }
       if (config.actions.some(function (a) {return a.name === "Schedule";})) this.getView().getModel().callFunction("/ScheduleStatus", {method: "GET", success: function (r) {self.byId("cockpitSchedule").setText(r.Answer);}});
     },
-    answer: function (answer) {this.byId("cockpitAnswer").setText(typeof answer === "string" ? answer : JSON.stringify(answer)).setVisible(true);},
+    answer: function (answer) {this.byId("cockpitAnswer").setText(typeof answer === "string" ? answer : answer && answer.Answer !== undefined ? answer.Answer : JSON.stringify(answer)).setVisible(true);},
     ask: function (action) {
       var self = this, inputs = {}, box = new VBox({width: "28rem"}), context = this.getView().getBindingContext();
       var run = context && context.getObject();
