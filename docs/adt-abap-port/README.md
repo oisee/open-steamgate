@@ -14,3 +14,5 @@ Working documents for ADR 0007 (the façade in ABAP) and ADR 0008 (locks through
 
 Clean room: we port our own JavaScript. The contract comes from the wire, from A4H answering us as a client, and from
 open-source clients, never from SAP server code or SAP client jars.
+- [slice-3-front.md](slice-3-front.md) is slice 3, dell's half: the CSRF gate in ABAP (built) and the design for
+  moving the front up so every ADT request enters the ABAP handler, with its open fork and the measured overhead.
