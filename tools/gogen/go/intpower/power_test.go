@@ -29,7 +29,7 @@ func TestPowers(t *testing.T) {
 	}
 }
 func TestOverflow(t *testing.T) {
-	for _, run := range []func(){func() { Integer(int32(2), 31) }, func() { Integer(int64(2), 63) }} {
+	for _, run := range []func(){func() { Integer(int32(2), 31) }, func() { Integer(int64(2), 63) }, func() { Integer(int64(3), 40) }} {
 		func() {
 			defer func() {
 				err, ok := recover().(abaperr.ArithmeticError)
@@ -41,14 +41,17 @@ func TestOverflow(t *testing.T) {
 		}()
 	}
 }
-func TestNegativeRefused(t *testing.T) {
+func TestNegative(t *testing.T) {
+	if Integer(int32(2), -1) != 1 || Integer(int64(-2), -1) != -1 || Float(2, -1) != 0.5 {
+		t.Fatal("negative exponent rounding")
+	}
 	defer func() {
 		err, ok := recover().(abaperr.ArithmeticError)
-		if !ok || err.Class != "NOT_COMPILED" {
-			t.Fatalf("want refusal, got %v", err)
+		if !ok || err.Class != "CX_SY_ARITHMETIC_OVERFLOW" {
+			t.Fatalf("want overflow, got %v", err)
 		}
 	}()
-	Integer(int32(2), -1)
+	Integer(int32(0), -1)
 }
 
 func TestBoolx(t *testing.T) {
@@ -72,11 +75,11 @@ func TestPackedUsesExactMultiplication(t *testing.T) {
 		x, _ := new(big.Int).SetString(a, 10)
 		y, _ := new(big.Int).SetString(b, 10)
 		return new(big.Int).Mul(x, y).String()
-	})
+	}, nil)
 	if got != "32" || calls != 4 {
 		t.Fatalf("got %s in %d calls", got, calls)
 	}
-	if Packed("0", 0, nil) != "1" {
+	if Packed("0", 0, nil, nil) != "1" {
 		t.Fatal("zero exponent should not multiply")
 	}
 }

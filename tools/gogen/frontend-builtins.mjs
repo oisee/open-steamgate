@@ -13,9 +13,11 @@ export function builtin(name, direct, named, ctx, api, calc) {
     const get = (key) => params.find((p) => upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()) === key)?.findDirectExpression(Expressions.Source);
     if (!get("BASE") || !get("EXP")) throw new Unsupported("IPOW( ) requires BASE and EXP");
     const base = source(get("BASE"), ctx);
-    const type = calc ? {...calc} : (base.type.k === "p" ? P31 : base.type);
+    const rank = {i: 0, int8: 1, p: 2, f: 3};
+    const chosen = calc && rank[calc.k] > rank[base.type.k] ? calc : base.type;
+    const type = chosen.k === "p" ? P31 : {...chosen};
     delete type.calculation;
-    if (!["i", "int8", "p"].includes(type.k)) throw new Unsupported(`IPOW( ) of a ${type.k}: awaiting A4H oracle`);
+    if (!["i", "int8", "p", "f"].includes(type.k)) throw new Unsupported(`IPOW( ) of a ${type.k}: awaiting A4H oracle`);
     return {e: "fn", name, args: [convert(base, type), convert(source(get("EXP"), ctx), I)], type};
   }
   if (kind === "max") {

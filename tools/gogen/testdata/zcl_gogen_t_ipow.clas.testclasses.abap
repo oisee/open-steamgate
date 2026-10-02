@@ -1,5 +1,6 @@
 CLASS ltcl_power DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
  PRIVATE SECTION.
+  METHODS negative FOR TESTING.
   METHODS powers FOR TESTING.
   METHODS overflow FOR TESTING.
   METHODS int8 FOR TESTING.
@@ -8,6 +9,32 @@ CLASS ltcl_power DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   METHODS logical FOR TESTING.
 ENDCLASS.
 CLASS ltcl_power IMPLEMENTATION.
+ METHOD negative.
+  DATA actual TYPE i.
+  DATA wide TYPE int8.
+  DATA packed TYPE p LENGTH 16 DECIMALS 0.
+  DATA fraction TYPE f.
+  actual = ipow( base = -2 exp = -1 ).
+  cl_abap_unit_assert=>assert_equals( act = actual exp = -1 ).
+  wide = ipow( base = 2 exp = -1 ).
+  cl_abap_unit_assert=>assert_equals( act = wide exp = 1 ).
+  packed = ipow( base = 2 exp = -1 ).
+  cl_abap_unit_assert=>assert_equals( act = packed exp = 1 ).
+  fraction = ipow( base = 2 exp = -1 ).
+  cl_abap_unit_assert=>assert_equals( act = fraction exp = '0.5' ).
+  actual = ipow( base = 0 exp = 0 ).
+  cl_abap_unit_assert=>assert_equals( act = actual exp = 1 ).
+  TRY.
+   actual = ipow( base = 0 exp = -1 ).
+   cl_abap_unit_assert=>fail( msg = 'Zero to negative power must overflow' ).
+  CATCH cx_sy_arithmetic_overflow.
+  ENDTRY.
+  TRY.
+   packed = ipow( base = 10 exp = 31 ).
+   cl_abap_unit_assert=>fail( msg = 'Packed IPOW must overflow' ).
+  CATCH cx_sy_arithmetic_overflow.
+  ENDTRY.
+ ENDMETHOD.
  METHOD powers.
   DATA e TYPE i.
   DATA expected TYPE i VALUE 1.
@@ -46,13 +73,17 @@ CLASS ltcl_power IMPLEMENTATION.
  METHOD packed.
   DATA base TYPE p LENGTH 8 DECIMALS 2 VALUE '1.5'.
   DATA actual TYPE p LENGTH 8 DECIMALS 2.
+  DATA rounded TYPE i.
   actual = ipow( base = base exp = 3 ).
   cl_abap_unit_assert=>assert_equals( act = actual exp = '3.38' ).
+  rounded = ipow( base = base exp = 3 ).
+  cl_abap_unit_assert=>assert_equals( act = rounded exp = 3 ).
  ENDMETHOD.
  METHOD logical.
   DATA actual TYPE xstring.
   actual = boolx( bool = 1 = 1 bit = 9 ).
   cl_abap_unit_assert=>assert_equals( act = actual exp = CONV xstring( '0080' ) ).
+  cl_abap_unit_assert=>assert_equals( act = xstrlen( actual ) exp = 2 ).
   actual = boolx( bool = 1 = 1 bit = -9 ).
   cl_abap_unit_assert=>assert_equals( act = actual exp = CONV xstring( 'FF80' ) ).
   actual = boolx( bool = 1 = 2 bit = 9 ).

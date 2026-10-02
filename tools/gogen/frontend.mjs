@@ -3823,7 +3823,7 @@ function arith(node, ctx, calc, hint) {
     if (item.descr) { const v = descrAttr(item.descr.call, item.descr.attr, ctx); return t === undefined ? v : convert(v, t); }
     if (item.group !== undefined) return arith(item.group, ctx, t);
     if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
-    let v = sourceOperand(item.node, ctx, t === undefined ? item.hint : {...t, calculation: true});
+    let v = sourceOperand(item.node, ctx, t === undefined ? item.hint : t);
     if (item.comps) v = componentsOf(v, item.comps, ctx);
     // an x operand of arithmetic that is not a bit operation: through i
     if (t !== undefined && (v.type.k === "x" || v.type.k === "xstring") && t.k !== "x" && t.k !== "xstring" && t.k !== "i") v = convert(v, I);
@@ -5919,7 +5919,7 @@ function call(chain, ctx, statement, hint) {
   // generator, whose sequence would be the contract, is refused
   if (owner === "CL_ABAP_RANDOM" && name === "CREATE" && (direct || named || full)) throw new Unsupported(`CL_ABAP_RANDOM=>CREATE with a SEED: the host generator ignores it`);
 
-  if (receiver === null && owner === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx, {FUNCTIONS, Expressions, source, convert, Unsupported, upper, I, F, P31, S, XS, numeric}, hint?.calculation ? hint : undefined);
+  if (receiver === null && owner === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx, {FUNCTIONS, Expressions, source, convert, Unsupported, upper, I, F, P31, S, XS, numeric}, name === "IPOW" && ["i", "int8", "p", "f"].includes(hint?.k) ? hint : undefined);
   if (receiver === null && name === "LINES" && !ctx.signatures.has(name)) {
     const t = source(direct, ctx);
     if (t.type.k === "data") return {e: "lines_data", x: t, type: I};
@@ -6344,6 +6344,8 @@ export function convert(expr, to) {
   // i -> string, measured on A4H: the digits and then a place for the sign,
   // 42 is "42 ", -5 is "5-" (a template writes -5; a move does not)
   if (to.k === "string" && from.k === "i") return ok("i2s");
+  if (to.k === "string" && from.k === "int8") return ok("i82s");
+  if (to.k === "string" && from.k === "f") return ok("f2s");
   // Four/eight big-endian bytes, zero-padded or truncated on the left.
   if (["x", "xstring"].includes(to.k) && ["i", "int8"].includes(from.k)) return ok(from.k === "i" ? "i2x" : "i82x");
   // An exact upper-case hex literal supplies the bytes directly.

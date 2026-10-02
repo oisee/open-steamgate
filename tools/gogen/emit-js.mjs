@@ -1128,6 +1128,8 @@ function conv(e, ctx) {
     case "p2n": return `abap.PToN(${x}, ${e.to.len})`;
     case "x2i": case "x2i8": return `abap.${to === "i" ? "XToI" : "XToI8"}(${x})`;
     case "i2s": return `abap.IToString(${x})`;
+    case "i82s": return `((v) => v < 0n ? String(-v) + "-" : String(v) + " ")(${x})`;
+    case "f2s": return `(${x}).toExponential(16).replace(/e([+-])(\\d)$/, "E$10$2").replace("e", "E")`;
     case "i2n": return `abap.IToN(${x}, ${e.to.len})`;
     case "s2n": return `abap.CToN(${x}, ${e.to.len})`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;

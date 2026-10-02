@@ -3,7 +3,7 @@ export function emitBuiltinGo(e, args, FN_F, HELPER_IMPORTS) {
   if (e.name === "BOOLX") { HELPER_IMPORTS.add("intpower"); return `hIntpower.Boolx(${args.join(", ")})`; }
   if (e.name === "IPOW") {
     HELPER_IMPORTS.add("intpower");
-    return e.type.k === "p" ? `hIntpower.Packed(${args.join(", ")}, abap.MulP)` : `hIntpower.Integer(${args.join(", ")})`;
+    return e.type.k === "p" ? `hIntpower.Packed(${args.join(", ")}, abap.MulP, abap.FToP)` : e.type.k === "f" ? `hIntpower.Float(${args.join(", ")})` : `hIntpower.Integer(${args.join(", ")})`;
   }
   if (FN_F[e.name]) return `${FN_F[e.name]}(${args[0]})`;
   const k = e.type.k;
@@ -26,7 +26,7 @@ export function emitBuiltinGo(e, args, FN_F, HELPER_IMPORTS) {
 
 export function emitBuiltinJs(e, args, FN) {
   if (e.name === "BOOLX") return `boolx(${args.join(", ")}, abap.AbapError)`;
-  if (e.name === "IPOW") return `ipow(${args.join(", ")}, ${JSON.stringify(e.type.k)}, abap.MulP, abap.AbapError)`;
+  if (e.name === "IPOW") return `ipow(${args.join(", ")}, ${JSON.stringify(e.type.k)}, abap.MulP, abap.AbapError, abap.FToP)`;
   if (FN[e.name]) return `${FN[e.name]}(${args[0]})`;
   const k = e.type.k;
   if (e.args[0]?.type.k === "p") {

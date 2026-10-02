@@ -504,6 +504,6 @@ test("integer power and numeric/logical built-ins run through ABAP Unit", {timeo
     "--class","ZCL_GOGEN_T_IPOW","--no-cache"]);
   assert.equal(run.status,0,run.stderr || run.stdout);
   assert.equal(run.result.compiled,1);
-  assert.equal(run.result.rows.length,6);
+  assert.equal(run.result.rows.length,7);
   assert.ok(run.result.rows.every((row)=>row.status === "SUCCESS"),run.stdout);
 });

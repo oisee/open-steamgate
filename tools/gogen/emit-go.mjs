@@ -2162,7 +2162,9 @@ function conv(e, ctx) {
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "s2d": return `abap.S2D(${x})`;
     case "s2t": return `abap.S2T(${x})`;
-    case "i2s": return `abap.IToString(${x})`;
+    case "i2s": HELPER_IMPORTS.add("intpower"); return `hIntpower.IToString(${x})`;
+    case "i82s": HELPER_IMPORTS.add("intpower"); return `hIntpower.I8ToString(${x})`;
+    case "f2s": HELPER_IMPORTS.add("intpower"); return `hIntpower.FToString(${x})`;
     case "i2n": return `abap.IToN(${x}, ${e.to.len})`;
     case "s2n": return `abap.CToN(${x}, ${e.to.len})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
