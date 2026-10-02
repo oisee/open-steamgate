@@ -1,0 +1,309 @@
+[
+  {
+    "before": [
+      "    CONSTANTS c_parallel TYPE c LENGTH 1 VALUE 'P'.\n"
+    ],
+    "after": [
+      "    CONSTANTS c_parallel TYPE c LENGTH 1 VALUE 'P'.\n",
+      "{{#simulate}}\n",
+      "    \" the simulated twin of the work (port work, variant sim): the seed of its\n",
+      "    \" streams, and its time scale in wall millionths per simulated second\n",
+      "{{#seed}}\n",
+      "    CONSTANTS c_sim_seed TYPE i VALUE {{value}}.\n",
+      "{{/seed}}\n",
+      "{{#scale}}\n",
+      "    CONSTANTS c_sim_scale TYPE i VALUE {{value}}.\n",
+      "{{/scale}}\n",
+      "{{/simulate}}\n"
+    ]
+  },
+  {
+    "before": [
+      "{{#sources}}\n",
+      "    \" puts the rows of {{table}} back after a replay: the rows kept before it\n"
+    ],
+    "after": [
+      "{{#stages}}\n",
+      "{{#piles}}\n",
+      "{{#sim}}\n",
+      "    \" a simulated pile's keys: the rows of its range read through port\n",
+      "    \" {{source.name}}, keys only, sorted; none for an empty range\n",
+      "    CLASS-METHODS sim_keys_{{no}}\n",
+      "      IMPORTING it_range TYPE tt_range_{{no}}\n",
+      "                iv_bind TYPE string OPTIONAL\n",
+      "      RETURNING VALUE(rt_keys) TYPE string_table.\n",
+      "{{/sim}}\n",
+      "{{/piles}}\n",
+      "{{/stages}}\n",
+      "{{#simulate}}\n",
+      "    \" the model hash a simulated run writes under, sim256: for sha256:, so\n",
+      "    \" its rows never take a real run's slots and its finalise never deletes them\n",
+      "    CLASS-METHODS sim_hash\n",
+      "      IMPORTING iv_hash TYPE csequence\n",
+      "      RETURNING VALUE(rv_hash) TYPE zosd_l3_alert-model_hash.\n",
+      "    \" what the doctor and resume( ) heal a run with: iv_bind when given, else\n",
+      "    \" the run's recorded binding when it was a simulated run, else nothing\n",
+      "    CLASS-METHODS sim_bind\n",
+      "      IMPORTING iv_recorded TYPE csequence\n",
+      "                iv_bind TYPE string OPTIONAL\n",
+      "      RETURNING VALUE(rv_bind) TYPE string.\n",
+      "{{/simulate}}\n",
+      "{{#sources}}\n",
+      "    \" puts the rows of {{table}} back after a replay: the rows kept before it\n"
+    ]
+  },
+  {
+    "before": [
+      "    IF lock( iv_run = rs_result-run_id iv_date = rs_result-check_date ) = abap_false.\n",
+      "      rs_result-status = 'BUSY'.\n",
+      "      RETURN.\n",
+      "    ENDIF.\n"
+    ],
+    "after": [
+      "    IF lock( iv_run = rs_result-run_id iv_date = rs_result-check_date ) = abap_false.\n",
+      "      rs_result-status = 'BUSY'.\n",
+      "      RETURN.\n",
+      "    ENDIF.\n",
+      "{{#simulate}}\n",
+      "    \" the run's binding on its lock row: a simulated run is healed as one\n",
+      "    UPDATE zosd_l3_run SET run_bind = iv_bind\n",
+      "      WHERE set_name = c_set\n",
+      "        AND check_date = rs_result-check_date\n",
+      "        AND run_id = rs_result-run_id.\n",
+      "{{/simulate}}\n"
+    ]
+  },
+  {
+    "before": [
+      "    DATA ls_pile TYPE zosd_l3_pile.\n",
+      "{{#stages}}\n",
+      "{{#piles}}\n",
+      "    DATA lt_range_{{no}} TYPE tt_range_{{no}}.\n"
+    ],
+    "after": [
+      "{{#simulate}}\n",
+      "    DATA li_work TYPE REF TO {{work_iface}}.\n",
+      "    DATA ls_work TYPE {{work_iface}}=>ty_pile.\n",
+      "    DATA lt_simkeys TYPE string_table.\n",
+      "{{/simulate}}\n",
+      "    DATA ls_pile TYPE zosd_l3_pile.\n",
+      "{{#stages}}\n",
+      "{{#piles}}\n",
+      "    DATA lt_range_{{no}} TYPE tt_range_{{no}}.\n"
+    ]
+  },
+  {
+    "before": [
+      "    UPDATE zosd_l3_pile FROM ls_pile.\n",
+      "    CASE iv_rule.\n"
+    ],
+    "after": [
+      "    UPDATE zosd_l3_pile FROM ls_pile.\n",
+      "{{#simulate}}\n",
+      "    \" the work: the L2 classes below (variant real), or the simulated twin\n",
+      "    li_work = {{ports_class}}=>get_work( {{ports_class}}=>variant( iv_port = 'work' iv_bind = iv_bind ) ).\n",
+      "    IF li_work IS BOUND.\n",
+      "      ls_work-run_id = iv_run.\n",
+      "      ls_work-rule = iv_rule.\n",
+      "      ls_work-pile_no = iv_pile.\n",
+      "      ls_work-attempt = ls_pile-attempt.\n",
+      "      ls_work-seed = {{#settings.simulate_seed}}gs_settings-vals-simulate_seed{{/settings.simulate_seed}}{{^settings.simulate_seed}}c_sim_seed{{/settings.simulate_seed}}.\n",
+      "      ls_work-scale = {{#settings.simulate_time_scale}}gs_settings-vals-simulate_time_scale{{/settings.simulate_time_scale}}{{^settings.simulate_time_scale}}c_sim_scale{{/settings.simulate_time_scale}}.\n",
+      "      ls_work-stale = {{#settings.stale}}gs_settings-vals-stale{{/settings.stale}}{{^settings.stale}}c_stale{{/settings.stale}}.\n",
+      "    ENDIF.\n",
+      "{{/simulate}}\n",
+      "    CASE iv_rule.\n"
+    ]
+  },
+  {
+    "before": [
+      "        rs_rule-stage_no = {{stage_no}}.\n"
+    ],
+    "after": [
+      "        rs_rule-stage_no = {{stage_no}}.\n",
+      "{{#sim}}\n",
+      "        IF li_work IS BOUND.\n",
+      "          rs_rule-model_hash = sim_hash( rs_rule-model_hash ).\n",
+      "        ENDIF.\n",
+      "{{/sim}}\n"
+    ]
+  },
+  {
+    "before": [
+      "        lt_keys_{{index}} = {{check_class}}=>keys( iv_date = iv_date{{#range}} it_range = lt_range_{{stage_no}}{{/range}}{{#param_args}} {{ref}} = ls_params-{{name}}{{/param_args}} ).\n",
+      "        LOOP AT lt_keys_{{index}} INTO ls_key_{{index}}.\n",
+      "          APPEND ls_key_{{index}}-low TO lt_found.\n",
+      "        ENDLOOP.\n"
+    ],
+    "after": [
+      "{{#sim}}\n",
+      "        IF li_work IS BOUND.\n",
+      "          CLEAR lt_simkeys.\n",
+      "{{#range}}\n",
+      "          lt_simkeys = sim_keys_{{stage_no}}( it_range = lt_range_{{stage_no}} iv_bind = iv_bind ).\n",
+      "{{/range}}\n",
+      "          lt_found = li_work->keys( is_pile = ls_work\n",
+      "                                    it_keys = lt_simkeys ).\n",
+      "        ELSE.\n",
+      "{{/sim}}\n",
+      "          lt_keys_{{index}} = {{check_class}}=>keys( iv_date = iv_date{{#range}} it_range = lt_range_{{stage_no}}{{/range}}{{#param_args}} {{ref}} = ls_params-{{name}}{{/param_args}} ).\n",
+      "          LOOP AT lt_keys_{{index}} INTO ls_key_{{index}}.\n",
+      "            APPEND ls_key_{{index}}-low TO lt_found.\n",
+      "          ENDLOOP.\n",
+      "{{#sim}}\n",
+      "        ENDIF.\n",
+      "{{/sim}}\n"
+    ]
+  },
+  {
+    "before": [
+      "{{#check}}\n",
+      "        lt_alerts = {{check_class}}=>check( iv_date{{#has_args}} = iv_date{{/has_args}}{{#range}} it_range = lt_range_{{stage_no}}{{/range}}{{#param_args}} {{ref}} = ls_params-{{name}}{{/param_args}} ).\n",
+      "        write( EXPORTING iv_date = iv_date\n",
+      "                         iv_run = iv_run\n",
+      "                         iv_pile = iv_pile\n"
+    ],
+    "after": [
+      "{{#check}}\n",
+      "{{#sim}}\n",
+      "        IF li_work IS BOUND.\n",
+      "          CLEAR lt_simkeys.\n",
+      "{{#range}}\n",
+      "          lt_simkeys = sim_keys_{{stage_no}}( it_range = lt_range_{{stage_no}} iv_bind = iv_bind ).\n",
+      "{{/range}}\n",
+      "          lt_alerts = li_work->check( is_pile = ls_work\n",
+      "                                      it_keys = lt_simkeys ).\n",
+      "        ELSE.\n",
+      "{{/sim}}\n",
+      "          lt_alerts = {{check_class}}=>check( iv_date{{#has_args}} = iv_date{{/has_args}}{{#range}} it_range = lt_range_{{stage_no}}{{/range}}{{#param_args}} {{ref}} = ls_params-{{name}}{{/param_args}} ).\n",
+      "{{#sim}}\n",
+      "        ENDIF.\n",
+      "{{/sim}}\n",
+      "        write( EXPORTING iv_date = iv_date\n",
+      "                         iv_run = iv_run\n",
+      "                         iv_pile = iv_pile\n"
+    ]
+  },
+  {
+    "before": [
+      "    DATA lv_latest TYPE zosd_l3_run-run_id.\n"
+    ],
+    "after": [
+      "    DATA lv_latest TYPE zosd_l3_run-run_id.\n",
+      "{{#simulate}}\n",
+      "    DATA lv_hash TYPE zosd_l3_alert-model_hash.\n",
+      "{{/simulate}}\n"
+    ]
+  },
+  {
+    "before": [
+      "        AND model_hash = iv_hash\n",
+      "        AND check_date = iv_date\n",
+      "        AND run_id <> iv_run.\n"
+    ],
+    "after": [
+      "{{#simulate}}\n",
+      "        AND model_hash = lv_hash\n",
+      "{{/simulate}}\n",
+      "        AND check_date = iv_date\n",
+      "        AND run_id <> iv_run.\n"
+    ]
+  },
+  {
+    "before": [
+      "    DELETE FROM {{sink.table}}\n",
+      "      WHERE set_name = c_set\n",
+      "        AND rule_name = iv_rule\n"
+    ],
+    "after": [
+      "{{#simulate}}\n",
+      "    \" a simulated run finalises its own rows only, those under sim256:\n",
+      "    lv_hash = iv_hash.\n",
+      "    IF {{ports_class}}=>variant( iv_port = 'work' iv_bind = iv_bind ) = 'sim'.\n",
+      "      lv_hash = sim_hash( iv_hash ).\n",
+      "    ENDIF.\n",
+      "{{/simulate}}\n",
+      "    DELETE FROM {{sink.table}}\n",
+      "      WHERE set_name = c_set\n",
+      "        AND rule_name = iv_rule\n"
+    ]
+  },
+  {
+    "before": [
+      "                    iv_force = abap_true\n",
+      "                    iv_bind = iv_bind\n"
+    ],
+    "after": [
+      "                    iv_force = abap_true\n",
+      "{{#simulate}}\n",
+      "                    iv_bind = sim_bind( iv_recorded = ls_lock-run_bind\n",
+      "                                        iv_bind = iv_bind )\n",
+      "{{/simulate}}\n"
+    ]
+  },
+  {
+    "before": [
+      "                      iv_force = abap_false\n",
+      "            CHANGING ct_report = rt_report ).\n"
+    ],
+    "after": [
+      "                      iv_force = abap_false\n",
+      "{{#simulate}}\n",
+      "                      iv_bind = sim_bind( ls_lock-run_bind )\n",
+      "{{/simulate}}\n",
+      "            CHANGING ct_report = rt_report ).\n"
+    ]
+  },
+  {
+    "before": [
+      "{{#sources}}\n",
+      "  METHOD restore_{{index}}.\n"
+    ],
+    "after": [
+      "{{#stages}}\n",
+      "{{#piles}}\n",
+      "{{#sim}}\n",
+      "  METHOD sim_keys_{{no}}.\n",
+      "    DATA li_source TYPE REF TO {{source.iface}}.\n",
+      "    DATA lt_rows TYPE {{source.iface}}=>tt_rows.\n",
+      "    DATA ls_row LIKE LINE OF lt_rows.\n",
+      "    DATA lv_key TYPE string.\n",
+      "    IF it_range IS INITIAL.\n",
+      "      RETURN.\n",
+      "    ENDIF.\n",
+      "    li_source = {{ports_class}}=>get_{{source.name}}( {{ports_class}}=>variant( iv_port = {{source.name | literal}} iv_bind = iv_bind ) ).\n",
+      "    lt_rows = li_source->read( it_range ).\n",
+      "    LOOP AT lt_rows INTO ls_row.\n",
+      "      lv_key = ls_row-{{source.key}}.\n",
+      "      APPEND lv_key TO rt_keys.\n",
+      "    ENDLOOP.\n",
+      "    SORT rt_keys.\n",
+      "    DELETE ADJACENT DUPLICATES FROM rt_keys.\n",
+      "  ENDMETHOD.\n",
+      "\n",
+      "{{/sim}}\n",
+      "{{/piles}}\n",
+      "{{/stages}}\n",
+      "{{#simulate}}\n",
+      "  METHOD sim_hash.\n",
+      "    rv_hash = iv_hash.\n",
+      "    IF strlen( rv_hash ) > 7 AND rv_hash(7) = 'sha256:'.\n",
+      "      CONCATENATE 'sim256:' rv_hash+7 INTO rv_hash.\n",
+      "    ENDIF.\n",
+      "  ENDMETHOD.\n",
+      "\n",
+      "  METHOD sim_bind.\n",
+      "    DATA lv_recorded TYPE string.\n",
+      "    rv_bind = iv_bind.\n",
+      "    lv_recorded = iv_recorded.\n",
+      "    IF rv_bind IS INITIAL AND {{ports_class}}=>variant( iv_port = 'work' iv_bind = lv_recorded ) = 'sim'.\n",
+      "      rv_bind = lv_recorded.\n",
+      "    ENDIF.\n",
+      "  ENDMETHOD.\n",
+      "\n",
+      "{{/simulate}}\n",
+      "{{#sources}}\n",
+      "  METHOD restore_{{index}}.\n"
+    ]
+  }
+]

@@ -136,6 +136,12 @@
       {
         "object": "ZCL_L3_FLEET_PROOF",
         "class": "ltcl_proof",
+        "method": "sim_twin",
+        "_why": "as mode_p: the simulated twin runs in real jobs the doctor submits again, which needs STG_DB=file, a dialog step per method and a worker; test/dsl-l3.mjs runs it with all three (docs/dsl-l3.md, Simulated twin)"
+      },
+      {
+        "object": "ZCL_L3_FLEET_PROOF",
+        "class": "ltcl_proof",
         "method": "doctor_heals",
         "_why": "as mode_p: the doctor submits a pile again as a real job, which needs STG_DB=file, a dialog step per method and a worker; test/dsl-l3.mjs runs it with all three (docs/dsl-l3.md, Resilience)"
       },

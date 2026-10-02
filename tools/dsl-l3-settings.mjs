@@ -13,13 +13,16 @@ const numeric = [
   ["stale", (m) => m.resilience?.stale?.seconds, 60, 99 * 3600],
   ["fuses.max_alerts", (m) => m.resilience?.fuses?.max_alerts?.count, 1, INT4],
   ["keep.days", (m) => m.resilience?.keep?.days, 1, 9999],
+  // the simulated twin: its seed, and its time scale in wall millionths per simulated second
+  ["simulate.seed", (m) => m.simulate?.seed?.value, 1, INT4 - 1],
+  ["simulate.time_scale", (m) => m.simulate?.scale?.value, 0, 1000000],
 ];
 // What a run is planned and fused with belongs to the run: the fuse, the pile
 // sizes and the set's parameters are read from the run's snapshot whenever the
 // run is worked again (a job, the doctor, collect( )). The rest (retry budget,
 // backoff, staleness, retention, the schedule) is the operator's policy of the
 // moment and is read fresh once per pass.
-export const runScoped = (name) => name.startsWith("budget.") || name === "fuses.max_alerts" || /^piles\.([a-z0-9_]+\.)?size$/.test(name) || name.startsWith("params.");
+export const runScoped = (name) => name.startsWith("budget.") || name.startsWith("simulate.") || name === "fuses.max_alerts" || /^piles\.([a-z0-9_]+\.)?size$/.test(name) || name.startsWith("params.");
 export function compileSettings(doc, model, {line, fail}) {
   if (doc.settings === undefined) return undefined;
   const spec = doc.settings;
@@ -90,6 +93,7 @@ export function compileSettings(doc, model, {line, fail}) {
       budget_narrow_at: has("budget.narrow_at"), budget_per_pile: has("budget.per_pile")} : {}),
     retry_max: has("retry.max"), retry_backoff: has("retry.backoff"), stale: has("stale"),
     max_alerts: has("fuses.max_alerts"), keep_days: has("keep.days"),
+    ...(model.simulate ? {simulate_seed: has("simulate.seed"), simulate_time_scale: has("simulate.time_scale")} : {}),
     schedule_every: has("schedule.every"), pile_size: has("piles.size"),
     params: entries.filter((e) => e.name.startsWith("params.")).map((e) => ({...e, param: e.name.slice(7)})),
     stages: (model.stages ?? []).map((s) => ({no: s.no, field: `piles_${s.name}_size`, tunable: has(`piles.${s.name}.size`)}))};

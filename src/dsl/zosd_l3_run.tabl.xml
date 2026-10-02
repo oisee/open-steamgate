@@ -62,6 +62,15 @@
      <LENG>000015</LENG>
      <MASK>  DEC</MASK>
     </DD03P>
+    <DD03P>
+     <FIELDNAME>RUN_BIND</FIELDNAME>
+     <ADMINFIELD>0</ADMINFIELD>
+     <INTTYPE>C</INTTYPE>
+     <INTLEN>000510</INTLEN>
+     <DATATYPE>CHAR</DATATYPE>
+     <LENG>000255</LENG>
+     <MASK>  CHAR</MASK>
+    </DD03P>
    </DD03P_TABLE>
   </asx:values>
  </asx:abap>

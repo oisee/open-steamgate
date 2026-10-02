@@ -1,0 +1,54 @@
+[
+  {
+    "before": [
+      "{{#governor}}\n",
+      "    DATA ls_budget TYPE zosd_l3_budget.\n",
+      "{{/governor}}\n"
+    ],
+    "after": [
+      "{{#governor}}\n",
+      "    DATA ls_budget TYPE zosd_l3_budget.\n",
+      "{{/governor}}\n",
+      "{{#simulate}}\n",
+      "    DATA lv_key_offset TYPE i.\n",
+      "{{/simulate}}\n"
+    ]
+  },
+  {
+    "before": [
+      "{{#sim}}\n",
+      "        ENDIF.\n",
+      "{{/sim}}\n",
+      "        write( EXPORTING iv_date = iv_date\n",
+      "                         iv_run = iv_run\n",
+      "                         iv_pile = iv_pile\n",
+      "                         iv_class = {{check_class | literal}}\n",
+      "                         iv_file = {{file | literal}}\n",
+      "                         iv_line = {{alert_line | literal}}\n",
+      "                         it_alerts = lt_alerts\n",
+      "{{#governed}}\n",
+      "                         iv_key_offset = {{offset}} iv_key_length = {{length}} iv_rule_no = {{rule_no}}\n",
+      "{{/governed}}\n"
+    ],
+    "after": [
+      "{{#sim}}\n",
+      "        ENDIF.\n",
+      "        \" a simulated alert starts with SIM and a blank: its key four characters on\n",
+      "        lv_key_offset = {{offset}}.\n",
+      "        IF li_work IS BOUND.\n",
+      "          lv_key_offset = {{sim_offset}}.\n",
+      "        ENDIF.\n",
+      "{{/sim}}\n",
+      "        write( EXPORTING iv_date = iv_date\n",
+      "                         iv_run = iv_run\n",
+      "                         iv_pile = iv_pile\n",
+      "                         iv_class = {{check_class | literal}}\n",
+      "                         iv_file = {{file | literal}}\n",
+      "                         iv_line = {{alert_line | literal}}\n",
+      "                         it_alerts = lt_alerts\n",
+      "{{#governed}}\n",
+      "                         iv_key_offset = lv_key_offset iv_key_length = {{length}} iv_rule_no = {{rule_no}}\n",
+      "{{/governed}}\n"
+    ]
+  }
+]

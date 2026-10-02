@@ -75,7 +75,9 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
         return text;
       };
       const file = join(OUT, `zz_plain_${process.pid}.l3.yaml`);
-      writeFileSync(file, SET_TEXT.replace(/^governor:\n(  .*\n)+/m, "").replace(/^resilience:\n(  .*\n)+/m, "").replace(/^settings:\n(  .*\n|    .*\n)+/m, ""));
+      // slice 5d's simulated twin needs resilience: its block, the work port and the sim variant go too
+      writeFileSync(file, SET_TEXT.replace(/^governor:\n(  .*\n)+/m, "").replace(/^resilience:\n(  .*\n)+/m, "").replace(/^settings:\n(  .*\n|    .*\n)+/m, "")
+        .replace(/^simulate:\n(  .*\n)+/m, "").replace(/^  work:\n(    .*\n)+/m, "").replace("      sim: generated\n", "").replace("  work: real\n", ""));
       try {
         const model = compileSet(file);
         expect([model.resilience, model.fused, model.killable]).to.deep.equal([undefined, undefined, undefined]);

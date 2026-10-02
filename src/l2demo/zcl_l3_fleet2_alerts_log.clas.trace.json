@@ -2,217 +2,217 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-ports/sink-log.tpl",
- "model": "sha256:77107ad3c971caab834cd62f8efcb277827783ea9a813b6f37ee1dba57442ce0",
+ "model": "sha256:31c0de1179bf73be22ec45fb874432abfeecb7567ec7a023bf1f701634c38a51",
  "lines": [
   {
    "line": 1,
    "template_line": 1,
    "path": "/source",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 2,
    "template_line": 2,
    "path": "/port",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 3,
    "template_line": 3,
    "path": "/class",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 4,
    "template_line": 4,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 5,
    "template_line": 5,
    "path": "/iface",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 6,
    "template_line": 6,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 7,
    "template_line": 7,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 8,
    "template_line": 8,
    "path": "/class",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 9,
    "template_line": 9,
    "path": "/iface",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 10,
    "template_line": 10,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 11,
    "template_line": 11,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 12,
    "template_line": 12,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 13,
    "template_line": 13,
    "path": "/table",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 14,
    "template_line": 14,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 15,
    "template_line": 15,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 16,
    "template_line": 16,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 17,
    "template_line": 17,
    "path": "/table",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 18,
    "template_line": 18,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 19,
    "template_line": 19,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 20,
    "template_line": 20,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 21,
    "template_line": 21,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 22,
    "template_line": 22,
    "path": "/table",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 23,
    "template_line": 24,
    "path": "/group/1/lead",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 24,
    "template_line": 24,
    "path": "/group/2/lead",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 25,
    "template_line": 24,
    "path": "/group/3/lead",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 26,
    "template_line": 24,
    "path": "/group/4/lead",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 27,
    "template_line": 24,
    "path": "/group/5/lead",
    "node": "set/fleet2/stages",
-   "set_line": 16
+   "set_line": 20
   },
   {
    "line": 28,
    "template_line": 26,
    "path": "/seq",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 29,
    "template_line": 27,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   },
   {
    "line": 30,
    "template_line": 28,
    "path": "/",
    "node": "set/fleet2/port/alerts/variant/log",
-   "set_line": 47
+   "set_line": 51
   }
  ]
 }

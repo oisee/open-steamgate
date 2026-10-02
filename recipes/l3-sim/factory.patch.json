@@ -1,0 +1,70 @@
+[
+  {
+    "before": [
+      "    DATA lv_hand_port TYPE string.\n"
+    ],
+    "after": [
+      "    DATA lv_hand_port TYPE string.\n",
+      "{{#simulate}}\n",
+      "    DATA lv_work TYPE string.\n",
+      "{{#guarded}}\n",
+      "    DATA lv_sink TYPE string.\n",
+      "{{/guarded}}\n",
+      "{{/simulate}}\n"
+    ]
+  },
+  {
+    "before": [
+      "    IF iv_parallel = abap_true AND lv_volatile_port IS NOT INITIAL.\n"
+    ],
+    "after": [
+      "{{#simulate}}\n",
+      "    \" a simulated run never writes to a production sink variant that\n",
+      "    \" simulate.allow_sink does not name, and never replays: its WAIT commits,\n",
+      "    \" and a replay swaps table content in one LUW. A sim variant of another\n",
+      "    \" port answers by chance and is bound only beside work=sim\n",
+      "    lv_work = variant( iv_port = 'work' iv_bind = iv_bind ).\n",
+      "    IF lv_work = 'sim'.\n",
+      "{{#guarded}}\n",
+      "      lv_sink = variant( iv_port = {{sink.name | literal}} iv_bind = iv_bind ).\n",
+      "{{/guarded}}\n",
+      "{{#blocked}}\n",
+      "      IF lv_sink = {{name | literal}}.\n",
+      "        RAISE EXCEPTION TYPE {{exception}}\n",
+      "          EXPORTING iv_port = {{sink.name | literal}} iv_variant = lv_sink\n",
+      "                    iv_reason = 'a simulated run writes to a production sink only when simulate.allow_sink names it'.\n",
+      "      ENDIF.\n",
+      "{{/blocked}}\n",
+      "      IF lv_replay_port IS NOT INITIAL.\n",
+      "        RAISE EXCEPTION TYPE {{exception}}\n",
+      "          EXPORTING iv_port = 'work' iv_variant = lv_work\n",
+      "                    iv_reason = 'a simulated run waits, and WAIT commits; a replay swaps table content in one LUW'.\n",
+      "      ENDIF.\n",
+      "{{#sim_only}}\n",
+      "    ELSEIF variant( iv_port = {{port | literal}} iv_bind = iv_bind ) = 'sim'.\n",
+      "      RAISE EXCEPTION TYPE {{exception}}\n",
+      "        EXPORTING iv_port = {{port | literal}} iv_variant = 'sim'\n",
+      "                  iv_reason = 'a sim variant answers by chance: it is bound only beside work=sim'.\n",
+      "{{/sim_only}}\n",
+      "    ENDIF.\n",
+      "{{/simulate}}\n",
+      "    IF iv_parallel = abap_true AND lv_volatile_port IS NOT INITIAL.\n"
+    ]
+  },
+  {
+    "before": [
+      "      WHEN {{name | literal}}.\n",
+      "        CREATE OBJECT ri_port TYPE {{class}}.\n"
+    ],
+    "after": [
+      "      WHEN {{name | literal}}.\n",
+      "{{#is_inline}}\n",
+      "        \" the runner's own static calls of the L2 classes: no object\n",
+      "        CLEAR ri_port.\n",
+      "{{/is_inline}}\n",
+      "{{^is_inline}}\n",
+      "        CREATE OBJECT ri_port TYPE {{class}}.\n",
+      "{{/is_inline}}\n"
+    ]
+  }
+]

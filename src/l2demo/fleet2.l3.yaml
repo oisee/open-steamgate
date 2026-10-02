@@ -7,6 +7,10 @@
 # takes over a lock, a pile or a gate left for 15 minutes and runs as a job of
 # the schedule; a rule stops writing past 500 alerts in a run; a row of
 # ZOSD_L3_KILL stops the set; final runs' plans go after 30 days.
+# Slice 5d (docs/dsl-l3.md, "Simulated twin: the work as a port"): the work
+# of a pile is the port work; iv_bind = 'work=sim' runs the same runner with a
+# simulated twin of the checks (outcomes, durations and hits drawn from the
+# seed), and close=sim closes its alerts by chance.
 # `node tools/dsl-l3.mjs build src/l2demo/fleet2.l3.yaml --out src/l2demo`
 set: fleet2
 title: The fleet in two stages, busy ships first, then the deep checks
@@ -53,10 +57,17 @@ ports:
       none: generated
       capture: generated
       maintenance: zcl_l3_fleet2_autoclose
+      sim: generated
+  work:
+    kind: work
+    variants:
+      real: generated
+      sim: generated
 bindings:
   ships: table
   alerts: log
   close: none
+  work: real
 resilience:
   retry: {max: 2, backoff: 60}
   stale: 900
@@ -68,7 +79,25 @@ resilience:
 governor:
   budget: {glass: 10, counts: open, warn: 0.7, narrow_at: 0.8, per_pile: 50}
   funnel: {group_by: object, autoclose: port:close}
+simulate:
+  seed: 42
+  time_scale: 0.01
+  allow_sink: [log]
+  default:
+    duration: {dist: lognormal, median: 40, p95: 300}
+    outcome: {ok: 0.93, dump: 0.03, hang: 0.01, slow: 0.03}
+    slow_factor: 5
+    hits: {dist: poisson, mean: 2}
+    autoclose: 0.4
+  stages:
+    candidates:
+      duration: {dist: uniform, min: 5, max: 20}
+      outcome: {ok: 0.5, dump: 0.5}
+      keep: 0.5
+  rules:
+    ship-min-crew:
+      hits: {dist: fixed, value: 1}
 settings:
-  tunable: [budget.glass, budget.warn, budget.narrow_at, budget.per_pile, retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, piles.checks.size]
+  tunable: [budget.glass, budget.warn, budget.narrow_at, budget.per_pile, retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, simulate.seed, simulate.time_scale, piles.checks.size]
   bounds:
     fuses.max_alerts: {min: 1, max: 100000}

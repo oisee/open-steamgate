@@ -67,6 +67,10 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_set TYPE zosd_l3_alert-set_name VALUE 'fleet2'.
     CONSTANTS c_sequential TYPE c LENGTH 1 VALUE 'S'.
     CONSTANTS c_parallel TYPE c LENGTH 1 VALUE 'P'.
+    " the simulated twin of the work (port work, variant sim): the seed of its
+    " streams, and its time scale in wall millionths per simulated second
+    CONSTANTS c_sim_seed TYPE i VALUE 42.
+    CONSTANTS c_sim_scale TYPE i VALUE 10000.
     CONSTANTS c_rule_1 TYPE zosd_l3_alert-rule_name VALUE 'ship-busy'.
     CONSTANTS c_hash_1 TYPE zosd_l3_alert-model_hash VALUE 'sha256:45ea923b55497387bebe8f844927710b4793719d6598f05beeb5a07536f6be87'.
     CONSTANTS c_rule_2 TYPE zosd_l3_alert-rule_name VALUE 'maintenance-ship-no-future-voyage'.
@@ -261,6 +265,29 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS range_2
       IMPORTING is_pile TYPE zosd_l3_pile
       RETURNING VALUE(rt_range) TYPE tt_range_2.
+    " a simulated pile's keys: the rows of its range read through port
+    " ships, keys only, sorted; none for an empty range
+    CLASS-METHODS sim_keys_1
+      IMPORTING it_range TYPE tt_range_1
+                iv_bind TYPE string OPTIONAL
+      RETURNING VALUE(rt_keys) TYPE string_table.
+    " a simulated pile's keys: the rows of its range read through port
+    " ships, keys only, sorted; none for an empty range
+    CLASS-METHODS sim_keys_2
+      IMPORTING it_range TYPE tt_range_2
+                iv_bind TYPE string OPTIONAL
+      RETURNING VALUE(rt_keys) TYPE string_table.
+    " the model hash a simulated run writes under, sim256: for sha256:, so
+    " its rows never take a real run's slots and its finalise never deletes them
+    CLASS-METHODS sim_hash
+      IMPORTING iv_hash TYPE csequence
+      RETURNING VALUE(rv_hash) TYPE zosd_l3_alert-model_hash.
+    " what the doctor and resume( ) heal a run with: iv_bind when given, else
+    " the run's recorded binding when it was a simulated run, else nothing
+    CLASS-METHODS sim_bind
+      IMPORTING iv_recorded TYPE csequence
+                iv_bind TYPE string OPTIONAL
+      RETURNING VALUE(rv_bind) TYPE string.
     " puts the rows of zosd_l2_ship back after a replay: the rows kept before it
     CLASS-METHODS restore_1
       IMPORTING it_keep TYPE zif_l3_fleet2_ships=>tt_rows.
@@ -400,6 +427,11 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       rs_result-status = 'BUSY'.
       RETURN.
     ENDIF.
+    " the run's binding on its lock row: a simulated run is healed as one
+    UPDATE zosd_l3_run SET run_bind = iv_bind
+      WHERE set_name = c_set
+        AND check_date = rs_result-check_date
+        AND run_id = rs_result-run_id.
     IF lv_dry = abap_false.
       zcl_l3_fleet2_conf=>snapshot( iv_run = rs_result-run_id is_state = gs_settings ).
     ENDIF.
@@ -818,6 +850,58 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     APPEND ls_range TO rt_range.
   ENDMETHOD.
 
+  METHOD sim_keys_1.
+    DATA li_source TYPE REF TO zif_l3_fleet2_ships.
+    DATA lt_rows TYPE zif_l3_fleet2_ships=>tt_rows.
+    DATA ls_row LIKE LINE OF lt_rows.
+    DATA lv_key TYPE string.
+    IF it_range IS INITIAL.
+      RETURN.
+    ENDIF.
+    li_source = zcl_l3_fleet2_ports=>get_ships( zcl_l3_fleet2_ports=>variant( iv_port = 'ships' iv_bind = iv_bind ) ).
+    lt_rows = li_source->read( it_range ).
+    LOOP AT lt_rows INTO ls_row.
+      lv_key = ls_row-ship_id.
+      APPEND lv_key TO rt_keys.
+    ENDLOOP.
+    SORT rt_keys.
+    DELETE ADJACENT DUPLICATES FROM rt_keys.
+  ENDMETHOD.
+
+  METHOD sim_keys_2.
+    DATA li_source TYPE REF TO zif_l3_fleet2_ships.
+    DATA lt_rows TYPE zif_l3_fleet2_ships=>tt_rows.
+    DATA ls_row LIKE LINE OF lt_rows.
+    DATA lv_key TYPE string.
+    IF it_range IS INITIAL.
+      RETURN.
+    ENDIF.
+    li_source = zcl_l3_fleet2_ports=>get_ships( zcl_l3_fleet2_ports=>variant( iv_port = 'ships' iv_bind = iv_bind ) ).
+    lt_rows = li_source->read( it_range ).
+    LOOP AT lt_rows INTO ls_row.
+      lv_key = ls_row-ship_id.
+      APPEND lv_key TO rt_keys.
+    ENDLOOP.
+    SORT rt_keys.
+    DELETE ADJACENT DUPLICATES FROM rt_keys.
+  ENDMETHOD.
+
+  METHOD sim_hash.
+    rv_hash = iv_hash.
+    IF strlen( rv_hash ) > 7 AND rv_hash(7) = 'sha256:'.
+      CONCATENATE 'sim256:' rv_hash+7 INTO rv_hash.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD sim_bind.
+    DATA lv_recorded TYPE string.
+    rv_bind = iv_bind.
+    lv_recorded = iv_recorded.
+    IF rv_bind IS INITIAL AND zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = lv_recorded ) = 'sim'.
+      rv_bind = lv_recorded.
+    ENDIF.
+  ENDMETHOD.
+
   METHOD restore_1.
     DELETE FROM zosd_l2_ship.
     INSERT zosd_l2_ship FROM TABLE it_keep.
@@ -875,6 +959,10 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lt_alerts TYPE string_table.
     DATA lt_found TYPE string_table.
     DATA ls_budget TYPE zosd_l3_budget.
+    DATA lv_key_offset TYPE i.
+    DATA li_work TYPE REF TO zif_l3_fleet2_work.
+    DATA ls_work TYPE zif_l3_fleet2_work=>ty_pile.
+    DATA lt_simkeys TYPE string_table.
     DATA ls_pile TYPE zosd_l3_pile.
     DATA lt_range_1 TYPE tt_range_1.
     DATA lt_range_2 TYPE tt_range_2.
@@ -943,17 +1031,38 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ls_pile-status = 'RUNNING'.
     GET TIME STAMP FIELD ls_pile-started.
     UPDATE zosd_l3_pile FROM ls_pile.
+    " the work: the L2 classes below (variant real), or the simulated twin
+    li_work = zcl_l3_fleet2_ports=>get_work( zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = iv_bind ) ).
+    IF li_work IS BOUND.
+      ls_work-run_id = iv_run.
+      ls_work-rule = iv_rule.
+      ls_work-pile_no = iv_pile.
+      ls_work-attempt = ls_pile-attempt.
+      ls_work-seed = gs_settings-vals-simulate_seed.
+      ls_work-scale = gs_settings-vals-simulate_time_scale.
+      ls_work-stale = gs_settings-vals-stale.
+    ENDIF.
     CASE iv_rule.
       WHEN c_rule_1.
         rs_rule-model_hash = c_hash_1.
         rs_rule-jobname = 'L3_FLEET2_101'.
         rs_rule-stage_no = 1.
+        IF li_work IS BOUND.
+          rs_rule-model_hash = sim_hash( rs_rule-model_hash ).
+        ENDIF.
         lt_range_1 = range_1( ls_pile ).
         rs_rule-filter = abap_true.
-        lt_keys_1 = zcl_l2_ship_busy=>keys( iv_date = iv_date it_range = lt_range_1 ).
-        LOOP AT lt_keys_1 INTO ls_key_1.
-          APPEND ls_key_1-low TO lt_found.
-        ENDLOOP.
+        IF li_work IS BOUND.
+          CLEAR lt_simkeys.
+          lt_simkeys = sim_keys_1( it_range = lt_range_1 iv_bind = iv_bind ).
+          lt_found = li_work->keys( is_pile = ls_work
+                                    it_keys = lt_simkeys ).
+        ELSE.
+          lt_keys_1 = zcl_l2_ship_busy=>keys( iv_date = iv_date it_range = lt_range_1 ).
+          LOOP AT lt_keys_1 INTO ls_key_1.
+            APPEND ls_key_1-low TO lt_found.
+          ENDLOOP.
+        ENDIF.
         fill( EXPORTING iv_run = iv_run
                         iv_date = iv_date
                         iv_worklist = 'busy'
@@ -963,8 +1072,23 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         rs_rule-model_hash = c_hash_2.
         rs_rule-jobname = 'L3_FLEET2_202'.
         rs_rule-stage_no = 2.
+        IF li_work IS BOUND.
+          rs_rule-model_hash = sim_hash( rs_rule-model_hash ).
+        ENDIF.
         lt_range_2 = range_2( ls_pile ).
-        lt_alerts = zcl_l2_maintenance_ship=>check( iv_date = iv_date it_range = lt_range_2 ).
+        IF li_work IS BOUND.
+          CLEAR lt_simkeys.
+          lt_simkeys = sim_keys_2( it_range = lt_range_2 iv_bind = iv_bind ).
+          lt_alerts = li_work->check( is_pile = ls_work
+                                      it_keys = lt_simkeys ).
+        ELSE.
+          lt_alerts = zcl_l2_maintenance_ship=>check( iv_date = iv_date it_range = lt_range_2 ).
+        ENDIF.
+        " a simulated alert starts with SIM and a blank: its key four characters on
+        lv_key_offset = 0.
+        IF li_work IS BOUND.
+          lv_key_offset = 4.
+        ENDIF.
         write( EXPORTING iv_date = iv_date
                          iv_run = iv_run
                          iv_pile = iv_pile
@@ -972,15 +1096,30 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/maintenance_ship.l2.yaml'
                          iv_line = 13
                          it_alerts = lt_alerts
-                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 2
+                         iv_key_offset = lv_key_offset iv_key_length = 4 iv_rule_no = 2
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_3.
         rs_rule-model_hash = c_hash_3.
         rs_rule-jobname = 'L3_FLEET2_203'.
         rs_rule-stage_no = 2.
+        IF li_work IS BOUND.
+          rs_rule-model_hash = sim_hash( rs_rule-model_hash ).
+        ENDIF.
         lt_range_2 = range_2( ls_pile ).
-        lt_alerts = zcl_l2_grounded_ship_crew=>check( iv_date = iv_date it_range = lt_range_2 ).
+        IF li_work IS BOUND.
+          CLEAR lt_simkeys.
+          lt_simkeys = sim_keys_2( it_range = lt_range_2 iv_bind = iv_bind ).
+          lt_alerts = li_work->check( is_pile = ls_work
+                                      it_keys = lt_simkeys ).
+        ELSE.
+          lt_alerts = zcl_l2_grounded_ship_crew=>check( iv_date = iv_date it_range = lt_range_2 ).
+        ENDIF.
+        " a simulated alert starts with SIM and a blank: its key four characters on
+        lv_key_offset = 0.
+        IF li_work IS BOUND.
+          lv_key_offset = 4.
+        ENDIF.
         write( EXPORTING iv_date = iv_date
                          iv_run = iv_run
                          iv_pile = iv_pile
@@ -988,15 +1127,30 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/grounded_ship_crew.l2.yaml'
                          iv_line = 14
                          it_alerts = lt_alerts
-                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 3
+                         iv_key_offset = lv_key_offset iv_key_length = 4 iv_rule_no = 3
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_4.
         rs_rule-model_hash = c_hash_4.
         rs_rule-jobname = 'L3_FLEET2_204'.
         rs_rule-stage_no = 2.
+        IF li_work IS BOUND.
+          rs_rule-model_hash = sim_hash( rs_rule-model_hash ).
+        ENDIF.
         lt_range_2 = range_2( ls_pile ).
-        lt_alerts = zcl_l2_ship_captain=>check( iv_date = iv_date it_range = lt_range_2 iv_active_status = ls_params-active_status ).
+        IF li_work IS BOUND.
+          CLEAR lt_simkeys.
+          lt_simkeys = sim_keys_2( it_range = lt_range_2 iv_bind = iv_bind ).
+          lt_alerts = li_work->check( is_pile = ls_work
+                                      it_keys = lt_simkeys ).
+        ELSE.
+          lt_alerts = zcl_l2_ship_captain=>check( iv_date = iv_date it_range = lt_range_2 iv_active_status = ls_params-active_status ).
+        ENDIF.
+        " a simulated alert starts with SIM and a blank: its key four characters on
+        lv_key_offset = 0.
+        IF li_work IS BOUND.
+          lv_key_offset = 4.
+        ENDIF.
         write( EXPORTING iv_date = iv_date
                          iv_run = iv_run
                          iv_pile = iv_pile
@@ -1004,15 +1158,30 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_captain.l2.yaml'
                          iv_line = 15
                          it_alerts = lt_alerts
-                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 4
+                         iv_key_offset = lv_key_offset iv_key_length = 4 iv_rule_no = 4
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_5.
         rs_rule-model_hash = c_hash_5.
         rs_rule-jobname = 'L3_FLEET2_205'.
         rs_rule-stage_no = 2.
+        IF li_work IS BOUND.
+          rs_rule-model_hash = sim_hash( rs_rule-model_hash ).
+        ENDIF.
         lt_range_2 = range_2( ls_pile ).
-        lt_alerts = zcl_l2_ship_voyage_limit=>check( iv_date = iv_date it_range = lt_range_2 ).
+        IF li_work IS BOUND.
+          CLEAR lt_simkeys.
+          lt_simkeys = sim_keys_2( it_range = lt_range_2 iv_bind = iv_bind ).
+          lt_alerts = li_work->check( is_pile = ls_work
+                                      it_keys = lt_simkeys ).
+        ELSE.
+          lt_alerts = zcl_l2_ship_voyage_limit=>check( iv_date = iv_date it_range = lt_range_2 ).
+        ENDIF.
+        " a simulated alert starts with SIM and a blank: its key four characters on
+        lv_key_offset = 0.
+        IF li_work IS BOUND.
+          lv_key_offset = 4.
+        ENDIF.
         write( EXPORTING iv_date = iv_date
                          iv_run = iv_run
                          iv_pile = iv_pile
@@ -1020,15 +1189,30 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_voyage_limit.l2.yaml'
                          iv_line = 11
                          it_alerts = lt_alerts
-                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 5
+                         iv_key_offset = lv_key_offset iv_key_length = 4 iv_rule_no = 5
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_6.
         rs_rule-model_hash = c_hash_6.
         rs_rule-jobname = 'L3_FLEET2_206'.
         rs_rule-stage_no = 2.
+        IF li_work IS BOUND.
+          rs_rule-model_hash = sim_hash( rs_rule-model_hash ).
+        ENDIF.
         lt_range_2 = range_2( ls_pile ).
-        lt_alerts = zcl_l2_ship_min_crew=>check( iv_date = iv_date it_range = lt_range_2 ).
+        IF li_work IS BOUND.
+          CLEAR lt_simkeys.
+          lt_simkeys = sim_keys_2( it_range = lt_range_2 iv_bind = iv_bind ).
+          lt_alerts = li_work->check( is_pile = ls_work
+                                      it_keys = lt_simkeys ).
+        ELSE.
+          lt_alerts = zcl_l2_ship_min_crew=>check( iv_date = iv_date it_range = lt_range_2 ).
+        ENDIF.
+        " a simulated alert starts with SIM and a blank: its key four characters on
+        lv_key_offset = 0.
+        IF li_work IS BOUND.
+          lv_key_offset = 4.
+        ENDIF.
         write( EXPORTING iv_date = iv_date
                          iv_run = iv_run
                          iv_pile = iv_pile
@@ -1036,15 +1220,30 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_min_crew.l2.yaml'
                          iv_line = 11
                          it_alerts = lt_alerts
-                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 6
+                         iv_key_offset = lv_key_offset iv_key_length = 4 iv_rule_no = 6
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_7.
         rs_rule-model_hash = c_hash_7.
         rs_rule-jobname = 'L3_FLEET2_207'.
         rs_rule-stage_no = 2.
+        IF li_work IS BOUND.
+          rs_rule-model_hash = sim_hash( rs_rule-model_hash ).
+        ENDIF.
         lt_range_2 = range_2( ls_pile ).
-        lt_alerts = zcl_l2_ship_cargo_limit=>check( iv_date = iv_date it_range = lt_range_2 ).
+        IF li_work IS BOUND.
+          CLEAR lt_simkeys.
+          lt_simkeys = sim_keys_2( it_range = lt_range_2 iv_bind = iv_bind ).
+          lt_alerts = li_work->check( is_pile = ls_work
+                                      it_keys = lt_simkeys ).
+        ELSE.
+          lt_alerts = zcl_l2_ship_cargo_limit=>check( iv_date = iv_date it_range = lt_range_2 ).
+        ENDIF.
+        " a simulated alert starts with SIM and a blank: its key four characters on
+        lv_key_offset = 0.
+        IF li_work IS BOUND.
+          lv_key_offset = 4.
+        ENDIF.
         write( EXPORTING iv_date = iv_date
                          iv_run = iv_run
                          iv_pile = iv_pile
@@ -1052,7 +1251,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_cargo_limit.l2.yaml'
                          iv_line = 10
                          it_alerts = lt_alerts
-                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 7
+                         iv_key_offset = lv_key_offset iv_key_length = 4 iv_rule_no = 7
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN OTHERS.
@@ -1307,6 +1506,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     " delete the slots a newer run rewrote. Only the log keeps older runs; a
     " run bound to another variant of alerts leaves the log as it is
     DATA lv_latest TYPE zosd_l3_run-run_id.
+    DATA lv_hash TYPE zosd_l3_alert-model_hash.
     SELECT SINGLE run_id FROM zosd_l3_run INTO lv_latest
       WHERE set_name = c_set
         AND check_date = iv_date.
@@ -1316,10 +1516,15 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF zcl_l3_fleet2_ports=>variant( iv_port = 'alerts' iv_bind = iv_bind ) <> 'log'.
       RETURN.
     ENDIF.
+    " a simulated run finalises its own rows only, those under sim256:
+    lv_hash = iv_hash.
+    IF zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = iv_bind ) = 'sim'.
+      lv_hash = sim_hash( iv_hash ).
+    ENDIF.
     DELETE FROM zosd_l3_alert
       WHERE set_name = c_set
         AND rule_name = iv_rule
-        AND model_hash = iv_hash
+        AND model_hash = lv_hash
         AND check_date = iv_date
         AND run_id <> iv_run.
   ENDMETHOD.
@@ -1393,7 +1598,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       WITH s_7 = gs_settings-vals-stale
       WITH s_8 = gs_settings-vals-fuses_max_alerts
       WITH s_9 = gs_settings-vals-keep_days
-      WITH s_10 = gs_settings-vals-piles_checks_size
+      WITH s_10 = gs_settings-vals-simulate_seed
+      WITH s_11 = gs_settings-vals-simulate_time_scale
+      WITH s_12 = gs_settings-vals-piles_checks_size
       WITH p_active = is_params-active_status
       VIA JOB lv_jobname NUMBER lv_jobcount
       AND RETURN.
@@ -1861,7 +2068,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                     iv_date = ls_lock-check_date
                     iv_now = lv_now
                     iv_force = abap_true
-                    iv_bind = iv_bind
+                    iv_bind = sim_bind( iv_recorded = ls_lock-run_bind
+                                        iv_bind = iv_bind )
                     is_params = is_params
           CHANGING ct_report = rt_report ).
   ENDMETHOD.
@@ -1923,6 +2131,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                       iv_date = ls_lock-check_date
                       iv_now = lv_now
                       iv_force = abap_false
+                      iv_bind = sim_bind( ls_lock-run_bind )
             CHANGING ct_report = rt_report ).
       IF budget_guard( ls_lock-run_id ) = abap_false.
         act( EXPORTING iv_run = ls_lock-run_id iv_date = ls_lock-check_date

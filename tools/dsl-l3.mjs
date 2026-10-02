@@ -26,6 +26,7 @@ import {compileSchedule, compileStages, explainStage, readStages, worklistVarian
 import {compileResilience, resilienceNodes} from "./dsl-l3-resilience.mjs";
 import {compileGovernor, governorTemplate} from "./dsl-l3-governor.mjs";
 import {compileSettings} from "./dsl-l3-settings.mjs";
+import {compileSimulate, simPorts, simVariant, WORK_PORT} from "./dsl-l3-sim.mjs";
 
 export const SET_TEMPLATE = "recipes/l3-set/template.tpl";
 export const JOB_TEMPLATE = "recipes/l3-job/template.tpl";
@@ -37,11 +38,14 @@ export const PORT_TEMPLATES = {
   "source-table": "recipes/l3-ports/source-table.tpl", "source-mem": "recipes/l3-ports/source-mem.tpl",
   "sink-log": "recipes/l3-ports/sink-log.tpl", "sink-dummy": "recipes/l3-ports/sink-dummy.tpl",
   "sink-capture": "recipes/l3-ports/sink-capture.tpl", "source-worklist": "recipes/l3-ports/source-worklist.tpl",
+  "iface-work": "recipes/l3-ports/iface-work.tpl", "work-sim": "recipes/l3-ports/work-sim.tpl", "autoclose-sim": "recipes/l3-ports/autoclose-sim.tpl",
 };
+// the opt-in recipe overlays of a set (docs/dsl-l3.md, "Governor" and "Simulated twin")
+const OVERLAY = {governor: "recipes/l3-governor", simulate: "recipes/l3-sim"};
 // what a port of each kind may be served by without a class of its own
-export const GENERATED = {source: ["table", "dummy", "capture"], sink: ["log", "dummy", "capture"], autoclose: ["none", "capture"]};
+export const GENERATED = {source: ["table", "dummy", "capture"], sink: ["log", "dummy", "capture"], autoclose: ["none", "capture", "sim"], work: ["real", "sim"]};
 // the methods a hand-written variant class must implement through the port's interface
-export const PORT_METHODS = {source: ["read"], sink: ["put"], autoclose: ["apply"]};
+export const PORT_METHODS = {source: ["read"], sink: ["put"], autoclose: ["apply"], work: ["check", "keys"]};
 // the alert log is the one sink the runner knows how to fill
 export const SINK_TABLE = "ZOSD_L3_ALERT";
 export const SINK_GROUP = ["set_name", "rule_name", "model_hash", "check_date"];
@@ -71,7 +75,8 @@ const COMMITTING_FM = /^'(DB_COMMIT|DB_ROLLBACK|BAPI_TRANSACTION_COMMIT|BAPI_TRA
 
 // [{line, what}] for each statement of the source that ends the unit of work, writes (when
 // writes is false), registers an update task or runs native SQL
-export function unitFindings(text, name, {writes = false, jobs = false} = {}) {
+// waits: the simulated work, whose WAIT is its job (a replay never binds it: the factory refuses)
+export function unitFindings(text, name, {writes = false, jobs = false, waits = false} = {}) {
   const registry = new abaplint.Registry();
   registry.addFile(new abaplint.MemoryFile(name, text));
   registry.parse();
@@ -82,7 +87,7 @@ export function unitFindings(text, name, {writes = false, jobs = false} = {}) {
         const type = statement.get().constructor;
         const line = statement.getStart().getRow();
         const source = statement.concatTokens().replace(/\s+/g, " ");
-        if (ENDS_UNIT.has(type) && !(jobs && type === S0.Submit)) found.push({line, what: `${ENDS_UNIT.get(type)} statement`});
+        if (ENDS_UNIT.has(type) && !(jobs && type === S0.Submit) && !(waits && type === S0.Wait)) found.push({line, what: `${ENDS_UNIT.get(type)} statement`});
         else if (!writes && WRITES.has(type)) found.push({line, what: `${WRITES.get(type)} database statement`});
         else if (type === abaplint.Statements.CallFunction && (/\bIN UPDATE TASK\b|\bIN BACKGROUND\b|\bDESTINATION\b|\bSTARTING NEW TASK\b/i.test(source) || COMMITTING_FM.test((source.split(" ")[2] ?? "").replace(/\.$/, "")))) found.push({line, what: "CALL FUNCTION that registers an update or ends the unit"});
         else if (type === abaplint.Statements.SetUpdateTask) found.push({line, what: "SET UPDATE TASK statement"});
@@ -124,7 +129,7 @@ export function classShape(text, name, className) {
   return shape.line === undefined ? undefined : shape;
 }
 
-const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience", "settings", "governor"];
+const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience", "settings", "governor", "simulate"];
 const PORT_KEYS = ["kind", "table", "key", "group", "seq", "variants"];
 const PORT_NAME = /^[a-z][a-z0-9_]{0,11}$/;
 const RULE_KEYS = ["rule", "enabled"];
@@ -297,6 +302,8 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   const implicit = doc.ports === undefined;
   const bindingDocs = doc.bindings === undefined ? (implicit ? {alerts: "log"} : {}) : asMap(doc.bindings, "bindings", "a mapping of port name to the variant it is bound to");
   if (!Object.keys(portDocs).length) fail(line("ports"), "ports names at least one port");
+  // simulate: brings the work port (variants real and sim), bound to real unless bound
+  const injected = simPorts(doc, portDocs, bindingDocs, {line, fail});
   // a hand-written variant: the named class itself declares the port's interface and implements
   // each of its methods (read with abaplint, so a second class in the file counts for nothing);
   // refused at the class's own file and line otherwise. Nothing more is asked of it: a replay
@@ -320,7 +327,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   const tooLong = (name, key) => { if (name.length > 30) fail(line(key), `the generated name ${name} has ${name.length} characters, a class or interface name has at most 30; shorten the set, port or variant name`); };
   const ports = Object.entries(portDocs).map(([name, def], pi) => {
     const key = `ports/${name}`;
-    const at = implicit ? line("set") : line(key);
+    const at = implicit ? line("set") : injected.port && name === WORK_PORT ? line("simulate") : line(key);
     if (!PORT_NAME.test(name)) fail(at, `port ${JSON.stringify(name)} is a lower-case name of 1 to 12 letters, digits and _ starting with a letter`);
     asMap(def, key, "a mapping with kind, table and variants");
     for (const k of Object.keys(def)) if (!PORT_KEYS.includes(k)) fail(line(`${key}/${k}`), `unknown key ${k} in a port (${PORT_KEYS.join(", ")})`);
@@ -331,8 +338,8 @@ export function compileSet(file, {ddic, registry, out} = {}) {
       return v;
     };
     const kind = text("kind", true);
-    if (!GENERATED[kind]) fail(line(`${key}/kind`), `kind of port ${name} is source, sink or autoclose, not ${JSON.stringify(kind)}`);
-    const table = kind === "autoclose" ? "zosd_l3_alert" : text("table", true).toLowerCase();
+    if (!GENERATED[kind]) fail(line(`${key}/kind`), `kind of port ${name} is source, sink, autoclose or work, not ${JSON.stringify(kind)}`);
+    const table = kind === "autoclose" || kind === "work" ? "zosd_l3_alert" : text("table", true).toLowerCase();
     const {names, client} = implicit ? {names: null, client: undefined} : columnsOf(table, key);
     const column = (k, v) => {
       if (names && !names.includes(v.toLowerCase())) fail(line(`${key}/${k}`), `${table.toUpperCase()} has no field ${v.toUpperCase()}`);
@@ -357,10 +364,11 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     const variants = Object.entries(variantDocs).map(([vname, value0]) => {
       let value = value0;
       const vkey = `${key}/variants/${vname}`;
-      const vat = implicit ? at : line(vkey);
+      const vat = implicit || (injected.port && name === WORK_PORT) ? at : line(vkey);
       if (!PORT_NAME.test(vname)) fail(vat, `variant ${JSON.stringify(vname)} is a lower-case name of 1 to 12 letters, digits and _ starting with a letter`);
       if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) fail(vat, `variant ${vname} is generated or the name of a class`);
       let className, generated = value === "generated";
+      const sim = simVariant({kind, vname, generated, simulate: doc.simulate !== undefined, at: vat, fail});
       if (generated) {
         if (!GENERATED[kind].includes(vname)) fail(vat, `a generated variant of a ${kind} is one of ${GENERATED[kind].join(", ")}; ${vname} needs a class of its own (${vname}: <class>)`);
         className = `zcl_l3_${set}_${name}_${vname}`;
@@ -378,7 +386,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
         // and not volatile, and a replay does not bind it
         port: name, "port@type": CHAR(30), hand: !generated,
         volatile: generated && (vname === "dummy" || vname === "capture"),
-        nonlive: generated && kind === "source" && vname !== "table",
+        nonlive: generated && kind === "source" && vname !== "table", ...sim,
       };
     });
     const bound = bindingDocs[name];
@@ -387,12 +395,12 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     if (typeof bound !== "string" || !variants.some((v) => v.name === bound)) fail(bat, `binding ${name}: ${JSON.stringify(bound)} is not a variant of the port (${variants.map((v) => v.name).join(", ")})`);
     return {
       "@id": `${id}/port/${name}`, set_line: at,
-      name, "name@type": CHAR(30), kind, is_source: kind === "source", is_sink: kind === "sink", ...(kind === "autoclose" ? {is_autoclose: true} : {}),
+      name, "name@type": CHAR(30), kind, is_source: kind === "source", is_sink: kind === "sink", ...(kind === "autoclose" ? {is_autoclose: true} : {}), ...(kind === "work" ? {is_work: true} : {}),
       table, key: keyField, seq, iface, exception: `zcx_l3_${set}_port`, ports_class: `zcl_l3_${set}_ports`,
       group: group?.map((g, i) => ({name: g, lead: i === 0 ? "WHERE" : "AND"})) ?? [],
       has_client: client !== undefined, client: client ?? "",
       variants,
-      binding: {"@id": `${id}/binding/${name}`, set_line: implicit ? at : bat, variant: bound, "variant@type": CHAR(30)},
+      binding: {"@id": `${id}/binding/${name}`, set_line: implicit || (injected.binding && name === WORK_PORT) ? at : bat, variant: bound, "variant@type": CHAR(30)},
     };
   });
   for (const name of Object.keys(bindingDocs)) if (!ports.some((p) => p.name === name)) fail(line(`bindings/${name}`), `binding ${name} names no port of the set`);
@@ -478,6 +486,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   if (staged) for (const stage of staged.stages) stage.members = model.rules.filter((r) => r.stage_no === stage.no);
   if (ports.some((p) => p.has_worklist)) model.with_worklist = {"@id": `${id}/stages`, set_line: line("stages")};
   if (doc.governor !== undefined) model.governor = compileGovernor(doc, model, all, {line, fail});
+  if (doc.simulate !== undefined) model.simulate = compileSimulate(doc, model, all, {line, fail, bindings: bindingDocs});
   if (doc.settings !== undefined) model.settings = compileSettings(doc, model, {line, fail});
   Object.defineProperty(model, "where", {value: where});
   return model;
@@ -498,6 +507,7 @@ function sidecar(model, template, rendered) {
   return JSON.stringify({
     generator: "dsl-l3", set: model.source, template,
     ...(model.governor && [SET_TEMPLATE, JOB_TEMPLATE].includes(template) ? {overlay: `recipes/l3-governor/${template === SET_TEMPLATE ? "runner" : "job"}.patch.json`} : {}),
+    ...(rendered.simOverlays?.length ? {sim_overlay: rendered.simOverlays} : {}),
     model: `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`,
     ...(model.rules ? {rules: Object.fromEntries(model.rules.map((r) => [r.name, {file: r.file, class: r.check_class, model: r.hash}]))} : {}),
     lines: rendered.trace.map((entry) => ({line: entry.line, template_line: entry.template_line, path: entry.path,
@@ -546,6 +556,26 @@ function progXml(model) {
 `;
 }
 
+// A template with the overlays the model opts into, in order: the governor's,
+// then the simulated twin's (a governed set's runner takes a second list of
+// the twin's whose anchors are the governor's lines). Undefined when none applies.
+function overlaid(model, template, patches) {
+  const files = [];
+  if (model.governor && patches.governor) files.push(`${OVERLAY.governor}/${patches.governor}`);
+  if (model.simulate && patches.simulate) files.push(`${OVERLAY.simulate}/${patches.simulate}`);
+  if (model.simulate && model.governor && patches.governed) files.push(`${OVERLAY.simulate}/${patches.governed}`);
+  if (!files.length) return undefined;
+  let text = readFileSync(template, "utf8");
+  for (const file of files) text = governorTemplate(text, JSON.parse(readFileSync(file, "utf8")));
+  return {templateText: text, sim: files.filter((f) => f.startsWith(OVERLAY.simulate))};
+}
+async function renderWith(model, template, patches) {
+  const {renderRecipe} = await import("./dsl-abap.mjs");
+  const over = overlaid(model, template, patches);
+  const result = await renderRecipe(model, template, {profile: "abap", ...(over ? {templateText: over.templateText} : {})});
+  return over?.sim.length ? {...result, simOverlays: over.sim} : result;
+}
+
 // The files of a set, name -> content. What the abap profile refuses is a
 // SetError at the manifest line of the node the line traces to.
 export async function renderSet(model) {
@@ -554,10 +584,8 @@ export async function renderSet(model) {
   let runner, job;
   try {
     console.log = (...items) => console.error(...items); // runtime bootstrap diagnostics
-    runner = await renderRecipe(model, SET_TEMPLATE, {profile: "abap", ...(model.governor ? {templateText:
-      governorTemplate(readFileSync(SET_TEMPLATE, "utf8"), JSON.parse(readFileSync("recipes/l3-governor/runner.patch.json", "utf8")))} : {})});
-    job = await renderRecipe(model, JOB_TEMPLATE, {profile: "abap", ...(model.governor ? {templateText:
-      governorTemplate(readFileSync(JOB_TEMPLATE, "utf8"), JSON.parse(readFileSync("recipes/l3-governor/job.patch.json", "utf8")))} : {})});
+    runner = await renderWith(model, SET_TEMPLATE, {governor: "runner.patch.json", simulate: "runner.patch.json", governed: "runner-governed.patch.json"});
+    job = await renderWith(model, JOB_TEMPLATE, {governor: "job.patch.json"});
   } finally {
     console.log = quiet;
   }
@@ -566,7 +594,7 @@ export async function renderSet(model) {
   const extra = await renderPorts(model);
   // nothing the runner or a generated variant holds may end the unit of work while a table is swapped
   for (const [name, text] of [[`${model.class}.clas.abap`, runner.text], ...extra.results.map(([n, r]) => [n, r.text])]) {
-    const [first] = unitFindings(text, name, {writes: true, jobs: name === `${model.class}.clas.abap`});
+    const [first] = unitFindings(text, name, {writes: true, jobs: name === `${model.class}.clas.abap`, waits: name === `${model.simulate?.work_class}.clas.abap`});
     if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
   }
   const results = [[`${model.class}.clas.abap`, runner], [`${model.report}.prog.abap`, job], ...extra.results];
@@ -618,7 +646,8 @@ async function renderPorts(model) {
     let result;
     try {
       console.log = (...items) => console.error(...items);
-      result = await renderRecipe(root, PORT_TEMPLATES[template], {profile: "abap"});
+      result = template === "factory" ? await renderWith(root, PORT_TEMPLATES[template], {simulate: "factory.patch.json"})
+        : await renderRecipe(root, PORT_TEMPLATES[template], {profile: "abap"});
     } finally { console.log = quiet; }
     results.push([`${name}.${ext}.abap`, result]);
     files[`${name}.${ext}.abap`] = result.text;
@@ -628,12 +657,14 @@ async function renderPorts(model) {
   for (const port of model.ports) {
     const {variants, binding, ...fields} = port;
     const portRoot = {...base, ...fields, port: port.name, "@id": port["@id"], set_line: port.set_line};
-    await one(port.iface, "intf", portRoot, port.is_autoclose ? "iface-autoclose" : port.is_source ? "iface-source" : "iface-sink", `L3 port ${port.name} of ${model.set}`, true);
+    await one(port.iface, "intf", portRoot, port.is_autoclose ? "iface-autoclose" : port.is_work ? "iface-work" : port.is_source ? "iface-source" : "iface-sink", `L3 port ${port.name} of ${model.set}`, true);
     for (const variant of variants) {
-      if (!variant.generated) continue;
+      // a hand-written class is its author's; the work's real variant is the runner's own calls
+      if (!variant.generated || variant.is_inline) continue;
       const root = {...portRoot, "@id": variant["@id"], set_line: variant.set_line, variant: variant.name, class: variant.class,
         capture: variant.is_capture, dummy: variant.is_dummy};
-      const template = port.is_autoclose ? "autoclose" : port.is_source ? (variant.is_table ? "source-table" : variant.is_worklist ? "source-worklist" : "source-mem")
+      const template = port.is_autoclose ? (variant.is_sim ? "autoclose-sim" : "autoclose") : port.is_work ? "work-sim"
+        : port.is_source ? (variant.is_table ? "source-table" : variant.is_worklist ? "source-worklist" : "source-mem")
         : variant.is_log ? "sink-log" : variant.is_dummy ? "sink-dummy" : "sink-capture";
       await one(variant.class, "clas", root, template, `L3 port ${port.name}, variant ${variant.name}`);
     }

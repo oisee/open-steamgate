@@ -2,105 +2,105 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-ports/autoclose.tpl",
- "model": "sha256:825c50aee13b0e5effe6afafb67621ed80b96f7a80376698135be7c34e5d7998",
+ "model": "sha256:16ce9efba6117e7af870b55aee9a3902133a2adeece8914c0fc64bd121f7ffaf",
  "lines": [
   {
    "line": 1,
    "template_line": 1,
    "path": "/source",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 2,
    "template_line": 2,
    "path": "/port",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 3,
    "template_line": 3,
    "path": "/class",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 4,
    "template_line": 4,
    "path": "/",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 5,
    "template_line": 5,
    "path": "/iface",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 6,
    "template_line": 7,
    "path": "/iface",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 7,
    "template_line": 8,
    "path": "/iface",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 8,
    "template_line": 10,
    "path": "/",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 9,
    "template_line": 11,
    "path": "/class",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 10,
    "template_line": 12,
    "path": "/iface",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 11,
    "template_line": 14,
    "path": "/capture",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 12,
    "template_line": 15,
    "path": "/capture",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 13,
    "template_line": 17,
    "path": "/",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   },
   {
    "line": 14,
    "template_line": 18,
    "path": "/",
    "node": "set/fleet2/port/close/variant/capture",
-   "set_line": 54
+   "set_line": 58
   }
  ]
 }

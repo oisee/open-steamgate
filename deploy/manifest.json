@@ -4,7 +4,7 @@
   "customerNamespaces": [],
   "units": {
     "l3demo": {
-      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner with its ports (two interfaces, five generated variants, the factory and its exception), its job report, the alert log, the pile plan table, the run lock and the proof class; and the two-stage set ZCL_L3_FLEET2 (slice 3b): the keys rule ZCL_L2_SHIP_BUSY, its runner, report, ports (with the worklist variant), the worklist ZOSD_L3_WORK and the stage gate ZOSD_L3_STAGE; and since slice 5a the doctor's audit ZOSD_L3_DOCTOR and the kill switch ZOSD_L3_KILL; since slice 5b the settings ZOSD_L3_CONF, ZOSD_L3_CONF_LOG, ZOSD_L3_RUN_CONF, ZCL_L3_FLEET2_CONF and its report ZL3_FLEET2_CONF. Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
+      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner with its ports (two interfaces, five generated variants, the factory and its exception), its job report, the alert log, the pile plan table, the run lock and the proof class; and the two-stage set ZCL_L3_FLEET2 (slice 3b): the keys rule ZCL_L2_SHIP_BUSY, its runner, report, ports (with the worklist variant), the worklist ZOSD_L3_WORK and the stage gate ZOSD_L3_STAGE; and since slice 5a the doctor's audit ZOSD_L3_DOCTOR and the kill switch ZOSD_L3_KILL; since slice 5b the settings ZOSD_L3_CONF, ZOSD_L3_CONF_LOG, ZOSD_L3_RUN_CONF, ZCL_L3_FLEET2_CONF and its report ZL3_FLEET2_CONF; since slice 5d the simulated twin, the work port ZIF_L3_FLEET2_WORK with its sim variant ZCL_L3_FLEET2_WORK_SIM and the chance autoclose ZCL_L3_FLEET2_CLOSE_SIM (ZOSD_L3_RUN gains RUN_BIND). Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
       "sources": ["src/l3proof"],
       "objects": [
         "TABL ZOSD_L2_SHIP",
@@ -29,6 +29,9 @@
         "CLAS ZCL_L3_FLEET2_CLOSE_NONE",
         "CLAS ZCL_L3_FLEET2_CLOSE_CAPTURE",
         "CLAS ZCL_L3_FLEET2_AUTOCLOSE",
+        "CLAS ZCL_L3_FLEET2_CLOSE_SIM",
+        "INTF ZIF_L3_FLEET2_WORK",
+        "CLAS ZCL_L3_FLEET2_WORK_SIM",
         "CLAS ZCL_L2_MAINTENANCE_SHIP",
         "CLAS ZCL_L2_GROUNDED_SHIP_CREW",
         "CLAS ZCL_L2_SHIP_CAPTAIN",

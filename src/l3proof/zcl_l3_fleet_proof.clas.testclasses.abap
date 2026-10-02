@@ -17,6 +17,9 @@
 * again by one doctor pass on a real job, and the jobs complete the run with
 * mode S's log; a rule that has written c_max_alerts alerts in a run is
 * FUSED, writes nothing more, and the older run's rows of it stay.
+* The simulated twin (slice 5d): the generator draws on the system what its
+* JavaScript twin draws, and fleet2 run with work=sim on real jobs dumps,
+* is retried by the doctor and ends final with only SIM rows in the log.
 * Settings (slice 5b): a tuned max_alerts fuses the next run, and a run the
 * doctor heals after the operator tuned the fuse and the pile size keeps the
 * values its snapshot holds. Every method starts and ends with every setting
@@ -59,10 +62,23 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS rerun FOR TESTING.
     METHODS rerun_fewer_piles FOR TESTING.
     METHODS settings_tune FOR TESTING.
+    METHODS sim_twin FOR TESTING.
     METHODS stages_mode_p FOR TESTING.
     METHODS stages_mode_s FOR TESTING.
     METHODS stages_partial FOR TESTING.
     METHODS plan_budget IMPORTING iv_run TYPE csequence.
+    METHODS golden
+      IMPORTING iv_run TYPE csequence
+                iv_rule TYPE csequence
+                iv_pile TYPE i
+                iv_attempt TYPE i
+                iv_seed TYPE i
+                iv_outcome TYPE csequence
+                iv_duration TYPE i
+                iv_hits TYPE i.
+    METHODS tune
+      IMPORTING iv_param TYPE csequence
+                iv_value TYPE csequence.
     METHODS open_run
       IMPORTING iv_failed TYPE abap_bool
       RETURNING VALUE(rs_result) TYPE zcl_l3_fleet2=>ty_result.
@@ -1375,6 +1391,169 @@ CLASS ltcl_proof IMPLEMENTATION.
     IF lv_fused < 1.
       cl_abap_unit_assert=>fail( msg = 'tuned max_alerts fuses a rule' ).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD sim_twin.
+    " the simulated twin (slice 5d) on real jobs. First the generator draws on
+    " this system what its JavaScript twin draws (tools/dsl-l3-sim.mjs, and
+    " test/dsl-l3-sim.mjs checks these values against it). Then fleet2 runs with
+    " iv_bind = 'work=sim' in mode P: its stage 1 dumps half the time (the
+    " set's simulate: block), a dump is a job that aborts, and the doctor,
+    " asked once a second here, fails the pile and submits it again on a real
+    " job; the run ends final, every pile's attempts are the draws, and every
+    " row it logged is a SIM row under a sim256: hash
+    DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
+    DATA lt_report TYPE zcl_l3_fleet2=>tt_doctor.
+    DATA ls_report LIKE LINE OF lt_report.
+    DATA ls_lock TYPE zosd_l3_run.
+    DATA lt_piles TYPE STANDARD TABLE OF zosd_l3_pile WITH DEFAULT KEY.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lt_alerts TYPE STANDARD TABLE OF zosd_l3_alert WITH DEFAULT KEY.
+    DATA ls_alert TYPE zosd_l3_alert.
+    DATA ls_ship TYPE zosd_l2_ship.
+    DATA ls_work TYPE zif_l3_fleet2_work=>ty_pile.
+    DATA ls_draw TYPE zcl_l3_fleet2_work_sim=>ty_draw.
+    DATA lt_none TYPE string_table.
+    DATA lv_resubmits TYPE i.
+    DATA lv_waited TYPE i.
+    DATA lv_offset TYPE i.
+    DATA lv_attempt TYPE i.
+    DATA lv_id TYPE zosd_l2_ship-ship_id.
+    DATA lv_msg TYPE string.
+    DATA lv_text TYPE string.
+    CONSTANTS lc_letters TYPE c LENGTH 16 VALUE 'ABCDEFGHIJKLMNOP'.
+    golden( iv_run = 'A4H0TWIN000000000000000000000001' iv_rule = 'ship-cargo-limit' iv_pile = 1 iv_attempt = 2 iv_seed = 7
+            iv_outcome = 'OK' iv_duration = 19 iv_hits = 3 ).
+    golden( iv_run = 'A4H0TWIN000000000000000000000004' iv_rule = 'ship-busy' iv_pile = 4 iv_attempt = 2 iv_seed = 7
+            iv_outcome = 'OK' iv_duration = 17 iv_hits = 2 ).
+    golden( iv_run = 'A4H0TWIN000000000000000000000008' iv_rule = 'ship-busy' iv_pile = 8 iv_attempt = 3 iv_seed = 2147483646
+            iv_outcome = 'DUMP' iv_duration = 4 iv_hits = 4 ).
+    golden( iv_run = 'A4H0TWIN000000000000000000000013' iv_rule = 'ship-cargo-limit' iv_pile = 4 iv_attempt = 2 iv_seed = 7
+            iv_outcome = 'DUMP' iv_duration = 881 iv_hits = 1 ).
+    golden( iv_run = 'A4H0TWIN000000000000000000000042' iv_rule = 'ship-min-crew' iv_pile = 6 iv_attempt = 1 iv_seed = 42
+            iv_outcome = 'DUMP' iv_duration = 119 iv_hits = 1 ).
+    golden( iv_run = 'A4H0TWIN000000000000000000000083' iv_rule = 'maintenance-ship-no-future-voyage' iv_pile = 2 iv_attempt = 3 iv_seed = 2147483646
+            iv_outcome = 'HANG' iv_duration = 1350 iv_hits = 5 ).
+    golden( iv_run = 'A4H0TWIN000000000000000000000011' iv_rule = 'ship-too-many-future-voyages' iv_pile = 2 iv_attempt = 3 iv_seed = 2147483646
+            iv_outcome = 'SLOW' iv_duration = 755 iv_hits = 4 ).
+    " sixteen more ships, L30A to L30P: with setup's four, ten piles in stage 1,
+    " so a dump at one of their first attempts is all but certain (1 in 1024)
+    DO 16 TIMES.
+      lv_offset = sy-index - 1.
+      CONCATENATE 'L30' lc_letters+lv_offset(1) INTO lv_id.
+      add_ship( iv_id = lv_id iv_name = 'Twin' iv_status = 'A' ).
+      READ TABLE mt_ship INTO ls_ship INDEX lines( mt_ship ).
+      INSERT zosd_l2_ship FROM ls_ship.
+    ENDDO.
+    " a retry at once and up to twenty of them, a stale of a minute, room for
+    " every simulated alert, and no wall time: the twin's time scale 0
+    tune( iv_param = 'retry.max' iv_value = '20' ).
+    tune( iv_param = 'retry.backoff' iv_value = '0' ).
+    tune( iv_param = 'stale' iv_value = '60' ).
+    tune( iv_param = 'budget.glass' iv_value = '1000' ).
+    tune( iv_param = 'simulate.time_scale' iv_value = '0' ).
+    COMMIT WORK.
+    ls_result = zcl_l3_fleet2=>run( iv_date = zcl_l3_fleet_proof=>c_check_date
+                                    iv_mode = zcl_l3_fleet2=>c_parallel
+                                    iv_bind = 'work=sim' ).
+    APPEND ls_result-run_id TO mt_runs.
+    COMMIT WORK.
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'SUBMITTED' msg = 'the twin is submitted' ).
+    DO.
+      lt_report = zcl_l3_fleet2=>doctor( ).
+      COMMIT WORK.
+      LOOP AT lt_report INTO ls_report WHERE run_id = ls_result-run_id AND doc_action = 'RESUBMIT'.
+        lv_resubmits = lv_resubmits + 1.
+      ENDLOOP.
+      SELECT SINGLE * FROM zosd_l3_run INTO ls_lock
+        WHERE set_name = zcl_l3_fleet2=>c_set
+          AND check_date = zcl_l3_fleet_proof=>c_check_date.
+      IF ls_lock-run_id = ls_result-run_id AND ls_lock-status = 'RELEASED'.
+        EXIT.
+      ENDIF.
+      IF lv_waited >= c_wait_limit.
+        SELECT * FROM zosd_l3_pile INTO TABLE lt_piles WHERE run_id = ls_result-run_id ORDER BY PRIMARY KEY.
+        lv_msg = 'the twin did not end:'.
+        LOOP AT lt_piles INTO ls_pile WHERE status <> 'DONE'.
+          lv_text = |{ ls_pile-rule_name } { ls_pile-pile_no } { ls_pile-status } { ls_pile-attempt } { ls_pile-reason }|.
+          CONCATENATE lv_msg lv_text INTO lv_msg SEPARATED BY space.
+        ENDLOOP.
+        cl_abap_unit_assert=>fail( msg = lv_msg ).
+      ENDIF.
+      WAIT UP TO 1 SECONDS.
+      lv_waited = lv_waited + 1.
+    ENDDO.
+    cl_abap_unit_assert=>assert_equals( act = ls_lock-run_bind exp = 'work=sim' msg = 'the run row records its binding' ).
+    IF lv_resubmits < 1.
+      cl_abap_unit_assert=>fail( msg = 'no pile dumped and was submitted again' ).
+    ENDIF.
+    " every pile DONE, at the attempt the generator says: the attempts before it
+    " dumped or hung, it ended normally
+    SELECT * FROM zosd_l3_pile INTO TABLE lt_piles WHERE run_id = ls_result-run_id ORDER BY PRIMARY KEY.
+    cl_abap_unit_assert=>assert_not_initial( act = lt_piles msg = 'the twin planned piles' ).
+    LOOP AT lt_piles INTO ls_pile.
+      lv_text = |{ ls_pile-rule_name } { ls_pile-pile_no }|.
+      cl_abap_unit_assert=>assert_equals( act = ls_pile-status exp = 'DONE' msg = lv_text ).
+      CLEAR ls_work.
+      ls_work-run_id = ls_result-run_id.
+      ls_work-rule = ls_pile-rule_name.
+      ls_work-pile_no = ls_pile-pile_no.
+      ls_work-seed = zcl_l3_fleet2=>c_sim_seed.
+      ls_work-stale = 60.
+      lv_attempt = 1.
+      WHILE lv_attempt <= ls_pile-attempt.
+        ls_work-attempt = lv_attempt.
+        ls_draw = zcl_l3_fleet2_work_sim=>draw( is_pile = ls_work
+                                                it_keys = lt_none ).
+        IF lv_attempt < ls_pile-attempt AND ls_draw-outcome <> 'DUMP' AND ls_draw-outcome <> 'HANG'.
+          cl_abap_unit_assert=>fail( msg = |{ lv_text }: attempt { lv_attempt } drew { ls_draw-outcome } and was retried| ).
+        ENDIF.
+        IF lv_attempt = ls_pile-attempt AND ( ls_draw-outcome = 'DUMP' OR ls_draw-outcome = 'HANG' ).
+          cl_abap_unit_assert=>fail( msg = |{ lv_text }: its last attempt drew { ls_draw-outcome } and ended DONE| ).
+        ENDIF.
+        lv_attempt = lv_attempt + 1.
+      ENDWHILE.
+    ENDLOOP.
+    SELECT * FROM zosd_l3_alert INTO TABLE lt_alerts WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = ls_result-run_id.
+    LOOP AT lt_alerts INTO ls_alert.
+      IF ls_alert-alert_text NP 'SIM *' OR ls_alert-model_hash NP 'sim256:*'.
+        cl_abap_unit_assert=>fail( msg = |a simulated row that does not say so: { ls_alert-alert_text }| ).
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD golden.
+    " one draw of the generator on this system against what its JavaScript
+    " twin computes for the same inputs (time scale 0, stale 900)
+    DATA ls_work TYPE zif_l3_fleet2_work=>ty_pile.
+    DATA ls_draw TYPE zcl_l3_fleet2_work_sim=>ty_draw.
+    DATA lt_none TYPE string_table.
+    DATA lv_filter TYPE abap_bool.
+    DATA lv_msg TYPE string.
+    ls_work-run_id = iv_run.
+    ls_work-rule = iv_rule.
+    ls_work-pile_no = iv_pile.
+    ls_work-attempt = iv_attempt.
+    ls_work-seed = iv_seed.
+    ls_work-stale = 900.
+    IF iv_rule = zcl_l3_fleet2=>c_rule_1.
+      lv_filter = abap_true.
+    ENDIF.
+    ls_draw = zcl_l3_fleet2_work_sim=>draw( is_pile = ls_work
+                                            it_keys = lt_none
+                                            iv_filter = lv_filter ).
+    lv_msg = |golden draw { iv_run } { iv_rule } { iv_pile } { iv_attempt } { iv_seed }|.
+    cl_abap_unit_assert=>assert_equals( act = ls_draw-outcome exp = iv_outcome msg = lv_msg ).
+    cl_abap_unit_assert=>assert_equals( act = ls_draw-duration exp = iv_duration msg = lv_msg ).
+    cl_abap_unit_assert=>assert_equals( act = ls_draw-hits exp = iv_hits msg = lv_msg ).
+  ENDMETHOD.
+
+  METHOD tune.
+    DATA lv_ok TYPE abap_bool.
+    DATA lv_msg TYPE string.
+    lv_ok = zcl_l3_fleet2=>set_setting( iv_param = iv_param iv_value = iv_value iv_note = 'sim twin proof' ).
+    lv_msg = |{ iv_param } = { iv_value } accepted|.
+    cl_abap_unit_assert=>assert_equals( act = lv_ok exp = abap_true msg = lv_msg ).
   ENDMETHOD.
 
 ENDCLASS.
