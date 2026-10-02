@@ -12,10 +12,9 @@ import {emitBuiltinJs} from "./emit-builtins.mjs";
 // object, a table an array; a structure or table moved out of a place is
 // copied (abap.copy), which is ABAP's value semantics. An EXPORTING
 // parameter is a box {v}.
+import {emitSectionStatement} from "./emit-js-section.mjs";
 import {ident as goIdent, funcName, referencedClasses, hexBytes, definable} from "./emit-go.mjs";
 
-// Go's identifiers, and an _ after a word JavaScript reserves (a parameter
-// named IN made the module a syntax error)
 const JS_RESERVED = new Set(("await catch class const debugger delete do enum export extends finally function in instanceof let "
   + "super this throw try typeof void while with yield arguments eval implements private protected public static").split(" "));
 const ident = (name) => {
@@ -326,7 +325,7 @@ function place(p, ctx) {
     case "const": return p.go;
     case "static": {
       const [cls, attr] = p.go.split("__");
-      return `${cls}.${ident(attr)}`;
+      return `${p.owner ? `(${cls}.$ensure?.(s), ${cls})` : cls}.${ident(attr)}`;
     }
     case "field": return `${["var", "attr", "static", "field", "fs", "row", "refattr", "const"].includes(p.base.e) ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "dref_field": return `${expr(p.base, ctx)}.get().${ident(p.name)}`;
@@ -435,6 +434,7 @@ function stmt(st, ctx, d) {
       const value = st.target.type.k === "n" ? `abap.CToN(v, ${limit})` : st.target.type.k === "d" ? "abap.S2D(v)" : "v";
       return [`${t}{ const [v, rc] = abap.ConcatFit(${joined}, ${limit}); ${place(st.target, ctx)} = ${value}; s.sy.subrc = rc; }`];
     }
+    case "replace_bytes": case "replace_chars": return emitSectionStatement(st, ctx, t, {expr, place});
     case "find_bytes":
       return [`${t}{ const fb = abap.FindBytes(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.secOff ? expr(st.secOff, ctx) : "0"}); if (fb >= 0) { ${st.off ? `${place(st.off, ctx)} = fb; ` : ""}s.sy.subrc = 0; } else { s.sy.subrc = 4; } }`];
     case "find_all": {
@@ -926,7 +926,7 @@ const FN = {SIN: "Math.sin", COS: "Math.cos", TAN: "Math.tan", SQRT: "abap.SqrtF
 
 function expr(e, ctx) {
   switch (e.e) {
-    case "static": return e.owner ? `(${typeName(e.owner)}.$ensure?.(s), ${place(e, ctx)})` : place(e, ctx);
+    case "static": return place(e, ctx);
     case "var": case "attr": case "field": case "fs": case "row": case "refattr": case "dref_field": return place(e, ctx);
     case "zero": return zero(e.type);
     case "case_fn": return `abap.${e.upper ? "ToUpper" : "ToLower"}(${expr(e.x, ctx)})`;

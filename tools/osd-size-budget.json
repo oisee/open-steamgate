@@ -481,6 +481,10 @@
     "go:intpower": {
       "lines": 120,
       "reason": "758 IPOW oracle: negative exponent float path and numeric assignment text in the pure helper; go/abap budgets unchanged"
+    },
+    "go:charsection": {
+      "lines": 63,
+      "reason": "Character REPLACE SECTION isolated from go/abap; character bounds and fixed-target fitting, with focused tests."
     }
   },
   "readmeMissing": [

@@ -1722,3 +1722,20 @@ inherited `DEFINE` (28 methods in three unbuilt owners); AJSON parsing
 classes were not timed: `go/abap/db.go` has one process-global DB, and
 generated class constructors and class data are process global without
 goroutine coordination.
+
+### Static attribute write targets
+
+`class=>attr` resolves to the declaring class's storage for reads and writes,
+including an explicit name of the current class. The target class constructor
+runs before an assignment, CLEAR, a table mutation or a reference actual.
+External READ-ONLY writes are compilation refusals. REPLACE SECTION supports
+byte and character mode; CONCATENATE supports both modes. Fixed hex attributes
+also accept offset/length assignment. Offset reads and XSTRLEN use the same
+static attribute resolution.
+
+The static oracle fixture covers six ABAPiti cases; the static write fixture
+covers constructor ordering, character sections, tables and output actuals.
+The chunk fixtures alternate interface calls through static references to depth
+2000 and count 2001 calls. Go ABAP Unit and the JS emitter check the same answers.
+Public static xstrings keep the string ABI; they are outside owned-buffer
+selection. Static buffer ownership across classes remains future work.
