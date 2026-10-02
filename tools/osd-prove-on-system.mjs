@@ -800,7 +800,7 @@ export async function receiptVersions(mcp, pkg, items) {
 
 // vsp deletes in the given order, and a table whose data element went first serialises
 // with COMPTYPE N and comes back `changed` (A4H 2026-10-02): users before what they use
-export const deleteRank = (type) => ({DDLS: 1, VIEW: 2, TABL: 2, TTYP: 2, SHLP: 3, ENQU: 3, DTEL: 4, DOMA: 5})[type] ?? 0;
+export const deleteRank = (type) => ({INTF: 1, DDLS: 2, SHLP: 3, ENQU: 3, TTYP: 4, VIEW: 5, TABL: 5, DTEL: 6, DOMA: 7})[type] ?? 0;
 
 /** Step 7: one `git_delete_objects` call, users first (deleteRank). Each object goes
  *  with the receipt's `expect: {sha256}`: vsp locks, reads the version under the
