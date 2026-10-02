@@ -672,9 +672,17 @@ export function adtRouter(options = {}) {
   // 403 they never asked for
   // the Node session middleware is the gate only when no ABAP front is; with
   // one, the front resolves the session and runs the gate in ABAP
-  if (options.abap === undefined) router.use(BASE, sessions.middleware());
+  // every pass-through layer is mounted through here and returned, so the
+  // coverage gate (test/adt-abap-coverage.mjs) can tell it from an endpoint
+  // by reference, with its path, and not by what its source looks like
+  const middleware = [];
+  const pass = (id, path, fn) => {
+    middleware.push({id, path, fn});
+    router.use(path, fn);
+  };
+  if (options.abap === undefined) pass("sessions", BASE, sessions.middleware());
   // every answer names the generation of the system it describes
-  router.use(BASE, (req, res, next) => {
+  pass("generation", BASE, (req, res, next) => {
     const generation = liveHash(store.root);
     if (generation !== undefined) {
       res.set("X-OSD-Generation", generation);
@@ -692,7 +700,7 @@ export function adtRouter(options = {}) {
   const dump = options.dump ?? process.env.STG_ADT_DUMP;
   if (dump !== undefined && dump !== "") {
     let seq = 0;
-    router.use(BASE, (req, res, next) => {
+    pass("dump", BASE, (req, res, next) => {
       const startedAt = new Date();
       const chunks = [];
       const write = res.write.bind(res);
@@ -726,7 +734,7 @@ export function adtRouter(options = {}) {
   // ADR 0007: every request enters ZCL_OSD_ADT_HANDLER (adt-abap-front.mjs),
   // which resolves the session, gates and answers or hands over; locks go
   // to ENQ (adt-enq.mjs)
-  if (options.abap !== undefined) router.use([BASE, "/sap/public/bc/icf/logoff"], abapFront({...options.abap, served: options.abapServed, refuse, store,
+  if (options.abap !== undefined) pass("abap-front", [BASE, "/sap/public/bc/icf/logoff"], abapFront({...options.abap, served: options.abapServed, refuse, store,
     miss: (req, kind) => record(req, kind, undefined, (req.originalUrl ?? req.url).split("?")[0]),
     hostLogoff: async (req) => { await endLogoff(req); endedLogoffs.add(req); },
     generation: () => liveHash(store.root),
@@ -3036,7 +3044,7 @@ export function adtRouter(options = {}) {
     res.status(404).type("application/xml").send(exceptionDocument("ExceptionResourceNotFound", `${req.path} is not served by OSD`));
   });
 
-  return {router, sessions, store, data, resources, missed};
+  return {router, sessions, store, data, resources, missed, middleware};
 }
 
 // a client names a type either as ADT does (DEVC/K, CLAS/OC) or bare (DEVC)
