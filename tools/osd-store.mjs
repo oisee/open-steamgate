@@ -12,7 +12,7 @@
 // registry, because a class that compiles alone can still break the system
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
-import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
+import {closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, watch, writeFileSync, writeSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
@@ -188,44 +188,90 @@ export class ObjectStore {
     // what every cold build of this store is also given (a test's tree of a
     // few objects has nothing to generate: {generators: false})
     this.buildOptions = options.build ?? {};
-    this.#activating = new Map();
+    // a test's crash: the named step throws, leaving the disk as a process
+    // killed there would (#crash)
+    this.crashAt = options.crashAt;
     this.#loadInactive();
   }
 
-  // the objects an activation in flight is building with their saved
-  // version, key -> count of callers
-  #activating;
+  #crash(point) {
+    if (this.crashAt === point) {
+      const error = new Error(`crashed at ${point}`);
+      error.code = "CRASH";
+      throw error;
+    }
+  }
 
   // The set as saved: per object, its files and the digest of what was
-  // saved in them. On load a key whose files no longer hash to it is
-  // dropped: a checkout or another editor wrote that file since, and a save
-  // from the disk is active (the dev loop's rule), so a set left behind by a
-  // process that died cannot keep an object out of the build for ever.
+  // saved in them. The order of every step is the recoverable one:
+  //   a save:       active copy, then the set (with the digest the save will
+  //                 have), then the source -- a crash before the source
+  //                 leaves an object inactive whose file is still active;
+  //   an activation: the set, then the copies -- a crash between leaves a
+  //                 copy nobody owns, which the next start removes;
+  //   a delete:     the files, then the set, then the copies.
+  // The set is replaced atomically (temp, fsync, rename), so no crash
+  // truncates it. A file that no longer hashes to its digest was changed
+  // outside (a checkout, another editor): it stays inactive, with its
+  // active copy, until somebody activates it; nothing claims an activation
+  // that did not happen. An object whose files are all gone is gone.
   #loadInactive() {
+    const file = join(this.root, this.inactiveDir, "inactive.json");
     let saved;
     try {
-      saved = JSON.parse(readFileSync(join(this.root, this.inactiveDir, "inactive.json"), "utf8"));
-    } catch {
-      return; // nothing saved: everything in the tree is active, as before
-    }
-    for (const [key, {files = [], digest} = {}] of Object.entries(saved.inactive ?? {})) {
-      if (digest !== undefined && digest === this.#digestOf(files)) {
-        this.inactive.add(key);
-        this.#saved.set(key, {files, digest});
-      } else {
-        for (const file of files) rmSync(join(this.root, this.#snapshotOf(file)), {force: true});
+      saved = JSON.parse(readFileSync(file, "utf8"));
+    } catch (error) {
+      if (error.code !== "ENOENT" && existsSync(file)) {
+        // unreadable, and not by a crash of ours (the replace is atomic): kept
+        // aside, and every active copy kept, so nothing is lost by guessing
+        console.log(`inactive: ${file} is unreadable (${error.message}); kept aside, nothing removed`);
+        try {
+          renameSync(file, `${file}.unreadable-${Date.now()}`);
+        } catch {
+          // read-only
+        }
+        this.#keepOrphans = true;
       }
+      return;
     }
-    if (this.#saved.size !== Object.keys(saved.inactive ?? {}).length) this.#saveInactive();
+    let changed = false;
+    for (const [key, record = {}] of Object.entries(saved.inactive ?? {})) {
+      const files = Array.isArray(record.files) ? record.files : [];
+      if (files.length > 0 && !files.some((f) => existsSync(join(this.root, f)))) {
+        changed = true;
+        continue;
+      }
+      const digest = this.#digestOf(files);
+      const outside = record.outside === true || (record.digest !== undefined && digest !== record.digest);
+      if (outside !== (record.outside === true) || digest !== record.digest) changed = true;
+      this.inactive.add(key);
+      this.#saved.set(key, {files, digest, ...(outside ? {outside: true} : {})});
+    }
+    if (changed) this.#saveInactive();
+    this.#dropOrphanCopies();
   }
 
   #saved = new Map();
+  #keepOrphans = false;
 
-  #digestOf(files) {
+  // a copy that no saved object owns: what a crash between an activation's
+  // set and its copies leaves behind
+  #dropOrphanCopies() {
+    if (this.#keepOrphans) return;
+    const folder = join(this.root, this.inactiveDir, "active");
+    if (!existsSync(folder)) return;
+    const owned = new Set([...this.#saved.values()].flatMap((r) => r.files.map((f) => resolve(this.root, this.#snapshotOf(f)))));
+    for (const file of walkFiles(folder)) {
+      if (!owned.has(resolve(file))) rmSync(file, {force: true});
+    }
+  }
+
+  #digestOf(files, override = new Map()) {
     const hash = createHash("sha256");
     for (const file of files) {
       hash.update(file).update("\0");
-      if (existsSync(join(this.root, file))) hash.update(readFileSync(join(this.root, file)));
+      if (override.has(file)) hash.update(override.get(file));
+      else if (existsSync(join(this.root, file))) hash.update(readFileSync(join(this.root, file)));
       hash.update("\0");
     }
     return hash.digest("hex");
@@ -237,13 +283,19 @@ export class ObjectStore {
       if (!this.inactive.has(key)) this.#saved.delete(key);
     }
     if (this.inactive.size === 0 && !existsSync(dir)) return;
+    mkdirSync(dir, {recursive: true});
+    const inactive = Object.fromEntries([...this.#saved.entries()].sort(([a], [b]) => a.localeCompare(b)));
+    const target = join(dir, "inactive.json");
+    const temp = `${target}.${process.pid}.tmp`;
+    const fd = openSync(temp, "w");
     try {
-      mkdirSync(dir, {recursive: true});
-      const inactive = Object.fromEntries([...this.#saved.entries()].sort(([a], [b]) => a.localeCompare(b)));
-      writeFileSync(join(dir, "inactive.json"), JSON.stringify({inactive}, null, 1) + "\n");
-    } catch {
-      // a read-only tree keeps the set in memory only
+      writeSync(fd, JSON.stringify({inactive}, null, 1) + "\n");
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
     }
+    this.#crash("save:before-rename");
+    renameSync(temp, target);
   }
 
   // every file of one object in the tree: the source, a class's includes,
@@ -260,15 +312,12 @@ export class ObjectStore {
     return [...new Set(files)];
   }
 
-  #neverActive(type, name) {
-    const key = `${type} ${String(name).toUpperCase()}`;
-    if (!this.inactive.has(key)) return false;
-    const entry = this.find(type, name);
-    return entry === undefined || !this.#filesOfEntry(entry).some((file) => existsSync(join(this.root, this.#snapshotOf(file))));
-  }
-
   #snapshotOf(file) {
     return join(this.inactiveDir, "active", file);
+  }
+
+  #hasCopy(entry) {
+    return this.#filesOfEntry(entry).some((file) => existsSync(join(this.root, this.#snapshotOf(file))));
   }
 
   // the active version of an object, copied aside before its first save
@@ -290,29 +339,35 @@ export class ObjectStore {
     }
   }
 
-  #markInactive(entry) {
+  // the intent, before the bytes: the set says the object is inactive and
+  // what its files will hold once `pending` (file -> text) is written
+  #markInactive(entry, pending = new Map()) {
     const key = `${entry.type} ${entry.name}`;
     const files = this.#filesOfEntry(entry);
     this.inactive.add(key);
-    this.#saved.set(key, {files, digest: this.#digestOf(files)});
+    this.#saved.set(key, {files, digest: this.#digestOf(files, pending)});
     this.#saveInactive();
   }
 
   #markActive(type, name) {
     const key = `${type} ${String(name).toUpperCase()}`;
-    if (!this.inactive.delete(key)) return;
+    if (!this.inactive.has(key)) return;
     const entry = this.find(type, name);
-    if (entry !== undefined) this.#dropActiveCopy(entry);
+    this.inactive.delete(key);
     this.#saveInactive();
+    this.#crash("activate:before-copies");
+    if (entry !== undefined) this.#dropActiveCopy(entry);
   }
 
-  // The inactive objects as the build takes them (tools/osd-build.mjs
+  // The inactive objects as one build takes them (tools/osd-build.mjs
   // activeOverlay): every file of an inactive object is excluded, and its
   // last active version comes from build/inactive/active when there is one.
-  // An object an activation in flight names is built with its saved version
-  // instead -- that is what activating it means -- so its copy is excluded.
+  // The objects THIS publication activates (`activating`, a set of
+  // "TYPE NAME") are built with their saved version instead -- that is what
+  // activating them means -- so their copies are excluded. Another
+  // publication's objects are not this one's: each build is given its own.
   // undefined when there is nothing to keep out.
-  overlay() {
+  overlay(activating = new Set()) {
     const kept = [];
     const copied = [];
     const unused = [];
@@ -321,11 +376,11 @@ export class ObjectStore {
       const [type, ...rest] = key.split(" ");
       const entry = this.find(type, rest.join(" "));
       if (entry === undefined) continue;
-      const activating = this.#activating.has(key);
+      const mine = activating.has(key);
       for (const file of this.#filesOfEntry(entry)) {
         const copy = this.#snapshotOf(file);
         const hasCopy = existsSync(join(this.root, copy));
-        if (activating) {
+        if (mine) {
           if (hasCopy) unused.push(resolve(this.root, copy));
           continue;
         }
@@ -347,6 +402,49 @@ export class ObjectStore {
       if (!owned.has(resolve(file))) unused.push(resolve(file));
     }
     return {exclude: [...new Set([...kept, ...unused])].sort(), folder: join(this.inactiveDir, "active")};
+  }
+
+  // The registry as the build of `activating` would see the system: every
+  // other inactive object as its active copy, or absent when it never had
+  // one, for the length of one call. What a precheck says about a dependent
+  // is then what the build will say, not what an unactivated save says
+  // (#withSource's borrowing, for several files).
+  #withOverlay(activating, fn) {
+    const registry = this.registry();
+    const swapped = [];
+    for (const key of this.inactive) {
+      if (activating.has(key)) continue;
+      const [type, ...rest] = key.split(" ");
+      const entry = this.find(type, rest.join(" "));
+      if (entry === undefined) continue;
+      for (const file of this.#filesOfEntry(entry)) {
+        if (!/\.(abap|xml|asddls)$/.test(file)) continue;
+        const name = "/" + file;
+        const before = registry.getFileByName(name);
+        const copy = join(this.root, this.#snapshotOf(file));
+        if (existsSync(copy)) {
+          const replacement = new abaplint.MemoryFile(name, readFileSync(copy, "utf8"));
+          if (before === undefined) registry.addFile(replacement);
+          else registry.updateFile(replacement);
+          swapped.push({name, before, replacement});
+        } else if (before !== undefined) {
+          registry.removeFile(before);
+          swapped.push({name, before, replacement: undefined});
+        }
+      }
+    }
+    if (swapped.length === 0) return fn(registry);
+    try {
+      registry.parse();
+      return fn(registry);
+    } finally {
+      for (const {before, replacement} of swapped.reverse()) {
+        if (before === undefined) registry.removeFile(replacement);
+        else if (replacement === undefined) registry.addFile(before);
+        else registry.updateFile(before);
+      }
+      registry.parse();
+    }
   }
 
   // the inactive objects, for the ADT inactive-objects feed
@@ -386,16 +484,27 @@ export class ObjectStore {
   #sourceRevision(type, name) {
     const entry = this.find(type, name);
     if (entry === undefined) return undefined;
-    const files = type === "CLAS"
+    return this.#revisionOf(entry, (file) => existsSync(join(this.root, file))
+      ? createHash("sha256").update(readFileSync(join(this.root, file))).digest("hex") : "");
+  }
+
+  // a revision is the files of an object and the digest of each: the same
+  // whether it is read off the disk or off the digests a build read
+  // (tools/osd-build.mjs hashOf), so a completion compares like with like
+  #revisionOf(entry, digestOf) {
+    const files = entry.type === "CLAS"
       ? Object.values(INCLUDES).map((suffix) => entry.file.replace(/\.clas\.abap$/, suffix))
       : [entry.file];
     const hash = createHash("sha256");
-    for (const file of files) {
-      hash.update(file).update("\0");
-      if (existsSync(join(this.root, file))) hash.update(readFileSync(join(this.root, file)));
-      hash.update("\0");
-    }
+    for (const file of files) hash.update(file).update("\0").update(digestOf(file)).update("\0");
     return hash.digest("hex");
+  }
+
+  #builtRevision(key, digests) {
+    const [type, ...rest] = key.split(" ");
+    const entry = this.find(type, rest.join(" "));
+    if (entry === undefined) return undefined;
+    return this.#revisionOf(entry, (file) => digests.get(join(this.root, file)) ?? digests.get(resolve(this.root, file)) ?? "");
   }
 
   // ---------------------------------------------------------------- index
@@ -664,13 +773,17 @@ export class ObjectStore {
       file = entry.file.replace(/\.clas\.abap$/, suffix);
     }
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
-    this.#keepActive(entry);
     // One line ending, the repository's. An editor on Windows sends CRLF,
     // and a save that wrote it as it came turned a one-line comment into a
     // sixty-three-line diff with no comment in it. A system stores source
     // by line, not by terminator, and so does this tree.
-    writeFileSync(join(this.root, file), String(source).replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
-    this.#markInactive(entry);
+    const text = String(source).replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+    // the active copy, then the intent, then the bytes (#loadInactive)
+    this.#keepActive(entry);
+    this.#crash("write:before-intent");
+    this.#markInactive(entry, new Map([[file, Buffer.from(text, "utf8")]]));
+    this.#crash("write:before-source");
+    writeFileSync(join(this.root, file), text);
     this.#forget();
     return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8")};
   }
@@ -722,10 +835,8 @@ export class ObjectStore {
     }
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
     const made = CREATABLE[type](upper, description, options.source);
-    for (const [suffix, content] of Object.entries(made)) {
-      const target = type === "DEVC" ? file : file.slice(0, -meta.ext.length) + suffix;
-      writeFileSync(join(this.root, target), content);
-    }
+    const writes = Object.entries(made).map(([suffix, content]) =>
+      [type === "DEVC" ? file : file.slice(0, -meta.ext.length) + suffix, content]);
     // filed the way build() files it, so the entry a create makes is the
     // entry the next rebuild makes: a package sits in the package above it,
     // and its own chain stops there
@@ -734,10 +845,15 @@ export class ObjectStore {
     const entry = {type, name: upper, file, root: root.path, writable: true, library: false,
                    imported: root.imported === true, description,
                    package: packages[packages.length - 1], packages};
-    this.#entries().set(`${type} ${upper}`, entry);
+    // the intent first: a crash before the files leaves a set naming files
+    // that are all absent, which the next start drops (#loadInactive)
     if (type !== "DEVC") {
-      this.#markInactive(entry);
+      this.#markInactive(entry, new Map(writes.map(([target, content]) => [target, Buffer.from(String(content), "utf8")])));
     }
+    for (const [target, content] of writes) {
+      writeFileSync(join(this.root, target), content);
+    }
+    this.#entries().set(`${type} ${upper}`, entry);
     this.#forget();
     return {...entry, ...this.stateOf(entry), created: true};
   }
@@ -823,9 +939,10 @@ export class ObjectStore {
         unlinkSync(join(this.root, file));
       }
     }
-    this.#dropActiveCopy(entry);
+    // the files, then the set, then the copies (#loadInactive)
     this.#entries().delete(`${entry.type} ${entry.name}`);
     if (this.inactive.delete(`${entry.type} ${entry.name}`)) this.#saveInactive();
+    this.#dropActiveCopy(entry);
     this.#forget();
     return {type: entry.type, name: entry.name, deleted: true};
   }
@@ -1036,37 +1153,27 @@ export class ObjectStore {
   // joined when its build named the generation by the same hash the tree
   // has now (sourceKey()). Two activators of one save are then one build and
   // one swap, and both answers wait for the swap and carry its ms.
+  //
+  // Each publication carries its own activation (`activate`, the objects it
+  // builds with their saved version), and is joined only by a caller with
+  // the same set over the same tree: two activations of different objects
+  // are two builds, so one's broken save never enters the other's.
   async publish(options = {}) {
-    // the objects this publish activates are built with their saved version
-    // for as long as any publish that may carry them is pending
-    const named = [...(options.activate ?? [])].map((o) => `${o.type} ${String(o.name).toUpperCase()}`);
-    if (named.length === 0) return this.#publishInLine(options);
-    for (const key of named) this.#activating.set(key, (this.#activating.get(key) ?? 0) + 1);
-    try {
-      return await this.#publishInLine(options);
-    } finally {
-      for (const key of named) {
-        const left = (this.#activating.get(key) ?? 1) - 1;
-        if (left <= 0) this.#activating.delete(key);
-        else this.#activating.set(key, left);
-      }
-    }
-  }
-
-  async #publishInLine(options = {}) {
+    const activating = new Set([...(options.activate ?? [])].map((o) => `${o.type} ${String(o.name).toUpperCase()}`));
+    const set = [...activating].sort().join("\n");
     const forced = options.force === true || options.replace === true;
     if (!forced) {
-      if (this.#queued !== undefined) return this.#queued.promise;
+      if (this.#queued !== undefined && this.#queued.set === set) return this.#queued.promise;
       const running = this.#running;
-      if (running !== undefined && running.forced !== true) {
+      if (running !== undefined && running.forced !== true && running.set === set) {
         // the name first: what the tree is now, before waiting on anything
-        const key = await this.sourceKey();
+        const key = await this.sourceKey(activating);
         const built = await running.built.catch(() => undefined);
         if (key !== undefined && built?.ok !== false && built?.hash === key) return running.promise;
-        if (this.#queued !== undefined) return this.#queued.promise;
+        if (this.#queued !== undefined && this.#queued.set === set) return this.#queued.promise;
       }
     }
-    const entry = {forced};
+    const entry = {forced, set};
     entry.built = new Promise((resolve, reject) => {
       entry.resolveBuilt = resolve;
       entry.rejectBuilt = reject;
@@ -1075,7 +1182,7 @@ export class ObjectStore {
     entry.promise = this.#publishing.then(() => {
       if (this.#queued === entry) this.#queued = undefined;
       this.#running = entry;
-      return this.#publish(options, entry);
+      return this.#publish({...options, activating}, entry);
     }).finally(() => {
       if (this.#running === entry) this.#running = undefined;
       entry.rejectBuilt(new Error("the publish ended before its build"));
@@ -1094,9 +1201,9 @@ export class ObjectStore {
   // the hash of the inputs (tools/osd-build.mjs hashOf), the same one a warm
   // build names its generation by. undefined when the tree cannot be named,
   // and then nothing is joined.
-  async sourceKey() {
+  async sourceKey(activating = new Set()) {
     try {
-      return hashOf(this.root, inputsOf(this.root), {overlay: this.overlay()});
+      return hashOf(this.root, inputsOf(this.root), {overlay: this.overlay(activating)});
     } catch {
       return undefined;
     }
@@ -1634,7 +1741,20 @@ export class ObjectStore {
   //
   // This is only the check verdict. The inactive mark is cleared separately,
   // after publication succeeds; a failed build is not an activation.
-  activate(type, name) {
+  //
+  // The check sees the system the build will make (#withOverlay): the
+  // objects activated together (`options.activating`, "TYPE NAME"s; this one
+  // when none are named) as saved, every other inactive object as its active
+  // copy or absent. A saved, unactivated, broken dependent no longer holds
+  // back an edit its active version accepts.
+  activate(type, name, options = {}) {
+    const self = `${type} ${String(name).toUpperCase()}`;
+    const activating = new Set([self, ...[...(options.activating ?? [])].map((o) =>
+      typeof o === "string" ? o : `${o.type} ${String(o.name).toUpperCase()}`)]);
+    return this.#withOverlay(activating, () => this.#activateChecked(type, name));
+  }
+
+  #activateChecked(type, name) {
     const result = this.check(type, name);
     if (result.issues.length > 0) {
       return {...result, active: false, dependents: []};
@@ -1646,11 +1766,6 @@ export class ObjectStore {
     // verdict.
     const broken = [];
     for (const dependent of this.dependents(type, name)) {
-      // a dependent that was never activated is not built, so what it says
-      // about this object is not what the system it is activated into says
-      // (a real system checks the active versions of the others). One with
-      // an active version is checked as saved: the closest this tree has
-      if (this.#neverActive(dependent.type, dependent.name)) continue;
       // straight off the registry, not through find(): a dependent may be of
       // a type the store does not index (an IWPR naming the class it maps),
       // and it is in the registry by construction, so it is checked there
@@ -1673,14 +1788,23 @@ export class ObjectStore {
 
   // Complete only the exact revision that passed the check. An editor may
   // save again while publish() awaits its build or runtime recycle.
-  completeActivation(result) {
-    return this.completeActivations([result]);
+  completeActivation(result, built = undefined) {
+    return this.completeActivations([result], built);
   }
 
-  completeActivations(results) {
+  // `built` is what the build read of each object ("TYPE NAME" -> revision,
+  // the publication's transpile.built): an object is promoted only when the
+  // checked revision is the one that was built AND the one on disk now. A
+  // save between the check and the build's read, restored before the
+  // completion, otherwise promoted the checked bytes over a live build of
+  // others and dropped the active copy. Without `built` (no build ran: a
+  // façade whose activation does not transpile) the disk is compared alone.
+  completeActivations(results, built = undefined) {
     // An ADT request may activate several objects. Do not mark the first
     // active if a later one was saved again during the same build.
+    const key = (result) => `${result.type} ${String(result.name).toUpperCase()}`;
     if (results.some((result) => result.active !== true || result.revision === undefined ||
+        (built !== undefined && built[key(result)] !== result.revision) ||
         result.revision !== this.#sourceRevision(result.type, result.name))) return false;
     for (const result of results) {
       this.#markActive(result.type, result.name);
@@ -1695,17 +1819,26 @@ export class ObjectStore {
   // shared: a second caller while one is running gets the same one, and
   // {force: true} rebuilds even when the inputs have not changed.
   transpile(options = {}) {
-    if (this.building !== undefined && options.force !== true) {
+    // the objects this build activates: its own, never another caller's
+    const activating = options.activating instanceof Set ? options.activating : new Set();
+    const set = [...activating].sort().join("\n");
+    if (this.building !== undefined && options.force !== true && this.buildingSet === set) {
       return this.building;
     }
-    // a forced build waits for the one in flight rather than running beside it
-    const before = options.force === true ? this.building : undefined;
+    // a forced build, or one of another activation, waits for the one in
+    // flight rather than running beside it
+    const before = this.building;
+    this.buildingSet = set;
     this.building = (async () => {
       await before?.catch(() => undefined);
       const started = Date.now();
       const w = this.warm();
       // read once, at the start of the build, so the build and its name agree
-      const overlay = this.overlay();
+      const overlay = this.overlay(activating);
+      // what this build read of the objects it activates: the revision a
+      // completion must match, not the bytes on disk when it completes
+      const built = (digests) => digests === undefined ? undefined
+        : Object.fromEntries([...activating].map((key) => [key, this.#builtRevision(key, digests)]));
       if (w.on === true && overlay !== undefined && w.compiler !== undefined) {
         // the warm registry holds the tree as saved, inactive objects
         // included; a build that must leave some out is a cold one
@@ -1719,6 +1852,7 @@ export class ObjectStore {
           try {
             const r = await w.compiler.build();
             return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, warm: true,
+              built: built(w.compiler.digests),
               modules: r.modules, hostHeld: r.hostHeld, from: r.from, stale: r.stale, steps: r.steps,
               closure: r.closure, unverified: w.compiler.unverified.has(r.hash)};
           } catch (error) {
@@ -1738,7 +1872,7 @@ export class ObjectStore {
       try {
         const {build} = await import("./osd-build.mjs");
         const r = await build({...this.buildOptions, root: this.root, force: options.force === true, replace: options.replace === true, overlay});
-        return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached};
+        return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, built: built(r.digests)};
       } catch (error) {
         // the transpiler's refusal names each object and line; the rest of
         // the log is for the host's console and never for a client: it

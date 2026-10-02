@@ -160,15 +160,124 @@ describe("tools/adt-facade: a failed activation stays inactive", function () {
     expect(await inactive()).not.to.contain("ZOSD_ACT_OK");
   });
 
-  it("the inactive set survives a restart, and a file changed on disk since is active", async () => {
+  it("the inactive set survives a restart, and a file changed on disk since stays inactive", async () => {
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+    expect(ok(await activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'saved'"));
     store.write("PROG", "ZOSD_ACT_BAD", BROKEN);
-    store.write("PROG", "ZOSD_ACT_OK", TRIVIAL("ZOSD_ACT_OK"));
     const again = new ObjectStore({root, libs: []});
-    expect(again.inactiveObjects().map((o) => o.name)).to.deep.equal(["ZOSD_ACT_BAD", "ZOSD_ACT_OK"]);
-    // a checkout writes the file: the disk is the other editor, and active
-    writeFileSync(join(root, store.find("PROG", "ZOSD_ACT_OK").file), TRIVIAL("ZOSD_ACT_OK") + "* changed\n");
+    expect(again.inactiveObjects().map((o) => o.name)).to.deep.equal(["ZCL_OSD_ACT", "ZOSD_ACT_BAD"]);
+    // a checkout writes other bytes over the saved ones: that is no
+    // activation, so the object stays inactive and keeps its active copy
+    const file = store.find("CLAS", "ZCL_OSD_ACT").file;
+    writeFileSync(join(root, file), CLASS("lv_from_a_checkout"));
     const third = new ObjectStore({root, libs: []});
-    expect(third.inactiveObjects().map((o) => o.name)).to.deep.equal(["ZOSD_ACT_BAD"]);
-    expect(readdirSync(join(root, "build", "inactive"))).to.include("inactive.json");
+    expect(third.inactiveObjects().map((o) => o.name)).to.deep.equal(["ZCL_OSD_ACT", "ZOSD_ACT_BAD"]);
+    expect(readFileSync(join(root, "build", "inactive", "active", file), "utf8")).to.contain("hello");
+    expect(JSON.parse(readFileSync(join(root, "build", "inactive", "inactive.json"), "utf8")).inactive["CLAS ZCL_OSD_ACT"].outside).to.equal(true);
+  });
+
+  // what a completion is bound to: the bytes the build read, not the ones on
+  // disk when it completes
+  it("promotes only what was built: a save restored after the build does not promote the checked bytes", async () => {
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+    expect(ok(await activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'checked'"));
+    const checked = store.activate("CLAS", "ZCL_OSD_ACT");
+    expect(checked.active).to.equal(true);
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'other'"));
+    const published = await store.publish({activate: [{type: "CLAS", name: "ZCL_OSD_ACT"}]});
+    expect(published.ok).to.equal(true);
+    expect(live("zcl_osd_act.clas.mjs")).to.contain("other");
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'checked'"));
+    expect(store.completeActivation(checked, published.transpile.built), "promoted the checked bytes over a build of others").to.equal(false);
+    expect(store.stateOf(store.find("CLAS", "ZCL_OSD_ACT")).version).to.equal("inactive");
+  });
+
+  it("two activations pending together are two builds: one's broken save is not in the other's", async () => {
+    store.write("PROG", "ZOSD_ACT_OK", TRIVIAL("ZOSD_ACT_OK"));
+    store.write("PROG", "ZOSD_ACT_BAD", BROKEN);
+    const first = store.publish();
+    const clean = store.publish({activate: [{type: "PROG", name: "ZOSD_ACT_OK"}]});
+    const broken = store.publish({activate: [{type: "PROG", name: "ZOSD_ACT_BAD"}]});
+    await first;
+    expect((await clean).ok, "the clean activation built the broken save").to.equal(true);
+    expect((await broken).ok).to.equal(false);
+  });
+
+  describe("a crash leaves a state the next start recovers", () => {
+    const restart = () => new ObjectStore({root, libs: []});
+
+    it("a save killed before its source is written stays inactive, with its file and active copy intact", async () => {
+      store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+      expect(ok(await activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+      store.crashAt = "write:before-source";
+      expect(() => store.write("CLAS", "ZCL_OSD_ACT", CLASS("'newer'"))).to.throw(/crashed at/);
+      const file = store.find("CLAS", "ZCL_OSD_ACT").file;
+      expect(readFileSync(join(root, file), "utf8")).to.contain("hello");
+      const next = restart();
+      expect(next.inactiveObjects().map((o) => o.name)).to.deep.equal(["ZCL_OSD_ACT"]);
+      expect(existsSync(join(root, "build", "inactive", "active", file)), "the active copy").to.equal(true);
+    });
+
+    it("a save killed while the set is replaced keeps the set as it was", () => {
+      store.write("PROG", "ZOSD_ACT_BAD", BROKEN);
+      store.crashAt = "save:before-rename";
+      expect(() => store.write("PROG", "ZOSD_ACT_OK", TRIVIAL("ZOSD_ACT_OK"))).to.throw(/crashed at/);
+      expect(restart().inactiveObjects().map((o) => o.name)).to.deep.equal(["ZOSD_ACT_BAD"]);
+    });
+
+    it("an activation killed between the set and the copies leaves the object active and no copy behind", async () => {
+      store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+      expect(ok(await activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+      store.write("CLAS", "ZCL_OSD_ACT", CLASS("'newer'"));
+      const file = store.find("CLAS", "ZCL_OSD_ACT").file;
+      const checked = store.activate("CLAS", "ZCL_OSD_ACT");
+      store.crashAt = "activate:before-copies";
+      expect(() => store.completeActivation(checked)).to.throw(/crashed at/);
+      expect(existsSync(join(root, "build", "inactive", "active", file)), "the copy is still there").to.equal(true);
+      const next = restart();
+      expect(next.inactiveObjects()).to.deep.equal([]);
+      expect(existsSync(join(root, "build", "inactive", "active", file)), "an orphan copy").to.equal(false);
+    });
+  });
+
+  it("a saved, broken dependent does not hold back an edit its active version accepts", () => {
+    const user = `CLASS zcl_osd_act_user DEFINITION PUBLIC CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS shout RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+
+CLASS zcl_osd_act_user IMPLEMENTATION.
+  METHOD shout.
+    rv = zcl_osd_act=>greet( ).
+  ENDMETHOD.
+ENDCLASS.
+`;
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+    expect(store.completeActivation(store.activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+    store.write("CLAS", "ZCL_OSD_ACT_USER", user);
+    expect(store.completeActivation(store.activate("CLAS", "ZCL_OSD_ACT_USER"))).to.equal(true);
+    // saved broken, not activated: its active version still compiles
+    store.write("CLAS", "ZCL_OSD_ACT_USER", user.replace("rv = zcl_osd_act=>greet( ).", "rv = zcl_osd_act=>greet( ).\n    rv = lv_nowhere."));
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'changed'"));
+    const verdict = store.activate("CLAS", "ZCL_OSD_ACT");
+    expect(verdict.dependents.map((d) => d.name)).to.deep.equal([]);
+    expect(verdict.active).to.equal(true);
+  });
+
+  it("no host path in X-OSD-Build when a swap is refused over one", async () => {
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+    store.transpile = async () => ({ok: true, warm: true, hash: "h2", from: "h1", modules: ["zcl_osd_act.clas.mjs"], hostHeld: []});
+    store.served = {
+      running: true, generation: "h1", swaps: 0, epoch: 1,
+      hot: async () => { throw new Error("cannot load /home/some user/a tree/output/zcl_osd_act.clas.mjs"); },
+      recycle: async () => ({generation: "h2", ms: 7}),
+    };
+    const answer = await activate("CLAS", "ZCL_OSD_ACT");
+    expect(ok(answer), answer.xml).to.equal(true);
+    expect(answer.build).to.match(/^cold; recycled after a warm build/);
+    expect(answer.build).not.to.match(/\/home|some user/);
+    expect(withoutHostPaths("at /secret and C:\\Users\\Al Ice\\x\\y.abap", root)).to.equal("at secret and x\\y.abap");
   });
 });

@@ -689,7 +689,11 @@ export async function build(options = {}) {
   const started = Date.now();
   const {config, stack} = prepare(root, log);
   const inputs = inputsOf(root, config);
-  const hash = hashOf(root, inputs, {overlay: options.overlay});
+  // what each input held when the generation was named: the bytes it is
+  // built from (checked as the transpiler reads them, below), and what an
+  // activation's completion compares with (ObjectStore#completeActivations)
+  const digests = new Map();
+  const hash = hashOf(root, inputs, {overlay: options.overlay, digests});
   const target = join(paths.byInput, hash);
 
   // a generation a warm build made (tools/osd-warm.mjs) is not a cache hit
@@ -728,7 +732,7 @@ export async function build(options = {}) {
     if (options.switch !== false && liveHash(root) !== hash) {
       switchTo(root, hash, log);
     }
-    return {ok: true, hash, cached: true, live: liveHash(root) === hash, ms: Date.now() - started, objects: manifest.objects};
+    return {ok: true, hash, cached: true, live: liveHash(root) === hash, ms: Date.now() - started, objects: manifest.objects, digests};
   }
 
   const unlock = lock(paths);
@@ -768,7 +772,21 @@ export async function build(options = {}) {
     // tools/osd-transpile.mjs): no node_modules/.bin, no second process,
     // no parsing a count out of its output
     log("transpile");
-    const made = await transpile({root, config: own, log: (m) => { output += m + "\n"; }});
+    // **The bytes the generation is named by are the bytes it is built
+    // from.** A save that lands between the hash above and the transpiler's
+    // read would build other bytes under this name; it is refused instead,
+    // and the next build names what is there then
+    const changed = [];
+    const made = await transpile({root, config: own, log: (m) => { output += m + "\n"; },
+      onRead: (file, bytes) => {
+        const known = digests.get(file);
+        if (known !== undefined && createHash("sha256").update(bytes).digest("hex") !== known) changed.push(relative(root, file));
+      }});
+    if (changed.length > 0) {
+      const error = new Error(`the tree changed while it was built: ${changed.slice(0, 5).join(", ")}`);
+      error.code = "CHANGED";
+      throw error;
+    }
     const objects = made.objects;
 
     const manifest = {
@@ -857,7 +875,7 @@ export async function build(options = {}) {
     if (options.switch !== false) {
       switchTo(root, hash, log);
     }
-    return {ok: true, hash, cached: false, live: liveHash(root) === hash, ms: manifest.ms, objects, output: options.verbose ? output : undefined};
+    return {ok: true, hash, cached: false, live: liveHash(root) === hash, ms: manifest.ms, objects, output: options.verbose ? output : undefined, digests};
   } catch (error) {
     rmSync(tmp, {recursive: true, force: true});
     error.output = (error.output ?? "") || output;

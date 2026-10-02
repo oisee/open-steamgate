@@ -397,7 +397,7 @@ export class StoreDestination {
     // nobody opened is hiding the part worth seeing.
     const before = snapshotOf(join(this.store.root, "gen"));
     const published = await this.store.publish({activate: [{type, name}]});
-    const committed = published?.ok !== false && this.store.completeActivation(result);
+    const committed = published?.ok !== false && this.store.completeActivation(result, published?.transpile?.built);
     const regenerated = changedSince(before, join(this.store.root, "gen"));
     const objects = [
       ...regenerated.written.map((path) => generatedRow(path, "generated")),

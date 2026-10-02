@@ -9,6 +9,7 @@
 // paths of the machine that built it and stays in the host's console
 // (vsp-i7's abapGit spike, 2026-10-02: the first 2 KB of that log was the
 // whole answer, and it named the cause nowhere).
+import {homedir, tmpdir} from "node:os";
 import {objectOf} from "./osd-inputs.mjs";
 
 const LINE = /^(\S+), (.*), ([^\s,:/\\]+\.[a-z0-9]+):(\d+)$/i;
@@ -32,15 +33,23 @@ export function transpileIssues(text) {
 }
 
 /** text with every absolute path cut to what follows the tree's root, or to
- *  its last two segments when it is not under it */
+ *  its last segment when it is not under it. The places a path of this
+ *  machine starts with (the tree, the working directory, the home and temp
+ *  folders) are cut as literals first, so a folder name with a space in it
+ *  goes too; then any remaining absolute path, one segment or many */
 export function withoutHostPaths(text, root = undefined) {
   let out = String(text ?? "");
-  if (root !== undefined && root !== "") {
-    const prefix = String(root).replace(/\/+$/, "") + "/";
-    out = out.split(prefix).join("");
+  const prefixes = [root, process.cwd(), homedir(), tmpdir()]
+    .filter((p) => typeof p === "string" && p.length > 1)
+    .map((p) => p.replace(/[\\/]+$/, ""))
+    .sort((a, b) => b.length - a.length);
+  for (const prefix of prefixes) {
+    out = out.split(prefix + "/").join("").split(prefix + "\\").join("").split(prefix).join(".");
   }
-  // POSIX absolute paths (two segments or more) and Windows drive paths
-  out = out.replace(/(^|[\s"'(=:])\/(?:[^\s"'()/:]+\/)+([^\s"'()/:]+)/g, (m, lead, last) => `${lead}${last}`);
-  out = out.replace(/(^|[\s"'(=])[A-Za-z]:\\(?:[^\s"'()\\]+\\)+([^\s"'()\\]+)/g, (m, lead, last) => `${lead}${last}`);
+  // a user's home on any machine, whose name may hold a space
+  out = out.replace(/(?:\/home|\/Users|[A-Za-z]:\\Users|[A-Za-z]:\/Users)[\\/][^\\/\n]+[\\/]/g, "");
+  // POSIX absolute paths, one segment or more, and Windows drive paths
+  out = out.replace(/(^|[\s"'(=:,;[])\/+(?:[^\s"'()/:,;\]]+\/+)*([^\s"'()/:,;\]]+)/g, (m, lead, last) => `${lead}${last}`);
+  out = out.replace(/(^|[\s"'(=:,;[])[A-Za-z]:[\\/](?:[^\s"'()\\/]+[\\/])*([^\s"'()\\/]+)/g, (m, lead, last) => `${lead}${last}`);
   return out;
 }

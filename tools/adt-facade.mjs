@@ -2012,8 +2012,10 @@ export function adtRouter(options = {}) {
       const previousActive = previousEntry !== undefined && store.stateOf(previousEntry).version === "active";
       store.write("CLAS", name, asked.source, "main", {root: scratch.path});
       const checked = store.warmActivation("CLAS", name);
+      let notebookBuilt;
       try {
         const activation = await store.publish({activate: [{type: "CLAS", name}]});
+        notebookBuilt = activation?.transpile?.built;
         if (activation?.ok === false) {
           const issue = activation.transpile?.issues?.flatMap((object) => object.issues ?? [])[0];
           const message = issue?.message ?? activation.error ?? activation.transpile?.output ?? "the notebook class did not activate";
@@ -2033,7 +2035,7 @@ export function adtRouter(options = {}) {
         }
         throw error;
       }
-      if (!store.completeActivation(checked)) {
+      if (!store.completeActivation(checked, notebookBuilt)) {
         const error = new Error("source changed during activation; run the notebook cell again");
         error.code = "NOTEBOOK_ACTIVATION_FAILED";
         throw error;
@@ -2463,7 +2465,8 @@ export function adtRouter(options = {}) {
     const t = result?.transpile ?? {};
     const w = store.warm?.();
     // a header value is one line of printable ASCII, whatever a reason says
-    const header = (v) => String(v).replace(/[^\x20-\x7e]+/g, " ").slice(0, 300);
+    // and no host path, whatever a reason quotes (a refused swap names a module file)
+    const header = (v) => withoutHostPaths(String(v), store.root).replace(/[^\x20-\x7e]+/g, " ").slice(0, 300);
     // "warm" is the build AND the load: a warm build the runtime was
     // recycled for (a refused swap, a host-held module) is a cold activation
     // and says why -- ObjectStore#publish sets result.why exactly then
@@ -2473,7 +2476,7 @@ export function adtRouter(options = {}) {
     // activation that succeeded (editors/vscode/extension.js), and this one
     // answers with a failure document, so they show its issue instead
     if (result?.ok === false) {
-      res.set("X-OSD-Build", header(`failed; ${withoutHostPaths(result.error ?? t.error ?? "the build after activation failed", store.root)}`));
+      res.set("X-OSD-Build", header(`failed; ${result.error ?? t.error ?? "the build after activation failed"}`));
       return;
     }
     res.set("X-OSD-Build", header(t.warm === true && result?.recycled !== true && result?.why === undefined ? "warm"
@@ -2537,7 +2540,7 @@ export function adtRouter(options = {}) {
         published = true;
         return;
       }
-      checked = named.map((o) => store.activate(o.type, o.name));
+      checked = named.map((o) => store.activate(o.type, o.name, {activating: named}));
       const failed = checked.filter((r) => r.active === false);
       if (failed.length > 0) {
         // the object that did not activate, then whatever it broke: an
@@ -2601,7 +2604,8 @@ export function adtRouter(options = {}) {
         ));
         return;
       }
-      if (!store.completeActivations(checked)) {
+      // promoted only if what was built is what was checked (and still saved)
+      if (!store.completeActivations(checked, result?.transpile?.built)) {
         res.status(200).type("application/xml").send(activationFailureDocument(
           named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
         ));

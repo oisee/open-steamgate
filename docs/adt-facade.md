@@ -203,13 +203,24 @@ in the file, which stays the working area every editor shares, and marks the
 object inactive. Before the first save after an activation the active
 version is copied to `build/inactive/active/<file>`; the set lives in
 `build/inactive/inactive.json` with a digest of each saved file, so it
-survives a restart and a file changed on disk since (a checkout, another
-editor) is active again. Every build excludes the files of the inactive
+survives a restart; a file changed on disk since (a checkout, another
+editor) stays inactive with its active copy, marked `outside`, until it is
+activated. Every step is ordered to recover from a kill: a save writes the
+copy, then the set (with the digest it will have), then the source; an
+activation writes the set, then drops the copies; a delete removes the files,
+then the set, then the copies; the set is replaced atomically (temp, fsync,
+rename), and a copy no saved object owns is removed at start. Every build excludes the files of the inactive
 objects and takes their active copy instead, or nothing for an object that
 was never active (`ObjectStore#overlay`, `activeOverlay` in
 `tools/osd-build.mjs`, both in the generation's hash). An activation names
 its objects (`store.publish({activate})`), which are built with their saved
-version; only a successful publication promotes them and drops the copy. So
+version; each publication carries its own set and is joined only by one with
+the same set over the same tree. The precheck sees the same view (the other
+inactive objects as their active copies). Only a successful publication
+promotes them, and only when the revision checked is the one the build read
+(`transpile.built`, from the digests the generation is named by; a cold build
+refuses a file that changed between the hash and the transpiler's read) and
+the one on disk. So
 a failed activation leaves its object inactive, the last active version keeps
 serving, and nobody else's activation fails over it. A dependent never
 activated does not hold an activation back. While any object other than the
