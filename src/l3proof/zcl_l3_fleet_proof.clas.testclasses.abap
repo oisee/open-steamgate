@@ -13,6 +13,10 @@
 * the worklist's keys only, mode P runs both stages on real jobs with the
 * gate opening stage 2 once, and a stage 1 pile that fails keeps stage 2
 * shut: the run is final with stage 2 NOT-RUN and its lock released.
+* Resilience (slice 5a): a stage 1 pile that failed long ago is submitted
+* again by one doctor pass on a real job, and the jobs complete the run with
+* mode S's log; a rule that has written c_max_alerts alerts in a run is
+* FUSED, writes nothing more, and the older run's rows of it stay.
 * RISK LEVEL DANGEROUS: setup commits rows into the rule tables, every run
 * commits its alerts, and teardown deletes both again and commits. The
 * keys all start with L30, which no generated L2 test uses.
@@ -36,6 +40,8 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     DATA mt_runs TYPE tt_run.
     METHODS setup.
     METHODS teardown.
+    METHODS settle.
+    METHODS cleanup.
     METHODS mode_s FOR TESTING.
     METHODS rerun FOR TESTING.
     METHODS rerun_fewer_piles FOR TESTING.
@@ -44,6 +50,11 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS stages_mode_s FOR TESTING.
     METHODS stages_mode_p FOR TESTING.
     METHODS stages_partial FOR TESTING.
+    METHODS doctor_heals FOR TESTING.
+    METHODS fuse_stops FOR TESTING.
+    METHODS open_run
+      IMPORTING iv_failed TYPE abap_bool
+      RETURNING VALUE(rs_result) TYPE zcl_l3_fleet2=>ty_result.
     METHODS add_ship IMPORTING iv_id TYPE csequence iv_name TYPE csequence iv_status TYPE csequence.
     METHODS add_voyage IMPORTING iv_id TYPE csequence iv_ship TYPE csequence iv_date TYPE csequence.
     METHODS add_crew IMPORTING iv_id TYPE csequence iv_ship TYPE csequence iv_role TYPE csequence iv_since TYPE csequence.
@@ -120,8 +131,15 @@ CLASS ltcl_proof IMPLEMENTATION.
     add_cargo( iv_id = 'L30001' iv_ship = 'L303' iv_weight = '600.50' ).
     add_cargo( iv_id = 'L30002' iv_ship = 'L303' iv_weight = '500.00' ).
     add_cargo( iv_id = 'L30003' iv_ship = 'L304' iv_weight = '1.25' ).
-    " rows an interrupted run may have left under the same keys
+    " rows an interrupted run may have left under the same keys, and its
+    " locks of the proof's date and a kill switch, so no method depends on
+    " how the one before it ended
     delete_seed( ).
+    DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet=>c_set
+                              AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet2=>c_set
+                              AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    DELETE FROM zosd_l3_kill WHERE set_name = zcl_l3_fleet2=>c_set.
     INSERT zosd_l2_ship FROM TABLE mt_ship.
     INSERT zosd_l2_voy FROM TABLE mt_voy.
     INSERT zosd_l2_crew FROM TABLE mt_crew.
@@ -130,6 +148,76 @@ CLASS ltcl_proof IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD teardown.
+    " a method that failed may leave jobs of its runs open: wait for them,
+    " bounded, so the deletes meet no job that writes the same rows; a delete
+    " that fails all the same (a deadlock with such a job) is rolled back and
+    " tried once more. Teardown never raises: an exception here would stop
+    " the methods after this one on a system
+    settle( ).
+    TRY.
+        cleanup( ).
+      CATCH cx_sy_open_sql_db.
+        ROLLBACK WORK.
+        WAIT UP TO 1 SECONDS.
+        TRY.
+            cleanup( ).
+          CATCH cx_sy_open_sql_db.
+            ROLLBACK WORK.
+        ENDTRY.
+    ENDTRY.
+    CLEAR mt_runs.
+  ENDMETHOD.
+
+  METHOD settle.
+    " the jobs of the method's runs that are still open (a pile PLANNED or
+    " RUNNING with a job neither finished nor aborted), waited for up to
+    " c_wait_limit seconds
+    DATA lt_piles TYPE STANDARD TABLE OF zosd_l3_pile WITH DEFAULT KEY.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lv_run TYPE zosd_l3_alert-run_id.
+    DATA lv_open TYPE i.
+    DATA lv_waited TYPE i.
+    DATA lv_aborted TYPE btch0000-char1.
+    DATA lv_finished TYPE btch0000-char1.
+    DATA lv_running TYPE btch0000-char1.
+    DATA lv_ready TYPE btch0000-char1.
+    DATA lv_scheduled TYPE btch0000-char1.
+    DATA lv_preliminary TYPE btch0000-char1.
+    DO.
+      lv_open = 0.
+      LOOP AT mt_runs INTO lv_run.
+        SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
+          WHERE run_id = lv_run
+            AND job_count <> space.
+        LOOP AT lt_piles INTO ls_pile WHERE status = 'PLANNED' OR status = 'RUNNING'.
+          CLEAR: lv_aborted, lv_finished, lv_running, lv_ready, lv_scheduled, lv_preliminary.
+          CALL FUNCTION 'SHOW_JOBSTATE'
+            EXPORTING
+              jobname = ls_pile-job_name
+              jobcount = ls_pile-job_count
+            IMPORTING
+              aborted = lv_aborted
+              finished = lv_finished
+              preliminary = lv_preliminary
+              ready = lv_ready
+              running = lv_running
+              scheduled = lv_scheduled
+            EXCEPTIONS
+              OTHERS = 1.
+          IF sy-subrc = 0 AND lv_aborted <> 'X' AND lv_finished <> 'X'.
+            lv_open = lv_open + 1.
+          ENDIF.
+        ENDLOOP.
+      ENDLOOP.
+      IF lv_open = 0 OR lv_waited >= c_wait_limit.
+        RETURN.
+      ENDIF.
+      WAIT UP TO 1 SECONDS.
+      lv_waited = lv_waited + 1.
+    ENDDO.
+  ENDMETHOD.
+
+  METHOD cleanup.
     DATA lv_run TYPE zosd_l3_alert-run_id.
     delete_seed( ).
     LOOP AT mt_runs INTO lv_run.
@@ -142,13 +230,13 @@ CLASS ltcl_proof IMPLEMENTATION.
       DELETE FROM zosd_l3_pile WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = lv_run.
       DELETE FROM zosd_l3_stage WHERE run_id = lv_run.
       DELETE FROM zosd_l3_work WHERE run_id = lv_run.
+      DELETE FROM zosd_l3_doctor WHERE run_id = lv_run.
     ENDLOOP.
     " the run locks of the proof's date, held or released
     DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet=>c_set
                               AND check_date = zcl_l3_fleet_proof=>c_check_date.
     DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet2=>c_set
                               AND check_date = zcl_l3_fleet_proof=>c_check_date.
-    CLEAR mt_runs.
     COMMIT WORK.
   ENDMETHOD.
 
@@ -872,6 +960,176 @@ CLASS ltcl_proof IMPLEMENTATION.
       WAIT UP TO 1 SECONDS.
       lv_waited = lv_waited + 1.
     ENDDO.
+  ENDMETHOD.
+
+  METHOD open_run.
+    " a run in jobs as run( ) leaves it once stage 1 has run: its lock held
+    " (since long ago), stage 1 open, stage 2 waiting. Every pile of stage 1
+    " ran but, with iv_failed, the last, which is FAILED long ago after its
+    " first attempt, as a job that aborted leaves it once a doctor looked
+    DATA lt_piles TYPE zcl_l3_fleet2=>tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA ls_gate TYPE zosd_l3_stage.
+    DATA ls_lock TYPE zosd_l3_run.
+    DATA ls_rule TYPE zcl_l3_fleet2=>ty_rule.
+    DATA lv_last TYPE i.
+    rs_result-set_name = zcl_l3_fleet2=>c_set.
+    rs_result-check_date = zcl_l3_fleet_proof=>c_check_date.
+    rs_result-mode = zcl_l3_fleet2=>c_parallel.
+    rs_result-rules = zcl_l3_fleet2=>rules( ).
+    rs_result-run_id = cl_system_uuid=>create_uuid_c32_static( ).
+    APPEND rs_result-run_id TO mt_runs.
+    ls_lock-set_name = zcl_l3_fleet2=>c_set.
+    ls_lock-check_date = zcl_l3_fleet_proof=>c_check_date.
+    ls_lock-run_id = rs_result-run_id.
+    ls_lock-status = 'HELD'.
+    ls_lock-started = '20000101000000'.
+    MODIFY zosd_l3_run FROM ls_lock.
+    ls_gate-run_id = rs_result-run_id.
+    ls_gate-set_name = zcl_l3_fleet2=>c_set.
+    ls_gate-check_date = zcl_l3_fleet_proof=>c_check_date.
+    ls_gate-stage_no = 1.
+    ls_gate-stage_name = zcl_l3_fleet2=>c_stage_1.
+    ls_gate-status = 'OPEN'.
+    ls_gate-opened = '20000101000000'.
+    INSERT zosd_l3_stage FROM ls_gate.
+    ls_gate-stage_no = 2.
+    ls_gate-stage_name = zcl_l3_fleet2=>c_stage_2.
+    ls_gate-status = 'WAITING'.
+    CLEAR ls_gate-opened.
+    INSERT zosd_l3_stage FROM ls_gate.
+    lt_piles = zcl_l3_fleet2=>plan( iv_run = rs_result-run_id
+                                    iv_date = zcl_l3_fleet_proof=>c_check_date
+                                    iv_stage = 1 ).
+    INSERT zosd_l3_pile FROM TABLE lt_piles.
+    lv_last = lines( lt_piles ).
+    IF lv_last < 2.
+      cl_abap_unit_assert=>fail( msg = 'stage 1 needs two piles, one to fail' ).
+    ENDIF.
+    LOOP AT lt_piles INTO ls_pile.
+      IF sy-tabix < lv_last OR iv_failed = abap_false.
+        ls_rule = zcl_l3_fleet2=>run_rule( iv_rule = ls_pile-rule_name
+                                           iv_date = zcl_l3_fleet_proof=>c_check_date
+                                           iv_run = rs_result-run_id
+                                           iv_pile = ls_pile-pile_no ).
+      ELSE.
+        ls_pile-status = 'FAILED'.
+        ls_pile-attempt = 1.
+        ls_pile-reason = 'JOB-ENDED'.
+        ls_pile-ended = '20000101000000'.
+        MODIFY zosd_l3_pile FROM ls_pile.
+      ENDIF.
+    ENDLOOP.
+    COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD doctor_heals.
+    " one doctor pass submits the failed pile of stage 1 again, once, on a
+    " real job (its backoff passed long ago, its budget is not spent); that
+    " job ends stage 1 and opens stage 2 through the gate, and the jobs of
+    " stage 2 complete the run: the log equals mode S's
+    DATA ls_seq TYPE zcl_l3_fleet2=>ty_result.
+    DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
+    DATA lt_seq TYPE tt_row.
+    DATA lt_par TYPE tt_row.
+    DATA lt_report TYPE zcl_l3_fleet2=>tt_doctor.
+    DATA ls_report TYPE zcl_l3_fleet2=>ty_doctor.
+    DATA lt_piles TYPE zcl_l3_fleet2=>tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA ls_lock TYPE zosd_l3_run.
+    DATA lv_count TYPE i.
+    ls_seq = staged( zcl_l3_fleet2=>c_sequential ).
+    lt_seq = staged_logged( ls_seq-run_id ).
+    ls_result = open_run( abap_true ).
+    lt_report = zcl_l3_fleet2=>doctor( ).
+    COMMIT WORK.
+    LOOP AT lt_report INTO ls_report WHERE run_id = ls_result-run_id AND doc_action = 'RESUBMIT'.
+      lv_count = lv_count + 1.
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the doctor submits the failed pile again, once' ).
+    ls_result = wait_for_stages( ls_result ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'DONE' msg = 'the healed run ends DONE' ).
+    SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
+      WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = ls_result-run_id AND stage_no = 1 AND attempt = 2.
+    lv_count = lines( lt_piles ).
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'one pile had a second attempt' ).
+    READ TABLE lt_piles INTO ls_pile INDEX 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_pile-status exp = 'DONE' msg = 'its second attempt is DONE' ).
+    lt_par = staged_logged( ls_result-run_id ).
+    cl_abap_unit_assert=>assert_equals( act = lt_par exp = lt_seq msg = 'the healed run wrote the log mode S wrote' ).
+    SELECT SINGLE * FROM zosd_l3_run INTO ls_lock
+      WHERE set_name = zcl_l3_fleet2=>c_set AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    cl_abap_unit_assert=>assert_equals( act = ls_lock-status exp = 'RELEASED' msg = 'the healed run released its lock' ).
+    SELECT COUNT(*) FROM zosd_l3_doctor WHERE run_id = ls_result-run_id AND doc_action = 'RESUBMIT'.
+    lv_count = sy-dbcnt.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 msg = 'the audit holds the resubmit' ).
+  ENDMETHOD.
+
+  METHOD fuse_stops.
+    " stage 2 of a run in which the voyage rule has already written
+    " c_max_alerts alerts (a DONE pile of it saying so): each of its own piles
+    " with an alert is FUSED and writes nothing, so the older run's rows of
+    " the rule stay; collect( ) reports the rule FUSED and finalises nothing
+    " of it
+    DATA ls_seq TYPE zcl_l3_fleet2=>ty_result.
+    DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
+    DATA lt_piles TYPE zcl_l3_fleet2=>tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA ls_rule TYPE zcl_l3_fleet2=>ty_rule.
+    DATA lv_older TYPE i.
+    DATA lv_count TYPE i.
+    DATA lv_fused TYPE i.
+    ls_seq = staged( zcl_l3_fleet2=>c_sequential ).
+    SELECT COUNT(*) FROM zosd_l3_alert
+      WHERE set_name = zcl_l3_fleet2=>c_set AND rule_name = zcl_l3_fleet2=>c_rule_5
+        AND check_date = zcl_l3_fleet_proof=>c_check_date AND run_id = ls_seq-run_id.
+    lv_older = sy-dbcnt.
+    IF lv_older < 1.
+      cl_abap_unit_assert=>fail( msg = 'the seed makes the voyage rule alert' ).
+    ENDIF.
+    ls_result = open_run( abap_false ).
+    UPDATE zosd_l3_stage SET status = 'DONE' WHERE run_id = ls_result-run_id AND stage_no = 1.
+    UPDATE zosd_l3_stage SET status = 'OPEN' WHERE run_id = ls_result-run_id AND stage_no = 2.
+    lt_piles = zcl_l3_fleet2=>plan( iv_run = ls_result-run_id
+                                    iv_date = zcl_l3_fleet_proof=>c_check_date
+                                    iv_stage = 2 ).
+    INSERT zosd_l3_pile FROM TABLE lt_piles.
+    " what the rule's other piles of this run have written: the limit
+    ls_pile-set_name = zcl_l3_fleet2=>c_set.
+    ls_pile-run_id = ls_result-run_id.
+    ls_pile-rule_name = zcl_l3_fleet2=>c_rule_5.
+    ls_pile-pile_no = 9999.
+    ls_pile-stage_no = 2.
+    ls_pile-status = 'DONE'.
+    ls_pile-alerts = zcl_l3_fleet2=>c_max_alerts.
+    INSERT zosd_l3_pile FROM ls_pile.
+    LOOP AT lt_piles INTO ls_pile WHERE rule_name = zcl_l3_fleet2=>c_rule_5.
+      ls_rule = zcl_l3_fleet2=>run_rule( iv_rule = ls_pile-rule_name
+                                         iv_date = zcl_l3_fleet_proof=>c_check_date
+                                         iv_run = ls_result-run_id
+                                         iv_pile = ls_pile-pile_no ).
+      IF ls_rule-status = 'FUSED'.
+        lv_fused = lv_fused + 1.
+      ENDIF.
+    ENDLOOP.
+    COMMIT WORK.
+    IF lv_fused < 1.
+      cl_abap_unit_assert=>fail( msg = 'a pile of the voyage rule past c_max_alerts is FUSED' ).
+    ENDIF.
+    SELECT COUNT(*) FROM zosd_l3_alert
+      WHERE set_name = zcl_l3_fleet2=>c_set AND rule_name = zcl_l3_fleet2=>c_rule_5
+        AND check_date = zcl_l3_fleet_proof=>c_check_date AND run_id = ls_result-run_id.
+    lv_count = sy-dbcnt.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'the fused rule wrote nothing past the limit' ).
+    ls_result = zcl_l3_fleet2=>collect( ls_result ).
+    COMMIT WORK.
+    READ TABLE ls_result-rules INTO ls_rule WITH KEY rule = zcl_l3_fleet2=>c_rule_5.
+    cl_abap_unit_assert=>assert_equals( act = ls_rule-status exp = 'FUSED' msg = 'collect reports the rule FUSED' ).
+    SELECT COUNT(*) FROM zosd_l3_alert
+      WHERE set_name = zcl_l3_fleet2=>c_set AND rule_name = zcl_l3_fleet2=>c_rule_5
+        AND check_date = zcl_l3_fleet_proof=>c_check_date AND run_id = ls_seq-run_id.
+    lv_count = sy-dbcnt.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = lv_older msg = 'the older run keeps its rows of the fused rule' ).
   ENDMETHOD.
 
 ENDCLASS.

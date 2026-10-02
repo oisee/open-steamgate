@@ -42,7 +42,7 @@ const FLEET = {
 };
 const COLUMNS = {zosd_l2_ship: ["ship_id", "name", "status"], zosd_l2_voy: ["voyage_id", "ship_id", "dep_date"],
   zosd_l2_crew: ["crew_id", "ship_id", "role", "since"], zosd_l2_cargo: ["cargo_id", "ship_id", "weight"]};
-const TABLES = ["zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work"];
+const TABLES = ["zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor", "zosd_l3_kill"];
 
 describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", function () {
   this.timeout(900000);
@@ -69,8 +69,8 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
     });
 
     it("a set without stages: renders what the templates render with every section of slice 3b taken out", async () => {
-      // the sections of this slice, and `planned` as it was: `piles`
-      const NEW = ["staged", "stages", "schedule", "with_worklist", "planner"];
+      // the sections of this slice, and `planned` as it was: `piles`; and slice 5a's (test/dsl-l3-resilience.mjs)
+      const NEW = ["staged", "stages", "schedule", "with_worklist", "planner", "resilience", "fused", "killable"];
       const before = (template) => {
         let text = readFileSync(template, "utf8");
         for (const n of NEW) {
@@ -522,7 +522,9 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
           if (drivers().filter((d) => d.started).length !== 1) problems.push("a second tick ran the driver again");
           // unschedule: the waiting instance goes, and the next day nothing runs
           const deleted = await call("unschedule", unscheduler);
-          if (deleted !== 1) problems.push(`unschedule( ) deleted ${deleted}`);
+          // the driver's waiting instance, and with resilience: (slice 5a) the doctor's
+          const scheduled = model.resilience ? 2 : 1;
+          if (deleted !== scheduled) problems.push(`unschedule( ) deleted ${deleted}`);
           await w.clock.advance(24 * 3600 * 1000);
           await settle(w);
           const after = drivers().filter((d) => d.started).length;
@@ -575,7 +577,7 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
         ...readdirSync(OUT).filter((f) => /^(zif_l3_fleet2_|zcx_l3_fleet2_port|zcl_l3_fleet2)[a-z_]*\.(clas|intf)\.(abap|xml)$/.test(f) && !f.startsWith(`${real}.`)).map((f) => join(OUT, f)),
         ...model.rules.flatMap((r) => [`${OUT}/${r.check_class}.clas.abap`, `${OUT}/${r.check_class}.clas.xml`]),
         ...["ddic/ttyp/string_table.ttyp.xml", "ddic/structures/symsg.tabl.xml"].map((x) => join(CORE, x)),
-        ...["uuid", "exceptions", ".", "ddic/dtel", "ddic/doma"].flatMap((folder) => readdirSync(join(CORE, folder))
+        ...["uuid", "exceptions", ".", "ddic/dtel", "ddic/doma", "date_time"].flatMap((folder) => readdirSync(join(CORE, folder))
           .filter((f) => /\.(clas|intf)\.abap$|\.(dtel|doma)\.xml$/.test(f)).map((f) => join(CORE, folder, f)))];
       for (const dep of deps) {
         try { reg.addDependency(new core.MemoryFile(basename(dep), readFileSync(dep, "utf8"))); } catch { /* not in this checkout */ }

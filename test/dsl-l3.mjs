@@ -99,7 +99,9 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       // the same bytes through both
       const NEW = ["piles", "with_params", "params", "range", "piled", "unpiled", "param_args", "has_args",
         // and slice 3b's (test/dsl-l3-stages.mjs), whose shared plan sections are `planned`
-        "planned", "staged", "stages", "schedule", "with_worklist", "planner"];
+        "planned", "staged", "stages", "schedule", "with_worklist", "planner",
+        // and slice 5a's (test/dsl-l3-resilience.mjs)
+        "resilience", "fused", "killable"];
       const before = (template) => {
         let text = readFileSync(template, "utf8");
         for (const n of NEW) {
@@ -1197,6 +1199,8 @@ ENDCLASS.
         // the two-stage set's gates and worklists (slice 3b)
         stages: read("SELECT COUNT(*) AS n FROM zosd_l3_stage WHERE check_date = ?", CHECK_DATE)[0].n,
         work: read("SELECT COUNT(*) AS n FROM zosd_l3_work WHERE check_date = ?", CHECK_DATE)[0].n,
+        // the doctor's audit rows (slice 5a)
+        doctor: read("SELECT COUNT(*) AS n FROM zosd_l3_doctor WHERE check_date = ?", CHECK_DATE)[0].n,
       });
       // a runner mutant answers every call the proof (and a job) makes to ZCL_L3_FLEET
       const withRunner = async (name, work) => {
@@ -1217,20 +1221,24 @@ ENDCLASS.
         const local = await proofClass();
         const before = new Set(store.list(200).map((r) => r.id));
         const failures = {};
-        const methods = ["mode_s", "rerun", "rerun_fewer_piles", "partial_keeps_old", "mode_p", "stages_mode_s", "stages_mode_p", "stages_partial"];
+        const methods = ["mode_s", "rerun", "rerun_fewer_piles", "partial_keeps_old", "mode_p", "stages_mode_s", "stages_mode_p", "stages_partial",
+          "doctor_heals", "fuse_stops"];
         for (const method of methods) failures[method] = await runMethod(local, method);
         expect(failures).to.deep.equal(Object.fromEntries(methods.map((m) => [m, undefined])));
         const all = store.list(200).filter((r) => !before.has(r.id));
         // the two-stage set: the filter's four piles (eight ships, two per pile), then
-        // stage 2's six rules over the two busy ships of the proof's date, one pile each
+        // stage 2's six rules over the two busy ships of the proof's date, one pile each;
+        // doctor_heals (slice 5a): the last filter pile once more, submitted by the doctor,
+        // and stage 2's six again
         const staged = all.filter((r) => r.jobName.startsWith("L3_FLEET2_"));
+        const stage2 = [2, 3, 4, 5, 6, 7].map((n) => `L3_FLEET2_20${n}_0001`);
         expect(staged.map((r) => r.jobName).sort(), "the two stages' jobs").to.deep.equal([1, 2, 3, 4].map((p) => `L3_FLEET2_101_000${p}`)
-          .concat([2, 3, 4, 5, 6, 7].map((n) => `L3_FLEET2_20${n}_0001`)).sort());
-        expect(staged.map((r) => r.state)).to.deep.equal(Array(10).fill("COMPLETED"));
+          .concat(stage2, ["L3_FLEET2_101_0004"], stage2).sort());
+        expect(staged.map((r) => r.state)).to.deep.equal(Array(17).fill("COMPLETED"));
         const runs = all.filter((r) => r.jobName.startsWith("L3_FLEET_"));
         expect(runs.map((r) => r.jobName).sort(), "twenty-four jobs ran").to.deep.equal(model.rules.flatMap((_, i) => [1, 2, 3, 4].map((p) => `L3_FLEET_0${i + 1}_000${p}`)));
         expect(runs.map((r) => r.state)).to.deep.equal(Array(24).fill("COMPLETED"));
-        expect(ours(), "teardown deleted the seed and the runs' rows").to.deep.equal({log: 0, piles: 0, seed: 0, stages: 0, work: 0});
+        expect(ours(), "teardown deleted the seed and the runs' rows").to.deep.equal({log: 0, piles: 0, seed: 0, stages: 0, work: 0, doctor: 0});
       });
 
       it("npm run unit runs mode_s and rerun and skips mode_p by configuration, said in the run", () => {
@@ -1239,6 +1247,7 @@ ENDCLASS.
         expect(entry).to.include('{"name":"mode_s","skip":false},{"name":"rerun","skip":false}');
         expect(entry).to.include('{"name":"mode_p","skip":true}');
         expect(entry).to.include('{"name":"stages_mode_s","skip":false},{"name":"stages_mode_p","skip":true},{"name":"stages_partial","skip":false}');
+        expect(entry).to.include('{"name":"doctor_heals","skip":true},{"name":"fuse_stops","skip":false}');
         expect(entry).to.include('riskLevel: "DANGEROUS"');
       });
 
@@ -1272,7 +1281,7 @@ ENDCLASS.
           // with its own text and not with msg; a system shows msg
           expect(failures.rerun).to.be.oneOf(["after the rerun the log is still the union of the checks",
             "Expected table to contain 12 rows, got 10"]);
-          expect(ours()).to.deep.equal({log: 0, piles: 0, seed: 0, stages: 0, work: 0});
+          expect(ours()).to.deep.equal({log: 0, piles: 0, seed: 0, stages: 0, work: 0, doctor: 0});
         });
 
         it("INSERT instead of MODIFY: the first run passes, the rerun cannot rewrite its rows", async () => {
@@ -1283,21 +1292,22 @@ ENDCLASS.
             mode_s: await runMethod(local, "mode_s"), rerun: await runMethod(local, "rerun")}));
           expect(failures.mode_s).to.equal(undefined);
           expect(failures.rerun).to.match(/^the rerun: every rule DONE expected, got L3_FLEET_01 .* PARTIAL ;/);
-          expect(ours()).to.deep.equal({log: 0, piles: 0, seed: 0, stages: 0, work: 0});
+          expect(ours()).to.deep.equal({log: 0, piles: 0, seed: 0, stages: 0, work: 0, doctor: 0});
         });
 
         it("mode P that does not wait: collect reads the jobs before they ran, and the proof names their states", async () => {
           const name = `${PROOF}_pm3`;
           const tests = readFileSync(join(PROOF_DIR, `${PROOF}.clas.testclasses.abap`), "utf8").replaceAll(PROOF, name);
           await loadRunner(name, readFileSync(join(PROOF_DIR, `${PROOF}.clas.abap`), "utf8").replaceAll(PROOF, name), {
-            extra: {[`${name}.clas.testclasses.abap`]: mutate(tests, "      WAIT UP TO 1 SECONDS.\n", "")}});
+            extra: {[`${name}.clas.testclasses.abap`]: mutate(tests, "      WAIT UP TO 1 SECONDS.\n      lv_waited = lv_waited + 1.\n    ENDDO.\n  ENDMETHOD.\n\n  METHOD expected.",
+            "      lv_waited = lv_waited + 1.\n    ENDDO.\n  ENDMETHOD.\n\n  METHOD expected.")}});
           const local = await proofClass(pathToFileURL(join(scratch, name, `${name}.clas.testclasses.mjs`)).href);
           const failure = await runMethod(local, "mode_p");
           // a rule whose piles are all still to run shows the state of an open job, as before piles
           expect(failure).to.match(/^the jobs did not end within 180 seconds: L3_FLEET_01 +maintenance-ship-no-future-voyage READY ;/);
           expect(failure.match(/ READY ;/g)).to.have.length(6);
-          // the jobs were released all the same: they run once the step is
-          // over, after the teardown, and write under the run it deleted
+          // the jobs were released all the same: the teardown waits for them
+          // (settle, bounded) before it deletes, so they ran inside its WAIT
           await settled();
           expect(ours().seed).to.equal(0);
           await exec([`DELETE FROM zosd_l3_alert WHERE check_date = '${CHECK_DATE}'`, `DELETE FROM zosd_l3_pile WHERE check_date = '${CHECK_DATE}'`]);

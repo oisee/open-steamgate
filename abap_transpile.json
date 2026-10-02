@@ -126,6 +126,12 @@
         "class": "ltcl_proof",
         "method": "stages_mode_p",
         "_why": "as mode_p: the two stages' jobs need STG_DB=file, a dialog step per method and a worker; test/dsl-l3.mjs runs it with all three (docs/dsl-l3.md, Stages, filters and a schedule)"
+      },
+      {
+        "object": "ZCL_L3_FLEET_PROOF",
+        "class": "ltcl_proof",
+        "method": "doctor_heals",
+        "_why": "as mode_p: the doctor submits a pile again as a real job, which needs STG_DB=file, a dialog step per method and a worker; test/dsl-l3.mjs runs it with all three (docs/dsl-l3.md, Resilience)"
       }
     ]
   },

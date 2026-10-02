@@ -1,6 +1,6 @@
 # DSL L3: a set of rules, run as one unit
 
-Status: slice 1, 2026-10-01; ports and adapters; piles and set parameters (slice 3a), 2026-10-02; stages, filter stages with a worklist, and a schedule (slice 3b), 2026-10-02. Built on L2 (`docs/dsl-l2.md`) and the background job facade
+Status: slice 1, 2026-10-01; ports and adapters; piles and set parameters (slice 3a), 2026-10-02; stages, filter stages with a worklist, and a schedule (slice 3b), 2026-10-02; resilience: retries, the doctor, fuses, a dry run and retention (slice 5a), 2026-10-02. Built on L2 (`docs/dsl-l2.md`) and the background job facade
 (`docs/job-standard-fms.md`, `docs/gui-reports.md`).
 
 L2 compiles one rule into a check class, `check( iv_date ) RETURNING rt_alerts`. L3 is the layer
@@ -236,15 +236,21 @@ passes, `rerun` fails with the rules `WRITE-FAILED`), and a proof whose wait loo
 (collect reads the jobs before they ran; it fails naming six jobs `READY`, and the released jobs
 then run after the teardown, which is the case the next paragraph warns about).
 
-If `mode_p` gives up on a system, the jobs it released may still run after `teardown` and write
-rows under the run id it deleted; delete `ZOSD_L3_ALERT` rows of check date `20991001` by hand.
+If `mode_p` gives up on a system, the jobs it released may still be open at `teardown`. Since slice
+5a `teardown` first waits for the open jobs of the method's runs (`settle( )`, bounded by the same
+180 s), then deletes; a delete that fails all the same is rolled back and tried once more, and
+`teardown` never raises, so one failing method does not stop the methods after it. `setup` also
+deletes the proof date's locks and a kill switch row of the set, so no method depends on how the one
+before it ended. Rows a job still writes after 180 s are the proof date's (`20991001`); delete them
+by hand.
 
 **On A4H.** The deploy unit `l3demo` (`deploy/manifest.json`) lists exactly what the proof needs:
 the four L2 tables and `ZOSD_L2_WEIGHT`, the six enabled rule classes (with their own generated
 tests, which the run will report too), `ZCL_L3_FLEET` with its ports (below), `ZL3_FLEET`, `ZOSD_L3_ALERT`,
 `ZOSD_L3_PILE`, `ZOSD_L3_RUN` and the proof; since slice 3b also the two-stage set `ZCL_L3_FLEET2`
 with its keys rule, report, ports and worklist variant, `ZOSD_L3_WORK` and `ZOSD_L3_STAGE` (see
-"Stages, filters and a schedule").
+"Stages, filters and a schedule"); since slice 5a also `ZOSD_L3_DOCTOR` and `ZOSD_L3_KILL` (see
+"Resilience").
 The objects live in three folders and the tool takes one flat folder, so stage them first:
 
 ```
@@ -258,6 +264,7 @@ rm -rf .local/stage/l3demo && mkdir -p .local/stage/l3demo && cp \
   src/l2demo/zcl_l3_fleet_alerts_*.clas.* src/l2demo/zif_l3_fleet_*.intf.* src/l2demo/zcx_l3_fleet_port.clas.* \
   src/l2demo/zl3_fleet.prog.* src/l3proof/zcl_l3_fleet_proof.clas.* \
   src/dsl/zosd_l3_work.tabl.xml src/dsl/zosd_l3_stage.tabl.xml src/l2demo/zcl_l2_ship_busy.clas.* \
+  src/dsl/zosd_l3_doctor.tabl.xml src/dsl/zosd_l3_kill.tabl.xml \
   src/l2demo/zcl_l3_fleet2.clas.* src/l2demo/zcl_l3_fleet2_*.clas.* src/l2demo/zif_l3_fleet2_*.intf.* \
   src/l2demo/zcx_l3_fleet2_port.clas.* src/l2demo/zl3_fleet2.prog.* \
   .local/stage/l3demo/
@@ -545,8 +552,8 @@ log keeps older runs, so a run bound to another variant of the sink (`alerts=dum
 
 **No finalise while a pile is not `DONE`.** The rule is `PARTIAL` and the older run's rows stay
 next to the new run's: the log may then hold a row of each for one alert. That is the conservative
-choice (an older answer is kept rather than a gap left); a later slice's doctor re-runs the
-failed piles, and a complete rerun finalises.
+choice (an older answer is kept rather than a gap left); in a staged set with `resilience:` the
+doctor runs the failed piles again (see "Resilience"), and a complete rerun finalises.
 
 ### One run at a time
 
@@ -563,7 +570,8 @@ release and names the latest run, which is what finalise compares with.
 The stance, stated: runs of one set and date are serialised, not merged. A run that is never
 collected, or a holder that died (a dump after the commit of mode P, a caller that never calls
 `collect( )`), keeps the lock: release it by hand (`UPDATE zosd_l3_run SET status = 'RELEASED'`
-for the set and date). There is no stale-lock timeout here; the doctor of slice 5 takes this over.
+for the set and date). In a staged set with `resilience:` the doctor releases a stale lock of a run
+that is final or never planned (see "Resilience"); a set without it has no stale-lock timeout.
 Sets without `piles:` take no lock (and have no finalise), as before.
 
 ### Explain
@@ -753,7 +761,7 @@ binding (`ships=worklist`), before anything is read.
 The key is **91** (3 + 32 + 16 + 40), counted as a system counts it (the alert log section).
 `KEY_VALUE` is the key as text, the convention of `RANGE_LOW` and `RANGE_HIGH`. A worklist name has
 the set-name rules, 13 characters at most, so 16 is enough. The worklist is kept per run, for audit;
-nothing deletes it. Retention (of worklists, gate rows, plan rows and old log versions) is slice 5's.
+nothing deletes it but `purge( )` of a set with `resilience:` (see "Resilience"), and only once the run is final.
 
 `ZOSD_L3_STAGE` (`src/dsl/zosd_l3_stage.tabl.xml`), the gate:
 
@@ -903,26 +911,335 @@ objects.
 - the worklist variant reads the worklist into an `I EQ` range, so a worklist of many thousand keys
   makes a large `IN` list; a system limits the statement size. Then a join or `FOR ALL ENTRIES` is
   needed (a `KEY_VALUE` of CHAR 40 does not join a key of another type in 7.02 Open SQL); not here;
-- a pile whose job dumps after its commit and before the gate, or that fails, leaves the run open
-  until `collect( )` (or the doctor of slice 5);
+- without `resilience:` (slice 5a), a pile whose job dumps after its commit and before the gate, or
+  that fails, leaves the run open until `collect( )`, and a stage left `OPEN` with no pile row (the
+  gate's crash window: `advance( )` opens a stage, then plans it, in one LUW, so only a system that
+  committed between them or a row deleted by hand leaves it) is taken as `DONE` by `collect( )`. With
+  `resilience:` the doctor handles both, and retention keeps every row of an open run (see
+  "Resilience");
 - a driver instance whose date is still held by the previous instance's run (a run slower than the
   period) answers `BUSY` and plans nothing; that run is not retried;
 - `unschedule( )` deletes the waiting instance only: an instance running at that moment completes;
   it is scoped to `sy-uname`, so only the user who scheduled can unschedule;
-- the gate's crash window: `advance( )` opens a stage (the `UPDATE` to `OPEN`), then plans and
-  inserts its piles. Both are in the job's one LUW, so a dump rolls both back; but should a stage end
-  `OPEN` with no pile row (a dump in a system that had committed between them, or a row deleted by
-  hand), `collect( )` finds no open pile and takes the stage as `DONE`. The doctor of slice 5 owns
-  telling an empty plan from a lost one;
-- a note for slice 5's retention: a worklist must not be deleted while its run is open. `range_<n>`
-  of a pile over it reads the worklist's keys between the pile's bounds, and with the rows gone falls
-  back to the two bounds alone, so the keys between them would go unchecked;
 - mode S leaves the gates of the stages after a `PARTIAL` one `WAITING` (as the slice's design says);
   `collect( )`, if called, closes them as `NOT-RUN`.
 
+## Resilience
+
+Slice 5a, 2026-10-02. A staged run that heals itself and can be stopped: retries with a backoff, a
+doctor that takes over what a dead job, a lost plan or a dead caller left, two fuses, a dry run and
+retention. Every property comes from the set's YAML, is generated into the runner and its report,
+and traces to its own manifest line; nothing in the compiler or the templates knows the fleet.
+
+```yaml
+resilience:
+  retry: {max: 2, backoff: 60}      # a FAILED or vanished pile goes again up to 2 times, 60 s after it failed, doubled per attempt
+  stale: 900                         # seconds after which a HELD lock, a pile without its job or an OPEN gate without piles is the doctor's
+  fuses:
+    max_alerts: 500                  # per rule and run; past it the rule stops writing and is FUSED
+    kill: ZOSD_L3_KILL               # optional; a row of the set in this generic table stops new runs, piles and stages
+  dry_run: false                     # the default of run( iv_dry_run )
+  keep: {days: 30}                   # how long the plan, worklist, gate and doctor rows of a final run are kept
+```
+
+`tools/dsl-l3-resilience.mjs` reads it. Refused, each at its line (`file:line: message`): a
+`resilience:` on a set without `stages:`; one whose alert sink has no generated `capture` variant
+(a dry run binds it); unknown keys; no `stale:` or no `keep:`; `retry.max` outside 0 to 99,
+`retry.backoff` outside 0 to 86400 s, `stale` outside 60 s to 99 h, `max_alerts` below 1 or past an
+INT4, `keep.days` outside 1 to 9999; a `kill:` naming another table than `ZOSD_L3_KILL` (the runner
+reads that generic table); `dry_run` other than true or false. `max_alerts` and `kill` are
+optional: without them the runner has no fuse and no kill switch. A set without `resilience:`
+renders the bytes it rendered before (`test/dsl-l3-resilience.mjs` renders a staged set through the
+live templates and through the templates with every section of this slice taken out, and compares);
+the trace sidecars of such a set name other template lines, since the templates grew.
+
+### The tables
+
+`ZOSD_L3_PILE` gains two fields, not keys: `ATTEMPT` (INT4, the pile's submits: the first is 1, each
+retry one more) and `REASON` (CHAR 40, why the pile is as it is: `JOB-ENDED`, `JOB-GONE`, `NO-JOB`,
+`RETRY`, `STALE-PLAN`, `KILLED`, `MAX-ALERTS`, `JOB-OPEN`, `JOB-CLOSE`, or the rule's status when its
+write failed). Its key stays **105** (3 + 32 + 60 + 10).
+
+`ZOSD_L3_DOCTOR` (`src/dsl/zosd_l3_doctor.tabl.xml`), the doctor's audit, generic for every set:
+
+| key | field |
+|---|---|
+| MANDT, RUN_ID (CHAR 32), SEQ (INT4) | SET_NAME, CHECK_DATE, STAGE_NO, RULE_NAME, PILE_NO, DOC_ACTION (CHAR 12), REASON (CHAR 40), ACTED (time stamp) |
+
+The key is **45** (3 + 32 + 10, the INT4 at its `LENG` 10). The column is `DOC_ACTION`, not
+`ACTION`: `ACTION` is a reserved word of the public list `tools/osd-ddic-reserved.mjs` checks. `SEQ`
+is the run's next number; an `INSERT` that clashes with a row another doctor inserted takes the
+next.
+
+`ZOSD_L3_KILL` (`src/dsl/zosd_l3_kill.tabl.xml`), the kill switch: key MANDT, SET_NAME (CHAR 16),
+**19**; REASON (CHAR 80). `test/ddic-reserved.mjs` asserts the three counts, and the deploy unit
+`l3demo` lists both new tables.
+
+### What is generated
+
+In `ZCL_L3_<SET>`: the constants `c_retry_max`, `c_backoff`, `c_stale`, `c_keep_days`,
+`c_max_alerts` (with `max_alerts:`) and `c_doctor` (with `schedule:`), each on its manifest line;
+`ty_doctor` and `tt_doctor`, the report (run, check date, stage, rule, pile, action, reason);
+`ty_result-dry`; and:
+
+- `run( ..., iv_dry_run )`, its default the YAML's `dry_run`; with the kill switch set, `run( )`
+  answers `KILLED` and plans nothing;
+- `resume( iv_run, iv_bind, is_params, iv_now ) RETURNING rt_report`: continues an open run, one whose
+  lock still names it `HELD` (a run without it is final, and the answer is one row `NOT-OPEN`). It
+  submits again, at once, every pile `PLANNED` without a job and every `FAILED` pile within the retry
+  budget, and advances a gate whose stage is complete;
+- `doctor( iv_now ) RETURNING rt_report`: the pass below;
+- `purge( iv_now ) RETURNING rt_report`: retention, below;
+- `killed( )`: true while `ZOSD_L3_KILL` holds a row of the set;
+- private: `heal( )` (the doctor's work on one run; `resume( )` is `heal( )` without waiting),
+  `due( )` (a failed pile's backoff), `ago( )`, `act( )` (a report row and an audit row), `dry( )`,
+  and with a schedule `schedule_doctor( )` and `unschedule_doctor( )`.
+
+`iv_now` is a time stamp in system time (UTC here and on the sandbox), initial for now. Pile and
+gate times are `GET TIME STAMP` too, so the tests move one injectable clock
+(`tools/osd-job-scheduler.mjs`, `manualClock` and `installAbapClock`) and everything reads it.
+
+In the job report `ZL3_<SET>`: a pile the kill switch sent back, or one past the fuse, commits its
+row and ends the job without `MESSAGE ... TYPE 'E'` (an abort would roll that row back); with a
+schedule, `P_MODE = 'H'` is the doctor's job, one `doctor( )`.
+
+### Retries and resume
+
+Piles are the checkpoints, and a `DONE` pile is never run again. `submit( )` makes a pile's first
+`ATTEMPT` 1. A pile is submitted again when it is `FAILED`, or `PLANNED` without a job, and its
+`ATTEMPT` is at most `c_retry_max`: the first submit and `retry.max` more. A `FAILED` pile is due
+`c_backoff` seconds after it failed (`ENDED`), doubled per attempt it has had (60, 120, 240 s ...,
+at most a week); a `PLANNED` pile without a job once it is stale, counted from the later of its own
+`ENDED` and its gate's `OPENED`. Mode S has no retry: its piles run in one step, and a pile that
+fails leaves the run `PARTIAL` and its lock released, as before.
+
+### The doctor
+
+`doctor( )` is one read-mostly pass over the set's open runs, the rows of `ZOSD_L3_RUN` that are
+`HELD`. For each run, in this order:
+
+| what it finds | what it does | action, reason |
+|---|---|---|
+| a pile `RUNNING` or `PLANNED` whose job (the pair, name and count, read by `SHOW_JOBSTATE`) has finished or aborted, or is gone; a pile `RUNNING` with no job | the pile `FAILED`, `ENDED` now | `FAILED`, `JOB-ENDED` / `JOB-GONE` / `NO-JOB` |
+| a pile `FAILED` with `ATTEMPT` at most `c_retry_max`, its backoff passed | `PLANNED` with the next `ATTEMPT`, then `submit( )` | `RESUBMIT`, `RETRY` |
+| a pile `PLANNED` without a job, older than `stale`, within the budget | as above | `RESUBMIT`, `STALE-PLAN` |
+| a gate `OPEN` with no pile of its stage, older than `stale` (slice 3b's crash window) | `plan( )` the stage again and submit its piles; a stage with no key advances | `REPLAN`, `OPEN-NO-PILES` |
+| a gate `OPEN` whose piles are all `DONE` (the job that ended the stage dumped after its commit); not while the kill switch is set | the stage `DONE`, then `advance( )` | `ADVANCE`, `STAGE-DONE` |
+| a gate `WAITING` after a stage `DONE` (an `advance( )` stopped in between, by a kill switch another session set after the check above) | `advance( )` of that stage, which opens the gate with its one `UPDATE` from `WAITING` | `ADVANCE`, `NEXT-WAITING` |
+| a lock older than `stale` whose run has every pile final (`DONE`, `FUSED`, or `FAILED` past the budget), no gate `OPEN` whose piles are all `DONE` and no gate `WAITING` after a `DONE` one | released, then made final as `collect( )` makes it (a stage with a lost pile `PARTIAL`, the ones after it `NOT-RUN`, every `DONE` rule finalised) | `RELEASE`, `ALL-FINAL` |
+| a lock older than `stale` whose run has no plan row and no gate at all | released | `RELEASE`, `NO-PLAN` |
+| (after every run) | `purge( )` | `PURGE`, ... |
+
+It answers a report row per action and writes an audit row of `ZOSD_L3_DOCTOR` per action on a run
+(not for `PURGE`, whose rows would be purged with the run, nor for `KILLED`). With the kill switch
+set it answers one row `KILLED` and does nothing else.
+
+**Safe beside jobs and another doctor.** Every change is one conditional `UPDATE` on the state the
+doctor read, and only the caller that gets `sy-dbcnt = 1` acts, in the style of the stage gate: a
+pile goes `FAILED` only `WHERE status = <read> AND job_count = <read>`; the claim of a retry is
+`UPDATE ... SET status = 'PLANNED' attempt = <read + 1> ... WHERE status = <read> AND attempt =
+<read>`, and only its winner submits; the re-plan of a gate is `UPDATE ... SET opened = now WHERE
+status = 'OPEN' AND opened = <read>`; the advance is `OPEN` to `DONE`; the release is `HELD` to
+`RELEASED`. A job that finishes its pile while the doctor looks at it wins the same way. The doctor
+and `resume( )` run in the caller's LUW and commit nothing themselves (the runner still holds no
+COMMIT; its job report commits at the end of its step).
+
+**Its schedule.** A set with `schedule:` also schedules the doctor: `schedule( )` opens a second
+periodic job, `L3_<SET>_DOC`, the report with `P_MODE = 'H'`, from now, every `stale` seconds
+rounded to minutes (`PRDMINS`; past 99 minutes, hours, `PRDHOURS`), unless an instance of it already
+waits; `unschedule( )` deletes the waiting instance of both jobs and answers how many it deleted.
+
+### Fuses
+
+**max_alerts.** `write( )` adds up the `ALERTS` of the rule's `DONE` piles of this run (the plan,
+so it holds for any variant of the sink) and this pile's alerts. Past `c_max_alerts` this pile
+writes nothing at all, so the older rows of its group stay where a partial write's tail `DELETE`
+would have removed them; the pile is `FUSED` (reason `MAX-ALERTS`), the rule `FUSED` in
+`rs_result-rules` (mode S) and in `collect( )`, and it is never finalised in this run. A `FUSED`
+pile is final: the doctor never submits it again, and like a `FAILED` one it keeps its stage from
+being `DONE` (the stage is `PARTIAL` once final, and the stages after it `NOT-RUN`).
+
+**The kill switch.** While `ZOSD_L3_KILL` holds a row of the set: `run( )` answers `KILLED`; a pile
+job checks it before it works, puts its pile back to `PLANNED` without a job (its attempt not spent,
+reason `KILLED`) and ends without abort; `advance( )` opens no gate; the doctor and `resume( )`
+answer `KILLED` and change nothing. Deleting the row lets `resume( )` (or the doctor, once the piles
+are stale) submit those piles again, and the run goes on. `collect( )` is unchanged: it makes the run
+final and takes a pile without a job as `FAILED`, so after a kill call `resume( )`, not `collect( )`.
+
+### The dry run
+
+`run( iv_dry_run = abap_true )`, or `dry_run: true` in the YAML, runs the set in this step whatever
+`iv_mode` says, with the alert sink bound to its `capture` variant: every stage is planned and every
+check runs, nothing reaches the log, and nothing is finalised (finalise runs for the `log` variant
+only). The result is the data: `rs_result-status` is `DRY`, every rule that would be `DONE` says
+`DRY`, and `rs_result-dry` holds the rows a real run would write. A dry run is a run: it takes and
+releases the set's lock for the date, and its plan, gates and worklist are written like any run's
+(and purged like any final run's).
+
+### Retention
+
+`purge( )` deletes, for every final run of the set whose gates were last touched (their latest
+`OPENED` or `ENDED`) more than `keep.days` ago, its rows of `ZOSD_L3_PILE`, `ZOSD_L3_WORK`,
+`ZOSD_L3_STAGE` and `ZOSD_L3_DOCTOR`; doctor rows older than that of any run that is not open; and
+the `RELEASED` lock rows of `ZOSD_L3_RUN` older than that (the lock history: one row per set and
+date). A run is open while its lock names it `HELD`, and nothing of an open run is deleted, so a
+worklist a pile still reads stays. It never deletes an alert row: the log is history by design. The
+doctor calls it at the end of every pass.
+
+### Proof
+
+`test/dsl-l3-resilience.mjs` (registered in `test/suites.d/infra-misc.json`, 35 tests), on a file
+database with the jobs facade (`drainJobOutbox`, `workQueuedBatch`) and the injectable clock:
+
+- the manifest: the committed `fleet2` is a fresh build and the one-stage `fleet` is too; the model;
+  a staged set without `resilience:` renders the templates' bytes with this slice's sections taken
+  out; each refusal above at its line; the doctor's period in minutes and in hours; the trace (each
+  constant to its own line, the fuse's branch to `max_alerts:`, `killed( )` to `kill:`, the doctor's
+  period to `stale:`, `P_MODE = 'H'` to `resilience:`); the runner ends no unit of work;
+- a pile job that dumps (the min-crew check throws once, inside the job): the doctor marks the pile
+  `FAILED` (`JOB-ENDED`), does nothing 1 s before its 60 s backoff, submits it again at 60 s, the job
+  completes the run, and the log equals a clean run's; the audit holds `FAILED` and `RESUBMIT`;
+- `retry.max` exceeded (the check always throws): three submits in all, each retry at its doubled
+  backoff and never a second early, then nothing; once the lock is stale the doctor releases it,
+  stage 2 is `PARTIAL`, the failing rule keeps no row of the run, and a released run is no longer
+  the doctor's;
+- two doctors at once: the second runs whole inside the first's pass, after the first has read the
+  pile and before it claims it (the test wraps `due( )`); one `RESUBMIT` between them, one new job,
+  one audit row, and two more passes find nothing to do;
+- a `HELD` lock of a dead run with no plan row: a run meanwhile is `BUSY`; nothing at 899 s,
+  `RELEASE NO-PLAN` at 900 s, and a new run starts; a stale lock whose run still has open jobs is
+  left alone, and the jobs then complete the run;
+- the kill switch set by another session during the doctor's pass (the test sets the row in the
+  doctor's own step, through a seam on `killed( )` or `advance( )`): set right after the doctor's
+  first check, the gate stays `OPEN` and the lock `HELD`; set between the `ADVANCE` and `advance( )`,
+  stage 1 is `DONE`, stage 2 `WAITING` and the lock `HELD`. Once the row is gone the next pass
+  answers `ADVANCE STAGE-DONE` or `ADVANCE NEXT-WAITING`, and the jobs complete the run with a clean
+  run's log;
+- a job that dumps after its commit, before the gate (`advance( )` throws twice): stage 1 `OPEN`
+  with both piles `DONE`; the doctor answers `ADVANCE STAGE-DONE`, stage 2's jobs run, and the log
+  equals a clean run's; an `OPEN` gate with no piles: nothing before stale, `REPLAN OPEN-NO-PILES`
+  at stale, six jobs, a clean run's log;
+- `max_alerts` (a copy of the runner with the limit at 1, and a third busy ship so ship-min-crew
+  alerts in two piles): the rule `FUSED`, at most one row of it in the run, the fused pile's group
+  still the older run's rows, the other rules `DONE` and stage 2 `PARTIAL`;
+- the kill switch, set after mode P submitted stage 1: both jobs end without abort, their piles are
+  `PLANNED` without a job and attempt 0, stage 2 waits, a run of another date is `KILLED`, the doctor
+  answers `KILLED` and changes nothing; with the row deleted, `resume( )` submits both piles again and
+  the run completes with a clean run's log;
+- a dry run: on an empty log it writes nothing; after a real run it leaves that run's log exactly as
+  it was (no write, no finalise), its `dry` rows are what the real run wrote, and every rule says
+  `DRY`;
+- `purge( )`: an old final run of another date and an open run; nothing at 29 days; at 31 days the
+  old run's plan, worklist and gate rows and its released lock are gone, the open run's rows and lock
+  are as they were, and the log is whole;
+- the schedule: `schedule( )` also makes `L3_FLEET2_DOC`, waiting, every 15 minutes; it runs as its
+  job when due; `unschedule( )` deletes 2, and a day later nothing runs.
+
+**Mutation evidence**, each a copy of the committed runner with one edit, transpiled alone, red
+against the test named:
+
+| mutant | turns red |
+|---|---|
+| the doctor's claim without the conditional `UPDATE` (`AND status = ... AND attempt = ...` dropped) | two doctors at once: 2 resubmits |
+| the backoff ignored (`due( )` not asked) | the dumping pile: the first pass already answers `RESUBMIT` |
+| the retry budget ignored (no `ATTEMPT > c_retry_max` check) | `retry.max` exceeded: a fourth submit |
+| a stale lock released while piles are open (no "every pile final" check) | the stale lock with open jobs: `RELEASED` |
+| a fuse that keeps writing (the limit never reached) | `max_alerts`: 2 rows in the run, past 1 |
+| the kill switch ignored by a pile job | the kill switch: stage 1's piles `DONE` while killed |
+| a dry run that writes to the log (the capture binding dropped) | the dry run: it wrote rows to the log |
+| `purge( )` touching an open run (no `HELD` check) | `purge( )`: the open run's plan rows are gone |
+| `purge( )` deleting alerts | `purge( )`: the log lost rows |
+| the doctor's `ADVANCE` without its kill check | the switch set before the `ADVANCE`: stage 1 `DONE`, stage 2 shut |
+| the release ignoring an `OPEN` gate that could still advance | the switch set before the `ADVANCE`: the lock is released |
+| the release ignoring a `WAITING` gate after a `DONE` one | the switch set between the `ADVANCE` and `advance( )`: the lock is released |
+| a job that works a pile that is not `PLANNED` (the state before the A4H run 2 fix) | the late job: it made the pile `DONE` and filled the worklist |
+
+**The ABAP Unit proof** (`src/l3proof`) gains two methods of `ltcl_proof` over `ZCL_L3_FLEET2`, on
+the same seed and check date: `doctor_heals` (a run as mode P leaves it, its lock and stage 1 gate
+from long ago, stage 1's piles run but the last, which is `FAILED` long ago after its first attempt;
+one `doctor( )` answers one `RESUBMIT` for the run and submits it as a real job, a bounded wait on
+`collect( )` sees the run `DONE`, that pile `DONE` at attempt 2, the log equal to mode S's, the lock
+released and the audit row written) and `fuse_stops` (stage 2 of a run in which a `DONE` pile of the
+voyage rule already holds `c_max_alerts` alerts: each of the rule's own piles with an alert is
+`FUSED` and writes no row, `collect( )` reports the rule `FUSED`, and the older run's rows of it are
+all still there). `npm run unit` skips `doctor_heals` by configuration (`abap_transpile.json`), as
+`mode_p`; `test/dsl-l3.mjs` runs the whole class with a worker beside it (seventeen jobs of the two
+stages, every one `COMPLETED`), and its teardown deletes the runs' doctor rows too. Its
+`doctor( )` passes over every open run of the set and purges old final ones, as on any system.
+
+**On A4H.** Run 1 (98db1792) passed, 10 of 10 proof methods on real jobs. Run 2 (fe4d4d5f) ran
+`doctor_heals` alone: `'the healed run ends DONE'` failed, and a `CX_SY_OPEN_SQL_DB` stopped the
+class. Read off the generated code (nothing could be run there), the cause was not the order of the
+gate and the plan: in `advance( )`, `heal( )` and `resume( )` the conditional gate `UPDATE` comes
+first and only its `sy-dbcnt = 1` plans and inserts, every `INSERT ... FROM TABLE` writes a plan of a
+new run or of a stage that winner just opened, and the single-row inserts (`ZOSD_L3_RUN`,
+`ZOSD_L3_DOCTOR`) check `sy-subrc`. It was the job: A4H has several background work processes, and
+`JOB_CLOSE` with `STRTIMMED` lets a job start before the step that submitted it commits. The
+resubmitted job read its pile as it was before the doctor's claim (`FAILED`, attempt 1, no job),
+worked it and wrote that copy back, so `collect( )` in the proof's wait found a `RUNNING` pile
+without a job, took it as `FAILED` and made the run `PARTIAL` (the assertion); the jobs still
+running then met `teardown`'s deletes, and the database error there, in `teardown`, is what
+stopped the class (the run-1 timing had the job start after the commit). The fix: a job reads its
+pile `FOR UPDATE`, so on a system it waits for the submitter's commit, and it works only a pile that
+is `PLANNED`; any other answers `NOT-PLANNED` and its job aborts without touching the row. One work
+process here never starts a job inside a step, so the mocha test takes the pile of a submitted job
+as `FAILED` before the job runs and checks that the job works nothing (red before the fix: the job
+made the pile `DONE` and filled the worklist); the proof's `teardown` is made robust as above.
+
+### Deviations from the slice's design, with their reason
+
+- **`resilience:` needs `stages:`.** The doctor reads a run's gates and re-plans a stage, and only a
+  staged run completes in its jobs; a piled set's mode P waits for a `collect( )` (the reason
+  `schedule:` needs stages too).
+- **It needs the sink's generated `capture` variant**, and **a dry run always runs in this step**:
+  the capture keeps rows in the session, which a job of another session would not see, and the
+  factory refuses a volatile variant in mode P.
+- **A dry run is a run**: it takes the lock and writes its plan, gates and worklist (the planner and
+  the piles read them); "writes nothing" is the log, which it never touches.
+- **The fuse is per pile, all or nothing**: a pile whose alerts would pass the limit writes none, so
+  the older rows of its group stay (a partial write's tail `DELETE` would remove them). It counts the
+  plan's `DONE` piles, so it holds for any sink variant.
+- **`max_alerts` and `kill` are optional**; without them nothing of the fuse or the switch is
+  generated.
+- **A killed pile job ends without abort**: an abort would roll back the pile's return to `PLANNED`;
+  the kill does not spend an attempt.
+- **`resume( )` takes `iv_bind` and `is_params`**: neither is stored with a run; the doctor submits
+  with the manifest's bindings and the set parameters' defaults (a limit, below). It resumes only a
+  run that still holds its lock.
+- **`ADVANCE` needs no stale wait**: the doctor's `OPEN` to `DONE` and the job's own gate are both
+  conditional, so a job that is about to advance and the doctor never both open the next stage.
+- **The doctor's `KILLED`, `PURGE` and `NOT-OPEN` rows are report-only**, no audit row: a kill means
+  "change nothing", and a purge's audit row would be purged with the run.
+- **The lock history** is `ZOSD_L3_RUN`'s `RELEASED` rows: the table holds one row per set and date,
+  the latest run, so there is no other history to purge.
+
+### Known limits, stated
+
+- the doctor resubmits with the manifest's bindings and the set parameters' defaults: a run started
+  with other parameters or a hand-written binding is healed as if started with the defaults
+  (`resume( )` can be given them);
+- the fuse checks each pile against the piles already `DONE`: piles of one rule that run at the same
+  time each pass the check, so the log may hold up to a pile's alerts past the limit per pile running
+  beside it (one work process here, so not here);
+- a kill switch set during a mode S run sends the rest of its piles back to `PLANNED` and the run
+  ends `PARTIAL` with its lock released; `resume( )` does not take up a released run;
+- a run that `collect( )` made final (released) with failed piles is not retried: `collect( )` is
+  the explicit end of a run;
+- a scheduled driver instance whose date is still held by the previous run answers `BUSY`; the
+  doctor heals the previous run, but that date's missed instance is not run again;
+- the doctor's job, like the driver's, is the user's who scheduled it (`sy-uname`);
+- `purge( )` keeps the log's old versions: the log is history, and its retention stays open;
+- a dry run takes the set's lock row for its date and leaves it naming the dry run: a late
+  `collect( )` of an older real run of that date then finds itself not the latest run and does not
+  finalise (the latest real run of the date still does);
+- the doctor's audit row takes the run's next `SEQ` and tries ten times; after ten clashes with rows
+  other doctors inserted at once, the audit row of that action is dropped (the action itself and its
+  report row stand).
+
 ## Not yet
 
-Ordering between rules within a stage, a log retention policy (old versions, worklists, gates and plans are kept forever), a
-monitor page over the log, and the doctor that re-runs a `PARTIAL` rule's failed piles (the plan
-table is what it will read). A pile planner over more than one source port, or over a key other
-than a single field, is not done either.
+Ordering between rules within a stage, a retention of the alert log's old versions (the log is
+history by design; `purge( )` keeps every row of it), a monitor page over the log, and resilience
+for a set without stages (a piled set's mode P waits for a `collect( )`; see "Resilience",
+"Deviations"). A pile planner over more than one source port, or over a key other than a single
+field, is not done either.

@@ -39,6 +39,7 @@
     "test/dsl-l2.mjs",
     "test/dsl-l3.mjs",
     "test/dsl-l3-stages.mjs",
+    "test/dsl-l3-resilience.mjs",
     "test/xml-wellformed.mjs",
     "test/prove-on-system.mjs",
     "test/prove-inplace.mjs",

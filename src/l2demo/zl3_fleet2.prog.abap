@@ -8,6 +8,9 @@ REPORT zl3_fleet2.
 * every pile of its stage DONE opens the next stage (advance).
 * p_mode = 'D' is the driver of the schedule: one run of the set in jobs
 * for the current date; 'R' (the default) runs one rule's pile.
+* p_mode = 'H' is the doctor's job: one pass of the doctor over the set.
+* A pile the kill switch sent back, or one past the fuse, commits its row
+* and ends the job without aborting it.
 
 PARAMETERS p_rule TYPE c LENGTH 60 LOWER CASE.
 PARAMETERS p_date TYPE d.
@@ -29,6 +32,15 @@ START-OF-SELECTION.
     WRITE: / ls_result-run_id, ls_result-status.
     RETURN.
   ENDIF.
+  DATA lt_report TYPE zcl_l3_fleet2=>tt_doctor.
+  DATA lv_actions TYPE i.
+  IF p_mode = 'H'.
+    " the doctor: one pass over the set's open runs, then purge
+    lt_report = zcl_l3_fleet2=>doctor( ).
+    lv_actions = lines( lt_report ).
+    WRITE: / 'doctor', lv_actions.
+    RETURN.
+  ENDIF.
   ls_params-active_status = p_active.
   lv_bind = p_bind.
   ls_rule = zcl_l3_fleet2=>run_rule(
@@ -39,6 +51,11 @@ START-OF-SELECTION.
     is_params = ls_params
     iv_bind = lv_bind ).
   WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.
+  IF ls_rule-status = 'KILLED' OR ls_rule-status = 'FUSED'.
+    " the pile row says so; it is committed and the job ends without abort
+    COMMIT WORK.
+    RETURN.
+  ENDIF.
   IF ls_rule-status = 'DONE'.
     " the pile's DONE is committed first, so the gate sees it
     COMMIT WORK.
