@@ -272,7 +272,9 @@ async function verdictsOf(regs, rows) {
 
 // the shape of a pattern: parameter names do not matter, case does not
 const shape = (pattern) => pattern.toLowerCase().replace(/\/:[^/]+/g, "/:");
-const probeAbap = (p) => p.found && p.row.servedBy === "ABAP";
+// A HEAD request falls through to a GET row in the ABAP router; an explicit
+// Node HEAD registration counts as ported only with a HEAD row of its own.
+const probeAbap = (p) => p.found && p.row.servedBy === "ABAP" && (!p.sample.startsWith("HEAD ") || p.row.method === "HEAD");
 /** every method of the registration reaches an ABAP row of its own pattern */
 const abapServed = (v) => v.probes.every((p) => probeAbap(p) && shape(p.row.pattern) === shape(v.path));
 const anyAbap = (v) => v.probes.some(probeAbap);
@@ -348,6 +350,8 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
     expect(HOST_ALLOWED.filter((e) => HOST_BY_DESIGN.has(e)), "in both lists").to.deep.equal([]);
     const keys = new Set(regs.map((r) => `${r.method} ${r.path}`));
     expect(keys.size, "a registration twice on the stack").to.equal(regs.length);
+    expect(table.filter((r, i) => table.findIndex((o) => o.method === r.method && o.pattern === r.pattern) !== i)
+      .map((r) => `${r.method} ${r.pattern}`), "a row twice in ROUTES").to.deep.equal([]);
     const stale = [...HOST_ALLOWED, ...HOST_BY_DESIGN.keys()].filter((e) => !keys.has(e));
     expect(stale, "entries no adtRouter registration has: remove them").to.deep.equal([]);
   });
@@ -356,12 +360,12 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
     const missing = verdicts.filter((v) => !HOST_ALLOWED.includes(v.key) && !HOST_BY_DESIGN.has(v.key) && !abapServed(v));
     expect(missing.map((v) => `${v.key} (${v.probes.filter((p) => !probeAbap(p) || shape(p.row.pattern) !== shape(v.path))
       .map((p) => `${p.sample} -> ${where(p)}`).join("; ")})`),
-    "not served by ABAP: port them or add them to HOST_ALLOWED").to.deep.equal([]);
+    "not served by ABAP: port them, or list them under the slice that will port them").to.deep.equal([]);
   });
 
   it("no registration in HOST_ALLOWED is served by ABAP, not even for one method", () => {
     const ported = verdicts.filter((v) => HOST_ALLOWED.includes(v.key) && anyAbap(v));
-    expect(ported.map((v) => `${v.key} (${v.probes.filter(probeAbap).map((p) => `${p.sample} -> ${p.row.handler}`).join("; ")})`),
+    expect(ported.map((v) => `${v.key} (${v.probes.filter(probeAbap).map((p) => `${p.sample} -> ${where(p)} (${p.row.handler})`).join("; ")})`),
       "served by ABAP now: remove it from HOST_ALLOWED").to.deep.equal([]);
   });
 
@@ -435,7 +439,9 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
       const reg = [{method: "*", path: SYSINFO}];
       const verdict = (except) => dialogStep(async () => {
         const rows = globalThis.abap.Classes.ZCL_OSD_ADT_ROUTER.METHODS.DISPATCH.parameters.IT_ROUTES.type();
-        for (const method of ALL_METHODS.filter((m) => m !== except)) {
+        // HEAD first: the ABAP router lets HEAD fall through to an earlier GET row
+        const order = [...ALL_METHODS].sort((x, y) => (y === "HEAD") - (x === "HEAD"));
+        for (const method of order.filter((m) => m !== except)) {
           const row = rows.appendInitial().get();
           row.method.set(method); row.pattern.set(SYSINFO); row.handler.set("ZCL_OSD_ADT_SYSINFO"); row.served_by.set("ABAP");
         }
