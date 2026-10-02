@@ -1,0 +1,47 @@
+# DSL L3, slice 3b: the fleet in two stages (docs/dsl-l3.md, "Stages, filters
+# and a schedule"). A filter stage selects the ships with a voyage ahead into
+# the worklist busy; the check stage piles over that worklist only and runs
+# the deep rules there; a schedule runs the set every day at 02:00 system time.
+# `node tools/dsl-l3.mjs build src/l2demo/fleet2.l3.yaml --out src/l2demo`
+set: fleet2
+title: The fleet in two stages, busy ships first, then the deep checks
+date: $date
+params:
+  active_status: {type: ZOSD_L2_SHIP-STATUS, default: A}
+stages:
+  - stage: candidates
+    filter: true
+    worklist: busy
+    piles: {source: ships, size: 2}
+    rules:
+      - rule: ship_busy.l2.yaml
+  - stage: checks
+    piles: {source: "worklist:busy", size: 2}
+    rules:
+      - rule: maintenance_ship.l2.yaml
+      - rule: grounded_ship_crew.l2.yaml
+      - rule: ship_captain.l2.yaml
+      - rule: ship_voyage_limit.l2.yaml
+      - rule: ship_min_crew.l2.yaml
+      - rule: ship_cargo_limit.l2.yaml
+schedule: {every: 1d, at: "020000"}
+ports:
+  ships:
+    kind: source
+    table: ZOSD_L2_SHIP
+    key: ship_id
+    variants:
+      table: generated
+      capture: generated
+  alerts:
+    kind: sink
+    table: ZOSD_L3_ALERT
+    group: [set_name, rule_name, model_hash, check_date]
+    seq: alert_seq
+    variants:
+      log: generated
+      dummy: generated
+      capture: generated
+bindings:
+  ships: table
+  alerts: log

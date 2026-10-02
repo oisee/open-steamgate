@@ -783,14 +783,14 @@
   },
   {
    "line": 112,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/1/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 113,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/1/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
@@ -1028,14 +1028,14 @@
   },
   {
    "line": 147,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/2/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 148,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/2/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
@@ -1266,14 +1266,14 @@
   },
   {
    "line": 181,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/3/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 182,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/3/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
@@ -1504,14 +1504,14 @@
   },
   {
    "line": 215,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/4/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 216,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/4/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
@@ -1875,56 +1875,56 @@
   },
   {
    "line": 268,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/5/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 269,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/5/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 270,
-   "template_line": 232,
+   "template_line": 237,
    "path": "/tests/5/range_args/1",
    "node": "rule/ship-cargo-limit/example/the range keeps the inner ship/range/1",
    "rule_line": 52
   },
   {
    "line": 271,
-   "template_line": 233,
+   "template_line": 238,
    "path": "/tests/5/range_args/1/sign",
    "node": "rule/ship-cargo-limit/example/the range keeps the inner ship/range/1",
    "rule_line": 52
   },
   {
    "line": 272,
-   "template_line": 234,
+   "template_line": 239,
    "path": "/tests/5/range_args/1/option",
    "node": "rule/ship-cargo-limit/example/the range keeps the inner ship/range/1",
    "rule_line": 52
   },
   {
    "line": 273,
-   "template_line": 235,
+   "template_line": 240,
    "path": "/tests/5/range_args/1/low",
    "node": "rule/ship-cargo-limit/example/the range keeps the inner ship/range/1",
    "rule_line": 52
   },
   {
    "line": 274,
-   "template_line": 237,
+   "template_line": 242,
    "path": "/tests/5/range_args/1/high",
    "node": "rule/ship-cargo-limit/example/the range keeps the inner ship/range/1",
    "rule_line": 52
   },
   {
    "line": 275,
-   "template_line": 239,
+   "template_line": 244,
    "path": "/tests/5/range_args/1",
    "node": "rule/ship-cargo-limit/example/the range keeps the inner ship/range/1",
    "rule_line": 52
@@ -2288,14 +2288,14 @@
   },
   {
    "line": 327,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/6/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 328,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/6/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
@@ -2491,14 +2491,14 @@
   },
   {
    "line": 356,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/7/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 357,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/7/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
@@ -2687,14 +2687,14 @@
   },
   {
    "line": 384,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/8/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 385,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/8/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
@@ -2883,14 +2883,14 @@
   },
   {
    "line": 412,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/9/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 413,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/9/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
@@ -3079,14 +3079,14 @@
   },
   {
    "line": 440,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/10/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 441,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/10/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
@@ -3282,14 +3282,14 @@
   },
   {
    "line": 469,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/11/range/table",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5
   },
   {
    "line": 470,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/11/range",
    "node": "rule/ship-cargo-limit/range",
    "rule_line": 5

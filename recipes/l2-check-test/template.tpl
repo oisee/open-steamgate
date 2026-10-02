@@ -225,6 +225,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+{{#keys_check}}
+    DATA lt_keys TYPE {{class}}=>tt_range.
+    DATA lt_keys_exp TYPE {{class}}=>tt_range.
+    DATA ls_key LIKE LINE OF lt_keys_exp.
+{{/keys_check}}
 {{#range}}
     DATA lt_range TYPE RANGE OF {{table}}-{{field}}.
     DATA ls_range LIKE LINE OF lt_range.
@@ -239,11 +244,6 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_range TO lt_range.
 {{/range_args}}
 {{/range}}
-{{#keys_check}}
-    DATA lt_keys TYPE {{class}}=>tt_range.
-    DATA lt_keys_exp TYPE {{class}}=>tt_range.
-    DATA ls_key LIKE LINE OF lt_keys_exp.
-{{/keys_check}}
 {{#long_expect}}
     DATA lv_exp TYPE string.
 {{/long_expect}}

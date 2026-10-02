@@ -97,11 +97,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -136,11 +136,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -170,11 +170,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S002'.
@@ -204,11 +204,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S003'.
@@ -274,6 +274,9 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
+    DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
+    DATA ls_key LIKE LINE OF lt_keys_exp.
     DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
     DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_range.
@@ -282,9 +285,6 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_range-low = 'S002'.
     ls_range-high = 'S003'.
     APPEND ls_range TO lt_range.
-    DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
-    DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
-    DATA ls_key LIKE LINE OF lt_keys_exp.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -350,11 +350,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -384,11 +384,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -423,11 +423,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -462,11 +462,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -501,11 +501,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -535,11 +535,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -569,11 +569,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -603,11 +603,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -641,11 +641,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.
@@ -668,11 +668,11 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
-    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
-    DATA ls_range LIKE LINE OF lt_range.
     DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
     DATA lt_keys_exp TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key LIKE LINE OF lt_keys_exp.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S001'.

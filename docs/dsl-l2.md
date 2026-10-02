@@ -710,6 +710,40 @@ before: `test/dsl-l2.mjs` renders the two demo rules without one through the tem
 the templates with every range section taken out, and compares the bytes. The code is
 `tools/dsl-l2-range.mjs`.
 
+## The keys a rule flags (`keys:`)
+
+For the L3 filter stages (`docs/dsl-l3.md`, "Stages, filters and a schedule"), a rule with a
+`range:` may also hand back the driving keys it flags:
+
+```yaml
+for: ZOSD_L2_SHIP as ship
+range: ship.ship_id
+keys: true
+```
+
+The class then has, beside `check`, `keys( iv_date, it_range, <params> ) RETURNING rt_keys`,
+`rt_keys` a `RANGE OF <for table>-<field>` (the class's `tt_range`): sign `I`, option `EQ`, one row
+per distinct flagged key, sorted. It is the check's own query (each query, for `any:`) with the key
+field only, `SELECT DISTINCT <alias>~<field> ... APPENDING TABLE`, then `SORT` and `DELETE ADJACENT
+DUPLICATES`: one query, never a `SELECT` per row, and a key flagged by several rows is one row.
+`keys:` is `true` or `false`; `keys: true` needs a `range:` and is refused, at its line, on a
+`limit:` rule: a threshold is decided in ABAP over the ordered rows (the `HAVING` probe fails on
+this runtime, slice 4), so a limit rule's keys are not one `SELECT DISTINCT`. That is the one
+deviation from the slice's design; the demo's filter is a `forbid:` rule.
+
+An example may give `expect_keys: [S001, S003]`; the interpreter answers it by evaluating the rule
+with every alert replaced by its driving key (`ruleKeys` in `tools/dsl-l2-range.mjs`, so every kind
+of rule answers through the one evaluator), and a list that is not the rule's sorted keys is refused
+at its line. Every test of a keys rule, example and derived case alike, asserts `keys( )` beside
+`check( )` against the interpreter's answer (or `expect_keys` when the example gives it). The model
+node is `driving_keys` (a `keys` already names a part of the count query); the `keys` method's own
+lines trace to the `keys:` line, its query to the rule's own lines, as the check's does. A rule without
+`keys:` renders the ABAP it rendered before: `test/dsl-l2.mjs` renders four demo rules through the
+templates with and without the keys sections and compares the bytes (the sidecars' template line
+numbers moved, their model hashes did not). The demo rule is `ship_busy.l2.yaml`: a ship that is not
+decommissioned with a voyage ahead; the mutant whose `keys( )` returns duplicates turns its example
+"several voyages one key" red.
+
 ## Not yet
 
 Grouping by fields of the counted table,

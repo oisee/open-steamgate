@@ -783,14 +783,14 @@
   },
   {
    "line": 112,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/1/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 113,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/1/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -993,14 +993,14 @@
   },
   {
    "line": 142,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/2/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 143,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/2/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -1196,14 +1196,14 @@
   },
   {
    "line": 171,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/3/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 172,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/3/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -1399,14 +1399,14 @@
   },
   {
    "line": 200,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/4/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 201,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/4/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -1609,14 +1609,14 @@
   },
   {
    "line": 230,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/5/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 231,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/5/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -1812,14 +1812,14 @@
   },
   {
    "line": 259,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/6/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 260,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/6/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -2169,56 +2169,56 @@
   },
   {
    "line": 310,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/7/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 311,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/7/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 312,
-   "template_line": 232,
+   "template_line": 237,
    "path": "/tests/7/range_args/1",
    "node": "rule/grounded-ship-keeps-only-keepers/example/the range keeps the inner ship/range/1",
    "rule_line": 65
   },
   {
    "line": 313,
-   "template_line": 233,
+   "template_line": 238,
    "path": "/tests/7/range_args/1/sign",
    "node": "rule/grounded-ship-keeps-only-keepers/example/the range keeps the inner ship/range/1",
    "rule_line": 65
   },
   {
    "line": 314,
-   "template_line": 234,
+   "template_line": 239,
    "path": "/tests/7/range_args/1/option",
    "node": "rule/grounded-ship-keeps-only-keepers/example/the range keeps the inner ship/range/1",
    "rule_line": 65
   },
   {
    "line": 315,
-   "template_line": 235,
+   "template_line": 240,
    "path": "/tests/7/range_args/1/low",
    "node": "rule/grounded-ship-keeps-only-keepers/example/the range keeps the inner ship/range/1",
    "rule_line": 65
   },
   {
    "line": 316,
-   "template_line": 237,
+   "template_line": 242,
    "path": "/tests/7/range_args/1/high",
    "node": "rule/grounded-ship-keeps-only-keepers/example/the range keeps the inner ship/range/1",
    "rule_line": 65
   },
   {
    "line": 317,
-   "template_line": 239,
+   "template_line": 244,
    "path": "/tests/7/range_args/1",
    "node": "rule/grounded-ship-keeps-only-keepers/example/the range keeps the inner ship/range/1",
    "rule_line": 65
@@ -2603,14 +2603,14 @@
   },
   {
    "line": 372,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/8/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 373,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/8/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -2813,14 +2813,14 @@
   },
   {
    "line": 402,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/9/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 403,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/9/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -3016,14 +3016,14 @@
   },
   {
    "line": 431,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/10/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 432,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/10/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -3219,14 +3219,14 @@
   },
   {
    "line": 460,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/11/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 461,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/11/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -3429,14 +3429,14 @@
   },
   {
    "line": 490,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/12/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 491,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/12/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -3632,14 +3632,14 @@
   },
   {
    "line": 519,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/13/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 520,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/13/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -3835,14 +3835,14 @@
   },
   {
    "line": 548,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/14/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 549,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/14/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -4045,14 +4045,14 @@
   },
   {
    "line": 578,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/15/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 579,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/15/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -4248,14 +4248,14 @@
   },
   {
    "line": 607,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/16/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 608,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/16/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -4451,14 +4451,14 @@
   },
   {
    "line": 636,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/17/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 637,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/17/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -4661,14 +4661,14 @@
   },
   {
    "line": 666,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/18/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 667,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/18/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -4871,14 +4871,14 @@
   },
   {
    "line": 696,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/19/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 697,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/19/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -5081,14 +5081,14 @@
   },
   {
    "line": 726,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/20/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 727,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/20/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -5291,14 +5291,14 @@
   },
   {
    "line": 756,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/21/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 757,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/21/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -5487,14 +5487,14 @@
   },
   {
    "line": 784,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/22/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 785,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/22/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
@@ -5634,14 +5634,14 @@
   },
   {
    "line": 805,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/23/range/table",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8
   },
   {
    "line": 806,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/23/range",
    "node": "rule/grounded-ship-keeps-only-keepers/range",
    "rule_line": 8

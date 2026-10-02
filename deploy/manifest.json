@@ -4,7 +4,7 @@
   "customerNamespaces": [],
   "units": {
     "l3demo": {
-      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner with its ports (two interfaces, five generated variants, the factory and its exception), its job report, the alert log, the pile plan table, the run lock and the proof class. Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
+      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner with its ports (two interfaces, five generated variants, the factory and its exception), its job report, the alert log, the pile plan table, the run lock and the proof class; and the two-stage set ZCL_L3_FLEET2 (slice 3b): the keys rule ZCL_L2_SHIP_BUSY, its runner, report, ports (with the worklist variant), the worklist ZOSD_L3_WORK and the stage gate ZOSD_L3_STAGE. Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
       "sources": ["src/l3proof"],
       "objects": [
         "TABL ZOSD_L2_SHIP",
@@ -15,6 +15,8 @@
         "TABL ZOSD_L3_ALERT",
         "TABL ZOSD_L3_PILE",
         "TABL ZOSD_L3_RUN",
+        "TABL ZOSD_L3_WORK",
+        "TABL ZOSD_L3_STAGE",
         "CLAS ZCL_L2_MAINTENANCE_SHIP",
         "CLAS ZCL_L2_GROUNDED_SHIP_CREW",
         "CLAS ZCL_L2_SHIP_CAPTAIN",
@@ -32,6 +34,19 @@
         "CLAS ZCL_L3_FLEET_PORTS",
         "CLAS ZCL_L3_FLEET",
         "PROG ZL3_FLEET",
+        "CLAS ZCL_L2_SHIP_BUSY",
+        "INTF ZIF_L3_FLEET2_SHIPS",
+        "INTF ZIF_L3_FLEET2_ALERTS",
+        "CLAS ZCX_L3_FLEET2_PORT",
+        "CLAS ZCL_L3_FLEET2_SHIPS_TABLE",
+        "CLAS ZCL_L3_FLEET2_SHIPS_CAPTURE",
+        "CLAS ZCL_L3_FLEET2_SHIPS_WORKLIST",
+        "CLAS ZCL_L3_FLEET2_ALERTS_LOG",
+        "CLAS ZCL_L3_FLEET2_ALERTS_DUMMY",
+        "CLAS ZCL_L3_FLEET2_ALERTS_CAPTURE",
+        "CLAS ZCL_L3_FLEET2_PORTS",
+        "CLAS ZCL_L3_FLEET2",
+        "PROG ZL3_FLEET2",
         "CLAS ZCL_L3_FLEET_PROOF"
       ]
     },

@@ -706,14 +706,14 @@
   },
   {
    "line": 101,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/1/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 102,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/1/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -909,14 +909,14 @@
   },
   {
    "line": 130,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/2/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 131,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/2/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -1105,14 +1105,14 @@
   },
   {
    "line": 158,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/3/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 159,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/3/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -1301,14 +1301,14 @@
   },
   {
    "line": 186,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/4/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 187,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/4/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -1497,14 +1497,14 @@
   },
   {
    "line": 214,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/5/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 215,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/5/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -1882,56 +1882,56 @@
   },
   {
    "line": 269,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/6/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 270,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/6/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 271,
-   "template_line": 232,
+   "template_line": 237,
    "path": "/tests/6/range_args/1",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 272,
-   "template_line": 233,
+   "template_line": 238,
    "path": "/tests/6/range_args/1/sign",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 273,
-   "template_line": 234,
+   "template_line": 239,
    "path": "/tests/6/range_args/1/option",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 274,
-   "template_line": 235,
+   "template_line": 240,
    "path": "/tests/6/range_args/1/low",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 275,
-   "template_line": 237,
+   "template_line": 242,
    "path": "/tests/6/range_args/1/high",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 276,
-   "template_line": 239,
+   "template_line": 244,
    "path": "/tests/6/range_args/1",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
@@ -2295,14 +2295,14 @@
   },
   {
    "line": 328,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/7/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 329,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/7/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -2498,14 +2498,14 @@
   },
   {
    "line": 357,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/8/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 358,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/8/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -2694,14 +2694,14 @@
   },
   {
    "line": 385,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/9/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 386,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/9/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -2890,14 +2890,14 @@
   },
   {
    "line": 413,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/10/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 414,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/10/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -3093,14 +3093,14 @@
   },
   {
    "line": 442,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/11/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 443,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/11/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -3289,14 +3289,14 @@
   },
   {
    "line": 470,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/12/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 471,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/12/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -3485,14 +3485,14 @@
   },
   {
    "line": 498,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/13/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 499,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/13/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -3681,14 +3681,14 @@
   },
   {
    "line": 526,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/14/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 527,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/14/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -3877,14 +3877,14 @@
   },
   {
    "line": 554,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/15/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 555,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/15/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
@@ -4024,14 +4024,14 @@
   },
   {
    "line": 575,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/16/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 576,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/16/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8

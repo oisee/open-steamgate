@@ -1,0 +1,92 @@
+{
+ "generator": "dsl-l3",
+ "set": "src/l2demo/fleet2.l3.yaml",
+ "template": "recipes/l3-ports/sink-dummy.tpl",
+ "model": "sha256:4080d5afe42595e6c3b9507108435acf1ee56cbe66733268a15f68044461a264",
+ "lines": [
+  {
+   "line": 1,
+   "template_line": 1,
+   "path": "/source",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 2,
+   "template_line": 2,
+   "path": "/port",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 3,
+   "template_line": 3,
+   "path": "/class",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 4,
+   "template_line": 4,
+   "path": "/",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 5,
+   "template_line": 5,
+   "path": "/iface",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 6,
+   "template_line": 6,
+   "path": "/",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 7,
+   "template_line": 7,
+   "path": "/",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 8,
+   "template_line": 8,
+   "path": "/class",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 9,
+   "template_line": 9,
+   "path": "/iface",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 10,
+   "template_line": 10,
+   "path": "/",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 11,
+   "template_line": 11,
+   "path": "/",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  },
+  {
+   "line": 12,
+   "template_line": 12,
+   "path": "/",
+   "node": "set/fleet2/port/alerts/variant/dummy",
+   "set_line": 43
+  }
+ ]
+}

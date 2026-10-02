@@ -776,14 +776,14 @@
   },
   {
    "line": 111,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/1/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 112,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/1/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -979,14 +979,14 @@
   },
   {
    "line": 140,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/2/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 141,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/2/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -1133,14 +1133,14 @@
   },
   {
    "line": 162,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/3/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 163,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/3/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -1385,14 +1385,14 @@
   },
   {
    "line": 198,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/4/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 199,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/4/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -1686,14 +1686,14 @@
   },
   {
    "line": 241,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/5/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 242,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/5/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -1938,14 +1938,14 @@
   },
   {
    "line": 277,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/6/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 278,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/6/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -2085,14 +2085,14 @@
   },
   {
    "line": 298,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/7/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 299,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/7/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -2386,14 +2386,14 @@
   },
   {
    "line": 341,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/8/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 342,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/8/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -3009,56 +3009,56 @@
   },
   {
    "line": 430,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/9/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 431,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/9/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 432,
-   "template_line": 232,
+   "template_line": 237,
    "path": "/tests/9/range_args/1",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/range/1",
    "rule_line": 85
   },
   {
    "line": 433,
-   "template_line": 233,
+   "template_line": 238,
    "path": "/tests/9/range_args/1/sign",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/range/1",
    "rule_line": 85
   },
   {
    "line": 434,
-   "template_line": 234,
+   "template_line": 239,
    "path": "/tests/9/range_args/1/option",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/range/1",
    "rule_line": 85
   },
   {
    "line": 435,
-   "template_line": 235,
+   "template_line": 240,
    "path": "/tests/9/range_args/1/low",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/range/1",
    "rule_line": 85
   },
   {
    "line": 436,
-   "template_line": 237,
+   "template_line": 242,
    "path": "/tests/9/range_args/1/high",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/range/1",
    "rule_line": 85
   },
   {
    "line": 437,
-   "template_line": 239,
+   "template_line": 244,
    "path": "/tests/9/range_args/1",
    "node": "rule/ship-min-crew/example/the range keeps the inner ship/range/1",
    "rule_line": 85
@@ -3289,14 +3289,14 @@
   },
   {
    "line": 470,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/10/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 471,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/10/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -3499,14 +3499,14 @@
   },
   {
    "line": 500,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/11/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 501,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/11/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -3702,14 +3702,14 @@
   },
   {
    "line": 529,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/12/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 530,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/12/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -3905,14 +3905,14 @@
   },
   {
    "line": 558,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/13/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 559,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/13/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -4157,14 +4157,14 @@
   },
   {
    "line": 594,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/14/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 595,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/14/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -4416,14 +4416,14 @@
   },
   {
    "line": 631,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/15/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 632,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/15/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -4668,14 +4668,14 @@
   },
   {
    "line": 667,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/16/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 668,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/16/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -4920,14 +4920,14 @@
   },
   {
    "line": 703,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/17/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 704,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/17/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -5179,14 +5179,14 @@
   },
   {
    "line": 740,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/18/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 741,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/18/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -5389,14 +5389,14 @@
   },
   {
    "line": 770,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/19/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 771,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/19/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -5634,14 +5634,14 @@
   },
   {
    "line": 805,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/20/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 806,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/20/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -5788,14 +5788,14 @@
   },
   {
    "line": 827,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/21/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 828,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/21/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
@@ -6089,14 +6089,14 @@
   },
   {
    "line": 870,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/22/range/table",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5
   },
   {
    "line": 871,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/22/range",
    "node": "rule/ship-min-crew/range",
    "rule_line": 5

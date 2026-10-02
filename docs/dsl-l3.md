@@ -1,6 +1,6 @@
 # DSL L3: a set of rules, run as one unit
 
-Status: slice 1, 2026-10-01; ports and adapters; piles and set parameters (slice 3a), 2026-10-02. Built on L2 (`docs/dsl-l2.md`) and the background job facade
+Status: slice 1, 2026-10-01; ports and adapters; piles and set parameters (slice 3a), 2026-10-02; stages, filter stages with a worklist, and a schedule (slice 3b), 2026-10-02. Built on L2 (`docs/dsl-l2.md`) and the background job facade
 (`docs/job-standard-fms.md`, `docs/gui-reports.md`).
 
 L2 compiles one rule into a check class, `check( iv_date ) RETURNING rt_alerts`. L3 is the layer
@@ -242,7 +242,9 @@ rows under the run id it deleted; delete `ZOSD_L3_ALERT` rows of check date `209
 **On A4H.** The deploy unit `l3demo` (`deploy/manifest.json`) lists exactly what the proof needs:
 the four L2 tables and `ZOSD_L2_WEIGHT`, the six enabled rule classes (with their own generated
 tests, which the run will report too), `ZCL_L3_FLEET` with its ports (below), `ZL3_FLEET`, `ZOSD_L3_ALERT`,
-`ZOSD_L3_PILE`, `ZOSD_L3_RUN` and the proof.
+`ZOSD_L3_PILE`, `ZOSD_L3_RUN` and the proof; since slice 3b also the two-stage set `ZCL_L3_FLEET2`
+with its keys rule, report, ports and worklist variant, `ZOSD_L3_WORK` and `ZOSD_L3_STAGE` (see
+"Stages, filters and a schedule").
 The objects live in three folders and the tool takes one flat folder, so stage them first:
 
 ```
@@ -255,6 +257,9 @@ rm -rf .local/stage/l3demo && mkdir -p .local/stage/l3demo && cp \
   src/l2demo/zcl_l3_fleet.clas.* src/l2demo/zcl_l3_fleet_ports.clas.* src/l2demo/zcl_l3_fleet_ships_*.clas.* \
   src/l2demo/zcl_l3_fleet_alerts_*.clas.* src/l2demo/zif_l3_fleet_*.intf.* src/l2demo/zcx_l3_fleet_port.clas.* \
   src/l2demo/zl3_fleet.prog.* src/l3proof/zcl_l3_fleet_proof.clas.* \
+  src/dsl/zosd_l3_work.tabl.xml src/dsl/zosd_l3_stage.tabl.xml src/l2demo/zcl_l2_ship_busy.clas.* \
+  src/l2demo/zcl_l3_fleet2.clas.* src/l2demo/zcl_l3_fleet2_*.clas.* src/l2demo/zif_l3_fleet2_*.intf.* \
+  src/l2demo/zcx_l3_fleet2_port.clas.* src/l2demo/zl3_fleet2.prog.* \
   .local/stage/l3demo/
 node tools/osd-prove-on-system.mjs .local/stage/l3demo --unit l3demo --manifest deploy/manifest.json
 ```
@@ -421,8 +426,8 @@ unchanged.
 
 ### Not here yet
 
-The pipeline around the ports (an order between stages, an audit sink and a provenance row; the
-pile planner is below), a schedule, and remote adapters (a variant that calls another system is a
+The pipeline around the ports (an audit sink and a provenance row; the pile planner, the stages and
+the schedule are below), and remote adapters (a variant that calls another system is a
 hand-written class today). A replay that does not touch the table needs the L2 check classes to take their rows from a port, a change in L2; a sink other than
 the alert log is not done either.
 
@@ -649,9 +654,259 @@ alerts port is bound to `log`.
 - "a pile that dumps rolls back" is true of mode P (the job's LUW); in mode S an exception leaves
   `run( )` and the caller's step decides, as before piles.
 
+## Stages, filters and a schedule
+
+Slice 3b, 2026-10-02. A set runs as an ordered list of stages: stage n+1 starts only when every
+pile of stage n is `DONE`. A stage may be a **filter**: its rules select driving keys into a
+**worklist** instead of raising alerts, and a later stage plans its piles over that worklist, not
+over the whole source. A set may carry a **schedule**, a periodic background job. All of it comes
+from the YAML; the compiler and the templates know no domain (preselect, then check deeply,
+expressed on the fleet).
+
+```yaml
+stages:
+  - stage: candidates            # a stage name: the set-name rules (a-z, 0-9, _; 13 at most)
+    filter: true                 # its rules fill a worklist with keys( ), not the alert log
+    worklist: busy               # the key set this stage fills
+    piles: {source: ships, size: 2}           # optional: a stage may be piled itself
+    rules:
+      - rule: ship_busy.l2.yaml  # L2 keys: true (docs/dsl-l2.md, "The keys a rule flags")
+  - stage: checks
+    piles: {source: "worklist:busy", size: 2}  # the worklist's keys, read through the port of their key
+    rules:
+      - rule: maintenance_ship.l2.yaml
+      - rule: ship_voyage_limit.l2.yaml
+schedule: {every: 1d, at: "020000"}           # m minutes, h hours, d days, w weeks; never months
+```
+
+The demo is `src/l2demo/fleet2.l3.yaml`: the filter `ship_busy` (a ship that is not decommissioned
+with a voyage ahead) fills `busy`, and six deep rules run over it. The one-stage `fleet.l3.yaml`
+stays as it was (below, "Deviations").
+
+### The manifest
+
+`stages:` replaces `rules:` and `piles:` (both beside it are refused); a set without `stages:` is one
+implicit stage and renders the bytes it rendered before (`test/dsl-l3-stages.mjs` renders the
+one-stage fleet through the live templates and through the templates with every section of this
+slice taken out, and compares; the committed one-stage runner, report and factory are those bytes).
+Refused, each at its line (`file:line: message`): a filter stage whose rule has no `keys: true`
+(at the rule's line); filter rules over different keys; a filter stage without `worklist:` and a
+worklist on a stage that is not a filter; a worklist used before it is filled, or filled twice; a
+worklist whose key has no source port of that table and key (it is read through that port); a key
+wider than 40; `piles.source: worklist:<w>` with a rule whose `range:` is not the worklist's key
+field (over a worklist every rule is piled: one that is not would run over every row and pass the
+filter by); an empty stage (no rule, or every rule disabled); more than 9 stages (the stage is one
+digit of the job names `L3_<SET>_<s><nn>_<pppp>`); a stage name that does not fit; a schedule in
+months or with another unit, a period wider than JOB_CLOSE's field (`PRDMINS` 2, `PRDHOURS` 2,
+`PRDDAYS` 3, `PRDWEEKS` 2 digits), an `at` that is not `HHMMSS`, and a schedule on a set without
+stages (below).
+
+### What is generated
+
+The runner `ZCL_L3_<SET>`, from the same template as before (new sections `staged`, `stages`,
+`schedule`; the plan machinery a piled and a staged set share is `planned`):
+
+- `CONSTANTS c_stage_<n>` (each stage's name) and `c_stages`; `ty_stage` (`stage_no`, `stage`,
+  `status`, `piles`, `piles_done`) and `rs_result-stages`; `ty_rule` gains `stage_no`, `filter`
+  and `keys` (a filter rule's `alerts` stay 0, its `keys` count what it selected); `rs_result`
+  carries the set parameters, so `collect( )` can open a stage with them;
+- `run( )`: the lock, a gate row per stage (all `WAITING`), then stage by stage: the gate opens
+  (`WAITING` to `OPEN`), `plan( iv_stage )` plans it then (a later stage reads what an earlier one
+  filled), and mode S runs its piles in the step; a stage that does not end `DONE` stops the run,
+  and the later stages stay `WAITING` in `rs_result` and in the gate table. Mode P submits the piles
+  of the first stage that has any (a stage with no pile is `DONE` at once and the next one opens);
+- `plan( iv_run, iv_date, iv_stage, iv_bind )`: a piled stage reads its keys through its source
+  port, the bound variant, or, over a worklist, through the port's `worklist` variant; cut as
+  before; a rule that is not piled is pile 0; the plan rows carry `STAGE_NO`;
+- `run_rule( )`: a check rule as before; a **filter** rule calls its `keys( )` with the pile's
+  range and writes the keys with `fill( )` into `ZOSD_L3_WORK`, `MODIFY` on the full key, so a
+  retried pile writes the same rows. Nothing of a filter goes to the alert log. A pile's `ALERTS`
+  column holds, for a filter pile, the number of keys it selected;
+- `range_<n>( is_pile )`: the range of a pile of stage n. Over a port it is `I BT low high` (or
+  `I EQ`), as before. **Over a worklist it is the worklist's keys between the pile's bounds, each
+  `I EQ`**: a key between them that the filter did not select stays out (the BT of the bounds would
+  check it; `test/dsl-l3-stages.mjs` seeds such a ship between two busy ones);
+- `advance( iv_run, iv_date, iv_stage, iv_bind, is_params ) RETURNING rv_opened`: the gate (next);
+- `collect( )`: per stage (below); `schedule( )` and `unschedule( )` (below).
+
+The job report `ZL3_<SET>`: a pile that ends `DONE` commits, then calls `advance( )`. With a
+schedule it has `P_MODE` (default `R`, run one rule's pile, as before; `D`, the driver).
+
+The source port of a worklist's key gets a generated variant `worklist`,
+`ZCL_L3_<SET>_<PORT>_WORKLIST`: `use( iv_run, iv_worklist )`, then `read( it_range )` selects the
+run's worklist keys from `ZOSD_L3_WORK` (`WHERE run_id = ... AND worklist = ...`), builds an `I EQ`
+range of them and reads the port's table with `<key> IN` that range `AND <key> IN it_range`, on the
+SQL path. An empty worklist is no row (an empty range would be every row). The planner is unchanged:
+it plans over a port. Only the planner reads this variant: the factory refuses it as a run's
+binding (`ships=worklist`), before anything is read.
+
+### The worklist and the gate
+
+`ZOSD_L3_WORK` (`src/dsl/zosd_l3_work.tabl.xml`), generic for every set:
+
+| key | field |
+|---|---|
+| MANDT, RUN_ID (CHAR 32), WORKLIST (CHAR 16), KEY_VALUE (CHAR 40) | SET_NAME (CHAR 16), CHECK_DATE |
+
+The key is **91** (3 + 32 + 16 + 40), counted as a system counts it (the alert log section).
+`KEY_VALUE` is the key as text, the convention of `RANGE_LOW` and `RANGE_HIGH`. A worklist name has
+the set-name rules, 13 characters at most, so 16 is enough. The worklist is kept per run, for audit;
+nothing deletes it. Retention (of worklists, gate rows, plan rows and old log versions) is slice 5's.
+
+`ZOSD_L3_STAGE` (`src/dsl/zosd_l3_stage.tabl.xml`), the gate:
+
+| key | field |
+|---|---|
+| MANDT, RUN_ID (CHAR 32), STAGE_NO (INT4) | SET_NAME, CHECK_DATE, STAGE_NAME (CHAR 16), STATUS (CHAR 12: WAITING, OPEN, DONE, PARTIAL, NOT-RUN), OPENED, ENDED (timestamps) |
+
+The key is **45** (3 + 32 + 10, the INT4 at its `LENG` 10). `ZOSD_L3_PILE` gains `STAGE_NO` (INT4) as
+a field, not a key: its key stays 105. `tools/osd-ddic-reserved.mjs` finds neither a reserved word
+nor a key over 120, and `test/ddic-reserved.mjs` asserts the three counts.
+
+**The gate.** Each pile job of a staged set, once its pile is `DONE`, commits (so the pile's `DONE`
+is visible to every other job) and calls `advance( )` for its stage. `advance( )` counts the stage's
+piles that are not `DONE`; if there is one, it returns. Otherwise it marks the stage `DONE` and opens
+the next one with **one statement**, `UPDATE zosd_l3_stage SET status = 'OPEN' ... WHERE run_id = ...
+AND stage_no = n + 1 AND status = 'WAITING'`: of two jobs that end the stage at once, both may find
+every pile `DONE`, but only the one that gets `sy-dbcnt = 1` plans stage n + 1 and submits its
+piles; the other returns. A stage that plans no pile is `DONE` at once and the gate of the one after
+it is tried in the same call. Past the last stage the run is complete: the job finalises every rule
+(each is `DONE`) and releases the lock, so **a staged run in jobs completes itself**: nobody has to
+call `collect( )` for the log to be final and the next run of the date to be let in (what the
+schedule needs, below).
+
+**`collect( )`** reads the plan and the gates. An open pile's job is read by `SHOW_JOBSTATE`; a job
+that ended without its pile `DONE`, or a pile with no job, makes the pile `FAILED`. A gate still
+`OPEN` whose piles are all `DONE` (the last job ended before it could advance) is advanced from
+`collect( )`. Then, stage by stage: a stage with a `FAILED` pile, once every pile is final, is
+`PARTIAL`, and every later stage becomes `NOT-RUN` in the gate table: its gate closes, so no late job
+opens it. The run is final when every stage is `DONE`, or when a stage is `PARTIAL` and the rest are
+`NOT-RUN`; only then is the lock released. A rule of a stage not opened reports the stage's state
+(`WAITING`, `NOT-RUN`); a filter rule reports `keys`, a check rule `alerts`.
+
+**A filter that selects no key**: the later stages plan no pile and are `DONE` with no alert; their
+rules are `DONE` with zero piles and finalise, which clears the older run's rows of the date, as zero
+keys did before stages.
+
+### The schedule
+
+`schedule: {every: <n><unit>, at: HHMMSS}` generates `schedule( ) RETURNING rv_jobcount`:
+`GET TIME`, `JOB_OPEN` of the driver job `L3_<SET>_D`, `SUBMIT ZL3_<SET> WITH p_mode = 'D' VIA JOB
+... AND RETURN`, and `JOB_CLOSE` with `SDLSTRTDT` and `SDLSTRTTM` and the one period field of the
+unit (`PRDMINS`, `PRDHOURS`, `PRDDAYS`, `PRDWEEKS`). The first start is `at` today in **system
+time**, `sy-datum` and `sy-uzeit` (UTC on the sandbox and here; the facade and a system both read
+`SDLSTRTDT`/`SDLSTRTTM` as system time, `docs/job-standard-fms.md`, "Periodic jobs"), or tomorrow
+when `at` has passed; without `at`, now. Months are refused: the facade refuses `PRDMONTHS`.
+`unschedule( ) RETURNING rv_deleted` selects the set's driver jobs with `BP_JOB_SELECT` (`SCHEDUL`)
+and deletes the one waiting for its start (status `S`) with `BP_JOB_DELETE`: a periodic job's
+successor is made when an instance starts, so deleting the waiting instance ends the chain, as
+measured on A4H. The driver, `P_MODE = 'D'`, does `GET TIME` (the date of the moment the instance
+starts) and calls `run( iv_date = sy-datum iv_mode = 'P' )`, passing nothing else: no rule, pile,
+run, binding or parameter applies to it (the set parameters take their defaults).
+
+A schedule needs `stages:`: it runs the set in jobs, and only a staged set completes in its jobs (the
+gate's last job finalises and releases the run); a piled set's mode P waits for a `collect( )`
+nobody would call, and would hold its lock for the date. That restriction is stated, not designed
+round.
+
+### Explain
+
+The `stage` line names the stage of the alert's rule (its number and name, whether it is a filter and
+what it is piled over, and its manifest line); the `pile` line names the stage's plan and, with
+`--db`, the plan row's range (over a worklist: "the worklist's keys from <low> <high>").
+
+### Proof
+
+`test/dsl-l3-stages.mjs` (registered in `test/suites.d/infra-misc.json`):
+
+- the manifest: the committed `fleet2` files are a fresh build; the model; a set without stages
+  renders the bytes of the templates without this slice's sections; each refusal above at its line;
+  the trace (every line of the runner, report, worklist variant and factory has a manifest line, a
+  stage's lines trace to the stage, the worklist reads to the `worklist:<w>` line, the driver
+  constant to `schedule:`); the runner ends no unit of work (its SUBMIT is in the jobs' path);
+- on a file database, mode S: the worklist holds each busy ship once; the log is exactly what the
+  check rules answer called directly with `it_range = ZCL_L2_SHIP_BUSY=>keys( )`; S003's cargo alert,
+  a ship the filter leaves out, is not in it; the filter wrote no alert; stage 2 plans one pile over
+  S001..S002; gates `DONE`, `DONE`; the lock released. With a third busy ship stage 2 has two piles
+  per rule. With busy S001 and S004, one pile S001..S004, S003 (between them, not busy) is not
+  checked. A filter that selects nothing: stage 2 `DONE` with no pile and the older rows finalised. A
+  rerun after the data changed plans over its own worklist only. `ships=worklist` is refused;
+- mode P: `run( )` submits stage 1's two piles only, stage 2 `WAITING` and unplanned; after one job
+  the gate is still shut; the rest: stage 1's last job opens stage 2, whose six jobs run, and the
+  last completes the run (lock released, nobody collected); the log equals mode S's; the gate called
+  twice opens stage 2 once (the second call answers false and plans and submits nothing); a call
+  while a pile of stage 1 is open opens nothing; a stage 1 pile whose job aborts keeps stage 2 shut,
+  and `collect( )` makes the run final, stage 1 `PARTIAL`, stage 2 `NOT-RUN`, lock released, and a
+  late gate call opens nothing;
+- the schedule, on the facade's injectable clock (`tools/osd-job-scheduler.mjs`, `manualClock` and
+  `installAbapClock`), with the user's own time five hours ahead in `sy-datlo`/`sy-timlo`: at 23:00
+  UTC `schedule( )` makes one driver waiting for 02:00 UTC the next day; an hour on, a tick runs
+  nothing; at 02:00 one driver runs, makes a run for that date whose jobs complete it (both stages
+  `DONE`, lock released) and the next instance waits for 02:00 a day later; a second tick runs
+  nothing; `unschedule( )` deletes one and a day later nothing runs.
+
+The ABAP Unit proof (`src/l3proof`) gains three methods of `ltcl_proof` over `ZCL_L3_FLEET2`, on the
+same seed and check date: `stages_mode_s` (two stages `DONE`, the worklist has each key `keys( )`
+answers, the log equals the check rules over those keys called directly, no filter row in the log,
+stage 2 has one pile per two worklist keys for each of its six rules and the worklist is smaller than
+the fleet, lock released); `stages_mode_p` (stage 1 submitted, stage 2 `WAITING` and unplanned, then
+a bounded wait on `collect( )`: the run `DONE`, stage 2 planned once with a job per pile, the log equal
+to mode S's, lock released); `stages_partial` (a run as `run( )` leaves it with a stage 1 pile that
+never gets a job: the gate stays shut, `collect( )` makes stage 1 `PARTIAL`, stage 2 `NOT-RUN`, the
+run final and its lock released, a late gate call opens nothing). `npm run unit` skips
+`stages_mode_p` by configuration, as `mode_p`; `test/dsl-l3.mjs` runs the whole class with a worker
+beside it (ten jobs of the two stages, every one `COMPLETED`). The deploy unit `l3demo` lists the new
+objects.
+
+**Mutation evidence**, each red against the test named:
+
+| mutant | turns red |
+|---|---|
+| the gate without `status = 'WAITING'` (a double submit) | the gate called twice: the second call opens stage 2 again |
+| stage n+1 opening before every pile of stage n is DONE | the gate called while a pile of stage 1 is open answers true |
+| the worklist variant ignoring the run id | the rerun plans over the first run's keys too (`["1 S001 S002"]`) |
+| `keys( )` returning duplicates (no DISTINCT, no DELETE ADJACENT) | `test/dsl-l2.mjs`: the examples "several voyages one key" and "the range keeps the inner ship" |
+| a filter stage writing alerts | mode S: "the filter stage wrote alerts" |
+| `unschedule( )` not deleting the waiting instance | the schedule: the driver runs again the next day |
+| a schedule computed in user time (`sy-datlo`, `sy-timlo`) | the schedule: the first start waits for 2026-10-03 02:00, not 2026-10-02 |
+
+### Deviations from the slice's design, with their reason
+
+- **The fleet demo stays one stage; the two-stage demo is a second set, `fleet2`.** 107 tests of
+  `test/dsl-l3.mjs` and the A4H proof's five methods measure the one-stage piled set (its exact plans,
+  its twelve and twenty-four jobs); making it two-staged would have replaced that evidence instead of
+  adding to it. `fleet2` uses the same rules, ports and seed, and the proof runs both.
+- **`keys: true` is refused on a `limit:` rule** (`docs/dsl-l2.md`): its threshold is decided in
+  ABAP over the ordered rows, so its keys are not one `SELECT DISTINCT`. The demo's filter is a new
+  `forbid:` rule, `ship_busy`, which the slice allowed.
+- **A pile over a worklist is the worklist's keys between its bounds, each `I EQ`**, not `I BT`: the
+  bounds alone would check keys the filter did not select (`range_<n>`, above).
+- **A staged run in jobs completes itself**: the job that ends the last stage finalises and releases
+  (`collect( )` still reports, and advances a gate a job missed). The schedule needs this, so a
+  schedule is refused on a set without stages.
+- **The job report commits a `DONE` pile before it calls the gate**: in one LUW, two jobs ending the
+  stage at once would each see the other's pile not yet `DONE` and neither would open the next stage.
+- **`GET TIME` before `sy-datum`** in `schedule( )` and in the driver: a job's step does not refresh
+  `sy-datum` on this runtime (and a long dialog step on a system does not either); without it the
+  driver ran for the day it was planned.
+- The gate has `ENDED` beside `OPENED`; the plan's `STAGE_NO` is a field. Job names carry the stage,
+  `L3_<SET>_<s><nn>`; rule numbers stay global.
+
+**Known limits, stated:**
+- the worklist variant reads the worklist into an `I EQ` range, so a worklist of many thousand keys
+  makes a large `IN` list; a system limits the statement size. Then a join or `FOR ALL ENTRIES` is
+  needed (a `KEY_VALUE` of CHAR 40 does not join a key of another type in 7.02 Open SQL); not here;
+- a pile whose job dumps after its commit and before the gate, or that fails, leaves the run open
+  until `collect( )` (or the doctor of slice 5);
+- a driver instance whose date is still held by the previous instance's run (a run slower than the
+  period) answers `BUSY` and plans nothing; that run is not retried;
+- `unschedule( )` deletes the waiting instance only: an instance running at that moment completes;
+- mode S leaves the gates of the stages after a `PARTIAL` one `WAITING` (as the slice's design says);
+  `collect( )`, if called, closes them as `NOT-RUN`.
+
 ## Not yet
 
-Ordering between rules, a schedule, a log retention policy (old versions are kept forever), a
+Ordering between rules within a stage, a log retention policy (old versions, worklists, gates and plans are kept forever), a
 monitor page over the log, and the doctor that re-runs a `PARTIAL` rule's failed piles (the plan
 table is what it will read). A pile planner over more than one source port, or over a key other
 than a single field, is not done either.

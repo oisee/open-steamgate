@@ -10,15 +10,36 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
              status TYPE c LENGTH 12,
              alerts TYPE i,
              failed TYPE i,
-{{#piles}}
+{{#planned}}
              piles TYPE i,
              piles_done TYPE i,
-{{/piles}}
+{{/planned}}
+{{#staged}}
+             stage_no TYPE i,
+             filter TYPE abap_bool,
+             keys TYPE i,
+{{/staged}}
            END OF ty_rule.
     TYPES tt_rule TYPE STANDARD TABLE OF ty_rule WITH DEFAULT KEY.
-{{#piles}}
+{{#planned}}
     TYPES tt_pile TYPE STANDARD TABLE OF zosd_l3_pile WITH DEFAULT KEY.
+{{/planned}}
+{{#staged}}
+    " a stage of the run: WAITING, OPEN, SUBMITTED, DONE, PARTIAL or NOT-RUN
+    TYPES: BEGIN OF ty_stage,
+             stage_no TYPE i,
+             stage TYPE zosd_l3_stage-stage_name,
+             status TYPE c LENGTH 12,
+             piles TYPE i,
+             piles_done TYPE i,
+           END OF ty_stage.
+    TYPES tt_stage TYPE STANDARD TABLE OF ty_stage WITH DEFAULT KEY.
+{{/staged}}
+{{#stages}}
+{{#piles}}
+    TYPES tt_range_{{no}} TYPE RANGE OF {{source.table}}-{{source.key}}.
 {{/piles}}
+{{/stages}}
 {{#with_params}}
     " the set parameters; run( ) gives a component that is initial its default
     TYPES: BEGIN OF ty_params,
@@ -36,10 +57,16 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
              mode TYPE c LENGTH 1,
              alerts TYPE i,
              rules TYPE tt_rule,
-{{#piles}}
+{{#planned}}
              bind TYPE string,
              status TYPE c LENGTH 12,
-{{/piles}}
+{{/planned}}
+{{#staged}}
+             stages TYPE tt_stage,
+{{#with_params}}
+             params TYPE ty_params,
+{{/with_params}}
+{{/staged}}
            END OF ty_result.
     CONSTANTS c_set TYPE zosd_l3_alert-set_name VALUE {{set | literal}}.
     CONSTANTS c_sequential TYPE c LENGTH 1 VALUE 'S'.
@@ -55,6 +82,17 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
 {{#disabled}}
     " not run: {{name}} ({{file}}), enabled: false in the set
 {{/disabled}}
+{{#stages}}
+    " stage {{no}}{{#filter}}, a filter: its rules fill worklist {{worklist.name}}{{/filter}}{{#piles}}, piles of {{size}} keys of {{source.table}}-{{source.key}}{{#over_worklist}} in worklist {{name}}{{/over_worklist}}{{/piles}}
+    CONSTANTS c_stage_{{no}} TYPE zosd_l3_stage-stage_name VALUE {{name | literal}}.
+{{/stages}}
+{{#staged}}
+    CONSTANTS c_stages TYPE i VALUE {{count}}.
+{{/staged}}
+{{#schedule}}
+    " the driver job of the schedule: every {{every}}, system time
+    CONSTANTS c_driver TYPE tbtcjob-jobname VALUE {{driver | literal}}.
+{{/schedule}}
     " iv_bind: the variant of each port for this run, "port=variant,port=variant";
     " a port it does not name keeps the manifest's binding. A source that is not
     " live replaces table content in the caller's LUW: a test and dev seam, never
@@ -80,13 +118,33 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_size TYPE i DEFAULT c_pile_size
       RETURNING VALUE(rt_piles) TYPE tt_pile.
 {{/piles}}
+{{#staged}}
+    " the plan of one stage, made when the stage opens: a row per rule and pile
+    CLASS-METHODS plan
+      IMPORTING iv_run TYPE csequence
+                iv_date TYPE d
+                iv_stage TYPE i
+                iv_bind TYPE string OPTIONAL
+      RETURNING VALUE(rt_piles) TYPE tt_pile.
+    " the gate, called by a pile's job once its pile is DONE and committed:
+    " when every pile of iv_stage is DONE the next stage opens, once
+    CLASS-METHODS advance
+      IMPORTING iv_run TYPE csequence
+                iv_date TYPE d
+                iv_stage TYPE i
+                iv_bind TYPE string OPTIONAL
+{{#with_params}}
+                is_params TYPE ty_params OPTIONAL
+{{/with_params}}
+      RETURNING VALUE(rv_opened) TYPE abap_bool.
+{{/staged}}
     CLASS-METHODS run_rule
       IMPORTING iv_rule TYPE csequence
                 iv_date TYPE d
                 iv_run TYPE csequence
-{{#piles}}
+{{#planned}}
                 iv_pile TYPE i
-{{/piles}}
+{{/planned}}
                 iv_bind TYPE string OPTIONAL
 {{#with_params}}
                 is_params TYPE ty_params OPTIONAL
@@ -97,20 +155,30 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rs_result) TYPE ty_result.
     CLASS-METHODS rules
       RETURNING VALUE(rt_rules) TYPE tt_rule.
+{{#schedule}}
+    " the set as a periodic background job: ZL3_<SET> with p_mode = 'D' (one
+    " run in jobs for the current date) every {{every}}, first at the time
+    " schedule: names, in system time (sy-datum, sy-uzeit), never the user's
+    CLASS-METHODS schedule
+      RETURNING VALUE(rv_jobcount) TYPE tbtcjob-jobcount.
+    " deletes the waiting instance of the driver, which ends the chain
+    CLASS-METHODS unschedule
+      RETURNING VALUE(rv_deleted) TYPE i.
+{{/schedule}}
   PRIVATE SECTION.
     CLASS-METHODS write
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
-{{#piles}}
+{{#planned}}
                 iv_pile TYPE i
-{{/piles}}
+{{/planned}}
                 iv_class TYPE csequence
                 iv_file TYPE csequence
                 iv_line TYPE i
                 it_alerts TYPE string_table
                 iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
-{{#piles}}
+{{#planned}}
     " one run of the set per check date at a time: ZOSD_L3_RUN
     CLASS-METHODS lock
       IMPORTING iv_run TYPE csequence
@@ -125,7 +193,26 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_date TYPE d
                 iv_run TYPE csequence
                 iv_bind TYPE string.
+{{/planned}}
+{{#staged}}
+    CLASS-METHODS stages
+      RETURNING VALUE(rt_stages) TYPE tt_stage.
+    " a filter rule's keys into the run's worklist (ZOSD_L3_WORK)
+    CLASS-METHODS fill
+      IMPORTING iv_run TYPE csequence
+                iv_date TYPE d
+                iv_worklist TYPE csequence
+                it_keys TYPE string_table
+      CHANGING cs_rule TYPE ty_rule.
+{{/staged}}
+{{#stages}}
+{{#piles}}
+    " the range of a pile of stage {{no}}, from its plan row{{#over_worklist}} and worklist {{name}}{{/over_worklist}}
+    CLASS-METHODS range_{{no}}
+      IMPORTING is_pile TYPE zosd_l3_pile
+      RETURNING VALUE(rt_range) TYPE tt_range_{{no}}.
 {{/piles}}
+{{/stages}}
 {{#sources}}
     " puts the rows of {{table}} back after a replay: the rows kept before it
     CLASS-METHODS restore_{{index}}
@@ -138,21 +225,28 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
 {{#with_params}}
                 is_params TYPE ty_params OPTIONAL
 {{/with_params}}
-{{^piles}}
+{{^planned}}
       CHANGING cs_rule TYPE ty_rule.
-{{/piles}}
-{{#piles}}
+{{/planned}}
+{{#planned}}
                 iv_jobname TYPE csequence
       CHANGING cs_pile TYPE zosd_l3_pile.
-{{/piles}}
+{{/planned}}
 ENDCLASS.
 
 CLASS {{class}} IMPLEMENTATION.
   METHOD run.
-{{^piles}}
+{{^planned}}
     " mode S runs every rule in this step; mode P submits one job per rule,
     " and collect( ) reads their states once they have run
-{{/piles}}
+{{/planned}}
+{{#staged}}
+    " stage by stage: a stage opens through its gate row in ZOSD_L3_STAGE
+    " (WAITING to OPEN), is planned then (a later stage reads the worklist an
+    " earlier one filled) and runs. Mode S runs every stage in this step and
+    " stops at a stage that is not DONE; mode P submits the piles of the first
+    " stage that has any, and the job that ends a stage opens the next one
+{{/staged}}
 {{#piles}}
     " the plan first: a row per rule and pile. Mode S then runs every pile in
     " this step; mode P submits one job per pile, and collect( ) reads the plan
@@ -160,12 +254,21 @@ CLASS {{class}} IMPLEMENTATION.
 {{/piles}}
     DATA lt_rules TYPE tt_rule.
     DATA ls_rule TYPE ty_rule.
-{{#piles}}
+{{#planned}}
     DATA lt_piles TYPE tt_pile.
     DATA ls_pile TYPE zosd_l3_pile.
     DATA ls_part TYPE ty_rule.
+{{/planned}}
+{{#piles}}
     DATA lv_lost TYPE i.
 {{/piles}}
+{{#staged}}
+    DATA lt_stages TYPE tt_stage.
+    DATA ls_stage TYPE ty_stage.
+    DATA ls_gate TYPE zosd_l3_stage.
+    DATA lv_stop TYPE abap_bool.
+    DATA lv_open TYPE abap_bool.
+{{/staged}}
     DATA lv_stamp TYPE timestampl.
     DATA lv_parallel TYPE abap_bool.
     DATA lx_error TYPE REF TO cx_root.
@@ -184,9 +287,14 @@ CLASS {{class}} IMPLEMENTATION.
                           iv_allow_replay = iv_allow_replay ).
     rs_result-set_name = c_set.
     rs_result-mode = iv_mode.
-{{#piles}}
+{{#planned}}
     rs_result-bind = iv_bind.
-{{/piles}}
+{{/planned}}
+{{#staged}}
+{{#with_params}}
+    rs_result-params = is_params.
+{{/with_params}}
+{{/staged}}
 {{#date}}
     rs_result-check_date = iv_date.
 {{#today}}
@@ -201,14 +309,14 @@ CLASS {{class}} IMPLEMENTATION.
         GET TIME STAMP FIELD lv_stamp.
         rs_result-run_id = lv_stamp.
     ENDTRY.
-{{#piles}}
+{{#planned}}
     " one run of the set per check date at a time: a run that finds the lock
     " held by another answers BUSY and plans nothing
     IF lock( iv_run = rs_result-run_id iv_date = rs_result-check_date ) = abap_false.
       rs_result-status = 'BUSY'.
       RETURN.
     ENDIF.
-{{/piles}}
+{{/planned}}
     lt_rules = rules( ).
     " a source that is not live replaces table content for this run, and the
     " table is put back whatever happens: after the loop, or when an exception
@@ -232,7 +340,7 @@ CLASS {{class}} IMPLEMENTATION.
           INSERT {{table}} FROM TABLE lt_scope_{{index}}.
         ENDIF.
 {{/sources}}
-{{^piles}}
+{{^planned}}
         LOOP AT lt_rules INTO ls_rule.
           IF iv_mode = c_parallel.
             submit( EXPORTING iv_date = rs_result-check_date
@@ -251,7 +359,7 @@ CLASS {{class}} IMPLEMENTATION.
           ENDIF.
           APPEND ls_rule TO rs_result-rules.
         ENDLOOP.
-{{/piles}}
+{{/planned}}
 {{#piles}}
         lt_piles = plan( iv_run = rs_result-run_id
                          iv_date = rs_result-check_date
@@ -316,10 +424,122 @@ CLASS {{class}} IMPLEMENTATION.
           release( iv_run = rs_result-run_id iv_date = rs_result-check_date ).
         ENDIF.
 {{/piles}}
+{{#staged}}
+        " the gate rows: every stage WAITING; a stage opens once, WAITING to OPEN
+        lt_stages = stages( ).
+        ls_gate-set_name = c_set.
+        ls_gate-run_id = rs_result-run_id.
+        ls_gate-check_date = rs_result-check_date.
+        ls_gate-status = 'WAITING'.
+        LOOP AT lt_stages INTO ls_stage.
+          ls_gate-stage_no = ls_stage-stage_no.
+          ls_gate-stage_name = ls_stage-stage.
+          INSERT zosd_l3_stage FROM ls_gate.
+        ENDLOOP.
+        LOOP AT lt_stages INTO ls_stage.
+          IF lv_stop = abap_true.
+            " after a stage that did not end DONE, or after the stage whose
+            " jobs were just submitted: not opened by this step
+            ls_stage-status = 'WAITING'.
+            LOOP AT lt_rules INTO ls_rule WHERE stage_no = ls_stage-stage_no.
+              ls_rule-status = 'WAITING'.
+              APPEND ls_rule TO rs_result-rules.
+            ENDLOOP.
+            APPEND ls_stage TO rs_result-stages.
+            CONTINUE.
+          ENDIF.
+          GET TIME STAMP FIELD lv_stamp.
+          UPDATE zosd_l3_stage SET status = 'OPEN' opened = lv_stamp
+            WHERE run_id = rs_result-run_id
+              AND stage_no = ls_stage-stage_no
+              AND status = 'WAITING'.
+          lt_piles = plan( iv_run = rs_result-run_id
+                           iv_date = rs_result-check_date
+                           iv_stage = ls_stage-stage_no
+                           iv_bind = iv_bind ).
+          INSERT zosd_l3_pile FROM TABLE lt_piles.
+          ls_stage-piles = lines( lt_piles ).
+          IF iv_mode = c_parallel AND lt_piles IS NOT INITIAL.
+            " mode P: this stage's piles as jobs; the job that ends the stage opens the next
+            LOOP AT lt_rules INTO ls_rule WHERE stage_no = ls_stage-stage_no.
+              ls_rule-status = 'SUBMITTED'.
+              LOOP AT lt_piles INTO ls_pile WHERE rule_name = ls_rule-rule.
+                ls_rule-piles = ls_rule-piles + 1.
+                submit( EXPORTING iv_date = rs_result-check_date
+                                  iv_run = rs_result-run_id
+                                  iv_bind = iv_bind
+{{#with_params}}
+                                  is_params = is_params
+{{/with_params}}
+                                  iv_jobname = ls_rule-jobname
+                        CHANGING cs_pile = ls_pile ).
+                IF ls_pile-status = 'FAILED'.
+                  ls_rule-status = 'PARTIAL'.
+                ENDIF.
+              ENDLOOP.
+              APPEND ls_rule TO rs_result-rules.
+            ENDLOOP.
+            ls_stage-status = 'SUBMITTED'.
+            lv_stop = abap_true.
+            lv_open = abap_true.
+          ELSE.
+            " mode S, or a stage without a pile: every pile in this step. A
+            " rule is DONE when every pile is, and only then finalised
+            LOOP AT lt_rules INTO ls_rule WHERE stage_no = ls_stage-stage_no.
+              LOOP AT lt_piles INTO ls_pile WHERE rule_name = ls_rule-rule.
+                ls_rule-piles = ls_rule-piles + 1.
+                ls_part = run_rule( iv_rule = ls_rule-rule
+                                    iv_date = rs_result-check_date
+                                    iv_run = rs_result-run_id
+                                    iv_pile = ls_pile-pile_no
+                                    iv_bind = iv_bind{{#with_params}} is_params = is_params{{/with_params}} ).
+                ls_rule-alerts = ls_rule-alerts + ls_part-alerts.
+                ls_rule-keys = ls_rule-keys + ls_part-keys.
+                ls_rule-failed = ls_rule-failed + ls_part-failed.
+                ls_rule-piles_done = ls_rule-piles_done + ls_part-piles_done.
+              ENDLOOP.
+              IF ls_rule-piles_done = ls_rule-piles.
+                ls_rule-status = 'DONE'.
+                finalise( iv_rule = ls_rule-rule
+                          iv_hash = ls_rule-model_hash
+                          iv_date = rs_result-check_date
+                          iv_run = rs_result-run_id
+                          iv_bind = iv_bind ).
+              ELSE.
+                ls_rule-status = 'PARTIAL'.
+              ENDIF.
+              ls_stage-piles_done = ls_stage-piles_done + ls_rule-piles_done.
+              rs_result-alerts = rs_result-alerts + ls_rule-alerts.
+              APPEND ls_rule TO rs_result-rules.
+            ENDLOOP.
+            IF ls_stage-piles_done = ls_stage-piles.
+              ls_stage-status = 'DONE'.
+            ELSE.
+              ls_stage-status = 'PARTIAL'.
+              lv_stop = abap_true.
+            ENDIF.
+            GET TIME STAMP FIELD lv_stamp.
+            UPDATE zosd_l3_stage SET status = ls_stage-status ended = lv_stamp
+              WHERE run_id = rs_result-run_id
+                AND stage_no = ls_stage-stage_no.
+          ENDIF.
+          APPEND ls_stage TO rs_result-stages.
+        ENDLOOP.
+        " mode P holds the lock while a stage's jobs are open; else the run is final
+        IF lv_open = abap_true.
+          rs_result-status = 'SUBMITTED'.
+        ELSE.
+          rs_result-status = 'DONE'.
+          LOOP AT rs_result-stages INTO ls_stage WHERE status <> 'DONE'.
+            rs_result-status = 'PARTIAL'.
+          ENDLOOP.
+          release( iv_run = rs_result-run_id iv_date = rs_result-check_date ).
+        ENDIF.
+{{/staged}}
       CATCH cx_root INTO lx_error.
-{{#piles}}
+{{#planned}}
         release( iv_run = rs_result-run_id iv_date = rs_result-check_date ).
-{{/piles}}
+{{/planned}}
 {{#sources}}
         IF lv_swap_{{index}} = abap_true.
           restore_{{index}}( lt_keep_{{index}} ).
@@ -395,6 +615,232 @@ CLASS {{class}} IMPLEMENTATION.
   ENDMETHOD.
 
 {{/piles}}
+{{#staged}}
+  METHOD plan.
+    " the plan of one stage, made when the stage opens. A piled stage reads
+    " its keys through its source port (over a worklist: the port's worklist
+    " variant, the keys an earlier stage of this run filled), sorted and
+    " without repeats, cut into consecutive chunks of its size; a rule that
+    " is not piled is one pile, number 0, over every row. No key, no pile
+    DATA lt_cut TYPE tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lv_count TYPE i.
+{{#stages}}
+{{#piles}}
+    DATA li_source_{{no}} TYPE REF TO {{source.iface}}.
+    DATA lt_keys_{{no}} TYPE {{source.iface}}=>tt_rows.
+    DATA ls_key_{{no}} LIKE LINE OF lt_keys_{{no}}.
+{{/piles}}
+{{/stages}}
+    ls_pile-set_name = c_set.
+    ls_pile-run_id = iv_run.
+    ls_pile-check_date = iv_date.
+    ls_pile-stage_no = iv_stage.
+    ls_pile-status = 'PLANNED'.
+    CASE iv_stage.
+{{#stages}}
+      WHEN {{no}}.
+{{#piles}}
+{{#over_worklist}}
+        " the keys worklist {{name}} holds for this run
+        {{class}}=>use( iv_run = iv_run iv_worklist = {{name | literal}} ).
+        li_source_{{no}} = {{ports_class}}=>get_{{source.name}}( 'worklist' ).
+{{/over_worklist}}
+{{^over_worklist}}
+        li_source_{{no}} = {{ports_class}}=>get_{{source.name}}( {{ports_class}}=>variant( iv_port = {{source.name | literal}} iv_bind = iv_bind ) ).
+{{/over_worklist}}
+        lt_keys_{{no}} = li_source_{{no}}->read( ).
+        SORT lt_keys_{{no}} BY {{source.key}}.
+        DELETE ADJACENT DUPLICATES FROM lt_keys_{{no}} COMPARING {{source.key}}.
+        LOOP AT lt_keys_{{no}} INTO ls_key_{{no}}.
+          IF lv_count = 0.
+            ls_pile-pile_no = ls_pile-pile_no + 1.
+            ls_pile-range_low = ls_key_{{no}}-{{source.key}}.
+          ENDIF.
+          ls_pile-range_high = ls_key_{{no}}-{{source.key}}.
+          lv_count = lv_count + 1.
+          IF lv_count = {{size}}.
+            APPEND ls_pile TO lt_cut.
+            lv_count = 0.
+          ENDIF.
+        ENDLOOP.
+        IF lv_count > 0.
+          APPEND ls_pile TO lt_cut.
+        ENDIF.
+{{/piles}}
+{{#members}}
+{{#range}}
+        " {{name}}: piled, its range: is the key
+        LOOP AT lt_cut INTO ls_pile.
+          ls_pile-rule_name = c_rule_{{index}}.
+          ls_pile-model_hash = c_hash_{{index}}.
+          APPEND ls_pile TO rt_piles.
+        ENDLOOP.
+{{/range}}
+{{#unpiled}}
+        " {{name}}: not piled, one pile over every row: 0
+        CLEAR: ls_pile-pile_no, ls_pile-range_low, ls_pile-range_high.
+        ls_pile-rule_name = c_rule_{{index}}.
+        ls_pile-model_hash = c_hash_{{index}}.
+        APPEND ls_pile TO rt_piles.
+{{/unpiled}}
+{{/members}}
+{{/stages}}
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD stages.
+    DATA ls_stage TYPE ty_stage.
+{{#stages}}
+    ls_stage-stage_no = {{no}}.
+    ls_stage-stage = c_stage_{{no}}.
+    APPEND ls_stage TO rt_stages.
+{{/stages}}
+  ENDMETHOD.
+
+  METHOD advance.
+    " every pile of stage iv_stage DONE: the stage is DONE and the next one
+    " opens. The gate is one UPDATE from WAITING to OPEN, so of two jobs that
+    " end the stage at once only the one that gets sy-dbcnt = 1 plans and
+    " submits it. A stage without a pile is DONE at once and the one after it
+    " opens; past the last stage the run is complete: every rule finalised
+    " (all are DONE) and the lock released
+    DATA lt_piles TYPE tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lt_rules TYPE tt_rule.
+    DATA ls_rule TYPE ty_rule.
+    DATA lv_stage TYPE i.
+    DATA lv_stamp TYPE timestampl.
+    SELECT COUNT(*) FROM zosd_l3_pile
+      WHERE set_name = c_set
+        AND run_id = iv_run
+        AND stage_no = iv_stage
+        AND status <> 'DONE'.
+    IF sy-dbcnt > 0.
+      RETURN.
+    ENDIF.
+    GET TIME STAMP FIELD lv_stamp.
+    UPDATE zosd_l3_stage SET status = 'DONE' ended = lv_stamp
+      WHERE run_id = iv_run
+        AND stage_no = iv_stage
+        AND status = 'OPEN'.
+    lt_rules = rules( ).
+    lv_stage = iv_stage + 1.
+    WHILE lv_stage <= c_stages.
+      UPDATE zosd_l3_stage SET status = 'OPEN' opened = lv_stamp
+        WHERE run_id = iv_run
+          AND stage_no = lv_stage
+          AND status = 'WAITING'.
+      IF sy-dbcnt <> 1.
+        RETURN.
+      ENDIF.
+      rv_opened = abap_true.
+      lt_piles = plan( iv_run = iv_run
+                       iv_date = iv_date
+                       iv_stage = lv_stage
+                       iv_bind = iv_bind ).
+      INSERT zosd_l3_pile FROM TABLE lt_piles.
+      IF lt_piles IS NOT INITIAL.
+        LOOP AT lt_piles INTO ls_pile.
+          READ TABLE lt_rules INTO ls_rule WITH KEY rule = ls_pile-rule_name.
+          submit( EXPORTING iv_date = iv_date
+                            iv_run = iv_run
+                            iv_bind = iv_bind
+{{#with_params}}
+                            is_params = is_params
+{{/with_params}}
+                            iv_jobname = ls_rule-jobname
+                  CHANGING cs_pile = ls_pile ).
+        ENDLOOP.
+        RETURN.
+      ENDIF.
+      UPDATE zosd_l3_stage SET status = 'DONE' ended = lv_stamp
+        WHERE run_id = iv_run
+          AND stage_no = lv_stage.
+      lv_stage = lv_stage + 1.
+    ENDWHILE.
+    LOOP AT lt_rules INTO ls_rule.
+      finalise( iv_rule = ls_rule-rule
+                iv_hash = ls_rule-model_hash
+                iv_date = iv_date
+                iv_run = iv_run
+                iv_bind = iv_bind ).
+    ENDLOOP.
+    release( iv_run = iv_run iv_date = iv_date ).
+  ENDMETHOD.
+
+  METHOD fill.
+    " a filter rule's keys go into the run's worklist, MODIFY on the full
+    " key, so a retried pile writes the same rows; the alert log gets none
+    DATA ls_work TYPE zosd_l3_work.
+    DATA lv_key TYPE string.
+    ls_work-set_name = c_set.
+    ls_work-run_id = iv_run.
+    ls_work-worklist = iv_worklist.
+    ls_work-check_date = iv_date.
+    LOOP AT it_keys INTO lv_key.
+      ls_work-key_value = lv_key.
+      MODIFY zosd_l3_work FROM ls_work.
+      IF sy-subrc <> 0.
+        cs_rule-failed = cs_rule-failed + 1.
+      ENDIF.
+    ENDLOOP.
+    cs_rule-keys = lines( it_keys ).
+    IF cs_rule-failed = 0.
+      cs_rule-status = 'DONE'.
+    ELSE.
+      cs_rule-status = 'WRITE-FAILED'.
+    ENDIF.
+  ENDMETHOD.
+{{#stages}}
+{{#piles}}
+
+  METHOD range_{{no}}.
+{{#over_worklist}}
+    " a pile over a worklist is the worklist's keys between its bounds, each
+    " I EQ: a key between them that the filter did not select stays out
+    DATA lt_values TYPE STANDARD TABLE OF zosd_l3_work-key_value WITH DEFAULT KEY.
+    DATA lv_value TYPE zosd_l3_work-key_value.
+{{/over_worklist}}
+    DATA ls_range LIKE LINE OF rt_range.
+    IF is_pile-pile_no = 0.
+      RETURN.
+    ENDIF.
+    ls_range-sign = 'I'.
+{{#over_worklist}}
+    ls_range-option = 'EQ'.
+    SELECT key_value FROM zosd_l3_work INTO TABLE lt_values
+      WHERE run_id = is_pile-run_id
+        AND worklist = {{name | literal}}
+        AND key_value BETWEEN is_pile-range_low AND is_pile-range_high.
+    LOOP AT lt_values INTO lv_value.
+      ls_range-low = lv_value.
+      APPEND ls_range TO rt_range.
+    ENDLOOP.
+    IF rt_range IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+    " no worklist row left: the bounds the plan recorded, each a key it held
+    ls_range-low = is_pile-range_low.
+    APPEND ls_range TO rt_range.
+    ls_range-low = is_pile-range_high.
+    APPEND ls_range TO rt_range.
+{{/over_worklist}}
+{{^over_worklist}}
+    ls_range-low = is_pile-range_low.
+    IF is_pile-range_high = is_pile-range_low.
+      ls_range-option = 'EQ'.
+    ELSE.
+      ls_range-option = 'BT'.
+      ls_range-high = is_pile-range_high.
+    ENDIF.
+    APPEND ls_range TO rt_range.
+{{/over_worklist}}
+  ENDMETHOD.
+{{/piles}}
+{{/stages}}
+
+{{/staged}}
 {{#sources}}
   METHOD restore_{{index}}.
     DELETE FROM {{table}}.
@@ -408,11 +854,16 @@ CLASS {{class}} IMPLEMENTATION.
     ls_rule-rule = c_rule_{{index}}.
     ls_rule-model_hash = c_hash_{{index}}.
     ls_rule-jobname = {{jobname | literal}}.
+{{#staged}}
+    ls_rule-stage_no = {{stage_no}}.
+    ls_rule-filter = {{#filter}}abap_true{{/filter}}{{^filter}}abap_false{{/filter}}.
+{{/staged}}
     APPEND ls_rule TO rt_rules.
 {{/rules}}
   ENDMETHOD.
 
   METHOD run_rule.
+{{^staged}}
     DATA lt_alerts TYPE string_table.
 {{#piles}}
     DATA ls_pile TYPE zosd_l3_pile.
@@ -500,6 +951,104 @@ CLASS {{class}} IMPLEMENTATION.
     ENDIF.
     UPDATE zosd_l3_pile FROM ls_pile.
 {{/piles}}
+{{/staged}}
+{{#staged}}
+    " a pile of one rule: its plan row RUNNING now, DONE or FAILED at the end;
+    " a filter rule's keys go to its worklist, a check rule's alerts to the log
+    DATA lt_alerts TYPE string_table.
+    DATA lt_found TYPE string_table.
+    DATA ls_pile TYPE zosd_l3_pile.
+{{#stages}}
+{{#piles}}
+    DATA lt_range_{{no}} TYPE tt_range_{{no}}.
+{{/piles}}
+{{/stages}}
+{{#rules}}
+{{#filter}}
+    DATA lt_keys_{{index}} TYPE {{check_class}}=>tt_range.
+    DATA ls_key_{{index}} LIKE LINE OF lt_keys_{{index}}.
+{{/filter}}
+{{/rules}}
+{{#with_params}}
+    DATA ls_params TYPE ty_params.
+    ls_params = is_params.
+{{/with_params}}
+{{#params}}
+{{#default}}
+    IF ls_params-{{name}} IS INITIAL.
+      ls_params-{{name}} = {{default | literal}}.
+    ENDIF.
+{{/default}}
+{{/params}}
+    rs_rule-rule = iv_rule.
+    SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
+      WHERE set_name = c_set
+        AND run_id = iv_run
+        AND rule_name = iv_rule
+        AND pile_no = iv_pile.
+    IF sy-subrc <> 0.
+      rs_rule-status = 'NO-PILE'.
+      RETURN.
+    ENDIF.
+    rs_rule-piles = 1.
+    ls_pile-status = 'RUNNING'.
+    GET TIME STAMP FIELD ls_pile-started.
+    UPDATE zosd_l3_pile FROM ls_pile.
+    CASE iv_rule.
+{{#rules}}
+      WHEN c_rule_{{index}}.
+        rs_rule-model_hash = c_hash_{{index}}.
+        rs_rule-jobname = {{jobname | literal}}.
+        rs_rule-stage_no = {{stage_no}}.
+{{#param_args}}
+{{#fallback}}
+        IF ls_params-{{name}} IS INITIAL.
+          ls_params-{{name}} = {{fallback | literal}}.
+        ENDIF.
+{{/fallback}}
+{{/param_args}}
+{{#range}}
+        lt_range_{{stage_no}} = range_{{stage_no}}( ls_pile ).
+{{/range}}
+{{#filter}}
+        rs_rule-filter = abap_true.
+        lt_keys_{{index}} = {{check_class}}=>keys( iv_date = iv_date{{#range}} it_range = lt_range_{{stage_no}}{{/range}}{{#param_args}} {{ref}} = ls_params-{{name}}{{/param_args}} ).
+        LOOP AT lt_keys_{{index}} INTO ls_key_{{index}}.
+          APPEND ls_key_{{index}}-low TO lt_found.
+        ENDLOOP.
+        fill( EXPORTING iv_run = iv_run
+                        iv_date = iv_date
+                        iv_worklist = {{worklist | literal}}
+                        it_keys = lt_found
+              CHANGING cs_rule = rs_rule ).
+{{/filter}}
+{{#check}}
+        lt_alerts = {{check_class}}=>check( iv_date{{#has_args}} = iv_date{{/has_args}}{{#range}} it_range = lt_range_{{stage_no}}{{/range}}{{#param_args}} {{ref}} = ls_params-{{name}}{{/param_args}} ).
+        write( EXPORTING iv_date = iv_date
+                         iv_run = iv_run
+                         iv_pile = iv_pile
+                         iv_class = {{check_class | literal}}
+                         iv_file = {{file | literal}}
+                         iv_line = {{alert_line | literal}}
+                         it_alerts = lt_alerts
+                         iv_bind = iv_bind
+               CHANGING cs_rule = rs_rule ).
+{{/check}}
+{{/rules}}
+      WHEN OTHERS.
+        rs_rule-status = 'UNKNOWN'.
+    ENDCASE.
+    " a filter pile's ALERTS column holds the keys it selected
+    ls_pile-alerts = rs_rule-alerts + rs_rule-keys.
+    GET TIME STAMP FIELD ls_pile-ended.
+    IF rs_rule-status = 'DONE'.
+      ls_pile-status = 'DONE'.
+      rs_rule-piles_done = 1.
+    ELSE.
+      ls_pile-status = 'FAILED'.
+    ENDIF.
+    UPDATE zosd_l3_pile FROM ls_pile.
+{{/staged}}
   ENDMETHOD.
 
   METHOD write.
@@ -517,9 +1066,9 @@ CLASS {{class}} IMPLEMENTATION.
     ls_row-rule_name = cs_rule-rule.
     ls_row-model_hash = cs_rule-model_hash.
     ls_row-check_date = iv_date.
-{{#piles}}
+{{#planned}}
     ls_row-pile_no = iv_pile.
-{{/piles}}
+{{/planned}}
     ls_row-run_id = iv_run.
     ls_row-rule_class = iv_class.
     ls_row-rule_file = iv_file.
@@ -534,9 +1083,9 @@ CLASS {{class}} IMPLEMENTATION.
     ls_group-rule_name = cs_rule-rule.
     ls_group-model_hash = cs_rule-model_hash.
     ls_group-check_date = iv_date.
-{{#piles}}
+{{#planned}}
     ls_group-pile_no = iv_pile.
-{{/piles}}
+{{/planned}}
     li_sink = {{ports_class}}=>get_{{name}}( {{ports_class}}=>variant( iv_port = {{name | literal}} iv_bind = iv_bind ) ).
     lv_count = li_sink->put( it_rows = lt_rows
                              is_group = ls_group ).
@@ -550,7 +1099,7 @@ CLASS {{class}} IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
-{{#piles}}
+{{#planned}}
   METHOD lock.
     " INSERT takes a set and date never run, UPDATE one whose last run
     " released it; each is one statement, so of two runs at once one wins.
@@ -607,28 +1156,28 @@ CLASS {{class}} IMPLEMENTATION.
         AND run_id <> iv_run.
   ENDMETHOD.
 
-{{/piles}}
+{{/planned}}
   METHOD submit.
-{{^piles}}
+{{^planned}}
     " one job per rule: JOB_OPEN, SUBMIT ... VIA JOB, JOB_CLOSE started at
     " once; the rules do not depend on each other, so no job waits for one
-{{/piles}}
-{{#piles}}
+{{/planned}}
+{{#planned}}
     " one job per pile: JOB_OPEN, SUBMIT ... VIA JOB, JOB_CLOSE started at
     " once, named L3_<SET>_<nn>_<pppp> (the last four digits of the pile);
     " the job finds its range in the plan row by set, run, rule and pile
-{{/piles}}
+{{/planned}}
     DATA lv_jobname TYPE tbtcjob-jobname.
     DATA lv_jobcount TYPE tbtcjob-jobcount.
     DATA lv_released TYPE btch0000-char1.
-{{^piles}}
+{{^planned}}
     lv_jobname = cs_rule-jobname.
-{{/piles}}
-{{#piles}}
+{{/planned}}
+{{#planned}}
     DATA lv_pile TYPE n LENGTH 4.
     lv_pile = cs_pile-pile_no.
     CONCATENATE iv_jobname '_' lv_pile INTO lv_jobname.
-{{/piles}}
+{{/planned}}
     CALL FUNCTION 'JOB_OPEN'
       EXPORTING
         jobname = lv_jobname
@@ -637,32 +1186,32 @@ CLASS {{class}} IMPLEMENTATION.
       EXCEPTIONS
         OTHERS = 1.
     IF sy-subrc <> 0.
-{{^piles}}
+{{^planned}}
       cs_rule-status = 'OPEN-FAILED'.
-{{/piles}}
-{{#piles}}
+{{/planned}}
+{{#planned}}
       cs_pile-status = 'FAILED'.
       UPDATE zosd_l3_pile FROM cs_pile.
-{{/piles}}
+{{/planned}}
       RETURN.
     ENDIF.
-{{^piles}}
+{{^planned}}
     cs_rule-jobcount = lv_jobcount.
     SUBMIT {{report}}
       WITH p_rule = cs_rule-rule
-{{/piles}}
-{{#piles}}
+{{/planned}}
+{{#planned}}
     cs_pile-job_name = lv_jobname.
     cs_pile-job_count = lv_jobcount.
     UPDATE zosd_l3_pile FROM cs_pile.
     SUBMIT {{report}}
       WITH p_rule = cs_pile-rule_name
-{{/piles}}
+{{/planned}}
       WITH p_date = iv_date
       WITH p_run = iv_run
-{{#piles}}
+{{#planned}}
       WITH p_pile = cs_pile-pile_no
-{{/piles}}
+{{/planned}}
       WITH p_bind = iv_bind
 {{#params}}
       WITH {{screen}} = is_params-{{name}}
@@ -679,27 +1228,117 @@ CLASS {{class}} IMPLEMENTATION.
       EXCEPTIONS
         OTHERS = 1.
     IF sy-subrc <> 0 OR lv_released <> 'X'.
-{{^piles}}
+{{^planned}}
       cs_rule-status = 'CLOSE-FAILED'.
       RETURN.
-{{/piles}}
-{{#piles}}
+{{/planned}}
+{{#planned}}
       cs_pile-status = 'FAILED'.
       UPDATE zosd_l3_pile FROM cs_pile.
-{{/piles}}
+{{/planned}}
     ENDIF.
-{{^piles}}
+{{^planned}}
     cs_rule-status = 'SUBMITTED'.
-{{/piles}}
+{{/planned}}
   ENDMETHOD.
 
+{{#schedule}}
+  METHOD schedule.
+    " JOB_OPEN, the driver as the job's step, JOB_CLOSE at a date and time with
+    " a period ({{field}}): the job facade and a system both read SDLSTRTDT and
+    " SDLSTRTTM as system time, which sy-datum and sy-uzeit are
+    DATA lv_jobname TYPE tbtcjob-jobname.
+    DATA lv_date TYPE d.
+    DATA lv_time TYPE t.
+    DATA lv_period TYPE tbtcjob-{{field}}.
+    DATA lv_released TYPE btch0000-char1.
+    lv_jobname = c_driver.
+    lv_period = {{count}}.
+    GET TIME.
+    lv_date = sy-datum.
+{{#at}}
+    lv_time = {{at | literal}}.
+    " a first start that has passed today is tomorrow's
+    IF lv_time <= sy-uzeit.
+      lv_date = lv_date + 1.
+    ENDIF.
+{{/at}}
+{{^at}}
+    lv_time = sy-uzeit.
+{{/at}}
+    CALL FUNCTION 'JOB_OPEN'
+      EXPORTING
+        jobname = lv_jobname
+      IMPORTING
+        jobcount = rv_jobcount
+      EXCEPTIONS
+        OTHERS = 1.
+    IF sy-subrc <> 0.
+      CLEAR rv_jobcount.
+      RETURN.
+    ENDIF.
+    SUBMIT {{report}}
+      WITH p_mode = 'D'
+      VIA JOB lv_jobname NUMBER rv_jobcount
+      AND RETURN.
+    CALL FUNCTION 'JOB_CLOSE'
+      EXPORTING
+        jobname = lv_jobname
+        jobcount = rv_jobcount
+        sdlstrtdt = lv_date
+        sdlstrttm = lv_time
+        {{field}} = lv_period
+      IMPORTING
+        job_was_released = lv_released
+      EXCEPTIONS
+        OTHERS = 1.
+    IF sy-subrc <> 0 OR lv_released <> 'X'.
+      CLEAR rv_jobcount.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD unschedule.
+    " the driver's instance that waits for its start (status S) is the chain:
+    " a periodic job's successor is made when an instance starts, so deleting
+    " the waiting one ends it (measured on a system, docs/job-standard-fms.md)
+    DATA ls_select TYPE btcselect.
+    DATA lt_jobs TYPE STANDARD TABLE OF tbtcjob WITH DEFAULT KEY.
+    DATA ls_job TYPE tbtcjob.
+    ls_select-jobname = c_driver.
+    ls_select-username = sy-uname.
+    ls_select-schedul = 'X'.
+    CALL FUNCTION 'BP_JOB_SELECT'
+      EXPORTING
+        jobselect_dialog = 'N'
+        jobsel_param_in = ls_select
+      TABLES
+        jobselect_joblist = lt_jobs
+      EXCEPTIONS
+        OTHERS = 1.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    LOOP AT lt_jobs INTO ls_job WHERE status = 'S'.
+      CALL FUNCTION 'BP_JOB_DELETE'
+        EXPORTING
+          jobname = ls_job-jobname
+          jobcount = ls_job-jobcount
+        EXCEPTIONS
+          OTHERS = 1.
+      IF sy-subrc = 0.
+        rv_deleted = rv_deleted + 1.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+
+{{/schedule}}
   METHOD collect.
-{{^piles}}
+{{^planned}}
     " the jobs of the run, found by BP_JOB_SELECT, each read by SHOW_JOBSTATE;
     " a finished rule counts the rows its job wrote under this run
     DATA ls_select TYPE btcselect.
     DATA lt_jobs TYPE STANDARD TABLE OF tbtcjob WITH DEFAULT KEY.
-{{/piles}}
+{{/planned}}
 {{#piles}}
     " the plan rows of the run, each open pile's job read by SHOW_JOBSTATE: a
     " pile is DONE when its job wrote so; a job that ended without that, or
@@ -712,6 +1351,27 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_lost TYPE abap_bool.
     DATA lv_final TYPE abap_bool VALUE abap_true.
 {{/piles}}
+{{#staged}}
+    " the run's plan rows and gate rows. An open pile's job is read by
+    " SHOW_JOBSTATE: a job that ended without its pile DONE, or no job at
+    " all, makes the pile FAILED. A stage whose piles are all DONE while its
+    " gate is still OPEN (its last job ended before it could advance) is
+    " advanced here. A stage with a FAILED pile is PARTIAL once every pile of
+    " it is final, and the stages after it are NOT-RUN: their gate closes, so
+    " no late job opens one. The run is final when every stage is DONE, or a
+    " stage is PARTIAL and the rest NOT-RUN; only then is the lock released
+    DATA lt_piles TYPE tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lt_gates TYPE STANDARD TABLE OF zosd_l3_stage WITH DEFAULT KEY.
+    DATA ls_gate TYPE zosd_l3_stage.
+    DATA ls_stage TYPE ty_stage.
+    DATA lv_state TYPE c LENGTH 12.
+    DATA lv_open TYPE c LENGTH 12.
+    DATA lv_lost TYPE abap_bool.
+    DATA lv_final TYPE abap_bool VALUE abap_true.
+    DATA lv_closed TYPE abap_bool.
+    DATA lv_stamp TYPE timestampl.
+{{/staged}}
     DATA ls_rule TYPE ty_rule.
     DATA lv_aborted TYPE btch0000-char1.
     DATA lv_finished TYPE btch0000-char1.
@@ -721,7 +1381,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_preliminary TYPE btch0000-char1.
     rs_result = is_result.
     CLEAR: rs_result-rules, rs_result-alerts.
-{{^piles}}
+{{^planned}}
     ls_select-jobname = {{jobs | literal}}.
     ls_select-username = sy-uname.
     CALL FUNCTION 'BP_JOB_SELECT'
@@ -787,7 +1447,7 @@ CLASS {{class}} IMPLEMENTATION.
       ENDIF.
       APPEND ls_rule TO rs_result-rules.
     ENDLOOP.
-{{/piles}}
+{{/planned}}
 {{#piles}}
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = c_set
@@ -884,5 +1544,163 @@ CLASS {{class}} IMPLEMENTATION.
       rs_result-status = 'RUNNING'.
     ENDIF.
 {{/piles}}
+{{#staged}}
+    CLEAR rs_result-stages.
+    SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
+      WHERE set_name = c_set
+        AND run_id = is_result-run_id
+      ORDER BY PRIMARY KEY.
+    LOOP AT lt_piles INTO ls_pile WHERE status <> 'DONE' AND status <> 'FAILED'.
+      lv_state = 'NO-JOB'.
+      IF ls_pile-job_count IS NOT INITIAL.
+        CLEAR: lv_aborted, lv_finished, lv_running, lv_ready, lv_scheduled, lv_preliminary.
+        CALL FUNCTION 'SHOW_JOBSTATE'
+          EXPORTING
+            jobname = ls_pile-job_name
+            jobcount = ls_pile-job_count
+          IMPORTING
+            aborted = lv_aborted
+            finished = lv_finished
+            preliminary = lv_preliminary
+            ready = lv_ready
+            running = lv_running
+            scheduled = lv_scheduled
+          EXCEPTIONS
+            OTHERS = 1.
+        IF sy-subrc <> 0.
+          lv_state = 'NO-JOB'.
+        ELSEIF lv_finished = 'X'.
+          lv_state = 'FINISHED'.
+        ELSEIF lv_aborted = 'X'.
+          lv_state = 'ABORTED'.
+        ELSE.
+          lv_state = 'OPEN'.
+        ENDIF.
+      ENDIF.
+      IF lv_state <> 'OPEN'.
+        " the job is over: the row as it left it, DONE or not
+        SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
+          WHERE set_name = c_set
+            AND run_id = ls_pile-run_id
+            AND rule_name = ls_pile-rule_name
+            AND pile_no = ls_pile-pile_no.
+        IF ls_pile-status <> 'DONE'.
+          ls_pile-status = 'FAILED'.
+          GET TIME STAMP FIELD ls_pile-ended.
+          UPDATE zosd_l3_pile FROM ls_pile.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+    " a gate the last job of its stage did not get to
+    SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
+      WHERE run_id = is_result-run_id
+      ORDER BY PRIMARY KEY.
+    LOOP AT lt_gates INTO ls_gate WHERE status = 'OPEN'.
+      advance( iv_run = is_result-run_id
+               iv_date = is_result-check_date
+               iv_stage = ls_gate-stage_no
+               iv_bind = is_result-bind{{#with_params}} is_params = is_result-params{{/with_params}} ).
+    ENDLOOP.
+    SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
+      WHERE set_name = c_set
+        AND run_id = is_result-run_id
+      ORDER BY PRIMARY KEY.
+    SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
+      WHERE run_id = is_result-run_id
+      ORDER BY PRIMARY KEY.
+    LOOP AT lt_gates INTO ls_gate.
+      CLEAR ls_stage.
+      ls_stage-stage_no = ls_gate-stage_no.
+      ls_stage-stage = ls_gate-stage_name.
+      CLEAR lv_lost.
+      lv_open = ls_gate-status.
+      LOOP AT lt_piles INTO ls_pile WHERE stage_no = ls_gate-stage_no.
+        ls_stage-piles = ls_stage-piles + 1.
+        IF ls_pile-status = 'DONE'.
+          ls_stage-piles_done = ls_stage-piles_done + 1.
+        ELSEIF ls_pile-status = 'FAILED'.
+          lv_lost = abap_true.
+        ELSE.
+          lv_open = 'RUNNING'.
+        ENDIF.
+      ENDLOOP.
+      GET TIME STAMP FIELD lv_stamp.
+      IF ls_gate-status = 'WAITING' AND lv_closed = abap_true.
+        " after a PARTIAL stage: never opened, and now never opens
+        UPDATE zosd_l3_stage SET status = 'NOT-RUN' ended = lv_stamp
+          WHERE run_id = is_result-run_id
+            AND stage_no = ls_gate-stage_no
+            AND status = 'WAITING'.
+        ls_stage-status = 'NOT-RUN'.
+      ELSEIF ls_gate-status = 'WAITING'.
+        ls_stage-status = 'WAITING'.
+        lv_final = abap_false.
+      ELSEIF ls_gate-status = 'NOT-RUN'.
+        ls_stage-status = 'NOT-RUN'.
+        lv_closed = abap_true.
+      ELSEIF lv_open = 'RUNNING'.
+        ls_stage-status = 'RUNNING'.
+        lv_final = abap_false.
+      ELSEIF lv_lost = abap_true.
+        UPDATE zosd_l3_stage SET status = 'PARTIAL' ended = lv_stamp
+          WHERE run_id = is_result-run_id
+            AND stage_no = ls_gate-stage_no.
+        ls_stage-status = 'PARTIAL'.
+        lv_closed = abap_true.
+      ELSE.
+        ls_stage-status = ls_gate-status.
+        IF ls_stage-status = 'PARTIAL'.
+          lv_closed = abap_true.
+        ELSEIF ls_stage-status <> 'DONE'.
+          lv_final = abap_false.
+        ENDIF.
+      ENDIF.
+      APPEND ls_stage TO rs_result-stages.
+    ENDLOOP.
+    LOOP AT is_result-rules INTO ls_rule.
+      CLEAR: ls_rule-alerts, ls_rule-keys, ls_rule-piles, ls_rule-piles_done, lv_open, lv_lost.
+      LOOP AT lt_piles INTO ls_pile WHERE rule_name = ls_rule-rule.
+        ls_rule-piles = ls_rule-piles + 1.
+        IF ls_pile-status = 'DONE'.
+          ls_rule-piles_done = ls_rule-piles_done + 1.
+          IF ls_rule-filter = abap_true.
+            ls_rule-keys = ls_rule-keys + ls_pile-alerts.
+          ELSE.
+            ls_rule-alerts = ls_rule-alerts + ls_pile-alerts.
+          ENDIF.
+        ELSEIF ls_pile-status = 'FAILED'.
+          lv_lost = abap_true.
+        ELSEIF lv_open IS INITIAL.
+          lv_open = ls_pile-status.
+        ENDIF.
+      ENDLOOP.
+      READ TABLE rs_result-stages INTO ls_stage WITH KEY stage_no = ls_rule-stage_no.
+      IF ls_stage-status = 'WAITING' OR ls_stage-status = 'NOT-RUN'.
+        ls_rule-status = ls_stage-status.
+      ELSEIF ls_rule-piles_done = ls_rule-piles.
+        ls_rule-status = 'DONE'.
+        finalise( iv_rule = ls_rule-rule
+                  iv_hash = ls_rule-model_hash
+                  iv_date = is_result-check_date
+                  iv_run = is_result-run_id
+                  iv_bind = is_result-bind ).
+      ELSEIF lv_open IS NOT INITIAL.
+        ls_rule-status = lv_open.
+      ELSE.
+        ls_rule-status = 'PARTIAL'.
+      ENDIF.
+      rs_result-alerts = rs_result-alerts + ls_rule-alerts.
+      APPEND ls_rule TO rs_result-rules.
+    ENDLOOP.
+    IF lv_final = abap_true.
+      rs_result-status = 'DONE'.
+      LOOP AT rs_result-stages INTO ls_stage WHERE status <> 'DONE'.
+        rs_result-status = 'PARTIAL'.
+      ENDLOOP.
+      release( iv_run = is_result-run_id iv_date = is_result-check_date ).
+    ELSE.
+      rs_result-status = 'RUNNING'.
+    ENDIF.
+{{/staged}}
   ENDMETHOD.
 ENDCLASS.

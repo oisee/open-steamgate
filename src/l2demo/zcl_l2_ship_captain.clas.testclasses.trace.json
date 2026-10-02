@@ -721,14 +721,14 @@
   },
   {
    "line": 103,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/1/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 104,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/1/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -917,14 +917,14 @@
   },
   {
    "line": 131,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/2/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 132,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/2/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -1071,14 +1071,14 @@
   },
   {
    "line": 153,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/3/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 154,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/3/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -1281,14 +1281,14 @@
   },
   {
    "line": 183,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/4/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 184,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/4/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -1491,14 +1491,14 @@
   },
   {
    "line": 213,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/5/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 214,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/5/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -1736,14 +1736,14 @@
   },
   {
    "line": 248,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/6/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 249,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/6/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -1876,49 +1876,49 @@
   },
   {
    "line": 268,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/7/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 269,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/7/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 270,
-   "template_line": 232,
+   "template_line": 237,
    "path": "/tests/7/range_args/1",
    "node": "rule/ship-in-service-has-a-captain/example/the range keeps the inner ship/range/1",
    "rule_line": 61
   },
   {
    "line": 271,
-   "template_line": 233,
+   "template_line": 238,
    "path": "/tests/7/range_args/1/sign",
    "node": "rule/ship-in-service-has-a-captain/example/the range keeps the inner ship/range/1",
    "rule_line": 61
   },
   {
    "line": 272,
-   "template_line": 234,
+   "template_line": 239,
    "path": "/tests/7/range_args/1/option",
    "node": "rule/ship-in-service-has-a-captain/example/the range keeps the inner ship/range/1",
    "rule_line": 61
   },
   {
    "line": 273,
-   "template_line": 235,
+   "template_line": 240,
    "path": "/tests/7/range_args/1/low",
    "node": "rule/ship-in-service-has-a-captain/example/the range keeps the inner ship/range/1",
    "rule_line": 61
   },
   {
    "line": 274,
-   "template_line": 239,
+   "template_line": 244,
    "path": "/tests/7/range_args/1",
    "node": "rule/ship-in-service-has-a-captain/example/the range keeps the inner ship/range/1",
    "rule_line": 61
@@ -2142,14 +2142,14 @@
   },
   {
    "line": 306,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/8/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 307,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/8/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -2289,14 +2289,14 @@
   },
   {
    "line": 327,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/9/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 328,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/9/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -2429,14 +2429,14 @@
   },
   {
    "line": 347,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/10/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 348,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/10/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -2576,14 +2576,14 @@
   },
   {
    "line": 368,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/11/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 369,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/11/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -2779,14 +2779,14 @@
   },
   {
    "line": 397,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/12/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 398,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/12/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -2989,14 +2989,14 @@
   },
   {
    "line": 427,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/13/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 428,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/13/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -3192,14 +3192,14 @@
   },
   {
    "line": 456,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/14/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 457,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/14/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -3402,14 +3402,14 @@
   },
   {
    "line": 486,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/15/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 487,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/15/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -3612,14 +3612,14 @@
   },
   {
    "line": 516,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/16/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 517,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/16/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -3815,14 +3815,14 @@
   },
   {
    "line": 545,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/17/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 546,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/17/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -4018,14 +4018,14 @@
   },
   {
    "line": 574,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/18/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 575,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/18/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -4221,14 +4221,14 @@
   },
   {
    "line": 603,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/19/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 604,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/19/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
@@ -4375,14 +4375,14 @@
   },
   {
    "line": 625,
-   "template_line": 229,
+   "template_line": 234,
    "path": "/tests/20/range/table",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10
   },
   {
    "line": 626,
-   "template_line": 230,
+   "template_line": 235,
    "path": "/tests/20/range",
    "node": "rule/ship-in-service-has-a-captain/range",
    "rule_line": 10

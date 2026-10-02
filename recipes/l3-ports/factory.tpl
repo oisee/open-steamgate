@@ -86,6 +86,9 @@ CLASS {{ports_class}} IMPLEMENTATION.
     DATA lv_volatile_port TYPE string.
     DATA lv_replay_port TYPE string.
     DATA lv_hand_port TYPE string.
+{{#with_worklist}}
+    DATA lv_planner_port TYPE string.
+{{/with_worklist}}
     SPLIT iv_bind AT ',' INTO TABLE lt_parts.
     LOOP AT lt_parts INTO lv_part.
       CLEAR: lv_name, lv_value.
@@ -120,6 +123,9 @@ CLASS {{ports_class}} IMPLEMENTATION.
 {{#hand}}
       lv_hand_port = {{port | literal}}.
 {{/hand}}
+{{#planner}}
+      lv_planner_port = {{port | literal}}.
+{{/planner}}
     ENDIF.
 {{/variants}}
     IF lv_known = abap_false.
@@ -128,6 +134,13 @@ CLASS {{ports_class}} IMPLEMENTATION.
                   iv_reason = 'no such variant for the port'.
     ENDIF.
 {{/ports}}
+{{#with_worklist}}
+    IF lv_planner_port IS NOT INITIAL.
+      RAISE EXCEPTION TYPE {{exception}}
+        EXPORTING iv_port = lv_planner_port
+                  iv_reason = 'the worklist variant is read by the planner of a stage; a run does not bind it'.
+    ENDIF.
+{{/with_worklist}}
     IF iv_parallel = abap_true AND lv_volatile_port IS NOT INITIAL.
       RAISE EXCEPTION TYPE {{exception}}
         EXPORTING iv_port = lv_volatile_port

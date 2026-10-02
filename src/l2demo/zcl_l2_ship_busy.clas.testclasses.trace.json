@@ -700,37 +700,37 @@
   {
    "line": 100,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 101,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 102,
+   "template_line": 231,
+   "path": "/tests/1/keys_check",
+   "node": "rule/ship-busy/example/a voyage ahead/keys",
+   "rule_line": 25
+  },
+  {
+   "line": 103,
+   "template_line": 234,
    "path": "/tests/1/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 101,
-   "template_line": 230,
+   "line": 104,
+   "template_line": 235,
    "path": "/tests/1/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 102,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 103,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 104,
-   "template_line": 245,
-   "path": "/tests/1/keys_check",
-   "node": "rule/ship-busy/example/a voyage ahead/keys",
-   "rule_line": 25
   },
   {
    "line": 105,
@@ -973,37 +973,37 @@
   {
    "line": 139,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 140,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 141,
+   "template_line": 231,
+   "path": "/tests/2/keys_check",
+   "node": "rule/ship-busy/example/only past voyages/keys",
+   "rule_line": 32
+  },
+  {
+   "line": 142,
+   "template_line": 234,
    "path": "/tests/2/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 140,
-   "template_line": 230,
+   "line": 143,
+   "template_line": 235,
    "path": "/tests/2/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 141,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 142,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 143,
-   "template_line": 245,
-   "path": "/tests/2/keys_check",
-   "node": "rule/ship-busy/example/only past voyages/keys",
-   "rule_line": 32
   },
   {
    "line": 144,
@@ -1211,37 +1211,37 @@
   {
    "line": 173,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 174,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 175,
+   "template_line": 231,
+   "path": "/tests/3/keys_check",
+   "node": "rule/ship-busy/example/decommissioned/keys",
+   "rule_line": 39
+  },
+  {
+   "line": 176,
+   "template_line": 234,
    "path": "/tests/3/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 174,
-   "template_line": 230,
+   "line": 177,
+   "template_line": 235,
    "path": "/tests/3/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 175,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 176,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 177,
-   "template_line": 245,
-   "path": "/tests/3/keys_check",
-   "node": "rule/ship-busy/example/decommissioned/keys",
-   "rule_line": 39
   },
   {
    "line": 178,
@@ -1449,37 +1449,37 @@
   {
    "line": 207,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 208,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 209,
+   "template_line": 231,
+   "path": "/tests/4/keys_check",
+   "node": "rule/ship-busy/example/several voyages one key/keys",
+   "rule_line": 56
+  },
+  {
+   "line": 210,
+   "template_line": 234,
    "path": "/tests/4/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 208,
-   "template_line": 230,
+   "line": 211,
+   "template_line": 235,
    "path": "/tests/4/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 209,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 210,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 211,
-   "template_line": 245,
-   "path": "/tests/4/keys_check",
-   "node": "rule/ship-busy/example/several voyages one key/keys",
-   "rule_line": 56
   },
   {
    "line": 212,
@@ -1939,79 +1939,79 @@
   {
    "line": 277,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 278,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 279,
+   "template_line": 231,
+   "path": "/tests/5/keys_check",
+   "node": "rule/ship-busy/example/the range keeps the inner ship/keys",
+   "rule_line": 74
+  },
+  {
+   "line": 280,
+   "template_line": 234,
    "path": "/tests/5/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 278,
-   "template_line": 230,
+   "line": 281,
+   "template_line": 235,
    "path": "/tests/5/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 279,
-   "template_line": 232,
+   "line": 282,
+   "template_line": 237,
    "path": "/tests/5/range_args/1",
    "node": "rule/ship-busy/example/the range keeps the inner ship/range/1",
    "rule_line": 60
   },
   {
-   "line": 280,
-   "template_line": 233,
-   "path": "/tests/5/range_args/1/sign",
-   "node": "rule/ship-busy/example/the range keeps the inner ship/range/1",
-   "rule_line": 60
-  },
-  {
-   "line": 281,
-   "template_line": 234,
-   "path": "/tests/5/range_args/1/option",
-   "node": "rule/ship-busy/example/the range keeps the inner ship/range/1",
-   "rule_line": 60
-  },
-  {
-   "line": 282,
-   "template_line": 235,
-   "path": "/tests/5/range_args/1/low",
-   "node": "rule/ship-busy/example/the range keeps the inner ship/range/1",
-   "rule_line": 60
-  },
-  {
    "line": 283,
-   "template_line": 237,
-   "path": "/tests/5/range_args/1/high",
+   "template_line": 238,
+   "path": "/tests/5/range_args/1/sign",
    "node": "rule/ship-busy/example/the range keeps the inner ship/range/1",
    "rule_line": 60
   },
   {
    "line": 284,
    "template_line": 239,
-   "path": "/tests/5/range_args/1",
+   "path": "/tests/5/range_args/1/option",
    "node": "rule/ship-busy/example/the range keeps the inner ship/range/1",
    "rule_line": 60
   },
   {
    "line": 285,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
+   "template_line": 240,
+   "path": "/tests/5/range_args/1/low",
+   "node": "rule/ship-busy/example/the range keeps the inner ship/range/1",
+   "rule_line": 60
   },
   {
    "line": 286,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
+   "template_line": 242,
+   "path": "/tests/5/range_args/1/high",
+   "node": "rule/ship-busy/example/the range keeps the inner ship/range/1",
+   "rule_line": 60
   },
   {
    "line": 287,
-   "template_line": 245,
-   "path": "/tests/5/keys_check",
-   "node": "rule/ship-busy/example/the range keeps the inner ship/keys",
-   "rule_line": 74
+   "template_line": 244,
+   "path": "/tests/5/range_args/1",
+   "node": "rule/ship-busy/example/the range keeps the inner ship/range/1",
+   "rule_line": 60
   },
   {
    "line": 288,
@@ -2471,37 +2471,37 @@
   {
    "line": 353,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 354,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 355,
+   "template_line": 231,
+   "path": "/tests/6/keys_check",
+   "node": "rule/ship-busy/case/b_status_eq/keys",
+   "rule_line": 10
+  },
+  {
+   "line": 356,
+   "template_line": 234,
    "path": "/tests/6/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 354,
-   "template_line": 230,
+   "line": 357,
+   "template_line": 235,
    "path": "/tests/6/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 355,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 356,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 357,
-   "template_line": 245,
-   "path": "/tests/6/keys_check",
-   "node": "rule/ship-busy/case/b_status_eq/keys",
-   "rule_line": 10
   },
   {
    "line": 358,
@@ -2709,37 +2709,37 @@
   {
    "line": 387,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 388,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 389,
+   "template_line": 231,
+   "path": "/tests/7/keys_check",
+   "node": "rule/ship-busy/case/b_status_ne/keys",
+   "rule_line": 10
+  },
+  {
+   "line": 390,
+   "template_line": 234,
    "path": "/tests/7/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 388,
-   "template_line": 230,
+   "line": 391,
+   "template_line": 235,
    "path": "/tests/7/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 389,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 390,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 391,
-   "template_line": 245,
-   "path": "/tests/7/keys_check",
-   "node": "rule/ship-busy/case/b_status_ne/keys",
-   "rule_line": 10
   },
   {
    "line": 392,
@@ -2982,37 +2982,37 @@
   {
    "line": 426,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 427,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 428,
+   "template_line": 231,
+   "path": "/tests/8/keys_check",
+   "node": "rule/ship-busy/case/b_status_blank/keys",
+   "rule_line": 10
+  },
+  {
+   "line": 429,
+   "template_line": 234,
    "path": "/tests/8/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 427,
-   "template_line": 230,
+   "line": 430,
+   "template_line": 235,
    "path": "/tests/8/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 428,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 429,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 430,
-   "template_line": 245,
-   "path": "/tests/8/keys_check",
-   "node": "rule/ship-busy/case/b_status_blank/keys",
-   "rule_line": 10
   },
   {
    "line": 431,
@@ -3255,37 +3255,37 @@
   {
    "line": 465,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 466,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 467,
+   "template_line": 231,
+   "path": "/tests/9/keys_check",
+   "node": "rule/ship-busy/case/b_ship_id_match/keys",
+   "rule_line": 10
+  },
+  {
+   "line": 468,
+   "template_line": 234,
    "path": "/tests/9/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 466,
-   "template_line": 230,
+   "line": 469,
+   "template_line": 235,
    "path": "/tests/9/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 467,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 468,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 469,
-   "template_line": 245,
-   "path": "/tests/9/keys_check",
-   "node": "rule/ship-busy/case/b_ship_id_match/keys",
-   "rule_line": 10
   },
   {
    "line": 470,
@@ -3528,37 +3528,37 @@
   {
    "line": 504,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 505,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 506,
+   "template_line": 231,
+   "path": "/tests/10/keys_check",
+   "node": "rule/ship-busy/case/b_ship_id_nomatch/keys",
+   "rule_line": 10
+  },
+  {
+   "line": 507,
+   "template_line": 234,
    "path": "/tests/10/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 505,
-   "template_line": 230,
+   "line": 508,
+   "template_line": 235,
    "path": "/tests/10/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 506,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 507,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 508,
-   "template_line": 245,
-   "path": "/tests/10/keys_check",
-   "node": "rule/ship-busy/case/b_ship_id_nomatch/keys",
-   "rule_line": 10
   },
   {
    "line": 509,
@@ -3766,37 +3766,37 @@
   {
    "line": 538,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 539,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 540,
+   "template_line": 231,
+   "path": "/tests/11/keys_check",
+   "node": "rule/ship-busy/case/b_dep_date_lt/keys",
+   "rule_line": 10
+  },
+  {
+   "line": 541,
+   "template_line": 234,
    "path": "/tests/11/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 539,
-   "template_line": 230,
+   "line": 542,
+   "template_line": 235,
    "path": "/tests/11/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 540,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 541,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 542,
-   "template_line": 245,
-   "path": "/tests/11/keys_check",
-   "node": "rule/ship-busy/case/b_dep_date_lt/keys",
-   "rule_line": 10
   },
   {
    "line": 543,
@@ -4004,37 +4004,37 @@
   {
    "line": 572,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 573,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 574,
+   "template_line": 231,
+   "path": "/tests/12/keys_check",
+   "node": "rule/ship-busy/case/b_dep_date_eq/keys",
+   "rule_line": 10
+  },
+  {
+   "line": 575,
+   "template_line": 234,
    "path": "/tests/12/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 573,
-   "template_line": 230,
+   "line": 576,
+   "template_line": 235,
    "path": "/tests/12/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 574,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 575,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 576,
-   "template_line": 245,
-   "path": "/tests/12/keys_check",
-   "node": "rule/ship-busy/case/b_dep_date_eq/keys",
-   "rule_line": 10
   },
   {
    "line": 577,
@@ -4242,37 +4242,37 @@
   {
    "line": 606,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 607,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 608,
+   "template_line": 231,
+   "path": "/tests/13/keys_check",
+   "node": "rule/ship-busy/case/b_dep_date_gt/keys",
+   "rule_line": 10
+  },
+  {
+   "line": 609,
+   "template_line": 234,
    "path": "/tests/13/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 607,
-   "template_line": 230,
+   "line": 610,
+   "template_line": 235,
    "path": "/tests/13/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 608,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 609,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 610,
-   "template_line": 245,
-   "path": "/tests/13/keys_check",
-   "node": "rule/ship-busy/case/b_dep_date_gt/keys",
-   "rule_line": 10
   },
   {
    "line": 611,
@@ -4508,37 +4508,37 @@
   {
    "line": 644,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 645,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 646,
+   "template_line": 231,
+   "path": "/tests/14/keys_check",
+   "node": "rule/ship-busy/case/b_exists_zero/keys",
+   "rule_line": 10
+  },
+  {
+   "line": 647,
+   "template_line": 234,
    "path": "/tests/14/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 645,
-   "template_line": 230,
+   "line": 648,
+   "template_line": 235,
    "path": "/tests/14/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 646,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 647,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 648,
-   "template_line": 245,
-   "path": "/tests/14/keys_check",
-   "node": "rule/ship-busy/case/b_exists_zero/keys",
-   "rule_line": 10
   },
   {
    "line": 649,
@@ -4697,37 +4697,37 @@
   {
    "line": 671,
    "template_line": 229,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 672,
+   "template_line": 230,
+   "path": "/class",
+   "node": "rule/ship-busy",
+   "rule_line": 5
+  },
+  {
+   "line": 673,
+   "template_line": 231,
+   "path": "/tests/15/keys_check",
+   "node": "rule/ship-busy/case/b_exists_two/keys",
+   "rule_line": 10
+  },
+  {
+   "line": 674,
+   "template_line": 234,
    "path": "/tests/15/range/table",
    "node": "rule/ship-busy/range",
    "rule_line": 9
   },
   {
-   "line": 672,
-   "template_line": 230,
+   "line": 675,
+   "template_line": 235,
    "path": "/tests/15/range",
    "node": "rule/ship-busy/range",
    "rule_line": 9
-  },
-  {
-   "line": 673,
-   "template_line": 243,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 674,
-   "template_line": 244,
-   "path": "/class",
-   "node": "rule/ship-busy",
-   "rule_line": 5
-  },
-  {
-   "line": 675,
-   "template_line": 245,
-   "path": "/tests/15/keys_check",
-   "node": "rule/ship-busy/case/b_exists_two/keys",
-   "rule_line": 10
   },
   {
    "line": 676,

@@ -141,6 +141,16 @@ describe("DDIC reserved field names (tools/osd-ddic-reserved.mjs)", () => {
       expect(keyFindings(table("ZT_S", [field("A", 200)], "INTTAB"))).to.deep.equal([]);
       expect(keyFindings(table("TBTCX", [field("A", 200)]))).to.deep.equal([]);
     });
+    it("the slice 3b tables as committed: the worklist 91, the stage gate 45; a worklist name of 46 would be 121", () => {
+      const committed = (name) => keyLength(readFileSync(join("src/dsl", `${name}.tabl.xml`), "utf8"));
+      // MANDT 3 + RUN_ID 32 + WORKLIST 16 + KEY_VALUE 40; MANDT 3 + RUN_ID 32 + STAGE_NO (INT4) 10
+      expect(committed("zosd_l3_work")).to.deep.equal({table: "ZOSD_L3_WORK", length: 91, unmeasured: []});
+      expect(committed("zosd_l3_stage")).to.deep.equal({table: "ZOSD_L3_STAGE", length: 45, unmeasured: []});
+      // the pile plan keeps its 105 with STAGE_NO a field, not a key
+      expect(committed("zosd_l3_pile")).to.deep.equal({table: "ZOSD_L3_PILE", length: 105, unmeasured: []});
+      const wide = [field("MANDT", undefined, true, "MANDT"), field("RUN_ID", 32), field("WORKLIST", 46), field("KEY_VALUE", 40)];
+      expect(keyFindings(table("ZT_WORK", wide))).to.have.length(1);
+    });
     it("the command fails on such a table under a path", () => {
       const dir = mkdtempSync(join(tmpdir(), "ddic-key-"));
       try {
