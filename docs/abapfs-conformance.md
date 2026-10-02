@@ -40,9 +40,19 @@ Output:
 - a summary on stdout.
 
 The exit code is 1 on a regression against
-`test/fixtures/abapfs-conformance/expected.json`. It is 2 if the run left a
-change in the working tree. With `--start`, `git status` is compared before
-and after the run.
+`test/fixtures/abapfs-conformance/expected.json`, meaning a PASS that was
+lost or a MISSING that became a FAIL. It is 2 if a restore failed or anything
+was left behind:
+
+- **On the system.** A scratch object counts as gone only when a read
+  answers a confirmed 404. A timeout, an auth error or a 500 is reported as
+  "existence unknown".
+- **In the checkout.** With `--start`, every tracked and untracked file
+  (except `.local/`) is hashed before the run and again after OSG has
+  stopped. That also catches a second change to a file that was already
+  dirty. With `--url` the checkout is not this tool's to judge, so the repo
+  check is skipped and the report says so. The system-side cleanup is still
+  verified.
 
 ## The client, and why it is pinned this way
 
@@ -95,8 +105,20 @@ The statuses:
   routed 404 such as "DEVC $TMP does not exist" is a FAIL and not a
   MISSING.
 
-The scratch objects are deleted inside their own scenario. They are deleted
-again at the end of the run if they still answer.
+Safety rules:
+
+- The write scenario restores the original source on every path and
+  verifies the restore on every path. A failed or unverified restore is
+  fatal: the run stops before activation, and every remaining scenario is
+  reported as not run.
+- No delete runs without a non-empty lock handle.
+- Each scratch object is deleted in its own scenario, and checked again in a
+  `finally` at the end of the run, one object at a time. Both checks only
+  accept a confirmed 404.
+
+`test/adt-abapfs-conformance.mjs` proves each rule offline with fake
+clients: restore-fatal, cleanup after a read error, handle validation, the
+MISSING→FAIL regression and the hash diff.
 
 ## Current matrix (2026-10-02, origin/main b3df2f86)
 

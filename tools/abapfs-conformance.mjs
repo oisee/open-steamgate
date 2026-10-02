@@ -14,6 +14,7 @@
 // it into .local/conformance/abapfs/deps on first use.
 import {spawn, spawnSync} from "node:child_process";
 import {copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -90,7 +91,7 @@ Runs ABAP-FS's own ADT client (${PIN.name} ${PIN.version}) against an OSG ADT fa
   --out DIR           report folder (default .local/conformance/abapfs)
   --expected FILE     expectations to compare against (default test/fixtures/abapfs-conformance/expected.json)
   --update-expected   write this run's statuses into the expectations file
-Exit 1 on a regression against the expectations, 2 if the run left a change behind.`;
+Exit 1 on a regression (a PASS lost, or a MISSING now FAIL), 2 if a restore failed or anything was left behind.`;
 
 class Check extends Error {}
 const check = (cond, message) => { if (!cond) throw new Check(message); };
@@ -154,28 +155,7 @@ export const SCENARIOS = [
     run: async ({r}) => { const m = await r.mainPrograms(OBJ.INCL); check(m.length > 0, "no main program"); return m.map(x => x["adtcore:name"]).join(","); }},
   // write
   {id: "write.lockWriteUnlock", group: "write", impact: 5, feature: "Edit + save (lock, PUT source, unlock)",
-    run: async ({c, ADTClient}) => {
-      const s = await c.objectStructure(OBJ.CLAS);
-      const main = ADTClient.mainInclude(s);
-      const original = await c.getObjectSource(main);
-      const marker = `* abapfs-conformance ${Date.now()}`;
-      const lock = await c.lock(OBJ.CLAS);
-      check(lock.LOCK_HANDLE, "no lock handle");
-      let restored = false;
-      try {
-        await c.setObjectSource(main, `${original.replace(/\n?$/, "\n")}${marker}\n`, lock.LOCK_HANDLE);
-        const written = await c.getObjectSource(main, {version: "inactive"});
-        check(written.includes(marker), "written source not read back");
-        await c.setObjectSource(main, original, lock.LOCK_HANDLE);
-        restored = true;
-      } finally {
-        if (!restored) await c.setObjectSource(main, original, lock.LOCK_HANDLE).catch(() => {});
-        await c.unLock(OBJ.CLAS, lock.LOCK_HANDLE);
-      }
-      const after = await c.getObjectSource(main, {version: "inactive"});
-      check(after.replace(/\r\n/g, "\n") === original.replace(/\r\n/g, "\n"), "restore did not round-trip");
-      return `lock IS_LOCAL=${lock.IS_LOCAL || "-"}, restored`;
-    }},
+    run: ({c, ADTClient}) => writeRoundTrip(c, ADTClient, OBJ.CLAS)},
   // checks
   {id: "check.syntax", group: "check", impact: 4, feature: "Syntax check (checkruns)",
     run: async ({r, ADTClient}) => {
@@ -316,17 +296,86 @@ async function createAndDelete(c, r, name, pkg) {
     parentPath: `/sap/bc/adt/packages/${encodeURIComponent(pkg.toLowerCase())}`, responsible: USER});
   const s = await r.objectStructure(url); check(s.metaData["adtcore:name"] === name, "created object not readable");
   await deleteObject(c, url);
-  const gone = await r.objectStructure(url).then(() => false, e => e.err === 404);
+  const gone = await r.objectStructure(url).then(() => false, isNotFound);
   check(gone, "object still answers after delete");
   return "created, read, deleted, gone";
 }
 
-async function deleteObject(c, url) {
-  const lock = await c.lock(url);
-  try { await c.deleteObject(url, lock.LOCK_HANDLE); } catch (e) { await c.unLock(url, lock.LOCK_HANDLE).catch(() => {}); throw e; }
+/** A failure that makes every later scenario unsafe: the run stops. */
+export class Fatal extends Error {}
+
+export function requireHandle(lock, url) {
+  const h = lock?.LOCK_HANDLE;
+  if (typeof h !== "string" || !h.trim()) throw new Check(`no lock handle for ${url}`);
+  return h;
 }
 
+const sameSource = (a, b) => String(a).replace(/\r\n/g, "\n") === String(b).replace(/\r\n/g, "\n");
+
+/** lock, write a marker, read it back, write the original back, unlock.
+ *  The restore runs on every path and is verified on every path; a restore
+ *  that fails or does not round-trip is Fatal, so nothing activates after it. */
+export async function writeRoundTrip(c, ADTClient, url) {
+  const s = await c.objectStructure(url);
+  const main = ADTClient.mainInclude(s);
+  const original = await c.getObjectSource(main);
+  const marker = `* abapfs-conformance ${Date.now()}`;
+  const lock = await c.lock(url);
+  const handle = requireHandle(lock, url);
+  let failure, written = false;
+  try {
+    written = true;
+    await c.setObjectSource(main, `${original.replace(/\n?$/, "\n")}${marker}\n`, handle);
+    const back = await c.getObjectSource(main, {version: "inactive"});
+    check(back.includes(marker), "written source not read back");
+  } catch (e) {
+    failure = e;
+  }
+  try {
+    if (written) {
+      try { await c.setObjectSource(main, original, handle); } catch (e) {
+        throw new Fatal(`restore of ${main} failed: ${e.message}`);
+      }
+      let after;
+      try { after = await c.getObjectSource(main, {version: "inactive"}); } catch (e) {
+        throw new Fatal(`restore of ${main} could not be verified: ${e.message}`);
+      }
+      if (!sameSource(after, original)) throw new Fatal(`restore of ${main} did not round-trip`);
+    }
+  } finally {
+    await c.unLock(url, handle).catch(e => { failure ??= e; });
+  }
+  if (failure) throw failure;
+  return `lock IS_LOCAL=${lock.IS_LOCAL || "-"}, restored`;
+}
+
+async function deleteObject(c, url) {
+  const lock = await c.lock(url);
+  const handle = requireHandle(lock, url);
+  try { await c.deleteObject(url, handle); } catch (e) { await c.unLock(url, handle).catch(() => {}); throw e; }
+}
+
+const isNotFound = (e) => e?.err === 404 || e?.status === 404 || e?.response?.status === 404;
+
+/** Make sure a scratch object does not exist. Only a confirmed 404 counts
+ *  as absent; anything else (timeout, auth, 500) is reported, never assumed.
+ *  Returns undefined when gone, else a message saying what may be left. */
+export async function ensureGone(c, r, url) {
+  try {
+    await r.objectStructure(url);
+  } catch (e) {
+    return isNotFound(e) ? undefined : `${url}: existence unknown (${e.message})`;
+  }
+  try { await deleteObject(c, url); } catch (e) { return `${url}: delete failed (${e.message})`; }
+  try {
+    await r.objectStructure(url);
+    return `${url}: still answers after delete`;
+  } catch (e) {
+    return isNotFound(e) ? undefined : `${url}: deletion not verified (${e.message})`;
+  }
+}
 function classify(error, calls) {
+  if (error instanceof Fatal) return {status: "FAIL", http: calls.at(-1)?.status, error: `FATAL: ${error.message}`};
   if (error instanceof Check) {
     const last = calls.at(-1);
     return {status: "FAIL", http: last?.status, error: `check: ${error.message}`};
@@ -386,22 +435,47 @@ function startOsg(opts) {
   });
   const chunks = [];
   child.stdout.on("data", d => chunks.push(d)); child.stderr.on("data", d => chunks.push(d));
-  return {child, stop: () => {
-    try { process.kill(-child.pid, "SIGTERM"); } catch { /* gone */ }
+  const exited = new Promise(res => child.once("exit", res));
+  return {child, stop: async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      try { process.kill(-child.pid, "SIGTERM"); } catch { /* gone */ }
+      const t = setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch { /* gone */ } }, 15_000);
+      await exited;
+      clearTimeout(t);
+    }
     writeFileSync(log, Buffer.concat(chunks));
   }};
 }
 
-const gitStatus = () => spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], {cwd: ROOT, encoding: "utf8"}).stdout
-  .split("\n").filter(l => l && !/ \.local\//.test(l)).sort().join("\n");
+/** A content hash of every tracked and every untracked, not ignored file
+ *  (.local/ excluded: the report and the database live there). Comparing
+ *  hashes, not porcelain lines, sees a second change to an already dirty file. */
+export function treeSnapshot(root = ROOT) {
+  const out = spawnSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {cwd: root, encoding: "utf8", maxBuffer: 1 << 28});
+  if (out.status !== 0) throw new Error(`git ls-files failed in ${root}`);
+  const map = new Map();
+  for (const f of [...new Set(out.stdout.split("\0"))].filter(f => f && !f.startsWith(".local/")).sort()) {
+    const p = join(root, f);
+    map.set(f, existsSync(p) ? createHash("sha1").update(readFileSync(p)).digest("hex") : "(deleted)");
+  }
+  return map;
+}
 
-function compare(results, expected) {
+export function snapshotDiff(before, after) {
+  const lines = [];
+  for (const [f, h] of after) if (!before.has(f)) lines.push(`added ${f}`); else if (before.get(f) !== h) lines.push(`changed ${f}`);
+  for (const f of before.keys()) if (!after.has(f)) lines.push(`removed ${f}`);
+  return lines;
+}
+
+export function compare(results, expected) {
   const regressions = [], improvements = [], changed = [], unknown = [];
   for (const r of results) {
     const e = expected?.scenarios?.[r.id]?.status;
     if (!e) unknown.push(r.id);
     else if (e === r.status) continue;
-    else if (e === "PASS") regressions.push(`${r.id}: ${e} -> ${r.status}`);
+    // a served feature lost, or a missing one now broken (it answers, wrongly)
+    else if (e === "PASS" || (e === "MISSING" && r.status === "FAIL")) regressions.push(`${r.id}: ${e} -> ${r.status}`);
     else if (r.status === "PASS") improvements.push(`${r.id}: ${e} -> PASS`);
     else changed.push(`${r.id}: ${e} -> ${r.status}`);
   }
@@ -419,7 +493,8 @@ function markdown(report) {
     `Client: ${PIN.name} ${PIN.version} (${PIN.license}), as shipped in ${PIN.client}. Server: ${report.url}. ` +
     `Run ${report.startedAt}, ${(report.ms / 1000).toFixed(1)} s.`, "",
     `**${report.counts.PASS} PASS, ${report.counts.FAIL} FAIL, ${report.counts.MISSING} MISSING** of ${report.results.length}.` +
-    (report.leftBehind ? `\n\n**Left behind:**\n\n\`\`\`\n${report.leftBehind}\n\`\`\`` : " Nothing left behind."), "",
+    (report.leftBehind.length ? `\n\n**Left behind:**\n\n\`\`\`\n${report.leftBehind.join("\n")}\n\`\`\`` : " Nothing left behind.") +
+    ` Repo check: ${report.repoCheck}.`, "",
     "| Feature | Endpoint(s) | Result | ms | Note |", "|---|---|---|---:|---|", ...rows, "",
     "## Gaps by ABAP-FS user impact", "",
     ...gaps.map((g, i) => `${i + 1}. **${g.feature}** (${g.status}, impact ${g.impact}): ${esc(g.error)}`), "",
@@ -436,12 +511,13 @@ export async function main(argv = process.argv.slice(2)) {
   mkdirSync(opts.out, {recursive: true});
   const t0 = Date.now();
   let server;
-  const before = opts.start ? gitStatus() : undefined;
+  const before = opts.start ? treeSnapshot() : undefined;
   if (opts.start) {
     server = startOsg(opts);
     process.stderr.write(`abapfs-conformance: starting OSG on ${opts.url} ...\n`);
   }
   const results = [];
+  const leftBehind = [];
   try {
     await waitServing(opts.url, opts.start ? 300_000 : 10_000);
     let calls = [];
@@ -454,33 +530,49 @@ export async function main(argv = process.argv.slice(2)) {
     const scratch = `ZOSD_AFS_${Date.now().toString(36).toUpperCase()}`;
     const ctx = {c, r, ADTClient, scratch};
     const selected = SCENARIOS.filter(s => !opts.only.length || opts.only.includes(s.group) || s.group === "connect");
-    for (const s of selected) {
-      calls = [];
-      const start = Date.now();
-      let out;
-      try {
-        const note = await s.run(ctx);
-        out = {status: "PASS", note: note ?? ""};
-      } catch (e) {
-        out = classify(e, calls);
+    let aborted;
+    try {
+      for (const s of selected) {
+        calls = [];
+        if (aborted) {
+          results.push({id: s.id, group: s.group, feature: s.feature, impact: s.impact, status: "FAIL",
+            error: `not run: ${aborted}`, ms: 0, endpoints: [], calls: []});
+          continue;
+        }
+        const start = Date.now();
+        let out;
+        try {
+          const note = await s.run(ctx);
+          out = {status: "PASS", note: note ?? ""};
+        } catch (e) {
+          out = classify(e, calls);
+        }
+        results.push({id: s.id, group: s.group, feature: s.feature, impact: s.impact, ...out, ms: Date.now() - start,
+          endpoints: [...new Set(calls.map(x => `${x.method} ${shortPath(x.uri)}`))],
+          calls: calls.map(x => ({method: x.method, path: shortPath(x.uri), status: x.status}))});
+        process.stderr.write(`  ${out.status.padEnd(7)} ${s.id}${out.status === "PASS" ? "" : `  ${out.http ?? ""} ${out.error}`}\n`);
+        if (out.error?.startsWith("FATAL")) aborted = `${s.id} failed fatally, later scenarios are unsafe`;
       }
-      results.push({id: s.id, group: s.group, feature: s.feature, impact: s.impact, ...out, ms: Date.now() - start,
-        endpoints: [...new Set(calls.map(x => `${x.method} ${shortPath(x.uri)}`))],
-        calls: calls.map(x => ({method: x.method, path: shortPath(x.uri), status: x.status}))});
-      process.stderr.write(`  ${out.status.padEnd(7)} ${s.id}${out.status === "PASS" ? "" : `  ${out.http ?? ""} ${out.error}`}\n`);
+      if (aborted) leftBehind.push(`run aborted: ${aborted}`);
+    } finally {
+      // never leave a scratch object behind, whatever a scenario did; each
+      // one on its own, and only a confirmed 404 counts as gone
+      for (const name of [scratch, `${scratch}P`]) {
+        const problem = await ensureGone(c, r, scratchUrl(name)).catch(e => `${scratchUrl(name)}: ${e.message}`);
+        if (problem) leftBehind.push(`system: ${problem}`);
+      }
+      await c.logout().catch(() => {});
     }
-    // never leave the scratch object behind, whatever the scenario did
-    for (const name of [scratch, `${scratch}P`])
-      await r.objectStructure(scratchUrl(name)).then(() => deleteObject(c, scratchUrl(name)), () => {});
-    await c.logout().catch(() => {});
   } finally {
-    server?.stop();
+    await server?.stop();
   }
-  const leftBehind = opts.start ? diffLines(before, gitStatus()) : "";
+  // after shutdown, so nothing the system writes on its way out escapes
+  if (opts.start) leftBehind.push(...snapshotDiff(before, treeSnapshot()).map(l => `repo: ${l}`));
+  const repoCheck = opts.start ? "compared file hashes before and after" : "skipped (--url: the system's files are not this checkout's to judge)";
   const counts = Object.fromEntries(STATUSES.map(k => [k, results.filter(r => r.status === k).length]));
   const expected = existsSync(opts.expected) ? JSON.parse(readFileSync(opts.expected, "utf8")) : undefined;
   const report = {client: PIN, url: opts.url, startedAt: new Date(t0).toISOString(), ms: Date.now() - t0,
-    counts, leftBehind, diff: compare(results, expected), results};
+    counts, leftBehind, repoCheck, diff: compare(results, expected), results};
   writeFileSync(join(opts.out, "report.json"), JSON.stringify(report, null, 2) + "\n");
   writeFileSync(join(opts.out, "report.md"), markdown(report));
   if (opts.updateExpected) {
@@ -496,14 +588,11 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(`abapfs-conformance: ${counts.PASS} PASS, ${counts.FAIL} FAIL, ${counts.MISSING} MISSING of ${results.length} in ${(report.ms / 1000).toFixed(1)} s against ${opts.url}`);
   console.log(`  regressions: ${d.regressions.length ? d.regressions.join("; ") : "none"}; improvements: ${d.improvements.length ? d.improvements.join("; ") : "none"}`);
   console.log(`  report: ${join(opts.out, "report.md")}`);
-  if (leftBehind) { console.log(`  LEFT BEHIND:\n${leftBehind}`); return 2; }
+  console.log(`  repo check: ${repoCheck}; system-side cleanup verified${leftBehind.length ? " WITH PROBLEMS" : ""}`);
+  if (leftBehind.length) { console.log(`  LEFT BEHIND:\n    ${leftBehind.join("\n    ")}`); return 2; }
   return d.regressions.length ? 1 : 0;
 }
 
-function diffLines(a, b) {
-  const was = new Set(a.split("\n"));
-  return b.split("\n").filter(l => l && !was.has(l)).join("\n");
-}
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().then(code => process.exit(code), e => { console.error(`abapfs-conformance: ${e.message}`); process.exit(2); });
