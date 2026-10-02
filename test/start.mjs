@@ -14,6 +14,7 @@ import {adtRouter} from "../tools/adt-facade.mjs";
 import {abapRunner} from "../tools/adt-abap-front.mjs";
 import {kernelFreshness} from "../tools/adt-abap-kernel.mjs";
 import {liveHash} from "../tools/osd-build.mjs";
+import {warmUnitPlan} from "../tools/osd-unit.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
@@ -311,20 +312,6 @@ export function startServer(quiet) {
   // and now everything the registry declares for this host, in its order
   const declaredNodeList = nodes(process.cwd(), {proxies: false});
   mountHost(app, declaredNodeList, hostNodes, {host: "test/start.mjs"});
-  // parsing the system is the expensive part of a syntax check or an object
-  // structure, and it is shared once paid. A served instance pays it at
-  // startup so the first client does not buy it for the second; it is
-  // seconds of a blocked loop over a big system, which is why a test
-  // harness, where nothing waits on it, does not.
-  if (quiet !== true) {
-    setImmediate(() => {
-      const started = Date.now();
-      const objects = facade.store.list().length;
-      facade.store.registry();
-      console.log(`parsed ${objects} objects in ${Date.now() - started} ms`);
-    });
-  }
-
   // SICF: every other ICF service this tree carries.
   //
   // The OData front is one if_http_extension on one path; a system has many,
@@ -631,6 +618,19 @@ export function startServer(quiet) {
   let secure;
   if (tls !== undefined) {
     secure = listenBound(createHttpsServer(tls, app), TLS_PORT);
+  }
+
+  // Open the sockets first. Discovery waits for this same warm-up on both
+  // fronts, with a silence bound. The synchronous registry parse still blocks
+  // readiness and unrelated routes until it finishes. Bind-only tests opt out.
+  if (quiet !== true && process.env.OSD_UNIT_WARM !== "0") {
+    facade.store.unitReady = new Promise((resolve) => setImmediate(resolve))
+      .then(() => warmUnitPlan(facade.store))
+      .then((warmed) => {
+        console.log(`unit plan: pre-warmed ${warmed.objects} objects and xref graph in ${Math.round(warmed.ms)} ms`);
+      }).catch((error) => {
+        console.error(`unit plan: pre-warm failed: ${error?.message ?? error}`);
+      });
   }
 
   // what the snapshot reports as this instance's ports: what was opened here

@@ -12,7 +12,9 @@
 // directly, it shares the process group), SIGHUP and the supervisor's
 // "quiesce" message are all the same request. Once serving, the guard lets
 // go and the defaults (or the serving quiesce, or the file save's own
-// handler) are what they were.
+// handler) are what they were. IPC disconnect still ends the runtime: a
+// serving child must not outlive its supervisor. During boot it follows the
+// same database-step guard as a stop.
 //
 // It narrows the window and does not close it: a crash, an OOM or a SIGKILL
 // in the middle of the seed still leaves such a schema. The complete answer
@@ -33,6 +35,12 @@ export function bootGuard({proc = process, exit = (code) => process.exit(code)} 
     }
     exit(0);
   };
+  // The IPC channel belongs to the supervisor. Keep this listener after
+  // boot too, so a killed parent cannot leave a serving runtime behind.
+  proc.once("disconnect", () => {
+    if (serving) exit(0);
+    else go();
+  });
   const onMessage = (message) => {
     if (message?.type === "quiesce") go();
   };

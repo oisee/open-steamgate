@@ -83,6 +83,106 @@ export function unitChildEnv(options = {}, parentEnv = process.env) {
   };
 }
 
+// One parser implementation for the runner and the PARSE UNIT_PLAN command.
+export function unitClasses(store, type, name) {
+  const entry = store.find(type, name);
+  if (entry === undefined) {
+    throw new NotFound(type, name);
+  }
+  const object = store.registry().getObject(type, entry.name);
+  if (object === undefined || object.getABAPFiles === undefined) {
+    return {object: entry, classes: []};
+  }
+  const classes = [];
+  for (const file of object.getABAPFiles()) {
+    const filename = file.getFilename();
+    const implementations = new Map(file.getInfo().listClassImplementations().map((i) => [i.name.toUpperCase(), i]));
+    for (const definition of file.getInfo().listClassDefinitions()) {
+      if (definition.isForTesting !== true || definition.isAbstract === true) {
+        continue;
+      }
+      // a method's position is where its body is, not where it was
+      // declared: a client that follows the URI wants the code
+      const bodies = new Map((implementations.get(definition.name.toUpperCase())?.methods ?? [])
+        .map((m) => [m.token.strUpper, m.token.start]));
+      const methods = definition.methods.filter((m) => m.isForTesting === true).map((m) => {
+        const at = bodies.get(m.name.toUpperCase()) ?? m.identifier?.token?.start;
+        return {
+          name: m.name.toUpperCase(),
+          method: m.name,
+          line: at?.getRow?.() ?? at?.row ?? 1,
+          column: at?.getCol?.() ?? at?.col ?? 1,
+        };
+      });
+      classes.push({
+        name: definition.name.toUpperCase(),
+        localClass: definition.name,
+        riskLevel: RISK[definition.riskLevel] ?? "harmless",
+        durationCategory: DURATION[definition.duration] ?? "short",
+        // ADT reports an undeclared level as harmless; a scheduler must
+        // not believe that (tools/osd-unit-risk.mjs scheduledRisk)
+        riskLevelDeclared: RISK[definition.riskLevel] !== undefined,
+        durationDeclared: DURATION[definition.duration] !== undefined,
+        include: includeOf(filename),
+        source: filename,
+        module: basename(filename).replace(/\.abap$/, ".mjs"),
+        line: definition.identifier?.token?.start?.row ?? 1,
+        column: definition.identifier?.token?.start?.col ?? 1,
+        testMethods: methods,
+      });
+    }
+  }
+  return {object: entry, classes};
+}
+
+// Warm-up can be slow while doing synchronous work, but an unresolved
+// async stage must not keep discovery waiting forever. Reset the silence
+// deadline when a stage finishes, and let queued completion run before timing out.
+export async function waitUnitWarmup(store) {
+  const ready = store.unitReady;
+  if (ready === undefined) return;
+  const silenceMs = Number(process.env.OSD_TRANSITION_MS ?? 30000);
+  const started = Date.now();
+  const late = Symbol("late");
+  let settled = false;
+  ready.then(() => {settled = true;}, () => {settled = true;});
+  for (;;) {
+    let timer;
+    const deadline = (store.unitWarmHeard ?? started) + silenceMs;
+    const result = await Promise.race([ready, new Promise((resolve) => {
+      timer = setTimeout(() => resolve(late), Math.max(0, deadline - Date.now()));
+    })]).finally(() => clearTimeout(timer));
+    if (result !== late) return;
+    await new Promise((resolve) => setImmediate(resolve));
+    if (settled) {await ready;return;}
+    if ((store.unitWarmHeard ?? started) + silenceMs > Date.now()) continue;
+    // Abandon this wait, including for later requests: discovery can use
+    // the runner directly even if the background graph never finishes.
+    if (store.unitReady === ready) delete store.unitReady;
+    throw new Error(`unit plan pre-warm silent for ${silenceMs} ms`);
+  }
+}
+
+export async function unitPlan(store, type, name, {risk = false} = {}) {
+  await waitUnitWarmup(store);
+  const runner = await store.unit();
+  const plan = runner.classes(type, name);
+  return risk ? runner.withRisk(plan) : plan;
+}
+
+// Cold measurement on this tree: 2055 objects, 5600 ms; warm 0.026 ms.
+// Pre-warm the same runner/registry/graph the first discovery request uses.
+export async function warmUnitPlan(store) {
+  const started = performance.now();
+  store.unitWarmHeard = Date.now();
+  const runner = await store.unit();
+  store.unitWarmHeard = Date.now();
+  runner.risk ??= new UnitRisk(store);
+  await runner.risk.writesReached("");
+  store.unitWarmHeard = Date.now();
+  return {ms: performance.now() - started, objects: Array.from(store.registry().getObjects()).length};
+}
+
 export class UnitRun {
   constructor(store = new ObjectStore()) {
     this.store = store;
@@ -92,54 +192,7 @@ export class UnitRun {
   // running it. The façade uses this for a testruns request that only asks
   // what tests there are.
   classes(type, name) {
-    const entry = this.store.find(type, name);
-    if (entry === undefined) {
-      throw new NotFound(type, name);
-    }
-    const object = this.store.registry().getObject(type, entry.name);
-    if (object === undefined || object.getABAPFiles === undefined) {
-      return {object: entry, classes: []};
-    }
-    const classes = [];
-    for (const file of object.getABAPFiles()) {
-      const filename = file.getFilename();
-      const implementations = new Map(file.getInfo().listClassImplementations().map((i) => [i.name.toUpperCase(), i]));
-      for (const definition of file.getInfo().listClassDefinitions()) {
-        if (definition.isForTesting !== true || definition.isAbstract === true) {
-          continue;
-        }
-        // a method's position is where its body is, not where it was
-        // declared: a client that follows the URI wants the code
-        const bodies = new Map((implementations.get(definition.name.toUpperCase())?.methods ?? [])
-          .map((m) => [m.token.strUpper, m.token.start]));
-        const methods = definition.methods.filter((m) => m.isForTesting === true).map((m) => {
-          const at = bodies.get(m.name.toUpperCase()) ?? m.identifier?.token?.start;
-          return {
-            name: m.name.toUpperCase(),
-            method: m.name,
-            line: at?.getRow?.() ?? at?.row ?? 1,
-            column: at?.getCol?.() ?? at?.col ?? 1,
-          };
-        });
-        classes.push({
-          name: definition.name.toUpperCase(),
-          localClass: definition.name,
-          riskLevel: RISK[definition.riskLevel] ?? "harmless",
-          durationCategory: DURATION[definition.duration] ?? "short",
-          // ADT reports an undeclared level as harmless; a scheduler must
-          // not believe that (tools/osd-unit-risk.mjs scheduledRisk)
-          riskLevelDeclared: RISK[definition.riskLevel] !== undefined,
-          durationDeclared: DURATION[definition.duration] !== undefined,
-          include: includeOf(filename),
-          source: filename,
-          module: basename(filename).replace(/\.abap$/, ".mjs"),
-          line: definition.identifier?.token?.start?.row ?? 1,
-          column: definition.identifier?.token?.start?.col ?? 1,
-          testMethods: methods,
-        });
-      }
-    }
-    return {object: entry, classes};
+    return unitClasses(this.store, type, name);
   }
 
   // The plan with what the declarations are checked against

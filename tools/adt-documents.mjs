@@ -1155,7 +1155,7 @@ export function checkObjectsIn(body, collections) {
     if (object === undefined) {
       continue;
     }
-    const artifact = block[2].match(/<chkrun:content>([\s\S]*?)<\/chkrun:content>/);
+    const artifact = block[2].match(/<chkrun:content>([\s\S]*?)<\/chkrun:content>/) ?? undefined;
     const includeUri = block[2].match(/chkrun:uri="([^"]+)"/)?.[1] ?? "";
     out.push({
       ...object,

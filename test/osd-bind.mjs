@@ -69,7 +69,7 @@ async function freePort() {
 
 async function front(env) {
   const port = await freePort();
-  const childEnv = {...process.env, STG_PORT: String(port), STG_TLS: "0", STG_DB: "sqlite", STG_PROTOCOLS: "0", ...env};
+  const childEnv = {...process.env, STG_PORT: String(port), STG_TLS: "0", STG_DB: "sqlite", STG_PROTOCOLS: "0", OSD_UNIT_WARM: "0", ...env};
   for (const key of Object.keys(childEnv)) {
     if (childEnv[key] === undefined) delete childEnv[key];
   }

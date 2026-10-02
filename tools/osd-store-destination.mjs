@@ -32,14 +32,22 @@ import {basename, join} from "node:path";
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
-export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE"];
+export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN", "PARSE"];
 
 /** What this host can do, as the screen asks it (CAPABILITIES, EV_NOTE):
  *  the editor draws a button only for a command named here. Node holds the
  *  compiler and the build, so it offers all five; a host that cannot check
  *  or activate (OSGo, a built binary) leaves them out and the screen shows
  *  no button that would only be refused (host-tools review 2026-09-25, D2). */
-export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION"];
+export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
+
+const PARSE_KINDS = {
+  UNIT_PLAN: async (store, input) => {
+    const {unitPlan} = await import("./osd-unit.mjs");
+    return unitPlan(store, String(input.type ?? "").toUpperCase(),
+      String(input.name ?? "").toUpperCase(), {risk: input.risk === true});
+  },
+};
 
 // SYSTEM answers facts about this system rather than about the tree, one
 // kind per call, as JSON in EV_JSON (docs/adt-abap-port/port-map.md,
@@ -145,20 +153,36 @@ export class StoreDestination {
     if (command === "OBJECT") {
       return this.#object(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));
     }
-    const store = systemCalls?.getStore()?.store ?? await this.#open();
-    if (store === undefined) {
-      // Named, and with the reason. "No store" answered as an empty list is
-      // a screen that says the system is empty, which is a different and
-      // false statement.
-      return {EV_ERROR: `no object store here: ${this.reason}`};
-    }
-    const type = givenText(signature, "IV_TYPE").toUpperCase();
-    const name = givenText(signature, "IV_NAME").toUpperCase();
-    const include = givenText(signature, "IV_INCLUDE", "main") || "main";
-    const source = given(signature, "IV_SOURCE");
     const started = Date.now();
     try {
+      // Kind refusals require no tree and must not open the default store.
+      let parseInput;
+      if (command === "PARSE") {
+        try { parseInput = JSON.parse(givenText(signature, "IV_JSON") || "{}"); }
+        catch { return refusal("PARSE needs IV_JSON {kind, ...}", "NOT_SUPPORTED"); }
+        if (!Object.hasOwn(PARSE_KINDS, parseInput?.kind)) return refusal(`unknown PARSE kind ${parseInput?.kind ?? "(none)"}`, "NOT_SUPPORTED");
+      }
+      const store = systemCalls?.getStore()?.store ?? await this.#open();
+      if (store === undefined) {
+        // Named, and with the reason. "No store" answered as an empty list is
+        // a screen that says the system is empty, which is a different and
+        // false statement.
+        return {EV_ERROR: `no object store here: ${this.reason}`};
+      }
+      const type = givenText(signature, "IV_TYPE").toUpperCase();
+      const name = givenText(signature, "IV_NAME").toUpperCase();
+      const include = givenText(signature, "IV_INCLUDE", "main") || "main";
+      const source = given(signature, "IV_SOURCE");
       switch (command) {
+        case "PARSE": {
+          return {EV_JSON: JSON.stringify(await PARSE_KINDS[parseInput.kind](store, parseInput))};
+        }
+        case "CHECKRUN": {
+          const {checkRunReport} = await import("./adt-checkrun.mjs");
+          return {EV_JSON: JSON.stringify(checkRunReport(store, {type, name,
+            include: givenText(signature, "IV_INCLUDE") || undefined,
+            source: givenText(signature, "IV_FILTER") === "SOURCE" ? givenText(signature, "IV_SOURCE") : undefined}))};
+        }
         case "PACKAGE": {
           const input = JSON.parse(givenText(signature, "IV_JSON"));
           if (!["raw", "local"].includes(input.mode)) return refusal("PACKAGE mode must be raw or local", "INVALID_NAME");

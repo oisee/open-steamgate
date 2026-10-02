@@ -129,6 +129,9 @@ module.exports = {
     // and git, which HISTORY / REVISION import on the call: a preview has no
     // worktree and no child_process, and never gets that far (no store)
     new webpack.IgnorePlugin({resourceRegExp: /osd-git-history\.mjs$/}),
+    // and the unit plan (ABAP Unit discovery), imported on the call: it spawns
+    // test runs and reads build frames, and a preview has no store to plan from
+    new webpack.IgnorePlugin({resourceRegExp: /osd-unit\.mjs$/}),
     new webpack.ProvidePlugin({
       Buffer: ["buffer", "Buffer"],
       process: "process/browser",

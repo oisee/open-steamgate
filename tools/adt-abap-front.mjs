@@ -266,6 +266,12 @@ export function abapFront(options) {
     const system = options.system ?? (() => undefined);
     let record;
     try {
+      // Discovery must wait before acquiring the shared work process.
+      if (options.store !== undefined && ["GET", "HEAD"].includes(req.method)
+        && /^\/sap\/bc\/adt\/core\/http\/unit\/object\/?$/i.test(path)) {
+        const {waitUnitWarmup} = await import("./osd-unit.mjs");
+        await waitUnitWarmup(options.store);
+      }
       record = await withSystem((kind, name, json) => system(kind, name, req, json),
         () => options.step(async () => {
           const answer = await options.answer(view, await options.sessions?.sessionFor?.(req));
