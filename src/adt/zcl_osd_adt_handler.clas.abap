@@ -236,9 +236,15 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD refusal.
+    DATA ls_header TYPE ihttpnvp.
     rs_response-status = ix_error->status.
     rs_response-content_type = `application/xml; charset=utf-8`.
     rs_response-body = ix_error->document( ).
+    IF ix_error->miss = zcx_osd_adt=>c_miss_object OR ix_error->miss = zcx_osd_adt=>c_miss_resource.
+      ls_header-name = `X-OSD-Miss`.
+      ls_header-value = ix_error->miss.
+      APPEND ls_header TO rs_response-headers.
+    ENDIF.
   ENDMETHOD.
 
 ENDCLASS.
