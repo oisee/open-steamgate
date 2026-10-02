@@ -462,7 +462,7 @@ ${objects.map(([uri, name]) => `  <adtcore:objectReference adtcore:uri="${uri}" 
       // that did not carries messages and activationExecuted="false"
       const xml = await res.text();
       expect(xml).to.contain('activationExecuted="true"');
-      expect(xml, "a message here is a finding, and there should be none").to.not.contain("<msg:msg");
+      expect(xml, "a message here is a finding, and there should be none").to.not.match(/<msg[\s:]/);
     });
 
     it("the two SEGW classes activate as well", async function () {

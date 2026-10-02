@@ -422,6 +422,10 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     mkdirSync(join(dir, "src"));
     const store = new ObjectStore({root: dir, roots: [{path: "src", writable: true}], libs: []});
     store.write("CLAS", "ZCL_A", "CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\nCLASS zcl_a IMPLEMENTATION. ENDCLASS.\n");
+    // the object is live before the edits below: an inactive one is kept
+    // out of every build (ObjectStore#overlay), and a build that must leave
+    // something out is not a warm one
+    store.completeActivation(store.warmActivation("CLAS", "ZCL_A"));
     const src = {text: "rv = 1."};
     store.sourceKey = async () => nameOf(src.text);
     const events = [];

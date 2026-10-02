@@ -12,7 +12,7 @@
 // registry, because a class that compiles alone can still break the system
 // it is part of. The check returns the same shape for a write and for an
 // activation, since the façade reports both the same way.
-import {existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
+import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, watch, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
@@ -20,6 +20,7 @@ import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
 import {hashOf, inputsOf, loadConfig} from "./osd-build.mjs";
+import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
 
 import {basename, dirname, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -176,6 +177,186 @@ export class ObjectStore {
     // own copy for the newer one and showed an empty editor over a save
     // that had succeeded. Written marks it, a clean activation clears it.
     this.inactive = new Set();
+    // **And an inactive object is not built.** The saved version is the
+    // file, because the tree is the working area every other editor shares;
+    // the version that was active before the first save after an activation
+    // is kept beside the build (`build/inactive/active/<file>`), and the
+    // build takes that one, or leaves the object out when it never had one
+    // (#overlay). The set and the copies survive a restart in
+    // `build/inactive/`, which is gitignored with the rest of build/.
+    this.inactiveDir = join("build", "inactive");
+    // what every cold build of this store is also given (a test's tree of a
+    // few objects has nothing to generate: {generators: false})
+    this.buildOptions = options.build ?? {};
+    this.#activating = new Map();
+    this.#loadInactive();
+  }
+
+  // the objects an activation in flight is building with their saved
+  // version, key -> count of callers
+  #activating;
+
+  // The set as saved: per object, its files and the digest of what was
+  // saved in them. On load a key whose files no longer hash to it is
+  // dropped: a checkout or another editor wrote that file since, and a save
+  // from the disk is active (the dev loop's rule), so a set left behind by a
+  // process that died cannot keep an object out of the build for ever.
+  #loadInactive() {
+    let saved;
+    try {
+      saved = JSON.parse(readFileSync(join(this.root, this.inactiveDir, "inactive.json"), "utf8"));
+    } catch {
+      return; // nothing saved: everything in the tree is active, as before
+    }
+    for (const [key, {files = [], digest} = {}] of Object.entries(saved.inactive ?? {})) {
+      if (digest !== undefined && digest === this.#digestOf(files)) {
+        this.inactive.add(key);
+        this.#saved.set(key, {files, digest});
+      } else {
+        for (const file of files) rmSync(join(this.root, this.#snapshotOf(file)), {force: true});
+      }
+    }
+    if (this.#saved.size !== Object.keys(saved.inactive ?? {}).length) this.#saveInactive();
+  }
+
+  #saved = new Map();
+
+  #digestOf(files) {
+    const hash = createHash("sha256");
+    for (const file of files) {
+      hash.update(file).update("\0");
+      if (existsSync(join(this.root, file))) hash.update(readFileSync(join(this.root, file)));
+      hash.update("\0");
+    }
+    return hash.digest("hex");
+  }
+
+  #saveInactive() {
+    const dir = join(this.root, this.inactiveDir);
+    for (const key of [...this.#saved.keys()]) {
+      if (!this.inactive.has(key)) this.#saved.delete(key);
+    }
+    if (this.inactive.size === 0 && !existsSync(dir)) return;
+    try {
+      mkdirSync(dir, {recursive: true});
+      const inactive = Object.fromEntries([...this.#saved.entries()].sort(([a], [b]) => a.localeCompare(b)));
+      writeFileSync(join(dir, "inactive.json"), JSON.stringify({inactive}, null, 1) + "\n");
+    } catch {
+      // a read-only tree keeps the set in memory only
+    }
+  }
+
+  // every file of one object in the tree: the source, a class's includes,
+  // the abapGit header beside it
+  #filesOfEntry(entry) {
+    const meta = TYPES[entry.type];
+    const files = [entry.file];
+    if (entry.type === "CLAS") {
+      files.push(...Object.values(INCLUDES).map((suffix) => entry.file.replace(/\.clas\.abap$/, suffix)));
+    }
+    if (meta !== undefined && entry.type !== "DEVC" && (meta.ext.endsWith(".abap") || meta.ext.endsWith(".asddls"))) {
+      files.push(entry.file.slice(0, -meta.ext.length) + meta.ext.replace(/\.(abap|asddls)$/, ".xml"));
+    }
+    return [...new Set(files)];
+  }
+
+  #neverActive(type, name) {
+    const key = `${type} ${String(name).toUpperCase()}`;
+    if (!this.inactive.has(key)) return false;
+    const entry = this.find(type, name);
+    return entry === undefined || !this.#filesOfEntry(entry).some((file) => existsSync(join(this.root, this.#snapshotOf(file))));
+  }
+
+  #snapshotOf(file) {
+    return join(this.inactiveDir, "active", file);
+  }
+
+  // the active version of an object, copied aside before its first save
+  // after an activation overwrites it
+  #keepActive(entry) {
+    const key = `${entry.type} ${entry.name}`;
+    if (this.inactive.has(key)) return;
+    for (const file of this.#filesOfEntry(entry)) {
+      if (!existsSync(join(this.root, file))) continue;
+      const copy = join(this.root, this.#snapshotOf(file));
+      mkdirSync(dirname(copy), {recursive: true});
+      copyFileSync(join(this.root, file), copy);
+    }
+  }
+
+  #dropActiveCopy(entry) {
+    for (const file of this.#filesOfEntry(entry)) {
+      rmSync(join(this.root, this.#snapshotOf(file)), {force: true});
+    }
+  }
+
+  #markInactive(entry) {
+    const key = `${entry.type} ${entry.name}`;
+    const files = this.#filesOfEntry(entry);
+    this.inactive.add(key);
+    this.#saved.set(key, {files, digest: this.#digestOf(files)});
+    this.#saveInactive();
+  }
+
+  #markActive(type, name) {
+    const key = `${type} ${String(name).toUpperCase()}`;
+    if (!this.inactive.delete(key)) return;
+    const entry = this.find(type, name);
+    if (entry !== undefined) this.#dropActiveCopy(entry);
+    this.#saveInactive();
+  }
+
+  // The inactive objects as the build takes them (tools/osd-build.mjs
+  // activeOverlay): every file of an inactive object is excluded, and its
+  // last active version comes from build/inactive/active when there is one.
+  // An object an activation in flight names is built with its saved version
+  // instead -- that is what activating it means -- so its copy is excluded.
+  // undefined when there is nothing to keep out.
+  overlay() {
+    const kept = [];
+    const copied = [];
+    const unused = [];
+    const owned = new Set();
+    for (const key of this.inactive) {
+      const [type, ...rest] = key.split(" ");
+      const entry = this.find(type, rest.join(" "));
+      if (entry === undefined) continue;
+      const activating = this.#activating.has(key);
+      for (const file of this.#filesOfEntry(entry)) {
+        const copy = this.#snapshotOf(file);
+        const hasCopy = existsSync(join(this.root, copy));
+        if (activating) {
+          if (hasCopy) unused.push(resolve(this.root, copy));
+          continue;
+        }
+        if (existsSync(join(this.root, file))) kept.push(resolve(this.root, file));
+        if (hasCopy) {
+          copied.push(copy);
+          owned.add(resolve(this.root, copy));
+        }
+      }
+    }
+    // no copy is an input: the tree's own inactive files are all there is
+    // to leave out, and nothing at all is the build as it always was --
+    // which keeps an ordinary save-then-activate on the warm path
+    if (copied.length === 0) return kept.length === 0 ? undefined : {exclude: kept.sort()};
+    // a copy nobody inactive owns any more (an object deleted under us) is
+    // not an input either
+    const folder = join(this.root, this.inactiveDir, "active");
+    for (const file of walkFiles(folder)) {
+      if (!owned.has(resolve(file))) unused.push(resolve(file));
+    }
+    return {exclude: [...new Set([...kept, ...unused])].sort(), folder: join(this.inactiveDir, "active")};
+  }
+
+  // the inactive objects, for the ADT inactive-objects feed
+  inactiveObjects() {
+    return [...this.inactive].sort().map((key) => {
+      const [type, ...rest] = key.split(" ");
+      const name = rest.join(" ");
+      const entry = this.find(type, name);
+      return {type, name, package: entry?.package, file: entry?.file};
+    });
   }
 
   // the config changed under us (an import listed its folder as an input):
@@ -483,12 +664,13 @@ export class ObjectStore {
       file = entry.file.replace(/\.clas\.abap$/, suffix);
     }
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
+    this.#keepActive(entry);
     // One line ending, the repository's. An editor on Windows sends CRLF,
     // and a save that wrote it as it came turned a one-line comment into a
     // sixty-three-line diff with no comment in it. A system stores source
     // by line, not by terminator, and so does this tree.
     writeFileSync(join(this.root, file), String(source).replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
-    this.inactive.add(`${entry.type} ${entry.name}`);
+    this.#markInactive(entry);
     this.#forget();
     return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8")};
   }
@@ -554,7 +736,7 @@ export class ObjectStore {
                    package: packages[packages.length - 1], packages};
     this.#entries().set(`${type} ${upper}`, entry);
     if (type !== "DEVC") {
-      this.inactive.add(`${type} ${upper}`);
+      this.#markInactive(entry);
     }
     this.#forget();
     return {...entry, ...this.stateOf(entry), created: true};
@@ -641,8 +823,9 @@ export class ObjectStore {
         unlinkSync(join(this.root, file));
       }
     }
+    this.#dropActiveCopy(entry);
     this.#entries().delete(`${entry.type} ${entry.name}`);
-    this.inactive.delete(`${entry.type} ${entry.name}`);
+    if (this.inactive.delete(`${entry.type} ${entry.name}`)) this.#saveInactive();
     this.#forget();
     return {type: entry.type, name: entry.name, deleted: true};
   }
@@ -854,6 +1037,23 @@ export class ObjectStore {
   // has now (sourceKey()). Two activators of one save are then one build and
   // one swap, and both answers wait for the swap and carry its ms.
   async publish(options = {}) {
+    // the objects this publish activates are built with their saved version
+    // for as long as any publish that may carry them is pending
+    const named = [...(options.activate ?? [])].map((o) => `${o.type} ${String(o.name).toUpperCase()}`);
+    if (named.length === 0) return this.#publishInLine(options);
+    for (const key of named) this.#activating.set(key, (this.#activating.get(key) ?? 0) + 1);
+    try {
+      return await this.#publishInLine(options);
+    } finally {
+      for (const key of named) {
+        const left = (this.#activating.get(key) ?? 1) - 1;
+        if (left <= 0) this.#activating.delete(key);
+        else this.#activating.set(key, left);
+      }
+    }
+  }
+
+  async #publishInLine(options = {}) {
     const forced = options.force === true || options.replace === true;
     if (!forced) {
       if (this.#queued !== undefined) return this.#queued.promise;
@@ -896,7 +1096,7 @@ export class ObjectStore {
   // and then nothing is joined.
   async sourceKey() {
     try {
-      return hashOf(this.root, inputsOf(this.root));
+      return hashOf(this.root, inputsOf(this.root), {overlay: this.overlay()});
     } catch {
       return undefined;
     }
@@ -1092,6 +1292,13 @@ export class ObjectStore {
     const w = this.warm();
     if (w.on !== true) return undefined;
     if (w.priming !== undefined) return w.priming;
+    // the warm registry primes on the tree as saved; while some of it is
+    // inactive and kept out of the build, it would prime on what is not live.
+    // The next cold build schedules another try.
+    if (this.overlay() !== undefined) {
+      w.reason = `${this.inactive.size} inactive object(s) are kept out of the build`;
+      return undefined;
+    }
     w.priming = (async () => {
       const {WarmCompiler} = await import("./osd-warm.mjs");
       w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m)});
@@ -1439,6 +1646,11 @@ export class ObjectStore {
     // verdict.
     const broken = [];
     for (const dependent of this.dependents(type, name)) {
+      // a dependent that was never activated is not built, so what it says
+      // about this object is not what the system it is activated into says
+      // (a real system checks the active versions of the others). One with
+      // an active version is checked as saved: the closest this tree has
+      if (this.#neverActive(dependent.type, dependent.name)) continue;
       // straight off the registry, not through find(): a dependent may be of
       // a type the store does not index (an IWPR naming the class it maps),
       // and it is in the registry by construction, so it is checked there
@@ -1471,7 +1683,7 @@ export class ObjectStore {
     if (results.some((result) => result.active !== true || result.revision === undefined ||
         result.revision !== this.#sourceRevision(result.type, result.name))) return false;
     for (const result of results) {
-      this.inactive.delete(`${result.type} ${String(result.name).toUpperCase()}`);
+      this.#markActive(result.type, result.name);
     }
     return true;
   }
@@ -1492,7 +1704,16 @@ export class ObjectStore {
       await before?.catch(() => undefined);
       const started = Date.now();
       const w = this.warm();
-      if (w.on === true && options.force !== true) {
+      // read once, at the start of the build, so the build and its name agree
+      const overlay = this.overlay();
+      if (w.on === true && overlay !== undefined && w.compiler !== undefined) {
+        // the warm registry holds the tree as saved, inactive objects
+        // included; a build that must leave some out is a cold one
+        w.reason = `${this.inactive.size} inactive object(s) are kept out of the build`;
+        w.compiler.drop?.();
+        w.compiler = undefined;
+      }
+      if (w.on === true && options.force !== true && overlay === undefined) {
         await w.priming;
         if (w.compiler?.primed === true) {
           try {
@@ -1505,7 +1726,8 @@ export class ObjectStore {
               // `check`: the transpiler refused the change; anything else
               // (BUSY, a disk that failed) is a build that did not happen
               return {ok: false, ms: Date.now() - started, objects: 0, warm: true, check: error.check === true,
-                issues: error.issues, output: String(error.output || error.message).slice(-2000), error: error.message};
+                issues: error.issues, output: withoutHostPaths(String(error.output || error.message).slice(-2000), this.root),
+                error: withoutHostPaths(error.message, this.root)};
             }
             w.reason = error.message;
             w.compiler.drop();
@@ -1515,10 +1737,17 @@ export class ObjectStore {
       }
       try {
         const {build} = await import("./osd-build.mjs");
-        const r = await build({root: this.root, force: options.force === true, replace: options.replace === true});
+        const r = await build({...this.buildOptions, root: this.root, force: options.force === true, replace: options.replace === true, overlay});
         return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached};
       } catch (error) {
-        return {ok: false, ms: Date.now() - started, objects: 0, output: String(error.output || error.message).slice(-2000), error: error.message};
+        // the transpiler's refusal names each object and line; the rest of
+        // the log is for the host's console and never for a client: it
+        // carries absolute paths of the machine that built it
+        const issues = transpileIssues(error.message);
+        console.log(`build failed: ${String(error.message).slice(0, 2000)}${error.output ? `\n${String(error.output).slice(-2000)}` : ""}`);
+        return {ok: false, ms: Date.now() - started, objects: 0, check: issues.length > 0, issues,
+          output: withoutHostPaths(String(error.output || error.message).slice(-2000), this.root),
+          error: withoutHostPaths(String(error.message).split("\n")[0], this.root)};
       } finally {
         // a cold build is a new start for the warm registry, primed once the
         // saves have stopped for a while: the prime holds this process for
@@ -1613,4 +1842,14 @@ function main(args) {
 
 if (runsAs("osd-store.mjs")) {
   process.exit(main(process.argv.slice(2)));
+}
+
+// every file under a folder, for the copies of active versions
+function walkFiles(dir, out = []) {
+  for (const e of readdirSync(dir, {withFileTypes: true})) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) walkFiles(p, out);
+    else if (e.isFile()) out.push(p);
+  }
+  return out;
 }

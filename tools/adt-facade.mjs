@@ -31,13 +31,14 @@ import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-prope
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {portabilityWarnings} from "./amdp-gen.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 import {objectVersions, versionSource, versionsFeedDocument} from "./adt-versions.mjs";
 import {segwRegistrations, registeredServices, countServiceRegistrations} from "./segw-registry.mjs";
 import {generatorFoldersOf} from "./osd-packs.mjs";
+import {withoutHostPaths} from "./osd-build-issues.mjs";
 import {entitySetMapFor} from "./segw-entityset-map.mjs";
 import {testClassesIn} from "./osd-unit-run.mjs";
 import {serviceTree} from "./osd-status.mjs";
@@ -2012,7 +2013,7 @@ export function adtRouter(options = {}) {
       store.write("CLAS", name, asked.source, "main", {root: scratch.path});
       const checked = store.warmActivation("CLAS", name);
       try {
-        const activation = await store.publish();
+        const activation = await store.publish({activate: [{type: "CLAS", name}]});
         if (activation?.ok === false) {
           const issue = activation.transpile?.issues?.flatMap((object) => object.issues ?? [])[0];
           const message = issue?.message ?? activation.error ?? activation.transpile?.output ?? "the notebook class did not activate";
@@ -2347,16 +2348,24 @@ export function adtRouter(options = {}) {
     );
   });
 
-  // Nothing here is ever inactive: an object is what the file says and there
-  // is no inactive version to hold. The empty list is the answer, and it is
-  // the resource's absence rather than its content that a client reports as
+  // What has been saved and not activated: the store's inactive set
+  // (ObjectStore#inactiveObjects), the objects the build keeps out until
+  // they are activated. A client that activates "everything inactive" (vsp's
+  // ActivatePackage, Eclipse's Activate dialog) builds its list from this,
+  // and an empty one made that impossible (vsp-i7, 2026-10-02). It is the
+  // resource's absence, not an empty list, that a client reports as
   // "activation is not supported".
+  // the logon user of a request, as its Basic credentials name it; the
+  // inactive set is the system's, so every user sees all of it
+  const sessionUser = (req) => {
+    const basic = /^Basic\s+(\S+)/i.exec(String(req.headers.authorization ?? ""))?.[1];
+    const user = basic === undefined ? "" : Buffer.from(basic, "base64").toString("utf8").split(":")[0];
+    return (user || "DEVELOPER").toUpperCase();
+  };
   advertise("activation/inactiveobjects");
   router.get(`${BASE}/activation/inactiveobjects`, (req, res) => {
     res.type("application/vnd.sap.adt.inactivectsobjects.v1+xml; charset=utf-8").send(
-      '<?xml version="1.0" encoding="utf-8"?>' +
-      '<ioc:inactiveObjects xmlns:ioc="http://www.sap.com/adt/ioc"/>',
-    );
+      inactiveObjectsDocument(store.inactiveObjects(), sessionUser(req)));
   });
 
   router.post(`${BASE}/checkruns`, async (req, res) => {
@@ -2464,7 +2473,7 @@ export function adtRouter(options = {}) {
     // activation that succeeded (editors/vscode/extension.js), and this one
     // answers with a failure document, so they show its issue instead
     if (result?.ok === false) {
-      res.set("X-OSD-Build", header(`failed; ${result.error ?? t.error ?? "the build after activation failed"}`));
+      res.set("X-OSD-Build", header(`failed; ${withoutHostPaths(result.error ?? t.error ?? "the build after activation failed", store.root)}`));
       return;
     }
     res.set("X-OSD-Build", header(t.warm === true && result?.recycled !== true && result?.why === undefined ? "warm"
@@ -2564,24 +2573,31 @@ export function adtRouter(options = {}) {
     // the modules are written, and the process that serves them is the one
     // that has them.
     try {
-      const result = await store.publish();
+      // the named objects are built with their saved version; every other
+      // inactive object is built with its last active one, or left out
+      // (ObjectStore#overlay), so one broken save fails its own activation
+      // and nobody else's
+      const result = await store.publish({activate: named});
       warmHeaders(res, result);
       if (result?.ok === false && result.transpile?.check === true && (result.transpile.issues ?? []).length > 0) {
-        // the warm build refused: each object's own issues at their own lines,
-        // the activated ones first and listed even when their issues are all
-        // in the objects that read them
-        const byName = new Map(result.transpile.issues.map((o) => [`${o.type} ${o.name}`, o]));
+        // the build refused, warm or cold: each object's own issues at their
+        // own lines, the activated ones first and listed even when their
+        // issues are all in the objects that read them. A name is matched
+        // whatever type the build filed it under (an include is a PROG to it)
+        const same = (a, b) => String(a.name).toUpperCase() === String(b.name).toUpperCase();
         const entries = [
-          ...named.map((o) => ({type: o.type, name: o.name, issues: byName.get(`${o.type} ${o.name}`)?.issues ?? []})),
-          ...result.transpile.issues.filter((o) => !named.some((n) => n.type === o.type && n.name === o.name)),
+          ...named.map((o) => ({type: o.type, name: o.name,
+            issues: result.transpile.issues.filter((i) => same(i, o)).flatMap((i) => i.issues ?? [])})),
+          ...result.transpile.issues.filter((o) => !named.some((n) => same(n, o))),
         ];
         res.status(200).type("application/xml").send(activationFailureDocument(entries));
         return;
       }
       if (result?.ok === false) {
-        const why = result.error ?? result.transpile?.output ?? "the build after activation failed";
+        // one line, without the build log: that is the host's console's
+        const why = withoutHostPaths(result.error ?? result.transpile?.error ?? "the build after activation failed", store.root);
         res.status(200).type("application/xml").send(activationFailureDocument(
-          named.map((o) => ({type: o.type, name: o.name, issues: [{message: String(why).slice(-2000), severity: "E", line: 1, column: 1}]})),
+          named.map((o) => ({type: o.type, name: o.name, issues: [{message: String(why).split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}]})),
         ));
         return;
       }
@@ -2598,7 +2614,7 @@ export function adtRouter(options = {}) {
       res.status(200).type("application/xml").send(activationSuccessDocument());
     } catch (e) {
       res.status(200).type("application/xml").send(activationFailureDocument(
-        named.map((o) => ({type: o.type, name: o.name, issues: [{message: String(e?.message ?? e), severity: "E", line: 1, column: 1}]})),
+        named.map((o) => ({type: o.type, name: o.name, issues: [{message: withoutHostPaths(String(e?.message ?? e), store.root).split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}]})),
       ));
     }
   });

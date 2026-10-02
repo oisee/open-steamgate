@@ -818,7 +818,7 @@ describe("tools/adt-facade: the development loop", () => {
       expect(res.status).to.equal(200);
       const xml = await res.text();
       expect(xml).to.contain('activationExecuted="false"');
-      expect(xml).to.contain("<msg:msg");
+      expect(xml).to.match(/<msg /);
       expect(xml.toUpperCase()).to.contain(SCRATCH);
     });
 
@@ -828,6 +828,9 @@ describe("tools/adt-facade: the development loop", () => {
       store.write("CLAS", SCRATCH, SOURCE);
       store.write("CLAS", CALLER, CALLER_SOURCE);
       expect(store.check("CLAS", CALLER).issues).to.have.length(0);
+      // the caller is part of the system: active, as a caller is. One that was
+      // never activated is not built and does not hold an activation back
+      store.completeActivation(store.activate("CLAS", CALLER));
 
       // the rename: legal ABAP, self-consistent, and it takes the method
       // the caller calls out from under it

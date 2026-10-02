@@ -995,14 +995,15 @@ function parseActivationResult(xml) {
     return {ok: true, issues: []};
   }
   const issues = [];
-  for (const m of text.matchAll(/<msg:msg\b([^>]*)>([\s\S]*?)<\/msg:msg>/g)) {
-    const attrs = m[1];
+  // `msg` as a system writes it; `msg:msg` as an older OSD did
+  for (const m of text.matchAll(/<(msg(?::msg)?)\b([^>]*)>([\s\S]*?)<\/\1>/g)) {
+    const attrs = m[2];
     const href = attrs.match(/href="([^"]*)"/)?.[1] ?? "";
     issues.push({
       line: Number(attrs.match(/line="([^"]*)"/)?.[1] ?? "1"),
       column: Number(href.match(/,(\d+)$/)?.[1] ?? "1"),
       objDescr: xmlUnescape(attrs.match(/objDescr="([^"]*)"/)?.[1] ?? ""),
-      message: xmlUnescape(m[2].match(/<txt>([\s\S]*?)<\/txt>/)?.[1] ?? ""),
+      message: xmlUnescape(m[3].match(/<txt>([\s\S]*?)<\/txt>/)?.[1] ?? ""),
     });
   }
   return {ok: false, issues};

@@ -330,9 +330,14 @@ function digestOf(file) {
 //              libraries are 4400 of this tree's 5100 inputs;
 //   transpiler describeBuild(root), when the caller has it already.
 // None of them changes the name: it is the same hash over the same list.
+//   overlay    the inactive objects an ObjectStore keeps out of the build
+//              (overlayOf below); an empty or absent one changes nothing.
 export function hashOf(root, inputs = inputsOf(root), options = {}) {
   const digests = options instanceof Map ? options : options.digests;
-  const folders = options instanceof Map ? undefined : options.folders;
+  const overlay = options instanceof Map ? undefined : activeOverlay(options.overlay);
+  // a folder walk cached for a tree without an overlay is not this list
+  const folders = options instanceof Map || overlay !== undefined ? undefined : options.folders;
+  const kept = overlay === undefined ? () => true : (f) => !overlay.exclude.has(resolve(f));
   const h = createHash("sha256");
   h.update("transpiler\0").update(String(options.transpiler ?? describeBuild(root))).update("\0");
   // the rule that decides a name held by two inputs is part of what the
@@ -359,7 +364,13 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
     // the name a function of the tree AND of how many times the tree had
     // been built. What decides its content is hashed instead.
     if (relative(root, dir) === "gen") continue;
-    folder("dir", dir, () => (existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f)).sort() : []));
+    folder("dir", dir, () => (existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f) && kept(f)).sort() : []));
+  }
+  // the last active versions of the objects whose saved version is kept
+  // out: a generation built from them is another generation
+  if (overlay?.folder !== undefined) {
+    const dir = join(root, overlay.folder);
+    folder("active", dir, () => (existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f) && kept(f)).sort() : []));
   }
   for (const dir of inputs.bspFolders ?? []) {
     folder("bsp", dir, () => walk(dir).sort());
@@ -642,15 +653,33 @@ export function prepare(root, log = () => {}) {
 // joins it to its working directory. The transpiler is handed the winner of
 // every name only: a class in two inputs is "already defined" to it, not an
 // override, so the files an earlier layer hides are kept from it here
-export function ownConfig(root, config, stack, outputFolder) {
+export function ownConfig(root, config, stack, outputFolder, overlay = undefined) {
+  const kept = activeOverlay(overlay);
   return {
     ...config,
     // the packs are layers of this build, so the transpiler is handed them
-    // with the tree's own folders (backlog E.2)
-    input_folder: inputFoldersOf(root, config),
+    // with the tree's own folders (backlog E.2); the last active versions of
+    // inactive objects come last, and their saved files are excluded
+    input_folder: [...inputFoldersOf(root, config), ...(kept?.folder === undefined ? [] : [kept.folder])],
     output_folder: relative(root, outputFolder),
-    exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden)],
+    exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden),
+      ...[...(kept?.exclude ?? [])].sort().map((file) => `^${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`)],
   };
+}
+
+// **An inactive object is not built** (vsp-i7's abapGit spike, 2026-10-02).
+// The tree is the working area: a save lands in its file before anyone
+// activates it, so a build of the folders alone built every saved-but-failed
+// source too, and one broken object failed every later activation of
+// anything until it was deleted. The store says which objects are inactive
+// (ObjectStore#overlay): their files are excluded by absolute path, and the
+// last active version of each, when it had one, comes from `folder` instead.
+// {exclude: [absolute files], folder: root-relative folder | undefined}
+export function activeOverlay(overlay) {
+  if (overlay === undefined || overlay === null) return undefined;
+  const exclude = new Set([...(overlay.exclude ?? [])].map((f) => resolve(f)));
+  if (exclude.size === 0 && overlay.folder === undefined) return undefined;
+  return {exclude, folder: overlay.folder};
 }
 
 export async function build(options = {}) {
@@ -660,7 +689,7 @@ export async function build(options = {}) {
   const started = Date.now();
   const {config, stack} = prepare(root, log);
   const inputs = inputsOf(root, config);
-  const hash = hashOf(root, inputs);
+  const hash = hashOf(root, inputs, {overlay: options.overlay});
   const target = join(paths.byInput, hash);
 
   // a generation a warm build made (tools/osd-warm.mjs) is not a cache hit
@@ -733,7 +762,7 @@ export async function build(options = {}) {
         log(`overridden: ${object}: ${hidden.join(", ")} hidden by ${winner}`);
       }
     }
-    const own = ownConfig(root, config, after, join(tmp, "output"));
+    const own = ownConfig(root, config, after, join(tmp, "output"), options.overlay);
     writeFileSync(join(tmp, "abap_transpile.json"), JSON.stringify(own, null, 2));
     // the transpile itself is a library call in this process (N3,
     // tools/osd-transpile.mjs): no node_modules/.bin, no second process,

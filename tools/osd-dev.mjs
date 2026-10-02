@@ -23,7 +23,9 @@ export function devLoop(options = {}) {
   // an editor's save is one write or a few in a burst; a warm build is
   // short enough that a long wait for the burst to end would be most of it
   const quiet = options.debounce ?? Number(process.env.OSD_DEBOUNCE ?? (process.env.OSD_WARM === "1" ? 30 : 300));
-  const publish = options.publish ?? (() => store.publish());
+  // the changed objects are what this pass activates: built with their saved
+  // version while every other inactive object stays out (ObjectStore#overlay)
+  const publish = options.publish ?? ((activate) => store.publish({activate}));
   const pending = new Map(); // file -> event
   let timer;
   let running;
@@ -55,7 +57,7 @@ export function devLoop(options = {}) {
     if (warmable && store.warm?.().compiler?.primed === true) {
       const started = Date.now();
       const checked = [...objects.values()].map(({type, name}) => store.warmActivation(type, name));
-      const result = await publish();
+      const result = await publish([...objects.values()]);
       const t = result.transpile ?? {};
       if (result.ok !== true) {
         log(`${t.check ? "check" : "build"} failed after ${t.ms ?? "?"} ms: ${result.error ?? t.error ?? "see the output below"}; the running system is untouched`);
@@ -96,7 +98,7 @@ export function devLoop(options = {}) {
     }
     log(`check clean in ${Date.now() - started} ms, building`);
 
-    const result = await publish();
+    const result = await publish([...objects.values()]);
     const t = result.transpile ?? {};
     if (result.ok !== true) {
       log(`build failed after ${t.ms ?? "?"} ms: ${result.error ?? t.error ?? "see the output below"}; live generation untouched`);
