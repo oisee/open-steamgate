@@ -9,7 +9,7 @@
 | **Browser, now** | nothing to install | **[oisee.github.io/open-steamgate/main/app/flp.html](https://oisee.github.io/open-steamgate/main/app/flp.html)** |
 | **Docker** | `git clone https://github.com/oisee/open-steamgate && cd open-steamgate && docker compose -p osd11 -f docker/compose.sqlite.yml up -d` | `http://localhost:8011/app/flp.html` |
 | **Portainer** | Stacks → Add stack → Web editor, paste one YAML block from [`docs/spin.md`](docs/spin.md) (SQLite, DuckDB, PostgreSQL or HANA Express) | `http://<host>:8011/app/flp.html` |
-| **One binary (Bun)** | download `osd-linux-x64` / `osd-linux-arm64` / `osd-darwin-arm64` / `osd-windows-x64.exe` from [Releases](https://github.com/oisee/open-steamgate/releases), then `mv osd-linux-x64 osd && chmod +x osd && ./osd up` | `http://localhost:3030/` |
+| **One binary (Bun)** | download `osd-linux-x64` / `osd-linux-arm64` / `osd-darwin-arm64` / `osd-darwin-x64` / `osd-windows-x64.exe` / `osd-windows-arm64.exe` from [Releases](https://github.com/oisee/open-steamgate/releases), then `mv osd-linux-x64 osd && chmod +x osd && ./osd up` | `http://localhost:3030/` |
 | **VS Code** | install [open-steamgate: local ABAP server](https://marketplace.visualstudio.com/items?itemName=oisee.open-steamgate), or the `.vsix` from [Releases](https://github.com/oisee/open-steamgate/releases) via *Extensions: Install from VSIX…*; then run **osd: Start** | the OSD tree in VS Code |
 | **Node, from source** | `npm ci && npm run bootstrap && npm start` (Node 22.14+ or 24) | `http://localhost:3030/` |
 | **Your report as a CLI tool** | `node tools/gogen/osabap.mjs zmy_report.prog.abap`, then `tools/gogen/.out/osabap` (needs Go 1.26) | a native binary, no server ([below](#abap-as-a-language-for-command-line-tools)) |

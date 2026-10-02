@@ -1,7 +1,8 @@
 # OSGo release binary in CI
 
 The `vscode-v0.N.NNNN` release includes `osgo-linux-x64`,
-`osgo-linux-arm64`, `osgo-darwin-arm64`, and `osgo-windows-x64.exe`, each
+`osgo-linux-arm64`, `osgo-darwin-arm64`, `osgo-darwin-x64`,
+`osgo-windows-x64.exe`, and `osgo-windows-arm64.exe`, each
 with a matching `.sha256`. The Go executable runs the compiled OData
 services with a pure Go SQLite driver. It does not need Node, a Go installation,
 or a separate database server. OSGo does **not** serve ADT yet; the readiness

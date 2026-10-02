@@ -37,11 +37,15 @@ const TARGETS = {
   "bun-linux-x64-baseline": {format: "elf", machine: 0x3e},
   "bun-linux-arm64": {format: "elf", machine: 0xb7},
   "bun-darwin-arm64": {format: "macho", machine: 0x0100000c},
+  "bun-darwin-x64-baseline": {format: "macho", machine: 0x01000007},
   "bun-windows-x64-baseline": {format: "pe", machine: 0x8664},
+  "bun-windows-arm64": {format: "pe", machine: 0xaa64},
   "go-linux-amd64": {format: "elf", machine: 0x3e},
   "go-linux-arm64": {format: "elf", machine: 0xb7},
   "go-darwin-arm64": {format: "macho", machine: 0x0100000c},
+  "go-darwin-amd64": {format: "macho", machine: 0x01000007},
   "go-windows-amd64": {format: "pe", machine: 0x8664},
+  "go-windows-arm64": {format: "pe", machine: 0xaa64},
 };
 
 function head(file, length) {

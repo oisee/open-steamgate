@@ -55,4 +55,12 @@ describe("release README and FILE_ID.DIZ", () => {
     assert.match(text, /does not serve ADT yet/);
     assert.match(text, /sha256sum -c/);
   });
+
+  it("knows the six platforms of each binary, Intel macOS and Windows on Arm included", () => {
+    const text = renderReadme(["osd-darwin-x64", "osd-windows-arm64.exe", "osgo-darwin-x64", "osgo-windows-arm64.exe"]);
+    assert.match(text, /## osd-darwin-x64\n\n.*mv osd-darwin-x64 osd/);
+    assert.match(text, /xattr -d com\.apple\.quarantine osd/);
+    assert.match(text, /## osd-windows-arm64\.exe\n\n.*osd\.exe up/);
+    assert.match(text, /## osgo-windows-arm64\.exe\n\n.*osgo\.exe/);
+  });
 });
