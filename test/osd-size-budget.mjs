@@ -1,11 +1,11 @@
 // The size budget's rules (tools/osd-size-budget.mjs) on made-up sizes: a
 // breach, a new file in go/abap, an oversize file, a package without a
 // README or importing go/abap, a raise without a reason, and --update
-// lowering budgets but never recording what needs a reason. And the tree as
-// it is passes its own budget.
+// lowering budgets but never recording what needs a reason. The tree itself
+// is not checked here: a breach stops a push (.githooks/pre-push) and is
+// advisory in CI (Alice, 2026-10-02), never a red suite.
 import {expect} from "chai";
-import {check, measure, update} from "../tools/osd-size-budget.mjs";
-import {readFileSync} from "node:fs";
+import {check, update} from "../tools/osd-size-budget.mjs";
 
 const base = () => ({
   fileLimits: {go: 800, mjs: 1000},
@@ -81,10 +81,5 @@ describe("the size budget", function () {
     expect(b.budgets["tools/big.mjs"].lines).to.equal(1500);
     expect(b.budgets["go:fresh"]).to.include({lines: 20});
     expect(b.budgets["tools/gogen/go/abap/new.go"]).to.equal(undefined);
-  });
-
-  it("holds for the tree as it is", () => {
-    const budget = JSON.parse(readFileSync(new URL("../tools/osd-size-budget.json", import.meta.url), "utf8"));
-    expect(check(budget, measure(budget))).to.deep.equal([]);
   });
 });
