@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/url"
 	"osg/gogen/abaperr"
+	"osg/gogen/intarith"
 	"osg/gogen/intbytes"
 	"strconv"
 	"strings"
@@ -210,86 +211,13 @@ func F2I8(f float64) int64 {
 	return int64(r)
 }
 
-// int8 arithmetic, overflow checked.
-func AddI8(a, b int64) int64 {
-	r := a + b
-	if (a > 0 && b > 0 && r < 0) || (a < 0 && b < 0 && r >= 0) {
-		overflow("+")
-	}
-	return r
-}
-func SubI8(a, b int64) int64 {
-	r := a - b
-	if (a >= 0 && b < 0 && r < 0) || (a < 0 && b > 0 && r >= 0) {
-		overflow("-")
-	}
-	return r
-}
-func MulI8(a, b int64) int64 {
-	if a != 0 && b != 0 {
-		r := a * b
-		if r/b != a || (a == -1 && b == math.MinInt64) || (b == -1 && a == math.MinInt64) {
-			overflow("*")
-		}
-		return r
-	}
-	return 0
-}
-func DivI8(a, b int64) int64 {
-	if b == 0 {
-		if a == 0 {
-			return 0
-		}
-		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "/"})
-	}
-	q := a / b
-	r := a % b
-	if r != 0 && 2*absI64(r) >= absI64(b) {
-		if (a < 0) != (b < 0) {
-			q--
-		} else {
-			q++
-		}
-	}
-	return q
-}
-func DivIntI8(a, b int64) int64 {
-	if b == 0 {
-		if a == 0 {
-			return 0
-		}
-		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "DIV"})
-	}
-	r := a % b
-	q := a / b
-	if r < 0 {
-		if b > 0 {
-			q--
-		} else {
-			q++
-		}
-	}
-	return q
-}
-func ModI8(a, b int64) int64 {
-	if b == 0 {
-		if a == 0 {
-			return 0
-		}
-		panic(ArithmeticError{Class: "CX_SY_ZERODIVIDE", Op: "MOD"})
-	}
-	r := a % b
-	if r < 0 {
-		r += absI64(b)
-	}
-	return r
-}
-func absI64(v int64) int64 {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
+// int8 arithmetic uses the pure native helpers; errors retain their ABAP class.
+func AddI8(a, b int64) int64    { return intarith.Add(a, b) }
+func SubI8(a, b int64) int64    { return intarith.Sub(a, b) }
+func MulI8(a, b int64) int64    { return intarith.Mul(a, b) }
+func DivI8(a, b int64) int64    { return intarith.Div(a, b) }
+func DivIntI8(a, b int64) int64 { return intarith.Quot(a, b) }
+func ModI8(a, b int64) int64    { return intarith.Mod(a, b) }
 
 // Built-in numeric functions with ABAP's domain checks.
 func SqrtF(v float64) float64 {

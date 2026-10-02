@@ -3473,3 +3473,21 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream issue: none yet
 - Regression-test location: `test/dsl-l3-cockpit.mjs` (the set-filter mutant now edits the dynamic condition)
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-10-02-gogen-int8-division-boundaries
+
+- Affected path: Go int8 `/`, DIV and MOD helpers.
+- Reproducer: `tools/gogen/testdata/zcl_gogen_t_int8arith.clas.abap`.
+- Expected behavior: MIN / -1 and MIN DIV -1 raise
+  `CX_SY_ARITHMETIC_OVERFLOW`; MOD is non-negative; integer `/` rounds half
+  away from zero at the full int8 limits. These are documentation-backed
+  regressions, not new A4H measurements; JS already gives these results.
+- Actual before fix: Go returned MIN for both overflowing quotients and
+  rounded incorrectly when a signed remainder was doubled or the divisor
+  was MIN. Native unary negation also wrapped MIN.
+- Fix: unsigned magnitudes and explicit quotient overflow checks in the
+  pure `go/intarith` package; the emitter uses checked negation. Integral
+  packed arithmetic uses native helpers where eligible, with the original
+  packed calculation retained for wider intermediates and fractional trees.
+- Tests: the shared Go/JS fixture, `int8arith.test.mjs`, and randomized
+  `go/intarith` comparisons against an independent big-integer reference.

@@ -1,6 +1,7 @@
 import {analyzeOwnership} from "./frontend-owned.mjs";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.mjs";
 import {emitBuiltinGo} from "./emit-builtins.mjs";
+import {I8_OPS, emitPackedInt8, emitPackedComparison} from "./emit-int8.mjs";
 import {emitByteStatement} from "./emit-bytes.mjs";
 // IR -> Go source, for the Go backend spike.
 //
@@ -1969,7 +1970,6 @@ ${t}	}`));
 const dbP = (v, ft) => `abap.DBP(${v}, ${ft.len ?? 8}, ${ft.dec ?? 0})`;
 
 const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
-const I8_OPS = {"+": "abap.AddI8", "-": "abap.SubI8", "*": "abap.MulI8", "/": "abap.DivI8", DIV: "abap.DivIntI8", MOD: "abap.ModI8"};
 const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
 const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
 const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
@@ -2014,7 +2014,7 @@ function expr(e, ctx) {
       const rest = zeroFields(e.type, new Set(e.fields.map((f) => String(f.name).toUpperCase())));
       return `${e.type.go}{${[...e.fields.map((f) => `${ident(f.name)}: ${copied(expr(f.value, ctx), f.value.type, f.value)}`), ...rest].join(", ")}}`;
     }
-    case "neg": return e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : e.type.k === "p" ? `abap.NegP(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
+    case "neg": return e.type.k === "int8" ? `abap.SubI8(0, ${expr(e.x, ctx)})` : e.type.k === "i" ? `abap.NegI(${expr(e.x, ctx)})` : e.type.k === "p" ? `abap.NegP(${expr(e.x, ctx)})` : `(-${expr(e.x, ctx)})`;
     case "bin":
       if (e.type.k === "x") return `abap.BitX(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "xstring") return `abap.BitXS(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
@@ -2133,6 +2133,8 @@ function templateValue(v, ctx, opts) {
 }
 
 function conv(e, ctx) {
+  const fast = emitPackedInt8(e, (n) => expr(n, ctx), helperFn);
+  if (fast !== null) return fast;
   const x = expr(e.x, ctx);
   const from = e.from.k;
   const to = e.to.k;
@@ -2198,6 +2200,8 @@ function fn(e, ctx) {
 }
 
 function cond(c, ctx) {
+  const fast = emitPackedComparison(c, (n) => expr(n, ctx));
+  if (fast !== null) return fast;
   switch (c.c) {
     case "num_data_cmp": return `abap.CmpData(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} 0`;
     case "in_range": {

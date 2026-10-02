@@ -19,6 +19,10 @@ const EXPECT = {
   ZCL_GOGEN_T_STATICREC: "2001",
   // Supplied byte oracles plus documentation, unmeasured extensions (fixture NOTES.md).
   ZCL_GOGEN_T_INT8X: "0000000000000000FFFFFFFFFFFFFFFE/-2/0708/65535/-9223372036854775808/8000000000000000/0/00000000FFFFFFFE/-2/FFFFFFFE/documented",
+  // Documentation-backed int8 limits, also checked against math/big in Go.
+  ZCL_GOGEN_T_INT8ARITH: "-4/1/-4/4/1/4/-3/1/-4/div-overflow/round-overflow/0/1/0/1/1/9223372036854775807/0/0/9223372036854775807/-1/-2/9223372036854775806/-1/1/0/-1/1/-1/add-overflow/sub-overflow/mul-overflow/9223372036854775807/-1/4294967289/-30064771072/4294967289/0/packed-div-overflow/neg-overflow/-9223372036854775808/7/0/0/0/zero-div/zero-mod/zero-round",
+  // A4H negative x16 padding plus documentation-backed widths (fixture NOTES.md).
+  ZCL_GOGEN_T_INT8X: "0000000000000000FFFFFFFFFFFFFFFE/-2/0708/65535/-9223372036854775808/8000000000000000/0/00000000FFFFFFFE/-2/FFFFFFFE",
   // Unmeasured regression: character bases, int8 concat and shared i formatting.
   ZCL_GOGEN_T_IPOWTEXT: "a42/42a/a42a/a5-/c:10/n:10/5-/2147483648-",
   // Unmeasured: documented integer power and packed assignment rounding.
@@ -809,6 +813,12 @@ for (const f of demoCopies) {
 // sorted: zcl_gogen_t_uncaught_read reads what zcl_gogen_t_uncaught left
 const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
 // the function groups (parity-wave1: ZGOGEN_T_FG, called by ZCL_GOGEN_T_FM)
+// A focused invocation still checks the shared Go/JS oracle rows.
+const selected = process.argv.slice(2).flatMap((arg, i, args) => arg === "--class" ? [args[i + 1]?.toLowerCase()] : []);
+if (selected.length) {
+  for (const name of selected) if (!objects.includes(name)) throw new Error(`unknown semantics class: ${name}`);
+  objects.splice(0, objects.length, ...objects.filter((name) => selected.includes(name)));
+}
 const groups = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".fugr.xml")).map((f) => f.split(".")[0]).sort();
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
