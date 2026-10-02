@@ -31,7 +31,7 @@ Express also answers HEAD for every GET automatically. That is one router rule (
 |---|---|---|---|---|---|
 | SKELETON | dell | 23 | 20 | 3 | 0 |
 | A, versions + write path + activation | stoker | 15 | 4 | 9 | 2 |
-| B, repository reads | osg-research | 22 (11 core + 11 proposed) | 14 | 5 | 3 |
+| B, repository reads | dell (information system, DDIC); stoker (source read, objectstructure) | 22 (11 core + 11 proposed) | 14 | 5 | 3 |
 | C, check / unit / preview / run | dell | 15 | 4 | 6 | 5 |
 | D, OSD-private endpoints | unassigned | 9 | 1 | 7 | 1 |
 | **total** | | **84** | **43** | **30** | **11** |
@@ -372,7 +372,9 @@ Dependencies:
 | A3 create / delete | stoker; **uses dell's `holder_of`, `release`** | POST create, DELETE (6 types + DEVC) | CREATABLE templates (host) | adt-devloop create/delete |
 | A4 activate | stoker | activation, transportchecks, inactiveobjects | activationSuccess/Failure, transportCheck | adt-devloop activating, adt-facade transport |
 
-### B: repository reads (osg-research)
+### B: repository reads (dell: information system, DDIC; stoker: source read, objectstructure)
+
+Reassigned 2026-10-02: osg-research's track is the DSL and its applications. The port plan (port-plan.md) and the family specs (family-specs/) carry the slices.
 
 Core rows (CONTEXT scope):
 

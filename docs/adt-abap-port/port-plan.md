@@ -1,4 +1,4 @@
-<!-- Produced 2026-10-02 by a 16-agent workflow (one spec agent per route family, a completeness critic, a synthesis), read-only against origin/main. Inputs to codex slices; each slice still gets its own critic. Line numbers in the family specs are as of the run and drift as main moves (tools/adt-facade.mjs has since been reorganised): find a route by its pattern, not its line. Ownership agreed 2026-10-02: group A and discovery, feeds/users, debugger/listeners, OSD introspection, notebook: stoker; group C and the front (F1/F2): dell; group B: osg-research. -->
+<!-- Produced 2026-10-02 by a 16-agent workflow (one spec agent per route family, a completeness critic, a synthesis), read-only against origin/main. Inputs to codex slices; each slice still gets its own critic. Line numbers in the family specs are as of the run and drift as main moves (tools/adt-facade.mjs has since been reorganised): find a route by its pattern, not its line. Ownership agreed 2026-10-02: group A and discovery, feeds/users, debugger/listeners, OSD introspection, notebook: stoker; group C, the front (F1/F2), information system / search / tree and DDIC reads / typestructure: dell; source read / objectstructure: stoker. -->
 
 # ADT on ABAP 100%: port plan (milestone 0.7, "must")
 
@@ -11,15 +11,15 @@ Sources: 15 family specs plus the critic's findings. I checked one fact on origi
 | 1 | sessions / logoff / reentrance | 4 (4) | port | M | stoker | F1, F2 |
 | 2 | discovery (+ compatibility graph, already done) | 6 (4 new) | port | S | stoker (proposed) | slice 1 (landed) |
 | 3 | debugger/listeners (missed by every spec) | 3 (3) | port | S | stoker (proposed) | none |
-| 4 | source read / objectstructure | 7 (30, generated) | port + STORE PARSE OUTLINE | L | osg-research | S0, versions helpers |
+| 4 | source read / objectstructure | 7 (30, generated) | port + STORE PARSE OUTLINE | L | stoker | S0, versions helpers |
 | 5 | object create / delete | 2 (14, generated) | port + STORE CREATE/DELETE | M | stoker | S0, F1 |
 | 6 | write + includes (4a) | 4 (9) | port | M | stoker | S0, F1 (session-native, no LOCK_OF) |
 | 7 | activation + inactiveobjects (4b) | 2 (2) | ABAP protocol + host continuation | L | stoker | S0, F3 |
 | 8 | checkruns | 2 (2) | port + STORE CHECKRUN | M | dell | S0, F1, B5 (PACKAGE) |
 | 9 | ABAP Unit | 5 (5) | ABAP protocol + host continuation | L | dell | S0, F3, PARSE |
 | 10 | data preview | 5 (5) | port + STORE SQL/SQLCHECK | L | dell | S0, B8b, PARSE |
-| 11 | information system / search / tree | 11 (11) | port + STORE PACKAGE/PACKAGES/SEARCH | L | osg-research | S0, F2 (qs record), Node fixes |
-| 12 | DDIC reads + typestructure | 5 (5) | port | M | osg-research | S0 |
+| 11 | information system / search / tree | 11 (11) | port + STORE PACKAGE/PACKAGES/SEARCH | L | dell | S0, F2 (qs record), Node fixes |
+| 12 | DDIC reads + typestructure | 5 (5) | port | M | dell | S0 |
 | 13 | editor helpers + transport check | 8 (8) | port | M | stoker (proposed) | S0 |
 | 14 | classrun + notebook | 2 (2) | classrun: port; notebook: protocol + continuation | L | dell (classrun), stoker (notebook, proposed) | F1 fence, F3 |
 | 15 | OSD introspection (build, changed, git, services, transactions, entitysets, xref) | 9 (9) | port: thin rows over STORE/SYSTEM, xref and entitysets real ports | L | stoker (proposed: the family is unassigned, and this balances the load) | S0, F2 (/osd/ready) |
@@ -199,4 +199,4 @@ S0 ─► B2b(PARSE) ─► C2a ─► C2b ;  C4b
 
 **Ownership changes against port-map, each needing one line of confirmation:**
 - stoker takes discovery, feeds/users, debugger/listeners, the whole introspection family and the notebook.
-- dell keeps group C minus the notebook, plus front-up F1/F2. **Group B goes to osg-research** (agreed 2026-10-02, as port-map.md section 1 says); the B slices listed under dell above are hers.
+- dell keeps group C minus the notebook, plus front-up F1/F2, plus the B families information system / search / tree and DDIC reads / typestructure. **The B family source read / objectstructure goes to stoker** (agreed 2026-10-02: osg-research's track is the DSL; the split keeps both lines near 18-20 slices). Its slices listed under dell above are stoker's.
