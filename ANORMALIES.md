@@ -3395,3 +3395,16 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream issue: none yet
 - Regression-test location: none yet
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-10-02-gogen-int8-x — integer byte conversions
+
+- Status: `fixed` locally in the Go and IR-as-JS backends.
+- Discovery date: `2026-10-02`
+- Affected path: `tools/gogen/frontend.mjs` conversions and `go/abap/conv.go` `IToX`.
+- Reproducer: `tools/gogen/testdata-unit-int8x/`; run `node tools/gogen/unit.mjs --fixture tools/gogen/testdata-unit-int8x --no-cache`.
+- Expected SAP behaviour: the six ABAPiti A4H 758 rows pass; integer bytes are right-aligned, left-truncated or zero-padded, even for negative values.
+- Actual before fix: int8 to x and back are NOT_COMPILED; i to x wider than four bytes sign-extends a negative value.
+- Impact: ABAPiti's 64-bit memory and bit operations cannot compile.
+- Fix: pure `go/intbytes` conversions; frontend and emitters use them, with the existing i runtime binding delegating to the same rule. Documentation-backed rows and pending oracle cases are recorded beside the fixtures.
+- Upstream: no issue or PR requested; this is the local gogen backend.
+- Regression tests: the fixture folder above, `go/intbytes/intbytes_test.go`, and `testdata/zcl_gogen_t_int8x.clas.abap`.

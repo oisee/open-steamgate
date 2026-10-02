@@ -1110,7 +1110,7 @@ function conv(e, ctx) {
     case "s2d": return `abap.S2D(${x})`;
     case "s2t": return `abap.S2T(${x})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
-    case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
+    case "i2x": case "i82x": return `abap.IToX(${x}, ${e.to.k === "x" ? e.to.len : "undefined"}, ${from === "i" ? 4 : 8})`;
     // packed numbers, js/abap.mjs (= go/abap packed.go)
     case "i2pc": return `abap.IToP(${x})`;
     case "c2pc": return `abap.CToP(${x})`;
@@ -1124,7 +1124,7 @@ function conv(e, ctx) {
     case "p2s": return `abap.PToString(${x}, ${e.from.dec ?? 0})`;
     case "p2c": return `abap.PToC(${x}, ${e.from.dec ?? 0}, ${e.to.len})`;
     case "p2n": return `abap.PToN(${x}, ${e.to.len})`;
-    case "x2i": return `abap.XToI(${x})`;
+    case "x2i": case "x2i8": return `abap.${to === "i" ? "XToI" : "XToI8"}(${x})`;
     case "i2s": return `abap.IToString(${x})`;
     case "i2n": return `abap.IToN(${x}, ${e.to.len})`;
     case "s2n": return `abap.CToN(${x}, ${e.to.len})`;
