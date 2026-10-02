@@ -78,3 +78,4 @@ The P2 ALL C3 probe read sy-subrc after its LOOP, so its rc0 records the
 nonempty LOOP result. The fixture also checks FIND's rc0 before that LOOP.
 The added fixed x LENGTH 2 needle repeats P2's A3C3 bounded hit using the
 needle type used by the A4H probe.
+- GET RUN TIME FIELD past 2^31 microseconds (about 35.8 minutes): wrap, or a fresh origin? osgo wraps today.

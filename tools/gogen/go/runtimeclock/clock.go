@@ -21,5 +21,9 @@ func Microseconds() int32 {
 		clock.origin = time.Now()
 		return 0
 	}
+	// The origin is per process, and an i of microseconds wraps after
+	// about 35.8 minutes; what a system answers past that is not measured
+	// (byte-section-notes.md, next oracle rows), so a long-running server
+	// should measure short spans only.
 	return int32(time.Since(clock.origin).Microseconds())
 }
