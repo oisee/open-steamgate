@@ -25,6 +25,7 @@ import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions, parseCookies, sessionIdOf} from "./adt-session.mjs";
+import {abapFront} from "./adt-abap-front.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
@@ -714,6 +715,10 @@ export function adtRouter(options = {}) {
       next();
     });
   }
+
+  // ADR 0007: ABAP rows go to ZCL_OSD_ADT_HANDLER ({run, routes}, tools/adt-abap-front.mjs)
+  if (options.abap !== undefined) router.use(BASE, abapFront({...options.abap, served: options.abapServed, refuse,
+    system: (kind) => (kind === "IDENTITY" ? identity : undefined)}));
 
   // ---- What an ABAP Cloud Project needs that an ordinary one does not.
   //
@@ -3019,7 +3024,7 @@ function typeOf(asked) {
 // exception is a genuine 500, which is a defect here and not a condition the
 // SAP framework has a name for; it answers in this project's namespace so
 // that nobody reading it mistakes our bug for a system's.
-function answered(res, body, record) {
+export function answered(res, body, record) {
   try {
     body();
   } catch (e) {
@@ -3046,7 +3051,7 @@ function answered(res, body, record) {
 }
 
 // One way of saying no, so that every no is the same shape on the wire.
-function refuse(res, status, type, message, options) {
+export function refuse(res, status, type, message, options) {
   res.status(status).type("application/xml").send(exceptionDocument(type, message, options));
 }
 

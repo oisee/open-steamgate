@@ -9,6 +9,8 @@ Working documents for ADR 0007 (the façade in ABAP) and ADR 0008 (locks through
 - [client-view-abap-fs.md](client-view-abap-fs.md) is the client side. It shows how the open-source abap-fs /
   abap-adt-api (MIT) call each path, what they parse, where they gate features on discovery, and which paths they
   use that we don't serve.
+- [abap-skeleton.md](abap-skeleton.md) is slice 1 of the skeleton as built: where the ABAP front sits in the Node
+  host, the classes in `src/adt/`, the routes ported, gate 1, and the plan for slice 2 (session, CSRF, ENQ).
 
 Clean room: we port our own JavaScript. The contract comes from the wire, from A4H answering us as a client, and from
 open-source clients, never from SAP server code or SAP client jars.

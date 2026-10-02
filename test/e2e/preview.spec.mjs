@@ -1093,7 +1093,7 @@ test("the registry screen counts the nodes this deployment actually serves", asy
     await expect(body).toContainText("ICF services", {timeout: 30000});
     // not a number pulled out of the air: the same nodes the worker mounts,
     // so the screen and the routing cannot disagree without this failing
-    await expect(body).not.toContainText("0 nodes");
+    await expect(body).not.toContainText(/(^|[^0-9])0 nodes/); // "20 nodes" is not "0 nodes"
     await expect(body).toContainText("/sap/bc/osd/sicf/");
     await expect(body).toContainText("ZCL_OSD_BSP");
   } finally {

@@ -151,8 +151,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/adt-facade.mjs": {
-      "lines": 3097,
-      "reason": "baseline 2026-10-01"
+      "lines": 3102,
+      "reason": "2026-10-02 +5: the seam of ADR 0007 slice 1 (import + mount of tools/adt-abap-front.mjs); the facade shrinks as groups move to src/adt/"
     },
     "tools/cds2ddic.mjs": {
       "lines": 1100,

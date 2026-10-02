@@ -1,0 +1,137 @@
+"! A refusal of the ADT facade: the HTTP status, the exception type id, its
+"! namespace, the message and the properties a system carries (a T100 key,
+"! a long text). ZCL_OSD_ADT_HANDLER catches it once and answers DOCUMENT( )
+"! as application/xml.
+"!
+"! The document is byte-equal to exceptionDocument in tools/adt-documents.mjs
+"! (Gate 1, test/adt-abap-diff.mjs): same declaration, same indentation, a
+"! self-closing properties element when there are none, a final newline.
+"!
+"! The factories are the Node facade's answered( ) mapping, said once:
+"! NotFound 404, ReadOnly 405, NotSupported 501, Conflict 409, anything
+"! else 500 in our own namespace.
+CLASS zcx_osd_adt DEFINITION PUBLIC INHERITING FROM cx_static_check CREATE PUBLIC.
+  PUBLIC SECTION.
+    CONSTANTS c_namespace_adt TYPE string VALUE `com.sap.adt`.
+    CONSTANTS c_namespace_osd TYPE string VALUE `org.open-steamgate.osd`.
+
+    DATA status TYPE i READ-ONLY.
+    DATA type_id TYPE string READ-ONLY.
+    DATA namespace TYPE string READ-ONLY.
+    DATA message_text TYPE string READ-ONLY.
+    DATA properties TYPE tihttpnvp READ-ONLY.
+
+    METHODS constructor
+      IMPORTING iv_status     TYPE i DEFAULT 500
+                iv_type       TYPE string DEFAULT `ExceptionInternalError`
+                iv_message    TYPE string OPTIONAL
+                iv_namespace  TYPE string DEFAULT c_namespace_adt
+                it_properties TYPE tihttpnvp OPTIONAL
+                previous      TYPE REF TO cx_root OPTIONAL.
+
+    METHODS get_text REDEFINITION.
+
+    "! the exception document, as the wire carries it
+    METHODS document
+      RETURNING VALUE(rv_xml) TYPE string.
+
+    CLASS-METHODS not_found
+      IMPORTING iv_message      TYPE string
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS read_only
+      IMPORTING iv_message      TYPE string
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS not_supported
+      IMPORTING iv_message      TYPE string
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS conflict
+      IMPORTING iv_message      TYPE string
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS internal
+      IMPORTING iv_message      TYPE string
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+ENDCLASS.
+
+CLASS zcx_osd_adt IMPLEMENTATION.
+
+  METHOD constructor.
+    super->constructor( previous = previous ).
+    status = iv_status.
+    type_id = iv_type.
+    message_text = iv_message.
+    namespace = iv_namespace.
+    properties = it_properties.
+  ENDMETHOD.
+
+  METHOD get_text.
+    result = message_text.
+  ENDMETHOD.
+
+  METHOD document.
+    DATA lv_nl TYPE string.
+    DATA lv_props TYPE string.
+    DATA lv_message TYPE string.
+    DATA ls_property LIKE LINE OF properties.
+
+    lv_nl = cl_abap_char_utilities=>newline.
+    IF properties IS INITIAL.
+      lv_props = `  <properties/>`.
+    ELSE.
+      lv_props = `  <properties>` && lv_nl.
+      LOOP AT properties INTO ls_property.
+        lv_props = lv_props && `    <entry key="` && zcl_osd_adt_xml=>esc( ls_property-name ) && `">`
+          && zcl_osd_adt_xml=>esc( ls_property-value ) && `</entry>` && lv_nl.
+      ENDLOOP.
+      lv_props = lv_props && `  </properties>`.
+    ENDIF.
+    lv_message = zcl_osd_adt_xml=>esc( message_text ).
+
+    rv_xml = `<?xml version="1.0" encoding="utf-8"?>` && lv_nl
+      && `<exc:exception xmlns:exc="http://www.sap.com/abapxml/types/communicationframework">` && lv_nl
+      && `  <namespace id="` && zcl_osd_adt_xml=>esc( namespace ) && `"/>` && lv_nl
+      && `  <type id="` && zcl_osd_adt_xml=>esc( type_id ) && `"/>` && lv_nl
+      && `  <message lang="EN">` && lv_message && `</message>` && lv_nl
+      && `  <localizedMessage lang="EN">` && lv_message && `</localizedMessage>` && lv_nl
+      && lv_props && lv_nl
+      && `</exc:exception>` && lv_nl.
+  ENDMETHOD.
+
+  METHOD not_found.
+    CREATE OBJECT ro_error
+      EXPORTING iv_status  = 404
+                iv_type    = `ExceptionResourceNotFound`
+                iv_message = iv_message.
+  ENDMETHOD.
+
+  METHOD read_only.
+    CREATE OBJECT ro_error
+      EXPORTING iv_status  = 405
+                iv_type    = `ExceptionResourceNoAccess`
+                iv_message = iv_message.
+  ENDMETHOD.
+
+  METHOD not_supported.
+    CREATE OBJECT ro_error
+      EXPORTING iv_status  = 501
+                iv_type    = `ExceptionResourceNoAccess`
+                iv_message = iv_message.
+  ENDMETHOD.
+
+  METHOD conflict.
+*   the id the client shows for "already exists" on a save over a changed
+*   object; the Node facade chose it for the same reason
+    CREATE OBJECT ro_error
+      EXPORTING iv_status  = 409
+                iv_type    = `ExceptionResourceIsModified`
+                iv_message = iv_message.
+  ENDMETHOD.
+
+  METHOD internal.
+    CREATE OBJECT ro_error
+      EXPORTING iv_status    = 500
+                iv_type      = `ExceptionInternalError`
+                iv_message   = iv_message
+                iv_namespace = c_namespace_osd.
+  ENDMETHOD.
+
+ENDCLASS.

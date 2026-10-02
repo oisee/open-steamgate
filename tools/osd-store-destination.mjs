@@ -41,6 +41,37 @@ const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", 
  *  no button that would only be refused (host-tools review 2026-09-25, D2). */
 export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION"];
 
+// SYSTEM answers facts about this system rather than about the tree, one
+// kind per call, as JSON in EV_JSON (docs/adt-abap-port/port-map.md,
+// section 3). Slice 1 of the ADT facade in ABAP asks IDENTITY: who this
+// system says it is to an ADT client.
+//
+// The answer belongs to the facade instance whose request is running the
+// ABAP, not to the process -- a test mounts several -- so the caller binds
+// its answers for the length of one call (withSystem, used by
+// tools/adt-abap-front.mjs) and the binding rides the call's async context
+// through the work-process queue to here. Nothing is set process-wide, and
+// a call nobody bound is refused: a plausible identity from the
+// environment would be a wrong answer that looks right.
+// SYSTEM needs no store and does not open one: opening it parses the tree.
+const SYSTEM_KINDS = ["IDENTITY"];
+let systemCalls;
+try {
+  if (typeof process !== "undefined" && process.versions?.node !== undefined) {
+    const {AsyncLocalStorage} = await import(/* webpackIgnore: true */ "node:async_hooks");
+    systemCalls = new AsyncLocalStorage();
+  }
+} catch {
+  systemCalls = undefined;
+}
+
+/** Run work with `answers` ((kind) => value; throw to refuse) bound as the
+ *  SYSTEM answers of every STORE call it makes. */
+export function withSystem(answers, work) {
+  if (systemCalls === undefined) throw new Error("SYSTEM needs an async context (Node or Bun)");
+  return systemCalls.run({answers}, work);
+}
+
 export class StoreDestination {
   /**
    * @param {object} options
@@ -88,6 +119,9 @@ export class StoreDestination {
   }
 
   async #answer(command, signature) {
+    if (command === "SYSTEM") {
+      return this.#system(givenText(signature, "IV_TYPE").toUpperCase());
+    }
     if (await this.#open() === undefined) {
       // Named, and with the reason. "No store" answered as an empty list is
       // a screen that says the system is empty, which is a different and
@@ -118,6 +152,23 @@ export class StoreDestination {
       // answers a person can act on, so they are carried through as they are
       // written rather than turned into "failed"
       return {EV_ERROR: String(error?.message ?? error), EV_MS: String(Date.now() - started)};
+    }
+  }
+
+  #system(kind) {
+    if (SYSTEM_KINDS.includes(kind) === false) {
+      return {EV_ERROR: `unknown SYSTEM kind ${kind || "(none)"}`};
+    }
+    const bound = systemCalls?.getStore();
+    if (bound?.answers === undefined) {
+      return {EV_ERROR: `nothing answers SYSTEM ${kind} for this call: it is bound per ADT facade instance (withSystem)`};
+    }
+    try {
+      const value = bound.answers(kind);
+      if (value === undefined) return {EV_ERROR: `SYSTEM ${kind} has no answer here`};
+      return {EV_JSON: JSON.stringify(value)};
+    } catch (error) {
+      return {EV_ERROR: String(error?.message ?? error)};
     }
   }
 
@@ -369,6 +420,7 @@ const EMPTY = {
   EV_COUNT: "0",
   EV_MS: "0",
   EV_ERROR: "",
+  EV_JSON: "",
   ET_OBJECT: [],
   ET_ISSUE: [],
   ET_TYPE: [],
