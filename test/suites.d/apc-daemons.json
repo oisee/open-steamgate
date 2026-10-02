@@ -3,6 +3,7 @@
     "test/apc-timers.mjs",
     "test/amc.mjs",
     "test/dialog-step.mjs",
+    "test/dialog-step-icf.mjs",
     "test/osd-apc.mjs",
     "test/osd-icf-apc.mjs",
     "test/pages-push.mjs"

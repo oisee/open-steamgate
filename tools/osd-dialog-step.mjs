@@ -33,6 +33,8 @@
 // the runtime's WAIT does, then releases, and takes the work process back
 // when the wait is over. The runtime's own WAIT committed every connection
 // whenever it ran, which with overlapping steps was somebody else's LUW too.
+// What the steps share besides the LUW -- the ICF shim's static server --
+// is saved at the roll-out and put back at the roll-in (rollOut, below).
 //
 // Not covered: ABAP that calls this same process over HTTP inside a step
 // waits for itself. Nothing in the tree does; a system would serve it from
@@ -233,6 +235,31 @@ async function commitAll() {
   endLuw();
 }
 
+// **What a roll-out keeps besides the LUW** (2026-10-02). A system rolls
+// the whole session out at a WAIT and rolls it back in afterwards; here the
+// session's memory stays where it is, and what is shared between steps is
+// whatever another step may overwrite meanwhile. CL_EXPRESS_ICF_SHIM is such
+// a thing: one static server for every request, and each run hangs a new
+// request and response entity on it. A handler in a WAIT resumed on the
+// entities of the request served while it slept -- it read that request's
+// path, wrote into that request's response, and the shim then answered its
+// own caller with the other request's answer (test/dialog-step-icf.mjs).
+// The shim's server belongs in the run, not in a CLASS-DATA (docs/upstream.md);
+// until it does, the roll-out notes the step's server, request and response
+// and the roll-in puts them back, before the step runs another line.
+function rollOut() {
+  const shared = globalThis.abap?.Classes?.CL_EXPRESS_ICF_SHIM?.mi_server;
+  const server = shared?.get?.();
+  if (server === undefined) return () => undefined;
+  const request = server.if_http_server$request?.get();
+  const response = server.if_http_server$response?.get();
+  return () => {
+    shared.set(server);
+    if (request !== undefined) server.if_http_server$request.set(request);
+    if (response !== undefined) server.if_http_server$response.set(response);
+  };
+}
+
 /** WAIT inside a step: the runtime's semantics (sy-subrc 0, or 8 when the
  *  condition is still false at the deadline; the condition polled every
  *  500 ms), with the work process given up while it sleeps. A WAIT outside
@@ -251,6 +278,7 @@ function installWait() {
       // committed while still holding it: a failed commit ends the step
       // here, and the step's own bracket releases
       await commitAll();
+      const rollIn = rollOut();
       release();
       try {
         const until = Date.now() + timeout;
@@ -260,11 +288,13 @@ function installWait() {
         }
       } finally {
         await acquire(token);
+        rollIn();
       }
       subrc(0);
       return;
     }
     let released = false;
+    let rollIn;
     try {
       for (;;) {
         if (options.cond() === true) { subrc(0); return; }
@@ -272,6 +302,7 @@ function installWait() {
         if (remaining <= 0) { subrc(8); return; }
         if (released === false) {
           await commitAll();
+          rollIn = rollOut();
           release();
           released = true;
         }
@@ -281,7 +312,10 @@ function installWait() {
         await waitPump?.(token);
       }
     } finally {
-      if (released === true) await acquire(token);
+      if (released === true) {
+        await acquire(token);
+        rollIn();
+      }
     }
   };
   wait.osdStep = true;

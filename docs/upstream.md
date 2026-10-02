@@ -80,6 +80,21 @@ branch. What is left:
    `src/webgui/zcl_osd_form`, with `test/unit/zcl_osd_form_test`, whose last
    test asserts the **gap** so the workaround has an expiry.
 
+8. **express-icf-shim: one static server for every request** —
+   `ANOMALY-2026-10-02-icf-shim-static-server`. `cl_express_icf_shim=>run`
+   hangs each request's `request` and `response` entities on
+   `CLASS-DATA mi_server`, so a handler that is still running when another
+   `run` starts -- here, one in a WAIT, which gives the work process up --
+   resumes on the other request's entities, and the shim answers its caller
+   with the other request's response. No branch and no issue yet. The fix
+   is small: a local `DATA li_server TYPE REF TO if_http_server` in `run`,
+   created per call and passed to `request` and `response` as a parameter
+   (both are private, so nothing outside changes). Workaround here: the
+   WAIT's roll-out and roll-in in `tools/osd-dialog-step.mjs` save and
+   restore the static server and its two entities; `test/dialog-step-icf.mjs`
+   fails without it. When the fix is in the pinned shim, the roll-out's
+   shim half goes and the test stays.
+
 ## What we carry, and what we wait for
 
 *Decided 2026-09-17, after the performance work made the question real.*

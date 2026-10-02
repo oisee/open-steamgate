@@ -3227,3 +3227,31 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream issue: none; the facade is this repository's
 - Regression-test location: `test/job-count.mjs` (the A4H sequences of `test/fixtures/job-count/contract.json`; mutants: decimal suffix, lowest free, refusal past 99, numeric predecessor parsing)
 - Upstream version containing a fix: not applicable
+
+### ANOMALY-2026-10-02-icf-shim-static-server — a handler resumed after WAIT sees the request served meanwhile
+
+- Status: `worked around locally` (tools/osd-dialog-step.mjs); upstream fix not sent yet
+- Discovery date: `2026-10-02` (reported by a critic reviewing ADT slice 1, reproduced on `main` at `ad99abe0`)
+- Affected library: `open-abap/express-icf-shim` at `c1fc3602` (libs.lock.json), `cl_express_icf_shim`
+- Affected ABAP statement: `WAIT UP TO` / `WAIT UNTIL` / `WAIT FOR ...` inside an `if_http_extension~handle_request`
+- Minimal reproducer: `test/integration/zcl_osd_icf_wait_probe` (reads `~path`, WAITs one second, reads it
+  again, answers it); `test/dialog-step-icf.mjs` runs request A (`?wait=X`) and request B through the shim, B
+  queued behind A.
+- Exact command used to run it: `npx mocha test/dialog-step-icf.mjs`
+- Expected SAP behaviour: every ICF request has a server object of its own (`if_http_server` with its own
+  `request` and `response`), and a WAIT rolls the session out with all of it; after the roll-in the handler reads
+  its own request and writes its own response.
+- Actual open-abap behaviour: `cl_express_icf_shim` keeps the server in `CLASS-DATA mi_server` and every `run`
+  hangs a new `request` and `response` entity on that one object. The dialog step gives the work process up
+  during a WAIT, B runs and replaces both, and A resumes on B's entities. Measured before the workaround: A's
+  handler read `/sap/bc/osd_probe/second` after its WAIT, its writes went into B's (already sent) response, and
+  the shim answered A's caller with B's status, headers and body; A's own header written before the WAIT was lost.
+- Impact on open-steamgate: one caller can be answered with another caller's response, on every host (inline,
+  child, browser preview), for any ICF/OData/ported-ADT handler that WAITs (or whose callee does). Without a WAIT
+  the work-process lock serialises the steps and nothing interleaves.
+- Smallest safe workaround: the WAIT's roll-out in `tools/osd-dialog-step.mjs` notes the shim's static server and
+  its request and response entities, and the roll-in puts them back before the step runs again.
+- Upstream issue: not filed yet. The fix is a local `DATA li_server` in `run`, passed to `request`/`response`
+  instead of the CLASS-DATA (docs/upstream.md, item 8).
+- Regression-test location: `test/dialog-step-icf.mjs` (fails without the roll-in: both cases)
+- Upstream version containing a fix: `none`
