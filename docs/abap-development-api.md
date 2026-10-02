@@ -16,26 +16,27 @@ transpiler still emits `throw new Error("GenerateSubroutine, not supported, tran
 
 ## What exists
 
-- **The store.** `ObjectStore` creates (`tools/osd-store.mjs:836`), writes (`:772`), deletes (`:948`) and
-  checks activation over the object and its dependents (`activate`, `:1796`; `dependents`, `:1763`). Only
+- **The store.** `ObjectStore` creates (`create` in `tools/osd-store.mjs`), writes (`write`), deletes (`delete`) and
+  checks activation over the object and its dependents (`activate`, `dependents`). Only
   CLAS, INTF, PROG, INCL, DDLS and DEVC are creatable (`tools/osd-store-create.mjs:22-75`); FUGR has no
   source (`tools/osd-store-types.mjs:13`).
-- **The inactive set (#460).** A write marks the object inactive (`#markInactive`, `osd-store.mjs:372`).
-  Every build reads the last active copy from `build/inactive/active/` (`overlay`, `:400`). A failed
-  activation stays inactive and breaks nothing. `completeActivations` (`:1848`) promotes only the revision
+- **The inactive set (#460).** A write marks the object inactive (`#markInactive`, `osd-store.mjs`).
+  Every build reads the last active copy from `build/inactive/active/` (`overlay`). A failed
+  activation stays inactive and breaks nothing. `completeActivations` promotes only the revision
   that was checked and built.
 - **`$TMP` (#463).** `$TMP` is a permanent local package in `local/tmp` (`tools/osd-tmp.mjs:33-36`). Its
   authors are kept in `tadir.json` (`noteAuthor`, `tools/osd-store-tmp.mjs:131`). It is a build layer when
   it exists, and `forPublishing` (`osd-tmp.mjs:181`) leaves it out of every published build. Names must
   match `OBJECT_NAME` (`osd-tmp.mjs:228`), so `%` is refused.
-- **Publish.** `publish()` (`osd-store.mjs:1207`) runs one activation at a time per store. It transpiles,
-  then hot-swaps a warm build into the serving process or recycles that process (`#publish`, `:1258`).
+- **Publish.** `publish()` (`osd-store.mjs`) runs one activation at a time per store. It transpiles,
+  then hot-swaps a warm build into the serving process or recycles that process (`#publish`).
 - **Warm.** A content edit of an existing class or interface is warm (`warmRule`, `tools/osd-warm.mjs:91`);
-  a new or removed file is cold (`:74-76`; `docs/warm-compile.md:60-71`). PR #466
-  (`fix/warm-no-recycle-per-activation`, open) primes the registry from the build view, so an activation of
-  a set S is a warm edit. Until generators read that view, any inactive generator input forces cold.
+  a new or removed file is cold (`:74-76`; `docs/warm-compile.md`, "What is warm, and what is cold"). Since
+  #466 (merged) the registry is primed from the build view (`docs/warm-compile.md`, "The build view, with
+  objects inactive"), so an activation of a set S is a warm edit. Until generators read that view, any
+  inactive generator input forces cold.
   `verify()` compares each warm generation with a cold transpile. The swap runs under the work-process lock
-  (`tools/osd-serve.mjs:388-395`).
+  (`tools/osd-serve.mjs:389`).
 - **WAIT.** `WAIT` commits, rolls out (snapshots the ICF shim's static server), releases the FIFO lock and
   takes it back afterwards (`tools/osd-dialog-step.mjs:239-345`, #438). Session memory stays where it is.
 - **ZOSD_STORE ACTIVATE.** It already awaits `publish()` inside the calling step
@@ -46,11 +47,11 @@ transpiler still emits `throw new Error("GenerateSubroutine, not supported, tran
   `_SESSION` and `ZCX_OSD_ADT`. Port-map section 3 adds the store commands CREATE, DELETE and OBJECT, and
   extends ACTIVATE (`docs/adt-abap-port/port-map.md:262-290`). Port-map risk 2 (`:537-541`) already says that
   a swap or recycle happens after the response, never during it.
-- **Slice 3, option B** (`docs/adt-abap-port/slice-3-front.md:107-129`). On `feat/adt-front-up` (in
-  progress) a HOST verdict carries `ZIF_OSD_ADT_ROUTE=>TY_CONTINUATION` (kind, JSON payload). Node runs the
+- **Slice 3, option B** (`docs/adt-abap-port/slice-3-front.md:107-129`). On `feat/adt-front-up` (**not merged**,
+  in progress) a HOST verdict carries `ZIF_OSD_ADT_ROUTE=>TY_CONTINUATION` (kind, JSON payload). Node runs the
   handler registered with `registerContinuation(kind, handler)` (`tools/adt-abap-front.mjs`) after the step,
-  outside the lock. stoker's 4b design uses this: ABAP gives the activation verdict, and the host publishes
-  after the step.
+  outside the lock. stoker's 4b design (**not merged**, not yet in a tracked file) uses this: ABAP gives the
+  activation verdict, and the host publishes after the step. P3 depends on both.
 - **The kernel oracle** (PR #467, `test/fixtures/kernel-oracle`, P7). A good pool returns subrc 0, NAME
   `%_T002O3` (generated, different on every run), and `PERFORM f IN PROGRAM (name)` works. A semantic error
   returns subrc 4 with MESSAGE `Field "UNDEFINED_X" is unknown.`, LINE 3 and WORD `UNDEFINED_X`. A syntax
@@ -77,7 +78,7 @@ lock( type name ) / unlock( type name )              -> through ZCL_OSD_ADT_LOCK
 - **Errors.** `ZCX_OSD_DEVELOPMENT` carries a table of messages (object, include, line, column, severity,
   text, word), shaped like ADT's activation messages, and maps the store's errors the way `ZCX_OSD_ADT`
   does: NotFound, ReadOnly, Conflict, NotSupported, InvalidName.
-- **Packages.** A package must be named, as `create` requires today (`osd-store.mjs:846-853`). The default is
+- **Packages.** A package must be named, as `create` requires today (its package check in `create`, `osd-store.mjs`). The default is
   `$TMP`. A library package is ReadOnly. There is no CTS (`backlog/adt.md`, A.8), so no transport is asked.
 - **Author.** The author is `sy-uname`, recorded through `noteAuthor`.
 - **Locks.** The API uses the ADT lock, so the API and an open Eclipse editor cannot both write one object.
@@ -109,7 +110,7 @@ recycle ends the process the step runs in, and a swap needs the lock the step ho
 **Recommendation: (c) for anything already loaded, and (a) only for objects nobody has loaded yet.** An
 edit of a loaded object is published after the step, which is stoker's 4b. This matches a system, where a
 running internal session keeps the load it has and activation gives the new load to the next session
-(`warm-compile.md:127-131`). A new object with no dependents (section 3) has nothing to replace. It can be
+(`docs/warm-compile.md:188-192`). A new object with no dependents (section 3) has nothing to replace. It can be
 built while the step is rolled out and loaded into the serving process once the step rolls back in,
 without a swap or a recycle. `activate` answers `live = abap_true` only in that case, and otherwise says
 "active, live after this step", as `ZOSD_STORE` ACTIVATE already does. (b) is left to HTTP clients that
@@ -117,7 +118,8 @@ want a job id (the port-map's JOB command).
 
 ## 3. Speed: the fast path for a new standalone object
 
-A new object is a cold build today, which takes 30 to 350 s and ends in a recycle. The fast path builds the
+A new object is a cold build today, which takes 30 to 350 s (measured by vsp-i7's abapGit spike on 0.6.1504,
+vibing-steampunk report 2026-10-02-003) and ends in a recycle. The fast path builds the
 new object alone with the warm compiler's registry (`only: [object]`, transpiler #1900) and loads its module
 with `import()`. Nothing that is already loaded is replaced. It is safe only when all of these hold:
 
@@ -144,7 +146,7 @@ built on the fast path still enters the next cold build, and from then on it is 
   Instead the source goes to a transient area (`build/pools/`, outside the layer list), keyed by a hash of
   the source.
 - **The path.** It uses the same check and the same `only` transpile as the fast path, against the live
-  registry. A cache hit (the same source generated again, which is common) costs nothing.
+  registry. A cache hit (the same source generated again; how common that is, UNMEASURED) costs nothing.
 - **NAME.** The kernel's shape: `%_T` plus five characters, unique per process. The forms register as
   `abap.Forms['PROG-%_Txxxxx-<FORM>']`, which is what `PERFORM ... IN PROGRAM (name)` looks up at call time
   (transpiler `perform.js`). A gap to fix first: that branch passes only CHANGING parameters, while the
@@ -195,8 +197,8 @@ activate through ADT, so the API gives such a client nothing new. The new risks 
 | P0 | A4H probes (below) | S | none |
 | P1 | M1 refusal, JS and Go | S | in progress |
 | P2 | `ZCL_OSD_DEVELOPMENT` over CREATE, WRITE, DELETE, OBJECT and ACTIVATE (verdict only), `ZCX_OSD_DEVELOPMENT`, ENQ, the dev-only gate; ADT group A routes moved onto it | M | slice 3 adapter, group A host commands |
-| P3 | publish after the step: a `publish` continuation (front-up) and the after-step queue in `osd-dialog-step` | M | slice 3 B, 4b, #466 |
-| P4 | fast path for a new standalone object, with its own verify | M | #466; transpiler #1899, #1900 and #1921 on npm or linked |
+| P3 | publish after the step: a `publish` continuation (front-up) and the after-step queue in `osd-dialog-step` | M | slice 3 B and the continuation registry (`feat/adt-front-up`), 4b; neither merged |
+| P4 | fast path for a new standalone object, with its own verify | M | transpiler #1899, #1900 and #1921 on npm or linked |
 | P5 | GENERATE: kernel hook, pool area, cache, error mapping, lifetime, PERFORM USING fix | M | P0, P4 |
 | P6 | FUGR and FUNC creation (always cold, after the step) | M | P2, P3 |
 
@@ -221,7 +223,7 @@ activate through ADT, so the API gives such a client nothing new. The new risks 
 3. **Decided:** both signals, as on a system (`CCCATEGORY` development and `CCNOCLIIND` changes allowed); OSG's own
    client row says "development" by default. Which signal is authoritative stays UNMEASURED until probed.
 4. **Decided:** `@KERNEL` in generated code is always refused.
-5. **Decided:** without a primed registry GENERATE waits for a prime up to a bound (about 10 s), then refuses
+5. **Decided:** without a primed registry GENERATE waits for a prime up to a bound (about 10 s, a chosen bound, not a measurement), then refuses
    with subrc 8; the browser preview and OSGo refuse at once.
 6. **Decided:** not now; ADT covers callers outside ABAP. RFC-enabled modules when a caller needs them.
 7. **Decided:** yes; subrc, LINE and WORD follow the kernel, the MESSAGE text is abaplint's.
