@@ -141,12 +141,39 @@ After `npm run transpile`, run
 project name, deletes its rows afterwards, reports profile findings and exits
 nonzero for an error.
 
-RFC and search-help operation bodies produced by `zcl_stg_segw_gen_rfc` are
-opaque pre-rendered text fields under the operation's trace node for this
-slice; its search-help interface method is also opaque. Replacing that mapping
-generator is the next slice. The string DPC generator remains the oracle and
-is not replaced here. XML, the EXT pair and direct writes to project folders
-remain outside this consumer.
+RFC and search-help bodies now come from data nodes through the `rfc-*.tpl`
+and `shlp-*.tpl` partials, including the search-help interface implementation.
+`zcl_osd_dsl_mapping` resolves parameter shapes, signatures, properties and
+navigation sources; `zcl_osd_dsl_dpc_map` builds the operation model. Neither
+calls the mapping oracle or puts generated statements into JSON. The model
+carries the module/search-help node, parameter declarations and call groups,
+IN/OUT mappings with module and entity types, typed constants, range components,
+exception handling and search-help selection/result mappings. Repeated
+projections keep the same stable IDs; constants retain the mapping-row UUID.
+Identifiers and qualified type/key references are data, as in the MPC model.
+Whitespace separators and alignment gaps are explicit formatting facts.
+
+The oracle's constant rows contain lexical literals. The builder removes
+single quotes and unescapes doubled apostrophes into a CHAR value with a
+`value@type` descriptor, or an INT4 value for an unquoted integer. The target
+module type remains on the constant node. The `literal` filter recreates the
+single-quoted spelling (a STRG descriptor would use backticks, which would
+break byte equality). The CHAR literal ceiling is the engine's existing 255
+characters, not a raised size budget.
+
+The string DPC generator, `zcl_stg_segw_gen_rfc`, and its JavaScript twin remain
+unchanged as independent byte oracles. The bridge imports fixture function
+signatures explicitly, so the RFC methods are exercised rather than falling
+back to missing-signature stubs. It checks data-only models, whole classes,
+one node per line, operation-body ownership, a clean ABAP profile, every new
+partial, five model mutations and four template mutants. The opaque-body
+mutant deliberately retains byte equality: the data-only and parameter-trace
+checks must reject it. Mutant partials are supplied in memory for one render;
+the original is then rendered again and required to be green.
+
+The coverage and copied quirks are recorded in
+[`dsl-l1-rfc-proof.md`](dsl-l1-rfc-proof.md). XML, the EXT pair and direct writes
+to project folders remain outside this consumer.
 
 ## Generated regions
 

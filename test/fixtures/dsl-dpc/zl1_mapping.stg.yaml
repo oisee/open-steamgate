@@ -1,0 +1,59 @@
+# Synthetic mapping coverage, compiled by the DPC bridge, never executed.
+project: ZL1_MAPPING
+service: ZL1_MAPPING_SRV
+entities:
+  Parent:
+    keys: [Id]
+    properties: {Id: String(8)}
+    operations: [R]
+  Item:
+    keys: [Id, Fallback, Scalar]
+    properties:
+      Id: String(8)
+      Fallback: String(8)
+      Text: String(40)
+      Scalar: String(8)
+    operations:
+      read: &mapped
+        function: Z_L1_MAP
+        log: ET_RETURN
+        in: {Id: IV_ID, Text: "IS_INPUT\\TEXT"}
+        out: {Id: "ET_ITEMS\\ID", Text: "ES_ITEM\\TEXT", Scalar: EV_SCALAR}
+        constants: {"IT_CONTROL\\VALUE": "'O''Brien'", IV_LONG_PARAMETER_NAME_123: "'X'", IV_COUNT: "7"}
+      create: *mapped
+      update: *mapped
+      delete: *mapped
+      query:
+        function: Z_L1_MAP
+        in: {Id: IV_ID, Text: "IS_INPUT\\TEXT"}
+        out: {Id: "ET_ITEMS\\ID", Text: "ET_ITEMS\\TEXT"}
+        ranges: {Fallback: IT_RANGE}
+        constants: {"IT_CONTROL\\VALUE": "'X'"}
+  Empty:
+    keys: [Id]
+    properties: {Id: String(8)}
+    operations:
+      query: {function: Z_L1_MAP}
+      read: {function: Z_L1_MISSING, in: {Id: IV_ID}}
+  Help:
+    keys: [Id]
+    properties: {Id: String(8), Text: String(40)}
+    operations:
+      read: &help
+        searchhelp: ZL1_HELP
+        in: {Id: ID, Text: TEXT}
+        out: {Id: "RESULT_LIST\\ID", Text: "RESULT_LIST\\TEXT"}
+      query: *help
+  EmptyHelp:
+    keys: [Id]
+    properties: {Id: String(8)}
+    operations:
+      query: {searchhelp: ZL1_HELP}
+      read: {searchhelp: ZL1_HELP}
+associations:
+  ParentItems:
+    from: Parent
+    to: Item
+    cardinality: 1:N
+    constraint: {Id: Id}
+    navigation: {Parent: Items}
