@@ -331,6 +331,57 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
       }
     });
 
+    // the first swap refused and its recycle slow: the second caller waits
+    // for the recycle rather than swapping into a process changing hands,
+    // and both answers say cold, with the first refusal as the reason
+    it("a refused swap with a slow recycle: the second waits, both answer cold", async () => {
+      const {store, src, compiler, log, done} = setup();
+      try {
+        const runtime = store.served;
+        let finish;
+        let refuse = true;
+        const hot = runtime.hot;
+        runtime.hot = async function (swap) {
+          log.push(`hot-try ${swap.from}->${swap.generation}`);
+          if (this.recycling !== undefined) throw new Error("nothing to swap into");
+          if (refuse) {
+            refuse = false;
+            throw new Error(`the runtime carries h9, and the swap is from ${swap.from}`);
+          }
+          return hot.call(this, swap);
+        };
+        runtime.recycle = async function () {
+          log.push("recycle");
+          // like #stopChild: the child is gone before the shutdown is awaited
+          this.recycling ??= new Promise((resolve) => { finish = resolve; }).then(() => {
+            this.recycling = undefined;
+            this.generation = compiler.hash;
+            return {generation: compiler.hash, ms: 900};
+          });
+          return this.recycling;
+        };
+        src.text = "rv = 2.";
+        const first = store.publish();
+        while (finish === undefined) await new Promise((r) => setTimeout(r, 5));
+        const second = store.publish();
+        const tick = new Promise((r) => setTimeout(() => r("pending"), 80));
+        expect(await Promise.race([second.then(() => "settled"), tick])).to.equal("pending");
+        expect(log).to.deep.equal(["hot-try h0->h1", "recycle"]);
+        finish();
+        const [a, b] = await Promise.all([first, second]);
+        expect(log).to.deep.equal(["hot-try h0->h1", "recycle"]);
+        expect(runtime.generation).to.equal("h1");
+        for (const r of [a, b]) {
+          expect(r.hot).to.not.equal(true);
+          const h = await activateWith(r);
+          expect(h.build).to.match(/^cold; recycled after a warm build: .*the swap was refused: the runtime carries h9/);
+          expect(h.swap).to.equal(null);
+        }
+      } finally {
+        done();
+      }
+    });
+
     it("a publish() that throws does not stop the next one", async () => {
       const {store, src, log, done} = setup();
       try {
