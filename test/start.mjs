@@ -110,6 +110,12 @@ async function loadChildKernel() {
 const adtKernel = MODE === "child" && process.env.OSD_ADT !== "js" ? await loadChildKernel() : undefined;
 
 
+/** Host memory only; child readiness starts with its first running generation. */
+export function readinessAnswer(mode, store) {
+  const ready = mode === "inline" || store.served?.running === true;
+  return {status: ready ? 200 : 503, body: {ready}};
+}
+
 export function startServer(quiet) {
   const PORT = Number(process.env.STG_PORT ?? 3030);
 
@@ -237,8 +243,8 @@ export function startServer(quiet) {
   hostNodes["adt-facade"] = (a) => a.use(facade.router);
   // Host memory only: this probe must answer while ABAP holds the FIFO.
   hostNodes.ready = (a, node) => a.get(node.path, (req, res) => {
-    const ready = MODE === "inline" || store.served?.running === true;
-    res.status(ready ? 200 : 503).json({ready});
+    const answer = readinessAnswer(MODE, store);
+    res.status(answer.status).json(answer.body);
   });
   // What a client asked the facade for and did not get.
   hostNodes["not-served"] = (a, node) => a.get(node.path, function (req, res) {

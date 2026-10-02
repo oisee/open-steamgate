@@ -130,8 +130,11 @@ export async function answerOf(handler, view, session) {
   r.path.set(view.path);
   r.uri.set(view.url);
   const query = String(view.url).includes("?") ? String(view.url).slice(String(view.url).indexOf("?") + 1) : "";
-  // Express has already decoded with qs: arrays stringify with commas,
-  // bracketed values are objects, and malformed percent escapes stay literal.
+  // The record uses Express qs semantics to match Node routes: joined repeats,
+  // nested values and raw bad escapes. Integer-like keys reorder; prototype-named
+  // keys drop; x[a]=1 stringifies as [object Object]; arrays past arrayLimit 20
+  // become objects. Repeated _action reaches ZCL_OSD_ADT_LOCK as "LOCK,UNLOCK",
+  // just as it does on the Node route.
   const fields = view.query === undefined ? new URLSearchParams(query) : Object.entries(view.query);
   for (const [name, value] of fields) {
     const row = r.query.appendInitial().get();

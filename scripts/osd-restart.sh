@@ -33,7 +33,7 @@ STG_PORT=$port setsid nohup node test/run.mjs > "$log" 2>&1 < /dev/null &
 echo "запустил, лог $log"
 
 i=0
-while [ "$i" -lt 40 ]; do
+while [ "$i" -lt 120 ]; do
   code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/osd/ready" 2>/dev/null || true)
   if [ "$code" = "200" ]; then
     echo "OSD отвечает на $port"

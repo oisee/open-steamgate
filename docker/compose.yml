@@ -28,24 +28,7 @@ services:
       OSD_BIND: "0.0.0.0"
     volumes: ["osd-data:/osd/data-run"]
     healthcheck:
-      # By content, not by "the port is open" -- and by the RIGHT field, which
-      # took a second measurement to get. `grep -q commit` passes while the
-      # system serves nothing at all: /build answers 200 with a commit in it
-      # even when the serving runtime died, and OData answers 503. The body
-      # already carries the true signal and the old check threw it away:
-      #
-      #   {"commit":"4d1633e…","system":{"serving":null,
-      #    "database":{"serving":null},"synchronized":false}}
-      #
-      # So the check asserts that `system.serving` is a string. A three-valued
-      # instrument whose consumer reads two of the values is not a check, it
-      # is a habit.
-      #
-      # It is anchored on the `live` field before it rather than matching
-      # `"serving":"` anywhere, because `database.serving` is a second field
-      # of that name one level down: an unanchored grep would pass on the
-      # database's value while the system served nothing. Both patterns work
-      # today; only one of them says what it means.
+      # Readiness is host memory, so the probe does not queue behind ABAP.
       # Two questions, because they have different answers and we have been
       # caught by the difference three times in one day: **is it serving**,
       # and **is it serving what it should**.
@@ -63,7 +46,7 @@ services:
       # the data never arrived, and a check that cannot say that is a habit
       # rather than a check.
       test: &serving_check ["CMD", "sh", "-c",
-             "wget -qO- http://localhost:3030/sap/bc/adt/core/http/build | grep -qE '\"live\":\"[^\"]+\",\"serving\":\"[^\"]+\"' && wget -qO- 'http://localhost:3030/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$$top=1&$$format=json' | grep -q '__metadata'"]
+             "wget -qO- http://localhost:3030/osd/ready | grep -q '\"ready\":true' && wget -qO- 'http://localhost:3030/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$$top=1&$$format=json' | grep -q '__metadata'"]
       interval: 5s
       timeout: 5s
       retries: 30

@@ -25,6 +25,13 @@ CLASS zcl_osd_adt_route_f2 IMPLEMENTATION.
         ls_header-name = `Location`.
         ls_header-value = `/fixture/target`.
         APPEND ls_header TO rs_response-headers.
+      WHEN `empty`.
+        rs_response-status = 201.
+      WHEN `host-cookie`.
+        rs_response-continuation-kind = `f2-cookie`.
+        ls_header-name = `Set-Cookie`.
+        ls_header-value = `host=1; Path=/`.
+        APPEND ls_header TO rs_response-headers.
       WHEN `miss`.
         rs_response-status = 404.
         rs_response-body = `fixture miss`.

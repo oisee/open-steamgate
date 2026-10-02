@@ -5,11 +5,11 @@ async function json(path) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
-// Warm the child before checking its reported state.
+// Keep the demo seed check as well as the host-memory readiness probe.
 const travels = await json('/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$top=1&$format=json');
 if (!travels.d?.results?.length) throw new Error("Demo seed is missing");
-const build = await json('/sap/bc/adt/core/http/build');
-if (!build.system?.serving) throw new Error("No serving runtime");
+const ready = await json('/osd/ready');
+if (ready.ready !== true) throw new Error("No serving runtime");
 if (process.env.STG_PROTOCOLS !== "0") {
   const instance = process.env.INSTANCE ?? "00";
   if (!/^\d{2}$/.test(instance)) throw new Error("INSTANCE must be two digits");

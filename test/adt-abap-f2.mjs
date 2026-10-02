@@ -4,10 +4,10 @@ import {spawn} from "node:child_process";
 import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {startServer} from "./start.mjs";
+import {startServer, readinessAnswer} from "./start.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {AbapSessions} from "../tools/adt-abap-sessions.mjs";
-import {abapRunner} from "../tools/adt-abap-front.mjs";
+import {abapRunner, registerContinuation} from "../tools/adt-abap-front.mjs";
 import {dialogStep, workProcess} from "../tools/osd-dialog-step.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 
@@ -31,6 +31,7 @@ describe("ADT F2: front wire replay and host readiness", function () {
     }
     await abap.Classes.ZCL_OSD_ADT_HANDLER.use_routes({it_routes: routes});
     const app = express();
+    app.set("etag", false);
     app.use(express.raw({type: "*/*"}));
     // Real ANSWER and dialog step; no session so fixture cookies are exact.
     const sessions = new AbapSessions();
@@ -67,6 +68,23 @@ describe("ADT F2: front wire replay and host readiness", function () {
       expect(Buffer.from(await actual.arrayBuffer())).to.deep.equal(Buffer.from(await expected.arrayBuffer()));
     });
   }
+  for (const method of ["GET", "HEAD"]) {
+    it(`empty 201 ${method} has an explicit zero Content-Length without an ETag`, async () => {
+      const res = await fetch(`${at(server)}${FIXTURE}?mode=empty`, {method});
+      expect(res.status).to.equal(201);
+      expect(res.headers.get("content-length")).to.equal("0");
+      expect(res.headers.get("etag")).to.equal(null);
+      expect(await res.text()).to.equal("");
+    });
+  }
+  it("keeps a HOST record cookie when its continuation calls res.cookie", async () => {
+    const off = registerContinuation("f2-cookie", ({res}) => res.cookie("continuation", "2").end());
+    try {
+      const res = await fetch(`${at(server)}${FIXTURE}?mode=host-cookie`);
+      expect(res.status).to.equal(200);
+      expect(res.headers.getSetCookie()).to.deep.equal(["host=1; Path=/", "continuation=2; Path=/"]);
+    } finally { off(); }
+  });
   it("appends all three Set-Cookie lines in order", async () => {
     const res = await fetch(`${at(server)}${FIXTURE}?mode=307`, {redirect: "manual"});
     expect(res.headers.getSetCookie()).to.deep.equal(cookies);
@@ -85,6 +103,12 @@ describe("ADT F2: front wire replay and host readiness", function () {
     expect(res.status).to.equal(200);
     expect(await res.text()).to.equal("mode=query;value=a b;repeat=1,2;nested=[object Object];stray=%;bad=%zz;");
   });
+  it("passes a raw bad UTF-8 escape to ABAP with qs semantics", async () => {
+    expect(new URLSearchParams("a=%E0%A4%A").get("a")).to.equal("\uFFFD%A");
+    const res = await fetch(`${at(server)}${FIXTURE}?mode=query&a=%E0%A4%A`);
+    expect(res.status).to.equal(200);
+    expect(await res.text()).to.equal("mode=query;a=%E0%A4%A;");
+  });
   it("strips ABAP's miss marker and records each kind and count in facade.missed", async () => {
     for (const kind of ["resource", "object"]) {
       for (let i = 0; i < 2; i++) {
@@ -97,6 +121,40 @@ describe("ADT F2: front wire replay and host readiness", function () {
     const none = await fetch(`${at(server)}${FIXTURE}?mode=miss&kind=none`);
     expect(none.headers.get("x-osd-miss")).to.equal(null);
     expect(facade.missed.size).to.equal(2);
+  });
+  for (const [served, status, exitCode] of [[undefined, 503, 1], [{running: false}, 503, 1], [{running: true}, 200, 0]]) {
+    it(`child readiness with served=${JSON.stringify(served)} answers ${status} and osd ready exits ${exitCode}`, async () => {
+      const store = {served};
+      expect(readinessAnswer("child", store)).to.deep.equal({status, body: {ready: status === 200}});
+      const app = express();
+      app.get("/osd/ready", (req, res) => {
+        const answer = readinessAnswer("child", store);
+        res.status(answer.status).json(answer.body);
+      });
+      const probe = await listen(app);
+      try {
+        const res = await fetch(`${at(probe)}/osd/ready`);
+        expect(res.status).to.equal(status);
+        expect(await res.json()).to.deep.equal({ready: status === 200});
+        const exit = await new Promise((resolve, reject) => {
+          const child = spawn(process.execPath, ["bin/osd.mjs", "ready"], {
+            env: {...process.env, STG_PORT: String(probe.address().port)}, stdio: "ignore"});
+          child.on("error", reject); child.on("exit", resolve);
+        });
+        expect(exit).to.equal(exitCode);
+      } finally { await close(probe); }
+    });
+  }
+  it("the image healthcheck succeeds against the host from this tree", async () => {
+    const host = startServer(true);
+    try {
+      const exit = await new Promise((resolve, reject) => {
+        const child = spawn(process.execPath, ["docker/image/healthcheck.mjs"], {
+          env: {...process.env, STG_PROTOCOLS: "0"}, stdio: "ignore"});
+        child.on("error", reject); child.on("exit", resolve);
+      });
+      expect(exit).to.equal(0);
+    } finally { await host.close(); }
   });
   it("osd ready answers while a gated step holds the work process", async () => {
     const host = startServer(true);
