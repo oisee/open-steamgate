@@ -134,10 +134,6 @@ const HOST_ALLOWED = [
   // B6: search and virtual folders
   "POST /sap/bc/adt/repository/informationsystem/virtualfolders/contents",
   "GET /sap/bc/adt/repository/informationsystem/search",
-  // B8b: DDIC documents
-  "GET /sap/bc/adt/ddic/dataelements/:name",
-  "GET /sap/bc/adt/ddic/tables/:name",
-  "GET /sap/bc/adt/ddic/tables/:name/source/main",
   // C1: check runs
   "GET /sap/bc/adt/checkruns/reporters",
   "POST /sap/bc/adt/checkruns",

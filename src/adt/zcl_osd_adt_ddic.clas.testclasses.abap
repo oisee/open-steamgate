@@ -1,6 +1,8 @@
 CLASS ltcl_ddic DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
   PRIVATE SECTION.
     METHODS unknown_pattern FOR TESTING RAISING cx_static_check.
+    METHODS parsing FOR TESTING.
+    METHODS source FOR TESTING.
     METHODS parser_miss FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_ddic IMPLEMENTATION.
@@ -34,5 +36,41 @@ CLASS ltcl_ddic IMPLEMENTATION.
         cl_abap_unit_assert=>assert_equals( act = lx_error->message_text
           exp = `the DDL parser information is the system's own and is not served here` ).
     ENDTRY.
+  ENDMETHOD.
+  METHOD parsing.
+    DATA lv_xml TYPE string.
+    DATA ls_table TYPE zcl_osd_adt_ddic=>ty_table.
+    lv_xml = `<DDTEXT>&lt;&gt;&quot;&amp;&apos;&#39;</DDTEXT><DDTEXT>later</DDTEXT>`.
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_adt_ddic=>tag( iv_xml = lv_xml iv_tag = `DDTEXT` ) exp = `<>"&&apos;&#39;` ).
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_adt_ddic=>js_int( `  -00015tail` ) exp = `-15` ).
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_adt_ddic=>js_int( `x1` ) exp = `NaN` ).
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_adt_ddic=>js_int( `` ) exp = `0` ).
+    ls_table = zcl_osd_adt_ddic=>table_fields( iv_name = `ZT` iv_xml = `<DD03P_TABLE><DD03P><FIELDNAME>.INCLUDE</FIELDNAME></DD03P><DD03P><FIELDNAME>A</FIELDNAME><ROLLNAME>ZD</ROLLNAME></DD03P></DD03P_TABLE>` ).
+    cl_abap_unit_assert=>assert_equals( act = lines( ls_table-fields ) exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_table-delivery exp = `A` ).
+  ENDMETHOD.
+  METHOD source.
+    DATA ls_table TYPE zcl_osd_adt_ddic=>ty_table.
+    DATA ls_field TYPE zcl_osd_adt_ddic=>ty_field.
+    DATA lv_body TYPE string.
+    ls_table-name = `ZT`.
+    ls_table-description = `O'Brien`.
+    ls_table-delivery = `A`.
+    ls_table-maintenance = `#RESTRICTED`.
+    ls_field-name = `A`.
+    ls_field-datatype = `DEC`.
+    ls_field-length = `15`.
+    ls_field-decimals = `2`.
+    ls_field-key = abap_true.
+    APPEND ls_field TO ls_table-fields.
+    ls_field-name = `LONG_NAME`.
+    ls_field-datatype = `RSTR`.
+    ls_field-length = `0`.
+    ls_field-key = abap_false.
+    APPEND ls_field TO ls_table-fields.
+    lv_body = zcl_osd_adt_ddic=>table_source( ls_table ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_body exp = `*'O''Brien'*` ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_body exp = `*  key a         : abap.dec(15,2);*` ).
+    cl_abap_unit_assert=>assert_char_cp( act = lv_body exp = `*      long_name : abap.rawstring(0);*` ).
   ENDMETHOD.
 ENDCLASS.

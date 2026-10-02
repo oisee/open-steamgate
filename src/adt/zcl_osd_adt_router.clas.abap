@@ -105,6 +105,9 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
                    iv_handler = `ZCL_OSD_ADT_TYPESTRUCTURE` CHANGING ct_routes = rt_routes ).
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/ddic/tables/parser/info`
                    iv_handler = `ZCL_OSD_ADT_DDIC` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/ddic/dataelements/:name` iv_handler = `ZCL_OSD_ADT_DDIC` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/ddic/tables/:name` iv_handler = `ZCL_OSD_ADT_DDIC` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/ddic/tables/:name/source/main` iv_handler = `ZCL_OSD_ADT_DDIC` CHANGING ct_routes = rt_routes ).
 *   LOCK and UNLOCK, one row per lockable type, from the type table
     lt_types = zcl_osd_adt_types=>lockable( ).
     LOOP AT lt_types INTO ls_type.
