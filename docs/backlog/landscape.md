@@ -28,6 +28,35 @@ Labels follow the release practice: **must** gates the milestone, **should** is 
 - **Renaming by prefix.** `tools/osd-rename.mjs` renames whole identifiers, the contents and the
   file names of a set of objects. It is a deploy-time tool, not a generator option.
 
+## Decided 2026-10-02: one system first, with a real seam
+
+Alice: colleagues may lay the foundation for real cross-system calls, but the set stays **inside one
+system** for now. It still crosses a **real seam**: `CALL FUNCTION ... DESTINATION`, to a set of
+remote-enabled function modules with a typed contract.
+
+- **The contract.** The DSL generates the cut as a function group of remote-enabled modules
+  (`<REMOTE_CALL>R</REMOTE_CALL>`) with DDIC-typed parameters only (no generic types, no references:
+  what RFC can carry), plus a structure and table type per payload. The two sides of the cut call
+  each other only through these modules.
+- **One system today.** The destination is a setting of the set (5b), by default `NONE`, so the
+  call runs locally in its own LUW the way RFC does. Moving one side to another system means
+  changing the destination, not the code.
+- **Proof that it is a real seam.** On A4H, the same set runs through `NONE` and through an SM59
+  destination that points back at the same system (another client or a loopback logon). The
+  results are equal, and a test fails if a side reads the other's tables directly.
+- **Foundation for later, by the colleagues:** SL.1, SL.2 and SL.3 below. The DSL needs only the
+  `NONE` route and a typed signature from them, so it does not wait.
+
+**Already in OSG and what it lacks.**
+- `CALL FUNCTION ... DESTINATION d` is `abap.context.RFCDestinations[d].call(name, params)`.
+- Host bridges live in the same map under destination names: `AMDP`, `JOBS`, `STORE`,
+  `SQLTRACE`. They are in-process only and occupy names an SM59 entry could want. SL.2 separates
+  them (reserved names or a map of their own).
+- `NONE` must be registered as local (an AGENDA gotcha from 2026-09-12).
+- The JSON channel `/sap/bc/osd/rfc/` has no authentication.
+- `IN BACKGROUND TASK` and `STARTING NEW TASK` with a destination are not handled yet. Check the
+  transpiler before SL.2's exactly-once variant.
+
 ## SL.1 — consistent identity per instance (must)
 
 - **The client is part of the data.** The seed rows in `data/` are in client 123. An instance
