@@ -4,9 +4,9 @@ package xsmall
 // Set fits on the right with zero bytes, just like an ordinary fixed-x move.
 func Set(dst []byte, src string) { n := copy(dst, src); clear(dst[n:]) }
 
-// FromInt sign extends i before retaining its rightmost bytes.
+// FromInt retains the rightmost i bytes, zero-padding targets wider than i.
 func FromInt(dst []byte, value int32) {
-	v := int64(value)
+	v := uint32(value)
 	for i := len(dst) - 1; i >= 0; i-- {
 		dst[i] = byte(v)
 		v >>= 8
@@ -24,3 +24,11 @@ func Int(src []byte) int32 {
 
 // Byte wraps integer constants as well as variables into one byte.
 func Byte(value int32) byte { return byte(value) }
+
+// First fits a string-backed x(1), including an unassigned RETURNING value.
+func First(src string) byte {
+	if len(src) == 0 {
+		return 0
+	}
+	return src[0]
+}

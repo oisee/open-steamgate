@@ -241,7 +241,7 @@ test("fixed locals loading owned memory use inline bytes; references keep string
   for (const escape of ["DATA r TYPE REF TO x. GET REFERENCE OF byte INTO r.", "FIELD-SYMBOLS <b> TYPE x. ASSIGN byte TO <b>."]) {
     const escaped = emitGo(compile(body + escape));
     assert.match(escaped, /var byte_ string/);
-    assert.match(escaped, /StoreByte\(\(byte_\)\[0\]/);
+    assert.match(escaped, /StoreByte\(hXsmall.First\(byte_\)/);
   }
 });
 
@@ -257,13 +257,50 @@ test("generated single-byte reads, integer moves, padding and snapshots agree wi
     writeFileSync(join(dir, "ownedcheck/generated.go"), emitGo(program).replace("package main", "package ownedcheck"));
     writeFileSync(join(dir, "ownedcheck/generated_test.go"), `package ownedcheck
 import ("testing"; "osg/gogen/abap")
-func TestBytes(t *testing.T) { if got:=ZCL_GOGEN_T_SINGLEBYTES_RUN(&abap.Session{}); got != ${JSON.stringify(want)} {t.Fatal(got)}; if got:=ZCL_GOGEN_T_SINGLEBYTES_REPLACE_FIT(&abap.Session{}); got!="12FF/2/12FFFF/0" {t.Fatal(got)} }
+func TestBytes(t *testing.T) { if got:=ZCL_GOGEN_T_SINGLEBYTES_RUN(&abap.Session{}); got != ${JSON.stringify(want)} {t.Fatal(got)}; if got:=ZCL_GOGEN_T_SINGLEBYTES_EMPTY_SOURCE(&abap.Session{}); got!="00/0" {t.Fatal(got)}; if got:=ZCL_GOGEN_T_SINGLEBYTES_FROM_BYTE(&abap.Session{}, ""); got!="00/0" {t.Fatal(got)}; if got:=ZCL_GOGEN_T_SINGLEBYTES_REPLACE_FIT(&abap.Session{}); got!="12FF/2/12FFFF/0" {t.Fatal(got)} }
 `);
     execFileSync("go", ["test", "./ownedcheck"], {cwd: dir, env: process.env});
     writeFileSync(join(dir, "generated.mjs"), emitJs(program));
     copyFileSync(join(import.meta.dirname, "js/abap.mjs"), join(dir, "abap.mjs"));
     const js = await import(join(dir, "generated.mjs"));
     assert.equal(js.ZCL_GOGEN_T_SINGLEBYTES.RUN({sy: {index:0, subrc:0}}), want);
+    assert.equal(js.ZCL_GOGEN_T_SINGLEBYTES.EMPTY_SOURCE({sy: {subrc:0}}), "00/0");
     assert.equal(js.ZCL_GOGEN_T_SINGLEBYTES.REPLACE_FIT({sy: {subrc:0}}), "12FF/2/12FFFF/0");
   } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("owned-memory checksum addition keeps exact packed fallbacks and JS parity", async () => {
+  const p = compile("mv_mem = '00'.", `METHOD checksum. r = seed. r = r + n. ENDMETHOD.`,
+    "TYPES packed TYPE p LENGTH 16 DECIMALS 0. METHODS checksum IMPORTING VALUE(seed) TYPE packed VALUE(n) TYPE i RETURNING VALUE(r) TYPE packed.");
+  assert.deepEqual(p.partial, []);
+  assert.deepEqual(p.broken, [], p.reg.findIssues().map((i) => i.getMessage()).join("; "));
+  assert.match(emitGo(p), /hPackedint.Add/);
+  const dir = mkdtempSync(join(import.meta.dirname, ".out", "packed-checksum-"));
+  const cases = [["0", 255, "255"], ["12", -20, "-8"], ["9223372036854775807", 1, "9223372036854775808"],
+    ["-9223372036854775808", -1, "-9223372036854775809"], ["9999999999999999999999999999999", -1, "9999999999999999999999999999998"]];
+  try {
+    cpSync(join(import.meta.dirname, "go"), dir, {recursive: true});
+    mkdirSync(join(dir, "check"));
+    writeFileSync(join(dir, "check/generated.go"), emitGo(p).replace("package main", "package check"));
+    writeFileSync(join(dir, "check/generated_test.go"), `package check
+import("testing"; "osg/gogen/abap")
+func TestChecksum(t *testing.T) {
+ me:=&ZCL_OWNED{}; s:=&abap.Session{}
+ ${cases.map(([seed, n, want]) => `if got:=me.CHECKSUM(s, ${JSON.stringify(seed)}, ${n}); got!=${JSON.stringify(want)} {t.Fatal(got)}`).join("\n")}
+ defer func(){r:=recover(); e,ok:=r.(abap.ArithmeticError); if !ok || e.Class!="CX_SY_ARITHMETIC_OVERFLOW" {t.Fatalf("overflow: %v",r)}}()
+ me.CHECKSUM(s,"9999999999999999999999999999999",1)
+}
+`);
+    execFileSync("go", ["test", "./check"], {cwd: dir, env: process.env});
+    writeFileSync(join(dir, "generated.mjs"), emitJs(p));
+    copyFileSync(join(import.meta.dirname, "js/abap.mjs"), join(dir, "abap.mjs"));
+    const js = await import(join(dir, "generated.mjs"));
+    const me = new js.ZCL_OWNED();
+    for (const [seed, n, want] of cases) assert.equal(me.CHECKSUM({sy: {}}, seed, n), want);
+    assert.throws(() => me.CHECKSUM({sy: {}}, "9999999999999999999999999999999", 1), /CX_SY_ARITHMETIC_OVERFLOW/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+  // Any parameter, reference, or generic consumer retains ordinary arithmetic.
+  const escaped = compile("mv_mem = '00'.", "METHOD checksum. DATA ptr TYPE REF TO packed. GET REFERENCE OF r INTO ptr. r = r + n. ENDMETHOD.",
+    "TYPES packed TYPE p LENGTH 16 DECIMALS 0. METHODS checksum IMPORTING VALUE(n) TYPE i RETURNING VALUE(r) TYPE packed.");
+  assert.doesNotMatch(emitGo(escaped), /hPackedint.Add/);
 });

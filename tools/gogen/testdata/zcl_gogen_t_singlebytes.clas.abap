@@ -1,10 +1,28 @@
 * Unmeasured fixture: expected bytes follow fixed-x fitting and signed i moves.
 CLASS zcl_gogen_t_singlebytes DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
+    TYPES byte TYPE x LENGTH 1.
+    CLASS-METHODS initial RETURNING VALUE(result) TYPE byte.
+    CLASS-METHODS from_byte IMPORTING VALUE(value) TYPE byte RETURNING VALUE(result) TYPE string.
+    CLASS-METHODS empty_source RETURNING VALUE(result) TYPE string.
     CLASS-METHODS replace_fit RETURNING VALUE(result) TYPE string.
     CLASS-METHODS run RETURNING VALUE(result) TYPE string.
 ENDCLASS.
 CLASS zcl_gogen_t_singlebytes IMPLEMENTATION.
+  METHOD initial.
+* Deliberately unassigned RETURNING x(1): its initial value is 00.
+  ENDMETHOD.
+  METHOD from_byte.
+    DATA mem TYPE xstring.
+    DATA b TYPE x LENGTH 1.
+    b = value.
+    mem = 'FF'.
+    REPLACE SECTION OFFSET 0 LENGTH 1 OF mem WITH b IN BYTE MODE.
+    result = |{ mem }/{ sy-subrc }|.
+  ENDMETHOD.
+  METHOD empty_source.
+    result = from_byte( initial( ) ).
+  ENDMETHOD.
   METHOD run.
     DATA mem TYPE xstring.
     DATA b TYPE x LENGTH 1.

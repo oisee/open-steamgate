@@ -27,3 +27,11 @@ func TestIntegerAndFitContract(t *testing.T) {
 		}
 	}
 }
+
+func TestFirstInitialAndByte(t *testing.T) {
+	for _, s := range []string{"", "\x00", "\xff", "\x80\x01"} {
+		if got, want := First(s), abap.XFit(s, 1)[0]; got != want {
+			t.Fatalf("%x: %x != %x", s, got, want)
+		}
+	}
+}

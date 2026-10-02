@@ -167,8 +167,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:xbuf": {
-      "lines": 79,
-      "reason": "Owned xstring read-into and fixed-byte store paths; bounds validated before mutation. The abap and emitter budgets stay unchanged."
+      "lines": 75,
+      "reason": "Owned fixed-byte reads and stores; removed the dead single-byte StoreFrom branch."
     },
     "tools/adt-documents.mjs": {
       "lines": 1621,
@@ -491,8 +491,12 @@
       "reason": "Native checked int8 arithmetic and overflow fallback for integral packed trees; go/abap shrinks, existing ceilings unchanged."
     },
     "go:xsmall": {
-      "lines": 26,
-      "reason": "Inline unescaped x(1..8) fitting and integer moves, independent of abap."
+      "lines": 34,
+      "reason": "Inline fixed-byte fitting and integer moves; empty string-backed x(1) sources read as 00."
+    },
+    "go:packedint": {
+      "lines": 32,
+      "reason": "Profiled owned-memory checksum addition: checked integral fast path with the existing exact packed fallback; no growth in abap or the main emitter."
     }
   },
   "readmeMissing": [

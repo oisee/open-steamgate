@@ -56,14 +56,10 @@ func (b *Buffer) ReadInto(dst []byte, off, n int32) {
 	clear(dst[copied:])
 }
 
-// StoreFrom validates an equal-length span; a single byte needs one store.
+// StoreFrom validates an equal-length span before copying a wider field.
 func (b *Buffer) StoreFrom(src []byte, off int32) int32 {
 	from, to := bytesection.Bounds(len(b.bytes), off, int32(len(src)))
-	if len(src) == 1 {
-		b.bytes[from] = src[0]
-	} else {
-		copy(b.bytes[from:to], src)
-	}
+	copy(b.bytes[from:to], src)
 	return 0
 }
 

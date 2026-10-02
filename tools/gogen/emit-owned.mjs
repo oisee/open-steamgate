@@ -1,6 +1,9 @@
+import {packedChecksum} from "./emit-packedint.mjs";
 // Owned xstring emission leaves types, signatures and generic descriptors alone.
 export function ownedExpression(e, ctx, h) {
   const {ownership, expr, place} = h;
+  const checksum = packedChecksum(e, ctx, h);
+  if (checksum !== null) return checksum;
   if (ownership.has(e, ctx)) return ownership.fixed(e, ctx) ? `string(${place(e, ctx)}[:])` : `${place(e, ctx)}.Snapshot()`;
   if (e.e === "conv" && e.kind === "x2i" && ownership.has(e.x, ctx) && e.x.type.k === "x") return ownership.fixed(e.x, ctx) === 1 ? `int32(${place(e.x, ctx)}[0])` : `${h.helper("xsmall.Int")}(${place(e.x, ctx)}[:])`;
   if (e.e === "xstrlen" && ownership.has(e.x, ctx)) return ownership.fixed(e.x, ctx) ? `int32(${ownership.fixed(e.x, ctx)})` : `${place(e.x, ctx)}.Len()`;
@@ -30,8 +33,8 @@ export function ownedStatement(st, ctx, t, h) {
   const target = place(st.target, ctx);
   if (st.s === "assign") return [`${t}${target}.Set(${expr(st.value, ctx)})`];
   if (st.s === "clear") return [`${t}${target}.Clear()`];
-  if (st.s === "replace_bytes" && ownership.width(st.with, ctx) === 1 && st.len?.e === "int" && st.len.value === 1) return [`${t}s.Sy.Subrc = ${target}.StoreByte(${ownership.fixed(st.with, ctx) ? place(st.with, ctx) : `(${expr(st.with, ctx)})`}[0], ${st.off ? expr(st.off, ctx) : "0"})`];
-  if (st.s === "replace_bytes" && ownership.fixed(st.with, ctx) && st.len?.e === "int" && st.len.value === ownership.fixed(st.with, ctx)) return [`${t}s.Sy.Subrc = ${target}.${ownership.fixed(st.with, ctx) === 1 ? `StoreByte(${place(st.with, ctx)}[0]` : `StoreFrom(${place(st.with, ctx)}[:]`}, ${st.off ? expr(st.off, ctx) : "0"})`];
+  if (st.s === "replace_bytes" && ownership.width(st.with, ctx) === 1 && st.len?.e === "int" && st.len.value === 1) return [`${t}s.Sy.Subrc = ${target}.StoreByte(${ownership.fixed(st.with, ctx) ? `${place(st.with, ctx)}[0]` : `${h.helper("xsmall.First")}(${expr(st.with, ctx)})`}, ${st.off ? expr(st.off, ctx) : "0"})`];
+  if (st.s === "replace_bytes" && ownership.fixed(st.with, ctx) && st.len?.e === "int" && st.len.value === ownership.fixed(st.with, ctx)) return [`${t}s.Sy.Subrc = ${target}.StoreFrom(${place(st.with, ctx)}[:], ${st.off ? expr(st.off, ctx) : "0"})`];
   if (st.s === "replace_bytes") return [`${t}s.Sy.Subrc = ${target}.Replace(${expr(st.with, ctx)}, ${st.off ? expr(st.off, ctx) : "0"}, ${st.len ? expr(st.len, ctx) : "abap.NoLength"})`];
   if (st.s === "concat_bytes") {
     if (!st.table && st.parts.slice(1).every(purePart) && st.parts[0] && ownership.has(st.parts[0], ctx) && place(st.parts[0], ctx) === target) {

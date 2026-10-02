@@ -120,7 +120,15 @@ export function analyzeOwnership(program) {
     for (const a of cls.attributes ?? []) if (attrs.get(cls.name).has(a.name)) declarations.add(a);
     for (const m of methods(cls)) for (const l of m.locals) if (locals.get(localKey(cls, m)).has(l.name)) declarations.add(l);
   }
-  return {declarations, width(p, ctx) {
+  return {declarations, unescaped(p, ctx) {
+    const safety = program.ownershipSafety?.get(sourceOwner(ctx.cls));
+    const mentions = (n) => n && typeof n === "object" && ((n.e === "var" && n.name === p?.name) || children(n).some(mentions));
+    const escapes = (n) => n && typeof n === "object" &&
+      ((n.e === "wrap" && mentions(n.x)) || (["call", "new"].includes(n.e) && n.args.some(mentions)) ||
+       (["call_fm", "call_dyn_static"].includes(n.s) && mentions(n)) || children(n).some(escapes));
+    return p?.e === "var" && !p.ref && safety && !safety.dynamic && !safety.names.has(p.name) && !escapes(ctx.method.body) &&
+      (ctx.method.locals.some((l) => l.name === p.name) || ctx.method.returning?.name === p.name);
+  }, width(p, ctx) {
     return p?.e === "var" ? ctx.method.locals.find((v) => v.name === p.name && v.type.k === "x")?.type.len : 0;
   }, fixed(p, ctx) {
     const decl = p?.e === "var" && !p.ref ? ctx.method.locals.find((v) => v.name === p.name) : undefined;
