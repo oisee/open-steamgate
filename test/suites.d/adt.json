@@ -1,5 +1,6 @@
 {
   "files": [
+    "test/adt-abap-csrf.mjs",
     "test/adt-abap-diff.mjs",
     "test/adt-abapfs-conformance.mjs",
     "test/adt-devloop.mjs",
