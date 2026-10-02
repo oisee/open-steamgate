@@ -2765,6 +2765,12 @@ function statement(node, ctx) {
     Statements.ReadDataset, Statements.GetDataset, Statements.SetDataset].some((k) => isStmt(node, k))) {
     return datasetStatement(node, ctx, text);
   }
+  // GET RUN TIME FIELD: monotonic microseconds since the first call (FIX.md).
+  if (isStmt(node, Statements.GetRunTime)) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "i") throw new Unsupported(`GET RUN TIME FIELD into a ${target.type.k}`);
+    return {s: "get_runtime", target};
+  }
   // ultra/events: GET TIME STAMP FIELD ts into a TIMESTAMP p(8,0) or a
   // TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
   if (isStmt(node, Statements.GetTime)) {

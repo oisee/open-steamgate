@@ -126,6 +126,10 @@
       "lines": 209,
       "reason": "baseline 2026-10-01"
     },
+    "go:runtimeclock": {
+      "lines": 25,
+      "reason": "GET RUN TIME FIELD monotonic clock in its own package; no abap growth."
+    },
     "go:sandbox": {
       "lines": 533,
       "reason": "carved out of go/abap/dataset.go (wave 2, docs/gogen-go-packages.md)"

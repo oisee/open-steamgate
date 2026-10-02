@@ -1275,6 +1275,7 @@ function stmtLines(st, ctx, d) {
     }
     // ultra/events: SET HANDLER, one registration per handler (the names
     // Ev* are mixed case, so no ABAP name, all upper or all lower, meets them)
+    case "get_runtime": return [`${t}${place(st.target, ctx)} = ${helperFn("runtimeclock.Microseconds")}()`];
     case "get_timestamp": return [`${t}${place(st.target, ctx)} = abap.TimeStamp(${st.dec})`];
     // AMC on the Go host (go/amc; the bodies frontend.mjs AMC_HOST gives)
     case "amc": {
