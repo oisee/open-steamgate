@@ -1,5 +1,8 @@
 CLASS ltcl_power DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
  PRIVATE SECTION.
+  METHODS concat_int8 FOR TESTING.
+  METHODS character_base FOR TESTING.
+  METHODS numc_base FOR TESTING.
   METHODS negative FOR TESTING.
   METHODS powers FOR TESTING.
   METHODS overflow FOR TESTING.
@@ -9,6 +12,31 @@ CLASS ltcl_power DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   METHODS logical FOR TESTING.
 ENDCLASS.
 CLASS ltcl_power IMPLEMENTATION.
+ METHOD concat_int8.
+  DATA b TYPE int8 VALUE 42.
+  DATA s TYPE string.
+  s = `a` && b.
+  cl_abap_unit_assert=>assert_equals( act = s exp = `a42` ).
+  s = b && `a`.
+  cl_abap_unit_assert=>assert_equals( act = s exp = `42a` ).
+  s = `a` && b && `a`.
+  cl_abap_unit_assert=>assert_equals( act = s exp = `a42a` ).
+  b = -5.
+  s = `a` && b.
+  cl_abap_unit_assert=>assert_equals( act = s exp = `a5-` ).
+ ENDMETHOD.
+ METHOD character_base.
+  DATA lv_c TYPE c LENGTH 1 VALUE '3'.
+  DATA v TYPE i.
+  v = 1 + ipow( base = lv_c exp = 2 ).
+  cl_abap_unit_assert=>assert_equals( act = v exp = 10 ).
+ ENDMETHOD.
+ METHOD numc_base.
+  DATA lv_n TYPE n LENGTH 1 VALUE '3'.
+  DATA v TYPE i.
+  v = 1 + ipow( base = lv_n exp = 2 ).
+  cl_abap_unit_assert=>assert_equals( act = v exp = 10 ).
+ ENDMETHOD.
  METHOD negative.
   DATA actual TYPE i.
   DATA wide TYPE int8.

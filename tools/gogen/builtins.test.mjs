@@ -58,3 +58,15 @@ test("7.02 audit uses release gates", () => {
  assert.ok(!names.includes("IPOW"));
  assert.ok(!names.includes("XSDBOOL"));
 });
+
+test("int8 concat trims assignment blanks and minimum i uses shared formatting in both emitters", async () => {
+ const p = compileProgram({folders:[resolve("tools/gogen/testdata")], objects:["ZCL_GOGEN_T_IPOWTEXT"]});
+ assert.deepEqual(p.partial,[]);
+ const go = emitGo(p);
+ assert.match(go,/strings\.TrimRight\(hIntpower\.I8ToString/);
+ assert.match(go,/abap\.IToString/);
+ assert.doesNotMatch(go,/hIntpower\.IToString/);
+ const js = emitJs(p, new URL("./js/abap.mjs", import.meta.url).href);
+ const m = await import(`data:text/javascript,${encodeURIComponent(js)}`);
+ assert.equal(m.ZCL_GOGEN_T_IPOWTEXT.RUN({sy:{index:0,tabix:0,subrc:0}}),"a42/42a/a42a/a5-/c:10/n:10/5-/2147483648-");
+});

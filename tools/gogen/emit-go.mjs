@@ -2005,7 +2005,7 @@ function expr(e, ctx) {
       const parts = e.parts.map((p) => (p.text !== undefined ? JSON.stringify(p.text) : templatePart(p.value, ctx, p.opts ?? {})));
       return parts.length === 0 ? `""` : `(${parts.join(" + ")})`;
     }
-    case "concat": return `(${e.l.e === "conv" && e.l.kind === "i2s" ? `strings.TrimRight(${expr(e.l, ctx)}, " ")` : expr(e.l, ctx)} + ${e.r.e === "conv" && e.r.kind === "i2s" ? `strings.TrimRight(${expr(e.r, ctx)}, " ")` : expr(e.r, ctx)})`;
+    case "concat": return `(${e.l.e === "conv" && ["i2s", "i82s"].includes(e.l.kind) ? `strings.TrimRight(${expr(e.l, ctx)}, " ")` : expr(e.l, ctx)} + ${e.r.e === "conv" && ["i2s", "i82s"].includes(e.r.kind) ? `strings.TrimRight(${expr(e.r, ctx)}, " ")` : expr(e.r, ctx)})`;
     // CORRESPONDING type( itab ): a new table, one mapped row per source row
     case "table_map": {
       const n = ctx.loop++;
@@ -2162,7 +2162,7 @@ function conv(e, ctx) {
     case "s2c": return `abap.CFit(${x}, ${e.to.len})`;
     case "s2d": return `abap.S2D(${x})`;
     case "s2t": return `abap.S2T(${x})`;
-    case "i2s": HELPER_IMPORTS.add("intpower"); return `hIntpower.IToString(${x})`;
+    case "i2s": return `abap.IToString(${x})`;
     case "i82s": HELPER_IMPORTS.add("intpower"); return `hIntpower.I8ToString(${x})`;
     case "f2s": HELPER_IMPORTS.add("intpower"); return `hIntpower.FToString(${x})`;
     case "i2n": return `abap.IToN(${x}, ${e.to.len})`;

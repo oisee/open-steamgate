@@ -2,15 +2,6 @@ package intpower
 
 import "strconv"
 
-// IToString retains the supplied IPOW oracle's leading sign at the i minimum.
-// Ordinary integers use the measured ABAP assignment trailing sign.
-func IToString(v int32) string {
-	if v == -2147483648 {
-		return "-2147483648"
-	}
-	return I8ToString(int64(v))
-}
-
 func I8ToString(v int64) string {
 	s := strconv.FormatInt(v, 10)
 	if v < 0 {

@@ -14,7 +14,10 @@ export function builtin(name, direct, named, ctx, api, calc) {
     if (!get("BASE") || !get("EXP")) throw new Unsupported("IPOW( ) requires BASE and EXP");
     const base = source(get("BASE"), ctx);
     const rank = {i: 0, int8: 1, p: 2, f: 3};
-    const chosen = calc && rank[calc.k] > rank[base.type.k] ? calc : base.type;
+    // Leaf-type discovery has no enclosing hint yet. Character bases start
+    // as i (the built-in signature); the later calculation can widen it.
+    calc ??= ["c", "n"].includes(base.type.k) ? I : undefined;
+    const chosen = calc && (rank[calc.k] ?? -1) > (rank[base.type.k] ?? -1) ? calc : base.type;
     const type = chosen.k === "p" ? P31 : {...chosen};
     delete type.calculation;
     if (!["i", "int8", "p", "f"].includes(type.k)) throw new Unsupported(`IPOW( ) of a ${type.k}: awaiting A4H oracle`);

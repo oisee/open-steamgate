@@ -952,7 +952,7 @@ function expr(e, ctx) {
       const parts = e.parts.map((p) => (p.text !== undefined ? JSON.stringify(p.text) : templatePart(p.value, ctx, p.opts ?? {})));
       return parts.length === 0 ? `""` : `(${parts.join(" + ")})`;
     }
-    case "concat": return `(${e.l.e === "conv" && e.l.kind === "i2s" ? `${expr(e.l, ctx)}.replace(/ +$/, "")` : expr(e.l, ctx)} + ${e.r.e === "conv" && e.r.kind === "i2s" ? `${expr(e.r, ctx)}.replace(/ +$/, "")` : expr(e.r, ctx)})`;
+    case "concat": return `(${e.l.e === "conv" && ["i2s", "i82s"].includes(e.l.kind) ? `${expr(e.l, ctx)}.replace(/ +$/, "")` : expr(e.l, ctx)} + ${e.r.e === "conv" && ["i2s", "i82s"].includes(e.r.kind) ? `${expr(e.r, ctx)}.replace(/ +$/, "")` : expr(e.r, ctx)})`;
     // CORRESPONDING type( itab ): a new table, one mapped row per source row
     case "table_map":
       return `(() => { const out = []; for (const row of ${expr(e.from, ctx)}) { ${place(e.row, ctx)} = row; out.push(${expr(e.value, ctx)}); } return out; })()`;
