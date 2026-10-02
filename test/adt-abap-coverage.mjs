@@ -95,13 +95,6 @@ const HOST_ALLOWED = [
   "GET /sap/bc/adt/core/http/xref/closure",
   // A10: segw entity sets
   "GET /sap/bc/adt/core/http/segw/entitysets",
-  // B1: information system statics
-  "GET /sap/bc/adt/repository/informationsystem/virtualfolders/facets",
-  "GET /sap/bc/adt/repository/informationsystem/objecttypes",
-  "GET /sap/bc/adt/repository/informationsystem/releasestates",
-  "GET /sap/bc/adt/repository/informationsystem/objectproperties/values",
-  "GET /sap/bc/adt/packages/settings",
-  "GET /sap/bc/adt/packages/valuehelps/:what",
   // B2a: source read and bare object documents
   "GET /sap/bc/adt/oo/classes/:name/source/main",
   "GET /sap/bc/adt/oo/classes/:name/includes/:include",
