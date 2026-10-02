@@ -850,7 +850,7 @@ same seed and check date: `stages_mode_s` (two stages `DONE`, the worklist has e
 answers, the log equals the check rules over those keys called directly, no filter row in the log,
 stage 2 has one pile per two worklist keys for each of its six rules and the worklist is smaller than
 the fleet, lock released); `stages_mode_p` (stage 1 submitted, stage 2 `WAITING` and unplanned, then
-a bounded wait on `collect( )`: the run `DONE`, stage 2 planned once with a job per pile, the log equal
+a bounded wait on `collect( )`: the run `DONE`, stage 2 planned once with a job per pile (a job is the pair name and count: on A4H the six stage 2 jobs of a run share one `JOBCOUNT`, `ANOMALY-2026-10-02-jobcount-unique-per-name`), the log equal
 to mode S's, lock released); `stages_partial` (a run as `run( )` leaves it with a stage 1 pile that
 never gets a job: the gate stays shut, `collect( )` makes stage 1 `PARTIAL`, stage 2 `NOT-RUN`, the
 run final and its lock released, a late gate call opens nothing). `npm run unit` skips

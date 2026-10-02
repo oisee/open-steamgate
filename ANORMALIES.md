@@ -3184,6 +3184,18 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream: none; a local runtime choice.
 - Regression-test location: `test/job-periodic.mjs` (`successor-at-start` starts the instance 50 s late, as the sandbox's tick did, and checks the successor is still due at scheduled time + period).
 
+### ANOMALY-2026-10-02-jobcount-unique-per-name — the local facade hands out JOBCOUNTs unique on their own; a system only per job name
+
+- Status: `open` (known difference; facade owner: dell, change to the allocator is theirs to decide)
+- Discovery date: `2026-10-02`
+- Affected adapter: the local job facade's count allocator (`JOB_OPEN` in `src/jobs/zosd_jobs.fugr.*`, `ZOSD_JOB_IDENTITY`)
+- Expected SAP behaviour (sandbox, 2026-10-02, the L3 proof `stages_mode_p` with its jobs kept and TBTCO read): `JOBCOUNT` is the creation time (hhmmss) plus a two-digit counter and is unique only together with `JOBNAME`; jobs opened in the same second under different names share a count. The six stage 2 jobs of one run, `L3_FLEET2_202_0001` to `L3_FLEET2_207_0001`, had one count (03440000 in one run, 03460000 in the other). This matches the measurement of 2026-10-01 (creation hhmmss + 2 digits).
+- Actual local behaviour: the facade allocates a count that is unique on its own (a random free count), so no two jobs ever share one.
+- Impact: code that identifies a job by `JOBCOUNT` alone passes here and fails on a system. The L3 proof did: `COUNT( DISTINCT job_count )` over the stage 2 piles was 6 here and 1 on the sandbox (140 of 141 tests green there).
+- Smallest safe workaround: always identify a job by the pair (`JOBNAME`, `JOBCOUNT`), as the job APIs do. The proof now counts distinct pairs; the generated L3 runner reads every job state by the pair and finds plan rows by set, run, rule and pile, never by count.
+- Upstream: none; a local facade difference. Whether the allocator should hand out hhmmss + NN per name (which would let this runtime catch such code) is the facade owner's call.
+- Regression-test location: `src/l3proof/zcl_l3_fleet_proof.clas.testclasses.abap` (`stages_mode_p`, run on A4H by `tools/osd-prove-on-system.mjs`); no local test can catch it while the allocator gives unique counts.
+
 ### ANOMALY-2026-10-02-update-task-synchronous — IN UPDATE TASK runs at the call, so there is no update window
 
 - Status: `open` (known difference; backlog: an asynchronous update task, 0.6 should)

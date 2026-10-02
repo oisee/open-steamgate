@@ -649,6 +649,7 @@ CLASS ltcl_proof IMPLEMENTATION.
     DATA lv_count TYPE i.
     DATA lv_piles TYPE i.
     DATA ls_lock TYPE zosd_l3_run.
+    DATA lt_jobs TYPE STANDARD TABLE OF zosd_l3_pile WITH DEFAULT KEY.
     ls_seq = staged( zcl_l3_fleet2=>c_sequential ).
     lt_seq = staged_logged( ls_seq-run_id ).
     ls_par = staged( zcl_l3_fleet2=>c_parallel ).
@@ -665,8 +666,15 @@ CLASS ltcl_proof IMPLEMENTATION.
       msg = 'the gate opened stage 2 and its jobs ran' ).
     " opened once: one plan of stage 2, each pile with a job of its own
     assert_cut( ls_par-run_id ).
-    SELECT COUNT( DISTINCT job_count ) FROM zosd_l3_pile INTO lv_count
+    " a job is the pair (name, count): a system's JOBCOUNT is the creation time
+    " plus a counter, unique per job name only, so jobs opened in one second
+    " under other names share it (A4H, 2026-10-02)
+    SELECT job_name job_count FROM zosd_l3_pile INTO CORRESPONDING FIELDS OF TABLE lt_jobs
       WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = ls_par-run_id AND stage_no = 2.
+    DELETE lt_jobs WHERE job_count IS INITIAL.
+    SORT lt_jobs BY job_name job_count.
+    DELETE ADJACENT DUPLICATES FROM lt_jobs COMPARING job_name job_count.
+    lv_count = lines( lt_jobs ).
     lv_piles = staged_piles( iv_run = ls_par-run_id iv_stage = 2 ).
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = lv_piles
       msg = 'each pile of stage 2 was submitted once' ).
