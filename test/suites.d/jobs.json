@@ -11,6 +11,7 @@
     "test/submit-semantics.mjs",
     "test/osd-queue-check.mjs",
     "test/job-periodic.mjs",
-    "test/job-count.mjs"
+    "test/job-count.mjs",
+    "test/job-delete.mjs"
   ]
 }

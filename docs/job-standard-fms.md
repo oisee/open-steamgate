@@ -11,8 +11,8 @@ bridge. A read cannot create a job or import pending work.
 reports and returns step number 1. `JOB_CLOSE` accepts immediate, predecessor,
 named event and date/time starts, the latter once or periodic (see
 [Periodic jobs](#periodic-jobs)); it releases the intent. `BP_EVENT_RAISE`
-records a local named event. `BP_JOB_DELETE` deletes a job that waits or has
-ended. Unsupported scheduling, target and external program values raise the
+records a local named event. `BP_JOB_DELETE` deletes a job that waits, is
+only opened or has ended, also one still in the outbox or in the caller's LUW. Unsupported scheduling, target and external program values raise the
 respective call's failure exception instead of being ignored: `EVENT_PERIODIC`,
 `PRDMONTHS`, `CALENDAR_ID`, `AT_OPMODE`, `AT_OPMODE_PERIODIC`,
 `STARTDATE_RESTRICTION`, the `START_ON_WORKDAY_*` and `WORKDAY_COUNT_DIRECTION`
@@ -173,15 +173,37 @@ predecessor's scheduled time + one period, as measured.
 instance is not started; it ends `A` with result status `EXPIRED`, and its
 periodic successor is still made, with its latest start moved by the period.
 
-**BP_JOB_DELETE** deletes a job of the caller that waits (`S`) or has ended
-(`F`, `A`). A queued or running job, or one the scheduler is releasing,
-raises `JOB_IS_ALREADY_RUNNING`, an
-unknown one `JOB_DOES_NOT_EXIST`, another user's `NO_DELETE_AUTHORITY`, and a
-job still in the caller's LUW or in the outbox (not yet imported) or a
-nonempty `FORCEDMODE` raises `CANT_DELETE_JOB`. Like `BP_EVENT_RAISE` the
-delete reaches the operations store at once and is not undone by a later
-`ROLLBACK WORK`. A deleted job's row stays, as `DELETED`, for its ledger, log
-and chain link; every read answers as for an unknown job.
+**BP_JOB_DELETE** (measured on the sandbox 2026-10-01 and 2026-10-02,
+`test/fixtures/job-delete/contract.json`, `test/job-delete.mjs`) deletes a
+job of the caller that waits (`S`: a start time, a predecessor, a named
+event), that is only opened (`P`) or that has ended (`F`, `A`), wherever the
+job is: in the caller's own LUW, committed in the outbox, or imported. A job
+scheduled, committed and deleted in the same program run is gone at once and
+never runs; so is one deleted before any `COMMIT WORK`. A job released to
+start at once is `Y` on a system from `JOB_CLOSE` on, so here, still in the
+outbox or imported and queued, it raises `JOB_IS_ALREADY_RUNNING`, as a
+running job or one the scheduler is releasing does. An unknown one raises
+`JOB_DOES_NOT_EXIST`, another user's `NO_DELETE_AUTHORITY`, and a nonempty
+`FORCEDMODE` `CANT_DELETE_JOB`.
+
+How it goes depends on where the job lives. Not imported, its business rows
+(identity, outbox, steps) are deleted in the caller's LUW. Imported, its
+operations run is marked `DELETED` at once and its business rows go in the
+caller's LUW too, outbox rows included when the import's acknowledgement has
+not landed, so the next drain has nothing half to acknowledge. The delete then
+ends with `COMMIT WORK`: the default `COMMITMODE = 'X'` commits the caller's
+LUW on a system, other pending writes included (measured with a sentinel row),
+and a later `ROLLBACK WORK` does not bring the job back. `COMMITMODE = space`
+(on a system: the delete stays in the caller's LUW) is not honoured here,
+because a function module cannot tell an omitted parameter from a space
+(ANORMALIES.md, fm-is-supplied). A worker's drain imports only committed
+outbox rows and takes the work process the deleting step holds, so it either
+imported the job before the delete, which then takes the imported path, or
+never sees it. A deleted job's operations run stays, as `DELETED`, for its
+ledger, log and chain link; every read answers as for an unknown job.
+
+On a system `JOB_OPEN` and `JOB_CLOSE` commit the caller's LUW as well; here
+they do not (ANORMALIES.md, job-open-commits).
 
 **Not here:** `BP_JOB_ABORT`. A running instance holds the one work process,
 so nothing could call it while the instance runs; the abort fixture uses an

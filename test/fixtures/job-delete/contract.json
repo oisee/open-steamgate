@@ -1,0 +1,122 @@
+{
+ "contract": "job-delete",
+ "version": 1,
+ "measured": {
+  "date": "2026-10-02",
+  "on": "the SAP sandbox, through throwaway ABAP Unit probes in a temporary package: JOB_OPEN, SUBMIT VIA JOB of a report that WAITs p_sec seconds, JOB_CLOSE with SDLSTRTDT/TM one hour ahead (or STRTIMMED, or PRED_JOBNAME/PRED_JOBCOUNT), then COMMIT WORK, BP_JOB_DELETE and ROLLBACK WORK in one program run, with TBTCO/TBTCP read after each; a sentinel table written in the caller's LUW; the probes, the report, the table, the package and every job deleted afterwards",
+  "by": "docs/job-standard-fms.md, BP_JOB_DELETE"
+ },
+ "schema": {
+  "EXPECT": "A4H = measured on the sandbox; 'unmeasured: assumption' = chosen here, with the reasoning in 'assumption'",
+  "steps": "run in order. {\"step\": [...]} is one dialog step (one program run) with these operations in order; any other entry runs between steps",
+  "close": "JOB_OPEN + JOB_SUBMIT + JOB_CLOSE of job <name>: start = seconds ahead (SDLSTRTDT/TM), immediate = STRTIMMED, after = predecessor job <name>",
+  "open": "JOB_OPEN only",
+  "sentinel": "JOB_OPEN of job <name>, used as a pending write of the caller (the sandbox used an INSERT into a throwaway table)",
+  "commit": "COMMIT WORK", "rollback": "ROLLBACK WORK",
+  "delete": "BP_JOB_DELETE of job <name>; commitmode given = COMMITMODE; expect = 0 or the classic exception",
+  "drain": "one scheduler pass: import the committed outbox, release due jobs, run what is queued",
+  "advance": "move the clock <seconds>, firing the scheduler's timers",
+  "status": "per job, its state after the step: P/S/Y/R/F/A from SHOW_JOBSTATE, or none when the job does not exist (TBTCO has no row)",
+  "ran": "per job, how many times its report ran",
+  "blocked": "measured, not reproduced here yet: the anomaly that blocks it; the test is pending"
+ },
+ "cases": [
+  {
+   "id": "commit-then-delete",
+   "EXPECT": "A4H",
+   "title": "scheduled, committed and deleted in the same run: deleted at once, a ROLLBACK does not bring it back, it never runs",
+   "steps": [
+    {"step": [{"close": "A", "start": 3600}, {"commit": true},
+      {"delete": "A", "expect": 0}, {"rollback": true}, {"delete": "A", "expect": "JOB_DOES_NOT_EXIST"}]},
+    {"status": {"A": "none"}},
+    {"drain": true, "advance": 7200, "ran": {"A": 0}}
+   ],
+   "observed": "S before the delete; after it TBTCO and TBTCP have no row; the second delete raises JOB_DOES_NOT_EXIST with BT 127"
+  },
+  {
+   "id": "delete-uncommitted",
+   "EXPECT": "A4H",
+   "title": "closed and deleted before any COMMIT WORK: rc 0, and gone after a ROLLBACK",
+   "steps": [
+    {"step": [{"close": "B", "start": 3600}, {"delete": "B", "expect": 0}, {"rollback": true}]},
+    {"status": {"B": "none"}},
+    {"drain": true, "advance": 7200, "ran": {"B": 0}}
+   ],
+   "observed": "on the sandbox the job was already S before the delete, because JOB_OPEN and JOB_CLOSE commit (ANORMALIES.md, job-open-commits)"
+  },
+  {
+   "id": "delete-commits-caller",
+   "EXPECT": "A4H",
+   "title": "BP_JOB_DELETE with the default COMMITMODE commits the caller's LUW: a pending write survives a later ROLLBACK",
+   "steps": [
+    {"step": [{"close": "C", "start": 3600}, {"commit": true}, {"sentinel": "CS"},
+      {"delete": "C", "expect": 0}, {"rollback": true}]},
+    {"status": {"C": "none", "CS": "P"}}
+   ]
+  },
+  {
+   "id": "commitmode-space",
+   "EXPECT": "A4H",
+   "title": "with COMMITMODE = space the delete is part of the caller's LUW: a ROLLBACK brings the job back, waiting",
+   "blocked": "ANOMALY-2026-10-02-fm-is-supplied: an omitted COMMITMODE cannot be told from a space, so the facade always commits; the case runs once the transpiler applies FM defaults",
+   "steps": [
+    {"step": [{"close": "D", "start": 3600}, {"commit": true}, {"sentinel": "DS"},
+      {"delete": "D", "commitmode": "", "expect": 0}, {"rollback": true}]},
+    {"status": {"D": "S", "DS": "none"}},
+    {"step": [{"delete": "D", "expect": 0}]},
+    {"status": {"D": "none"}}
+   ]
+  },
+  {
+   "id": "ready-refused",
+   "EXPECT": "A4H",
+   "title": "a job released to start at once is Y from JOB_CLOSE on, and BP_JOB_DELETE refuses it like a running one, committed or not",
+   "steps": [
+    {"step": [{"close": "E", "immediate": true}, {"delete": "E", "expect": "JOB_IS_ALREADY_RUNNING"}]},
+    {"step": [{"close": "F", "immediate": true}, {"commit": true}, {"delete": "F", "expect": "JOB_IS_ALREADY_RUNNING"}]},
+    {"drain": true, "ran": {"E": 1, "F": 1}}
+   ],
+   "observed": "on the sandbox the job was Y and then R at the delete (BT 128); here it is still in the outbox and is refused the same"
+  },
+  {
+   "id": "predecessor",
+   "EXPECT": "A4H",
+   "title": "a job waiting for its predecessor (S) and the predecessor itself are both deleted at once after the COMMIT",
+   "steps": [
+    {"step": [{"close": "G", "start": 3600}, {"close": "H", "after": "G"}, {"commit": true},
+      {"delete": "H", "expect": 0}, {"delete": "G", "expect": 0}]},
+    {"status": {"G": "none", "H": "none"}},
+    {"drain": true, "advance": 7200, "ran": {"G": 0, "H": 0}}
+   ],
+   "observed": "the sandbox closed H without PREDJOB_CHECKSTAT; the local facade requires it = 'X' (ANORMALIES.md, job-standard-facade), so the test passes it"
+  },
+  {
+   "id": "opened-only",
+   "EXPECT": "A4H",
+   "title": "a job only opened (P, no step) is deleted",
+   "steps": [
+    {"step": [{"open": "I"}, {"delete": "I", "expect": 0}]},
+    {"status": {"I": "none"}}
+   ],
+   "observed": "on the sandbox the opened job had survived a ROLLBACK first (JOB_OPEN commits); its delete answered rc 0"
+  },
+  {
+   "id": "finished-and-unknown",
+   "EXPECT": "A4H",
+   "title": "a finished job is deleted; an unknown one raises JOB_DOES_NOT_EXIST, a missing count JOBCOUNT_MISSING",
+   "steps": [
+    {"step": [{"close": "J", "immediate": true}]},
+    {"drain": true, "ran": {"J": 1}},
+    {"status": {"J": "F"}},
+    {"step": [{"delete": "J", "expect": 0}, {"delete": "NOBODY", "count": "99999999", "expect": "JOB_DOES_NOT_EXIST"},
+      {"delete": "NOBODY", "count": "", "expect": "JOBCOUNT_MISSING"}]},
+    {"status": {"J": "none"}}
+   ],
+   "observed": "a running job (R) is refused with JOB_IS_ALREADY_RUNNING (BT 128) and deleted with rc 0 once it is F; here a running job holds the one work process, so nothing can call BP_JOB_DELETE meanwhile"
+  }
+ ],
+ "unmeasured": [
+  "a job waiting for a named event, still in the outbox: deleted like a timed one (it is S on a system and its imported form is already deletable)",
+  "BP_JOB_DELETE of an imported job with COMMITMODE = space followed by a ROLLBACK: the operations run stays deleted here (the sandbox brings the job back)"
+ ]
+}

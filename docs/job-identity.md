@@ -55,8 +55,9 @@ daily on the scheduler's clock, in a dialog step. Retention is
 state (COMPLETED, FAILED, INTERRUPTED, DELETED) that ended before the cutoff
 goes: identity, outbox and step rows in the business database (first), then
 run, steps, log, import ledger and completion event in the operations store.
-`BP_JOB_DELETE` removes the identity and step rows when it marks an imported
-job deleted; the operations run stays as a tombstone until reorganisation.
+`BP_JOB_DELETE` removes the identity, outbox and step rows of the job it
+deletes, in the caller's LUW, which it commits; an imported job's operations
+run stays as a tombstone until reorganisation (docs/job-standard-fms.md).
 Never a job that is not final, never one a waiting job is chained behind, never
 the latest instance of a periodic chain. When a reservation still fails, the
 scheduler leaves that run RELEASING, says so, retries it a minute later and

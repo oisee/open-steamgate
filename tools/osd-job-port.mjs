@@ -10,7 +10,7 @@ import {BatchRuns, liveGeneration} from "./osd-batch-runs.mjs";
 import {identity} from "./osd-identity.mjs";
 import {readJobSnapshot} from "./osd-job-snapshot.mjs";
 import {jobInputJson} from "./osd-job-input.mjs";
-import {periodMinutes} from "./osd-job-schedule.mjs";
+import {periodMinutes, scheduleOfOutbox} from "./osd-job-schedule.mjs";
 import {nextJobCount, legacyCountUsed, JobCountExhausted, JOB_COUNT_EXHAUSTED} from "./osd-job-count.mjs";
 import {abapNow} from "./osd-job-scheduler.mjs";
 
@@ -84,14 +84,32 @@ export class JobDestination {
     this.candidate = (proposal) => proposal.count;
   }
 
-  // BP_JOB_DELETE. Only a committed, imported job can be deleted: one
-  // still in this caller's LUW or in the outbox answers CANT_DELETE (drain
-  // first), so the business LUW and the operations store cannot disagree.
-  #delete(db, jobname, count) {
+  // BP_JOB_DELETE, as measured on the sandbox (2026-10-02,
+  // test/fixtures/job-delete/contract.json): a job that waits (S), an
+  // opened one (P) and an ended one go; a ready (Y) or running one is
+  // refused. Where the job still lives decides how it goes:
+  // - imported (OPERATIONS): the operations run is marked DELETED at once,
+  //   and its business rows (identity, outbox, steps) go in the caller's LUW;
+  // - in the outbox or in the caller's own LUW (not imported): its
+  //   business rows go in the caller's LUW, which the facade's COMMITMODE
+  //   commits. A worker imports only committed outbox rows and the import
+  //   takes the work process this step holds, so it either imported the job
+  //   before (first case) or never sees it.
+  async #delete(db, jobname, count, token) {
     const who = identity(this.env);
     const sourceDb = resolve(db.path);
     const name = jobname.trim().toUpperCase();
     if (!name || name.length > 32 || !/^[0-9]{6}[0-9A-Z]{2}$/.test(count)) return "NOT_FOUND";
+    // opened in this LUW and not closed: on a system JOB_OPEN has committed
+    // the job as P already, and BP_JOB_DELETE removes it
+    const jobs = pending.get(token);
+    const transient = jobs?.get(keyOf(name, count));
+    if (transient && !transient.closed) {
+      if (transient.owner !== who.user || transient.client !== who.client) return "FORBIDDEN";
+      jobs.delete(keyOf(name, count));
+      await this.#deleteRows(db, who.client, name, count, "");
+      return "";
+    }
     let snapshot;
     try {
       snapshot = readJobSnapshot({sourceDb, jobName: name, jobCount: count,
@@ -101,24 +119,58 @@ export class JobDestination {
     }
     const local = db.db.prepare(`SELECT owner, intent_id FROM zosd_job_identity
       WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(who.client, name, count);
-    if (!snapshot) return local ? "UNCOMMITTED" : "NOT_FOUND";
-    if (String(local?.intent_id ?? "").trim() !== (snapshot.intentId ?? "")) return "UNCOMMITTED";
+    if (local && String(local.owner ?? "").trim() !== who.user) return "FORBIDDEN";
+    const localIntent = String(local?.intent_id ?? "").trim();
+    if (!snapshot && !local) return "NOT_FOUND";
+    // committed nowhere yet, or closed in this LUW over a committed reservation
+    if (!snapshot || (local && localIntent !== (snapshot.intentId ?? ""))) {
+      if (!local) return "NOT_FOUND"; // deleted in this LUW already
+      return this.#deleteUnimported(db, who.client, name, count, localIntent);
+    }
+    if (!local) return "NOT_FOUND"; // deleted in this LUW, not yet committed
     if (snapshot.state === "DELETED") return "NOT_FOUND";
-    if (snapshot.phase !== "OPERATIONS") return snapshot.state === "RUNNING" ? "RUNNING" : "NOT_IMPORTED";
+    if (snapshot.phase === "RESERVED" || snapshot.phase === "OUTBOX") {
+      return this.#deleteUnimported(db, who.client, name, count, localIntent);
+    }
+    if (snapshot.phase !== "OPERATIONS") return "NOT_IMPORTED";
     const id = snapshot.intentId.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
     const store = new BatchRuns(this.root, this.env);
-    try {
-      const kind = store.deleteJob(id);
-      if (kind === "deleted") {
-        // A deleted system job no longer holds its (name, count) row. Keep
-        // the operations run as a tombstone for the scheduler and reorg.
-        db.db.prepare(`DELETE FROM zosd_job_identity WHERE mandt = ? AND jobname = ?
-          AND jobcount = ? AND intent_id = ?`).run(who.client, name, count, snapshot.intentId);
-        db.db.prepare("DELETE FROM zosd_job_step WHERE mandt = ? AND intent_id = ?")
-          .run(who.client, snapshot.intentId);
+    let kind;
+    try { kind = store.deleteJob(id); } finally { store.close(); }
+    if (kind !== "deleted") return kind === "running" ? "RUNNING" : "NOT_FOUND";
+    // A deleted system job no longer holds its (name, count) row. Keep the
+    // operations run as a tombstone for the scheduler and reorg. An import
+    // whose acknowledgement did not land yet leaves its outbox rows; they go
+    // too, so a later drain has nothing half to acknowledge.
+    await this.#deleteRows(db, who.client, name, count, snapshot.intentId);
+    return "";
+  }
+
+  // a job not imported: a ready one (no start condition) is Y on a system
+  // from JOB_CLOSE on and is refused; anything else goes with its rows
+  async #deleteUnimported(db, client, name, count, intentId) {
+    if (intentId) {
+      const row = db.db.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?")
+        .get(client, intentId);
+      if (row) {
+        const field = (key) => String(row[key] ?? "").trim();
+        let timed;
+        try { timed = !!scheduleOfOutbox(row); } catch { return "UNAVAILABLE"; }
+        if (!timed && !field("event_id") && !field("pred_jobname")) return "RUNNING";
       }
-      return kind === "deleted" ? "" : kind === "running" ? "RUNNING" : "NOT_FOUND";
-    } finally { store.close(); }
+    }
+    await this.#deleteRows(db, client, name, count, intentId);
+    return "";
+  }
+
+  // the job's business rows, in the caller's LUW (the facade commits it)
+  async #deleteRows(db, client, name, count, intentId) {
+    await db.beginTransaction();
+    db.db.prepare(`DELETE FROM zosd_job_identity WHERE mandt = ? AND jobname = ?
+      AND jobcount = ? AND COALESCE(TRIM(intent_id), '') = ?`).run(client, name, count, intentId);
+    if (!intentId) return;
+    db.db.prepare("DELETE FROM zosd_job_step WHERE mandt = ? AND intent_id = ?").run(client, intentId);
+    db.db.prepare("DELETE FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?").run(client, intentId);
   }
 
   async call(_name, signature) {
@@ -142,7 +194,7 @@ export class JobDestination {
       return;
     }
     if (command === "DELETE") {
-      fill(signature, {EV_ERROR_CODE: this.#delete(db, jobname, count)});
+      fill(signature, {EV_ERROR_CODE: await this.#delete(db, jobname, count, token)});
       return;
     }
     if (command === "STATUS" || command === "READ_JOB") {

@@ -3279,3 +3279,51 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Regression-test location: `test/dialog-step-icf.mjs` (four cases: timed, both timed, conditional, AMC
   receiver; each fails without its half of the workaround)
 - Upstream version containing a fix: `none`
+
+### ANOMALY-2026-10-02-job-delete-outbox — BP_JOB_DELETE refused a committed job still in the outbox
+
+- Status: `fixed` (in this repository's JOB_* facade; no upstream involved)
+- Discovery date: `2026-10-02` (reported by the DSL research and demo sessions)
+- Affected versions: `tools/osd-job-port.mjs` and `src/jobs/zosd_jobs.fugr.bp_job_delete.abap` before this change
+- Affected ABAP statement, runtime API or adapter: `BP_JOB_DELETE`
+- Minimal reproducer: in one program run `JOB_OPEN`, `JOB_SUBMIT`, `JOB_CLOSE` with a start time ahead, `COMMIT WORK`, `BP_JOB_DELETE`; `test/fixtures/job-delete/contract.json`, case `commit-then-delete`
+- Exact command used to run it: `npx mocha test/job-delete.mjs`
+- Expected SAP behaviour (sandbox, 2026-10-02, throwaways deleted): the job is `S`, the delete answers rc 0 and TBTCO/TBTCP have no row at once; a later `ROLLBACK WORK` does not bring it back; a second delete raises `JOB_DOES_NOT_EXIST` (BT 127). The same holds before any `COMMIT WORK`, for a job waiting for a predecessor, its predecessor, and a job only opened (`P`). A job released to start at once is `Y` right after `JOB_CLOSE` and is refused with `JOB_IS_ALREADY_RUNNING` (BT 128), as is a running one; a finished one is deleted. With the default `COMMITMODE = 'X'` the delete commits the caller's LUW: a write pending before it survives a later ROLLBACK; with `COMMITMODE = space` the ROLLBACK brings the job back.
+- Actual open-abap behaviour: only an imported job could be deleted; one still in the outbox or in the caller's LUW, or only opened, raised `CANT_DELETE_JOB` until a worker had drained the outbox.
+- Impact on open-steamgate: an `unschedule( )` right after a `schedule( )` deleted nothing here and its job ran; on a system it is gone.
+- Smallest safe workaround: none needed. Not imported, the job's business rows (identity, outbox, steps) go in the caller's LUW and the facade's `COMMIT WORK` (COMMITMODE) makes that durable; the outbox drain reads only committed rows and takes the work process the step holds, so it imports the job before the delete (which then takes the imported path) or never sees it. Imported, the operations run is marked `DELETED` and the outbox rows of an import whose acknowledgement had not landed go with the rest, so the next drain has nothing half to acknowledge. A ready job without a start condition is refused like a running one. `COMMITMODE = space` is not honoured (ANOMALY-2026-10-02-fm-is-supplied).
+- Upstream issue: none, a local facade
+- Regression-test location: `test/job-delete.mjs` (fixture cases, delete during a drain, drain during a delete, an unacknowledged import), `test/job-periodic.mjs`, `test/job-count.mjs`
+- Upstream version containing a fix: `n/a`
+
+### ANOMALY-2026-10-02-fm-is-supplied — IS SUPPLIED of a function module parameter is always false, and its DEFAULT is not applied
+
+- Status: `workaround`
+- Discovery date: `2026-10-02`
+- Affected versions: `@abaplint/transpiler 2.13.89` (and `main` of 2026-09-17 in `.local/lars/transpiler`, `packages/transpiler/src/expressions/compare.ts` and `structures/function_module.ts`)
+- Affected ABAP statement, runtime API or adapter: `<param> IS SUPPLIED`, `<param> IS NOT SUPPLIED` and the DEFAULT of an optional parameter, inside `FUNCTION ... ENDFUNCTION`
+- Minimal ABAP reproducer: `IF commitmode IS NOT SUPPLIED OR commitmode IS NOT INITIAL. COMMIT WORK. ENDIF.` in `BP_JOB_DELETE`, called with `commitmode = space`: the generated test reads `INPUT.commitmode`, while a function module's parameters arrive in `INPUT.exporting` / `INPUT.tables` / `INPUT.changing`; it commits anyway (`test/job-delete.mjs`, case `commitmode-space`, red with that line)
+- Exact command used to run it: `npm run transpile && npx mocha test/job-delete.mjs`, then read `zosd_jobs.fugr.mjs` in `output/`
+- Expected SAP behaviour: IS SUPPLIED is true when the caller passed the parameter; an omitted optional parameter takes its DEFAULT (`COMMITMODE` of `BP_JOB_DELETE` is `'X'` by FUPARAREF)
+- Actual open-abap behaviour: the compare emits `(INPUT && INPUT.<name>)` / `(INPUT === undefined || INPUT.<name> === undefined)`, right for a method and never true / always true for a function module; the module prologue leaves an omitted parameter initial (`// todo, set DEFAULT value`)
+- Impact on open-steamgate: `BP_JOB_DELETE` cannot tell an omitted COMMITMODE from a space and always commits; by the generated code, `BP_JOB_SELECT`'s `IF jobname_ext_sel IS SUPPLIED AND ...` (and the username one) never takes the extended selection (not exercised by a test here)
+- Smallest safe workaround: do not use IS SUPPLIED in a function module; where the default matters, apply the documented default to an initial value
+- Upstream issue: none yet, needs an issue (abaplint/transpiler)
+- Regression-test location: `test/job-delete.mjs`, case `commitmode-space` (pending while this is open)
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-10-02-job-open-commits — JOB_OPEN and JOB_CLOSE commit the caller's LUW on a system
+
+- Status: `open` (known difference of the JOB_* facade)
+- Discovery date: `2026-10-02` (inferred in docs/dsl-l3.md, measured here)
+- Affected versions: the JOB_* facade (`src/jobs/zosd_jobs.fugr.*`)
+- Affected ABAP statement, runtime API or adapter: `JOB_OPEN`, `JOB_CLOSE`
+- Minimal reproducer: a sandbox probe, 2026-10-02 (throwaways deleted): INSERT into a table, `JOB_OPEN`, `ROLLBACK WORK`: the row is there and the job still exists (its BP_JOB_DELETE answers rc 0); the same with `JOB_OPEN` + `SUBMIT VIA JOB` + `JOB_CLOSE`: the row is there and the job is `S` with its step in TBTCP
+- Exact command used to run it: by hand on the sandbox
+- Expected SAP behaviour: the job exists from JOB_OPEN on, whatever the caller does with its LUW, and the caller's pending writes are committed with it
+- Actual open-abap behaviour: the job's rows are written in the caller's LUW; a ROLLBACK removes the job, and the caller's other writes stay pending
+- Impact on open-steamgate: a program that rolls back after scheduling keeps its job on a system and loses it here; the window docs/dsl-l3.md describes (plan rows visible from the first JOB_OPEN on) never opens here
+- Smallest safe workaround: commit before scheduling when the difference matters
+- Upstream issue: none, a local facade
+- Regression-test location: none yet (`test/fixtures/job-delete/contract.json` records the observation)
+- Upstream version containing a fix: `n/a`
