@@ -1,6 +1,8 @@
 // Import committed ABAP intent into the operations store. The source query
 // uses a separate SQLite reader so an unfinished caller LUW is invisible.
-// The ledger in BatchRuns makes an import-before-ack crash safe to retry.
+// Each intent is claimed (its business rows deleted) before the import and
+// committed after it; the ledger in BatchRuns makes a crash between the
+// import and that commit safe to retry.
 import {DatabaseSync} from "node:sqlite";
 import {resolve} from "node:path";
 import {exclusive, currentStepToken} from "./osd-dialog-step.mjs";
@@ -11,7 +13,7 @@ import {scheduleOfOutbox} from "./osd-job-schedule.mjs";
 const value = (row, field) => String(row[field] ?? row[field.toUpperCase()] ?? "").trim();
 const sql = (text) => `'${String(text).replaceAll("'", "''")}'`;
 
-export async function drainJobOutbox(store, {env = process.env, afterImport} = {}) {
+export async function drainJobOutbox(store, {env = process.env, afterRead, afterImport} = {}) {
   if (currentStepToken() !== undefined) throw new Error("job outbox drain must run after the caller step commits");
   if (env.STG_DB !== "file") throw new Error("job outbox requires STG_DB=file");
   return exclusive(async () => {
@@ -40,6 +42,7 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
     } finally {
       reader.close();
     }
+    await afterRead?.(rows); // test seam: a delete may commit between the read and the claim
     let imported = 0;
     for (const row of rows) {
       const intent = {
@@ -99,29 +102,16 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
         throw new Error(`outbox ${intent.intentId} has invalid ordered steps`);
       }
       if (legacy) delete intent.steps;
-      store.importIntent(intent);
-      await afterImport?.(intent); // test seam: process exit here must be safe
+      // Claim first, import second, in one business transaction: deleting
+      // the outbox rows takes SQLite's write lock, which a BP_JOB_DELETE in
+      // any process needs too. A delete that won has removed the rows, so the
+      // claim finds none and nothing is imported; a delete that comes later
+      // waits for this commit and then finds the job imported. A crash before
+      // the commit leaves the rows (the import is then a ledger duplicate).
+      const idWhere = `mandt = ${sql(who.client)} AND intent_id = ${sql(intent.intentId)}`;
+      let claimed = false;
       try {
-        const idWhere = `mandt = ${sql(who.client)} AND intent_id = ${sql(intent.intentId)}`;
-        if (!legacy) {
-          let concurrent = false;
-          for (const step of intent.steps) {
-            const child = await client.delete({table: "zosd_job_step",
-              where: `${idWhere} AND step_no = ${sql(String(step.number).padStart(2, "0"))} AND program = ${sql(step.program)}`});
-            if (child.subrc === 0 && child.dbcnt === 1) continue;
-            await client.rollback();
-            const check = new DatabaseSync(sourceDb, {readOnly: true});
-            let pending;
-            try { pending = check.prepare(`SELECT 1 FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?
-              UNION ALL SELECT 1 FROM zosd_job_step WHERE mandt = ? AND intent_id = ?`)
-              .get(who.client, intent.intentId, who.client, intent.intentId); } finally { check.close(); }
-            if (pending) throw new Error("outbox acknowledgement failed");
-            concurrent = true;
-            break;
-          }
-          if (concurrent) { imported += 1; continue; }
-        }
-        const changed = await client.delete({table: "zosd_job_outbox",
+        const parent = await client.delete({table: "zosd_job_outbox",
           where: `${idWhere} AND sysid = ${sql(intent.sysid)} AND source_db = ${sql(intent.sourceDb)}
             AND jobname = ${sql(intent.jobname)} AND jobcount = ${sql(intent.jobcount)}
             AND owner = ${sql(intent.owner)} AND program = ${sql(intent.program)}
@@ -136,29 +126,36 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
             AND COALESCE(tail_event_param, '') = ${sql(tailParam)}` : ""}${hasSchedule ? ["sdlstrtdt", "sdlstrttm",
               "laststrtdt", "laststrttm", "prdmins", "prdhours", "prddays", "prdweeks"].map((field) => `
             AND COALESCE(${field}, '') = ${sql(value(row, field))}`).join("") : ""}`});
-        if (changed.subrc === 0 && changed.dbcnt === 1) {
-          await client.commit();
-        } else if (changed.subrc === 4) {
-          // Another process may have acknowledged the same imported intent.
-          // FileSqliteClient also returns 4 for SQL errors, so verify the
-          // committed row independently after releasing this transaction.
+        if (parent.subrc !== 0 || parent.dbcnt !== 1) {
+          // deleted by BP_JOB_DELETE or acknowledged by another worker since
+          // the read; FileSqliteClient also answers 4 for an SQL error, so
+          // check that the row is really gone
           await client.rollback();
           const check = new DatabaseSync(sourceDb, {readOnly: true});
           let pending;
           try {
-            pending = check.prepare(`SELECT 1 FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?
-              UNION ALL SELECT 1 FROM zosd_job_step WHERE mandt = ? AND intent_id = ?`)
-              .get(who.client, intent.intentId, who.client, intent.intentId);
+            pending = check.prepare("SELECT 1 FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?")
+              .get(who.client, intent.intentId);
           } finally { check.close(); }
           if (pending) throw new Error("outbox acknowledgement failed");
-        } else {
-          throw new Error("outbox acknowledgement failed");
+          continue;
         }
+        if (!legacy) {
+          for (const step of intent.steps) {
+            const child = await client.delete({table: "zosd_job_step",
+              where: `${idWhere} AND step_no = ${sql(String(step.number).padStart(2, "0"))} AND program = ${sql(step.program)}`});
+            if (child.subrc !== 0 || child.dbcnt !== 1) throw new Error("outbox acknowledgement failed");
+          }
+        }
+        claimed = true;
+        store.importIntent(intent);
+        await afterImport?.(intent); // test seam: process exit here must be safe
+        await client.commit();
       } catch (error) {
         await client.rollback();
         throw error;
       }
-      imported += 1;
+      if (claimed) imported += 1;
     }
     return {imported};
   }, "committed job outbox drain");

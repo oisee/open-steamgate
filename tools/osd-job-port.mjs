@@ -10,7 +10,7 @@ import {BatchRuns, liveGeneration} from "./osd-batch-runs.mjs";
 import {identity} from "./osd-identity.mjs";
 import {readJobSnapshot} from "./osd-job-snapshot.mjs";
 import {jobInputJson} from "./osd-job-input.mjs";
-import {periodMinutes} from "./osd-job-schedule.mjs";
+import {periodMinutes, scheduleOfOutbox} from "./osd-job-schedule.mjs";
 import {nextJobCount, legacyCountUsed, JobCountExhausted, JOB_COUNT_EXHAUSTED} from "./osd-job-count.mjs";
 import {abapNow} from "./osd-job-scheduler.mjs";
 
@@ -84,41 +84,90 @@ export class JobDestination {
     this.candidate = (proposal) => proposal.count;
   }
 
-  // BP_JOB_DELETE. Only a committed, imported job can be deleted: one
-  // still in this caller's LUW or in the outbox answers CANT_DELETE (drain
-  // first), so the business LUW and the operations store cannot disagree.
-  #delete(db, jobname, count) {
+  // BP_JOB_DELETE, as measured on the sandbox (2026-10-02,
+  // test/fixtures/job-delete/contract.json): a job that waits (S), an
+  // opened one (P) and an ended one go; a ready (Y) or running one is
+  // refused. The delete and an outbox drain meet in the business database,
+  // not in this process: both start by deleting the job's outbox row, which
+  // takes SQLite's write lock, and whoever deletes it owns the job. The
+  // drain imports only what it claimed (tools/osd-job-outbox.mjs); the
+  // delete, holding the lock, then asks the operations ledger whether an
+  // earlier drain imported the job and deletes its run there too. The
+  // business rows go in the caller's LUW, which the facade commits.
+  async #delete(db, jobname, count, token) {
     const who = identity(this.env);
     const sourceDb = resolve(db.path);
     const name = jobname.trim().toUpperCase();
     if (!name || name.length > 32 || !/^[0-9]{6}[0-9A-Z]{2}$/.test(count)) return "NOT_FOUND";
-    let snapshot;
+    // opened in this LUW and not closed: on a system JOB_OPEN has committed
+    // the job as P already, and BP_JOB_DELETE removes it
+    const jobs = pending.get(token);
+    const transient = jobs?.get(keyOf(name, count));
+    if (transient && !transient.closed) {
+      if (transient.owner !== who.user || transient.client !== who.client) return "FORBIDDEN";
+      jobs.delete(keyOf(name, count));
+      await db.beginTransaction();
+      db.db.prepare(`DELETE FROM zosd_job_identity WHERE mandt = ? AND jobname = ? AND jobcount = ?
+        AND COALESCE(TRIM(intent_id), '') = ''`).run(who.client, name, count);
+      return "";
+    }
     try {
-      snapshot = readJobSnapshot({sourceDb, jobName: name, jobCount: count,
+      readJobSnapshot({sourceDb, jobName: name, jobCount: count,
         caller: {client: who.client, user: who.user, sid: who.sid}, root: this.root, env: this.env});
     } catch (error) {
-      return error?.code === "JOB_READ_FORBIDDEN" ? "FORBIDDEN" : "UNAVAILABLE";
+      if (error?.code === "JOB_READ_FORBIDDEN") return "FORBIDDEN";
+      if (error?.code !== "JOB_SNAPSHOT_INCONSISTENT") return "UNAVAILABLE";
+      // a snapshot taken while a drain committed half its view; the rows
+      // read under the lock below decide
     }
-    const local = db.db.prepare(`SELECT owner, intent_id FROM zosd_job_identity
-      WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(who.client, name, count);
-    if (!snapshot) return local ? "UNCOMMITTED" : "NOT_FOUND";
-    if (String(local?.intent_id ?? "").trim() !== (snapshot.intentId ?? "")) return "UNCOMMITTED";
-    if (snapshot.state === "DELETED") return "NOT_FOUND";
-    if (snapshot.phase !== "OPERATIONS") return snapshot.state === "RUNNING" ? "RUNNING" : "NOT_IMPORTED";
-    const id = snapshot.intentId.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
-    const store = new BatchRuns(this.root, this.env);
+    await this.beforeDeleteLock?.(); // test seam: another process may drain here
+    // From here under the business write lock: the first statement writes.
+    await db.beginTransaction();
+    const savepoint = `osd_job_delete_${randomUUID().replaceAll("-", "")}`;
+    db.db.exec(`SAVEPOINT ${savepoint}`);
+    const undo = (answer) => {
+      db.db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      db.db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+      return answer;
+    };
     try {
-      const kind = store.deleteJob(id);
-      if (kind === "deleted") {
-        // A deleted system job no longer holds its (name, count) row. Keep
-        // the operations run as a tombstone for the scheduler and reorg.
-        db.db.prepare(`DELETE FROM zosd_job_identity WHERE mandt = ? AND jobname = ?
-          AND jobcount = ? AND intent_id = ?`).run(who.client, name, count, snapshot.intentId);
-        db.db.prepare("DELETE FROM zosd_job_step WHERE mandt = ? AND intent_id = ?")
-          .run(who.client, snapshot.intentId);
+      const local = db.db.prepare(`DELETE FROM zosd_job_identity WHERE mandt = ? AND jobname = ?
+        AND jobcount = ? RETURNING owner, intent_id`).get(who.client, name, count);
+      if (!local) return undo("NOT_FOUND");
+      if (String(local.owner ?? "").trim() !== who.user) return undo("FORBIDDEN");
+      const intentId = String(local.intent_id ?? "").trim();
+      if (!intentId) { // reserved: opened, never closed
+        db.db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+        return "";
       }
-      return kind === "deleted" ? "" : kind === "running" ? "RUNNING" : "NOT_FOUND";
-    } finally { store.close(); }
+      const claimed = db.db.prepare("DELETE FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ? RETURNING *")
+        .get(who.client, intentId);
+      db.db.prepare("DELETE FROM zosd_job_step WHERE mandt = ? AND intent_id = ?").run(who.client, intentId);
+      const store = new BatchRuns(this.root, this.env);
+      try {
+        if (store.importedCount(intentId) !== undefined) {
+          // imported by an earlier drain (one that crashed before its
+          // acknowledgement leaves the outbox rows, claimed above)
+          const id = intentId.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
+          const kind = store.deleteJob(id);
+          if (kind !== "deleted") return undo(kind === "running" ? "RUNNING" : "NOT_FOUND");
+        } else if (claimed) {
+          // a job released to start at once is Y from JOB_CLOSE on
+          let timed;
+          try { timed = !!scheduleOfOutbox(claimed); } catch { return undo("UNAVAILABLE"); }
+          const field = (key) => String(claimed[key] ?? "").trim();
+          if (!timed && !field("event_id") && !field("pred_jobname")) return undo("RUNNING");
+        } else {
+          return undo("NOT_FOUND"); // neither in the outbox nor imported
+        }
+      } finally { store.close(); }
+      db.db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+      await this.afterDeleteClaim?.(); // test seam: the lock is held until the COMMIT
+      return "";
+    } catch (error) {
+      try { undo(); } catch { /* the savepoint went with a failed statement */ }
+      throw error;
+    }
   }
 
   async call(_name, signature) {
@@ -142,7 +191,7 @@ export class JobDestination {
       return;
     }
     if (command === "DELETE") {
-      fill(signature, {EV_ERROR_CODE: this.#delete(db, jobname, count)});
+      fill(signature, {EV_ERROR_CODE: await this.#delete(db, jobname, count, token)});
       return;
     }
     if (command === "STATUS" || command === "READ_JOB") {

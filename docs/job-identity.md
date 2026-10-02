@@ -55,8 +55,9 @@ daily on the scheduler's clock, in a dialog step. Retention is
 state (COMPLETED, FAILED, INTERRUPTED, DELETED) that ended before the cutoff
 goes: identity, outbox and step rows in the business database (first), then
 run, steps, log, import ledger and completion event in the operations store.
-`BP_JOB_DELETE` removes the identity and step rows when it marks an imported
-job deleted; the operations run stays as a tombstone until reorganisation.
+`BP_JOB_DELETE` removes the identity, outbox and step rows of the job it
+deletes, in the caller's LUW, which it commits; an imported job's operations
+run stays as a tombstone until reorganisation (docs/job-standard-fms.md).
 Never a job that is not final, never one a waiting job is chained behind, never
 the latest instance of a periodic chain. When a reservation still fails, the
 scheduler leaves that run RELEASING, says so, retries it a minute later and
@@ -78,8 +79,9 @@ The private port returns the canonical name (trimmed and upper case) to both
 reservation to the intent in that same LUW. A private savepoint surrounds
 these writes. Handled failures roll back to it, including SQLite statements
 whose trigger changed a row before reporting failure, while preserving earlier
-caller writes in the LUW. A successful outbox acknowledgement deletes the dispatch
-rows and leaves the identity row. The reservation's owner is checked when
+caller writes in the LUW. A drain claims the dispatch rows (deletes them) before
+it imports and commits after, in one business transaction, so the claim fences
+it against `BP_JOB_DELETE` and other drains; it leaves the identity row. The reservation's owner is checked when
 binding; the key is scoped by client and the business database containing it.
 
 The additive SQLite migration recognizes the exact preceding schema stamp,

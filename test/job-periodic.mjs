@@ -363,10 +363,9 @@ describe("periodic and time-scheduled background jobs", function () {
     expect(await status(w.name("ZEROS"), zeros.count)).to.equal("Y");
     expect(await deleteJob(w.name("NOBODY"), "00000001")).to.equal("JOB_DOES_NOT_EXIST");
     const once = await close(w, "ONCE", {start: 60});
-    // still in the outbox: the delete waits for the import
-    expect(await deleteJob(w.name("ONCE"), once.count)).to.equal("CANT_DELETE_JOB");
-    await w.scheduler.tick();
+    // still in the outbox: deleted at once, as on the sandbox (test/fixtures/job-delete)
     expect(await deleteJob(w.name("ONCE"), once.count)).to.equal(0);
+    await w.scheduler.tick();
     expect(await status(w.name("ONCE"), once.count).catch((error) => String(error.classic))).to.match(/job_notex/i);
     expect(await deleteJob(w.name("ONCE"), once.count)).to.equal("JOB_DOES_NOT_EXIST");
     await w.clock.advance(120 * 1000);

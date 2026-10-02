@@ -218,8 +218,10 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
     const caller = {client: who.client, user: who.user, sid: who.sid};
     expect(readJobSnapshot({sourceDb: dbPath, jobName: a, jobCount: countA, caller, root}).phase).to.not.equal("RESERVED");
     expect(readJobSnapshot({sourceDb: dbPath, jobName: b, jobCount: countB, caller, root}).phase).to.equal("RESERVED");
-    // a delete by pair of the reserved job touches the scheduled one not at all
-    expect(await deleteJob(b, countB)).to.equal("CANT_DELETE_JOB");
+    // a delete by pair of the reserved job (P, deleted as on the sandbox,
+    // test/fixtures/job-delete) touches the scheduled one not at all
+    expect(await deleteJob(b, countB)).to.equal(0);
+    expect(identity(b)).to.deep.equal([]);
     expect(await status(a, countA)).to.equal("S");
   });
 
