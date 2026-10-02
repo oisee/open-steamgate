@@ -29,6 +29,7 @@
     "onNotebook:osd-sql-notebook",
     "onCommand:osd.newSqlNotebook",
     "onCommand:osd.start",
+    "onCommand:osd.prepareAbapgitZip",
     "onCommand:osd.quickStart",
     "onCommand:osd.gettingStarted",
     "onCommand:osd.webProbe",
@@ -178,6 +179,7 @@
       ]
     },
     "commands": [
+      {"command": "osd.prepareAbapgitZip", "title": "osd: Prepare abapGit zip…"},
       {"command": "osd.webProbe", "title": "osd: Web probe"},
       {"command": "osd.webReadProbe", "title": "osd: Web read probe"},
       {"command": "osd.webVerifyLastTravel", "title": "osd: Web verify last Travel"},
@@ -301,6 +303,7 @@
         {"command": "osd.runWithDebugger", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation@2"}
       ],
       "view/title": [
+        {"command": "osd.prepareAbapgitZip", "when": "view == osdTree", "group": "9_osd@4"},
         {"command": "osd.start", "when": "!isWeb && !osd.web && view == osdTree", "group": "navigation@1"},
         {"command": "osd.stop", "when": "!isWeb && !osd.web && view == osdTree", "group": "navigation@2"},
         {"command": "osd.rebuildWarm", "when": "!isWeb && !osd.web && view == osdTree", "group": "navigation@3"},

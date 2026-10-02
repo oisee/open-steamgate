@@ -5,6 +5,7 @@
     "test/release-readme.mjs",
     "test/release-verify.mjs",
     "test/third-party-notices.mjs",
+    "test/vscode-abapgit-zip.mjs",
     "test/vscode-debug.mjs",
     "test/vscode-extension.mjs",
     "test/vscode-launcher.mjs",
