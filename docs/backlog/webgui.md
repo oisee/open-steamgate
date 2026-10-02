@@ -70,13 +70,13 @@ their own, and the classic transactions as they are.
 
 What is there now, sorted by that rule: SE16 (`ZCL_OSD_SE16`, G.9) and ST05
 (`ZCL_OSD_ST05`, G.10) are built in the shape of their transactions, and
-ZOSD_NOTE (G.3) proves the webgui loop itself -- they stay. *Tech debt, not
-now:* the versions screen (`ZCL_OSD_VERSIONS`, an object's history out of
-git) is a service app drawn as webgui HTML. It stays until it needs more
-than a fix; then it is rebuilt as a Fiori app over the same ABAP, and the
-webgui entry becomes a link to the tile. A rewrite that turns out cheaper
-than the fix may be done at once. A Fiori twin of SE16 or ST05 is a new app
-under this rule, not a replacement.
+ZOSD_NOTE (G.3) proves the webgui loop itself -- they stay.
+`ZCL_OSD_VERSIONS` lives under `src/webgui/` but has no screen: it is the
+reader behind the ADT versions feed (`docs/object-versions.md`). If a
+versions screen is built, it is a Fiori app. So there is no service app to
+move today; should one turn up drawn as webgui HTML, it is tech debt that
+moves when it needs more than a fix, or at once if that is cheaper. A Fiori
+twin of SE16 or ST05 is a new app under this rule, not a replacement.
 
 ```
 G.1  SAP Easy Access, served by ABAP                     [S] DONE 2026-09-18
