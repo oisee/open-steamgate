@@ -3246,12 +3246,20 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
   during a WAIT, B runs and replaces both, and A resumes on B's entities. Measured before the workaround: A's
   handler read `/sap/bc/osd_probe/second` after its WAIT, its writes went into B's (already sent) response, and
   the shim answered A's caller with B's status, headers and body; A's own header written before the WAIT was lost.
-- Impact on open-steamgate: one caller can be answered with another caller's response, on every host (inline,
-  child, browser preview), for any ICF/OData/ported-ADT handler that WAITs (or whose callee does). Without a WAIT
-  the work-process lock serialises the steps and nothing interleaves.
+- Impact on open-steamgate: one caller can be answered with another caller's response on the Node hosts (inline
+  and child), for any ICF/OData/ported-ADT handler that WAITs (or whose callee does). A conditional WAIT
+  (`WAIT UNTIL`, `WAIT FOR ... UNTIL`) was asked against the other request's entities (sy-subrc 0 where 8 was due),
+  and an AMC receiver the WAIT delivered to wrote into the other request's response. Without a WAIT the
+  work-process lock serialises the steps and nothing interleaves. The browser preview is not affected for HTTP:
+  `web/preview-backend.mjs` queues every request behind the previous one (`serialized()`), so a WAIT there gives
+  the work process only to an APC event, which does not go through the shim.
 - Smallest safe workaround: the WAIT's roll-out in `tools/osd-dialog-step.mjs` notes the shim's static server and
-  its request and response entities, and the roll-in puts them back before the step runs again.
+  its request and response entities on the step's token; every roll-in puts them back: after the WAIT, before
+  each evaluation of a WAIT's condition (taken with the work process, released again while it stays false), and
+  around an AMC receiver the WAIT delivers to (`inSession`, called by `tools/osd-amc.mjs`, which keeps what the
+  receiver leaves for the next delivery and the final roll-in).
 - Upstream issue: not filed yet. The fix is a local `DATA li_server` in `run`, passed to `request`/`response`
   instead of the CLASS-DATA (docs/upstream.md, item 8).
-- Regression-test location: `test/dialog-step-icf.mjs` (fails without the roll-in: both cases)
+- Regression-test location: `test/dialog-step-icf.mjs` (four cases: timed, both timed, conditional, AMC
+  receiver; each fails without its half of the workaround)
 - Upstream version containing a fix: `none`

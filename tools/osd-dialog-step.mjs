@@ -34,7 +34,7 @@
 // when the wait is over. The runtime's own WAIT committed every connection
 // whenever it ran, which with overlapping steps was somebody else's LUW too.
 // What the steps share besides the LUW -- the ICF shim's static server --
-// is saved at the roll-out and put back at the roll-in (rollOut, below).
+// is saved at the roll-out and put back at every roll-in (rollOut, below).
 //
 // Not covered: ABAP that calls this same process over HTTP inside a step
 // waits for itself. Nothing in the tree does; a system would serve it from
@@ -246,8 +246,10 @@ async function commitAll() {
 // own caller with the other request's answer (test/dialog-step-icf.mjs).
 // The shim's server belongs in the run, not in a CLASS-DATA (docs/upstream.md);
 // until it does, the roll-out notes the step's server, request and response
-// and the roll-in puts them back, before the step runs another line.
-function rollOut() {
+// on its token and every roll-in puts them back before the session runs
+// another line: after the WAIT, before each look at a WAIT's condition, and
+// around a receiver the WAIT delivers a message to (inSession).
+function snapshot() {
   const shared = globalThis.abap?.Classes?.CL_EXPRESS_ICF_SHIM?.mi_server;
   const server = shared?.get?.();
   if (server === undefined) return () => undefined;
@@ -258,6 +260,30 @@ function rollOut() {
     if (request !== undefined) server.if_http_server$request.set(request);
     if (response !== undefined) server.if_http_server$response.set(response);
   };
+}
+function rollOut(token) {
+  token.rolledOut = snapshot();
+}
+function rollIn(token) {
+  token.rolledOut?.();
+  token.rolledOut = undefined;
+}
+
+/** run `work` -- a step of its own, holding the work process -- in the
+ *  shared state of `session`, a step rolled out in a WAIT: what a WAIT's
+ *  message delivery runs its receiver in (tools/osd-amc.mjs). What the
+ *  receiver leaves there is what the session rolls back in with; the state
+ *  found before is put back after. */
+export async function inSession(session, work) {
+  if (session?.rolledOut === undefined) return work();
+  const found = snapshot();
+  session.rolledOut();
+  try {
+    return await work();
+  } finally {
+    session.rolledOut = snapshot();
+    found();
+  }
 }
 
 /** WAIT inside a step: the runtime's semantics (sy-subrc 0, or 8 when the
@@ -278,7 +304,7 @@ function installWait() {
       // committed while still holding it: a failed commit ends the step
       // here, and the step's own bracket releases
       await commitAll();
-      const rollIn = rollOut();
+      rollOut(token);
       release();
       try {
         const until = Date.now() + timeout;
@@ -288,33 +314,34 @@ function installWait() {
         }
       } finally {
         await acquire(token);
-        rollIn();
+        rollIn(token);
       }
       subrc(0);
       return;
     }
-    let released = false;
-    let rollIn;
+    // the condition is the session's own code, so it is asked as a system
+    // asks it: rolled in, with the work process, and rolled out again when
+    // it is still false
+    let held = true;
     try {
       for (;;) {
         if (options.cond() === true) { subrc(0); return; }
         const remaining = deadline === undefined ? 500 : deadline - Date.now();
         if (remaining <= 0) { subrc(8); return; }
-        if (released === false) {
-          await commitAll();
-          rollIn = rollOut();
-          release();
-          released = true;
-        }
-        // polled while rolled out, without the work process: a system asks
-        // it after the roll-in; here it reads only this step's own memory
+        await commitAll();
+        rollOut(token);
+        release();
+        held = false;
         await new Promise((r) => setTimeout(r, Math.min(500, remaining)));
         await waitPump?.(token);
+        await acquire(token);
+        held = true;
+        rollIn(token);
       }
     } finally {
-      if (released === true) {
+      if (held === false) {
         await acquire(token);
-        rollIn();
+        rollIn(token);
       }
     }
   };

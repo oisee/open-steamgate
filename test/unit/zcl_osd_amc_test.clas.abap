@@ -1,6 +1,12 @@
 CLASS zcl_osd_amc_test DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     CLASS-METHODS send_many IMPORTING iv_count TYPE i RAISING cx_amc_error.
+    "! a consumer of /text delivering to io_receiver, opened by this class,
+    "! which the channel authorises (test/integration/zcl_osd_icf_wait_probe)
+    CLASS-METHODS start_delivery
+      IMPORTING io_receiver        TYPE REF TO if_amc_message_receiver_text
+      RETURNING VALUE(ro_consumer) TYPE REF TO if_amc_message_consumer
+      RAISING   cx_amc_error.
     INTERFACES if_amc_message_receiver_text.
     METHODS wait_up_to RETURNING VALUE(rv_count) TYPE i RAISING cx_amc_error.
     METHODS wait_for_message RETURNING VALUE(rv_count) TYPE i RAISING cx_amc_error.
@@ -18,6 +24,12 @@ CLASS zcl_osd_amc_test IMPLEMENTATION.
       lv_number = sy-index.
       lo_producer->send( lv_number ).
     ENDDO.
+  ENDMETHOD.
+
+  METHOD start_delivery.
+    ro_consumer = cl_amc_channel_manager=>create_message_consumer(
+      i_application_id = 'ZOSD_AMC_TEST' i_channel_id = '/text' ).
+    ro_consumer->start_message_delivery( io_receiver ).
   ENDMETHOD.
 
   METHOD wait_up_to.
