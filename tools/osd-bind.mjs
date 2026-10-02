@@ -85,10 +85,33 @@ function install(server, env) {
     server[INSTALLED].env = env;
     return;
   }
-  const state = {env, twin: undefined};
+  const state = {env, twin: undefined, closing: undefined, open: new Set()};
   server[INSTALLED] = state;
-  server.on("listening", () => {
-    if (!isLoopbackDefault(state.env) || state.twin !== undefined) return;
+
+  // One connection limit for both sockets. net.Server enforces
+  // maxConnections per listener, so the twin would add a second allowance
+  // (the RFC bridge's 64 would be 128). Every connection of either socket
+  // reaches the server as a "connection" event, so it is counted there,
+  // before any listener sees it, and one past the limit is dropped the way
+  // net drops it: closed, and a "drop" event.
+  const emit = server.emit;
+  server.emit = function (event, socket, ...rest) {
+    if (event === "connection" && socket !== undefined && typeof socket.once === "function") {
+      const limit = server.maxConnections;
+      if (Number.isInteger(limit) && limit > 0 && state.open.size >= limit) {
+        emit.call(this, "drop", {localAddress: socket.localAddress, localPort: socket.localPort,
+          remoteAddress: socket.remoteAddress, remotePort: socket.remotePort, remoteFamily: socket.remoteFamily});
+        socket.destroy();
+        return false;
+      }
+      state.open.add(socket);
+      socket.once("close", () => state.open.delete(socket));
+    }
+    return emit.call(this, event, socket, ...rest);
+  };
+
+  const openTwin = () => {
+    if (!isLoopbackDefault(state.env) || state.twin !== undefined || state.closing !== undefined) return;
     const actual = server.address()?.port;
     const twin = createServer((socket) => server.emit("connection", socket));
     state.twin = twin;
@@ -102,23 +125,29 @@ function install(server, env) {
     });
     twin.listen(actual, "::1");
     twin.unref?.();
-  });
+  };
+  server.on("listening", openTwin);
+
+  // One close for both sockets, shared by every caller: a second close(cb)
+  // while the first is still draining waits for the same end instead of
+  // asking the primary again (which answers "not running" at once while
+  // ::1 connections are still open).
   const close = server.close.bind(server);
   server.close = (cb) => {
-    const twin = state.twin;
-    state.twin = undefined;
-    let pending = twin?.listening ? 2 : 1;
-    let first;
-    const done = (error) => {
-      first ??= error;
-      if (--pending === 0 && typeof cb === "function") cb(first);
-    };
-    if (twin?.listening) {
-      twin.close(() => done());
-    } else {
-      twin?.close();
+    if (state.closing === undefined) {
+      const twin = state.twin;
+      state.closing = Promise.all([
+        twin?.listening ? new Promise((resolve) => twin.close(() => resolve())) : (twin?.close(), Promise.resolve()),
+        new Promise((resolve) => close((error) => resolve(error))),
+      ]).then(([, error]) => {
+        if (state.twin === twin) state.twin = undefined;
+        state.closing = undefined;
+        // listened again while this was draining: give it its twin now
+        if (server.listening) openTwin();
+        return error;
+      });
     }
-    close((error) => done(error));
+    if (typeof cb === "function") state.closing.then((error) => cb(error));
     return server;
   };
 }

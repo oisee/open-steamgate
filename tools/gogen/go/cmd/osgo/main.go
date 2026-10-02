@@ -452,6 +452,7 @@ func main() {
 		pm.HandleFunc("/debug/pprof/", pprof.Index)
 		pm.HandleFunc("/debug/pprof/profile", pprof.Profile)
 		pm.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		// osd-bind-allow: a comes from osdbind.PprofAddr, a bare port stays on the bind host
 		go func() { log.Printf("pprof: %v", http.ListenAndServe(a, pm)) }()
 		log.Printf("pprof: http://%s/debug/pprof/", a)
 	}

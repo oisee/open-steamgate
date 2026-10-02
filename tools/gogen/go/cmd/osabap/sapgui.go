@@ -50,6 +50,7 @@ func sapGUIOption(host []reportargs.Arg) (bool, bool, string) {
 }
 
 func serveSAPGUI(listen string, launch bool, selection ZCL_GG_HOST__TY_RESULT, execute func([]ZIF_GG_SELECTION_SCREEN_TYPES__TY_VALUE) ZCL_GG_HOST__TY_RESULT) error {
+	// osd-bind-allow: the -sapgui address as given, default 127.0.0.1:3232
 	ln, err := net.Listen("tcp", listen)
 	if err != nil {
 		return fmt.Errorf("SAP GUI listen %s: %w", listen, err)

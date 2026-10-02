@@ -11,6 +11,7 @@ export async function available(ports) {
       const server = createServer();
       await new Promise((resolve, reject) => {
         server.once('error', reject);
+        // osd-bind-allow: a probe that binds and closes at once, to find a port free on every interface
         server.listen({host: '0.0.0.0', port, exclusive: true}, resolve);
       });
       held.push(server);

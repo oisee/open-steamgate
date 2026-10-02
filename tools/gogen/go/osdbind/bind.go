@@ -42,6 +42,7 @@ func Selected(flagValue string, explicit bool, getenv func(string) string) []str
 func ListenAll(addrs []string, port int) ([]net.Listener, error) {
 	var out []net.Listener
 	for i, a := range addrs {
+		// osd-bind-allow: this is the module every Go listener goes through
 		ln, err := net.Listen("tcp", net.JoinHostPort(a, strconv.Itoa(port)))
 		if err != nil {
 			if i == 0 {

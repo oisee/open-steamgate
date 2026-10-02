@@ -251,6 +251,70 @@ describe("bind address (OSD_BIND)", function () {
     });
   });
 
+  describe("the ::1 twin shares close and the connection limit", () => {
+    const waitFor = async (check) => {
+      for (let i = 0; i < 40; i++) {
+        if (await check()) return true;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return false;
+    };
+
+    it("a second close(cb) waits for the same drain as the first", async function () {
+      if (!hasV6Loopback) this.skip();
+      let release;
+      const held = new Promise((resolve) => { release = resolve; });
+      let arrived;
+      const inside = new Promise((resolve) => { arrived = resolve; });
+      const server = createHttpServer(async (req, res) => { arrived(); await held; res.end("late"); });
+      await new Promise((resolve) => listenBound(server, 0, {}, resolve));
+      const {port} = server.address();
+      expect(await waitFor(() => reachable("::1", port))).to.equal(true);
+      const response = answers(`http://[::1]:${port}/`, {agent: false});
+      await inside;
+      const fired = [];
+      const first = new Promise((resolve) => server.close(() => { fired.push("first"); resolve(); }));
+      const second = new Promise((resolve) => server.close(() => { fired.push("second"); resolve(); }));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(fired, "a close callback fired while a ::1 request was running").to.deep.equal([]);
+      release();
+      expect(await response).to.equal(200);
+      await Promise.all([first, second]);
+      expect(fired).to.have.members(["first", "second"]);
+    });
+
+    it("maxConnections counts both sockets together", async function () {
+      if (!hasV6Loopback) this.skip();
+      // a server that greets every connection it keeps; a dropped one gets
+      // nothing and is closed, the way net drops past maxConnections
+      const server = createNetServer((socket) => { socket.on("error", () => {}); socket.write("hi"); });
+      server.maxConnections = 2;
+      await new Promise((resolve) => listenBound(server, 0, {}, resolve));
+      const {port} = server.address();
+      expect(await waitFor(() => reachable("::1", port))).to.equal(true);
+      // reachable() connected and left again; let those closes land
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const open = [];
+      const greeted = (host) => new Promise((resolve) => {
+        const socket = connect({host, port});
+        open.push(socket);
+        socket.once("data", () => resolve(true));
+        socket.once("close", () => resolve(false));
+        socket.once("error", () => resolve(false));
+        setTimeout(() => resolve(false), 1500);
+      });
+      try {
+        expect(await greeted("127.0.0.1"), "first, IPv4").to.equal(true);
+        expect(await greeted("::1"), "second, IPv6").to.equal(true);
+        expect(await greeted("::1"), "third, IPv6: over the limit of 2").to.equal(false);
+        expect(await greeted("127.0.0.1"), "third, IPv4: over the limit of 2").to.equal(false);
+      } finally {
+        for (const socket of open) socket.destroy();
+        await new Promise((resolve) => server.close(resolve));
+      }
+    });
+  });
+
   describe("forwarders and stands", () => {
     it("osd-tcp-forward listens on loopback unless --bind says otherwise", async () => {
       const port = await freePort();
@@ -305,67 +369,108 @@ describe("bind address (OSD_BIND)", function () {
   });
 
   // a listener added later must not bind every interface unasked: each call
-  // takes a host, goes through tools/osd-bind.mjs / osdbind, or is listed
-  // here with the reason it may
+  // names a host or goes through tools/osd-bind.mjs / osdbind. A call site
+  // that may bind everywhere carries a marker with its reason, on its line or
+  // the line above: `osd-bind-allow: <reason>`. Per call site, never per
+  // file, so a second listener in the same file is checked like any other.
   describe("no listener binds every interface unasked", () => {
-    const allowed = new Map([
-      ["scripts/serve-build.mjs", "the LAN preview of static files, all interfaces on purpose, and it says so"],
-      ["docker/image/free-instance.mjs", "a probe that binds and closes at once to find a free port"],
-      ["tools/gogen/go/cmd/osgo/main.go", "pprof on osdbind.PprofAddr, which keeps a bare port on the bind host"],
-      ["tools/gogen/go/cmd/osabap/sapgui.go", "-sapgui, default 127.0.0.1:3232"],
-      ["tools/gogen/go/osdbind/bind.go", "the module every Go listener goes through"],
-    ]);
+    const MARKER = /osd-bind-allow:\s*\S.{8,}/;
     const tracked = execFileSync("git", ["ls-files", "-z", "tools", "scripts", "web", "bin", "docker", "editors", "test/start.mjs", "test/run.mjs"],
       {encoding: "utf8"}).split("\0").filter((f) => /\.(mjs|js|cjs|go)$/.test(f) && !/_test\.go$|\.test\.mjs$|node_modules|\/generated\//.test(f));
 
-    // the argument text of each .listen( call, split at its top-level commas
-    function listenCalls(text) {
+    const lineOf = (text, index) => text.slice(0, index).split("\n").length;
+    const allowedAt = (lines, line) => MARKER.test(lines[line - 1] ?? "") || MARKER.test(lines[line - 2] ?? "");
+    // the text between the bracket at `open` and its partner
+    function inside(text, open) {
+      let depth = 1;
+      let i = open + 1;
+      for (; i < text.length && depth > 0; i++) {
+        if ("([{".includes(text[i])) depth++;
+        else if (")]}".includes(text[i])) depth--;
+      }
+      return text.slice(open + 1, i - 1);
+    }
+    function split(inner) {
+      const args = [];
+      let level = 0;
+      let from = 0;
+      for (let j = 0; j < inner.length; j++) {
+        if ("([{".includes(inner[j])) level++;
+        else if (")]}".includes(inner[j])) level--;
+        else if (inner[j] === "," && level === 0) { args.push(inner.slice(from, j).trim()); from = j + 1; }
+      }
+      args.push(inner.slice(from).trim());
+      return args.filter((a) => a !== "");
+    }
+    const ALL = /^["'`](0\.0\.0\.0|::)["'`]$|host:\s*["'`](0\.0\.0\.0|::)["'`]/;
+
+    /** listeners in JavaScript that bind every interface without a marker */
+    function scanNode(text, file = "<text>") {
+      const lines = text.split("\n");
       const out = [];
-      for (const match of text.matchAll(/\.listen\(/g)) {
-        let depth = 1;
-        let i = match.index + match[0].length;
-        const start = i;
-        for (; i < text.length && depth > 0; i++) {
-          if ("([{".includes(text[i])) depth++;
-          else if (")]}".includes(text[i])) depth--;
-        }
-        const inner = text.slice(start, i - 1);
-        const args = [];
-        let level = 0;
-        let from = 0;
-        for (let j = 0; j < inner.length; j++) {
-          if ("([{".includes(inner[j])) level++;
-          else if (")]}".includes(inner[j])) level--;
-          else if (inner[j] === "," && level === 0) { args.push(inner.slice(from, j).trim()); from = j + 1; }
-        }
-        args.push(inner.slice(from).trim());
-        out.push({args: args.filter((a) => a !== ""), line: text.slice(0, match.index).split("\n").length});
+      // .listen( / .listen ( / ["listen"](
+      for (const match of text.matchAll(/(?:\.\s*listen|\[\s*["'`]listen["'`]\s*\])\s*\(/g)) {
+        const args = split(inside(text, match.index + match[0].length - 1));
+        const line = lineOf(text, match.index);
+        if (allowedAt(lines, line)) continue;
+        const [first, second] = args;
+        if (first === undefined || /sock|path|join\(/i.test(first)) continue; // a unix socket
+        let open;
+        if (first.startsWith("{")) open = !/\bhost\b/.test(first) || ALL.test(first);
+        else open = second === undefined || /=>|^function\b|^(resolve|r|ok|done|cb|callback)$/.test(second) || args.some((a) => ALL.test(a));
+        if (open) out.push(`${file}:${line} listen(${args.join(", ")})`);
+      }
+      // a WebSocket server given a port opens its own listener
+      for (const match of text.matchAll(/new\s+(?:WebSocketServer|WebSocket\s*\.\s*Server|WSServer)\s*\(/g)) {
+        const [options = ""] = split(inside(text, match.index + match[0].length - 1));
+        const line = lineOf(text, match.index);
+        if (allowedAt(lines, line) || !/\bport\b/.test(options)) continue;
+        if (!/\bhost\b/.test(options) || ALL.test(options)) out.push(`${file}:${line} ${match[0]}${options})`);
       }
       return out;
     }
 
-    it("Node: every .listen( names a host", () => {
+    /** listeners in Go that do not go through osdbind, without a marker */
+    function scanGo(text, file = "<text>") {
+      const lines = text.split("\n");
+      const out = [];
+      lines.forEach((code, i) => {
+        if (/^\s*\/\//.test(code)) return;
+        if (/\b(ListenAndServe(TLS)?|ListenTCP|ListenUDP|ListenPacket|ListenUnix|ListenMulticastUDP)\s*\(|\bnet\s*\.\s*Listen\s*\(|\.\s*Listen\s*\(/.test(code)
+          && !allowedAt(lines, i + 1)) out.push(`${file}:${i + 1} ${code.trim()}`);
+      });
+      return out;
+    }
+
+    it("catches the shapes a listener takes, and a marker is per call site", () => {
+      expect(scanNode("server.listen(port, () => {});")).to.have.length(1);
+      expect(scanNode("server.listen (port);")).to.have.length(1);
+      expect(scanNode("server['listen'](port, done);")).to.have.length(1);
+      expect(scanNode("server.listen({port});")).to.have.length(1);
+      expect(scanNode("server.listen({port, host: '0.0.0.0'});")).to.have.length(1);
+      expect(scanNode("new WebSocketServer({port: 8080});")).to.have.length(1);
+      expect(scanNode("new WebSocket.Server({port, host: '127.0.0.1'});")).to.have.length(0);
+      expect(scanNode("server.listen(port, '127.0.0.1', done);")).to.have.length(0);
+      expect(scanNode("server.listen({port, host});")).to.have.length(0);
+      expect(scanNode("// osd-bind-allow: a probe that closes at once\nserver.listen(port, '0.0.0.0');\nother.listen(port);"))
+        .to.deep.equal(["<text>:3 listen(port)"]);
+      expect(scanGo("ln, _ := net.Listen(\"tcp\", addr)")).to.have.length(1);
+      expect(scanGo("ln, _ := lc.Listen(ctx, \"tcp\", addr)")).to.have.length(1);
+      expect(scanGo("ln, _ := net.ListenTCP(\"tcp\", a)")).to.have.length(1);
+      expect(scanGo("log.Fatal(srv.ListenAndServeTLS(c, k))")).to.have.length(1);
+      expect(scanGo("lns, _ := osdbind.ListenAll(binds, port)")).to.have.length(0);
+      expect(scanGo("\t// osd-bind-allow: the address is the flag, default loopback\n\tln, _ := net.Listen(\"tcp\", a)")).to.have.length(0);
+    });
+
+    it("Node: every listener names a host", () => {
       const offenders = [];
-      for (const file of tracked.filter((f) => !f.endsWith(".go"))) {
-        if (allowed.has(file)) continue;
-        for (const {args, line} of listenCalls(readFileSync(file, "utf8"))) {
-          const [first, second] = args;
-          if (first === undefined || first.startsWith("{") || /sock|path|join\(/i.test(first)) continue; // options object or a unix socket
-          const hostless = second === undefined || /=>|^function\b|^(resolve|r|ok|done|cb|callback)$/.test(second);
-          if (hostless || args.some((a) => /^["'](0\.0\.0\.0|::)["']$/.test(a))) offenders.push(`${file}:${line} .listen(${args.join(", ")})`);
-        }
-      }
+      for (const file of tracked.filter((f) => !f.endsWith(".go"))) offenders.push(...scanNode(readFileSync(file, "utf8"), file));
       expect(offenders).to.deep.equal([]);
     });
 
     it("Go: every listener goes through osdbind", () => {
       const offenders = [];
-      for (const file of tracked.filter((f) => f.endsWith(".go"))) {
-        if (allowed.has(file)) continue;
-        readFileSync(file, "utf8").split("\n").forEach((text, i) => {
-          if (/\b(ListenAndServe(TLS)?|net\.Listen)\(/.test(text) && !/^\s*\/\//.test(text)) offenders.push(`${file}:${i + 1} ${text.trim()}`);
-        });
-      }
+      for (const file of tracked.filter((f) => f.endsWith(".go"))) offenders.push(...scanGo(readFileSync(file, "utf8"), file));
       expect(offenders).to.deep.equal([]);
     });
   });
