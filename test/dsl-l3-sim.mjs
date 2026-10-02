@@ -290,6 +290,57 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
   });
 
   // -------------------------------------------------------------------------
+  // round 3: the manual clock's advance waits for a callback's ordinary async
+  // work, and only a WAIT on that clock (a timer set with {wait: true} under
+  // the callback) lets it fire later timers first
+  describe("manualClock.advance", () => {
+    const real = (ms) => new Promise((r) => setTimeout(r, ms));
+    async function orderProblems(manualClock) {
+      const clock = manualClock(0);
+      const log = [];
+      clock.setTimer(async () => {
+        log.push(`A@${clock.now()}`);
+        await real(20);
+        clock.setTimer(() => { log.push(`child@${clock.now()}`); }, 5);
+      }, 10);
+      clock.setTimer(() => { log.push(`B@${clock.now()}`); clock.setTimer(() => {}, 1000); }, 20);
+      await clock.advance(100);
+      const problems = [];
+      if (JSON.stringify(log) !== JSON.stringify(["A@10", "child@15", "B@20"])) problems.push(`order ${JSON.stringify(log)}`);
+      if (clock.now() !== 100) problems.push(`the clock at ${clock.now()}`);
+      return problems;
+    }
+    it("a callback's ordinary async work is waited for: its child fires at 15, before B at 20", async () => {
+      const {manualClock} = await import("../tools/osd-job-scheduler.mjs");
+      expect(await orderProblems(manualClock)).to.deep.equal([]);
+    });
+    it("mutant: round 2's quiet-time heuristic returns before A finishes", async function () {
+      const old = git(["show", "941a4ba9:tools/osd-job-scheduler.mjs"]);
+      if (old.status !== 0) this.skip();
+      const text = old.stdout;
+      const body = text.slice(text.indexOf("export function manualClock"), text.indexOf("/** sy-datum, sy-uzeit"));
+      // eslint-disable-next-line no-new-func
+      const manualClock = new Function(`${body.replace("export function", "function")}; return manualClock;`)();
+      expect((await orderProblems(manualClock)).join("\n")).to.match(/child@1(0[0-9]|05)|order/);
+    });
+    it("a callback blocked in a WAIT on this clock lets the later timers fire, then is waited for", async () => {
+      const {manualClock} = await import("../tools/osd-job-scheduler.mjs");
+      const clock = manualClock(0);
+      const log = [];
+      clock.setTimer(async () => {
+        log.push(`job@${clock.now()}`);
+        await new Promise((r) => clock.setTimer(r, 79, {wait: true}));
+        await real(10);
+        log.push(`job-end@${clock.now()}`);
+      }, 60);
+      clock.setTimer(() => { log.push(`other@${clock.now()}`); }, 100);
+      await clock.advance(3660);
+      expect(log).to.deep.equal(["job@60", "other@100", "job-end@139"]);
+      expect(clock.now()).to.equal(3660);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   describe("on a durable database, with the jobs facade and a manual clock", () => {
     let dir, dbPath, envBefore, priorAbap, priorContext, abap, client, store, dialogStep, drainJobOutbox, workQueuedBatch;
     let clock, restoreClock, installAbapClock, manualClock;
@@ -1031,7 +1082,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
     const logOf = (run) => read("SELECT rule_name, pile_no, alert_seq, model_hash, alert_text FROM zosd_l3_alert WHERE run_id = ? ORDER BY rule_name, pile_no, alert_seq", run);
     // every path that finalises, purges or heals, against a simulated run of
     // the date: none may touch a real run's rows, and a real run none of the twin's
-    async function sharedDateProblems() {
+    async function sharedDateProblems({blank = false} = {}) {
       const problems = [];
       await realFleet();
       await tune("simulate.time_scale", "1000000");
@@ -1045,6 +1096,9 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       };
       const {run: sim, result} = await twin();
       intact("after the twin");
+      // round 3: a run whose recorded binding is gone (initial) is treated as
+      // real for its work and deletes nothing when it finalises
+      if (blank) await exec([`UPDATE zosd_l3_stage SET run_bind = '' WHERE run_id = '${sim}'`]);
       // a finalisation that was interrupted: the twin's lock HELD again, long ago
       await exec([`UPDATE zosd_l3_run SET status = 'HELD' WHERE set_name = 'fleet2' AND check_date = '${DATE}'`]);
       clock.set(clock.now() + 2 * 3600000);
@@ -1070,6 +1124,15 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
     }
     it("P1: a real run's alerts survive the doctor, collect( ), resume( ) and purge( ) of a simulated run of the same date, and the reverse", async () => {
       expect(await sharedDateProblems()).to.deep.equal([]);
+    });
+    it("round 3: with the twin's recorded binding gone, its RELEASE ALL-FINAL still leaves the real run's rows", async () => {
+      expect(await sharedDateProblems({blank: true})).to.deep.equal([]);
+    });
+    it("mutant: finalise of a run with no recorded binding deletes as a real run's", async () => {
+      const name = "zcl_l3_fleet2_m_unrec";
+      await loadAs(RUNNER, name, edit(committed(RUNNER), "    IF sim_recorded( iv_run ) = abap_false\n       OR ", "    IF "));
+      const problems = await answering(RUNNER, name, () => sharedDateProblems({blank: true}));
+      expect(problems.join("\n")).to.match(/the real run's rows are 0, were \d+/);
     });
     it("mutant: finalise with the default hash, not the run's own", async () => {
       const name = "zcl_l3_fleet2_m_final";
@@ -1123,13 +1186,15 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       const text = committed(RUNNER);
       const from = text.slice(text.indexOf("    IF sim_named( iv_bind ) IS NOT INITIAL\n       AND"), text.indexOf("    heal( EXPORTING iv_run = ls_lock-run_id\n                    iv_date = ls_lock-check_date\n                    iv_now = lv_now\n                    iv_force = abap_true"));
       expect(from).to.match(/REFUSED/);
-      await loadAs(RUNNER, name, edit(edit(text, from, ""), "    IF rv_bind IS INITIAL.\n      rv_bind = iv_bind.\n    ENDIF.\n",
-        "    IF iv_bind IS NOT INITIAL.\n      rv_bind = iv_bind.\n    ENDIF.\n"));
+      await loadAs(RUNNER, name, edit(edit(text, from, ""), "    IF rv_bind IS NOT INITIAL.\n      RETURN.\n    ENDIF.\n",
+        "    IF iv_bind IS NOT INITIAL.\n      rv_bind = iv_bind.\n      RETURN.\n    ENDIF.\n    IF rv_bind IS NOT INITIAL.\n      RETURN.\n    ENDIF.\n"));
       const problems = await answering(RUNNER, name, () => overrideProblems());
       expect(problems.join("\n")).to.match(/resume\( work=sim \) answered|SIM rows/);
     });
-    it("P2-a: a factory whose default is sim does not make the doctor resubmit a run that started real as a simulated one", async () => {
+    async function legacyUnderSimDefault({blank}) {
       const run = await realWithFailedPile();
+      // a run from before the record: its binding initial
+      if (blank) await exec([`UPDATE zosd_l3_stage SET run_bind = '' WHERE run_id = '${run}'`]);
       expect(failedOf(run).length).to.be.greaterThan(0);
       const file = manifest("defaultsim", [["  work: real\n", "  work: sim\n"]]);
       const {files} = await renderSet(compileSet(file));
@@ -1139,9 +1204,26 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
         expect(trim((await cls(PORTS).variant({iv_port: str("work")})).get())).to.equal("sim");
         for (let pass = 0; pass < 10 && lockRow()?.status !== "RELEASED"; pass++) { clock.set(clock.now() + 900000); await doctor(); await drainAndWork(); }
       });
-      expect(lockRow()?.status).to.equal("RELEASED");
-      expect(pilesOf(run).every((p) => p.status === "DONE")).to.equal(true);
-      expect(read("SELECT COUNT(*) AS n FROM zosd_l3_alert WHERE alert_text LIKE 'SIM%' OR model_hash LIKE 'sim256:%'")[0].n).to.equal(0);
+      const problems = [];
+      if (lockRow()?.status !== "RELEASED") problems.push("the run did not complete");
+      if (!pilesOf(run).every((p) => p.status === "DONE")) problems.push("a pile is not DONE");
+      const sims = read("SELECT COUNT(*) AS n FROM zosd_l3_alert WHERE alert_text LIKE 'SIM%' OR model_hash LIKE 'sim256:%'")[0].n;
+      if (sims) problems.push(`${sims} SIM rows from a run that started real`);
+      return problems;
+    }
+    it("P2-a: a factory whose default is sim does not make the doctor resubmit a run that started real as a simulated one", async () => {
+      expect(await legacyUnderSimDefault({blank: false})).to.deep.equal([]);
+    });
+    it("round 3: nor a run from before the record (its binding initial): it stays real", async () => {
+      expect(await legacyUnderSimDefault({blank: true})).to.deep.equal([]);
+    });
+    it("mutant: an initial binding falls back to the factory's default", async () => {
+      const name = "zcl_l3_fleet2_m_default";
+      const text = committed(RUNNER);
+      const from = "    IF iv_bind IS INITIAL.\n      rv_bind = `work=real`.\n    ELSE.\n      rv_bind = iv_bind && `,work=real`.\n    ENDIF.\n";
+      await loadAs(RUNNER, name, edit(text, from, "    rv_bind = iv_bind.\n"));
+      const problems = await answering(RUNNER, name, () => legacyUnderSimDefault({blank: true}));
+      expect(problems.join("\n")).to.match(/SIM rows from a run that started real/);
     });
 
     // ---- round 2: no draw state in statics ---------------------------------------------

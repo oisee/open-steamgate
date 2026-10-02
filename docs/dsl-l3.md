@@ -1692,11 +1692,16 @@ tunable), never a class attribute a draw of another run may have set while this 
 One more thing made a replay reproducible: the jobs a step released in the same second were
 imported in the order of their random intent ids. The outbox now carries its release order,
 `ZOSD_JOB_OUTBOX-RELEASE_SEQ` (NUMC 16), which `JOB_CLOSE` writes as one more than any intent still
-in the outbox, and the drain (`tools/osd-job-outbox.mjs`) sorts by it, on any engine; a deleted job
-leaves a gap, never a reordering. A SQLite file from before is migrated in place
-(`migrateJobReleaseFile` in `test/setup.mjs`), a DuckDB file by `tools/osd-db-migrate.mjs`; a
-pending intent from before keeps an empty sequence and drains first. A run on a manual clock then
-runs its jobs in one order every time, also with other jobs released and deleted around it.
+in the outbox, and the drain (`tools/osd-job-outbox.mjs`) sorts by it; a deleted job leaves a gap,
+never a reordering. What is tested is the supported case: the jobs facade and the drain require a
+SQLite file today (`STG_DB=file`), and there the order holds, including with jobs deleted between
+(`test/dsl-l3-sim.mjs`). Two releases in the same second from two sessions at once can draw the same
+number; they fall back to the order before (time, then intent id), which is not reproducible. A
+SQLite file from before is migrated in place (`migrateJobReleaseFile` in `test/setup.mjs`), a
+DuckDB file by `tools/osd-db-migrate.mjs` (with the gate's `RUN_BIND`); on both a pending intent
+from before gets an empty sequence and drains first, in the order it drained before (time, then
+intent id; `test/batch-runs.mjs`, `test/db-migrate.mjs`). A run on a manual clock then runs its jobs
+in one order every time, also with other jobs released and deleted around it.
 
 ### Safety
 
@@ -1740,12 +1745,20 @@ advances it. Nothing special-cases the twin: any WAIT in a step follows an injec
 deadline of a WAIT without a condition starts once its commit is done, as it always did.
 
 Two more things make that clock safe to drive. `manualClock.advance( )` fires the due timers in
-time order and awaits each callback, but no longer one that waits on a later timer of the same
-clock: the scheduler's pass awaits its job, the job waits in WAIT on the clock, and an advance that
-awaited the pass never reached the WAIT's timer (one advance of 3660 s stalled at +60 s with a WAIT
-due at +79 s). A callback now runs until it settles or goes quiet with a timer of its own pending;
-the timers due by then fire in order, and the advance ends when nothing is due by its end and every
-callback still running waits on a timer past it. And a WAIT on an injected clock nobody moves would
+time order and awaits each callback, except one it can prove waits on this clock: the scheduler's
+pass awaits its job, the job waits in WAIT on the clock, and an advance that awaited the pass never
+reached the WAIT's timer (one advance of 3660 s stalled at +60 s with a WAIT due at +79 s). The proof
+is explicit dependency tracking, not a guess: a WAIT sets its timer with `{wait: true}`, and the
+clock records which of its callbacks it was set under (the callback's async context, an
+`AsyncLocalStorage`, which follows the scheduler's pass into its job and the job's WAIT). A
+callback that owns a pending WAIT timer is blocked: the timers due meanwhile fire in order, and the
+callback is awaited again once its WAIT has passed; every other callback is awaited to its end,
+however long its ordinary asynchronous work takes. Round 2 guessed instead (a callback "quiet" for
+two milliseconds with some timer set since it started counted as blocked), and codex showed the
+guess wrong: a callback awaiting 20 ms of ordinary work, beside another that set an unrelated
+future timer, was left behind, and its child fired at 105 instead of 15. Dependency tracking was
+chosen over not awaiting the scheduler's callback: tests that await an advance and then read what
+its jobs did keep working. And a WAIT on an injected clock nobody moves would
 hold its request for ever (the work process is given up, so nothing deadlocks): it has a wall-clock
 ceiling, `OSD_WAIT_CLOCK_CEILING_MS` (default 120000), past which it ends as if its time had passed
 and says so on stderr, loudly. Without an injected clock nothing changes.
@@ -1806,7 +1819,13 @@ what dumps. The ABAP Unit proof does this (`sim_twin`, below).
   (seeds 42 and 43) each match the twin; one advance of 3660 s with the real `JobScheduler` and a job
   that waits 79 s on the same clock completes the job; a WAIT on a clock nobody moves ends at its
   ceiling and says so; the outbox imports a second's jobs in release order, a deleted one leaving a
-  gap; and the determinism holds with other jobs released and one deleted around the twin's.
+  gap; and the determinism holds with other jobs released and one deleted around the twin's;
+- round 3: `manualClock.advance( )` waits for a callback's ordinary async work (codex's repro: the
+  child at 15, before B at 20) and lets a callback blocked in a WAIT on the clock pass the later
+  timers; with the twin's recorded binding gone its `RELEASE ALL-FINAL` still leaves the real rows,
+  and a run from before the record stays real under a factory whose default is `sim`; a DuckDB file
+  from before gains `RELEASE_SEQ` and `RUN_BIND` and the readers run on it (`test/db-migrate.mjs`);
+  old outbox rows drain first, in their old order (`test/batch-runs.mjs`).
 
 **Mutation evidence**, each red against the test named:
 
@@ -1822,6 +1841,9 @@ what dumps. The ABAP Unit proof does this (`sim_twin`, below).
 | finalise with the default hash, not the run's own | P1: the real run's rows are gone after the doctor's `RELEASE ALL-FINAL` |
 | `resume( )` accepting a work override (no refusal, the caller's binding first) | P2-a: `resume( work=sim )` not refused, SIM rows in a real run |
 | the chance autoclose with a static seed (the first run's) | P2-b: the seed 43 run's closures differ from the twin's |
+| round 2's quiet-time guess in `manualClock.advance( )` (taken from git) | round 3: A's child fires at 105, not 15 |
+| an initial binding falls back to the factory's default | round 3: a run from before the record writes SIM rows under a sim default |
+| finalise of a run with no recorded binding deletes as a real run's | round 3: the real run's rows are gone |
 
 **The ABAP Unit proof** gains `sim_twin` (alphabetically after `settings_tune`): seven golden draws
 of the generator against the values the twin computes (all four outcomes; the mocha suite checks
@@ -1844,6 +1866,11 @@ that its dumps aborted their jobs and the rest completed.
 - **A simulated run writes under `sim256:`** beside the `SIM` text: the alert key has no run id, so
   without it a simulated run of a date would rewrite a real run's slots and its finalise delete a
   real run's rows.
+- **A run with no recorded binding** (one from before the record, or one made by hand) is a real
+  run for its work, never the factory's default, and its finalise deletes nothing: it cannot show
+  which rows it supersedes, and taking it for real there would delete a real run's rows if it was a
+  simulated one whose record is gone (codex round 3). Its older rows are kept, the conservative
+  choice of a `PARTIAL` rule.
 - **The run records the whole binding (`ZOSD_L3_STAGE-RUN_BIND`)**, with its work variant made
   explicit, not the work variant alone, and every pile of the run is submitted, worked and
   finalised with it: a resubmitted pile must stay what it was, and the chance autoclose binding with

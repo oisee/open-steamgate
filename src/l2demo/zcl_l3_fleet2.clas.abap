@@ -284,7 +284,8 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rv_hash) TYPE zosd_l3_alert-model_hash.
     " the binding run iv_run started with (its gate rows): every pile of it is
     " submitted, worked and finalised with this, never with the binding of the
-    " moment; iv_bind only for a run that has none (one made by hand)
+    " moment; a run that has none (from before the record, or made by
+    " hand) is real: iv_bind with work=real, never the factory's default
     CLASS-METHODS sim_bind
       IMPORTING iv_run TYPE csequence
                 iv_bind TYPE string OPTIONAL
@@ -293,6 +294,10 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS sim_record
       IMPORTING iv_bind TYPE string
       RETURNING VALUE(rv_bind) TYPE string.
+    " whether run iv_run recorded the binding it started with
+    CLASS-METHODS sim_recorded
+      IMPORTING iv_run TYPE csequence
+      RETURNING VALUE(rv_recorded) TYPE abap_bool.
     " the work variant iv_bind names itself, initial when it names none
     CLASS-METHODS sim_named
       IMPORTING iv_bind TYPE csequence
@@ -904,8 +909,25 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     SELECT SINGLE run_bind FROM zosd_l3_stage INTO rv_bind
       WHERE run_id = iv_run
         AND stage_no = 1.
-    IF rv_bind IS INITIAL.
-      rv_bind = iv_bind.
+    IF rv_bind IS NOT INITIAL.
+      RETURN.
+    ENDIF.
+    " no binding recorded: a run from before the record, or one made by
+    " hand. It is real, the only kind there was, never the factory's default
+    IF iv_bind IS INITIAL.
+      rv_bind = `work=real`.
+    ELSE.
+      rv_bind = iv_bind && `,work=real`.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD sim_recorded.
+    DATA lv_bind TYPE zosd_l3_stage-run_bind.
+    SELECT SINGLE run_bind FROM zosd_l3_stage INTO lv_bind
+      WHERE run_id = iv_run
+        AND stage_no = 1.
+    IF lv_bind IS NOT INITIAL.
+      rv_recorded = abap_true.
     ENDIF.
   ENDMETHOD.
 
@@ -1575,7 +1597,10 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF zcl_l3_fleet2_ports=>variant( iv_port = 'work' iv_bind = lv_bound ) = 'sim'.
       lv_hash = sim_hash( iv_hash ).
     ENDIF.
-    IF zcl_l3_fleet2_ports=>variant( iv_port = 'alerts' iv_bind = lv_bound ) <> 'log'.
+    " a run that recorded no binding cannot show which rows it supersedes
+    " (it may be a simulated run whose record is gone): it deletes none
+    IF sim_recorded( iv_run ) = abap_false
+       OR zcl_l3_fleet2_ports=>variant( iv_port = 'alerts' iv_bind = lv_bound ) <> 'log'.
       RETURN.
     ENDIF.
     DELETE FROM zosd_l3_alert
