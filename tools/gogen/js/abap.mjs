@@ -1333,7 +1333,7 @@ export function DataP(d) {
     default: throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into a p`);
   }
 }
-export const SysID = ["OSD_SID", "STG_ADT_SID"].map((n) => String(globalThis.process?.env?.[n] ?? "").trim().toUpperCase().slice(0, 3)).find((v) => v !== "") ?? "OSD"; // the rule of tools/osd-identity.mjs, said here because this file is copied beside emitted code
+export const SysID = (() => { for (const n of ["OSD_SID", "STG_ADT_SID"]) { const v = String(globalThis.process?.env?.[n] ?? "").replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, ""); if (v === "") continue; if (!/^[A-Za-z][A-Za-z0-9]{2}$/.test(v)) throw new Error(`${n}=${JSON.stringify(v)} is not a system id: exactly three characters, A-Z or 0-9, the first a letter`); return v.toUpperCase(); } return "OSD"; })(); // the rule of tools/osd-identity.mjs, said here because this file is copied beside emitted code
 export const UName = "DEVELOPER";
 // sy-dbsys / sy-saprl (go/abap/sysinfo.go)
 export const DBSys = "sqlite";

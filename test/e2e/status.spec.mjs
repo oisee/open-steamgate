@@ -1,4 +1,9 @@
 import {test, expect} from "@playwright/test";
+import {identity} from "../../tools/osd-identity.mjs";
+
+// the system id the server (and the preview, at build) took from the one
+// identity: OSD_SID, its alias STG_ADT_SID, else OSD
+const SID = identity().sid;
 // the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
 const PORT = Number(process.env.STG_PORT ?? 3030);
 
@@ -20,14 +25,14 @@ test("system status: the object page over the running tree", async ({page}) => {
   await page.goto("/app/status/index.html");
 
   // the list report: one row, the SID of the running tree
-  const row = page.locator(".sapMListTblRow", {hasText: "OSD"}).first();
+  const row = page.locator(".sapMListTblRow", {hasText: SID}).first();
   await expect(row).toBeVisible();
   await row.click();
 
   // the object page header: HeaderInfo's Title is Sid, its Description GenLive
   const header = page.locator(".sapUxAPObjectPageHeaderTitle").first();
   await expect(header).toBeVisible();
-  await expect(header).toContainText("OSD");
+  await expect(header).toContainText(SID);
 
   // the five table facets, each scoped by the ID the service's ReferenceFacet
   // gave it (the section id ends in "--<ID>::Section")

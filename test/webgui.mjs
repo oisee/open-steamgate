@@ -248,7 +248,7 @@ describe("webgui: Easy Success, the screen SAP calls Easy Access", () => {
   // they are OSD unless OSD_SID (or its alias STG_ADT_SID) says otherwise.
   it("every surface reports the same system id, and it is the setting or OSD", async () => {
     const setting = [process.env.OSD_SID, process.env.STG_ADT_SID].map((v) => String(v ?? "").trim()).find((v) => v !== "");
-    const expected = setting === undefined ? "OSD" : setting.toUpperCase().slice(0, 3);
+    const expected = setting === undefined ? "OSD" : setting.toUpperCase();
     expect(identity().sid, "the identity").to.equal(expected);
     const system = await systemRow();
     expect(String(system.Sid).trim(), "ZOSD_SYS through the status service").to.equal(expected);

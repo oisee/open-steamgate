@@ -195,7 +195,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       // the system reports now, so the id changes only when the setting does
       const info = await (await call("/core/http/systeminformation")).json();
       const setting = [process.env.OSD_SID, process.env.STG_ADT_SID].map((v) => String(v ?? "").trim()).find((v) => v !== "");
-      expect(info.systemID).to.equal(setting === undefined ? "OSD" : setting.toUpperCase().slice(0, 3));
+      expect(info.systemID).to.equal(setting === undefined ? "OSD" : setting.toUpperCase());
       expect(info.systemID).to.equal(identity().sid);
       // and the feeds name the same system as their contributor
       const dumps = await (await call("/runtime/dumps")).text();

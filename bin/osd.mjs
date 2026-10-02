@@ -186,8 +186,13 @@ switch (mode) {
     console.log(`bind: ${describeBind()}${bindHint() === undefined ? "  (reachable from the network)" : "  (OSD_BIND=0.0.0.0 for the network)"}`);
     // the one system id (tools/osd-identity.mjs) and what chose it: the
     // setting OSD_SID, its alias STG_ADT_SID, or the default
-    const {sid, source} = systemId();
-    console.log(`system id: ${sid} (${source === "default" ? "default" : `setting ${source}`})`);
+    try {
+      const {sid, source} = systemId();
+      console.log(`system id: ${sid} (${source === "default" ? "default" : `setting ${source}`})`);
+    } catch (error) {
+      console.log(`system id: invalid -- ${error.message}`);
+      process.exitCode = 1;
+    }
     // what the bundle did to the runtime: a class the runtime looks up by
     // its name must still carry that name after bundling
     const renamed = [];

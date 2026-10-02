@@ -30,6 +30,7 @@ export async function listenProtocols(env = process.env) {
     port: diagPort,
     host: env.STG_DIAG_HOST,
     env,
+    sid: identity(env).sid,
     logger: (event, peer, error) => {
       if (error) console.error(`diag ${event} ${peer}: ${error.message}`);
     },

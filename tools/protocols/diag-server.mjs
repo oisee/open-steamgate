@@ -1,5 +1,6 @@
 // MIT-licensed capture-free DIAG tape stub for open-steamgate.
 
+import {identity} from "../osd-identity.mjs";
 import {createServer} from "node:net";
 import {describeBind, listenBound} from "../osd-bind.mjs";
 import {fileURLToPath} from "node:url";
@@ -111,11 +112,11 @@ export function createDiagTapeServer({
   return server;
 }
 
-export async function listenDiagTape({port, host, env = process.env, logger} = {}) {
+export async function listenDiagTape({port, host, env = process.env, logger, sid} = {}) {
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) {
     throw new RangeError(`DIAG port must be an integer from 0 to 65535, got ${port}`);
   }
-  const server = createDiagTapeServer({logger});
+  const server = createDiagTapeServer({logger, screenPayload: buildDiagTapeScreen({sid: sid ?? identity(env).sid})});
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     const done = () => {

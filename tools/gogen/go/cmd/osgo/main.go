@@ -377,13 +377,6 @@ func selectedPort(flagValue string, explicit bool, getenv func(string) string) (
 	return port, source, nil
 }
 
-// selectedSID is the one system id (sysid.FromEnv, the rule of
-// tools/osd-identity.mjs): sy-sysid and the status service's Sid
-func selectedSID(lookup func(string) (string, bool)) string {
-	sid, _ := sysid.FromEnv(lookup)
-	return sid
-}
-
 func selectedDB(db, home string, explicit bool, getenv func(string) string) string {
 	if explicit {
 		return db
@@ -430,7 +423,7 @@ func main() {
 	}
 	port := &portValue
 	binds := osdbind.Selected(*addr, addrExplicit, os.Getenv)
-	sid, sidSource := sysid.FromEnv(os.LookupEnv)
+	sid, sidSource := sysid.Must(os.LookupEnv)
 	abap.SysID = sid
 	log.Printf("system id: %s (%s)", sid, sysid.Describe(sidSource))
 	*dbFile = selectedDB(*dbFile, *homeDir, dbExplicit, os.Getenv)

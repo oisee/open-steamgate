@@ -139,8 +139,8 @@
       "reason": "recorded by --update"
     },
     "go:sysid": {
-      "lines": 41,
-      "reason": "one system id: the rule of tools/osd-identity.mjs in Go (2026-10-02)"
+      "lines": 73,
+      "reason": "one system id: the rule of tools/osd-identity.mjs in Go, with SAP format validation (2026-10-02)"
     },
     "go:termgui": {
       "lines": 307,

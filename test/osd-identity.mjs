@@ -1,5 +1,9 @@
 import {expect} from "chai";
-import {identity, sessionCookieName, systemId} from "../tools/osd-identity.mjs";
+import {readFileSync} from "node:fs";
+import {bootIdentity, identity, sessionCookieName, systemId} from "../tools/osd-identity.mjs";
+
+// the one list of cases, read by go/sysid's test as well
+const {cases} = JSON.parse(readFileSync(new URL("../tools/gogen/go/sysid/testdata/cases.json", import.meta.url), "utf8"));
 
 // One system id, one setting (tools/osd-identity.mjs): OSD_SID, its alias
 // STG_ADT_SID, the default OSD. Every surface takes it from identity(), so
@@ -19,25 +23,33 @@ describe("osd identity: one system id", () => {
     }
   });
 
-  it("takes OSD_SID, upper case and three characters", () => {
-    expect(systemId({OSD_SID: " qrstu "})).to.deep.equal({sid: "QRS", source: "OSD_SID"});
+  it("applies the shared cases: SAP's format, refused rather than truncated", () => {
+    expect(cases.length).to.be.greaterThan(10);
+    for (const c of cases) {
+      if (c.error) {
+        expect(() => systemId(c.env), c.name).to.throw(new RegExp(`^${c.error}=.*is not a system id`));
+        expect(() => identity(c.env), c.name).to.throw(/is not a system id/);
+      } else {
+        expect(systemId(c.env), c.name).to.deep.equal({sid: c.sid, source: c.source});
+      }
+    }
   });
 
-  it("takes STG_ADT_SID as an alias with the same meaning", () => {
-    expect(systemId({STG_ADT_SID: "osx"})).to.deep.equal({sid: "OSX", source: "STG_ADT_SID"});
-    expect(identity({STG_ADT_SID: "osx"}).sid).to.equal("OSX");
-  });
-
-  it("prefers OSD_SID when both are set, and treats a blank one as unset", () => {
-    expect(systemId({OSD_SID: "abc", STG_ADT_SID: "xyz"}).sid).to.equal("ABC");
-    expect(systemId({OSD_SID: "  ", STG_ADT_SID: "xyz"})).to.deep.equal({sid: "XYZ", source: "STG_ADT_SID"});
-    expect(systemId({OSD_SID: "", STG_ADT_SID: ""})).to.deep.equal({sid: "OSD", source: "default"});
+  it("never truncates: ABCDE and ABCXY are not both ABC", () => {
+    expect(() => systemId({OSD_SID: "ABCDE"})).to.throw(/OSD_SID="ABCDE"/);
+    expect(() => systemId({OSD_SID: "ABCXY"})).to.throw(/OSD_SID="ABCXY"/);
   });
 
   it("names the session cookie after the id and the ADT client", () => {
     expect(sessionCookieName({})).to.equal("SAP_SESSIONID_OSD_001");
     expect(sessionCookieName({OSD_SID: "qrs"})).to.equal("SAP_SESSIONID_QRS_001");
     expect(sessionCookieName({STG_ADT_SID: "osx", OSD_ADT_CLIENT: "002"})).to.equal("SAP_SESSIONID_OSX_002");
+    // nothing that would break the header gets into the name: it refuses
+    expect(() => sessionCookieName({OSD_SID: "a;b"})).to.throw(/is not a system id/);
+  });
+
+  it("refuses the boot with an invalid setting rather than starting under another id", () => {
+    expect(() => bootIdentity(undefined, {OSD_SID: "ABCD"})).to.throw(/OSD_SID="ABCD" is not a system id/);
   });
 
   it("keeps the client split: sy-mandt 123, ADT 001", () => {

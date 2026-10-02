@@ -50,10 +50,16 @@ const DEFAULT_ADT_CLIENT = "001";
 // value counts as unset, so it falls through to the next one
 const SID_SETTINGS = ["OSD_SID", "STG_ADT_SID"];
 
-// a system id is three characters, upper case, on a real system and here
-function sidOf(value) {
-  return String(value ?? "").trim().toUpperCase().slice(0, 3);
-}
+// What a system id is, as SAP has it: exactly three characters, A-Z or 0-9,
+// the first a letter. Lower case is accepted and upper-cased; nothing is
+// truncated (ABCDE and ABCXY would both become ABC) and anything else --
+// too long, too short, a ';' or a space that would break the cookie name,
+// a letter outside ASCII -- refuses the start rather than being bent into
+// shape. Only ASCII blanks are trimmed, so Node and Go trim alike
+// (tools/gogen/go/sysid holds the same rule; testdata/cases.json is the
+// one list of cases both test).
+const SID_FORMAT = /^[A-Za-z][A-Za-z0-9]{2}$/;
+const ASCII_BLANKS = /^[ \t\r\n]+|[ \t\r\n]+$/g;
 
 function clientOf(value, fallback) {
   const text = String(value ?? "").trim();
@@ -63,14 +69,19 @@ function clientOf(value, fallback) {
 /**
  * The system id and where it came from: {sid, source}, source being the
  * name of the setting that gave it ("OSD_SID" or "STG_ADT_SID") or
- * "default".
+ * "default". A setting that is not a system id throws, so a host refuses
+ * to start with it.
  */
 export function systemId(env = globalThis.process?.env ?? {}) {
   for (const name of SID_SETTINGS) {
-    const sid = sidOf(env[name]);
-    if (sid !== "") {
-      return {sid, source: name};
+    const value = String(env[name] ?? "").replace(ASCII_BLANKS, "");
+    if (value === "") {
+      continue;
     }
+    if (!SID_FORMAT.test(value)) {
+      throw new Error(`${name}=${JSON.stringify(env[name])} is not a system id: exactly three characters, A-Z or 0-9, the first a letter`);
+    }
+    return {sid: value.toUpperCase(), source: name};
   }
   return {sid: DEFAULT_SID, source: "default"};
 }

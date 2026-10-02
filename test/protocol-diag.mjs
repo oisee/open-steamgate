@@ -4,7 +4,9 @@ import {
   buildDiagTapeScreen, DIAG_ATOM, DIAG_HEADER_LENGTH, DIAG_ITEM,
   encodeDiagFrame, encodeDiagHeader, encodeDiagItem, encodeDiagLabel, encodeDiagMessage,
 } from "../tools/protocols/diag.mjs";
-import {createDiagTapeServer} from "../tools/protocols/diag-server.mjs";
+import {createDiagTapeServer, listenDiagTape} from "../tools/protocols/diag-server.mjs";
+import {parseDiagItems} from "../tools/protocols/diag.mjs";
+import {identity} from "../tools/osd-identity.mjs";
 import {encodeNIFrame, NIFrameDecoder, NI_PING, NI_PONG} from "../tools/protocols/ni.mjs";
 
 function findAppl4(body, wantedID, wantedSID) {
@@ -68,6 +70,51 @@ describe("the built-in MIT DIAG tape stub", () => {
     const second = dynt.readUInt16BE(0);
     expect(dynt[second + 4]).to.equal(DIAG_ATOM.LABEL);
     expect(dynt.includes(Buffer.from("Tape loading error", "ascii"))).to.equal(true);
+  });
+
+  // the R3INFO items 06/23 and 06/24 name the system: the one system id
+  // (tools/osd-identity.mjs), not the template's placeholder
+  const systemFields = (message) => parseDiagItems(message.subarray(DIAG_HEADER_LENGTH))
+    .filter((item) => item.type === DIAG_ITEM.APPL && item.id === 0x06 && (item.sid === 0x23 || item.sid === 0x24))
+    .map((item) => item.value.toString("latin1"));
+
+  it("names the system by the one system id in the screen's R3INFO items", () => {
+    const own = systemFields(buildDiagTapeScreen());
+    expect(own).to.have.length(2);
+    for (const field of own) expect(field.trimEnd()).to.equal(identity().sid);
+    const qrs = buildDiagTapeScreen({sid: "QRS"});
+    expect(systemFields(qrs).map((f) => f.trimEnd())).to.deep.equal(["QRS", "QRS"]);
+    expect(systemFields(qrs).map((f) => f.length)).to.deep.equal(own.map((f) => f.length));
+    expect(qrs.includes(Buffer.from("LSD", "latin1")), "no placeholder id left").to.equal(false);
+  });
+
+  it("serves the configured system id over TCP", async () => {
+    const server = await listenDiagTape({port: 0, host: "127.0.0.1", sid: "QRS"});
+    const socket = connect(server.address().port, "127.0.0.1");
+    const decoder = new NIFrameDecoder();
+    const received = [];
+    socket.on("data", (chunk) => received.push(...decoder.push(chunk)));
+    try {
+      await new Promise((resolve, reject) => {
+        socket.once("connect", resolve);
+        socket.once("error", reject);
+      });
+      const hello = Buffer.alloc(215);
+      hello.fill(0xff, 0, 4);
+      hello[201] = 0x10;
+      hello[208] = DIAG_ITEM.APPL;
+      hello[209] = 0x04;
+      hello[210] = 0x27;
+      hello.writeUInt16BE(2, 211);
+      hello.write("EN", 213, "ascii");
+      socket.write(encodeNIFrame(hello));
+      for (let i = 0; i < 400 && received.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+      expect(received, "a screen").to.have.length.greaterThan(0);
+      expect(systemFields(received[0]).map((f) => f.trimEnd())).to.deep.equal(["QRS", "QRS"]);
+    } finally {
+      socket.destroy();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   it("answers fragmented client traffic and NI keepalives over TCP", async () => {

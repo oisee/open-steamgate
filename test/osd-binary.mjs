@@ -59,6 +59,9 @@ describe("binary build modes from a clean checkout", function () {
     expect(doctorWith({}), "the default").to.contain("system id: OSD (default)");
     expect(doctorWith({OSD_SID: "qrs"}), "the setting").to.contain("system id: QRS (setting OSD_SID)");
     expect(doctorWith({STG_ADT_SID: "osx"}), "its alias").to.contain("system id: OSX (setting STG_ADT_SID)");
+    const refused = spawnSync(output, ["doctor"], {cwd: checkout, encoding: "utf8", env: {...clean, OSD_SID: "a;b"}});
+    expect(refused.stdout, "an invalid setting").to.contain('system id: invalid -- OSD_SID="a;b" is not a system id');
+    expect(refused.status, "and doctor says so by its exit").to.equal(1);
   });
 
   it("gives one actionable preflight line when --seed has no libraries", () => {
