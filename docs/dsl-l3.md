@@ -456,6 +456,12 @@ piles:
   size: 2                                # keys per pile, an INT4 from 1
 ```
 
+**Runtime requirement.** A pile's key range is a table of `I BT` rows, and a source port reads it with
+`WHERE <key> IN <range>`. `@abaplint/runtime` before **2.13.93** expands only EQ, NE, GE, LE and CP and
+raises `IN, I BT not supported` (abaplint/transpiler#1920 added BT, NB and the other options). So L3 piles
+need `@abaplint/runtime` >= 2.13.93; `package.json` and the lockfile pin it. CI links the pinned fork's
+runtime over npm's, which hides a too-old npm copy (`DEBT-2026-09-13-runtime-not-linked`).
+
 ### Set parameters
 
 A rule receives the set parameters whose names match its own L2 parameters (`docs/dsl-l2.md`,
