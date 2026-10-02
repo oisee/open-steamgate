@@ -4,10 +4,12 @@ import {expect} from "chai";
 import "./start.mjs";
 import {randomUUID} from "node:crypto";
 import {Sessions, SESSION_COOKIE, CONTEXT_COOKIE} from "../tools/adt-session.mjs";
-import {dialogStep, currentStepToken} from "../tools/osd-dialog-step.mjs";
+import {dialogStep, currentStepToken, outsideStepContext} from "../tools/osd-dialog-step.mjs";
 import {adtEnqOwner} from "../tools/adt-enq-key.mjs";
 import {EnqOwners} from "../tools/adt-enq.mjs";
 import {enqHolder} from "../tools/osd-enq-host.mjs";
+import {restoreAdtRows, rebuildAdtLocks, parentAdtSnapshot} from "../tools/adt-runtime-state.mjs";
+import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {withSystem} from "../tools/osd-store-destination.mjs";
 import {identity} from "./helpers/adt-session-unit.mjs";
 
@@ -328,6 +330,60 @@ describe("ADT session slice 3: ABAP / Node parity and ENQ", function () {
       expect((await sap.call("token_valid", {iv_id: first.id, iv_token: first.token})).get()).to.equal(" ");
     } finally {
       for (const session of [first, second]) if (session) await dialogStep(() => sap.call("end", {iv_id: session.id}), "cleanup");
+    }
+  });
+});
+
+describe("B0 ABAP boot rebuild measurements", function () {
+  this.timeout(30000);
+  for (const [sessions, handles] of [[5, 20], [100, 1000]]) {
+    it(`${sessions} sessions / ${handles} handles`, async () => {
+      const a = globalThis.abap;
+      const db = a.context.databaseConnections.DEFAULT;
+      const mandt = String(a.builtin.sy.get().mandt.get());
+      const state = {version: 1, zosd_adt_sess: [], zosd_adt_shdl: []};
+      for (let i = 0; i < sessions; i++) {
+        const id = ("b0" + sessions.toString(16).padStart(2, "0") + i.toString(16).padStart(20, "0"));
+        state.zosd_adt_sess.push({mandt, id, username: "BENCH", token: "bench-token", stateful: "X",
+          created: "20261002000000", touched: "20261002000000"});
+        for (let j = 0; j < handles / sessions; j++) state.zosd_adt_shdl.push({mandt, id,
+          handle: `${i}-${j}`, objtype: "CLAS", objname: `ZB0_${i}_${j}`});
+      }
+      try {
+        await dialogStep(() => restoreAdtRows(db, state), "benchmark seed");
+        const result = await rebuildAdtLocks(db);
+        console.log(`B0 REHYDRATE: ${sessions} sessions / ${handles} handles: ${result.ms.toFixed(2)} ms`);
+        expect(result.sessions).to.equal(sessions);
+        for (const row of state.zosd_adt_shdl) expect(enqHolder("ZOSD_ADT_LOCK", lockArgs(row.objname))).to.not.equal(undefined);
+      } finally {
+        await dialogStep(async () => {
+          const obj = await new a.Classes.ZCL_OSD_ADT_SESSION().constructor_();
+          for (const row of state.zosd_adt_sess) await obj[API + "end"]({iv_id: new a.types.String().set(row.id)});
+        }, "benchmark cleanup");
+      }
+    });
+  }
+});
+
+describe("B0 parent publication step", function () {
+  this.timeout(30000);
+  it("can boot a child while the publishing parent step is held", async () => {
+    const runtime = new ServingRuntime({env: {STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0"},
+      adtSnapshot: parentAdtSnapshot});
+    try {
+      const ready = await dialogStep(() => runtime.start(), "parent publishes while holding its step");
+      expect(ready.started).to.equal(true);
+      await runtime.stop();
+      await dialogStep(async () => {
+        // A background recycle/spawn can start while this step runs; this
+        // step then joins it. Snapshot must not wait for this step to end.
+        const background = outsideStepContext(() => runtime.start());
+        await Promise.resolve();
+        const joined = await runtime.start();
+        expect(joined.pid).to.equal((await background).pid);
+      }, "parent joins a background boot");
+    } finally {
+      await runtime.stop();
     }
   });
 });

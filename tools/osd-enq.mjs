@@ -72,6 +72,9 @@ export function garg(client, fields) {
 /** two arguments of one table touch a common key: position by position,
  * U+FFFF matching anything and a missing position a blank */
 export function collide(a, b) {
+  // Exact keys dominate ADT boot rebuilds. Avoid allocating two arrays for
+  // each unrelated pair; missing positions still mean blanks.
+  if (!a.includes("\uFFFF") && !b.includes("\uFFFF")) return a.replace(/ +$/, "") === b.replace(/ +$/, "");
   const ra = [...a];
   const rb = [...b];
   for (let i = 0; i < Math.max(ra.length, rb.length); i++) {

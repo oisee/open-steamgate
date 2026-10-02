@@ -35,6 +35,16 @@ import {batchMonitorHandler} from "./osd-batch-monitor.mjs";
 import {withAbapCase} from "./osd-case-determinism.mjs";
 
 const started = Date.now();
+// Install the receive side before boot: IPC can arrive during module load.
+const initialAdtState = process.send === undefined ? Promise.resolve({}) : new Promise((resolve) => {
+  const receive = (message) => {
+    if (message?.type !== "adt-state") return;
+    process.off("message", receive);
+    resolve(message);
+  };
+  process.on("message", receive);
+  process.send({type: "adt-state-request"});
+});
 
 // **Alive, and doing what.** A boot on a remote HANA can take minutes (the
 // seed inserts go over the network), and the supervisor used to give a
@@ -136,6 +146,14 @@ await zcl_stg_shlp_registry.register();
 // the synthetic taxi facts, made by ZCL_OSD_DEMO_DATA (tools/osd-demo-data.mjs)
 bootStep("demo data");
 await ensureDemoData((await from("zcl_osd_demo_data.clas.mjs")).zcl_osd_demo_data, {say: announce});
+
+bootStep("restoring ADT state and rebuilding locks");
+const {snapshotAdtRows, restoreAdtRows, rebuildAdtLocks} = await import("./adt-runtime-state.mjs");
+const initial = await initialAdtState;
+await dialogStep(() => restoreAdtRows(globalThis.abap.context.databaseConnections.DEFAULT, initial.state,
+  {replace: initial.replace === true}), "restoring ADT carry");
+const rebuilt = await rebuildAdtLocks(globalThis.abap.context.databaseConnections.DEFAULT);
+announce(`ADT rehydrate: ${rebuilt.sessions} sessions, ${rebuilt.ms.toFixed(2)} ms`);
 
 const app = express();
 app.disable("x-powered-by");
@@ -437,6 +455,11 @@ process.on("message", (message) => {
       await Promise.race([
         exclusive(async () => {
           await db.commit?.();
+          // Send while the connection is open, after the last step commits.
+          const state = await snapshotAdtRows(db);
+          if (process.connected) await new Promise((resolve, reject) => {
+            process.send({type: "adt-carry", state}, (error) => error ? reject(error) : resolve());
+          });
           committed = true;
           if (typeof db.export !== "function") {
             await db.disconnect?.();

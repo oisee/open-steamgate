@@ -14,6 +14,12 @@
 CLASS zcl_osd_adt_session DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     INTERFACES zif_osd_adt_session.
+    "! Boot only, one dialog step per session; never calls BIND's cleanup.
+    CLASS-METHODS rehydrate
+      IMPORTING iv_id TYPE string
+                iv_bind_context TYPE abap_bool DEFAULT abap_true
+      RETURNING VALUE(rv_count) TYPE i
+      RAISING zcx_osd_adt.
     METHODS constructor
       IMPORTING iv_ttl_seconds TYPE i DEFAULT 1800
                 iv_now TYPE timestamp OPTIONAL.
@@ -50,6 +56,51 @@ CLASS zcl_osd_adt_session DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 
 CLASS zcl_osd_adt_session IMPLEMENTATION.
+  METHOD rehydrate.
+    DATA ls_session TYPE zosd_adt_sess.
+    DATA lt_handles TYPE ty_handles.
+    DATA ls_handle TYPE zosd_adt_shdl.
+    DATA lv_user TYPE string.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+    SELECT SINGLE * FROM zosd_adt_sess INTO ls_session
+      WHERE mandt = sy-mandt AND id = iv_id AND stateful = abap_true.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    SELECT * FROM zosd_adt_shdl INTO TABLE lt_handles
+      WHERE mandt = sy-mandt AND id = iv_id.
+    IF lt_handles IS INITIAL.
+      RETURN.
+    ENDIF.
+    lv_user = ls_session-username.
+*   Native ICF can use its existing context with IV_BIND_CONTEXT = false.
+    IF iv_bind_context = abap_true.
+      IF zcl_osd_enq_kernel=>bind( iv_id = iv_id iv_user = lv_user ) = abap_false.
+        lx_error = zcx_osd_adt=>session_ended( ).
+        RAISE EXCEPTION lx_error.
+      ENDIF.
+    ENDIF.
+    LOOP AT lt_handles INTO ls_handle.
+      CALL FUNCTION 'ENQUEUE_EZOSD_ADT_OBJ'
+        EXPORTING
+          mode_zosd_adt_lock = 'X'
+          objtype = ls_handle-objtype
+          objname = ls_handle-objname
+          x_objtype = 'X'
+          x_objname = 'X'
+          _scope = '1'
+        EXCEPTIONS
+          foreign_lock = 1
+          system_failure = 2
+          OTHERS = 3.
+      IF sy-subrc <> 0 AND NOT ( sy-subrc = 1 AND sy-msgno = '602' ).
+        lx_error = zcx_osd_adt=>internal( `could not rehydrate ADT lock` ).
+        RAISE EXCEPTION lx_error.
+      ENDIF.
+      rv_count = rv_count + 1.
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD constructor.
     mv_ttl = iv_ttl_seconds.
     mv_now = iv_now.

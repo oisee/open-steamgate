@@ -187,6 +187,27 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${id}`}});
   });
 
+  it("B0 rebuild keeps the old handle writable and the CSRF token unchanged", async () => {
+    const one = await logon();
+    const locked = await as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`);
+    const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
+    expect(handle).to.match(/^[0-9a-f-]{36}$/);
+    endEnqSession(adtEnqOwner.key(one.id));
+    // A new process has a fresh prefix. Revive models that here, without
+    // changing the persisted rows or running normal RESOLVE cleanup.
+    await dialogStep(async () => {
+      const id = new abap.types.String().set(one.id);
+      await abap.Classes.ZCL_OSD_ENQ_KERNEL.revive({iv_id: id});
+      await abap.Classes.ZCL_OSD_ADT_SESSION.rehydrate({iv_id: id});
+    }, "B0 new ENQ context");
+    const put = await as(one, "PUT", `/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`,
+      {headers: {"content-type": "text/plain"}, body: SOURCE});
+    expect(put.status, await put.clone().text()).to.equal(200);
+    expect(put.headers.get("x-csrf-token")).to.equal(one.token);
+    expect((await as(one, "POST", `/oo/classes/${LOCKED}?_action=UNLOCK&lockHandle=${handle}`)).status).to.equal(200);
+    await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
+  });
+
   // The acceptance test of this branch and of #471 together: an ENQ context
   // the lock server ended is not a session that ended. The session and its
   // token stay; the dead handle writes nothing (409, as on main), and a read
