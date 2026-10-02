@@ -62,7 +62,7 @@ function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series) {
         var table = self.byId("cockpitDurations");
         if (!table.getModel("dur")) table.setModel(new JSONModel({rows: []}), "dur");
         table.getModel("dur").setData({rows: list});
-        if (rows[1].some(function (s) {return ["OPEN", "WAITING", "SUBMITTED"].indexOf(s.Status) >= 0;})) self.timer = setTimeout(function () {self.refresh();}, 5000);
+        if (rows[1].some(function (s) {return ["OPEN", "WAITING", "SUBMITTED"].indexOf(s.Status) >= 0;})) {clearTimeout(self.timer); self.timer = setTimeout(function () {self.refresh();}, 5000);}
       }).catch(function (e) {self.answer(e.message || e.responseText);});
       if (config.settings.length) {
         this.read("SettingSet").then(function (rows) {

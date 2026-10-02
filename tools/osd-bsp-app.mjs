@@ -230,7 +230,7 @@ export function checkAppName(app) {
  *  controller with one 1790-character line arrived 1511 bytes short and the
  *  application did not start. Refused here, by file and line. */
 export const PAGE_LINE = 255;
-const TEXT_PAGE = /\.(js|json|xml|html?|properties|css|txt|md)$/i;
+const TEXT_PAGE = /\.(js|mjs|ts|json|xml|svg|html?|properties|css|csv|txt|md|ya?ml)$/i;
 export function longLine(page, body) {
   if (!TEXT_PAGE.test(page)) return;
   const lines = body.toString("utf8").split(/\r?\n/);
