@@ -18,6 +18,7 @@ import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
+import {hosted, toolCommand} from "./osd-host.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export const PIN = {
@@ -428,7 +429,11 @@ function startOsg(opts) {
   const dbDir = join(opts.out, "db");
   mkdirSync(dbDir, {recursive: true});
   const log = join(opts.out, "osg.log");
-  const child = spawn(process.execPath, [join(ROOT, "test", "run.mjs")], {
+  // test/run.mjs exists only in a checkout; inside the binary there is no
+  // script to start, so --start refuses rather than spawn the binary itself
+  if (hosted()) throw new Error("--start needs a checkout; inside the binary use --url");
+  const [command, ...args] = toolCommand(join(ROOT, "test", "run.mjs"));
+  const child = spawn(command, args, {
     cwd: ROOT, detached: true,
     env: {...process.env, STG_PORT: String(opts.port), STG_DB_PATH: join(dbDir, "osd.sqlite")},
     stdio: ["ignore", "pipe", "pipe"]
