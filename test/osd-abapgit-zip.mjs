@@ -332,6 +332,11 @@ describe("deploy/manifest.json: only listed objects leave, never an SAP-owned na
     writeFileSync(join(dir, "zosd_srv_0001.iwsg.xml"), "<SRV_IDENTIFIER>ZOSD_SRV_0001</SRV_IDENTIFIER><SRV_IDENTIFIER>/IWFND/SG_MED_CATALOG_0001</SRV_IDENTIFIER>\n");
     expect(() => layout(dir, join(dir, "..", "out2"), "p", undefined, probe("IWSG ZOSD_SRV_0001", "IWOM ZOSD_MDL_0001_BE")))
       .to.throw(/IWSG ZOSD_SRV_0001[\s\S]*<SRV_IDENTIFIER> says \/IWFND\/SG_MED_CATALOG_0001/);
+    // a dispatch row of the model that names another model is foreign configuration
+    writeFileSync(join(dir, "zosd_srv_0001.iwsg.xml"), "<SRV_IDENTIFIER>ZOSD_SRV_0001</SRV_IDENTIFIER>\n");
+    writeFileSync(join(dir, "zosd_mdl_0001_be.iwom.xml"), "<MODEL_IDENTIFIER>ZOSD_MDL_0001_BE</MODEL_IDENTIFIER><MODEL_ID>/IWFND/SAP_MODEL_0001_BE</MODEL_ID>\n");
+    expect(() => layout(dir, join(dir, "..", "out3"), "p", undefined, probe("IWSG ZOSD_SRV_0001", "IWOM ZOSD_MDL_0001_BE")))
+      .to.throw(/IWOM ZOSD_MDL_0001_BE[\s\S]*<MODEL_ID> says \/IWFND\/SAP_MODEL_0001_BE/);
   });
 
   it("an enhancement is refused by its type unless intended: it changes an SAP object", () => {

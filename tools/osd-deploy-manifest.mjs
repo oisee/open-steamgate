@@ -221,7 +221,9 @@ export const NAME_TAGS = {
   // serialisation of a registered service): IWSG is the registration, named in
   // every SRV_IDENTIFIER; IWOM its model, named in every MODEL_IDENTIFIER
   IWSG: {tag: "SRV_IDENTIFIER", all: true},
-  IWOM: {tag: "MODEL_IDENTIFIER", all: true},
+  // the IWOM's dispatch rows (/IWFND/I_MGDPIM) carry the model in MODEL_ID: a
+  // row naming another model would add configuration to it, so both keys count
+  IWOM: {tag: "MODEL_IDENTIFIER", all: true, also: ["MODEL_ID"]},
 };
 
 /** Types that change an SAP object rather than add one of ours. */
@@ -241,6 +243,11 @@ export function nameTagProblem(obj, xml) {
   }
   const values = [...xml.matchAll(new RegExp(`<${spec.tag}>([^<]*)</${spec.tag}>`, "g"))].map((m) => m[1].trim().toUpperCase());
   if (values.length === 0) return `its XML has no <${spec.tag}>`;
+  for (const tag of spec.also ?? []) {
+    const foreign = [...xml.matchAll(new RegExp(`<${tag}>([^<]*)</${tag}>`, "g"))].map((m) => m[1].trim().toUpperCase())
+      .find((v) => v !== obj.name);
+    if (foreign !== undefined) return `the file says ${obj.name} and its <${tag}> says ${foreign}; abapGit writes that row as it stands`;
+  }
   const version = spec.version === undefined ? undefined : new RegExp(`<${spec.version}>([^<]*)<`).exec(xml)?.[1]?.trim();
   const own = (v) => (version === undefined ? v : `${v} ${version}`);
   const wrong = (spec.all === true ? values : values.slice(0, 1)).filter((v) => own(v) !== obj.name);
