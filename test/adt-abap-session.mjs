@@ -4,7 +4,9 @@ import {expect} from "chai";
 import {randomUUID} from "node:crypto";
 import {Sessions, SESSION_COOKIE, CONTEXT_COOKIE} from "../tools/adt-session.mjs";
 import {dialogStep, currentStepToken} from "../tools/osd-dialog-step.mjs";
-import {enqHolder, endEnqSession} from "../tools/osd-enq-host.mjs";
+import {adtEnqOwner} from "../tools/adt-enq-key.mjs";
+import {EnqOwners} from "../tools/adt-enq.mjs";
+import {enqHolder} from "../tools/osd-enq-host.mjs";
 import {withSystem} from "../tools/osd-store-destination.mjs";
 import {identity} from "./helpers/adt-session-unit.mjs";
 
@@ -164,7 +166,7 @@ describe("ADT session slice 3: ABAP / Node parity and ENQ", function () {
       await p.advance(2);
       expect((await p.sap.call("token_valid", {iv_id: first.sap.id, iv_token: first.sap.token})).get()).to.equal(" ");
       await p.request({[CONTEXT_COOKIE]: 2});
-      expect((await p.sap.call("alive", {iv_id: first.sap.id})).get()).to.equal(" ");
+      expect((await dialogStep(() => p.sap.call("alive", {iv_id: first.sap.id}), "holder check")).get()).to.equal(" ");
       expect(p.node.byId.has(first.node.id)).to.equal(false);
     } finally { await p.end(); }
   });
@@ -182,11 +184,54 @@ describe("ADT session slice 3: ABAP / Node parity and ENQ", function () {
       expect([again.id, again.token, again.user, again.stateful, again.fresh])
         .to.deep.equal([session.id, session.token, session.user, true, false]);
       expect((await two.call("holds", {iv_id: session.id, iv_handle: handle, iv_type: "CLAS", iv_name: "ZSHARED"})).get()).to.equal("X");
-      const kernel = abap.Classes.KERNEL_ENQ_SESSION;
-      abap.Classes.KERNEL_ENQ_SESSION = {}; // the assignment a warm class load makes
-      expect(abap.Classes.KERNEL_ENQ_SESSION).to.equal(kernel);
-      expect((await two.call("alive", {iv_id: session.id})).get()).to.equal("X");
+      const kernel = abap.Classes.ZCL_OSD_ENQ_KERNEL;
+      abap.Classes.ZCL_OSD_ENQ_KERNEL = {}; // the assignment a warm class load makes
+      expect(abap.Classes.ZCL_OSD_ENQ_KERNEL).to.equal(kernel);
+      expect((await dialogStep(() => two.call("alive", {iv_id: session.id}), "holder check")).get()).to.equal("X");
     } finally { if (session) await dialogStep(() => two.call("end", {iv_id: session.id}), "cleanup"); }
+  });
+
+  it("peek reads expired rows without sweeping or touching and returns initial for missing ids", async () => {
+    const sap = await create(10, Date.UTC(2026, 9, 2));
+    let session;
+    try {
+      session = await dialogStep(() => sap.resolve(), "open for peek");
+      await sap.clock(Date.UTC(2026, 9, 2, 0, 0, 11));
+      const read = () => sap.obj.peek(argsOf({iv_id: session.id}));
+      const row = plain(await dialogStep(read, "expired peek"));
+      expect([row.id, row.token, row.touched]).to.deep.equal([session.id, session.token, "20261002000000"]);
+      expect(plain(await dialogStep(() => sap.obj.peek(argsOf({iv_id: "missing"})), "missing peek")).id).to.equal("");
+      expect(plain(await dialogStep(read, "peek again"))).to.deep.equal(row);
+    } finally { if (session) await dialogStep(() => sap.call("end", {iv_id: session.id}), "cleanup"); }
+  });
+
+  it("stateless resolve uses UUIDs without the host kernel and ENQ stubs refuse by name", async () => {
+    const sap = await create(1800, Date.UTC(2099, 0, 1));
+    // Sweep first using the host, then exercise the actual generated stubs.
+    const first = await dialogStep(() => sap.resolve(), "sweep before stub test");
+    await dialogStep(() => sap.call("end", {iv_id: first.id}), "initial cleanup");
+    const descriptor = Object.getOwnPropertyDescriptor(abap.Classes, "ZCL_OSD_ENQ_KERNEL");
+    const {zcl_osd_enq_kernel: stub} = await import("../output/zcl_osd_enq_kernel.clas.mjs");
+    let session;
+    try {
+      Object.defineProperty(abap.Classes, "ZCL_OSD_ENQ_KERNEL", {value: stub, configurable: true});
+      session = await dialogStep(() => sap.resolve(), "stateless without host kernel");
+      expect(session.id).to.match(/^[a-f0-9]{24}$/);
+      expect(session.token).to.match(/^[A-Za-z0-9_-]{24}$/);
+      for (const method of ["bind", "end", "context_alive"]) {
+        let error;
+        await dialogStep(async () => {
+          try { await stub[method](argsOf({iv_id: session.id, iv_user: session.user})); } catch (e) { error = e; }
+        }, "unhosted kernel refusal");
+        expect(error).to.be.instanceOf(abap.Classes.ZCX_OSD_ADT);
+        expect(error.type_id.get()).to.equal(abap.Classes.ZCX_OSD_ADT.c_system_not_supported.get());
+        expect(error.namespace.get()).to.equal(abap.Classes.ZCX_OSD_ADT.c_namespace_osd.get());
+        expect(error.message_text.get()).to.equal("not supported on this system");
+      }
+    } finally {
+      Object.defineProperty(abap.Classes, "ZCL_OSD_ENQ_KERNEL", descriptor);
+      if (session) await dialogStep(() => sap.call("end", {iv_id: session.id}), "cleanup");
+    }
   });
 
   it("takes cookie names and the default user from the host identity", async () => {
@@ -214,13 +259,17 @@ describe("ADT session slice 3: ABAP / Node parity and ENQ", function () {
         await enqueue("ZSESSION_ENQ");
       }, "stateful LOCK");
       expect(enqHolder("ZOSD_ADT_LOCK", lockArgs("ZSESSION_ENQ"))).to.deep.equal({key, user: "OSD"});
-      expect((await sap.call("alive", {iv_id: key})).get()).to.equal("X");
+      const owners = new EnqOwners();
+      expect(owners.key(session.id)).to.equal(key);
+      expect(adtEnqOwner.idOf(key)).to.equal(session.id);
+      expect(owners.holder("CLAS", "ZSESSION_ENQ")).to.deep.equal({id: session.id, user: "OSD", mine: true});
+      expect((await dialogStep(() => sap.call("alive", {iv_id: key}), "holder check")).get()).to.equal("X");
       await dialogStep(() => sap.resolve({[SESSION_COOKIE]: session.id}), "stateless read of stateful context");
       expect(enqHolder("ZOSD_ADT_LOCK", lockArgs("ZSESSION_ENQ"))).to.not.equal(undefined);
       await dialogStep(() => sap.call("end", {iv_id: session.id}), "logoff");
       expect(enqHolder("ZOSD_ADT_LOCK", lockArgs("ZSESSION_ENQ"))).to.equal(undefined);
-      expect((await sap.call("alive", {iv_id: key})).get()).to.equal(" ");
-      expect((await sap.call("alive", {iv_id: "adt:another:gone"})).get()).to.equal("X");
+      expect((await dialogStep(() => sap.call("alive", {iv_id: key}), "holder check")).get()).to.equal(" ");
+      expect((await dialogStep(() => sap.call("alive", {iv_id: "adt:another:gone"}), "holder check")).get()).to.equal("X");
     } finally { if (session) await dialogStep(() => sap.call("end", {iv_id: session.id}), "cleanup"); }
   });
 
@@ -249,19 +298,35 @@ describe("ADT session slice 3: ABAP / Node parity and ENQ", function () {
     } finally { if (session) await dialogStep(() => sap.call("end", {iv_id: session.id}), "cleanup"); }
   });
 
-  it("translates a host-ended bind into a catchable ADT exception", async () => {
+  it("refuses an ended bind by name and recovers with a fresh session after rolled-back logoff", async () => {
     const sap = await create();
-    let session, key;
+    let session, handle;
     try {
       await dialogStep(async () => {
         session = await sap.resolve({}, {"x-sap-adt-sessiontype": "stateful"});
-        key = currentStepToken().enqSession;
+        handle = (await sap.call("adopt_handle", {iv_id: session.id, iv_type: "CLAS", iv_name: "ZENDED"})).get();
       }, "stateful open");
-      endEnqSession(key); // key ended while its logon row still exists
+      await dialogStep(async () => {
+        await sap.call("end", {iv_id: session.id});
+        throw new Error("logoff dump");
+      }, "rolled back logoff").catch((e) => expect(e.message).to.equal("logoff dump"));
+      expect(plain(await dialogStep(() => sap.obj.peek(argsOf({iv_id: session.id})), "peek before refusal")).id).to.equal(session.id);
       let error;
-      await dialogStep(() => sap.resolve({[CONTEXT_COOKIE]: session.id}), "ended bind").catch((e) => { error = e; });
+      // A handler catches the protocol refusal inside its step; cleanup commits.
+      await dialogStep(async () => {
+        try { await sap.resolve({[CONTEXT_COOKIE]: session.id}); } catch (e) { error = e; }
+      }, "ended bind");
       expect(error).to.be.instanceOf(abap.Classes.ZCX_OSD_ADT);
       expect(error.status.get()).to.equal(403);
+      expect(error.type_id.get()).to.equal(abap.Classes.ZCX_OSD_ADT.c_session_ended.get());
+      expect(error.namespace.get()).to.equal(abap.Classes.ZCX_OSD_ADT.c_namespace_osd.get());
+      expect((await dialogStep(() => sap.call("holds", {iv_id: session.id, iv_handle: handle,
+        iv_type: "CLAS", iv_name: "ZENDED"}), "ended handles cleared")).get()).to.equal(" ");
+      const fresh = await dialogStep(() => sap.resolve({[CONTEXT_COOKIE]: session.id}), "recovery after refusal");
+      expect(fresh.fresh).to.equal(true);
+      expect(fresh.id).to.not.equal(session.id);
+      expect(fresh.token).to.not.equal(session.token);
+      await dialogStep(() => sap.call("end", {iv_id: fresh.id}), "fresh cleanup");
     } finally { if (session) await dialogStep(() => sap.call("end", {iv_id: session.id}), "cleanup"); }
   });
 

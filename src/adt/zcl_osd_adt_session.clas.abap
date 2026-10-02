@@ -1,16 +1,20 @@
 "! Persistent ADT sessions; every SQL operation explicitly fences MANDT.
 "! CREATED/TOUCHED are UTC TIMESTAMPs, as in ZOSD_TSES; TTL is seconds.
-"! The kernel remembers issued raw ids and uses its own adt:<instance>:
-"! prefix for ENQ holders. ALIVE accepts either form; foreign keys stay live.
-"! A persisted row also proves ownership after a host restart/warm swap.
+"! Node owners and the kernel share one adt:<instance>: prefix for holders.
+"! Bare 24-hex ids address local sessions; holder keys prove host ownership.
+"! Foreign holder prefixes stay live. No issued-id ledger is needed.
 "! Dump cleanup is pulled before binding: no ABAP runs from an onEnd hook.
 "! Missing ENQ context clears handles, then BIND opens the next context.
+"! Ended keys delete their rows before the named refusal, never touch them.
+"! The request handler catches that refusal inside its step so cleanup commits.
 CLASS zcl_osd_adt_session DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     INTERFACES zif_osd_adt_session.
     METHODS constructor
       IMPORTING iv_ttl_seconds TYPE i DEFAULT 1800
                 iv_now TYPE timestamp OPTIONAL.
+    "! Adapter read: no touch, expiry filtering or sweep.
+    METHODS peek IMPORTING iv_id TYPE string RETURNING VALUE(rs_row) TYPE zosd_adt_sess.
     "! Test clock; initial means the real UTC clock.
     METHODS set_clock IMPORTING iv_now TYPE timestamp.
   PRIVATE SECTION.
@@ -23,6 +27,7 @@ CLASS zcl_osd_adt_session DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING it_fields TYPE tihttpnvp iv_name TYPE string
                 iv_header TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rv_value) TYPE string.
+    METHODS random IMPORTING iv_kind TYPE string RETURNING VALUE(rv_value) TYPE string.
     METHODS open
       IMPORTING it_headers TYPE tihttpnvp
       RETURNING VALUE(rs_row) TYPE zosd_adt_sess
@@ -38,6 +43,37 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
   METHOD constructor.
     mv_ttl = iv_ttl_seconds.
     mv_now = iv_now.
+  ENDMETHOD.
+
+  METHOD peek.
+    SELECT SINGLE * FROM zosd_adt_sess INTO rs_row WHERE mandt = sy-mandt AND id = iv_id.
+  ENDMETHOD.
+
+  METHOD random.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+    DATA lv_first TYPE sysuuid_x16.
+    DATA lv_second TYPE sysuuid_x16.
+    DATA lv_bytes TYPE xstring.
+    DATA lv_hex TYPE string.
+    TRY.
+        lv_first = cl_system_uuid=>create_uuid_x16_static( ).
+        CASE iv_kind.
+          WHEN `ID`.
+            lv_hex = lv_first.
+            rv_value = to_lower( lv_hex(24) ).
+          WHEN `TOKEN`.
+            lv_second = cl_system_uuid=>create_uuid_x16_static( ).
+            CONCATENATE lv_first lv_second(2) INTO lv_bytes IN BYTE MODE.
+            rv_value = cl_http_utility=>encode_x_base64( lv_bytes ).
+            REPLACE ALL OCCURRENCES OF `+` IN rv_value WITH `-`.
+            REPLACE ALL OCCURRENCES OF `/` IN rv_value WITH `_`.
+          WHEN `HANDLE`.
+            rv_value = to_lower( cl_system_uuid=>create_uuid_c36_static( ) ).
+        ENDCASE.
+      CATCH cx_uuid_error.
+        lx_error = zcx_osd_adt=>internal( `could not generate session randomness` ).
+        RAISE EXCEPTION lx_error.
+    ENDTRY.
   ENDMETHOD.
 
   METHOD set_clock.
@@ -101,8 +137,8 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
       lv_user = ls_identity-user_name.
     ENDIF.
     rs_row-mandt = sy-mandt.
-    rs_row-id = kernel_enq_session=>random( `ID` ).
-    rs_row-token = kernel_enq_session=>random( `TOKEN` ).
+    rs_row-id = random( `ID` ).
+    rs_row-token = random( `TOKEN` ).
     rs_row-username = lv_user.
     rs_row-created = now( ).
     rs_row-touched = rs_row-created.
@@ -110,14 +146,20 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD bind.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
     DATA lv_id TYPE string.
     DATA lv_user TYPE string.
     lv_id = is_row-id.
     lv_user = is_row-username.
-    IF kernel_enq_session=>context_alive( lv_id ) = abap_false.
+    IF zcl_osd_enq_kernel=>context_alive( lv_id ) = abap_false.
       zif_osd_adt_session~enq_context_ended( lv_id ).
     ENDIF.
-    kernel_enq_session=>bind( iv_id = lv_id iv_user = lv_user ).
+    IF zcl_osd_enq_kernel=>bind( iv_id = lv_id iv_user = lv_user ) = abap_false.
+      DELETE FROM zosd_adt_shdl WHERE mandt = sy-mandt AND id = lv_id.
+      DELETE FROM zosd_adt_sess WHERE mandt = sy-mandt AND id = lv_id.
+      lx_error = zcx_osd_adt=>session_ended( ).
+      RAISE EXCEPTION lx_error.
+    ENDIF.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~resolve.
@@ -140,8 +182,6 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
     IF to_lower( lv_type ) = `stateful`.
       ls_row-stateful = abap_true.
     ENDIF.
-    ls_row-touched = now( ).
-    UPDATE zosd_adt_sess FROM ls_row.
     rs_session-id = ls_row-id.
     rs_session-user = ls_row-username.
     rs_session-token = ls_row-token.
@@ -149,6 +189,8 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
     IF ls_row-stateful = abap_true.
       bind( ls_row ).
     ENDIF.
+    ls_row-touched = now( ).
+    UPDATE zosd_adt_sess FROM ls_row.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~cookies.
@@ -173,16 +215,17 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
   METHOD zif_osd_adt_session~end.
     DELETE FROM zosd_adt_shdl WHERE mandt = sy-mandt AND id = iv_id.
     DELETE FROM zosd_adt_sess WHERE mandt = sy-mandt AND id = iv_id.
-    kernel_enq_session=>end( iv_id ).
+    zcl_osd_enq_kernel=>end( iv_id ).
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~alive.
     DATA ls_row TYPE zosd_adt_sess.
     DATA lv_id TYPE string.
     DATA lv_cutoff TYPE timestamp.
-    lv_id = kernel_enq_session=>session_id( iv_id ).
+    lv_id = zcl_osd_enq_kernel=>session_id( iv_id ).
     SELECT SINGLE * FROM zosd_adt_sess INTO ls_row WHERE mandt = sy-mandt AND id = lv_id.
-    IF sy-subrc <> 0 AND kernel_enq_session=>owns( iv_id ) = abap_false.
+    IF sy-subrc <> 0 AND zcl_osd_enq_kernel=>owns( iv_id ) = abap_false
+      AND NOT ( strlen( iv_id ) = 24 AND iv_id CO `0123456789abcdef` ).
       rv_alive = abap_true.
       RETURN.
     ENDIF.
@@ -215,7 +258,7 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
     IF ls_row-handle IS INITIAL.
       ls_row-mandt = sy-mandt.
       ls_row-id = iv_id.
-      ls_row-handle = kernel_enq_session=>random( `HANDLE` ).
+      ls_row-handle = random( `HANDLE` ).
       ls_row-objtype = iv_type.
       ls_row-objname = iv_name.
       INSERT zosd_adt_shdl FROM ls_row.

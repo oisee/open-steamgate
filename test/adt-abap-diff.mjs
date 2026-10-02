@@ -809,25 +809,25 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       // the ABAP LOCK (LOCK_HOLDER) or a Node route, it is ended and the
       // caller proceeds. Another façade's holder is not this table's to end.
       const {sessions, server} = await withSessions();
-      const {enqTake} = await import("../tools/osd-enq-host.mjs");
+      const {enqTake, endEnqSession} = await import("../tools/osd-enq-host.mjs");
       const input = {mode_zosd_adt_lock: "X", objtype: "CLAS", objname: LOCKED, x_objtype: "X", x_objname: "X", _scope: "1"};
       expect(enqTake(sessions.owners.key("ghost"), "GHOST", "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input).subrc).to.equal(0);
       const two = await logon(server, "DEVTWO");
       const after = await lock(two);
       expect(after.status, after.body).to.equal(200);
       await logoff(two);
-      // a holder under another table's prefix stays, and is quoted
-      const other = new EnqOwners();
-      expect(enqTake(other.key("elsewhere"), "ELSEWHERE", "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input).subrc).to.equal(0);
+      // All owners in this host share a prefix; a different host stays live.
+      const foreignKey = "adt:foreign:elsewhere";
+      expect(enqTake(foreignKey, "ELSEWHERE", "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input).subrc).to.equal(0);
       const three = await logon(server, "DEVTHREE");
       const refused = await lock(three);
       expect(refused.status).to.equal(403);
       expect(refused.body).to.contain("<entry key=\"T100KEY-V1\">ELSEWHERE</entry>");
-      other.end("elsewhere");
+      endEnqSession(foreignKey);
       // an ended key takes and drops nothing from the host either (#433)
       const {enqDrop} = await import("../tools/osd-enq-host.mjs");
-      expect(() => enqTake(other.key("elsewhere"), "ELSEWHERE", "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input)).to.throw().with.property("code", "ENQ_SESSION_ENDED");
-      expect(() => enqDrop(other.key("elsewhere"), "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input)).to.throw().with.property("code", "ENQ_SESSION_ENDED");
+      expect(() => enqTake(foreignKey, "ELSEWHERE", "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input)).to.throw().with.property("code", "ENQ_SESSION_ENDED");
+      expect(() => enqDrop(foreignKey, "ZOSD_ADT_LOCK", "EZOSD_ADT_OBJ", input)).to.throw().with.property("code", "ENQ_SESSION_ENDED");
       await logoff(three);
       expect(await rows()).to.deep.equal([]);
     });

@@ -200,14 +200,22 @@ CLASS ltcl_session IMPLEMENTATION.
   METHOD ended_is_catchable.
     DATA lx_error TYPE REF TO zcx_osd_adt.
     DATA lv_caught TYPE abap_bool.
-    mo_api->end( ms_one-id ).
+    DATA ls_again TYPE zif_osd_adt_session=>ty_session.
+    ls_again = by_cookie( iv_context = ms_one-id iv_state = `stateful` ).
+    zcl_osd_enq_kernel=>end( ms_one-id ).
     TRY.
-        kernel_enq_session=>bind( iv_id = ms_one-id iv_user = ms_one-user ).
+        ls_again = by_cookie( iv_context = ms_one-id ).
       CATCH zcx_osd_adt INTO lx_error.
         lv_caught = abap_true.
         cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 403 ).
+        cl_abap_unit_assert=>assert_equals( act = lx_error->type_id exp = zcx_osd_adt=>c_session_ended ).
+        cl_abap_unit_assert=>assert_equals( act = lx_error->namespace exp = zcx_osd_adt=>c_namespace_osd ).
     ENDTRY.
     cl_abap_unit_assert=>assert_true( lv_caught ).
+    ls_again = by_cookie( iv_context = ms_one-id ).
+    cl_abap_unit_assert=>assert_true( ls_again-fresh ).
+    cl_abap_unit_assert=>assert_differs( act = ls_again-id exp = ms_one-id ).
+    cl_abap_unit_assert=>assert_differs( act = ls_again-token exp = ms_one-token ).
   ENDMETHOD.
 
   METHOD holders.

@@ -10,19 +10,19 @@
 // only the handles, which are ADT values (port-map section 2, step 8).
 //
 // The ENQ key of an ADT session is "adt:<instance>:<session id>", the
-// instance being this owner table's, so a holder this table does not know is
-// told apart: under its own prefix it is a session that has ended (dead, and
+// instance shared by Node owners and the ABAP kernel, so an unknown holder is
+// told apart: under this host's prefix it is a session that has ended (dead, and
 // ended on sight), under another prefix it is another façade's on the same
 // lock server (alive, its user quoted). The argument is built by
 // tools/osd-enq-host.mjs from the dictionary, as an ENQUEUE_ from ABAP builds
 // it, so the two sides cannot disagree on it.
+import {adtEnqOwner} from "./adt-enq-key.mjs";
 import {randomUUID} from "node:crypto";
 import {bindEnqSession, endEnqSession, enqDrop, enqHolder, enqTake, onEnqContextEnded} from "./osd-enq-host.mjs";
 import {refuseToken} from "./adt-session.mjs";
 
 export const LOCK_TABLE = "ZOSD_ADT_LOCK";
 export const LOCK_OBJECT = "EZOSD_ADT_OBJ";
-import {adtEnqKey, adtEnqPrefix} from "./adt-enq-key.mjs";
 
 /** the exporting parameters ZCL_OSD_ADT_LOCK passes, said for the host */
 const argument = (type, name) => ({
@@ -32,12 +32,12 @@ const argument = (type, name) => ({
 
 export class EnqOwners {
   constructor() {
-    this.prefix = adtEnqPrefix();
+    this.prefix = adtEnqOwner.prefix;
   }
 
   /** the ENQ session key of an ADT session of this table */
   key(id) {
-    return adtEnqKey(this.prefix, id);
+    return adtEnqOwner.key(id);
   }
 
   // {id, user, mine}: mine when the key is this table's, so that an id the
@@ -47,8 +47,8 @@ export class EnqOwners {
     if (held === undefined) {
       return undefined;
     }
-    const mine = typeof held.key === "string" && held.key.startsWith(this.prefix);
-    return {id: mine ? held.key.slice(this.prefix.length) : undefined, user: held.user, mine};
+    const mine = adtEnqOwner.owns(held.key);
+    return {id: mine ? adtEnqOwner.idOf(held.key) : undefined, user: held.user, mine};
   }
 
   // the Node LOCK route, which serves only when the ABAP route table could
