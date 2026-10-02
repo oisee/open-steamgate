@@ -320,6 +320,10 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
       <ls_param>-value = zcl_osd_adt_uri=>decode_segment( <ls_param>-value ).
     ENDLOOP.
 
+*   A HEAD falling back to GET keeps the GET answer for HTTP body suppression.
+    IF is_request-method = `HEAD` AND ls_route-method = `GET`.
+      ls_request-method = `GET`.
+    ENDIF.
     ls_request-pattern = ls_route-pattern.
     CREATE OBJECT li_route TYPE (ls_route-handler).
     rs_result-served_by = c_abap.

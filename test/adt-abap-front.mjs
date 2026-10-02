@@ -121,20 +121,23 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
 
   it("every ADT request enters the handler once, whoever serves it", async () => {
     const one = await logon();
-    const paths = [
-      ["GET", "/core/discovery"], ["GET", "/core/http/systeminformation"], ["GET", "/debugger/listeners"],
-      ["GET", `/oo/classes/${LOCKED}/source/main`], ["GET", "/no/such/resource"],
-      ["POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`],
-    ];
-    entered.length = 0;
-    served.length = 0;
-    for (const [method, path] of paths) await as(one, method, path);
-    expect(entered).to.deep.equal(paths.map(([method, path]) => `${method} ${BASE}${path.split("?")[0]}`));
-    expect(served).to.deep.equal([
-      `HOST GET ${BASE}/core/discovery`, `ABAP GET ${BASE}/core/http/systeminformation`,
-      `HOST GET ${BASE}/debugger/listeners`, `HOST GET ${BASE}/oo/classes/${LOCKED}/source/main`,
-      `HOST GET ${BASE}/no/such/resource`, `ABAP POST ${BASE}/oo/classes/${LOCKED}`]);
-    await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
+    try {
+      const paths = [
+        ["GET", "/core/discovery"], ["GET", "/core/http/systeminformation"], ["GET", "/debugger/listeners"],
+        ["GET", `/oo/classes/${LOCKED}/source/main`], ["GET", "/no/such/resource"],
+        ["POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`],
+      ];
+      entered.length = 0;
+      served.length = 0;
+      for (const [method, path] of paths) await as(one, method, path);
+      expect(entered).to.deep.equal(paths.map(([method, path]) => `${method} ${BASE}${path.split("?")[0]}`));
+      expect(served).to.deep.equal([
+        `ABAP GET ${BASE}/core/discovery`, `ABAP GET ${BASE}/core/http/systeminformation`,
+        `ABAP GET ${BASE}/debugger/listeners`, `HOST GET ${BASE}/oo/classes/${LOCKED}/source/main`,
+        `HOST GET ${BASE}/no/such/resource`, `ABAP POST ${BASE}/oo/classes/${LOCKED}`]);
+    } finally {
+      await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
+    }
   });
 
   it("a fresh fetch gets both cookies and the token of a session ABAP keeps", async () => {
@@ -148,7 +151,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     const row = await sessionRow(id);
     expect(row, "the session is a row of ZOSD_ADT_SESS").to.not.equal(undefined);
     expect(res.headers.get("x-csrf-token")).to.equal(row.token);
-    expect(served).to.deep.equal([`HOST GET ${BASE}/core/discovery`]);
+    expect(served).to.deep.equal([`ABAP GET ${BASE}/core/discovery`]);
   });
 
   it("the poll route serves in ABAP under the session it resolved", async () => {
@@ -364,13 +367,15 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
 
   it("the body goes to ABAP only for a row ABAP serves, and the answer names who served it", async () => {
     const asks = [["PUT", `${BASE}/oo/classes/zcl_x/source/main`, false], ["POST", `${BASE}/oo/classes/ZCL_X`, true],
-      ["GET", `${BASE}/core/http/systeminformation`, true], ["GET", `${BASE}/core/discovery`, false]];
+      ["GET", `${BASE}/core/http/systeminformation`, true], ["GET", `${BASE}/core/discovery`, true], ["GET", `${BASE}/debugger/listeners`, true],
+      ["GET", `${BASE}/no/such/resource`, false]];
     for (const [method, path, expected] of asks) {
       expect(await dialogStep(() => abapServes(method, path), "test: the router's match"), `${method} ${path}`).to.equal(expected);
     }
     const one = await logon();
     expect((await as(one, "GET", "/core/http/systeminformation")).headers.get("x-osd-served-by")).to.equal("ABAP");
-    expect((await as(one, "GET", "/core/discovery")).headers.get("x-osd-served-by")).to.equal("HOST");
+    expect((await as(one, "GET", "/core/discovery")).headers.get("x-osd-served-by")).to.equal("ABAP");
+    expect((await as(one, "GET", "/no/such/resource")).headers.get("x-osd-served-by")).to.equal("HOST");
     await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
   });
 
