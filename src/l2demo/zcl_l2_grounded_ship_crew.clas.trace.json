@@ -2,7 +2,7 @@
  "generator": "dsl-l2",
  "rule": "src/l2demo/grounded_ship_crew.l2.yaml",
  "template": "recipes/l2-check/template.tpl",
- "model": "sha256:2b72e97ce478f2a42dfc8e105f67dead7260925b87f6634c0f92f8bc4fd33f2f",
+ "model": "sha256:b394b7c481c2078cec32dd098774403af021f9b5992e10060c4df66f30a2ec63",
  "lines": [
   {
    "line": 1,
@@ -34,21 +34,21 @@
   },
   {
    "line": 5,
-   "template_line": 5,
-   "path": "/",
-   "node": "rule/grounded-ship-keeps-only-keepers",
-   "rule_line": 4
+   "template_line": 6,
+   "path": "/range/table",
+   "node": "rule/grounded-ship-keeps-only-keepers/range",
+   "rule_line": 8
   },
   {
    "line": 6,
-   "template_line": 6,
+   "template_line": 8,
    "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4
   },
   {
    "line": 7,
-   "template_line": 10,
+   "template_line": 9,
    "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4
@@ -56,321 +56,342 @@
   {
    "line": 8,
    "template_line": 11,
-   "path": "/",
-   "node": "rule/grounded-ship-keeps-only-keepers",
-   "rule_line": 4
+   "path": "/range",
+   "node": "rule/grounded-ship-keeps-only-keepers/range",
+   "rule_line": 8
   },
   {
    "line": 9,
-   "template_line": 12,
+   "template_line": 16,
    "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4
   },
   {
    "line": 10,
-   "template_line": 13,
-   "path": "/class",
+   "template_line": 17,
+   "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4
   },
   {
    "line": 11,
-   "template_line": 14,
+   "template_line": 18,
    "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4
   },
   {
    "line": 12,
-   "template_line": 15,
-   "path": "/comment",
+   "template_line": 19,
+   "path": "/class",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4
   },
   {
    "line": 13,
-   "template_line": 17,
-   "path": "/queries/1/type",
-   "node": "rule/grounded-ship-keeps-only-keepers/join",
-   "rule_line": 9
+   "template_line": 20,
+   "path": "/",
+   "node": "rule/grounded-ship-keeps-only-keepers",
+   "rule_line": 4
   },
   {
    "line": 14,
-   "template_line": 19,
+   "template_line": 21,
+   "path": "/comment",
+   "node": "rule/grounded-ship-keeps-only-keepers",
+   "rule_line": 4
+  },
+  {
+   "line": 15,
+   "template_line": 23,
+   "path": "/queries/1/type",
+   "node": "rule/grounded-ship-keeps-only-keepers/join",
+   "rule_line": 10
+  },
+  {
+   "line": 16,
+   "template_line": 25,
    "path": "/queries/1/fields/1/name",
    "node": "rule/grounded-ship-keeps-only-keepers/join/field/1",
    "rule_line": 7
   },
   {
-   "line": 15,
-   "template_line": 19,
+   "line": 17,
+   "template_line": 25,
    "path": "/queries/1/fields/2/name",
    "node": "rule/grounded-ship-keeps-only-keepers/join/field/2",
-   "rule_line": 10
-  },
-  {
-   "line": 16,
-   "template_line": 19,
-   "path": "/queries/1/fields/3/name",
-   "node": "rule/grounded-ship-keeps-only-keepers/join/field/3",
-   "rule_line": 13
-  },
-  {
-   "line": 17,
-   "template_line": 19,
-   "path": "/queries/1/fields/4/name",
-   "node": "rule/grounded-ship-keeps-only-keepers/join/field/4",
-   "rule_line": 13
+   "rule_line": 11
   },
   {
    "line": 18,
-   "template_line": 19,
-   "path": "/queries/1/fields/5/name",
-   "node": "rule/grounded-ship-keeps-only-keepers/join/field/5",
-   "rule_line": 13
+   "template_line": 25,
+   "path": "/queries/1/fields/3/name",
+   "node": "rule/grounded-ship-keeps-only-keepers/join/field/3",
+   "rule_line": 14
   },
   {
    "line": 19,
-   "template_line": 21,
-   "path": "/queries/1/type",
-   "node": "rule/grounded-ship-keeps-only-keepers/join",
-   "rule_line": 9
+   "template_line": 25,
+   "path": "/queries/1/fields/4/name",
+   "node": "rule/grounded-ship-keeps-only-keepers/join/field/4",
+   "rule_line": 14
   },
   {
    "line": 20,
-   "template_line": 22,
-   "path": "/queries/1/itab",
-   "node": "rule/grounded-ship-keeps-only-keepers/join",
-   "rule_line": 9
+   "template_line": 25,
+   "path": "/queries/1/fields/5/name",
+   "node": "rule/grounded-ship-keeps-only-keepers/join/field/5",
+   "rule_line": 14
   },
   {
    "line": 21,
-   "template_line": 23,
-   "path": "/queries/1/wa",
+   "template_line": 27,
+   "path": "/queries/1/type",
    "node": "rule/grounded-ship-keeps-only-keepers/join",
-   "rule_line": 9
+   "rule_line": 10
   },
   {
    "line": 22,
-   "template_line": 56,
+   "template_line": 28,
+   "path": "/queries/1/itab",
+   "node": "rule/grounded-ship-keeps-only-keepers/join",
+   "rule_line": 10
+  },
+  {
+   "line": 23,
+   "template_line": 29,
+   "path": "/queries/1/wa",
+   "node": "rule/grounded-ship-keeps-only-keepers/join",
+   "rule_line": 10
+  },
+  {
+   "line": 24,
+   "template_line": 62,
    "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4
   },
   {
-   "line": 23,
-   "template_line": 105,
+   "line": 25,
+   "template_line": 111,
    "path": "/queries/1",
    "node": "rule/grounded-ship-keeps-only-keepers/join",
-   "rule_line": 9
+   "rule_line": 10
   },
   {
-   "line": 24,
-   "template_line": 120,
+   "line": 26,
+   "template_line": 126,
    "path": "/queries/1/fields/1/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/field/1",
    "rule_line": 7
   },
   {
-   "line": 25,
-   "template_line": 120,
+   "line": 27,
+   "template_line": 126,
    "path": "/queries/1/fields/2/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/field/2",
-   "rule_line": 10
-  },
-  {
-   "line": 26,
-   "template_line": 120,
-   "path": "/queries/1/fields/3/source",
-   "node": "rule/grounded-ship-keeps-only-keepers/join/field/3",
-   "rule_line": 13
-  },
-  {
-   "line": 27,
-   "template_line": 120,
-   "path": "/queries/1/fields/4/source",
-   "node": "rule/grounded-ship-keeps-only-keepers/join/field/4",
-   "rule_line": 13
+   "rule_line": 11
   },
   {
    "line": 28,
-   "template_line": 120,
-   "path": "/queries/1/fields/5/source",
-   "node": "rule/grounded-ship-keeps-only-keepers/join/field/5",
-   "rule_line": 13
+   "template_line": 126,
+   "path": "/queries/1/fields/3/source",
+   "node": "rule/grounded-ship-keeps-only-keepers/join/field/3",
+   "rule_line": 14
   },
   {
    "line": 29,
-   "template_line": 124,
+   "template_line": 126,
+   "path": "/queries/1/fields/4/source",
+   "node": "rule/grounded-ship-keeps-only-keepers/join/field/4",
+   "rule_line": 14
+  },
+  {
+   "line": 30,
+   "template_line": 126,
+   "path": "/queries/1/fields/5/source",
+   "node": "rule/grounded-ship-keeps-only-keepers/join/field/5",
+   "rule_line": 14
+  },
+  {
+   "line": 31,
+   "template_line": 130,
    "path": "/queries/1/from/table",
    "node": "rule/grounded-ship-keeps-only-keepers/for",
    "rule_line": 7
   },
   {
-   "line": 30,
-   "template_line": 127,
+   "line": 32,
+   "template_line": 133,
    "path": "/queries/1/joins/1/table",
    "node": "rule/grounded-ship-keeps-only-keepers/forbid",
-   "rule_line": 9
-  },
-  {
-   "line": 31,
-   "template_line": 129,
-   "path": "/queries/1/joins/1/on/1/lhs",
-   "node": "rule/grounded-ship-keeps-only-keepers/forbid/where/1",
-   "rule_line": 11
-  },
-  {
-   "line": 32,
-   "template_line": 132,
-   "path": "/queries/1/itab",
-   "node": "rule/grounded-ship-keeps-only-keepers/join",
-   "rule_line": 9
+   "rule_line": 10
   },
   {
    "line": 33,
-   "template_line": 134,
-   "path": "/queries/1/where/1/pre",
-   "node": "rule/grounded-ship-keeps-only-keepers/when/1",
-   "rule_line": 8
+   "template_line": 135,
+   "path": "/queries/1/joins/1/on/1/lhs",
+   "node": "rule/grounded-ship-keeps-only-keepers/forbid/where/1",
+   "rule_line": 12
   },
   {
    "line": 34,
-   "template_line": 134,
-   "path": "/queries/1/where/2/pre",
-   "node": "rule/grounded-ship-keeps-only-keepers/when/2",
-   "rule_line": 8
+   "template_line": 138,
+   "path": "/queries/1/itab",
+   "node": "rule/grounded-ship-keeps-only-keepers/join",
+   "rule_line": 10
   },
   {
    "line": 35,
-   "template_line": 134,
-   "path": "/queries/1/where/3/pre",
-   "node": "rule/grounded-ship-keeps-only-keepers/forbid/where/2",
-   "rule_line": 12
-  },
-  {
-   "line": 36,
-   "template_line": 134,
-   "path": "/queries/1/where/4/pre",
-   "node": "rule/grounded-ship-keeps-only-keepers/forbid/where/3",
-   "rule_line": 12
-  },
-  {
-   "line": 37,
-   "template_line": 136,
-   "path": "/queries/1",
-   "node": "rule/grounded-ship-keeps-only-keepers/join",
+   "template_line": 140,
+   "path": "/queries/1/where/1/pre",
+   "node": "rule/grounded-ship-keeps-only-keepers/when/1",
    "rule_line": 9
   },
   {
+   "line": 36,
+   "template_line": 140,
+   "path": "/queries/1/where/2/pre",
+   "node": "rule/grounded-ship-keeps-only-keepers/when/2",
+   "rule_line": 9
+  },
+  {
+   "line": 37,
+   "template_line": 140,
+   "path": "/queries/1/where/3/pre",
+   "node": "rule/grounded-ship-keeps-only-keepers/forbid/where/2",
+   "rule_line": 13
+  },
+  {
    "line": 38,
-   "template_line": 138,
+   "template_line": 140,
+   "path": "/queries/1/where/4/pre",
+   "node": "rule/grounded-ship-keeps-only-keepers/forbid/where/3",
+   "rule_line": 13
+  },
+  {
+   "line": 39,
+   "template_line": 140,
+   "path": "/queries/1/where/5/pre",
+   "node": "rule/grounded-ship-keeps-only-keepers/range",
+   "rule_line": 8
+  },
+  {
+   "line": 40,
+   "template_line": 142,
+   "path": "/queries/1",
+   "node": "rule/grounded-ship-keeps-only-keepers/join",
+   "rule_line": 10
+  },
+  {
+   "line": 41,
+   "template_line": 144,
    "path": "/queries/1/order/1/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/order/1",
    "rule_line": 7
   },
   {
-   "line": 39,
-   "template_line": 138,
+   "line": 42,
+   "template_line": 144,
    "path": "/queries/1/order/2/source",
    "node": "rule/grounded-ship-keeps-only-keepers/join/order/2",
-   "rule_line": 10
-  },
-  {
-   "line": 40,
-   "template_line": 249,
-   "path": "/queries/1/itab",
-   "node": "rule/grounded-ship-keeps-only-keepers/join",
-   "rule_line": 9
-  },
-  {
-   "line": 41,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/1/jref",
-   "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/1",
-   "rule_line": 13
-  },
-  {
-   "line": 42,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/2/value",
-   "node": "rule/grounded-ship-keeps-only-keepers/alert/text/1",
-   "rule_line": 13
+   "rule_line": 11
   },
   {
    "line": 43,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/3/jref",
-   "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/2",
-   "rule_line": 13
+   "template_line": 255,
+   "path": "/queries/1/itab",
+   "node": "rule/grounded-ship-keeps-only-keepers/join",
+   "rule_line": 10
   },
   {
    "line": 44,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/4/value",
-   "node": "rule/grounded-ship-keeps-only-keepers/alert/text/2",
-   "rule_line": 13
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/1/jref",
+   "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/1",
+   "rule_line": 14
   },
   {
    "line": 45,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/5/jref",
-   "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/3",
-   "rule_line": 13
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/2/value",
+   "node": "rule/grounded-ship-keeps-only-keepers/alert/text/1",
+   "rule_line": 14
   },
   {
    "line": 46,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/6/value",
-   "node": "rule/grounded-ship-keeps-only-keepers/alert/text/3",
-   "rule_line": 13
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/3/jref",
+   "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/2",
+   "rule_line": 14
   },
   {
    "line": 47,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/7/jref",
-   "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/4",
-   "rule_line": 13
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/4/value",
+   "node": "rule/grounded-ship-keeps-only-keepers/alert/text/2",
+   "rule_line": 14
   },
   {
    "line": 48,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/8/value",
-   "node": "rule/grounded-ship-keeps-only-keepers/alert/text/4",
-   "rule_line": 13
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/5/jref",
+   "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/3",
+   "rule_line": 14
   },
   {
    "line": 49,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/9/jref",
-   "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/5",
-   "rule_line": 13
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/6/value",
+   "node": "rule/grounded-ship-keeps-only-keepers/alert/text/3",
+   "rule_line": 14
   },
   {
    "line": 50,
-   "template_line": 330,
-   "path": "/queries/1",
-   "node": "rule/grounded-ship-keeps-only-keepers/join",
-   "rule_line": 9
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/7/jref",
+   "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/4",
+   "rule_line": 14
   },
   {
    "line": 51,
-   "template_line": 332,
-   "path": "/queries/1",
-   "node": "rule/grounded-ship-keeps-only-keepers/join",
-   "rule_line": 9
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/8/value",
+   "node": "rule/grounded-ship-keeps-only-keepers/alert/text/4",
+   "rule_line": 14
   },
   {
    "line": 52,
-   "template_line": 384,
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/9/jref",
+   "node": "rule/grounded-ship-keeps-only-keepers/alert/hole/5",
+   "rule_line": 14
+  },
+  {
+   "line": 53,
+   "template_line": 336,
+   "path": "/queries/1",
+   "node": "rule/grounded-ship-keeps-only-keepers/join",
+   "rule_line": 10
+  },
+  {
+   "line": 54,
+   "template_line": 338,
+   "path": "/queries/1",
+   "node": "rule/grounded-ship-keeps-only-keepers/join",
+   "rule_line": 10
+  },
+  {
+   "line": 55,
+   "template_line": 390,
    "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4
   },
   {
-   "line": 53,
-   "template_line": 385,
+   "line": 56,
+   "template_line": 391,
    "path": "/",
    "node": "rule/grounded-ship-keeps-only-keepers",
    "rule_line": 4

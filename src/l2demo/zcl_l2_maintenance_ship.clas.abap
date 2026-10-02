@@ -2,8 +2,10 @@
 * Rule maintenance-ship-no-future-voyage: A ship in maintenance has no voyage departing after the check date
 CLASS zcl_l2_maintenance_ship DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
+    TYPES tt_range TYPE RANGE OF zosd_l2_ship-ship_id.
     CLASS-METHODS check
       IMPORTING iv_date TYPE d
+                it_range TYPE tt_range OPTIONAL
       RETURNING VALUE(rt_alerts) TYPE string_table.
 ENDCLASS.
 
@@ -30,6 +32,7 @@ CLASS zcl_l2_maintenance_ship IMPLEMENTATION.
       INTO CORRESPONDING FIELDS OF TABLE lt_join
       WHERE ship~status = 'M'
         AND voy~dep_date > iv_date
+        AND ship~ship_id IN it_range
       ORDER BY
         ship~ship_id
         voy~voyage_id.

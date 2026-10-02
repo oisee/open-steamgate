@@ -1329,7 +1329,7 @@ ENDCLASS.
         const run = spawnSync(process.execPath, ["tools/dsl-l3.mjs", "explain", `fleet/ship-cargo-limit/${row.hash.slice(7, 19)}/${DATE}/1`, "--db", dbPath], {encoding: "utf8"});
         expect(run.status, run.stderr).to.equal(0);
         expect(run.stdout).to.include("text    S003: 1100.50 kg booked");
-        expect(run.stdout).to.match(/line {4}src\/l2demo\/ship_cargo_limit\.l2\.yaml:9: alert:/);
+        expect(run.stdout).to.match(/line {4}src\/l2demo\/ship_cargo_limit\.l2\.yaml:10: alert:/);
       });
 
       it("a hash no version of the rule carried is refused", async () => {

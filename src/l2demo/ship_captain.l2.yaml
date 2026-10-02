@@ -5,6 +5,7 @@ rule: ship-in-service-has-a-captain
 class: zcl_l2_ship_captain
 title: A ship in service has a captain aboard on the check date
 for: ZOSD_L2_SHIP as ship
+range: ship.ship_id
 when: ship.status = 'A'
 require:
   exists: ZOSD_L2_CREW as crew
@@ -52,3 +53,14 @@ examples:
     rows:
       ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
     expect: []
+
+  - name: the range keeps the inner ship
+    date: 20261001
+    range: [{sign: I, option: EQ, low: S002}]
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: A}
+        - {ship_id: S002, name: Cormorant, status: A}
+        - {ship_id: S004, name: Dove, status: A}
+    expect:
+      - "S002 Cormorant: in service without a captain"

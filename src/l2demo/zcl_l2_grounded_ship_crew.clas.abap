@@ -2,8 +2,10 @@
 * Rule grounded-ship-keeps-only-keepers: A grounded ship has no crew aboard but its keepers and those joining later
 CLASS zcl_l2_grounded_ship_crew DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
+    TYPES tt_range TYPE RANGE OF zosd_l2_ship-ship_id.
     CLASS-METHODS check
       IMPORTING iv_date TYPE d
+                it_range TYPE tt_range OPTIONAL
       RETURNING VALUE(rt_alerts) TYPE string_table.
 ENDCLASS.
 
@@ -34,6 +36,7 @@ CLASS zcl_l2_grounded_ship_crew IMPLEMENTATION.
            OR ship~status = 'D' )
         AND NOT ( crew~role = 'K'
            OR crew~since > iv_date )
+        AND ship~ship_id IN it_range
       ORDER BY
         ship~ship_id
         crew~crew_id.

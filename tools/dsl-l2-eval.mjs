@@ -13,6 +13,7 @@
 //
 // The compiler's own word list stays empty of any domain: tables, fields and
 // values arrive in the model.
+import {inRange} from "./dsl-l2-range.mjs";
 import {INTEGERS, PACKED, INT_RANGE, kindOf, canonical, isOrdered, initialValue, scaled, sign, compareValues, render, formatDecimal, shiftDate} from "./dsl-l2-values.mjs";
 export {INTEGERS, PACKED, INT_RANGE, kindOf, canonical, isOrdered, initialValue, compareValues, render, shiftDate} from "./dsl-l2-values.mjs";
 
@@ -189,6 +190,7 @@ export function evaluate(model, rows, params = {}, override = {}) {
   const alerts = [];
   const each = (visit) => {
     for (const o of ordered(outer.table)) {
+      if (model.range && !inRange(params.$range, fieldsOf(outer.table)[model.range.field], valueOf(outer.table, o, model.range.field), compareValues)) continue;
       const context = {[outer.alias]: {table: outer.table, row: o}};
       if (whenHolds(context)) visit(context);
     }

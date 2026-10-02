@@ -2,6 +2,7 @@ rule: ship-min-crew
 class: zcl_l2_ship_min_crew
 title: An active ship has at least two crew members aboard on the check date
 for: ZOSD_L2_SHIP as ship
+range: ship.ship_id
 when: ship.status = 'A'
 limit:
   count: ZOSD_L2_CREW as crew
@@ -78,3 +79,14 @@ examples:
         - {crew_id: C00024, ship_id: S023, role: C, since: 20260101}
         - {crew_id: C00021, ship_id: S020, role: K, since: 20260201}
     expect: ["S021 Teal: 0 crew aboard", "S022 Lark: 1 crew aboard"]
+
+  - name: the range keeps the inner ship
+    date: 20261001
+    range: [{sign: I, option: BT, low: S002, high: S003}]
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: A}
+        - {ship_id: S002, name: Cormorant, status: A}
+        - {ship_id: S004, name: Dove, status: A}
+    expect:
+      - "S002 Cormorant: 0 crew aboard"

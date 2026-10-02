@@ -2,7 +2,7 @@
  "generator": "dsl-l2",
  "rule": "src/l2demo/ship_voyage_limit.l2.yaml",
  "template": "recipes/l2-check/template.tpl",
- "model": "sha256:817b24b38d55d3f382151282408eb931b80b70dc7ec29a2bfbf92fe7d8827f7f",
+ "model": "sha256:d5ba08cb38257a35fa27e16091cb1325fe0b3ad00dce9d5b1dfcb24d4e103596",
  "lines": [
   {
    "line": 1,
@@ -34,21 +34,21 @@
   },
   {
    "line": 5,
-   "template_line": 5,
-   "path": "/",
-   "node": "rule/ship-too-many-future-voyages",
-   "rule_line": 1
+   "template_line": 6,
+   "path": "/range/table",
+   "node": "rule/ship-too-many-future-voyages/range",
+   "rule_line": 5
   },
   {
    "line": 6,
-   "template_line": 6,
+   "template_line": 8,
    "path": "/",
    "node": "rule/ship-too-many-future-voyages",
    "rule_line": 1
   },
   {
    "line": 7,
-   "template_line": 10,
+   "template_line": 9,
    "path": "/",
    "node": "rule/ship-too-many-future-voyages",
    "rule_line": 1
@@ -56,405 +56,426 @@
   {
    "line": 8,
    "template_line": 11,
-   "path": "/",
-   "node": "rule/ship-too-many-future-voyages",
-   "rule_line": 1
+   "path": "/range",
+   "node": "rule/ship-too-many-future-voyages/range",
+   "rule_line": 5
   },
   {
    "line": 9,
-   "template_line": 12,
+   "template_line": 16,
    "path": "/",
    "node": "rule/ship-too-many-future-voyages",
    "rule_line": 1
   },
   {
    "line": 10,
-   "template_line": 13,
-   "path": "/class",
+   "template_line": 17,
+   "path": "/",
    "node": "rule/ship-too-many-future-voyages",
    "rule_line": 1
   },
   {
    "line": 11,
-   "template_line": 14,
+   "template_line": 18,
    "path": "/",
    "node": "rule/ship-too-many-future-voyages",
    "rule_line": 1
   },
   {
    "line": 12,
-   "template_line": 15,
-   "path": "/comment",
+   "template_line": 19,
+   "path": "/class",
    "node": "rule/ship-too-many-future-voyages",
    "rule_line": 1
   },
   {
    "line": 13,
-   "template_line": 17,
-   "path": "/queries/1/type",
-   "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
+   "template_line": 20,
+   "path": "/",
+   "node": "rule/ship-too-many-future-voyages",
+   "rule_line": 1
   },
   {
    "line": 14,
-   "template_line": 19,
+   "template_line": 21,
+   "path": "/comment",
+   "node": "rule/ship-too-many-future-voyages",
+   "rule_line": 1
+  },
+  {
+   "line": 15,
+   "template_line": 23,
+   "path": "/queries/1/type",
+   "node": "rule/ship-too-many-future-voyages/join",
+   "rule_line": 7
+  },
+  {
+   "line": 16,
+   "template_line": 25,
    "path": "/queries/1/fields/1/name",
    "node": "rule/ship-too-many-future-voyages/join/field/1",
    "rule_line": 4
   },
   {
-   "line": 15,
-   "template_line": 19,
+   "line": 17,
+   "template_line": 25,
    "path": "/queries/1/fields/2/name",
    "node": "rule/ship-too-many-future-voyages/join/field/2",
-   "rule_line": 10
-  },
-  {
-   "line": 16,
-   "template_line": 21,
-   "path": "/queries/1/type",
-   "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
-  },
-  {
-   "line": 17,
-   "template_line": 22,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
+   "rule_line": 11
   },
   {
    "line": 18,
-   "template_line": 23,
-   "path": "/queries/1/wa",
+   "template_line": 27,
+   "path": "/queries/1/type",
    "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
+   "rule_line": 7
   },
   {
    "line": 19,
-   "template_line": 25,
-   "path": "/queries/1/type",
+   "template_line": 28,
+   "path": "/queries/1/itab",
    "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
+   "rule_line": 7
   },
   {
    "line": 20,
-   "template_line": 56,
+   "template_line": 29,
+   "path": "/queries/1/wa",
+   "node": "rule/ship-too-many-future-voyages/join",
+   "rule_line": 7
+  },
+  {
+   "line": 21,
+   "template_line": 31,
+   "path": "/queries/1/type",
+   "node": "rule/ship-too-many-future-voyages/join",
+   "rule_line": 7
+  },
+  {
+   "line": 22,
+   "template_line": 62,
    "path": "/",
    "node": "rule/ship-too-many-future-voyages",
    "rule_line": 1
   },
   {
-   "line": 21,
-   "template_line": 62,
-   "path": "/threshold/is_count",
-   "node": "rule/ship-too-many-future-voyages/limit/more_than",
-   "rule_line": 9
-  },
-  {
-   "line": 22,
-   "template_line": 63,
-   "path": "/threshold/is_count",
-   "node": "rule/ship-too-many-future-voyages/limit/more_than",
-   "rule_line": 9
-  },
-  {
    "line": 23,
-   "template_line": 105,
-   "path": "/queries/1",
-   "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
+   "template_line": 68,
+   "path": "/threshold/is_count",
+   "node": "rule/ship-too-many-future-voyages/limit/more_than",
+   "rule_line": 10
   },
   {
    "line": 24,
-   "template_line": 120,
+   "template_line": 69,
+   "path": "/threshold/is_count",
+   "node": "rule/ship-too-many-future-voyages/limit/more_than",
+   "rule_line": 10
+  },
+  {
+   "line": 25,
+   "template_line": 111,
+   "path": "/queries/1",
+   "node": "rule/ship-too-many-future-voyages/join",
+   "rule_line": 7
+  },
+  {
+   "line": 26,
+   "template_line": 126,
    "path": "/queries/1/fields/1/source",
    "node": "rule/ship-too-many-future-voyages/join/field/1",
    "rule_line": 4
   },
   {
-   "line": 25,
-   "template_line": 120,
+   "line": 27,
+   "template_line": 126,
    "path": "/queries/1/fields/2/source",
    "node": "rule/ship-too-many-future-voyages/join/field/2",
-   "rule_line": 10
+   "rule_line": 11
   },
   {
-   "line": 26,
-   "template_line": 124,
+   "line": 28,
+   "template_line": 130,
    "path": "/queries/1/from/table",
    "node": "rule/ship-too-many-future-voyages/for",
    "rule_line": 4
   },
   {
-   "line": 27,
-   "template_line": 127,
+   "line": 29,
+   "template_line": 133,
    "path": "/queries/1/joins/1/table",
    "node": "rule/ship-too-many-future-voyages/limit/count",
-   "rule_line": 7
-  },
-  {
-   "line": 28,
-   "template_line": 129,
-   "path": "/queries/1/joins/1/on/1/lhs",
-   "node": "rule/ship-too-many-future-voyages/limit/where/1",
    "rule_line": 8
-  },
-  {
-   "line": 29,
-   "template_line": 132,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
   },
   {
    "line": 30,
-   "template_line": 134,
-   "path": "/queries/1/where/1/pre",
-   "node": "rule/ship-too-many-future-voyages/when/1",
-   "rule_line": 5
+   "template_line": 135,
+   "path": "/queries/1/joins/1/on/1/lhs",
+   "node": "rule/ship-too-many-future-voyages/limit/where/1",
+   "rule_line": 9
   },
   {
    "line": 31,
-   "template_line": 134,
-   "path": "/queries/1/where/2/pre",
-   "node": "rule/ship-too-many-future-voyages/limit/where/2",
-   "rule_line": 8
+   "template_line": 138,
+   "path": "/queries/1/itab",
+   "node": "rule/ship-too-many-future-voyages/join",
+   "rule_line": 7
   },
   {
    "line": 32,
-   "template_line": 136,
-   "path": "/queries/1",
-   "node": "rule/ship-too-many-future-voyages/join",
+   "template_line": 140,
+   "path": "/queries/1/where/1/pre",
+   "node": "rule/ship-too-many-future-voyages/when/1",
    "rule_line": 6
   },
   {
    "line": 33,
-   "template_line": 138,
+   "template_line": 140,
+   "path": "/queries/1/where/2/pre",
+   "node": "rule/ship-too-many-future-voyages/limit/where/2",
+   "rule_line": 9
+  },
+  {
+   "line": 34,
+   "template_line": 140,
+   "path": "/queries/1/where/3/pre",
+   "node": "rule/ship-too-many-future-voyages/range",
+   "rule_line": 5
+  },
+  {
+   "line": 35,
+   "template_line": 142,
+   "path": "/queries/1",
+   "node": "rule/ship-too-many-future-voyages/join",
+   "rule_line": 7
+  },
+  {
+   "line": 36,
+   "template_line": 144,
    "path": "/queries/1/order/1/source",
    "node": "rule/ship-too-many-future-voyages/join/order/1",
    "rule_line": 4
   },
   {
-   "line": 34,
-   "template_line": 247,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
-  },
-  {
-   "line": 35,
-   "template_line": 249,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
-  },
-  {
-   "line": 36,
-   "template_line": 253,
-   "path": "/queries/1/key_change",
-   "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
-  },
-  {
    "line": 37,
-   "template_line": 254,
-   "path": "/queries/1/limit/op",
-   "node": "rule/ship-too-many-future-voyages/limit/more_than",
-   "rule_line": 9
+   "template_line": 253,
+   "path": "/queries/1/itab",
+   "node": "rule/ship-too-many-future-voyages/join",
+   "rule_line": 7
   },
   {
    "line": 38,
    "template_line": 255,
-   "path": "/queries/1/limit/aggregate/is_count",
-   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "path": "/queries/1/itab",
+   "node": "rule/ship-too-many-future-voyages/join",
    "rule_line": 7
   },
   {
    "line": 39,
-   "template_line": 256,
-   "path": "/queries/1/limit/aggregate/is_count",
-   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "template_line": 259,
+   "path": "/queries/1/key_change",
+   "node": "rule/ship-too-many-future-voyages/join",
    "rule_line": 7
   },
   {
    "line": 40,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/1/jref",
-   "node": "rule/ship-too-many-future-voyages/alert/hole/1",
+   "template_line": 260,
+   "path": "/queries/1/limit/op",
+   "node": "rule/ship-too-many-future-voyages/limit/more_than",
    "rule_line": 10
   },
   {
    "line": 41,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/2/value",
-   "node": "rule/ship-too-many-future-voyages/alert/text/1",
-   "rule_line": 10
+   "template_line": 261,
+   "path": "/queries/1/limit/aggregate/is_count",
+   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "rule_line": 8
   },
   {
    "line": 42,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/3/jref",
-   "node": "rule/ship-too-many-future-voyages/alert/hole/2",
-   "rule_line": 10
+   "template_line": 262,
+   "path": "/queries/1/limit/aggregate/is_count",
+   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "rule_line": 8
   },
   {
    "line": 43,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/4/value",
-   "node": "rule/ship-too-many-future-voyages/alert/text/2",
-   "rule_line": 10
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/1/jref",
+   "node": "rule/ship-too-many-future-voyages/alert/hole/1",
+   "rule_line": 11
   },
   {
    "line": 44,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/5/jref",
-   "node": "rule/ship-too-many-future-voyages/alert/count",
-   "rule_line": 10
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/2/value",
+   "node": "rule/ship-too-many-future-voyages/alert/text/1",
+   "rule_line": 11
   },
   {
    "line": 45,
-   "template_line": 293,
-   "path": "/queries/1/alert_parts/6/value",
-   "node": "rule/ship-too-many-future-voyages/alert/text/3",
-   "rule_line": 10
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/3/jref",
+   "node": "rule/ship-too-many-future-voyages/alert/hole/2",
+   "rule_line": 11
   },
   {
    "line": 46,
-   "template_line": 298,
-   "path": "/queries/1/limit/aggregate/is_count",
-   "node": "rule/ship-too-many-future-voyages/limit/count",
-   "rule_line": 7
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/4/value",
+   "node": "rule/ship-too-many-future-voyages/alert/text/2",
+   "rule_line": 11
   },
   {
    "line": 47,
    "template_line": 299,
-   "path": "/queries/1/limit/aggregate/is_count",
-   "node": "rule/ship-too-many-future-voyages/limit/count",
-   "rule_line": 7
+   "path": "/queries/1/alert_parts/5/jref",
+   "node": "rule/ship-too-many-future-voyages/alert/count",
+   "rule_line": 11
   },
   {
    "line": 48,
-   "template_line": 300,
-   "path": "/queries/1/limit/aggregate/is_count",
-   "node": "rule/ship-too-many-future-voyages/limit/count",
-   "rule_line": 7
+   "template_line": 299,
+   "path": "/queries/1/alert_parts/6/value",
+   "node": "rule/ship-too-many-future-voyages/alert/text/3",
+   "rule_line": 11
   },
   {
    "line": 49,
-   "template_line": 301,
+   "template_line": 304,
    "path": "/queries/1/limit/aggregate/is_count",
    "node": "rule/ship-too-many-future-voyages/limit/count",
-   "rule_line": 7
+   "rule_line": 8
   },
   {
    "line": 50,
-   "template_line": 302,
+   "template_line": 305,
    "path": "/queries/1/limit/aggregate/is_count",
    "node": "rule/ship-too-many-future-voyages/limit/count",
-   "rule_line": 7
+   "rule_line": 8
   },
   {
    "line": 51,
-   "template_line": 303,
-   "path": "/queries/1/wa",
-   "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
+   "template_line": 306,
+   "path": "/queries/1/limit/aggregate/is_count",
+   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "rule_line": 8
   },
   {
    "line": 52,
-   "template_line": 332,
-   "path": "/queries/1",
-   "node": "rule/ship-too-many-future-voyages/join",
-   "rule_line": 6
+   "template_line": 307,
+   "path": "/queries/1/limit/aggregate/is_count",
+   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "rule_line": 8
   },
   {
    "line": 53,
-   "template_line": 336,
-   "path": "/queries/1/limit/op",
-   "node": "rule/ship-too-many-future-voyages/limit/more_than",
-   "rule_line": 9
+   "template_line": 308,
+   "path": "/queries/1/limit/aggregate/is_count",
+   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "rule_line": 8
   },
   {
    "line": 54,
-   "template_line": 337,
-   "path": "/queries/1/limit/aggregate/is_count",
-   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "template_line": 309,
+   "path": "/queries/1/wa",
+   "node": "rule/ship-too-many-future-voyages/join",
    "rule_line": 7
   },
   {
    "line": 55,
    "template_line": 338,
-   "path": "/queries/1/limit/aggregate/is_count",
-   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "path": "/queries/1",
+   "node": "rule/ship-too-many-future-voyages/join",
    "rule_line": 7
   },
   {
    "line": 56,
-   "template_line": 373,
-   "path": "/queries/1/alert_parts/1/jref",
-   "node": "rule/ship-too-many-future-voyages/alert/hole/1",
+   "template_line": 342,
+   "path": "/queries/1/limit/op",
+   "node": "rule/ship-too-many-future-voyages/limit/more_than",
    "rule_line": 10
   },
   {
    "line": 57,
-   "template_line": 373,
-   "path": "/queries/1/alert_parts/2/value",
-   "node": "rule/ship-too-many-future-voyages/alert/text/1",
-   "rule_line": 10
+   "template_line": 343,
+   "path": "/queries/1/limit/aggregate/is_count",
+   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "rule_line": 8
   },
   {
    "line": 58,
-   "template_line": 373,
-   "path": "/queries/1/alert_parts/3/jref",
-   "node": "rule/ship-too-many-future-voyages/alert/hole/2",
-   "rule_line": 10
+   "template_line": 344,
+   "path": "/queries/1/limit/aggregate/is_count",
+   "node": "rule/ship-too-many-future-voyages/limit/count",
+   "rule_line": 8
   },
   {
    "line": 59,
-   "template_line": 373,
-   "path": "/queries/1/alert_parts/4/value",
-   "node": "rule/ship-too-many-future-voyages/alert/text/2",
-   "rule_line": 10
+   "template_line": 379,
+   "path": "/queries/1/alert_parts/1/jref",
+   "node": "rule/ship-too-many-future-voyages/alert/hole/1",
+   "rule_line": 11
   },
   {
    "line": 60,
-   "template_line": 373,
-   "path": "/queries/1/alert_parts/5/jref",
-   "node": "rule/ship-too-many-future-voyages/alert/count",
-   "rule_line": 10
+   "template_line": 379,
+   "path": "/queries/1/alert_parts/2/value",
+   "node": "rule/ship-too-many-future-voyages/alert/text/1",
+   "rule_line": 11
   },
   {
    "line": 61,
-   "template_line": 373,
-   "path": "/queries/1/alert_parts/6/value",
-   "node": "rule/ship-too-many-future-voyages/alert/text/3",
-   "rule_line": 10
+   "template_line": 379,
+   "path": "/queries/1/alert_parts/3/jref",
+   "node": "rule/ship-too-many-future-voyages/alert/hole/2",
+   "rule_line": 11
   },
   {
    "line": 62,
-   "template_line": 375,
-   "path": "/queries/1/limit",
-   "node": "rule/ship-too-many-future-voyages/limit/more_than",
-   "rule_line": 9
+   "template_line": 379,
+   "path": "/queries/1/alert_parts/4/value",
+   "node": "rule/ship-too-many-future-voyages/alert/text/2",
+   "rule_line": 11
   },
   {
    "line": 63,
-   "template_line": 376,
-   "path": "/queries/1/limit",
-   "node": "rule/ship-too-many-future-voyages/limit/more_than",
-   "rule_line": 9
+   "template_line": 379,
+   "path": "/queries/1/alert_parts/5/jref",
+   "node": "rule/ship-too-many-future-voyages/alert/count",
+   "rule_line": 11
   },
   {
    "line": 64,
-   "template_line": 384,
+   "template_line": 379,
+   "path": "/queries/1/alert_parts/6/value",
+   "node": "rule/ship-too-many-future-voyages/alert/text/3",
+   "rule_line": 11
+  },
+  {
+   "line": 65,
+   "template_line": 381,
+   "path": "/queries/1/limit",
+   "node": "rule/ship-too-many-future-voyages/limit/more_than",
+   "rule_line": 10
+  },
+  {
+   "line": 66,
+   "template_line": 382,
+   "path": "/queries/1/limit",
+   "node": "rule/ship-too-many-future-voyages/limit/more_than",
+   "rule_line": 10
+  },
+  {
+   "line": 67,
+   "template_line": 390,
    "path": "/",
    "node": "rule/ship-too-many-future-voyages",
    "rule_line": 1
   },
   {
-   "line": 65,
-   "template_line": 385,
+   "line": 68,
+   "template_line": 391,
    "path": "/",
    "node": "rule/ship-too-many-future-voyages",
    "rule_line": 1

@@ -2,8 +2,14 @@
 * Rule {{rule}}: {{title}}
 CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
+{{#range}}
+    TYPES tt_range TYPE RANGE OF {{table}}-{{field}}.
+{{/range}}
     CLASS-METHODS check
       IMPORTING iv_date TYPE d
+{{#range}}
+                it_range TYPE tt_range OPTIONAL
+{{/range}}
 {{#params}}
                 {{ref}} TYPE {{type_name}}{{#default}} DEFAULT {{default | literal}}{{/default}}
 {{/params}}

@@ -2,6 +2,7 @@ rule: ship-cargo-limit
 class: zcl_l2_ship_cargo_limit
 title: A ship books no more than 1000 kilograms across its cargo
 for: ZOSD_L2_SHIP as ship
+range: ship.ship_id
 limit:
   sum: ZOSD_L2_CARGO.weight as cargo
   where: cargo.ship_id = ship.ship_id
@@ -45,3 +46,18 @@ examples:
         - {cargo_id: C00012, ship_id: S011, weight: 500.01}
         - {cargo_id: C00013, ship_id: S011, weight: 500.00}
     expect: ["S011: 1000.01 kg booked"]
+
+  - name: the range keeps the inner ship
+    date: 20261001
+    range: [{sign: I, option: BT, low: S002, high: S003}]
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: A}
+        - {ship_id: S002, name: Cormorant, status: A}
+        - {ship_id: S004, name: Dove, status: A}
+      ZOSD_L2_CARGO:
+        - {cargo_id: C00001, ship_id: S001, weight: 1000.01}
+        - {cargo_id: C00002, ship_id: S002, weight: 1000.01}
+        - {cargo_id: C00004, ship_id: S004, weight: 1000.01}
+    expect:
+      - "S002: 1000.01 kg booked"

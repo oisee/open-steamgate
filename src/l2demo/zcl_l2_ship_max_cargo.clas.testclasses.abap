@@ -7,11 +7,13 @@
 * own tables and its teardown deletes them again by key.
 CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT FINAL.
   PRIVATE SECTION.
+    TYPES tt_range TYPE RANGE OF zosd_l2_ship-ship_id.
     DATA mt_zosd_l2_ship TYPE STANDARD TABLE OF zosd_l2_ship WITH DEFAULT KEY.
     DATA mt_zosd_l2_cargo TYPE STANDARD TABLE OF zosd_l2_cargo WITH DEFAULT KEY.
     METHODS teardown.
     METHODS check_reference
       IMPORTING iv_date TYPE d
+                it_range TYPE tt_range OPTIONAL
       RETURNING VALUE(rt_alerts) TYPE string_table.
     METHODS assert_alerts
       IMPORTING it_act TYPE string_table it_exp TYPE string_table iv_example TYPE string.
@@ -20,6 +22,7 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
     METHODS maximum_over FOR TESTING.
     METHODS maximum_at_limit FOR TESTING.
     METHODS empty_group FOR TESTING.
+    METHODS the_range_keeps_the_inner_ship FOR TESTING.
     METHODS b_ship_id_match FOR TESTING.
     METHODS b_ship_id_nomatch FOR TESTING.
     METHODS b_max_at FOR TESTING.
@@ -48,6 +51,7 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lv_aggregate_abs TYPE p LENGTH 16 DECIMALS 2.
     DATA lv_aggregate_seen TYPE c LENGTH 1.
     SELECT * FROM zosd_l2_ship INTO TABLE lt_ship
+      WHERE ship_id IN it_range
       ORDER BY PRIMARY KEY.
     LOOP AT lt_ship INTO ls_ship.
       SELECT weight FROM zosd_l2_cargo INTO TABLE lt_aggregate_values
@@ -103,6 +107,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S020'.
@@ -124,8 +130,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_cargo TO mt_zosd_l2_cargo.
     INSERT zosd_l2_cargo FROM TABLE mt_zosd_l2_cargo.
     APPEND `S020: heaviest cargo is 2.50 kg` TO lt_exp.
-    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `maximum over (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `maximum over` ).
   ENDMETHOD.
@@ -136,6 +142,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S021'.
@@ -150,8 +158,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_cargo-weight = '2.00'.
     APPEND ls_zosd_l2_cargo TO mt_zosd_l2_cargo.
     INSERT zosd_l2_cargo FROM TABLE mt_zosd_l2_cargo.
-    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `maximum at limit (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `maximum at limit` ).
   ENDMETHOD.
@@ -161,6 +169,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S022'.
@@ -168,10 +178,69 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_ship-status = 'A'.
     APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
     INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
-    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `empty group (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `empty group` ).
+  ENDMETHOD.
+
+  METHOD the_range_keeps_the_inner_ship.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_cargo TYPE zosd_l2_cargo.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
+    CLEAR ls_range.
+    ls_range-sign = 'I'.
+    ls_range-option = 'BT'.
+    ls_range-low = 'S002'.
+    ls_range-high = 'S003'.
+    APPEND ls_range TO lt_range.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S001'.
+    ls_zosd_l2_ship-name = 'Albatross'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S002'.
+    ls_zosd_l2_ship-name = 'Cormorant'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S004'.
+    ls_zosd_l2_ship-name = 'Dove'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_cargo.
+    ls_zosd_l2_cargo-mandt = sy-mandt.
+    ls_zosd_l2_cargo-cargo_id = 'C00001'.
+    ls_zosd_l2_cargo-ship_id = 'S001'.
+    ls_zosd_l2_cargo-weight = '2.50'.
+    APPEND ls_zosd_l2_cargo TO mt_zosd_l2_cargo.
+    CLEAR ls_zosd_l2_cargo.
+    ls_zosd_l2_cargo-mandt = sy-mandt.
+    ls_zosd_l2_cargo-cargo_id = 'C00002'.
+    ls_zosd_l2_cargo-ship_id = 'S002'.
+    ls_zosd_l2_cargo-weight = '2.50'.
+    APPEND ls_zosd_l2_cargo TO mt_zosd_l2_cargo.
+    CLEAR ls_zosd_l2_cargo.
+    ls_zosd_l2_cargo-mandt = sy-mandt.
+    ls_zosd_l2_cargo-cargo_id = 'C00004'.
+    ls_zosd_l2_cargo-ship_id = 'S004'.
+    ls_zosd_l2_cargo-weight = '2.50'.
+    APPEND ls_zosd_l2_cargo TO mt_zosd_l2_cargo.
+    INSERT zosd_l2_cargo FROM TABLE mt_zosd_l2_cargo.
+    APPEND `S002: heaviest cargo is 2.50 kg` TO lt_exp.
+    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `the range keeps the inner ship (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `the range keeps the inner ship` ).
   ENDMETHOD.
 
   METHOD b_ship_id_match.
@@ -180,6 +249,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S020'.
@@ -195,8 +266,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_zosd_l2_cargo TO mt_zosd_l2_cargo.
     INSERT zosd_l2_cargo FROM TABLE mt_zosd_l2_cargo.
     APPEND `S020: heaviest cargo is 2.01 kg` TO lt_exp.
-    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `cargo.ship_id = ship.ship_id: match (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `cargo.ship_id = ship.ship_id: match` ).
   ENDMETHOD.
@@ -207,6 +278,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S020'.
@@ -221,8 +294,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_cargo-weight = '2.01'.
     APPEND ls_zosd_l2_cargo TO mt_zosd_l2_cargo.
     INSERT zosd_l2_cargo FROM TABLE mt_zosd_l2_cargo.
-    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `cargo.ship_id = ship.ship_id: nomatch (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `cargo.ship_id = ship.ship_id: nomatch` ).
   ENDMETHOD.
@@ -233,6 +306,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lt_act TYPE string_table.
     DATA lt_ref TYPE string_table.
     DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
     CLEAR ls_zosd_l2_ship.
     ls_zosd_l2_ship-mandt = sy-mandt.
     ls_zosd_l2_ship-ship_id = 'S020'.
@@ -247,8 +322,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_zosd_l2_cargo-weight = '2.00'.
     APPEND ls_zosd_l2_cargo TO mt_zosd_l2_cargo.
     INSERT zosd_l2_cargo FROM TABLE mt_zosd_l2_cargo.
-    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' ).
-    lt_ref = check_reference( iv_date = '20261001' ).
+    lt_act = zcl_l2_ship_max_cargo=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `the group's max is 2.00: at (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `the group's max is 2.00: at` ).
   ENDMETHOD.

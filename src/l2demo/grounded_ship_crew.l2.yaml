@@ -5,6 +5,7 @@ rule: grounded-ship-keeps-only-keepers
 class: zcl_l2_grounded_ship_crew
 title: A grounded ship has no crew aboard but its keepers and those joining later
 for: ZOSD_L2_SHIP as ship
+range: ship.ship_id
 when: ship.status = 'M' or ship.status = 'D'
 forbid:
   exists: ZOSD_L2_CREW as crew
@@ -58,3 +59,18 @@ examples:
     expect:
       - "S001 Albatross: grounded, crew C00008 (E) aboard since 20250101"
       - "S004 Skua: grounded, crew C00006 (C) aboard since 20250101"
+
+  - name: the range keeps the inner ship
+    date: 20261001
+    range: [{sign: I, option: BT, low: S002, high: S003}]
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S002, name: Cormorant, status: M}
+        - {ship_id: S004, name: Dove, status: M}
+      ZOSD_L2_CREW:
+        - {crew_id: C00001, ship_id: S001, role: E, since: 20260101}
+        - {crew_id: C00002, ship_id: S002, role: E, since: 20260101}
+        - {crew_id: C00004, ship_id: S004, role: E, since: 20260101}
+    expect:
+      - "S002 Cormorant: grounded, crew C00002 (E) aboard since 20260101"

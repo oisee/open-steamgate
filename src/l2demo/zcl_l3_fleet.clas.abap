@@ -24,17 +24,17 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_sequential TYPE c LENGTH 1 VALUE 'S'.
     CONSTANTS c_parallel TYPE c LENGTH 1 VALUE 'P'.
     CONSTANTS c_rule_1 TYPE zosd_l3_alert-rule_name VALUE 'maintenance-ship-no-future-voyage'.
-    CONSTANTS c_hash_1 TYPE zosd_l3_alert-model_hash VALUE 'sha256:5b94ace0a8ae6ea8dd37f2fa41f62ff23aa83e6533a88f0301c495753e7652a1'.
+    CONSTANTS c_hash_1 TYPE zosd_l3_alert-model_hash VALUE 'sha256:44dac8cf4f02744f207591d59ab67f90ec0108133257850d785acf7c43a0687f'.
     CONSTANTS c_rule_2 TYPE zosd_l3_alert-rule_name VALUE 'grounded-ship-keeps-only-keepers'.
-    CONSTANTS c_hash_2 TYPE zosd_l3_alert-model_hash VALUE 'sha256:2b72e97ce478f2a42dfc8e105f67dead7260925b87f6634c0f92f8bc4fd33f2f'.
+    CONSTANTS c_hash_2 TYPE zosd_l3_alert-model_hash VALUE 'sha256:b394b7c481c2078cec32dd098774403af021f9b5992e10060c4df66f30a2ec63'.
     CONSTANTS c_rule_3 TYPE zosd_l3_alert-rule_name VALUE 'ship-in-service-has-a-captain'.
-    CONSTANTS c_hash_3 TYPE zosd_l3_alert-model_hash VALUE 'sha256:9fe75f5ad8fa0127298f0c96195200b12eabaea019b569d569fde6276b153a29'.
+    CONSTANTS c_hash_3 TYPE zosd_l3_alert-model_hash VALUE 'sha256:541dc87e89655211663aa5c44b2caaa6f33cf422670c3bb68f01108e25c7a7b8'.
     CONSTANTS c_rule_4 TYPE zosd_l3_alert-rule_name VALUE 'ship-too-many-future-voyages'.
-    CONSTANTS c_hash_4 TYPE zosd_l3_alert-model_hash VALUE 'sha256:817b24b38d55d3f382151282408eb931b80b70dc7ec29a2bfbf92fe7d8827f7f'.
+    CONSTANTS c_hash_4 TYPE zosd_l3_alert-model_hash VALUE 'sha256:d5ba08cb38257a35fa27e16091cb1325fe0b3ad00dce9d5b1dfcb24d4e103596'.
     CONSTANTS c_rule_5 TYPE zosd_l3_alert-rule_name VALUE 'ship-min-crew'.
-    CONSTANTS c_hash_5 TYPE zosd_l3_alert-model_hash VALUE 'sha256:7e156d101af7385078bddbeb4aec645f470ffa22ec9e156a36d5d1fa07741013'.
+    CONSTANTS c_hash_5 TYPE zosd_l3_alert-model_hash VALUE 'sha256:d6bd4b7056cc98985ff457a7c4e5441515492e9316cb4c64a06f2214777204b0'.
     CONSTANTS c_rule_6 TYPE zosd_l3_alert-rule_name VALUE 'ship-cargo-limit'.
-    CONSTANTS c_hash_6 TYPE zosd_l3_alert-model_hash VALUE 'sha256:6dc361bcc17b388fe102c33fead3d7dd38d6b4993437e78ec508424e0e0f50a5'.
+    CONSTANTS c_hash_6 TYPE zosd_l3_alert-model_hash VALUE 'sha256:85e96ae3fa817522ecb9141d874a5109bc21e78a8106bf0deb3f2651b338d782'.
     " not run: ship-max-cargo (src/l2demo/ship_max_cargo.l2.yaml), enabled: false in the set
     " iv_bind: the variant of each port for this run, "port=variant,port=variant";
     " a port it does not name keeps the manifest's binding. A source that is not
@@ -196,7 +196,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_run = iv_run
                          iv_class = 'zcl_l2_maintenance_ship'
                          iv_file = 'src/l2demo/maintenance_ship.l2.yaml'
-                         iv_line = 12
+                         iv_line = 13
                          it_alerts = lt_alerts
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
@@ -208,7 +208,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_run = iv_run
                          iv_class = 'zcl_l2_grounded_ship_crew'
                          iv_file = 'src/l2demo/grounded_ship_crew.l2.yaml'
-                         iv_line = 13
+                         iv_line = 14
                          it_alerts = lt_alerts
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
@@ -220,7 +220,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_run = iv_run
                          iv_class = 'zcl_l2_ship_captain'
                          iv_file = 'src/l2demo/ship_captain.l2.yaml'
-                         iv_line = 12
+                         iv_line = 13
                          it_alerts = lt_alerts
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
@@ -232,7 +232,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_run = iv_run
                          iv_class = 'zcl_l2_ship_voyage_limit'
                          iv_file = 'src/l2demo/ship_voyage_limit.l2.yaml'
-                         iv_line = 10
+                         iv_line = 11
                          it_alerts = lt_alerts
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
@@ -244,7 +244,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_run = iv_run
                          iv_class = 'zcl_l2_ship_min_crew'
                          iv_file = 'src/l2demo/ship_min_crew.l2.yaml'
-                         iv_line = 10
+                         iv_line = 11
                          it_alerts = lt_alerts
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
@@ -256,7 +256,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
                          iv_run = iv_run
                          iv_class = 'zcl_l2_ship_cargo_limit'
                          iv_file = 'src/l2demo/ship_cargo_limit.l2.yaml'
-                         iv_line = 9
+                         iv_line = 10
                          it_alerts = lt_alerts
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
