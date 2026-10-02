@@ -1296,11 +1296,12 @@ plain `--sync` refuses it, and `--shared` also refuses a clone with
 uncommitted changes, so commit held changes to a branch inside the clone
 first (it moves to `.local/dev` with that branch). Run it from any
 up-to-date checkout whose `.local/lars` resolves to the shared folder: the
-pins and the lock come from that checkout, the clones from the folder its
-`.local/lars` points at, so a main checkout parked on an old branch without
-`libs.lock.json` is migrated from a fresh `origin/main` worktree with
-`.local/lars` linked to it. A folder there that is not a git clone at all is
-moved to `.local/dev` by hand before the run. Afterwards
+lock comes from that checkout, while the clones, `.local/pins` and
+`.local/dev` all sit next to the folder its `.local/lars` resolves to. So a
+main checkout parked on an old branch without `libs.lock.json` is migrated
+from a fresh `origin/main` worktree with `.local/lars` linked to it. A
+folder there that is not a git clone is moved to `.local/dev` by the run
+itself, with a log line. Afterwards
 `node tools/osd-libs.mjs --status` lists every library as ready.
 
 CI keeps real clones under
