@@ -137,7 +137,8 @@ describe("DSL L3 hardening: claims, set-scoped writes and unschedule refusals", 
       const deps = [...tables.map((f) => join("src/dsl", f)),
         ...["tbtcjob.tabl.xml", "btcselect.tabl.xml", "btch0000.tabl.xml", "zcl_osd_submit_semantics.clas.abap", "zcl_osd_submit_ranges.clas.abap"].map((f) => join("src/jobs", f)),
         "gen/gui/zcl_osd_batch_report.clas.abap", ".local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap",
-        ...readdirSync(OUT).filter((f) => /\.(abap|xml)$/.test(f) && !f.startsWith(`${real}.`)).map((f) => join(OUT, f)),
+        // the cockpit's DPC_EXT (zcl_zl3c_*) needs its gen/stg base and the Gateway; the mutants do not
+        ...readdirSync(OUT).filter((f) => /\.(abap|xml)$/.test(f) && !f.startsWith(`${real}.`) && !f.startsWith("zcl_zl3c_")).map((f) => join(OUT, f)),
         ...["ddic/ttyp/string_table.ttyp.xml", "ddic/structures/symsg.tabl.xml"].map((f) => join(coreDir, f)),
         ...["uuid", "exceptions", ".", "ddic/dtel", "ddic/doma", "date_time"].flatMap((d) => readdirSync(join(coreDir, d)).filter((f) => /\.(abap|xml)$/.test(f)).map((f) => join(coreDir, d, f)))];
       for (const dep of deps) reg.addDependency(new parser.MemoryFile(basename(dep), readFileSync(dep, "utf8")));

@@ -1,4 +1,5 @@
 // VSIX packaging scenarios, run in the full CI profile.
+import {cockpitAppsOf} from "../tools/osd-cockpit-apps.mjs";
 import {expect} from "chai";
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
@@ -447,7 +448,9 @@ describe("packaging: the .vsix installs and runs outside this checkout (docs/vsc
     expect(tiles.status).to.equal(200);
     const expected = JSON.parse(readFileSync(join(osdHome, "packs", "zork", "osd-pack.json"), "utf8")).tiles ?? [];
     const actual = (await tiles.json()).tiles;
-    expect(actual).to.have.length(expected.length + 1);
+    // the packaged system's own tiles: Zork's, every generated run cockpit's, and the workspace pack's
+    const cockpits = cockpitAppsOf(osdHome).length;
+    expect(actual).to.have.length(expected.length + cockpits + 1);
     expect(actual.find((tile) => tile.pack === "b0-workspace")).to.include({id: "b0-workspace", url: "/app/b0-workspace/"});
     const workspacePage = await fetch(`${base}/app/b0-workspace/`);
     expect(workspacePage.status).to.equal(200);
