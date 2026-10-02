@@ -1343,7 +1343,14 @@ while its stage opened less than `stale` ago (the doctor resubmits it after that
 and marks a pile `FAILED` with one conditional `UPDATE` on the row as read (status and job
 count), so a job given to it meanwhile is never overwritten. `collect_waits_for_submit` is the
 state on its own, with no job: red before the fix
-(`'a pile its planner is still submitting is not lost'`), green after.
+(`'a pile its planner is still submitting is not lost'`), green after. Review round 2 added two more: `collect( )` fails a pile only for the job whose state it
+read (job name and count in the conditional `UPDATE`), so a pile resubmitted between its
+`SHOW_JOBSTATE` and its reread keeps its new job; and every assignment of the runner's settings
+other than the run's own (`doctor`, `resume`, `schedule`, `purge`, the restore after `heal( )` and
+`collect( )`) clears the cached run id, so a later `run_rule( )` of that run without selection
+values reads the run's scope again instead of the live values the doctor left behind. Clearing
+the cache was chosen over scoping on every call: a dry run has no snapshot, and its mode S
+`run_rule( )` calls must keep the values `run( )` loaded.
 
 `ZCL_L3_<SET>=>set_setting( iv_param, iv_value, iv_note )` validates with the
 same type and bounds rule as reading, writes a USER row and audit row, and

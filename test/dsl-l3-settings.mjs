@@ -386,6 +386,51 @@ describe("DSL L3 slice 5b: settings", function () {
       expect(logs()).to.have.length(before + 2);
     });
 
+    it("a run_rule( ) after the doctor reads its run's scope again, not the doctor's live values (review round 2, P2-B)", async () => {
+      // run R is planned with a fuse of 1 (its snapshot); the operator resets it to 500
+      expect(await set("fuses.max_alerts", "1")).to.equal(true);
+      const r = await run();
+      expect(await reset("fuses.max_alerts")).to.equal(true);
+      // the doctor loads the live values (500); heal( ) is not called for R, its lock is released
+      await dialogStep(() => cls().doctor({}));
+      // one more pile of the minimum-crew rule for R, over every ship: two alerts, past R's fuse
+      await exec([`INSERT INTO zosd_l3_pile (mandt, run_id, rule_name, pile_no, set_name, stage_no, model_hash, check_date, range_low, range_high, status, job_name, job_count, alerts, started, ended, attempt, reason)
+        VALUES ('', '${r.run}', 'ship-min-crew', 99, 'fleet2', 2, '', '${DATE}', 'S000', 'S999', 'PLANNED', '', '', 0, 0, 0, 1, '')`]);
+      const rule = await dialogStep(() => cls().run_rule({iv_rule: str("ship-min-crew"), iv_date: date(), iv_run: str(r.run), iv_pile: new abap.types.Integer().set(99)}));
+      expect(trim(rule.get().status.get()), "the pile runs with R's fuse of 1").to.equal("FUSED");
+    });
+
+    it("collect( ) does not fail a pile the doctor gave another job between its job check and its reread (review round 2, P2-A)", async () => {
+      const r = await dialogStep(() => cls().run({iv_date: date(), iv_mode: new abap.types.Character(1).set("S")}));
+      const id = "RUNA0000000000000000000000000001";
+      r.get().run_id.set(id);
+      r.get().mode.set("P");
+      await exec([
+        `INSERT INTO zosd_l3_stage (mandt, run_id, stage_no, set_name, check_date, stage_name, status, opened, ended) VALUES ('', '${id}', 1, 'fleet2', '${DATE}', 'candidates', 'OPEN', 20000101000000, 0)`,
+        `INSERT INTO zosd_l3_stage (mandt, run_id, stage_no, set_name, check_date, stage_name, status, opened, ended) VALUES ('', '${id}', 2, 'fleet2', '${DATE}', 'checks', 'WAITING', 0, 0)`,
+        `INSERT INTO zosd_l3_pile (mandt, run_id, rule_name, pile_no, set_name, stage_no, model_hash, check_date, range_low, range_high, status, job_name, job_count, alerts, started, ended, attempt, reason)
+          VALUES ('', '${id}', 'ship-busy', 1, 'fleet2', 1, '', '${DATE}', 'S000', 'S999', 'RUNNING', 'L3_FLEET2_101_0001', '00000001', 0, 0, 0, 1, '')`]);
+      const real = abap.FunctionModules.SHOW_JOBSTATE;
+      let calls = 0;
+      // the seam: job 00000001 is found finished, and before collect( ) rereads the
+      // row the doctor has resubmitted the pile as job 00000002, attempt 2
+      abap.FunctionModules.SHOW_JOBSTATE = async (args) => {
+        calls++;
+        if (String(args.exporting.jobcount.get()).trim() === "00000001") {
+          await client.execute(`UPDATE zosd_l3_pile SET status = 'PLANNED', job_count = '00000002', attempt = 2, reason = 'RETRY' WHERE run_id = '${id}'`);
+          args.importing.finished.set("X");
+        } else {
+          args.importing.running.set("X");
+        }
+      };
+      let result;
+      try { result = await dialogStep(() => cls().collect({is_result: r})); } finally { abap.FunctionModules.SHOW_JOBSTATE = real; }
+      expect(calls).to.equal(1);
+      const pile = read("SELECT status, job_count, attempt FROM zosd_l3_pile WHERE run_id = ?", id)[0];
+      expect([trim(pile.status), trim(pile.job_count), Number(pile.attempt)], "the replacement job's pile stands").to.deep.equal(["PLANNED", "00000002", 2]);
+      expect(trim(result.get().status.get())).to.equal("RUNNING");
+    });
+
     it("mutant: seeding over a USER row loses the tuned value", async () => {
       await seed();
       expect(await set("fuses.max_alerts", "1")).to.equal(true);

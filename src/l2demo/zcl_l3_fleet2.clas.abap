@@ -188,6 +188,9 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rv_killed) TYPE abap_bool.
   PRIVATE SECTION.
     CLASS-DATA gs_settings TYPE zcl_l3_fleet2_conf=>ty_state.
+    " the run whose values gs_settings-vals holds: run( ) and run_rule( ) set
+    " it, and every other assignment of gs_settings clears it, so a later
+    " run_rule( ) of that run without selection values reads its scope again
     CLASS-DATA gv_settings_run TYPE zosd_l3_run-run_id.
     " set by dry( ) for the run( ) it calls, and cleared by that run( )
     CLASS-DATA gv_dry TYPE abap_bool.
@@ -1214,6 +1217,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_period TYPE tbtcjob-prddays.
     DATA lv_released TYPE btch0000-char1.
     gs_settings = zcl_l3_fleet2_conf=>load( ).
+    CLEAR gv_settings_run.
     " the doctor goes with the schedule, as a periodic job of its own
     schedule_doctor( ).
     " already scheduled: the waiting instance is the chain, a second would run the set twice
@@ -1351,6 +1355,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_pass TYPE zcl_l3_fleet2_conf=>ty_values.
     DATA lv_now TYPE timestamp.
     DATA lv_stale TYPE timestamp.
+    DATA lv_job_name TYPE zosd_l3_pile-job_name.
+    DATA lv_job_count TYPE zosd_l3_pile-job_count.
     DATA lv_fused TYPE abap_bool.
     DATA ls_rule TYPE ty_rule.
     DATA lv_aborted TYPE btch0000-char1.
@@ -1414,22 +1420,27 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         ENDIF.
       ENDIF.
       IF lv_state <> 'OPEN'.
-        " the job is over: the row as it left it, DONE or not
+        " the job is over: the row as it left it, DONE or not. Only for the
+        " job whose state was read above: a pile given another job meanwhile
+        " (its planner's, or a later submit of it) is not this job's to fail
+        lv_job_name = ls_pile-job_name.
+        lv_job_count = ls_pile-job_count.
         SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
           WHERE set_name = c_set
             AND run_id = ls_pile-run_id
             AND rule_name = ls_pile-rule_name
             AND pile_no = ls_pile-pile_no.
-        IF ls_pile-status <> 'DONE' AND ls_pile-status <> 'FUSED'.
-          " one UPDATE on the row as read: a job given to the pile meanwhile
-          " (its planner's UPDATE) is not overwritten with this stale copy
+        IF ls_pile-status <> 'DONE' AND ls_pile-status <> 'FUSED'
+            AND ls_pile-job_name = lv_job_name AND ls_pile-job_count = lv_job_count.
+          " one UPDATE on the row as read, and on the job that was checked
           GET TIME STAMP FIELD ls_pile-ended.
           UPDATE zosd_l3_pile SET status = 'FAILED' ended = ls_pile-ended
             WHERE run_id = ls_pile-run_id
               AND rule_name = ls_pile-rule_name
               AND pile_no = ls_pile-pile_no
               AND status = ls_pile-status
-              AND job_count = ls_pile-job_count.
+              AND job_name = lv_job_name
+              AND job_count = lv_job_count.
         ENDIF.
       ENDIF.
     ENDLOOP.
@@ -1553,6 +1564,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       rs_result-status = 'RUNNING'.
     ENDIF.
     gs_settings-vals = ls_pass.
+    CLEAR gv_settings_run.
   ENDMETHOD.
 
   METHOD dry.
@@ -1588,6 +1600,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_gate TYPE zosd_l3_stage.
     DATA ls_lock TYPE zosd_l3_run.
     gs_settings = zcl_l3_fleet2_conf=>load( ).
+    CLEAR gv_settings_run.
     lv_now = iv_now.
     IF lv_now IS INITIAL.
       GET TIME STAMP FIELD lv_now.
@@ -1647,6 +1660,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_result TYPE ty_result.
     DATA lt_purged TYPE tt_doctor.
     gs_settings = zcl_l3_fleet2_conf=>load( ).
+    CLEAR gv_settings_run.
     lv_now = iv_now.
     IF lv_now IS INITIAL.
       GET TIME STAMP FIELD lv_now.
@@ -2007,6 +2021,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
     gs_settings-vals = ls_pass.
+    CLEAR gv_settings_run.
   ENDMETHOD.
 
   METHOD due.
@@ -2050,6 +2065,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_audit TYPE zosd_l3_doctor.
     IF iv_loaded = abap_false.
       gs_settings = zcl_l3_fleet2_conf=>load( ).
+      CLEAR gv_settings_run.
     ENDIF.
     lv_now = iv_now.
     IF lv_now IS INITIAL.

@@ -273,6 +273,9 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PRIVATE SECTION.
 {{#settings}}
     CLASS-DATA gs_settings TYPE {{settings.class}}=>ty_state.
+    " the run whose values gs_settings-vals holds: run( ) and run_rule( ) set
+    " it, and every other assignment of gs_settings clears it, so a later
+    " run_rule( ) of that run without selection values reads its scope again
     CLASS-DATA gv_settings_run TYPE zosd_l3_run-run_id.
     " set by dry( ) for the run( ) it calls, and cleared by that run( )
     CLASS-DATA gv_dry TYPE abap_bool.
@@ -810,6 +813,7 @@ CLASS {{class}} IMPLEMENTATION.
     IF lv_size = c_pile_size OR lv_size < 1.
       IF gs_settings-vals-piles_size = 0.
         gs_settings = {{settings.class}}=>load( ).
+        CLEAR gv_settings_run.
       ENDIF.
       lv_size = gs_settings-vals-piles_size.
     ENDIF.
@@ -1639,6 +1643,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_released TYPE btch0000-char1.
 {{#settings}}
     gs_settings = {{settings.class}}=>load( ).
+    CLEAR gv_settings_run.
 {{/settings}}
 {{#resilience}}
     " the doctor goes with the schedule, as a periodic job of its own
@@ -1866,6 +1871,8 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_now TYPE timestamp.
     DATA lv_stale TYPE timestamp.
 {{/resilience}}
+    DATA lv_job_name TYPE zosd_l3_pile-job_name.
+    DATA lv_job_count TYPE zosd_l3_pile-job_count.
 {{/staged}}
 {{#fused}}
     DATA lv_fused TYPE abap_bool.
@@ -2102,22 +2109,27 @@ CLASS {{class}} IMPLEMENTATION.
       ENDIF.
 {{/resilience}}
       IF lv_state <> 'OPEN'.
-        " the job is over: the row as it left it, DONE or not
+        " the job is over: the row as it left it, DONE or not. Only for the
+        " job whose state was read above: a pile given another job meanwhile
+        " (its planner's, or a later submit of it) is not this job's to fail
+        lv_job_name = ls_pile-job_name.
+        lv_job_count = ls_pile-job_count.
         SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
           WHERE set_name = c_set
             AND run_id = ls_pile-run_id
             AND rule_name = ls_pile-rule_name
             AND pile_no = ls_pile-pile_no.
-        IF ls_pile-status <> 'DONE'{{#fused}} AND ls_pile-status <> 'FUSED'{{/fused}}.
-          " one UPDATE on the row as read: a job given to the pile meanwhile
-          " (its planner's UPDATE) is not overwritten with this stale copy
+        IF ls_pile-status <> 'DONE'{{#fused}} AND ls_pile-status <> 'FUSED'{{/fused}}
+            AND ls_pile-job_name = lv_job_name AND ls_pile-job_count = lv_job_count.
+          " one UPDATE on the row as read, and on the job that was checked
           GET TIME STAMP FIELD ls_pile-ended.
           UPDATE zosd_l3_pile SET status = 'FAILED' ended = ls_pile-ended
             WHERE run_id = ls_pile-run_id
               AND rule_name = ls_pile-rule_name
               AND pile_no = ls_pile-pile_no
               AND status = ls_pile-status
-              AND job_count = ls_pile-job_count.
+              AND job_name = lv_job_name
+              AND job_count = lv_job_count.
         ENDIF.
       ENDIF.
     ENDLOOP.
@@ -2250,6 +2262,7 @@ CLASS {{class}} IMPLEMENTATION.
     ENDIF.
 {{#settings}}
     gs_settings-vals = ls_pass.
+    CLEAR gv_settings_run.
 {{/settings}}
 {{/staged}}
   ENDMETHOD.
@@ -2297,6 +2310,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA ls_lock TYPE zosd_l3_run.
 {{#settings}}
     gs_settings = {{settings.class}}=>load( ).
+    CLEAR gv_settings_run.
 {{/settings}}
     lv_now = iv_now.
     IF lv_now IS INITIAL.
@@ -2362,6 +2376,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lt_purged TYPE tt_doctor.
 {{#settings}}
     gs_settings = {{settings.class}}=>load( ).
+    CLEAR gv_settings_run.
 {{/settings}}
     lv_now = iv_now.
     IF lv_now IS INITIAL.
@@ -2745,6 +2760,7 @@ CLASS {{class}} IMPLEMENTATION.
     ENDLOOP.
 {{#settings}}
     gs_settings-vals = ls_pass.
+    CLEAR gv_settings_run.
 {{/settings}}
   ENDMETHOD.
 
@@ -2790,6 +2806,7 @@ CLASS {{class}} IMPLEMENTATION.
 {{#settings}}
     IF iv_loaded = abap_false.
       gs_settings = {{settings.class}}=>load( ).
+      CLEAR gv_settings_run.
     ENDIF.
 {{/settings}}
     lv_now = iv_now.
