@@ -113,10 +113,13 @@ export function CFit(v, n) {
   return (chars.length > n ? chars.slice(0, n).join("") : v).replace(/ +$/, "");
 }
 export const FmtI = (v) => String(v);
-export function IToX(v, n) {
-  const b = [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255];
-  const out = n <= 4 ? b.slice(4 - n) : [...new Array(n - 4).fill(v < 0 ? 255 : 0), ...b];
-  return String.fromCharCode(...out);
+// Integer-width two's complement; fixed x is zero-padded, never sign-extended.
+export function IToX(v, n, width = 4) {
+  let bytes = BigInt.asUintN(width * 8, BigInt(v)).toString(16).padStart(width * 2, "0").match(/../g).map((b) => String.fromCharCode(parseInt(b, 16))).join("");
+  if (n !== undefined) return n <= width ? bytes.slice(width - n) : "\0".repeat(n - width) + bytes;
+  bytes = bytes.replace(/^\0+/, "");
+  if (!bytes.length || (width === 8 && bytes.length > 4 && bytes.length < 8)) throw new AbapError("NOT_COMPILED", "integer -> xstring: zero or 5-7 significant bytes needs an oracle row");
+  return bytes;
 }
 export const XToHex = (v) => [...v].map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("").toUpperCase();
 // text into f and into i, as A4H does (parity-wave2, ZCL_GOGEN_T_C2NUM;
@@ -261,15 +264,12 @@ export function BitX(op, a, b) {
   }
   return out;
 }
-// an x or xstring as an i: the last four bytes, 00 on the left, read as a
-// signed int32 (A4H 2026-09-24, ZCL_GOGEN_T_XCMPN: FF 255, FFFFFFFF -1,
-// 0100000002 2, empty 0; a move the same, ZCL_GOGEN_T_XMOVI)
-export function XToI(v) {
-  let r = 0;
-  for (let i = 0; i < v.length; i++) r = (r << 8) | v.charCodeAt(i);
-  return r;
+// Last 4/8 bytes, zero-extended and then interpreted as a signed integer.
+export function XToI8(v, width = 8) {
+  const r = [...v.slice(-width)].reduce((bits, b) => (bits << 8n) | BigInt(b.charCodeAt(0)), 0n);
+  return BigInt.asIntN(width * 8, r);
 }
-
+export const XToI = (v) => Number(XToI8(v, 4));
 const rangeError = () => { throw new AbapError("CX_SY_RANGE_OUT_OF_BOUNDS", "offset/length"); };
 // FIND p IN [SECTION OFFSET off OF] s IN BYTE MODE: the byte offset of p in
 // the xstring s from off on, -1 when it is not there (as abap.FindBytes)

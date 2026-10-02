@@ -6363,18 +6363,12 @@ export function convert(expr, to) {
   // (' 12' is 0000000012, 'a1b2 3' into n 3 is 123, '98765' into n 3 is
   // 765, a blank c is 000)
   if (charlike(from) && to.k === "n") return ok("s2n");
-  // i -> string and x -> string are conversion rules not measured yet (the
-  // sign of an i goes to the END there, unlike in a template): refused
-  // until an A4H probe says what they give
   // i -> string, measured on A4H: the digits and then a place for the sign,
   // 42 is "42 ", -5 is "5-" (a template writes -5; a move does not)
   if (to.k === "string" && from.k === "i") return ok("i2s");
-  if (to.k === "x" && from.k === "i") return ok("i2x");
-  // a c literal of upper-case hex digit pairs into an xstring, or into an x
-  // it fills exactly: its bytes, as VALUE gives them (ultra/bytecmp: every
-  // probe of ZCL_GOGEN_T_XCMP sets its operands so, and what A4H answered
-  // depends on those bytes; lower case, odd lengths and shorter literals
-  // are other rules of c -> x, not measured)
+  // Four/eight big-endian bytes, zero-padded or truncated on the left.
+  if (["x", "xstring"].includes(to.k) && ["i", "int8"].includes(from.k)) return ok(from.k === "i" ? "i2x" : "i82x");
+  // An exact upper-case hex literal supplies the bytes directly.
   if ((to.k === "xstring" || (to.k === "x" && expr.value?.length === 2 * to.len)) && expr.e === "chars" && /^([0-9A-F]{2})*$/.test(expr.value)) {
     return {e: "xbytes", value: expr.value, type: to};
   }
@@ -6444,11 +6438,11 @@ export function convert(expr, to) {
   // x <-> xstring: the bytes; into x LENGTH n cut or padded right with 00
   if (to.k === "x" && (from.k === "xstring" || from.k === "x")) return ok("xs2x");
   if (to.k === "xstring" && from.k === "x") return {...expr, type: to};
-  // x / xstring -> i: the last four bytes, 00 on the left, a signed int32
+  // x / xstring -> i/int8: last four/eight bytes, zero-extended, then signed.
   // (A4H: FF gives 255; ultra/bytecmp 2026-09-24, ZCL_GOGEN_T_XMOVI:
   // FFFFFFFF -1, 80000000 -2147483648, 0100000002 2 for an x and an
   // xstring, an empty xstring 0; ZCL_ABAPGIT_CONVERT=>XSTRING_TO_INT)
-  if (to.k === "i" && (from.k === "x" || from.k === "xstring")) return ok("x2i");
+  if (["i", "int8"].includes(to.k) && ["x", "xstring"].includes(from.k)) return ok(to.k === "i" ? "x2i" : "x2i8");
   if (numeric(to) && charlike(from)) return ok("c2n");
   // ultra/events (fix round): a move INTO a SORTED table sorts the rows (and
   // raises on a duplicate of a unique key), which no emitter does, so a

@@ -2166,7 +2166,7 @@ function conv(e, ctx) {
     case "i2n": return `abap.IToN(${x}, ${e.to.len})`;
     case "s2n": return `abap.CToN(${x}, ${e.to.len})`;
     case "x2s": return e.to.k === "c" ? `abap.CFit(abap.XToHex(${x}), ${e.to.len})` : `abap.XToHex(${x})`;
-    case "i2x": return `abap.IToX(${x}, ${e.to.len})`;
+    case "i2x": case "i82x": return `${helperFn(e.to.k === "xstring" ? "intbytes.ToString" : "intbytes.ToX")}(int64(${x}), ${from === "i" ? 4 : 8}${e.to.k === "x" ? `, ${e.to.len}` : ""})`;
     // packed numbers, go/abap packed.go
     case "i2pc": return `abap.IToP(${x})`;
     case "c2pc": return `abap.CToP(${x})`;
@@ -2180,7 +2180,7 @@ function conv(e, ctx) {
     case "p2s": return `abap.PToString(${x}, ${e.from.dec ?? 0})`;
     case "p2c": return `abap.PToC(${x}, ${e.from.dec ?? 0}, ${e.to.len})`;
     case "p2n": return `abap.PToN(${x}, ${e.to.len})`;
-    case "x2i": return `abap.XToI(${x})`;
+    case "x2i": case "x2i8": return `${to === "i" ? "int32" : "int64"}(${helperFn("intbytes.FromX")}(${x}, ${to === "i" ? 4 : 8}))`;
     case "xs2x": return `abap.XFit(${x}, ${e.to.len})`;
     case "c2x": return e.to.k === "x" ? `abap.XFit(abap.CToX(${x}), ${e.to.len})` : `abap.CToX(${x})`;
     case "d2i": return `abap.DToI(${x})`;
