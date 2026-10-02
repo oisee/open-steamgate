@@ -26,6 +26,7 @@ import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions, parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {abapFront} from "./adt-abap-front.mjs";
+import {EnqOwners, abapSession, statelessLock} from "./adt-enq.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
@@ -624,7 +625,7 @@ export function adtRouter(options = {}) {
     // in a stand-in store that does not watch, and that is not an error
     store.watch();
   }
-  const sessions = options.sessions ?? new Sessions();
+  const sessions = options.sessions ?? new Sessions(options.abap === undefined ? {} : {owners: new EnqOwners()});
   const data = options.data ?? store.data();
   const router = express.Router();
   const resources = [];
@@ -716,9 +717,9 @@ export function adtRouter(options = {}) {
     });
   }
 
-  // ADR 0007: ABAP rows go to ZCL_OSD_ADT_HANDLER ({run, routes}, tools/adt-abap-front.mjs)
-  if (options.abap !== undefined) router.use(BASE, abapFront({...options.abap, served: options.abapServed, refuse,
-    system: (kind) => (kind === "IDENTITY" ? identity : undefined)}));
+  // ADR 0007: ABAP rows go to ZCL_OSD_ADT_HANDLER (adt-abap-front.mjs), locks to ENQ (adt-enq.mjs)
+  if (options.abap !== undefined) router.use(BASE, abapFront({...options.abap, served: options.abapServed, refuse, store,
+    ...abapSession(sessions, (kind) => (kind === "IDENTITY" ? identity : undefined))}));
 
   // ---- What an ABAP Cloud Project needs that an ordinary one does not.
   //
@@ -2172,9 +2173,9 @@ export function adtRouter(options = {}) {
             .send(lockResultDocument(""));
           return;
         }
-        // one holder per object across sessions; the same session locking
-        // again gets the handle it has, another session gets a refusal that
-        // says who holds it, the way an enqueue conflict reads on a system
+        // a lock lives with a stateful session: without one it is refused, not given (statelessLock)
+        if (session.stateful !== true) return void refuse(res, 400, "ExceptionInvalidRequest", statelessLock(entry));
+        // one holder per object; the same session gets its handle again
         const taken = req.adt.sessions.lock(session, entry.type, entry.name, () => randomUUID());
         if (taken.heldBy !== undefined) {
           res.status(403).type("application/xml").send(lockedByOtherDocument(taken.heldBy.user, entry.name));
@@ -2222,8 +2223,7 @@ export function adtRouter(options = {}) {
       const {session, sessions} = req.adt;
       const handle = String(req.query.lockHandle ?? "");
       const lock = session.locks.get(handle);
-      const holder = lock === undefined ? undefined : sessions.holderOf(lock.type, lock.name);
-      if (lock === undefined || holder?.session !== session || holder.handle !== handle) {
+      if (lock === undefined || sessions.holds(session, handle, lock.type, lock.name) === false) {
         res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked",
           `lock handle ${handle} was released before the source arrived`));
         return false;

@@ -28,7 +28,7 @@
 //   have nothing to touch and do nothing.
 // - _WAIT sleeps through WAIT UP TO, which gives the work process up inside
 //   a step (tools/osd-dialog-step.mjs) -- and, as WAIT does, commits.
-import {locks} from "./osd-enq.mjs";
+import {collide, garg, locks} from "./osd-enq.mjs";
 import {currentStepToken, holderToken, onEveryStep, stepContextTracked} from "./osd-dialog-step.mjs";
 
 const PROCESS = {what: "the process, outside any step"};
@@ -97,9 +97,13 @@ function user() {
 export function currentEnqSession() {
   const key = sessionKey();
   if (isEnded(key)) throw new EnqSessionEnded(key);
+  return sessionOf(key, token()?.enqUser ?? user());
+}
+
+function sessionOf(key, owner) {
   let sid = sessions.get(key);
   if (sid === undefined || sid === 0) {
-    sid = locks().open(user());
+    sid = locks().open(owner);
     sessions.set(key, sid);
   }
   return sid;
@@ -114,11 +118,15 @@ function existingEnqSession() {
 
 /** a host's longer session: the step running now belongs to key (any value
  * the host keeps for its connection) until endEnqSession(key); a key already
- * ended throws EnqSessionEnded */
-export function bindEnqSession(key) {
+ * ended throws EnqSessionEnded. user is the logon user the session's locks
+ * name (sy-msgv1 of a refusal, GUNAME); it defaults to sy-uname, which is
+ * the process's and not a client's */
+export function bindEnqSession(key, {user: owner} = {}) {
   if (isEnded(key)) throw new EnqSessionEnded(key);
   const t = token();
-  if (t === undefined || t.enqSession === key) return;
+  if (t === undefined) return;
+  if (owner !== undefined) t.enqUser = owner;
+  if (t.enqSession === key) return;
   if (t.enqSession !== undefined) leave(t.enqSession);
   t.enqSession = key;
   live.set(key, (live.get(key) ?? 0) + 1);
@@ -168,6 +176,40 @@ function dropEnqSession(key) {
   sessions.delete(key);
   updated.delete(sid);
   locks().end(sid);
+}
+
+// ---- the lock table seen from the host, outside any step: what a host
+// route asks about a lock an ABAP route took (the ADT façade's write routes,
+// tools/adt-enq.mjs). The argument is built by the same rules as an
+// ENQUEUE_ from ABAP (request below), so the two cannot disagree on it.
+
+/** who holds the lock argument of table for input (the exporting parameters
+ * an ENQUEUE_ would get): {key, user} of the first row that collides, key
+ * the host's key of a bound session (undefined for a step's own one) */
+export function enqHolder(table, input) {
+  const r = request(globalThis.abap, table, "", input);
+  const arg = garg(r.client, r.fields);
+  const row = locks().read({client: r.client, table: r.table}).find((w) => collide(w.arg, arg));
+  if (row === undefined) return undefined;
+  let key;
+  for (const [k, sid] of sessions) {
+    if (sid === row.session) key = k;
+  }
+  return {key, user: row.user};
+}
+
+/** ENQUEUE_<object> on behalf of the bound session key, without a step:
+ * {subrc, msgno, holder} as the lock server answers (no _WAIT) */
+export function enqTake(key, owner, table, object, input) {
+  if (isEnded(key)) throw new EnqSessionEnded(key);
+  return locks().tryEnqueue(sessionOf(key, owner), request(globalThis.abap, table, object, input));
+}
+
+/** DEQUEUE_<object> on behalf of the bound session key, without a step */
+export function enqDrop(key, table, object, input) {
+  if (isEnded(key)) throw new EnqSessionEnded(key);
+  const sid = sessions.get(key);
+  if (sid !== undefined) locks().dequeue(sid, request(globalThis.abap, table, object, input));
 }
 
 /** an update module ran in the session's LUW (what the wrapped update

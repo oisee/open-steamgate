@@ -53,6 +53,16 @@ export function sessionIdOf(cookies) {
   return cookies[CONTEXT_COOKIE] || cookies[SESSION_COOKIE];
 }
 
+// How a write from a session that is gone is answered: the CSRF refusal, with
+// the word that tells a client to fetch a token, which it does by logging on
+// again (Eclipse re-logs on it). The middleware answers it for a token that
+// names no live session; the ABAP front answers it for a request whose
+// session ended while its step waited (EnqSessionEnded).
+export function refuseToken(res) {
+  res.setHeader("x-csrf-token", REQUIRED);
+  res.status(403).type("text/plain").send("CSRF token validation failed");
+}
+
 export class Session {
   constructor(user) {
     this.id = randomBytes(12).toString("hex");
@@ -62,10 +72,53 @@ export class Session {
     this.touched = this.created;
     this.stateful = false;
     // lock handle -> what is locked. The handles are the session's, because
-    // affinity is a property of the session, not of the write; who holds an
-    // object across sessions is Sessions#owners, and the two are changed
-    // together through Sessions#lock / #unlock / #end and nowhere else.
+    // affinity is a property of the session, not of the write. Who holds an
+    // object across sessions is the owner table's (Sessions#owners), and the
+    // two are changed through Sessions and nowhere else.
     this.locks = new Map();
+  }
+}
+
+const objectKey = (type, name) => `${String(type).toUpperCase()} ${String(name).toUpperCase()}`;
+
+// The owner table a Sessions keeps when nobody passes one: "TYPE NAME" ->
+// session id, in this object, one holder per object across the sessions of
+// this Sessions. With the ABAP front the table is the lock server instead
+// (tools/adt-enq.mjs), shared with the ABAP LOCK route; both answer the same
+// four questions, and holder() names a session by its id.
+export class SessionOwners {
+  constructor() {
+    this.byObject = new Map();
+  }
+
+  holder(type, name) {
+    const id = this.byObject.get(objectKey(type, name));
+    return id === undefined ? undefined : {id, mine: true};
+  }
+
+  take(session, type, name) {
+    const key = objectKey(type, name);
+    const id = this.byObject.get(key);
+    if (id !== undefined && id !== session.id) {
+      return {heldBy: {id}};
+    }
+    this.byObject.set(key, session.id);
+    return {};
+  }
+
+  drop(session, type, name) {
+    const key = objectKey(type, name);
+    if (this.byObject.get(key) === session.id) {
+      this.byObject.delete(key);
+    }
+  }
+
+  end(id) {
+    for (const [key, holder] of [...this.byObject]) {
+      if (holder === id) {
+        this.byObject.delete(key);
+      }
+    }
   }
 }
 
@@ -73,13 +126,14 @@ export class Sessions {
   // ttlMs: a session nobody has touched for this long is gone. Long by
   // default, because an editor holds one across a coffee break and a local
   // system has no reason to be stingy.
+  // owners: who holds which object (SessionOwners when not given)
   constructor(options = {}) {
     this.ttlMs = options.ttlMs ?? 30 * 60 * 1000;
     this.byId = new Map();
-    // "TYPE NAME" -> {session, handle}: one holder per object across every
-    // session, the enqueue table of a system. A session's own map says which
-    // handles it has; this one says whether anybody else may take the object.
-    this.owners = new Map();
+    // one holder per object across every session, the enqueue table of a
+    // system. A session's own map says which handles it has; this one says
+    // whether anybody else may take the object.
+    this.owners = options.owners ?? new SessionOwners();
   }
 
   #sweep() {
@@ -91,32 +145,55 @@ export class Sessions {
     }
   }
 
-  static #key(type, name) {
-    return `${String(type).toUpperCase()} ${String(name).toUpperCase()}`;
+  static #handleOf(session, type, name) {
+    const key = objectKey(type, name);
+    for (const [handle, lock] of session.locks) {
+      if (objectKey(lock.type, lock.name) === key) {
+        return handle;
+      }
+    }
+    return undefined;
   }
 
-  // the session that holds an object, or undefined; an owner whose session
-  // has expired holds nothing, and is released on the way
+  // {session, handle} of the session that holds an object, or undefined; an
+  // owner whose session has expired holds nothing, and is released on the
+  // way. So is one of this table's (mine) whose session is gone: a LOCK
+  // queued behind a logoff of its own session can still take the object
+  // after the session ended, and that lock has nobody left to give it back.
+  // A holder that is not this table's (another façade's session on the same
+  // lock server, or ABAP outside any ADT session) is answered with its user
+  // and no handle.
   holderOf(type, name) {
-    const key = Sessions.#key(type, name);
-    const owner = this.owners.get(key);
+    const owner = this.owners.holder(type, name);
     if (owner === undefined) {
       return undefined;
     }
+    const session = owner.mine === true ? this.byId.get(owner.id) : undefined;
+    if (session === undefined && owner.mine === true) {
+      this.owners.end(owner.id);
+      return undefined;
+    }
+    if (session === undefined) {
+      return {session: {id: owner.id, user: owner.user ?? "", locks: new Map()}, handle: undefined};
+    }
     // looked at without touching it: asking who holds an object must not
     // keep the holder's session alive
-    const alive = this.byId.get(owner.session.id) === owner.session &&
-      owner.session.touched >= Date.now() - this.ttlMs;
-    if (alive === false) {
-      this.end(owner.session.id);
-      this.owners.delete(key);
+    if (session.touched < Date.now() - this.ttlMs) {
+      this.end(session.id);
       return undefined;
     }
-    if (owner.session.locks.has(owner.handle) === false) {
-      this.owners.delete(key);
-      return undefined;
+    return {session, handle: Sessions.#handleOf(session, type, name)};
+  }
+
+  // Whether handle is this session's for the object and the session holds
+  // it: what a write checks before it writes (port-map section 2, step 8).
+  holds(session, handle, type, name) {
+    const lock = session.locks.get(handle);
+    if (lock === undefined || objectKey(lock.type, lock.name) !== objectKey(type, name)) {
+      return false;
     }
-    return owner;
+    const holder = this.holderOf(type, name);
+    return holder?.session === session && holder.handle === handle;
   }
 
   // Take the lock on an object for a session. The same session asking again
@@ -127,35 +204,56 @@ export class Sessions {
     if (owner !== undefined && owner.session !== session) {
       return {heldBy: owner.session};
     }
-    if (owner !== undefined) {
-      return {handle: owner.handle};
+    const taken = this.owners.take(session, type, name);
+    if (taken.heldBy !== undefined) {
+      return {heldBy: this.byId.get(taken.heldBy.id) ?? {user: taken.heldBy.user ?? ""}};
+    }
+    return {handle: this.adopt(session, type, name, makeHandle)};
+  }
+
+  // The session's handle for an object it holds: the one it has, or a new
+  // one. The owner table is not asked; the caller has just taken the object
+  // (the ABAP LOCK route, through SYSTEM LOCK_HANDLE, or lock above).
+  adopt(session, type, name, makeHandle) {
+    const known = Sessions.#handleOf(session, type, name);
+    if (known !== undefined) {
+      return known;
     }
     const handle = makeHandle();
     session.locks.set(handle, {handle, type, name, since: Date.now()});
-    this.owners.set(Sessions.#key(type, name), {session, handle});
-    return {handle};
+    return handle;
+  }
+
+  // Forget one handle of a session and answer what it locked; the owner
+  // table is not told (the ABAP UNLOCK route dequeues itself, through
+  // SYSTEM LOCK_RELEASE).
+  forget(session, handle) {
+    const lock = session.locks.get(handle);
+    if (lock !== undefined) {
+      session.locks.delete(handle);
+    }
+    return lock;
   }
 
   // Release one handle of a session; a handle the session does not hold is
   // ignored, as UNLOCK always has been.
   unlock(session, handle) {
-    const lock = session.locks.get(handle);
-    if (lock === undefined) {
-      return;
-    }
-    session.locks.delete(handle);
-    const key = Sessions.#key(lock.type, lock.name);
-    if (this.owners.get(key)?.session === session) {
-      this.owners.delete(key);
+    const lock = this.forget(session, handle);
+    if (lock !== undefined) {
+      this.owners.drop(session, lock.type, lock.name);
     }
   }
 
   // The object is gone (deleted): whoever held it holds nothing now.
   release(type, name) {
-    const owner = this.owners.get(Sessions.#key(type, name));
-    if (owner !== undefined) {
-      this.unlock(owner.session, owner.handle);
+    const owner = this.holderOf(type, name);
+    if (owner === undefined || this.byId.get(owner.session.id) !== owner.session) {
+      return;
     }
+    if (owner.handle !== undefined) {
+      this.forget(owner.session, owner.handle);
+    }
+    this.owners.drop(owner.session, type, name);
   }
 
   // An explicit end (logoff) or an expiry: the session goes, and every lock
@@ -166,9 +264,8 @@ export class Sessions {
       return;
     }
     this.byId.delete(id);
-    for (const handle of [...session.locks.keys()]) {
-      this.unlock(session, handle);
-    }
+    session.locks.clear();
+    this.owners.end(id);
   }
 
   open(user) {
@@ -263,8 +360,7 @@ export class Sessions {
       if (UNSAFE.has(req.method.toUpperCase()) && wanted !== session.token) {
         // the one place the word appears: a write without a valid token is
         // refused, and the client is told to fetch one and retry
-        res.setHeader("x-csrf-token", REQUIRED);
-        res.status(403).type("text/plain").send("CSRF token validation failed");
+        refuseToken(res);
         return;
       }
 
