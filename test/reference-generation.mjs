@@ -137,7 +137,7 @@ describe("reference generation", function () {
     const {abap, fields} = abapClock();
     const uuidClass = {};
     const realTime = abap.statements.getTime;
-    const start = Date.now();
+    const start = performance.now();
     const a = ["11111111", "1111", "4111", "8111", "111111111111"].join("-");
     const b = ["22222222", "2222", "4222", "8222", "222222222222"].join("-");
     await withAbapCase(abap, uuidClass, {clock: "2026-09-21T10:00:00.000Z", uuid: [a]}, async () => {
@@ -152,8 +152,11 @@ describe("reference generation", function () {
     expect(uuidClass.CRYPTO).to.equal(undefined);
     abap.statements.getTime();
     expect(fields.datum).to.equal(new Date().toISOString().slice(0, 10).replaceAll("-", ""));
+    // the host clock still moves after the cases: a timer may fire a
+    // millisecond early (14 ms for setTimeout 15 on CI), so ask for movement,
+    // measured on the monotonic clock, not for the exact delay
     await new Promise((done) => setTimeout(done, 15));
-    expect(Date.now() - start).to.be.at.least(15);
+    expect(performance.now() - start).to.be.at.least(10);
   });
   it("UUID exhaustion and unused values fail the case", async () => {
     const {abap} = abapClock();
