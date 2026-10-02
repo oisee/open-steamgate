@@ -127,17 +127,9 @@ const HOST_ALLOWED = [
   "GET /sap/bc/adt/programs/includes/:name/objectstructure",
   "GET /sap/bc/adt/ddic/srvd/sources/:name",
   "GET /sap/bc/adt/programs/includes/:name",
-  // B5: package read, node path, node structure
-  "GET /sap/bc/adt/packages/:name",
-  "POST /sap/bc/adt/repository/nodepath",
-  "POST /sap/bc/adt/repository/nodestructure",
   // B6: search and virtual folders
   "POST /sap/bc/adt/repository/informationsystem/virtualfolders/contents",
   "GET /sap/bc/adt/repository/informationsystem/search",
-  // B8b: DDIC documents
-  "GET /sap/bc/adt/ddic/dataelements/:name",
-  "GET /sap/bc/adt/ddic/tables/:name",
-  "GET /sap/bc/adt/ddic/tables/:name/source/main",
   // C1: check runs
   "GET /sap/bc/adt/checkruns/reporters",
   "POST /sap/bc/adt/checkruns",

@@ -1,6 +1,10 @@
 "! Ordered JSON object writer; callers append keys in wire order.
 CLASS zcl_osd_adt_json DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
+    "! Parse with IV_KEEP_ITEM_ORDER to retain object insertion order.
+    CLASS-METHODS ordered_members
+      IMPORTING io_json TYPE REF TO zcl_ajson iv_path TYPE string
+      RETURNING VALUE(rt_members) TYPE string_table.
     CLASS-METHODS quote IMPORTING iv_text TYPE string RETURNING VALUE(rv_json) TYPE string.
     METHODS add IMPORTING iv_name TYPE string iv_value TYPE string.
     METHODS add_raw IMPORTING iv_name TYPE string iv_json TYPE string.
@@ -10,6 +14,23 @@ CLASS zcl_osd_adt_json DEFINITION PUBLIC FINAL CREATE PUBLIC.
     DATA mv_count TYPE i.
 ENDCLASS.
 CLASS zcl_osd_adt_json IMPLEMENTATION.
+  METHOD ordered_members.
+    DATA lv_path TYPE string.
+    DATA ls_node TYPE zif_ajson_types=>ty_node.
+    DATA lv_key TYPE string VALUE `item_order`.
+    lv_path = iv_path.
+    REPLACE ALL OCCURRENCES OF REGEX `^/+|/+$` IN lv_path WITH ``.
+    IF lv_path IS NOT INITIAL.
+      lv_path = `/` && lv_path.
+    ENDIF.
+    IF io_json->zif_ajson~get_node_type( lv_path ) = `array`.
+      lv_key = `array_index`.
+    ENDIF.
+    lv_path = lv_path && `/`.
+    LOOP AT io_json->mt_json_tree INTO ls_node USING KEY (lv_key) WHERE path = lv_path.
+      APPEND ls_node-name TO rt_members.
+    ENDLOOP.
+  ENDMETHOD.
   METHOD quote.
     DATA lv_char TYPE string.
     DATA lv_bytes TYPE xstring.

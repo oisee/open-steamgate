@@ -1,6 +1,8 @@
 {
   "files": [
+    "test/adt-abap-b5.mjs",
     "test/adt-abap-b8a.mjs",
+    "test/adt-abap-b8b.mjs",
     "test/adt-abap-coverage.mjs",
     "test/adt-abap-csrf.mjs",
     "test/adt-abap-diff.mjs",
