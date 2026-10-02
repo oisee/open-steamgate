@@ -187,15 +187,58 @@ listing the object and the dependents it broke. A clean check then **awaits**
 it live by a rename, so a failed build leaves the live generation untouched;
 if a serving runtime is up it is recycled, and the call resolves only when the
 new process answers. A publish that fails answers a failure document naming
-the objects with the build's last lines as the message. Success answers the
+the objects: when the transpiler refused, one unprefixed `msg` per object and
+line (type, line, `href` to `…/source/main#start=line,col`, `shortText/txt`)
+from its refusal (`tools/osd-build-issues.mjs`); otherwise one line of
+reason. The build log stays in the host's console, and no answer carries a
+host path. Success answers the
 properties document (`checkExecuted`, `activationExecuted`,
 `generationExecuted`, all true). So the status code is `200` in every case
 and the body carries the verdict. `transpileOnActivate: false` is a test seam
 for suites that want the verdict without the build; it is not what a running
 instance does.
 
-`GET /sap/bc/adt/activation/inactiveobjects` answers an empty list; an
-object's own document carries its inactive state after a write.
+**Inactive versions** (vsp-i7's abapGit spike, 2026-10-02). A write lands
+in the file, which stays the working area every editor shares, and marks the
+object inactive. Before the first save after an activation the active
+version is copied to `build/inactive/active/<file>`; the set lives in
+`build/inactive/inactive.json` with a digest of each saved file, so it
+survives a restart; a file changed on disk since (a checkout, another
+editor) stays inactive with its active copy, marked `outside`, until it is
+activated. Every step is ordered to recover from a kill: a save writes the
+copy, then the set (with the digest it will have), then the source; an
+activation writes the set, then drops the copies; a delete removes the files,
+then the set, then the copies; the set is replaced atomically (temp, fsync,
+rename), and a copy no saved object owns is removed at start. Each step is
+durable before the next (`tools/osd-durable.mjs`: the file flushed, then its
+directory after a create, rename or remove; on Windows a directory cannot be
+flushed and NTFS journals the rename, so that step is skipped there). The
+tests inject a crash between steps; a power loss is not simulated, and a disk
+that acknowledges an fsync it has not done defeats all of it. A set that is
+missing or unreadable while active copies exist **fails closed**: every
+object with a copy is inactive, `outside`, until activated. A cold build
+also refuses when any non-library input -- generator inputs such as a CDS
+view included -- is written between the hash and the end of the build, even
+with the same bytes (its stamp changes). Every build excludes the files of the inactive
+objects and takes their active copy instead, or nothing for an object that
+was never active (`ObjectStore#overlay`, `activeOverlay` in
+`tools/osd-build.mjs`, both in the generation's hash). An activation names
+its objects (`store.publish({activate})`), which are built with their saved
+version; each publication carries its own set and is joined only by one with
+the same set over the same tree. The precheck sees the same view (the other
+inactive objects as their active copies). Only a successful publication
+promotes them, and only when the revision checked is the one the build read
+(`transpile.built`, from the digests the generation is named by; a cold build
+refuses a file that changed between the hash and the transpiler's read) and
+the one on disk. So
+a failed activation leaves its object inactive, the last active version keeps
+serving, and nobody else's activation fails over it. A dependent never
+activated does not hold an activation back. While any object other than the
+ones being activated is inactive, the build is cold (`X-OSD-Build` says why).
+
+`GET /sap/bc/adt/activation/inactiveobjects` lists that set as
+`ioc:inactiveObjects/ioc:entry/ioc:object/ioc:ref`; an activation takes an
+object off it, and an object's own document carries the same state.
 
 **Persistence.** Which rows survive what depends on the backend chosen in
 `test/setup.mjs`:

@@ -396,8 +396,8 @@ export class StoreDestination {
     // "activated" while it has just rewritten the MPC and DPC of a service
     // nobody opened is hiding the part worth seeing.
     const before = snapshotOf(join(this.store.root, "gen"));
-    const published = await this.store.publish();
-    const committed = published?.ok !== false && this.store.completeActivation(result);
+    const published = await this.store.publish({activate: [{type, name}]});
+    const committed = published?.ok !== false && this.store.completeActivation(result, published?.transpile?.built);
     const regenerated = changedSince(before, join(this.store.root, "gen"));
     const objects = [
       ...regenerated.written.map((path) => generatedRow(path, "generated")),

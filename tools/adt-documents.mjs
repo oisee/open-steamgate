@@ -1317,30 +1317,53 @@ export function activationSuccessDocument() {
 `;
 }
 
-// The answer to an activation that did not happen. An activation that did
-// happen answers nothing at all, which is the convention and not our choice:
-// a client reads an empty body as success and a document as failure, so a
-// document has to mean failure and nothing else.
+// The answer to an activation that did not happen: one message per object
+// and line, then the objects that stay inactive. The shape is the one ADT
+// clients read (abap-adt-api's activation parser, docs/adt-abap-port/
+// client-view-abap-fs.md): an unprefixed `msg` under `chkl:messages`, with
+// its type, line and an href to the object and line; `ioc:entry` holding
+// `ioc:object/ioc:ref`. A `msg:msg` was keyed by its prefix and read as no
+// message at all, so a failed activation said nothing about why.
 export function activationFailureDocument(objects) {
   // an issue's own severity (a warning is not an error), E when it has none
   const type = (issue) => (/^w/i.test(String(issue.severity ?? "")) ? "W" : /^i/i.test(String(issue.severity ?? "")) ? "I" : "E");
-  const message = (o, issue) => `    <msg:msg objDescr="${xmlEscape(o.name)}" type="${type(issue)}" line="${issue.line ?? 1}" href="${xmlEscape((uriOf(o.type, o.name) ?? "") + "/source/main#start=" + (issue.line ?? 1) + "," + (issue.column ?? 1))}" forceSupported="false">
-      <shortText><txt>${xmlEscape(issue.message)}</txt></shortText>
-    </msg:msg>`;
-
-  const inactive = (o) => `    <ioc:entry adtcore:name="${xmlEscape(o.name)}" adtcore:type="${xmlEscape(ADT_TYPE[o.type] ?? o.type)}" adtcore:uri="${xmlEscape(uriOf(o.type, o.name) ?? "")}"/>`;
+  const message = (o, issue) => `  <msg objDescr="${xmlEscape(o.name)}" type="${type(issue)}" line="${issue.line ?? 1}" href="${xmlEscape((uriOf(o.type, o.name) ?? "") + "/source/main#start=" + (issue.line ?? 1) + "," + (issue.column ?? 1))}" forceSupported="false">
+    <shortText><txt>${xmlEscape(issue.message)}</txt></shortText>
+  </msg>`;
 
   return `<?xml version="1.0" encoding="utf-8"?>
 <chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"
-               xmlns:msg="http://www.sap.com/abapxml/checklist/message"
-               xmlns:ioc="http://www.sap.com/adt/inactivectsobjects"
+               xmlns:ioc="http://www.sap.com/abapxml/inactiveCtsObjects"
                xmlns:adtcore="http://www.sap.com/adt/core"
                activationExecuted="false">
 ${objects.flatMap((o) => (o.issues ?? []).map((i) => message(o, i))).join("\n")}
   <ioc:inactiveObjects>
-${objects.map(inactive).join("\n")}
+${objects.map((o) => inactiveEntry(o)).join("\n")}
   </ioc:inactiveObjects>
 </chkl:messages>
+`;
+}
+
+// one inactive object, as the activation answer and the inactive-objects
+// feed both list it
+function inactiveEntry(o, user = "") {
+  const uri = uriOf(o.type, o.name) ?? "";
+  const parent = o.package ? ` adtcore:parentUri="/sap/bc/adt/packages/${xmlEscape(encodeURIComponent(String(o.package).toLowerCase()))}"` : "";
+  return `    <ioc:entry>
+      <ioc:object ioc:user="${xmlEscape(user)}" ioc:linked="" ioc:deleted="false">
+        <ioc:ref adtcore:uri="${xmlEscape(uri)}" adtcore:type="${xmlEscape(ADT_TYPE[o.type] ?? o.type)}" adtcore:name="${xmlEscape(o.name)}"${parent}/>
+      </ioc:object>
+      <ioc:transport/>
+    </ioc:entry>`;
+}
+
+// GET /sap/bc/adt/activation/inactiveobjects: what has been saved and not
+// activated since
+export function inactiveObjectsDocument(objects, user = "") {
+  return `<?xml version="1.0" encoding="utf-8"?>
+<ioc:inactiveObjects xmlns:ioc="http://www.sap.com/abapxml/inactiveCtsObjects" xmlns:adtcore="http://www.sap.com/adt/core">
+${objects.map((o) => inactiveEntry(o, user)).join("\n")}
+</ioc:inactiveObjects>
 `;
 }
 

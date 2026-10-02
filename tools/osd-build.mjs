@@ -330,9 +330,14 @@ function digestOf(file) {
 //              libraries are 4400 of this tree's 5100 inputs;
 //   transpiler describeBuild(root), when the caller has it already.
 // None of them changes the name: it is the same hash over the same list.
+//   overlay    the inactive objects an ObjectStore keeps out of the build
+//              (overlayOf below); an empty or absent one changes nothing.
 export function hashOf(root, inputs = inputsOf(root), options = {}) {
   const digests = options instanceof Map ? options : options.digests;
-  const folders = options instanceof Map ? undefined : options.folders;
+  const overlay = options instanceof Map ? undefined : activeOverlay(options.overlay);
+  // a folder walk cached for a tree without an overlay is not this list
+  const folders = options instanceof Map || overlay !== undefined ? undefined : options.folders;
+  const kept = overlay === undefined ? () => true : (f) => !overlay.exclude.has(resolve(f));
   const h = createHash("sha256");
   h.update("transpiler\0").update(String(options.transpiler ?? describeBuild(root))).update("\0");
   // the rule that decides a name held by two inputs is part of what the
@@ -359,7 +364,13 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
     // the name a function of the tree AND of how many times the tree had
     // been built. What decides its content is hashed instead.
     if (relative(root, dir) === "gen") continue;
-    folder("dir", dir, () => (existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f)).sort() : []));
+    folder("dir", dir, () => (existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f) && kept(f)).sort() : []));
+  }
+  // the last active versions of the objects whose saved version is kept
+  // out: a generation built from them is another generation
+  if (overlay?.folder !== undefined) {
+    const dir = join(root, overlay.folder);
+    folder("active", dir, () => (existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f) && kept(f)).sort() : []));
   }
   for (const dir of inputs.bspFolders ?? []) {
     folder("bsp", dir, () => walk(dir).sort());
@@ -642,15 +653,33 @@ export function prepare(root, log = () => {}) {
 // joins it to its working directory. The transpiler is handed the winner of
 // every name only: a class in two inputs is "already defined" to it, not an
 // override, so the files an earlier layer hides are kept from it here
-export function ownConfig(root, config, stack, outputFolder) {
+export function ownConfig(root, config, stack, outputFolder, overlay = undefined) {
+  const kept = activeOverlay(overlay);
   return {
     ...config,
     // the packs are layers of this build, so the transpiler is handed them
-    // with the tree's own folders (backlog E.2)
-    input_folder: inputFoldersOf(root, config),
+    // with the tree's own folders (backlog E.2); the last active versions of
+    // inactive objects come last, and their saved files are excluded
+    input_folder: [...inputFoldersOf(root, config), ...(kept?.folder === undefined ? [] : [kept.folder])],
     output_folder: relative(root, outputFolder),
-    exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden)],
+    exclude_filter: [...(config.exclude_filter ?? []), ...excludePatterns(stack.hidden),
+      ...[...(kept?.exclude ?? [])].sort().map((file) => `^${file.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`)],
   };
+}
+
+// **An inactive object is not built** (vsp-i7's abapGit spike, 2026-10-02).
+// The tree is the working area: a save lands in its file before anyone
+// activates it, so a build of the folders alone built every saved-but-failed
+// source too, and one broken object failed every later activation of
+// anything until it was deleted. The store says which objects are inactive
+// (ObjectStore#overlay): their files are excluded by absolute path, and the
+// last active version of each, when it had one, comes from `folder` instead.
+// {exclude: [absolute files], folder: root-relative folder | undefined}
+export function activeOverlay(overlay) {
+  if (overlay === undefined || overlay === null) return undefined;
+  const exclude = new Set([...(overlay.exclude ?? [])].map((f) => resolve(f)));
+  if (exclude.size === 0 && overlay.folder === undefined) return undefined;
+  return {exclude, folder: overlay.folder};
 }
 
 export async function build(options = {}) {
@@ -660,7 +689,27 @@ export async function build(options = {}) {
   const started = Date.now();
   const {config, stack} = prepare(root, log);
   const inputs = inputsOf(root, config);
-  const hash = hashOf(root, inputs);
+  // what each input held when the generation was named: the bytes it is
+  // built from (checked as the transpiler reads them, below), and what an
+  // activation's completion compares with (ObjectStore#completeActivations)
+  const named = new Map();
+  const hash = hashOf(root, inputs, {overlay: options.overlay, digests: named});
+  // one spelling of a path for every comparison: a native one from the walk,
+  // a forward-slash one from the transpiler's reads on Windows
+  const digests = new Map([...named].map(([file, digest]) => [normalPath(file), digest]));
+  // **What the generators read is verified as well as what the transpiler
+  // reads.** A CDS view or a table is no transpiler input -- a generator
+  // reads it -- so a save between the hash and the generators' read, put
+  // back before the completion, built a generation of other bytes under
+  // this name. Every non-library input is stamped (size, times, inode) here,
+  // checked against the hash's digest once stamped (closing the gap between
+  // the hash's read and the stamp), and stamped again after the build: any
+  // write in between, even one that restores the bytes, changes the stamp.
+  const libraries = inputs.libs.map((dir) => normalPath(dir) + "/");
+  const watched = [...named.keys()].filter((file) => !libraries.some((lib) => normalPath(file).startsWith(lib)));
+  const stamps = new Map(watched.map((file) => [file, stampOf(file)]));
+  const moved = watched.filter((file) => (existsSync(file) ? digestOf(file) : undefined) !== named.get(file));
+  if (moved.length > 0) throw changedError(root, moved);
   const target = join(paths.byInput, hash);
 
   // a generation a warm build made (tools/osd-warm.mjs) is not a cache hit
@@ -699,7 +748,7 @@ export async function build(options = {}) {
     if (options.switch !== false && liveHash(root) !== hash) {
       switchTo(root, hash, log);
     }
-    return {ok: true, hash, cached: true, live: liveHash(root) === hash, ms: Date.now() - started, objects: manifest.objects};
+    return {ok: true, hash, cached: true, live: liveHash(root) === hash, ms: Date.now() - started, objects: manifest.objects, digests};
   }
 
   const unlock = lock(paths);
@@ -713,6 +762,7 @@ export async function build(options = {}) {
     if (options.generators !== false) {
       output += runGenerators(root, log);
     }
+    await options.onStep?.("generated");
     // **The layers are read again once gen/ is written.** gen/ is a layer, and
     // an object it holds hides the one in src/ it was generated from (the AMDP
     // bridge: gen/amdp/zcl_osd_amdp_demo over src/amdp/). Reading the layers
@@ -733,13 +783,26 @@ export async function build(options = {}) {
         log(`overridden: ${object}: ${hidden.join(", ")} hidden by ${winner}`);
       }
     }
-    const own = ownConfig(root, config, after, join(tmp, "output"));
+    const own = ownConfig(root, config, after, join(tmp, "output"), options.overlay);
     writeFileSync(join(tmp, "abap_transpile.json"), JSON.stringify(own, null, 2));
     // the transpile itself is a library call in this process (N3,
     // tools/osd-transpile.mjs): no node_modules/.bin, no second process,
     // no parsing a count out of its output
     log("transpile");
-    const made = await transpile({root, config: own, log: (m) => { output += m + "\n"; }});
+    // **The bytes the generation is named by are the bytes it is built
+    // from.** A save that lands between the hash above and the transpiler's
+    // read would build other bytes under this name; it is refused instead,
+    // and the next build names what is there then
+    const changed = [];
+    const made = await transpile({root, config: own, log: (m) => { output += m + "\n"; },
+      onRead: (file, bytes) => {
+        const known = digests.get(normalPath(file));
+        if (known !== undefined && createHash("sha256").update(bytes).digest("hex") !== known) changed.push(file);
+      }});
+    // and nothing the generators or the transpiler read was written since
+    // it was named
+    changed.push(...watched.filter((file) => stampOf(file) !== stamps.get(file)));
+    if (changed.length > 0) throw changedError(root, changed);
     const objects = made.objects;
 
     const manifest = {
@@ -828,7 +891,7 @@ export async function build(options = {}) {
     if (options.switch !== false) {
       switchTo(root, hash, log);
     }
-    return {ok: true, hash, cached: false, live: liveHash(root) === hash, ms: manifest.ms, objects, output: options.verbose ? output : undefined};
+    return {ok: true, hash, cached: false, live: liveHash(root) === hash, ms: manifest.ms, objects, output: options.verbose ? output : undefined, digests};
   } catch (error) {
     rmSync(tmp, {recursive: true, force: true});
     error.output = (error.output ?? "") || output;
@@ -916,4 +979,26 @@ export async function main(args) {
 
 if (runsAs("osd-build.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code));
+}
+
+// a path spelled one way: absolute, forward slashes
+export function normalPath(file) {
+  return resolve(file).split("\\").join("/");
+}
+
+// what changes with any write to a file, a write of the same bytes included
+function stampOf(file) {
+  try {
+    const st = statSync(file, {bigint: true});
+    return `${st.size}:${st.mtimeNs}:${st.ctimeNs}:${st.ino}`;
+  } catch {
+    return "absent";
+  }
+}
+
+function changedError(root, files) {
+  const names = [...new Set(files.map((f) => relative(root, f)))];
+  const error = new Error(`the tree changed while it was built: ${names.slice(0, 5).join(", ")}`);
+  error.code = "CHANGED";
+  return error;
 }
