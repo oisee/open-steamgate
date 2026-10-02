@@ -3,6 +3,7 @@
     "test/adt-abap-csrf.mjs",
     "test/adt-abap-diff.mjs",
     "test/adt-abap-session.mjs",
+    "test/adt-abap-sessions.mjs",
     "test/adt-abapfs-conformance.mjs",
     "test/adt-activation.mjs",
     "test/adt-devloop.mjs",

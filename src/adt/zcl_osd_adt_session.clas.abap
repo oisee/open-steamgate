@@ -15,6 +15,9 @@ CLASS zcl_osd_adt_session DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_now TYPE timestamp OPTIONAL.
     "! Adapter read: no touch, expiry filtering or sweep.
     METHODS peek IMPORTING iv_id TYPE string RETURNING VALUE(rs_row) TYPE zosd_adt_sess.
+    "! Adapter snapshot of handles; no touch or ownership changes.
+    TYPES ty_handles TYPE STANDARD TABLE OF zosd_adt_shdl WITH DEFAULT KEY.
+    METHODS handles IMPORTING iv_id TYPE string RETURNING VALUE(rt_rows) TYPE ty_handles.
     "! Test clock; initial means the real UTC clock.
     METHODS set_clock IMPORTING iv_now TYPE timestamp.
   PRIVATE SECTION.
@@ -47,6 +50,10 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
 
   METHOD peek.
     SELECT SINGLE * FROM zosd_adt_sess INTO rs_row WHERE mandt = sy-mandt AND id = iv_id.
+  ENDMETHOD.
+
+  METHOD handles.
+    SELECT * FROM zosd_adt_shdl INTO TABLE rt_rows WHERE mandt = sy-mandt AND id = iv_id.
   ENDMETHOD.
 
   METHOD random.
