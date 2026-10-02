@@ -102,9 +102,16 @@ describe("C2a PARSE dispatcher destination",() => {
     const previous=process.env.OSD_TRANSITION_MS;
     process.env.OSD_TRANSITION_MS="20";
     try {
-      const store={unitReady:new Promise(() => {}),unit:() => {throw new Error("must await warm-up first");}};
+      let calls=0;
+      const store={unitReady:new Promise(() => {}),unit:async () => {calls++;return {classes:(t,n) => plan(t,n)};}};
       const result=await call(new StoreDestination(),{kind:"UNIT_PLAN",type:"CLAS",name:"ZCL_X"},store);
       expect(result.EV_ERROR).to.include("pre-warm silent for 20 ms");
+      expect(calls).to.equal(0);
+      expect(store.unitReady).to.equal(undefined);
+      const retry=await call(new StoreDestination(),{kind:"UNIT_PLAN",type:"CLAS",name:"ZCL_X"},store);
+      expect(retry.EV_ERROR).to.equal("");
+      expect(JSON.parse(retry.EV_JSON).object.name).to.equal("ZCL_X");
+      expect(calls).to.equal(1);
     } finally {
       if(previous===undefined) delete process.env.OSD_TRANSITION_MS;else process.env.OSD_TRANSITION_MS=previous;
     }
@@ -171,11 +178,24 @@ describe("C2a serving startup",function () {
       const response=fetch(origin+base+"core/http/unit/object?type=CLAS&name=ZCL_X").then((r) => {answered=true;return r;});
       await new Promise((resolve) => setTimeout(resolve,50));
       expect(answered).to.equal(false);
-      if(outcome==="warm") release();
+      if(outcome==="warm") {
+        // This route takes the same ABAP work process. It must answer while
+        // discovery is still waiting, for both front implementations.
+        const unrelated=await fetch(origin+base+"abapunit/metadata",{signal:AbortSignal.timeout(2000)});
+        expect(unrelated.status).to.equal(200);
+        await unrelated.arrayBuffer();
+        expect(answered).to.equal(false);
+        release();
+      }
       if(outcome==="rejected") reject(new Error("fixture warm failure"));
       const result=await response;
       expect(result.status).to.equal(outcome==="silent" ? 500 : 200);
-      if(outcome==="silent") expect(await result.text()).to.include("pre-warm silent for 100 ms");
+      if(outcome==="silent") {
+        expect(await result.text()).to.include("pre-warm silent for 100 ms");
+        const retry=await fetch(origin+base+"core/http/unit/object?type=CLAS&name=ZCL_X");
+        expect(retry.status).to.equal(200);
+        await retry.arrayBuffer();
+      }
       if(outcome==="rejected") expect(errors).to.deep.equal(["unit plan: pre-warm failed: fixture warm failure"]);
     } finally {
       release();

@@ -138,23 +138,27 @@ export function unitClasses(store, type, name) {
 // Warm-up can be slow while doing synchronous work, but an unresolved
 // async stage must not keep discovery waiting forever. Reset the silence
 // deadline when a stage finishes, and let queued completion run before timing out.
-async function waitUnitWarmup(store) {
-  if (store.unitReady === undefined) return;
+export async function waitUnitWarmup(store) {
+  const ready = store.unitReady;
+  if (ready === undefined) return;
   const silenceMs = Number(process.env.OSD_TRANSITION_MS ?? 30000);
   const started = Date.now();
   const late = Symbol("late");
   let settled = false;
-  store.unitReady.then(() => {settled = true;}, () => {settled = true;});
+  ready.then(() => {settled = true;}, () => {settled = true;});
   for (;;) {
     let timer;
     const deadline = (store.unitWarmHeard ?? started) + silenceMs;
-    const result = await Promise.race([store.unitReady, new Promise((resolve) => {
+    const result = await Promise.race([ready, new Promise((resolve) => {
       timer = setTimeout(() => resolve(late), Math.max(0, deadline - Date.now()));
     })]).finally(() => clearTimeout(timer));
     if (result !== late) return;
     await new Promise((resolve) => setImmediate(resolve));
-    if (settled) {await store.unitReady;return;}
+    if (settled) {await ready;return;}
     if ((store.unitWarmHeard ?? started) + silenceMs > Date.now()) continue;
+    // Abandon this wait, including for later requests: discovery can use
+    // the runner directly even if the background graph never finishes.
+    if (store.unitReady === ready) delete store.unitReady;
     throw new Error(`unit plan pre-warm silent for ${silenceMs} ms`);
   }
 }
