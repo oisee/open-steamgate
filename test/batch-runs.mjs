@@ -202,7 +202,7 @@ describe("durable one-shot batch runs", function () {
       // its intent id: the order the drain used before the release sequence
       const secondId = "0".repeat(32);
       db.prepare(`INSERT INTO zosd_job_outbox VALUES
-        ('123', ?, 'OSG', ?, 'OLD_SECOND', '00000002', 'DEVELOPER',
+        ('123', ?, '${SID}', ?, 'OLD_SECOND', '00000002', 'DEVELOPER',
          'Z_FIRST', '01', 'generation-1', '20260929', '091500')`).run(secondId, sourceDb);
       db.prepare(`INSERT INTO zosd_job_step VALUES ('123', ?, '01', 'Z_FIRST')`).run(secondId);
       db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
@@ -227,7 +227,7 @@ describe("durable one-shot batch runs", function () {
       const newId = "f".repeat(32);
       db.prepare(`INSERT INTO zosd_job_outbox (mandt, intent_id, sysid, source_db, jobname, jobcount, owner, program,
         step_count, generation, created_on, created_at, release_seq) VALUES
-        ('123', ?, 'OSG', ?, 'NEW_RELEASED', '00000003', 'DEVELOPER', 'Z_FIRST', '01', 'generation-1', '20260928', '080000', '0000000000000001')`).run(newId, sourceDb);
+        ('123', ?, '${SID}', ?, 'NEW_RELEASED', '00000003', 'DEVELOPER', 'Z_FIRST', '01', 'generation-1', '20260928', '080000', '0000000000000001')`).run(newId, sourceDb);
       db.prepare(`INSERT INTO zosd_job_step VALUES ('123', ?, '01', 'Z_FIRST', '[]')`).run(newId);
       // the columns a JOB_CLOSE writes empty
       for (const column of ["pred_jobname", "pred_jobcount", "pred_intent_id", "source_instance", "wait_seq", "event_id", "event_param",
