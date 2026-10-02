@@ -15,6 +15,7 @@ import {adtRouter} from "../tools/adt-facade.mjs";
 import {abapRunner, abapServes, registerContinuation, continuationKinds} from "../tools/adt-abap-front.mjs";
 import {dialogStep, workProcess} from "../tools/osd-dialog-step.mjs";
 import {adtEnqOwner} from "../tools/adt-enq-key.mjs";
+import {AbapSessions} from "../tools/adt-abap-sessions.mjs";
 import {endEnqSession} from "../tools/osd-enq-host.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {SESSION_COOKIE} from "../tools/adt-session.mjs";
@@ -64,10 +65,6 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
       abap: {...runner, answer: async (view, session) => {
         entered.push(`${view.method} ${view.path}`);
         const record = await runner.answer(view, session);
-        if (dumpNext === "enq") {
-          dumpNext = false;
-          throw Object.assign(new Error("the ENQ session ended while the step waited"), {code: "ENQ_SESSION_ENDED"});
-        }
         if (dumpNext) {
           dumpNext = false;
           throw new Error("a dump after the handler answered");
@@ -286,12 +283,42 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
   });
 
   it("a step whose ENQ session ended while it waited is the refusal, not a dump", async () => {
-    const one = await logon();
-    dumpNext = "enq";
-    const answer = await as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`);
-    expect([answer.status, answer.headers.get("x-csrf-token"), await answer.text()])
-      .to.deep.equal([403, "Required", "CSRF token validation failed"]);
-    await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
+    // The real path, with the logoff's moment chosen: the session is resolved
+    // and bound, then its ENQ key is ended (what a logoff running during a
+    // WAIT does), and the LOCK's ENQUEUE in the same step meets the lock
+    // server's EnqSessionEnded. No route of the tree WAITs before its
+    // ENQUEUE today, so the end is put there by the session's RESOLVE.
+    class EndingSessions extends AbapSessions {
+      async sessionFor(req) {
+        const obj = await super.sessionFor(req);
+        const resolve = obj["zif_osd_adt_session$resolve"];
+        obj["zif_osd_adt_session$resolve"] = async (input) => {
+          const resolved = await resolve(input);
+          if (req.method === "POST") endEnqSession(adtEnqOwner.key(resolved.get().id.get().trimEnd()));
+          return resolved;
+        };
+        return obj;
+      }
+    }
+    const app = express();
+    app.use(express.raw({type: "*/*"}));
+    app.use(adtRouter({store: new ObjectStore({root, libs: []}), data: {}, watch: false, logMisses: false,
+      transpileOnActivate: false, sessions: new EndingSessions(), abap: abapRunner({handler, step: dialogStep})}).router);
+    const other = await new Promise((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+    try {
+      const at = `http://127.0.0.1:${other.address().port}${BASE}`;
+      const hello = await fetch(`${at}/core/discovery`, {method: "HEAD",
+        headers: {"x-csrf-token": "fetch", "x-sap-adt-sessiontype": "stateful"}});
+      const answer = await fetch(`${at}/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`, {method: "POST",
+        headers: {cookie: `sap-contextid=${cookieId(hello)}`, "x-csrf-token": hello.headers.get("x-csrf-token"),
+          "x-sap-adt-sessiontype": "stateful"}});
+      expect([answer.status, answer.headers.get("x-csrf-token"), await answer.text()])
+        .to.deep.equal([403, "Required", "CSRF token validation failed"]);
+      const {locks} = await import("../tools/osd-enq.mjs");
+      expect(locks().read({table: "ZOSD_ADT_LOCK"}).filter((r) => r.arg.includes(LOCKED)), "no lock taken").to.deep.equal([]);
+    } finally {
+      await new Promise((resolve) => other.close(resolve));
+    }
   });
 
   it("the body goes to ABAP only for a row ABAP serves, and the answer names who served it", async () => {

@@ -106,11 +106,16 @@ Per host:
   the front with `AbapSessions` too. The parent runs no system, so it loads the **ADT kernel**
   (`tools/adt-abap-kernel.mjs`): the closure of the classes the front calls, read off the generated modules (138
   modules, against 1939 for the whole system), with a database of its own in memory holding only their tables,
-  and the lock server in the parent. Measured: about 110 MB RSS and 0.2 s to load, against 430 MB and 1.6 s for
-  the whole system. The sessions and their locks therefore outlive every recycle of the serving child (an editor
+  and the lock server in the parent. Measured by stoker on a running host: +55 MB RSS for the parent (675 MB against 620
+  MB), and 0.2 s to load. The sessions and their locks therefore outlive every recycle of the serving child (an editor
   locks, saves, activates and saves again under one handle; `test/osd-child.mjs` kills the child and the lock is
-  still held). They last as long as the parent, as Node's `Sessions` did. A change to `ZCL_OSD_ADT_*` reaches the
-  parent's kernel at its next start, not at an activation.
+  still held). They last as long as the parent, as Node's `Sessions` did. **After editing the front, restart the host.** The kernel is
+  loaded once (`tools/adt-abap-kernel.mjs`, `loadAdtKernel`), and a change to a `ZCL_OSD_ADT_*` class or to the
+  front's tables (`ZOSD_ADT_SESS`, `ZOSD_ADT_SHDL`) recycles the serving child but not the parent, which keeps
+  serving the old front until it restarts. This is detected: once per generation the parent compares the hash of
+  the front's closure (its modules and table statements, `closureHash`) with the one it loaded. When they differ
+  it says so on the console, naming the restart, and every answer of the front carries `X-OSD-Front-Stale: 1`: discovery (`discovery`, `core/discovery`), `core/http/systeminformation` and refusals included, so a client (the VS Code extension) can show a "restart the host" hint from requests it already makes.
+  Nothing is refused, because the editor that would fix the front goes through it.
 - `OSD_ADT=js`, in either shape: Node's `Sessions`, its middleware and Node's routes, as before slice 3. This is
   the emergency exit when the ABAP front itself is broken. A step of the front that dumps logs the reason once per
   generation and names this switch. If the kernel cannot load, the parent says why and falls back the same way.
@@ -225,6 +230,10 @@ phase. E2 is parked for 0.7. The two ways to one table, with no choice made here
 
 ### Group C and the child's runtime
 
+Until the lock-table and child-runtime question above is decided, slices 4a (writes), 4b (activation), the data
+preview and ABAP Unit stay HOST routes and continuations that delegate to the child. They do not become ABAP rows
+served in the parent.
+
 The parent's ADT kernel has a database holding only the ADT tables, and reaches the source tree through the
 STORE destination. That is enough for 4a writes (the store's files) and for 4b activation: the route decides in
 ABAP and ends with a HOST verdict whose continuation (`publish`) runs in the parent after the step, where the
@@ -237,20 +246,19 @@ handler, the continuation registry, `AbapSessions` and the tests stay.
 
 ### Measured overhead, with the real session
 
-One process per run, 120 requests per cell, the median of the last 100, two rounds per run, the inline mount. The
-same script ran on main (`d0768a9f`, mixed front, Node sessions) and on the branch (option B, `AbapSessions`),
-alternating, three runs each, after the fix round (the body no longer copied into hex for a HOST row). The LOCK is
-a relock of the session's own lock. Figures are round 2 of each run.
+stoker measured the running host (median of the last 100 of 120 requests per cell):
 
-| request | main | option B | added |
+| request | `OSD_ADT=js` | child | inline |
 |---|---|---|---|
-| `core/discovery` (HOST) | 0.48-0.54 ms | 1.63-1.86 ms | +1.1 to +1.4 ms |
-| source GET (HOST) | 0.38-0.45 ms | 1.31-1.68 ms | +0.9 to +1.3 ms |
-| LOCK (ABAP) | 1.42-1.82 ms | 2.05-2.13 ms | +0.2 to +0.7 ms |
+| `core/discovery` (HOST) | 0.70 ms | 2.91 ms | 3.09 ms |
+| source GET (HOST) | 0.61 ms | 2.47 ms | 2.73 ms |
 
-The first measurement, before the fix round, gave +1.3 to +2.2 ms for a HOST row. That is still more than the
-0.45 to 0.6 ms the shim-only measurement (below) predicted: the real session adds a sweep, a read and a touch per
-request, then the adapter's `peek` and `handles` for `req.adt`, and the commit.
+So a HOST row costs **+1.9 to 2.2 ms** with the ABAP front, not about 1 ms. The in-process bench of this branch
+(one process, the inline mount, three alternating runs against main `d0768a9f`) gave smaller figures: +1.1 to +1.4
+ms on discovery, +0.9 to +1.3 ms on a source GET and +0.2 to +0.7 ms on a LOCK. stoker's table is the one to
+quote, because it measures the host as it runs. The cost is the real session: a sweep, a read and a touch per
+request, then the adapter's `peek` and `handles` for `req.adt`, and the commit. That is more than the 0.45 to
+0.6 ms the shim-only measurement (below) predicted.
 
 **The sweep grows with the table.** `RESOLVE` ends expired sessions on every request with a scan of
 `ZOSD_ADT_SESS` by `TOUCHED`, which has no index. Measured through the adapter: 0.54 ms with 1 session, 0.58 ms

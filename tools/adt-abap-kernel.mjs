@@ -6,7 +6,7 @@
 // the ADT sessions and their locks live, and they must outlive a recycle of
 // the serving child: an editor locks, saves, activates and saves again under
 // the same handle. So the parent loads the ADT classes itself -- not the
-// whole system, which is 1939 modules and ~430 MB -- with a database of its
+// whole system, which is 1939 modules -- with a database of its
 // own in memory that holds only the tables those classes use, and the lock
 // server (tools/osd-enq-host.mjs) in this process. The sessions are then as
 // long-lived as Node's Sessions were in this process: until it stops.
@@ -17,6 +17,7 @@
 // route classes by name at run time, and the router names them as literals,
 // so they are in the closure too.
 import {readFileSync, readdirSync, existsSync} from "node:fs";
+import {createHash} from "node:crypto";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
 
@@ -76,6 +77,59 @@ function tableStatements(output, tables) {
   return out;
 }
 
+/** one hash over what the kernel loads from a generation: the closure's
+ *  modules (every part of each object) and its tables' statements */
+export function closureHash(output) {
+  const hash = createHash("sha256");
+  const files = kernelClosure(output);
+  const stems = new Set(files.map((f) => f.split(".")[0]));
+  for (const file of readdirSync(output).sort()) {
+    if (stems.has(file.split(".")[0]) && file.endsWith(".mjs") && file.includes(".testclasses.") === false) {
+      hash.update(file).update("\0").update(readFileSync(join(output, file))).update("\0");
+    }
+  }
+  const tables = new Set(files.filter((f) => f.includes(".tabl.")).map((f) => decodeURIComponent(f.split(".")[0]).toUpperCase()));
+  for (const statement of tableStatements(output, tables)) hash.update(statement).update("\0");
+  return hash.digest("hex").slice(0, 16);
+}
+
+/**
+ * Whether the kernel this process loaded is still the generation's: the
+ * kernel is loaded once, at start, and a generation that changes a class of
+ * the front or one of its tables recycles the serving child but not this
+ * process. Asked per request, computed once per generation (the key).
+ * When stale, it says so once per generation on the console, naming the
+ * restart; it never refuses, because the editor that would fix the front
+ * goes through the front.
+ * @param {object} options
+ * @param {string} options.output the generation's folder, as it is now
+ * @param {string} options.loaded the closureHash the kernel was loaded from
+ * @param {Function} options.generation () => the live generation's key
+ * @param {Function} [options.log] the one line, console.error by default
+ * @returns {() => boolean} stale
+ */
+export function kernelFreshness({output, loaded, generation, log = console.error}) {
+  const known = new Map();
+  return () => {
+    const key = String(generation() ?? "");
+    if (known.has(key) === false) {
+      let stale = false;
+      try {
+        stale = closureHash(output) !== loaded;
+      } catch {
+        // a generation half written or gone: not a verdict on the front
+        return false;
+      }
+      known.set(key, stale);
+      if (stale) {
+        log(`ADT front: generation ${key || "?"} changes the ADT classes or their tables, and this host still runs ` +
+          "the ADT kernel it started with; restart the host (npm start / osd up) to load them. Requests are served by the old front meanwhile.");
+      }
+    }
+    return known.get(key);
+  };
+}
+
 /**
  * Load the ADT kernel into this process: the ABAP runtime, a database in
  * memory with the closure's tables, the identity, the lock server and the
@@ -83,14 +137,19 @@ function tableStatements(output, tables) {
  * @param {object} options
  * @param {string} options.output the generation's folder (output/)
  * @param {object} options.setup test/setup.mjs, for installStoreDestination
- * @returns {Promise<{handler: Function, modules: number, tables: string[]}>}
+ * @returns {Promise<{handler: Function, modules: number, tables: string[], hash: string}>}
  */
 export async function loadAdtKernel({output, setup}) {
   if (globalThis.abap !== undefined) throw new Error("the ADT kernel loads only into a process with no ABAP system");
   if (existsSync(join(output, "init.mjs")) === false) throw new Error(`no generation at ${output}`);
   const files = kernelClosure(output);
+  const hash = closureHash(output);
   const runtime = (await import("@abaplint/runtime")).default;
   globalThis.abap = new runtime.ABAP();
+  // the sentinel a second ABAP boot in this process checks (Data#boot): a
+  // whole-system init.mjs would install another runtime over this one and
+  // take the sessions and locks with it
+  globalThis.__osdAdtKernel = {output, hash};
   const {SQLiteDatabaseClient} = await import("@abaplint/database-sqlite");
   const {installTrim} = await import("./sql-literals.mjs");
   const {bootIdentity} = await import("./osd-identity.mjs");
@@ -106,5 +165,5 @@ export async function loadAdtKernel({output, setup}) {
   installEnq(abap);
   setup.installStoreDestination(abap);
   for (const file of files) await import(pathToFileURL(join(output, file)).href);
-  return {handler: abap.Classes.ZCL_OSD_ADT_HANDLER, modules: files.length, tables: [...tables].sort()};
+  return {handler: abap.Classes.ZCL_OSD_ADT_HANDLER, modules: files.length, tables: [...tables].sort(), hash};
 }

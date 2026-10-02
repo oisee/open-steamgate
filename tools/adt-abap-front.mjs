@@ -172,8 +172,9 @@ export async function answerOf(handler, view, session) {
 /** {step, answer} for adtRouter's `abap` option, from the transpiled handler
  *  and the host's dialogStep: what test/start.mjs and the tests mount, said
  *  once. answer(view, session) runs inside the step. */
-export function abapRunner({handler, step}) {
+export function abapRunner({handler, step, stale}) {
   return {
+    stale,
     step: (work, label) => step(work, label),
     // the class slot read each time, so a warm load (tools/osd-hot.mjs) is
     // the handler the next request enters
@@ -226,6 +227,7 @@ function dumped(generation, message) {
  * @param {object} [options.store] this façade's ObjectStore, what OBJECT reads
  * @param {Function} [options.served] (servedBy, req, record) => void, for a test or a log
  * @param {Function} [options.generation] () => the live generation, for the one log line of a dump
+ * @param {Function} [options.stale] () => true when the ABAP the front runs is older than the generation
  */
 export function abapFront(options) {
   return async (req, res, next) => {
@@ -233,6 +235,9 @@ export function abapFront(options) {
     const url = req.originalUrl ?? req.url;
     const path = url.split("?")[0];
     const refuse = (message) => options.refuse(res, 500, "ExceptionInternalError", message, {namespace: NAMESPACE});
+    // a kernel older than the generation's front (tools/adt-abap-kernel.mjs):
+    // said on every answer, never refused
+    if (options.stale?.() === true) res.set("X-OSD-Front-Stale", "1");
     const body = await bodyOf(req);
     if (body === undefined) {
       refuse(`${req.method} ${path}: the request body was parsed before the ADT facade; mount it behind express.raw`);

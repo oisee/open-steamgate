@@ -534,7 +534,7 @@ Every landing also:
 1. **Session state and rollback.**
    - `zcl_stg_http_handler` rolls back on status ≥ 400, but a session or token issued on a 403 or 404 must persist. The ADT handler catches every refusal in `ANSWER`, so the step ends without an exception and commits the session and handle rows whatever the status. That includes the CSRF refusal of a session that ended (its rows' deletion).
    - On OSGo, state cannot live in statics: tables `ZOSD_ADT_SESS` / `ZOSD_ADT_SHDL` (#464).
-   - Touching the session is a write per request. Measured with the front moved up (one process, 120 requests per cell, median of the last 100, four runs), a delegated request costs 1.3 to 2.2 ms more than on main, and an ABAP LOCK 0.6 to 0.9 ms more. See `slice-3-front.md`.
+   - Touching the session is a write per request. Measured on a running host (stoker, median of the last 100 of 120), a HOST row costs +1.9 to 2.2 ms with the ABAP front (discovery 0.70 ms with `OSD_ADT=js`, 2.91 ms in child mode, 3.09 ms inline). See `slice-3-front.md`.
 2. **Async waits.**
    - Activation and unit runs hold the work-process FIFO lock for seconds.
    - The host answers a job id, and ABAP polls with `WAIT UP TO n SECONDS`, which releases the lock while it waits.
