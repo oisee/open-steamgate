@@ -233,14 +233,15 @@ ENDCLASS.
   });
 
   it("a new object joins the package tree without rebuilding the index", () => {
-    expect(store.packages()).to.deep.equal([]);
+    // $TMP is there before anything is (tools/osd-tmp.mjs), and nothing else
+    expect(store.packages().map((pkg) => pkg.name)).to.deep.equal(["$TMP"]);
 
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS);
 
     const packages = store.packages();
-    expect(packages.map((pkg) => pkg.name)).to.deep.equal(["$STG", "$STG_OSD"]);
+    expect(packages.map((pkg) => pkg.name)).to.deep.equal(["$STG", "$STG_OSD", "$TMP"]);
     expect(packages.find((pkg) => pkg.name === "$STG_OSD").objects).to.equal(1);
-    expect(store.rootPackages().map((pkg) => pkg.name)).to.deep.equal(["$STG"]);
+    expect(store.rootPackages().map((pkg) => pkg.name)).to.deep.equal(["$STG", "$TMP"]);
     expect(store.package("$STG_OSD").objects).to.deep.include({
       type: "CLAS",
       name: "ZCL_OSD_PROBE",
@@ -509,7 +510,8 @@ ENDCLASS.
 
     it("reads the inputs in their order, and the later one wins, as in the build", () => {
       const own = new ObjectStore({root: tree, libs: []});
-      expect(own.roots.map((r) => r.path)).to.deep.equal(["src", "gen", "local/used"]);
+      // and $TMP last, a root before anything is in it (tools/osd-tmp.mjs)
+      expect(own.roots.map((r) => r.path)).to.deep.equal(["src", "gen", "local/used", "local/tmp"]);
       expect(own.find("CLAS", "ZCL_OURS")).to.include({file: "local/used/zcl_ours.clas.abap", writable: true, imported: true});
       expect(own.find("CLAS", "ZCL_THEIRS")).to.include({file: "local/used/zcl_theirs.clas.abap", writable: true, imported: true});
       expect(own.find("CLAS", "ZCL_SHADOW"), "a folder that is not an input is not the system").to.equal(undefined);
@@ -530,14 +532,14 @@ ENDCLASS.
       expect(own.find("CLAS", "ZCL_SHADOW")).to.include({file: "local/shadow/zcl_shadow.clas.abap"});
       const chosen = new ObjectStore({root: tree, roots: [{path: "gen", writable: false, library: false}], libs: []});
       chosen.reroot();
-      expect(chosen.roots.map((r) => r.path)).to.deep.equal(["gen"]);
+      expect(chosen.roots.map((r) => r.path)).to.deep.equal(["gen", "local/tmp"]);
       expect(chosen.find("CLAS", "ZCL_OURS")).to.include({file: "gen/zcl_ours.clas.abap"});
     });
 
     it("a tree without the config uses the build's src fallback", () => {
       rmSync(join(tree, "abap_transpile.json"));
       const own = new ObjectStore({root: tree, libs: []});
-      expect(own.roots.map((r) => r.path)).to.deep.equal(["src"]);
+      expect(own.roots.map((r) => r.path)).to.deep.equal(["src", "local/tmp"]);
       expect(own.find("CLAS", "ZCL_SHADOW")).to.equal(undefined);
     });
   });

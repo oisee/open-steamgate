@@ -22,6 +22,7 @@ import {libraryFiles} from "./osd-inputs.mjs";
 import {hashOf, inputsOf, loadConfig, normalPath} from "./osd-build.mjs";
 import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
+import {TMP_FOLDER, TMP_PACKAGE, TMP_TEXT, ensureTmp, forgetAuthor, isTmpPackage, recordAuthor, tmpAuthors, tmpRoot} from "./osd-tmp.mjs";
 
 import {basename, dirname, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -153,17 +154,25 @@ export function exclusionsOf(root) {
 export function rootsOf(root, env = process.env) {
   const config = loadConfig(root);
   const packs = new Map(packRootsOf(root, env).map((pack) => [pack.path, pack]));
-  return inputFoldersOf(root, config, env).map((path) => packs.get(path) ?? ({
+  return inputFoldersOf(root, config, env).map((path) => packs.get(path) ?? (path === TMP_FOLDER ? tmpRoot() : {
     path, writable: path !== "gen", library: false,
     ...(path === "local" || path.startsWith("local/") ? {imported: true} : {}),
   }));
+}
+
+// $TMP is a root whether or not anything was created in it yet: the build
+// reads its folder once it exists (inputFoldersOf), the store needs it
+// before, so that the first create has somewhere to go. Last, so that a
+// write that names no root never lands in it.
+function withTmp(roots) {
+  return roots.some((r) => r.path === TMP_FOLDER) ? roots : [...roots, tmpRoot()];
 }
 
 export class ObjectStore {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
     this.explicitRoots = options.roots !== undefined;
-    this.roots = options.roots ?? rootsOf(this.root);
+    this.roots = withTmp(options.roots ?? rootsOf(this.root));
     // the build's exclusions are the store's too, from the same file
     this.excluded = options.excluded ?? exclusionsOf(this.root);
     this.superPackage = options.superPackage === undefined ? SUPER_PACKAGE : options.superPackage;
@@ -486,7 +495,7 @@ export class ObjectStore {
   // the roots are read again, unless a caller chose them
   reroot() {
     if (this.explicitRoots === false) {
-      this.roots = rootsOf(this.root);
+      this.roots = withTmp(rootsOf(this.root));
     }
     this.index = undefined;
     this.#forget();
@@ -621,6 +630,19 @@ export class ObjectStore {
           }
           break;
         }
+      }
+    }
+    // $TMP exists on every system, before anything was put in it
+    if (!index.has(`DEVC ${TMP_PACKAGE}`)) {
+      index.set(`DEVC ${TMP_PACKAGE}`, {type: "DEVC", name: TMP_PACKAGE, file: join(TMP_FOLDER, "package.devc.xml"),
+        root: TMP_FOLDER, writable: true, library: false, imported: false, package: TMP_PACKAGE, packages: [TMP_PACKAGE],
+        synthetic: true});
+    }
+    // and what is in it says who made it (tools/osd-tmp.mjs)
+    const authors = tmpAuthors(this.root);
+    for (const entry of index.values()) {
+      if (entry.root === TMP_FOLDER && authors[`${entry.type} ${entry.name}`] !== undefined) {
+        entry.changedBy = authors[`${entry.type} ${entry.name}`].author;
       }
     }
     this.index = index;
@@ -843,6 +865,9 @@ export class ObjectStore {
     if (home.writable === false) {
       throw new ReadOnly("DEVC", parent);
     }
+    if (isTmpPackage(parent)) {
+      ensureTmp(this.root);
+    }
     const folder = dirname(home.file);
     const root = this.roots.find((r) => folder === r.path || folder.startsWith(r.path + "/"));
     const description = String(options.description ?? "");
@@ -870,6 +895,11 @@ export class ObjectStore {
     const entry = {type, name: upper, file, root: root.path, writable: true, library: false,
                    imported: root.imported === true, description,
                    package: packages[packages.length - 1], packages};
+    // an object of $TMP carries its author, the way TADIR does on a system
+    if (root.path === TMP_FOLDER && options.author !== undefined && options.author !== "") {
+      recordAuthor(this.root, type, upper, options.author);
+      entry.changedBy = String(options.author).toUpperCase();
+    }
     // the intent first: a crash before the files leaves a set naming files
     // that are all absent, which the next start drops (#loadInactive)
     if (type !== "DEVC") {
@@ -942,6 +972,10 @@ export class ObjectStore {
     if (entry.writable === false) {
       throw new ReadOnly(type, name);
     }
+    if (type === "DEVC" && isTmpPackage(entry.name)) {
+      // delivered with every system; on one its row belongs to SAP
+      throw new NotSupported(`deleting ${TMP_PACKAGE}, the local package every system has`);
+    }
     const meta = TYPES[type];
     const files = [entry.file];
     if (type === "CLAS") {
@@ -968,6 +1002,9 @@ export class ObjectStore {
     this.#entries().delete(`${entry.type} ${entry.name}`);
     if (this.inactive.delete(`${entry.type} ${entry.name}`)) this.#saveInactive();
     this.#dropActiveCopy(entry);
+    if (entry.root === TMP_FOLDER) {
+      forgetAuthor(this.root, entry.type, entry.name);
+    }
     this.#forget();
     return {type: entry.type, name: entry.name, deleted: true};
   }
@@ -1099,7 +1136,7 @@ export class ObjectStore {
     for (const entry of this.#entries().values()) {
       if (entry.package === wanted && !(entry.type === "DEVC" && entry.name === wanted)) {
         objects.push({type: entry.type, name: entry.name, library: entry.library, writable: entry.writable,
-          version: this.stateOf(entry).version});
+          version: this.stateOf(entry).version, ...(entry.changedBy === undefined ? {} : {author: entry.changedBy})});
       }
     }
     return {
@@ -1112,13 +1149,13 @@ export class ObjectStore {
   // until content arrives the folder speaks for itself
   #packageText(name) {
     const file = this.#devcOf(name);
-    if (file !== undefined) {
+    if (file !== undefined && existsSync(join(this.root, file))) {
       const text = /<CTEXT>([^<]*)<\/CTEXT>/.exec(readFileSync(join(this.root, file), "utf8"));
       if (text !== null) {
         return text[1];
       }
     }
-    return undefined;
+    return isTmpPackage(name) ? TMP_TEXT : undefined;
   }
 
   // a package object is named after the package it describes

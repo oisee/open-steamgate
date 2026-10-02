@@ -24,6 +24,7 @@
 import {existsSync, readFileSync} from "node:fs";
 import {isAbsolute, join, relative, resolve} from "node:path";
 import {rename} from "./osd-rename.mjs";
+import {TMP_FOLDER, TMP_PACKAGE, insideTmp, tmpObjectKeys} from "./osd-tmp.mjs";
 
 export const MANIFEST = "deploy/manifest.json";
 
@@ -99,6 +100,7 @@ export function unitFor(manifest, input, name) {
     return withNamespaces(manifest, {name, ...units[name]});
   }
   const root = resolve(process.env.OSD_ROOT ?? process.cwd());
+  refuseTmp(root, input);
   const rel = (p) => relative(root, isAbsolute(p) ? p : resolve(p)).replace(/\/+$/, "");
   const want = rel(input);
   const hits = Object.entries(units).filter(([, u]) => (u.sources ?? []).some((s) => rel(join(root, s)) === want));
@@ -108,6 +110,15 @@ export function unitFor(manifest, input, name) {
   }
   throw new Error(`${input} is not the source of any deploy unit in ${manifest.file}. `
     + `Pass --unit <name>, or add a unit that lists what this zip may carry.`);
+}
+
+/** $TMP never travels: a zip of its folder, or of anything inside it, is
+ *  refused before a unit is even looked for. */
+export function refuseTmp(root, input) {
+  if (input !== undefined && insideTmp(root, isAbsolute(input) ? input : resolve(input))) {
+    throw new Error(`${input} is ${TMP_PACKAGE} (${TMP_FOLDER}): local objects are never transported, `
+      + "so nothing in it may go into a zip for a system. Move the object to a package of its own first.");
+  }
 }
 
 /** The unit whose objects list this SEGW project (`IWPR <project>`). */
@@ -264,14 +275,21 @@ function entriesOf(unit) {
 
 /** Check a folder's files (and the tables whose rows travel) against a unit.
  *  Returns the refusals; an empty list means everything may go. */
-export function admit({files, read, tables = [], unit, customerNamespaces}) {
+export function admit({files, read, tables = [], unit, customerNamespaces, root = process.env.OSD_ROOT ?? process.cwd()}) {
   if (unit === undefined) {
     return [{file: "(all)", key: "(all)", rule: "no-unit", why: "no deploy unit was given, so nothing is listed and nothing may go"}];
   }
+  // An object of $TMP is never transported (tools/osd-tmp.mjs), whatever a
+  // unit lists: by name, so a copy of it in another folder stays too.
+  const local = tmpObjectKeys(root);
   const namespaces = customerNamespaces ?? unit.customerNamespaces ?? [];
   const entries = entriesOf(unit);
   const refusals = [];
   const check = (file, obj) => {
+    if (local.has(obj.key)) {
+      refusals.push({file, key: obj.key, rule: "local-object",
+        why: `${obj.key} is an object of ${TMP_PACKAGE} (${TMP_FOLDER}), which is never transported`});
+    }
     const entry = entries.find((e) => e.matches(obj.key));
     if (entry === undefined) {
       refusals.push({file, key: obj.key, rule: "not-in-manifest", why: `unit "${unit.name}" does not list it`});

@@ -2097,6 +2097,8 @@ export function adtRouter(options = {}) {
         const made = store.create(type, name, {
           description: attribute(body, undefined, "adtcore:description") ?? "",
           package: home ?? "",
+          // an object of $TMP carries who made it (tools/osd-tmp.mjs)
+          author: req.adt.session.user,
         });
         res.status(201)
           .set("Location", `${BASE}/${adt}/${encodeURIComponent(made.name.toLowerCase())}`)
@@ -2754,7 +2756,7 @@ export function adtRouter(options = {}) {
       const wants2 = String(req.headers.accept ?? "").includes("packages.v2+xml");
       const describe = (name) => store.packages().find((p) => p.name === name)?.description ?? "";
       res.type(`application/vnd.sap.adt.packages.v${wants2 ? 2 : 1}+xml`)
-        .send(packageDocument(packageOf(store, req.params.name), {describe}));
+        .send(packageDocument(packageOf(store, req.params.name, {user: req.adt.session.user}), {describe}));
     });
   });
 
@@ -2819,6 +2821,9 @@ export function adtRouter(options = {}) {
         // its outline is parked; a client that accepts anything builds its
         // own tree from this and needs the flag to name a class's files.
         .send(nodeStructureDocument(nodesOf(store, name, parentType, {
+          // whose objects of $TMP: the logged-on user's, as on A4H, unless the
+          // client names a user (user_name; its exact semantics UNMEASURED)
+          user: String(req.query.user_name ?? "") || req.adt.session.user,
           classFolders: /dataname=com\.sap\.adt\.RepositoryObjectTreeContent/i.test(String(req.headers.accept ?? "")) === false,
         }), {
           flat: name === "" && parentType === "DEVC",
