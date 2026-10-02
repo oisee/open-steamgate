@@ -37,12 +37,9 @@ const WARM_QUIET_MS = Number(process.env.OSD_WARM_QUIET_MS ?? 60000);
 const WARM_HEAP_MB = Number(process.env.OSD_WARM_HEAP_MB ?? 512);
 // how long after a cold build the registry waits before it is primed again
 const WARM_REPRIME_MS = Number(process.env.OSD_WARM_REPRIME_MS ?? 5000);
-// how long the watcher events of a write through the store count as that
-// write's own (ObjectStore #written): the events of one write arrive within
-// milliseconds, and a process blocked by a reparse delivers them late; one
-// that arrives later is taken by the dev loop, which then joins the
-// activation's publish rather than building again
-const OWN_EVENT_MS = 2000;
+// how long a publish waits for a runtime changing hands (a recycle, a
+// start) before it answers that it is still changing rather than hang
+const TRANSITION_MS = Number(process.env.OSD_TRANSITION_MS ?? 60000);
 
 // abapGit writes /DEMO/ZREPORT as #demo#zreport; ADT hands us the name
 // with its slashes, URL-encoded, and the façade decodes before it gets here
@@ -611,9 +608,7 @@ export class ObjectStore {
     // and a save that wrote it as it came turned a one-line comment into a
     // sixty-three-line diff with no comment in it. A system stores source
     // by line, not by terminator, and so does this tree.
-    const text = String(source).replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-    writeFileSync(join(this.root, file), text);
-    this.#wrote(file, text);
+    writeFileSync(join(this.root, file), String(source).replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
     this.inactive.add(`${entry.type} ${entry.name}`);
     this.#forget();
     return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8")};
@@ -669,7 +664,6 @@ export class ObjectStore {
     for (const [suffix, content] of Object.entries(made)) {
       const target = type === "DEVC" ? file : file.slice(0, -meta.ext.length) + suffix;
       writeFileSync(join(this.root, target), content);
-      this.#wrote(target, content);
     }
     // filed the way build() files it, so the entry a create makes is the
     // entry the next rebuild makes: a package sits in the package above it,
@@ -707,9 +701,8 @@ export class ObjectStore {
           }
           this.index = undefined;
           this.#forget();
-          const own = this.#ownWrite(join(root.path, String(file)));
           for (const listener of this.listeners ?? []) {
-            listener({event, file: join(root.path, String(file)), root: root.path, own});
+            listener({event, file: join(root.path, String(file)), root: root.path});
           }
         });
         watcher.on("error", () => {});
@@ -721,51 +714,6 @@ export class ObjectStore {
     }
     return this;
   }
-
-  // What this store wrote itself (write(), create()), by file, as the
-  // digest of the bytes it wrote. Every caller that writes through the
-  // store activates through it as well -- the ADT façade's PUT and create
-  // are followed by the client's activation, the notebook and the store
-  // destination publish what they wrote -- so a watcher event that finds
-  // exactly those bytes is not another editor's save, and the dev loop
-  // leaves it to that activation (`own` below). Under STG_DEV=1 the dev
-  // loop used to publish every ADT save as well: a second activator per
-  // save, and for a new object a cold build of the create's skeleton that
-  // the activation then queued behind (vsp-i7, 2026-10-02). A delete is not
-  // recorded: no activation follows one, and the dev loop makes it live.
-  //
-  // Equal bytes name the content, not the writer, so the mark is narrow: it
-  // covers the events of the write itself (OWN_EVENT_MS after it), and it is
-  // dropped by the first event that finds other bytes or no file (another
-  // editor's save, a delete, a move), by a delete through the store, and by
-  // a publish that failed -- after which an identical save by another editor
-  // is a retry the dev loop must take, not an echo of this store's write.
-  #written = new Map();
-
-  #wrote(file, content) {
-    this.#written.set(resolve(this.root, file), {digest: createHash("sha256").update(content).digest("hex"), at: Date.now()});
-  }
-
-  // true for an event of this store's own write: within the write's burst,
-  // and with the file still holding the bytes written
-  #ownWrite(file) {
-    const path = resolve(this.root, file);
-    const wrote = this.#written.get(path);
-    if (wrote === undefined) return false;
-    let now;
-    try {
-      now = createHash("sha256").update(readFileSync(path)).digest("hex");
-    } catch {
-      now = undefined;
-    }
-    if (now === wrote.digest && Date.now() - wrote.at <= this.ownEventMs) return true;
-    this.#written.delete(path);
-    return false;
-  }
-
-  // how long after a write its watcher events count as its own; a test
-  // shortens it
-  ownEventMs = OWN_EVENT_MS;
 
   // who wants to know when the disk changed: the dev loop, which turns a
   // save in any editor into a check, a build and a recycle. The watcher
@@ -810,7 +758,6 @@ export class ObjectStore {
       files.push(entry.file.slice(0, -meta.ext.length) + meta.ext.replace(/\.(abap|asddls)$/, ".xml"));
     }
     for (const file of files) {
-      this.#written.delete(resolve(this.root, file));
       if (existsSync(join(this.root, file))) {
         unlinkSync(join(this.root, file));
       }
@@ -1055,9 +1002,6 @@ export class ObjectStore {
       entry.rejectBuilt(new Error("the publish ended before its build"));
     });
     if (!forced) this.#queued = entry;
-    // a publish that failed ends what this store's writes stood for: an
-    // identical save by another editor afterwards is a retry (#written)
-    entry.promise.then((r) => { if (r?.ok === false) this.#written.clear(); }, () => this.#written.clear());
     this.#publishing = entry.promise.catch(() => undefined);
     return entry.promise;
   }
@@ -1095,37 +1039,59 @@ export class ObjectStore {
     // loaded into: answering now would say "active" while no process serves
     // the code, and the one coming up may have read the live generation
     // before this build switched it
+    // -- but not for ever: a recycle that never settles is answered as one
+    const deadline = Date.now() + this.transitionMs;
     for (let changing = runtime?.recycling ?? runtime?.starting; changing !== undefined;
       changing = runtime?.recycling ?? runtime?.starting) {
-      await changing.catch(() => undefined);
+      let timer;
+      const late = await Promise.race([
+        changing.then(() => false, () => false),
+        new Promise((done) => { timer = setTimeout(() => done(true), Math.max(0, deadline - Date.now())); }),
+      ]);
+      clearTimeout(timer);
+      if (late) {
+        return {ok: false, transpile, recycled: false,
+          error: `the runtime is still changing hands after ${this.transitionMs} ms; nothing was loaded`};
+      }
       runtime = this.served;
     }
     if (runtime === undefined || runtime.running !== true) {
       return {ok: true, transpile, recycled: false};
     }
+    // nothing to load: the process already serves the generation this build
+    // named (a no-op warm build, a cached cold one), so no swap and no
+    // recycle -- a recycle of unchanged code ends every session for nothing.
+    // Said how THIS process got it: by a swap (its ms), or by a load at its
+    // start, which must not read as a swap (a recycle after a refused swap,
+    // a catch-up recycle, a process that came up on the live generation
+    // after this build switched it). A load is the process's only while its
+    // epoch is the one serving. A forced build replaces the generation's
+    // files under the same name, and is always loaded.
+    if (options.force !== true && options.replace !== true && (transpile.warm === true || transpile.cached === true) &&
+        transpile.hash === runtime.generation) {
+      const last = this.lastLoad?.generation === transpile.hash && this.lastLoad.epoch === runtime.epoch
+        ? this.lastLoad : undefined;
+      const how = last?.why !== undefined ? {why: `the runtime was recycled onto it: ${last.why}`}
+        : last?.hot === true ? {swapMs: last.ms}
+          : {why: "the serving process was started on it"};
+      return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash, ...how};
+    }
     // a warm build is loaded into the process that serves, not a new one
     // (tools/osd-hot.mjs); when that cannot be done, the recycle below does
     let why;
     if (transpile.warm === true && (transpile.hostHeld ?? []).length === 0) {
-      if (transpile.hash === runtime.generation) {
-        // nothing to load: the process already serves this generation. Say
-        // how THIS process got it -- by a swap (its ms), or by a load at its
-        // start, which must not read as a swap: a recycle this store did
-        // after a refused swap, a catch-up recycle, or a process that came
-        // up on the live generation after this build switched it. A load is
-        // the process's only while its epoch is the one serving.
-        const last = this.lastLoad?.generation === transpile.hash && this.lastLoad.epoch === runtime.epoch
-          ? this.lastLoad : undefined;
-        const how = last?.why !== undefined ? {why: `the runtime was recycled onto it: ${last.why}`}
-          : last?.hot === true ? {swapMs: last.ms}
-            : {why: "the serving process was started on it"};
-        return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash, ...how};
-      }
       try {
         const swap = await runtime.hot({generation: transpile.hash, from: transpile.from,
           modules: transpile.modules, verified: transpile.unverified !== true});
-        this.#afterSwap(transpile.hash, swap);
         this.lastLoad = {generation: transpile.hash, epoch: runtime.epoch, hot: true, ms: swap.ms};
+        // the swap limit or the heap: the catch-up recycle is part of this
+        // activation, and its answer is the load that recycle made
+        const caught = await this.#afterSwap(transpile.hash, swap);
+        if (caught !== undefined) {
+          if (caught.ok !== true) return {ok: false, transpile, recycled: false, error: caught.error};
+          return {ok: true, transpile, recycled: true, generation: caught.generation, ms: caught.ms,
+            why: `the swap (${swap.ms} ms) was followed by a catch-up recycle after ${caught.why}`};
+        }
         return {ok: true, transpile, recycled: false, hot: true, generation: transpile.hash, ms: swap.ms, swaps: swap.swaps};
       } catch (error) {
         console.log(`warm: the swap was refused, recycling instead: ${error.message}`);
@@ -1256,10 +1222,12 @@ export class ObjectStore {
     }
     const runtime = this.served;
     clearTimeout(w.timer);
-    if ((runtime?.swaps ?? 0) >= WARM_SWAPS) {
-      this.#catchUp("the swap limit");
+    // the limits are reached by a swap, so the recycle is the swap's
+    // publish's to await (undefined when nothing is recycled)
+    if ((runtime?.swaps ?? 0) >= this.warmSwapLimit) {
+      return this.#catchUp(`${runtime.swaps} swaps`);
     } else if (grown > WARM_HEAP_MB * 1024 * 1024) {
-      this.#catchUp(`a heap ${Math.round(grown / 1048576)} MB larger than at the first swap`);
+      return this.#catchUp(`a heap ${Math.round(grown / 1048576)} MB larger than at the first swap`);
     } else {
       w.timer = setTimeout(() => {
         // the live generation is compared once the saves have stopped, if
@@ -1273,7 +1241,13 @@ export class ObjectStore {
       }, WARM_QUIET_MS);
       w.timer.unref?.();
     }
+    return undefined;
   }
+
+  // the swap count that brings a catch-up recycle (OSD_WARM_SWAPS); a test lowers it
+  warmSwapLimit = WARM_SWAPS;
+  // how long a publish waits for a runtime changing hands (OSD_TRANSITION_MS)
+  transitionMs = TRANSITION_MS;
 
   #verifyNext() {
     const w = this.warm();
@@ -1311,7 +1285,7 @@ export class ObjectStore {
 
   async #catchUp(why) {
     const runtime = this.served;
-    if (runtime === undefined || runtime.running !== true || (runtime.swaps ?? 0) === 0) return;
+    if (runtime === undefined || runtime.running !== true || (runtime.swaps ?? 0) === 0) return undefined;
     try {
       const r = await runtime.recycle();
       this.#cleanHot();
@@ -1319,8 +1293,10 @@ export class ObjectStore {
       // the process now serving loaded its generation at its start
       this.lastLoad = {generation: r.generation, epoch: runtime.epoch, why: `a catch-up recycle after ${why}`};
       console.log(`warm: recycled after ${why} (${r.ms} ms)`);
+      return {ok: true, generation: r.generation, ms: r.ms, why};
     } catch (error) {
       console.log(`warm: the catch-up recycle failed: ${error.message}`);
+      return {ok: false, error: `the catch-up recycle after ${why} failed: ${error.message}`};
     }
   }
 

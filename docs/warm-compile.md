@@ -114,10 +114,13 @@ registry is primed again.
   queued, or the one a build in flight named its generation after, takes
   that publish's answer instead of building again behind it: the dev loop
   and VS Code's activation of one disk save are one build and one swap, and
-  both answers carry `X-OSD-Swap-Ms`. A save through the store itself (an
-  ADT PUT or create) is left to the client's activation; the dev loop takes
-  only what another editor wrote. An activation that finds a runtime
-  changing hands waits for it rather than answering with nothing serving.
+  both answers carry `X-OSD-Swap-Ms`. A build the serving process already
+  runs (same generation, same process) loads nothing -- no swap, no
+  recycle, sessions kept -- and says how that process got it. A catch-up
+  recycle a swap brings (the swap limit, the heap) is awaited by that
+  swap's activation, which then answers cold with the reason. A runtime
+  changing hands is waited for, at most `OSD_TRANSITION_MS` (60 s), and
+  then the activation fails saying so rather than hang.
 
 ## What a swap means, compared with a system
 
