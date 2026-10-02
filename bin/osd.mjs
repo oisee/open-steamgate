@@ -171,9 +171,9 @@ switch (mode) {
   case "ready": {
     try {
       const port = process.env.STG_PORT ?? "3030";
-      const response = await fetch(`http://127.0.0.1:${port}/sap/bc/adt/core/http/build`, {signal: AbortSignal.timeout(2000)});
+      const response = await fetch(`http://127.0.0.1:${port}/osd/ready`, {signal: AbortSignal.timeout(2000)});
       const body = response.ok ? await response.json() : undefined;
-      process.exit(body?.system?.serving ? 0 : 1);
+      process.exit(body?.ready === true ? 0 : 1);
     } catch {
       process.exit(1);
     }

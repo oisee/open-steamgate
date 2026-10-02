@@ -1,5 +1,5 @@
 // The ABAP front of the ADT façade (ADR 0007, slice 3, option B): every
-// request under /sap/bc/adt enters ZCL_OSD_ADT_HANDLER first.
+// request under /sap/bc/adt and the Node logoff path enters the handler.
 //
 // The seam is one middleware inside adtRouter (tools/adt-facade.mjs), after
 // the X-OSD-Generation stamp and the STG_ADT_DUMP capture, before the first
@@ -31,7 +31,6 @@ import {withSystem} from "./osd-store-destination.mjs";
 
 export const HANDLER = "ZCL_OSD_ADT_HANDLER";
 export const SERVED_BY = "x-osd-served-by";
-const BASE = "/sap/bc/adt";
 const NAMESPACE = "org.open-steamgate.osd";
 
 // ---- continuations -------------------------------------------------------
@@ -131,10 +130,13 @@ export async function answerOf(handler, view, session) {
   r.path.set(view.path);
   r.uri.set(view.url);
   const query = String(view.url).includes("?") ? String(view.url).slice(String(view.url).indexOf("?") + 1) : "";
-  for (const [name, value] of new URLSearchParams(query)) {
+  // Express has already decoded with qs: arrays stringify with commas,
+  // bracketed values are objects, and malformed percent escapes stay literal.
+  const fields = view.query === undefined ? new URLSearchParams(query) : Object.entries(view.query);
+  for (const [name, value] of fields) {
     const row = r.query.appendInitial().get();
     row.name.set(name);
-    row.value.set(value);
+    row.value.set(String(value));
   }
   for (const [name, value] of Object.entries(view.headers)) {
     for (const one of Array.isArray(value) ? value : [value]) {
@@ -196,6 +198,13 @@ export function replay(res, record, method, {sessionSent = false} = {}) {
     else res.append(name, value);
   }
   if (record.contentType !== "") res.set("content-type", record.contentType);
+  // Node redirect/create routes end bytes explicitly, without Express ETags.
+  if (record.status === 201 || (record.status >= 300 && record.status < 400 && record.status !== 304)) {
+    res.removeHeader("ETag");
+    res.set("Content-Length", String(record.body.length));
+    res.end(method === "HEAD" ? undefined : record.body);
+    return;
+  }
   // a body is sent, and on a HEAD express drops it and keeps its
   // Content-Length. An empty answer is ended, as the Node façade ends one
   // (`.end()`), unless it is typed and not a HEAD: the Node façade answers
@@ -226,6 +235,8 @@ function dumped(generation, message) {
  * @param {Function} options.refuse the façade's refusal: (res, status, type, message, options)
  * @param {Function} [options.system] (kind, name, req) => value: this façade's SYSTEM answers
  * @param {object} [options.store] this façade's ObjectStore, what OBJECT reads
+ * @param {Function} [options.hostLogoff] ends a delegated logoff inside its front step, until A3a
+ * @param {Function} [options.miss] (req, kind) => void, records the stripped X-OSD-Miss marker
  * @param {Function} [options.served] (servedBy, req, record) => void, for a test or a log
  * @param {Function} [options.generation] () => the live generation, for the one log line of a dump
  * @param {Function} [options.stale] () => true when the ABAP the front runs is older than the generation
@@ -248,12 +259,19 @@ export function abapFront(options) {
     // serve it next finds it where a raw parser would have put it: a parser
     // that skipped the request (a wildcard content type) left {} or nothing
     if (Buffer.isBuffer(req.body) === false && typeof req.body !== "string") req.body = body;
-    const view = {method: req.method, headers: req.headers, url, path, body};
+    const view = {method: req.method, headers: req.headers, url, path, body, query: req.query};
     const system = options.system ?? (() => undefined);
     let record;
     try {
       record = await withSystem((kind, name) => system(kind, name, req),
-        () => options.step(async () => options.answer(view, await options.sessions?.sessionFor?.(req)),
+        () => options.step(async () => {
+          const answer = await options.answer(view, await options.sessions?.sessionFor?.(req));
+          // Until A3a ports logoff, its HOST fallback must end the session
+          // before this step releases the FIFO to a queued LOCK or DELETE.
+          if (path === "/sap/public/bc/icf/logoff" && ["GET", "HEAD"].includes(req.method)
+            && answer.servedBy === "HOST" && answer.continuation === undefined) await options.hostLogoff?.(req);
+          return answer;
+        },
           `ADT ${req.method} ${path}`),
         {store: options.store});
     } catch (e) {
@@ -270,6 +288,13 @@ export function abapFront(options) {
       refuse(`${HANDLER}: ${message}`);
       return;
     }
+    // Slice 0 stamps the ZCX miss kind here. This is an internal marker,
+    // consumed even when a continuation replays the answer later.
+    record.headers = record.headers.filter(([name, value]) => {
+      if (name.toLowerCase() !== "x-osd-miss") return true;
+      if (value === "object" || value === "resource") options.miss?.(req, value);
+      return false;
+    });
     const by = record.servedBy === "HOST" ? "HOST" : "ABAP";
     res.set(SERVED_BY, by);
     options.served?.(by, req, record);

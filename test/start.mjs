@@ -235,8 +235,12 @@ export function startServer(quiet) {
   // /sap/bc/adt/** and passes everything else on -- so the node says the
   // prefix it answers and the registration ignores it
   hostNodes["adt-facade"] = (a) => a.use(facade.router);
-  // what a client asked the façade for and did not get, on demand: point a
-  // strange client at OSD, then read this to learn what it wanted
+  // Host memory only: this probe must answer while ABAP holds the FIFO.
+  hostNodes.ready = (a, node) => a.get(node.path, (req, res) => {
+    const ready = MODE === "inline" || store.served?.running === true;
+    res.status(ready ? 200 : 503).json({ready});
+  });
+  // What a client asked the facade for and did not get.
   hostNodes["not-served"] = (a, node) => a.get(node.path, function (req, res) {
     res.json([...facade.missed.values()].sort((a, b) => b.count - a.count));
   });

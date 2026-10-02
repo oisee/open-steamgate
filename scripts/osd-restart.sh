@@ -34,10 +34,10 @@ echo "запустил, лог $log"
 
 i=0
 while [ "$i" -lt 40 ]; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/sap/bc/adt/core/discovery" 2>/dev/null || true)
+  code=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$port/osd/ready" 2>/dev/null || true)
   if [ "$code" = "200" ]; then
     echo "OSD отвечает на $port"
-    echo "сборка: $(curl -s "http://localhost:$port/sap/bc/adt/core/http/build" 2>/dev/null)"
+    echo "готовность: $(curl -s "http://localhost:$port/osd/ready" 2>/dev/null)"
     exit 0
   fi
   i=$((i + 1))

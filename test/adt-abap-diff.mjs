@@ -738,7 +738,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       await held;
       const answer = await queued;
       expect(answer.status, "the LOCK ran first").to.equal(200);
-      expect(steps, "and entered the handler once").to.have.length(1);
+      await off;
+      expect(steps, "LOCK and logoff each entered the handler once").to.have.length(2);
       expect(await off).to.equal(200);
       // the same session once it is gone: the cookie names nothing, so a new
       // session opens, and the old token is not its token

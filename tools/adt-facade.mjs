@@ -643,16 +643,16 @@ export function adtRouter(options = {}) {
   // Recording only the first kind makes an empty list look like a clean bill
   // of health while a client is failing on every node it opens.
   const missed = new Map();
-  const record = (req, kind, detail) => {
+  const record = (req, kind, detail, path = req?.path) => {
     if (req === undefined) {
       return;
     }
-    const key = `${kind} ${req.method} ${req.path}`;
+    const key = `${kind} ${req.method} ${path}`;
     const seen = missed.get(key);
     missed.set(key, {
       kind,
       method: req.method,
-      path: req.path,
+      path,
       query: Object.keys(req.query ?? {}).length === 0 ? undefined : {...req.query},
       detail: seen?.detail ?? detail,
       accept: seen?.accept ?? req.headers.accept,
@@ -660,7 +660,7 @@ export function adtRouter(options = {}) {
       first: seen?.first ?? new Date().toISOString(),
     });
     if (options.logMisses !== false && seen === undefined) {
-      console.log(`ADT miss (${kind}): ${req.method} ${req.path}${detail === undefined ? "" : "  " + detail}`);
+      console.log(`ADT miss (${kind}): ${req.method} ${path}${detail === undefined ? "" : "  " + detail}`);
     }
   };
   // every answer() inside this router records the object misses it turns
@@ -715,10 +715,20 @@ export function adtRouter(options = {}) {
     });
   }
 
+  // Mixed phase only: A3a will move END into the ABAP logoff route.
+  // A delegated logoff must finish in the same FIFO turn as its verdict.
+  const endLogoff = async (req) => {
+    const id = sessionIdOf(parseCookies(req.headers.cookie));
+    if (id) await sessions.end(id);
+  };
+  const endedLogoffs = new WeakSet();
+
   // ADR 0007: every request enters ZCL_OSD_ADT_HANDLER (adt-abap-front.mjs),
   // which resolves the session, gates and answers or hands over; locks go
   // to ENQ (adt-enq.mjs)
-  if (options.abap !== undefined) router.use(BASE, abapFront({...options.abap, served: options.abapServed, refuse, store,
+  if (options.abap !== undefined) router.use([BASE, "/sap/public/bc/icf/logoff"], abapFront({...options.abap, served: options.abapServed, refuse, store,
+    miss: (req, kind) => record(req, kind, undefined, (req.originalUrl ?? req.url).split("?")[0]),
+    hostLogoff: async (req) => { await endLogoff(req); endedLogoffs.add(req); },
     generation: () => liveHash(store.root),
     sessions, ...abapSession(sessions, (kind) => (kind === "IDENTITY" ? identity : undefined))}));
 
@@ -1624,10 +1634,7 @@ export function adtRouter(options = {}) {
     // exactly the one session the cookies name, by the middleware's own
     // precedence: two cookies naming two sessions end only the one the
     // client is using, never the other
-    const id = sessionIdOf(parseCookies(req.headers.cookie));
-    if (id) {
-      await sessions.end(id);
-    }
+    if (endedLogoffs.has(req) === false) await endLogoff(req);
     res.status(200).type("text/plain").send("logged off");
   }));
 

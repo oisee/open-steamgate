@@ -52,6 +52,10 @@
     "type": "HOST", "host": "test/start.mjs", "handler": "adt-facade", "needs": "state",
     "text": "the ADT facade: 59 registrations of its own, meant to stay JavaScript -- A4H has ADT, this imitates it"
   },
+  "/osd/ready": {
+    "type": "HOST", "host": "test/start.mjs", "handler": "ready", "needs": "state",
+    "text": "readiness from host memory, independent of the ABAP work process"
+  },
   "/osd/not-served": {
     "type": "HOST", "host": "test/start.mjs", "handler": "not-served", "needs": "state",
     "text": "what the facade could not answer, held in this process's memory"

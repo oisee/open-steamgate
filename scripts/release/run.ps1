@@ -22,8 +22,8 @@ try {
   for ($attempt = 0; $attempt -lt 120; $attempt++) {
     if ($osd.HasExited) { throw 'OSD exited before ready' }
     try {
-      $status = Invoke-RestMethod -Uri "http://127.0.0.1:$port/sap/bc/adt/core/http/build" -TimeoutSec 2
-      if ($status.system.serving) { $ready = $true; break }
+      $status = Invoke-RestMethod -Uri "http://127.0.0.1:$port/osd/ready" -TimeoutSec 2
+      if ($status.ready) { $ready = $true; break }
     } catch { Start-Sleep -Seconds 1 }
   }
   if (-not $ready) { throw 'OSD did not become ready in 120 seconds' }
