@@ -1,0 +1,20 @@
+CLASS ltcl_test DEFINITION FINAL FOR TESTING DURATION SHORT RISK LEVEL HARMLESS.
+  PRIVATE SECTION.
+    METHODS check FOR TESTING.
+    METHODS f IMPORTING n TYPE i RETURNING VALUE(rv) TYPE i.
+ENDCLASS.
+CLASS ltcl_test IMPLEMENTATION.
+  METHOD check.
+    DATA result TYPE i. result = f( 1 ).
+  ENDMETHOD.
+  METHOD f.
+    DATA m TYPE i.
+    IF n = 0. RETURN. ENDIF.
+    m = n - 1.
+    DO.
+      rv = f( m ).
+      m = m - 1.
+      IF m <> -1. EXIT. ENDIF.
+    ENDDO.
+  ENDMETHOD.
+ENDCLASS.
