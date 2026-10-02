@@ -54,6 +54,8 @@ CLASS ltcl_static IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 15 ).
     cl_abap_unit_assert=>assert_char_cp( act = ls_response-body
       exp = `*<nameditem:name>CLAS</nameditem:name>*type:CLAS/OC;usedBy:quick_search,virtual_folders*` ).
+    cl_abap_unit_assert=>assert_char_cp( act = ls_response-body
+      exp = `*<nameditem:name>CLAS</nameditem:name><nameditem:description>Classes</nameditem:description>*` ).
   ENDMETHOD.
   METHOD empty_lists.
     DATA ls_release TYPE zif_osd_adt_route=>ty_response.

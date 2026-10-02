@@ -164,6 +164,7 @@ Every slice is one codex run plus a Claude critic. Every acceptance is `test/adt
 - 4a: the release-during-body message text.
 - create/delete: the front-up `{ended}` race. ABAP closes that gap entirely.
 - segw/entitysets: a throw becomes an ADT document instead of Express HTML (fixed in Node first, so equal in practice).
+- :param decode failure: ABAP answers the ADT 400 document, Node answers Express's HTML 400; covers the versions rows and packages/valuehelps.
 
 ## 5. Critical path and estimate
 

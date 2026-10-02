@@ -14,7 +14,6 @@
 import {expect} from "chai";
 import express from "express";
 import {request as httpRequest} from "node:http";
-import {createHash} from "node:crypto";
 import {execFileSync} from "node:child_process";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -263,6 +262,23 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
           expect(served).to.deep.equal([`ABAP ${method} ${path}`]);
         });
       }
+    }
+  }
+
+  for (const method of ["GET", "HEAD"]) {
+    for (const what of ["%zz", "%FF"]) {
+      it(`B1 valuehelp: ${method} ${what} decode failure agrees by status only`, async () => {
+        const shared = store();
+        const node = await mount({store: shared});
+        const ported = await mount(withAbap({store: shared}));
+        const path = `/sap/bc/adt/packages/valuehelps/${what}`;
+        const expected = await call(node, method, path);
+        const actual = await call(ported, method, path);
+        expect(expected.status).to.equal(400);
+        expect(actual.status).to.equal(400);
+        expect(actual.type).to.equal("application/xml; charset=utf-8");
+        expect(served).to.deep.equal([`ABAP ${method} ${path}`]);
+      });
     }
   }
 
@@ -613,10 +629,6 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       },
     };
 
-    // express's weak entity tag, which covers the handle: checked against the
-    // body it came with, then compared as a placeholder like the handle
-    const weakTag = (body) => `W/"${Buffer.byteLength(body).toString(16)}-${
-      createHash("sha1").update(body, "utf8").digest("base64").slice(0, 27)}"`;
     const STATUSES = {
       "lock, a stateless read, the PUT, UNLOCK, and a PUT after it": [200, 200, 200, 200, 409],
       "a second session is refused with EU 510, the holder relocks, UNLOCK hands it over": [200, 403, 200, 200, 200, 403],
@@ -630,9 +642,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     };
 
     const answered = (answers) => answers.map(({handle, ...rest}) => {
-      if (rest.etag !== null && rest.body !== undefined && new RegExp(UUID.source).test(rest.body)) {
-        expect(rest.etag, "the tag of the body that carries a handle").to.equal(weakTag(rest.body));
-        rest.etag = "<tag>";
+      if (rest.body !== undefined && new RegExp(UUID.source).test(rest.body)) {
+        expect(rest.etag).to.equal(null);
       }
       if (rest.body !== undefined) rest.body = rest.body.replace(UUID, "<handle>");
       return {...rest, handle: handle === undefined ? undefined : handle.replace(UUID, "<handle>")};
