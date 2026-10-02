@@ -1392,6 +1392,31 @@ something already shipped (then it is a must of the current release, like the ro
   The measurement fix is to keep binary-only and full-command figures separately and retain phase/shard timings
   in the runner. No execution-path optimization follows from these numbers: the four-shard runner is near its
   measured lower bound, while most full-command time is compilation outside the shard path.
+
+
+  **U4 frontend snapshot (2026-10-02):** `tools/gogen/frontend-cache.mjs` stores the whole closure's emitted
+  Go, unit runner and SQLite seed script under `.local/gogen-frontend-cache/`, keyed by contents of ordered
+  input layers (including pinned library trees and packs), ABAP source, test includes, DDIC and seed data,
+  the generator modules, configuration, dependency lock, and Go runtime sources. A changed input rebuilds
+  the whole closure; per-class invalidation is deferred. `--no-cache` bypasses it. Entries are written to a
+  temporary directory and renamed only after Go compilation succeeds.
+
+  The same `/usr/bin/time -f '%e %U %S %M'` instrument measured the full `node tools/gogen/unit.mjs --jobs 4`
+  command three times per case in this worktree. Empty-cache runs removed the snapshot before each sample;
+  changed-input runs made a distinct comment edit to one test include per sample and restored the file.
+  Go's build cache was warm in all samples. The current worktree's 53-owner, 586-row inventory exits 1 in
+  every case because some Go backend tests fail; it is not the earlier 51-owner green inventory.
+
+  | Full command | wall samples (s) | median wall | frontend on median case |
+  |---|---|---:|---:|
+  | Empty snapshot | 17.91, 16.40, 19.48 | 17.91 s | 7.12 s |
+  | Unchanged snapshot | 5.15, 5.47, 5.99 | 5.47 s | 0 s |
+  | Edited test include | 12.28, 11.64, 12.59 | 12.28 s | 6.60 s |
+
+  Every warm sample was a hit; every empty or edited sample was a miss. Class, method, status and message
+  rows matched between a cached run and `--no-cache` (586 of 586). The edited runs rebuilt the full
+  closure as designed. Their shorter wall time than the empty runs reflects warm Go build and runner caches,
+  not partial frontend invalidation.
 - nice: accept ADR 0005 (lazy table providers) -- done 2026-09-30, narrowed after three reviews.
 
 **0.5**

@@ -10,6 +10,7 @@ import {compileProgram} from "./frontend.mjs";
 import {emitGo, referencedClasses} from "./emit-go.mjs";
 import {reconcile} from "./unit-results.mjs";
 import {home} from "./home.mjs";
+import {cacheLocation, frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
 import {inputFoldersOf} from "../osd-packs.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -40,9 +41,10 @@ if (selected.size && owners.length !== selected.size) throw new Error(`unknown t
 // runtime has process-global class constructors.
 if (args.includes("--per-owner") && !selected.size && !fixture) {
   const rows = [];
+  const cacheCounts = {hit: 0, miss: 0, bypass: 0};
   const timingMs = {frontendClosureRounds: [], emit: 0, goBuild: 0, run: 0};
   for (const owner of owners) {
-    const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--unlayered", "--jobs", String(jobs), "--out", join(out, owner.toLowerCase())], {
+    const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--unlayered", ...(args.includes("--no-cache") ? ["--no-cache"] : []), "--jobs", String(jobs), "--out", join(out, owner.toLowerCase())], {
       cwd: home, encoding: "utf8", timeout: 180000, maxBuffer: 20e6, env: process.env,
     });
     if (!child.stdout) {
@@ -52,6 +54,7 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
     try {
       const result = JSON.parse(child.stdout);
       rows.push(...result.rows);
+      if (result.cache?.status in cacheCounts) cacheCounts[result.cache.status]++;
       timingMs.frontendClosureRounds.push(...(result.timingMs?.frontendClosureRounds ?? []));
       for (const phase of ["emit", "goBuild", "run"]) timingMs[phase] += result.timingMs?.[phase] ?? 0;
     }
@@ -62,7 +65,8 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
     return own.some((r) => r.status === "SUCCESS" || r.status === "FAILED")
       && own.every((r) => r.status !== "NOT_COMPILED");
   });
-  console.log(JSON.stringify({classes: owners.length, compiled: compiled.length, rows, timingMs}));
+  console.log(JSON.stringify({classes: owners.length, compiled: compiled.length, rows, timingMs,
+    cache: {status: cacheCounts.miss ? "miss" : cacheCounts.hit ? "hit" : "bypass", reason: "per-owner snapshots", counts: cacheCounts}}));
   process.exit(rows.some((r) => r.status === "FAILED") ? 1 : rows.some((r) => r.status === "NOT_COMPILED" || r.status === "NEEDS_DB") ? 2 : 0);
 }
 mkdirSync(out, {recursive: true});
@@ -73,6 +77,23 @@ const libDirs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/sr
 const folders = [...(fixture ? sourceFolders : inputFoldersOf(home, config).map((f) => join(home, f))), ...libDirs].filter(existsSync);
 const excluded = (config.exclude_filter ?? []).map((p) => new RegExp(p));
 const skip = (file) => excluded.some((re) => re.test("/" + file.slice(home.length + 1)));
+const timingMs = {frontendClosureRounds: [], emit: 0, goBuild: 0, run: 0};
+const cacheRoot = cacheLocation(home);
+const cacheEnabled = !args.includes("--no-cache");
+const cacheInputs = cacheEnabled ? frontendInputs({home, folders, owners, fixture, unlayered: args.includes("--unlayered")}) : null;
+cpSync(join(here, "go"), goDir, {recursive: true});
+const cacheMeta = cacheEnabled ? readFrontendCache(cacheRoot, cacheInputs.key, goDir) : null;
+const cache = {status: !cacheEnabled ? "bypass" : cacheMeta ? "hit" : "miss",
+  reason: !cacheEnabled ? "--no-cache" : cacheMeta ? "inputs unchanged" : existsSync(cacheRoot) ? "inputs changed or no matching snapshot" : "cache empty",
+  key: cacheInputs?.key};
+let program, rows, ready, groups, layerInfo, writeGeneratedGo;
+if (cacheMeta) {
+  rows = cacheMeta.rows;
+  layerInfo = cacheMeta.layers;
+  ready = rows.filter((x) => x.status === "READY");
+  groups = [...Map.groupBy(ready, (r) => `${r.class}:${r.testclass}`)].map(([key, methods]) => ({key, methods}));
+  timingMs.discovery = Math.round(performance.now() - commandStarted);
+} else {
 const available = new Set(folders.flatMap(walk).filter((f) => !skip(f) && /\.(clas|intf)\.abap$/.test(f))
   .map((f) => f.split("/").at(-1).split(".")[0].replaceAll("#", "/").toUpperCase()));
 const sourceByName = new Map(folders.flatMap(walk).filter((f) => !skip(f) && /\.clas\.abap$/.test(f))
@@ -109,9 +130,7 @@ while (sourceQueue.length) {
     if (available.has(target) && !wanted.has(target)) { wanted.add(target); sourceQueue.push(target); }
   }
 }
-let program;
 let registry;
-const timingMs = {frontendClosureRounds: [], emit: 0, goBuild: 0, run: 0};
 for (let round = 0; round < 12; round++) {
   const started = performance.now();
   program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners), skip, registry});
@@ -159,7 +178,7 @@ function testsOf(program) {
   return rows;
 }
 
-const rows = testsOf(program);
+rows = testsOf(program);
 const classes = new Map(program.classes.map((c) => [c.name, c]));
 function alertsOf(key, seen = new Set()) {
   if (seen.has(key)) return [];
@@ -312,7 +331,7 @@ while (promoted) {
 }
 const layerClasses = [0, 1, 2].map((i) => program.classes.filter((c) => layer.get(c.name) === i));
 const allClassNames = new Set(program.classes.map((c) => c.name));
-const layerInfo = {
+layerInfo = {
   classes: Object.fromEntries(["core", "app", "unit"].map((name, i) => [name, layerClasses[i].length])),
   crossLayerCycles,
   promoted: [...layer].filter(([name, value]) => value > initialLayer.get(name))
@@ -320,7 +339,7 @@ const layerInfo = {
 };
 const eventsFor = (i) => new Map([...program.events].filter(([, ev]) =>
   (layer.get(ev.decl) ?? interfaceLayer.get(ev.decl) ?? 0) === i));
-function writeGeneratedGo(dir) {
+writeGeneratedGo = function (dir) {
   if (args.includes("--unlayered") || fixture) {
     writeFileSync(join(dir, "zz_generated.go"), emitGo(program, "main", null, true));
     return;
@@ -360,18 +379,18 @@ function writeGeneratedGo(dir) {
 timingMs.discovery = Math.round(performance.now() - commandStarted - timingMs.frontendClosureRounds.reduce((a, b) => a + b, 0));
 const emitStarted = performance.now();
 const goName = (x) => x.toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
-const ready = rows.filter((x) => x.status === "READY");
-const groups = [...Map.groupBy(ready, (r) => `${r.class}:${r.testclass}`)].map(([key, methods]) => ({key, methods}));
+ready = rows.filter((x) => x.status === "READY");
+groups = [...Map.groupBy(ready, (r) => `${r.class}:${r.testclass}`)].map(([key, methods]) => ({key, methods}));
 // A4H: an assertion in TEARDOWN stops this local test class unless the
 // assertion that actually failed was called with QUIT = NO.
-const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; \"flag\"; \"fmt\"; \"os\"; \"regexp\"; \"runtime/debug\"; \"strings\"; \"time\"; \"osg/gogen/abap\"; \"osg/gogen/session\")", "",
+const generated = ["package main", "", "import (_ \"embed\"; \"encoding/json\"; \"flag\"; \"fmt\"; \"os\"; \"path/filepath\"; \"regexp\"; \"runtime/debug\"; \"strings\"; \"time\"; \"osg/gogen/abap\"; \"osg/gogen/session\")", "",
   "//go:embed zz_db.json", "var dbScript []byte", "",
   "type result struct { Class string `json:\"class\"`; Testclass string `json:\"testclass\"`; Method string `json:\"method\"`; Status string `json:\"status\"`; Message string `json:\"message\"` }",
   "var assertSite = regexp.MustCompile(`(?m)([A-Za-z0-9_]+\\.clas\\.testclasses\\.abap):([0-9]+)`)\nfunc failureMessage(x any) string { msg := fmt.Sprint(x); if msg != \"Expected abap_true\" && msg != \"Expected abap_false\" { return msg }; sites := assertSite.FindAllStringSubmatch(string(debug.Stack()), -1); if len(sites) == 0 { return msg }; site := sites[len(sites)-1]; return msg + \" at \" + site[1] + \":\" + site[2] }",
   "func caught(f func()) (msg string) { defer func() { if x := recover(); x != nil { msg = failureMessage(x) } }(); f(); return }",
   "func caughtTeardown(f func()) (msg string, assertion, quitNo bool) { defer func() { if x := recover(); x != nil { msg = failureMessage(x); if r, ok := abap.AsRaised(x); ok && r.Class == \"KERNEL_CX_ASSERT\" { assertion, quitNo = true, r.AssertionQuitNo } } }(); f(); return }",
   "func isNotCompiled(msg string) bool { return strings.Contains(msg, \"NOT_COMPILED in \") }",
-  `func main() { if err := abap.SetMediaDir(${JSON.stringify(join(runDir, "media"))}); err != nil { panic(err) }; results := []result{}`,
+  `func main() { mediaDir := os.Getenv("GOGEN_UNIT_MEDIA_DIR"); if mediaDir == "" { exe, err := os.Executable(); if err != nil { panic(err) }; mediaDir = filepath.Join(filepath.Dir(exe), "media") }; if err := abap.SetMediaDir(mediaDir); err != nil { panic(err) }; results := []result{}`,
   "classesFile := flag.String(\"classes-file\", \"\", \"JSON list of test classes to run\")",
   "imageFile := flag.String(\"seed-image\", \"\", \"seeded SQLite image\")",
   "imageOut := flag.String(\"seed-image-out\", \"\", \"write seeded SQLite image and exit\")",
@@ -417,10 +436,8 @@ generated.push("if *timingsOut != \"\" { data, err := json.Marshal(durations); i
 // Go resolves imports inside its module tree. Copy the small module into this
 // invocation's tree so another unit run cannot replace generated packages
 // between emission and compilation.
-cpSync(join(here, "go"), goDir, {recursive: true});
-const {collectMedia, writeMedia, replaceWwwparams} = await import("./media.mjs");
+const {collectMedia, replaceWwwparams} = await import("./media.mjs");
 const media = collectMedia(folders.filter(existsSync));
-writeMedia(media, join(runDir, "media"));
 const dir = join(goDir, "cmd", "unit");
 mkdirSync(dir, {recursive: true});
 writeGeneratedGo(dir);
@@ -433,7 +450,11 @@ if (ready.some((r) => r.db)) {
   writeFileSync(join(dir, "zz_db.json"), JSON.stringify(replaceWwwparams([...db.schemas.sqlite, ...db.insert, ...seedStatements()], media)));
 } else writeFileSync(join(dir, "zz_db.json"), "[]");
 timingMs.emit = Math.round(performance.now() - emitStarted);
-const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs, layers: layerInfo, buildDir: goDir};
+}
+const {collectMedia, writeMedia} = await import("./media.mjs");
+const media = collectMedia(folders.filter(existsSync));
+writeMedia(media, join(runDir, "media"));
+const summary = {classes: owners.length, compiled: new Set(ready.map((r) => r.class)).size, rows, timingMs, layers: layerInfo, cache, buildDir: goDir};
 const updateCompiledCount = () => {
   summary.compiled = owners.filter((owner) => {
     const own = rows.filter((r) => r.class === owner);
@@ -480,7 +501,7 @@ for (let attempt = 0; attempt < 100; attempt++) {
   if (process.env.GOGEN_GO_BUILD_X) appendFileSync(join(runDir, "go-build-x.log"), build.stderr ?? "");
   timingMs.goBuild += Math.round(performance.now() - buildStarted);
   if (build.status === 0) break;
-  if (!stubGoErrors(build.stderr ?? "")) break;
+  if (!program || !stubGoErrors(build.stderr ?? "")) break;
   const emitRetryStarted = performance.now();
   writeGeneratedGo(dir);
   timingMs.emit += Math.round(performance.now() - emitRetryStarted);
@@ -491,6 +512,10 @@ if (build.status !== 0) {
   updateCompiledCount();
   console.log(JSON.stringify({...summary, rows}));
   process.exit(2);
+}
+if (cacheEnabled && !cacheMeta) {
+  try { writeFrontendCache(cacheRoot, cacheInputs.key, goDir, {rows, layers: layerInfo}); }
+  catch (error) { console.error(`warning: frontend cache was not saved: ${error.message}`); }
 }
 const runStarted = performance.now();
 const runDetail = {seedImageMs: 0, shards: [], mergeMs: 0};
@@ -586,7 +611,7 @@ if (shards.length <= 1) {
   const tempDir = join(singleDir, "tmp");
   const datasetDir = join(singleDir, "dataset");
   mkdirSync(tempDir); mkdirSync(datasetDir);
-  const env = {...process.env, GOGEN_UNIT_BINARY: bin, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir,
+  const env = {...process.env, GOGEN_UNIT_BINARY: bin, GOGEN_UNIT_MEDIA_DIR: join(runDir, "media"), TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir,
     OSD_DATASET_READ: datasetDir, OSD_DATASET_WRITE: datasetDir, OSD_DATASET_HOME: datasetDir,
     OSD_DATASET_AUDIT: join(datasetDir, "audit.ndjson")};
   const runTimingsFile = join(runDir, "timings.json");
@@ -612,7 +637,7 @@ if (shards.length <= 1) {
   mkdirSync(scratchDir);
   const seedFile = join(scratchDir, "seed.sqlite");
   const seed = spawnSync(runner, ["--seed-image-out", seedFile], {
-    encoding: "utf8", timeout: 120000, maxBuffer: 20e6, cwd: scratchDir, env: {...process.env, GOGEN_UNIT_BINARY: bin},
+    encoding: "utf8", timeout: 120000, maxBuffer: 20e6, cwd: scratchDir, env: {...process.env, GOGEN_UNIT_BINARY: bin, GOGEN_UNIT_MEDIA_DIR: join(runDir, "media")},
   });
   runDetail.seedImageMs = Math.round(performance.now() - seedStarted);
   const seedHeader = existsSync(seedFile) ? readFileSync(seedFile).subarray(0, 16).toString("utf8") : "";
@@ -636,7 +661,7 @@ if (shards.length <= 1) {
     const durationsFile = join(shardDir, "timings.json");
     const phasesFile = join(shardDir, "phases.json");
     writeFileSync(classesFile, JSON.stringify(shard.keys));
-    const env = {...process.env, TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir,
+    const env = {...process.env, GOGEN_UNIT_MEDIA_DIR: join(runDir, "media"), TMPDIR: tempDir, TMP: tempDir, TEMP: tempDir,
       OSD_DATASET_READ: datasetDir, OSD_DATASET_WRITE: datasetDir, OSD_DATASET_HOME: datasetDir,
       OSD_DATASET_AUDIT: join(datasetDir, "audit.ndjson")};
     const run = await runProcess(["--classes-file", classesFile, "--seed-image", seedFile,

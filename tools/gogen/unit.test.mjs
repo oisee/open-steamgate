@@ -273,7 +273,7 @@ test("unit statics parity labels only reviewed Node assertions as nodeAnomaly", 
 });
 
 test("ABAP fixture runs pass, fail, exception, and teardown after failures", {timeout: 120000}, () => {
-  const run = spawnSync("node", [join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit")], {
+  const run = spawnSync("node", [join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit"), "--no-cache"], {
     cwd: join(here, "..", ".."), encoding: "utf8", timeout: 110000, maxBuffer: 5e6,
   });
   assert.equal(run.status, 1, run.stderr || run.error?.message);
