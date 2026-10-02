@@ -36,8 +36,9 @@ export async function drainJobOutbox(store, {env = process.env, afterRead, after
       // the jobs in the order they were released: RELEASE_SEQ, which JOB_CLOSE
       // writes as one more than any intent still here, so a run on a manual
       // clock replays in one order (docs/dsl-l3.md, "Simulated twin",
-      // determinism); a file from before the column, by time, then intent id
-      rows = reader.prepare(`SELECT * FROM zosd_job_outbox WHERE mandt = ? ORDER BY ${hasRelease ? "release_seq, " : ""}created_on, created_at, intent_id`)
+      // determinism). A row from before the column (empty, or NULL) drains
+      // first, in the order it drained before: by time, then intent id
+      rows = reader.prepare(`SELECT * FROM zosd_job_outbox WHERE mandt = ? ORDER BY ${hasRelease ? "COALESCE(release_seq, ''), " : ""}created_on, created_at, intent_id`)
         .all(who.client).map((row) => ({...row, steps: reader.prepare(
           `SELECT step_no, program, ${hasInput ? "input_json" : "'' AS input_json"} FROM zosd_job_step WHERE mandt = ? AND intent_id = ? ORDER BY step_no`)
           .all(who.client, value(row, "intent_id"))}));

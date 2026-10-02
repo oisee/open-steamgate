@@ -16,6 +16,7 @@
 // docs/job-standard-fms.md, "Periodic jobs"; the known differences are in
 // ANORMALIES.md (one work process: overlapping instances queue; no minute
 // tick: a due job starts when the scheduler looks, not at hh:mm:51).
+import {AsyncLocalStorage} from "node:async_hooks";
 import {resolve} from "node:path";
 import {exclusive, outsideStepContext, setWaitClock} from "./osd-dialog-step.mjs";
 import {runConvertedBatch, workQueuedBatch, workerSource} from "./osd-batch-runs.mjs";
@@ -103,30 +104,35 @@ export const systemClock = Object.freeze({
 });
 
 /** a clock a test moves: advance() fires the timers that come due, in
- *  order, and waits for each one's promise -- but not for a callback that
- *  is itself waiting on a later timer of this clock (a job the scheduler
- *  started that sits in WAIT UP TO on it): awaiting that one would stop the
- *  advance before the timer it waits for, and the advance would end with
- *  the clock short of where it was asked to go (the scheduler's tick awaits
- *  the job, the job awaits the clock). So a callback runs until it settles
- *  or goes quiet with a timer of its own pending; the timers due by then
- *  fire in time order, and the advance ends when no timer is due by its
- *  end and every callback still running waits on a timer past it. */
+ *  time order, and waits for each one's callback -- except for what it can
+ *  prove waits on this very clock. A WAIT UP TO inside a step sets its
+ *  timer with {wait: true} (tools/osd-dialog-step.mjs, setWaitClock), and
+ *  such a timer is owned by the callback it was set under: the async
+ *  context of the callback's run (AsyncLocalStorage), which follows the
+ *  scheduler's pass into the job it starts and into that job's WAIT. A
+ *  callback that owns a pending WAIT timer is blocked on the clock: the
+ *  advance fires the timers due meanwhile, in order, and goes back to it
+ *  once its WAIT has passed. Any other callback is awaited to its end,
+ *  however long its ordinary asynchronous work takes (no quiet-time
+ *  guessing, which took a timer another callback set for a dependency and
+ *  returned before the work it belonged to had finished). The advance ends
+ *  when nothing is due by its end and every callback still running owns a
+ *  WAIT past it. */
 export function manualClock(start) {
   let now = typeof start === "number" ? start : Date.parse(start);
   if (!Number.isFinite(now)) throw new TypeError("manualClock needs a start time");
   let next = 1;
-  let registered = 0; // setTimer calls so far: how a callback is seen to wait on the clock
-  let arm; // resolves the promise an advance waits on for the next setTimer
   const timers = new Map();
-  const real = (ms) => new Promise((r) => setTimeout(r, ms));
+  const runs = new AsyncLocalStorage(); // the callback of an advance a timer was set under
+  let woke; // resolves when a WAIT timer is set: some callback may have become blocked
+  const blocked = (entry) => [...timers.values()].some((timer) => timer.owner === entry);
   return {
     now: () => now,
-    setTimer(fn, ms) {
+    setTimer(fn, ms, {wait = false} = {}) {
       const handle = next++;
-      timers.set(handle, {at: now + Math.max(0, ms), fn});
-      registered++;
-      arm?.();
+      const owner = wait ? runs.getStore() : undefined;
+      timers.set(handle, {at: now + Math.max(0, ms), fn, owner});
+      if (owner) woke?.();
       return handle;
     },
     clearTimer(handle) { timers.delete(handle); },
@@ -138,38 +144,28 @@ export function manualClock(start) {
       const failures = [];
       const dueBy = () => [...timers.entries()].filter(([, timer]) => timer.at <= until)
         .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
-      // nothing changes for two real milliseconds: the callbacks have run as
-      // far as they can without the clock
-      const quiet = async () => {
-        let last;
-        for (;;) {
-          const seen = `${registered}/${timers.size}/${running.size}`;
-          if (seen === last) return;
-          last = seen;
-          await real(1);
-        }
+      // wait until one of `entries` settles or a WAIT timer is set
+      const until1 = (entries) => {
+        const wake = new Promise((r) => { woke = r; });
+        return Promise.race([...entries.map((entry) => entry.done), wake]).finally(() => { woke = undefined; });
       };
       for (;;) {
-        const due = dueBy();
-        if (due !== undefined) {
-          timers.delete(due[0]);
-          now = Math.max(now, due[1].at);
-          const entry = {mark: next};
-          entry.done = Promise.resolve().then(due[1].fn).then(() => {}, (error) => { failures.push(error); })
-            .finally(() => running.delete(entry));
-          running.add(entry);
-          await Promise.race([entry.done, quiet()]);
-          continue;
+        // a callback that is not blocked on the clock runs to its end first:
+        // a timer due meanwhile is later in its causal order than its work
+        let busy = [...running].filter((entry) => !blocked(entry));
+        while (busy.length) {
+          await until1(busy);
+          busy = [...running].filter((entry) => !blocked(entry));
         }
-        // nothing due by the end: a callback with a timer pending that was
-        // set since it started waits past the end and is left running; any
-        // other is awaited, until it settles or sets a timer
-        const busy = [...running].filter((entry) => ![...timers.keys()].some((handle) => handle >= entry.mark));
-        if (!busy.length) break;
-        const armed = new Promise((r) => { arm = r; });
-        await Promise.race([...busy.map((entry) => entry.done), armed]);
-        arm = undefined;
-        await quiet();
+        const due = dueBy();
+        if (due === undefined) break;
+        timers.delete(due[0]);
+        now = Math.max(now, due[1].at);
+        const entry = {};
+        entry.done = runs.run(entry, () => Promise.resolve().then(due[1].fn))
+          .then(() => {}, (error) => { failures.push(error); })
+          .finally(() => running.delete(entry));
+        running.add(entry);
       }
       now = Math.max(now, until);
       if (failures.length) throw failures[0];

@@ -115,7 +115,9 @@ export function setWaitClock(clock, {ceilingMs} = {}) {
   waitClock = clock === undefined ? WALL : {now: () => clock.now(), chunk: Infinity,
     sleep: (ms) => new Promise((resolve) => {
       let wall;
-      const handle = clock.setTimer(() => { clearTimeout(wall); resolve("time"); }, ms);
+      // {wait: true}: a WAIT, which a manual clock's advance knows belongs to
+      // the callback it runs under (the job its scheduler pass started)
+      const handle = clock.setTimer(() => { clearTimeout(wall); resolve("time"); }, ms, {wait: true});
       wall = setTimeout(() => {
         clock.clearTimer?.(handle);
         console.error(`osd-dialog-step: WAIT UP TO ${ms / 1000} s on an injected clock: nobody moved the clock for ${ceiling} ms of wall time; the WAIT ends now (OSD_WAIT_CLOCK_CEILING_MS)`);

@@ -330,4 +330,31 @@ describe("DuckDB file migration through test/setup.mjs", function () {
       db.close();
     }
   });
+  // DSL L3 slice 5d: the outbox's RELEASE_SEQ and the gate's RUN_BIND, added
+  // to a file made before them; the runner's read of the binding and the
+  // drain's order run against the migrated file
+  it("adds RELEASE_SEQ and RUN_BIND to a file made before them, and the readers run", async () => {
+    const db = await open(join(dir, "jobs.duckdb"));
+    try {
+      await db.execute(`CREATE TABLE "zosd_job_step" ("mandt" VARCHAR(3), "intent_id" VARCHAR(32), "input_json" TEXT)`);
+      await db.execute(`CREATE TABLE "zosd_job_outbox" ("mandt" VARCHAR(3), "intent_id" VARCHAR(32), "jobname" VARCHAR(32),
+        "created_on" VARCHAR(8), "created_at" VARCHAR(6))`);
+      await db.execute(`CREATE TABLE "zosd_l3_stage" ("mandt" VARCHAR(3), "run_id" VARCHAR(32), "stage_no" INT, "status" VARCHAR(12))`);
+      // two pending intents of one second, in their old order by intent id: B (aaa...) before A (bbb...)
+      await db.execute(`INSERT INTO zosd_job_outbox VALUES ('123', 'bbbb', 'OLD_A', '20261002', '100000'), ('123', 'aaaa', 'OLD_B', '20261002', '100000')`);
+      await db.execute(`INSERT INTO zosd_l3_stage VALUES ('', 'RUN1', 1, 'DONE')`);
+      await migrateDuckdbFile(db, []);
+      // the runner's sim_bind( ): an initial binding, which it reads as work=real
+      expect(await db.query(`SELECT run_bind FROM zosd_l3_stage WHERE run_id = 'RUN1' AND stage_no = 1`)).to.deep.equal([{run_bind: ""}]);
+      // a job released after the migration: the drain's order keeps the old rows first, in their old order
+      await db.execute(`INSERT INTO zosd_job_outbox VALUES ('123', '0000', 'NEW', '20261002', '090000', '0000000000000001')`);
+      const order = await db.query(`SELECT jobname FROM zosd_job_outbox WHERE mandt = '123'
+        ORDER BY COALESCE(release_seq, ''), created_on, created_at, intent_id`);
+      expect(order.map((row) => row.jobname)).to.deep.equal(["OLD_B", "OLD_A", "NEW"]);
+      // idempotent
+      await migrateDuckdbFile(db, []);
+    } finally {
+      db.close();
+    }
+  });
 });

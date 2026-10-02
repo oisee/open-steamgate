@@ -198,6 +198,13 @@ describe("durable one-shot batch runs", function () {
         ('123', ?, '${SID}', ?, 'OLD_PENDING', '00000001', 'DEVELOPER',
          'Z_FIRST', '01', 'generation-1', '20260929', '091500')`).run(intentId, sourceDb);
       db.prepare(`INSERT INTO zosd_job_step VALUES ('123', ?, '01', 'Z_FIRST')`).run(intentId);
+      // a second pending intent of the same second, released later but first by
+      // its intent id: the order the drain used before the release sequence
+      const secondId = "0".repeat(32);
+      db.prepare(`INSERT INTO zosd_job_outbox VALUES
+        ('123', ?, 'OSG', ?, 'OLD_SECOND', '00000002', 'DEVELOPER',
+         'Z_FIRST', '01', 'generation-1', '20260929', '091500')`).run(secondId, sourceDb);
+      db.prepare(`INSERT INTO zosd_job_step VALUES ('123', ?, '01', 'Z_FIRST')`).run(secondId);
       db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
       expect(migrateJobPredecessorFile(db, fingerprintOf(old), fingerprintOf(wanted), wanted, fingerprintOf)).to.equal(true);
       expect(migrateJobEventFile(db, fingerprintOf(wanted), fingerprintOf(eventWanted), eventWanted, fingerprintOf)).to.equal(true);
@@ -215,6 +222,18 @@ describe("durable one-shot batch runs", function () {
       expect(beforeJobReleaseDDL(releaseWanted)).to.deep.equal(scheduleWanted);
       expect(migrateJobReleaseFile(db, fingerprintOf(scheduleWanted), fingerprintOf(releaseWanted), releaseWanted, fingerprintOf)).to.equal(true);
       expect(db.prepare("SELECT release_seq FROM zosd_job_outbox").get()).to.deep.equal({release_seq: ""});
+      // released after the migration, with a sequence (and an earlier stamp
+      // and a later intent id): the old rows still drain first, in their old order
+      const newId = "f".repeat(32);
+      db.prepare(`INSERT INTO zosd_job_outbox (mandt, intent_id, sysid, source_db, jobname, jobcount, owner, program,
+        step_count, generation, created_on, created_at, release_seq) VALUES
+        ('123', ?, 'OSG', ?, 'NEW_RELEASED', '00000003', 'DEVELOPER', 'Z_FIRST', '01', 'generation-1', '20260928', '080000', '0000000000000001')`).run(newId, sourceDb);
+      db.prepare(`INSERT INTO zosd_job_step VALUES ('123', ?, '01', 'Z_FIRST', '[]')`).run(newId);
+      // the columns a JOB_CLOSE writes empty
+      for (const column of ["pred_jobname", "pred_jobcount", "pred_intent_id", "source_instance", "wait_seq", "event_id", "event_param",
+        "sdlstrtdt", "sdlstrttm", "laststrtdt", "laststrttm", "prdmins", "prdhours", "prddays", "prdweeks"]) {
+        db.prepare(`UPDATE zosd_job_outbox SET ${column} = '' WHERE intent_id = ?`).run(newId);
+      }
       ensureJobEventMetadata(db);
       const client = {path: sourceDb,
         async delete({table, where}) {
@@ -223,10 +242,12 @@ describe("durable one-shot batch runs", function () {
         },
         async commit() {}, async rollback() {}};
       globalThis.abap = {context: {databaseConnections: {DEFAULT: client}}};
-      expect((await drainJobOutbox(store, {env: {...env, STG_DB: "file"}})).imported).to.equal(1);
+      expect((await drainJobOutbox(store, {env: {...env, STG_DB: "file"}})).imported).to.equal(3);
       expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_job_outbox").get().n).to.equal(0);
       expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_job_step").get().n).to.equal(0);
-      expect(store.list().map((run) => run.jobName)).to.deep.equal(["OLD_PENDING"]);
+      const imported = store.db.prepare("SELECT job_name FROM batch_runs ORDER BY rowid").all().map((run) => run.job_name);
+      const before = [["OLD_PENDING", intentId], ["OLD_SECOND", secondId]].sort((a, b) => a[1].localeCompare(b[1])).map(([name]) => name);
+      expect(imported).to.deep.equal([...before, "NEW_RELEASED"]);
     } finally { globalThis.abap = oldAbap; store.close(); db.close(); }
   });
 
