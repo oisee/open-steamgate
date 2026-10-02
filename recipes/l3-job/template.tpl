@@ -29,6 +29,9 @@ PARAMETERS p_run TYPE c LENGTH 32.
 PARAMETERS p_pile TYPE i.
 {{/planned}}
 PARAMETERS p_bind TYPE c LENGTH 255 LOWER CASE.
+{{#settings.entries}}
+PARAMETERS {{screen}} TYPE c LENGTH 40 LOWER CASE.
+{{/settings.entries}}
 {{#params}}
 PARAMETERS {{screen}} TYPE {{type_name}}.
 {{/params}}
@@ -39,6 +42,12 @@ PARAMETERS p_mode TYPE c LENGTH 1 DEFAULT 'R'.
 START-OF-SELECTION.
   DATA ls_rule TYPE {{class}}=>ty_rule.
   DATA lv_bind TYPE string.
+{{#settings}}
+  DATA ls_settings TYPE {{settings.class}}=>ty_values.
+{{#entries}}
+  ls_settings-{{field}} = {{screen}}.
+{{/entries}}
+{{/settings}}
 {{#with_params}}
   DATA ls_params TYPE {{class}}=>ty_params.
 {{/with_params}}
@@ -71,6 +80,9 @@ START-OF-SELECTION.
     iv_rule = p_rule
     iv_date = p_date
     iv_run = p_run
+{{#settings}}
+    is_settings = ls_settings
+{{/settings}}
 {{#planned}}
     iv_pile = p_pile
 {{/planned}}

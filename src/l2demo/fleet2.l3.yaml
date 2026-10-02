@@ -58,3 +58,7 @@ resilience:
     kill: ZOSD_L3_KILL
   dry_run: false
   keep: {days: 30}
+settings:
+  tunable: [retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, piles.checks.size]
+  bounds:
+    fuses.max_alerts: {min: 1, max: 100000}

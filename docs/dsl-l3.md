@@ -264,9 +264,9 @@ rm -rf .local/stage/l3demo && mkdir -p .local/stage/l3demo && cp \
   src/l2demo/zcl_l3_fleet_alerts_*.clas.* src/l2demo/zif_l3_fleet_*.intf.* src/l2demo/zcx_l3_fleet_port.clas.* \
   src/l2demo/zl3_fleet.prog.* src/l3proof/zcl_l3_fleet_proof.clas.* \
   src/dsl/zosd_l3_work.tabl.xml src/dsl/zosd_l3_stage.tabl.xml src/l2demo/zcl_l2_ship_busy.clas.* \
-  src/dsl/zosd_l3_doctor.tabl.xml src/dsl/zosd_l3_kill.tabl.xml \
+  src/dsl/zosd_l3_doctor.tabl.xml src/dsl/zosd_l3_kill.tabl.xml src/dsl/zosd_l3_conf.tabl.xml src/dsl/zosd_l3_conf_log.tabl.xml src/dsl/zosd_l3_run_conf.tabl.xml \
   src/l2demo/zcl_l3_fleet2.clas.* src/l2demo/zcl_l3_fleet2_*.clas.* src/l2demo/zif_l3_fleet2_*.intf.* \
-  src/l2demo/zcx_l3_fleet2_port.clas.* src/l2demo/zl3_fleet2.prog.* \
+  src/l2demo/zcx_l3_fleet2_port.clas.* src/l2demo/zl3_fleet2.prog.* src/l2demo/zl3_fleet2_conf.prog.* \
   .local/stage/l3demo/
 node tools/osd-prove-on-system.mjs .local/stage/l3demo --unit l3demo --manifest deploy/manifest.json
 ```
@@ -1235,6 +1235,135 @@ made the pile `DONE` and filled the worklist); the proof's `teardown` is made ro
 - the doctor's audit row takes the run's next `SEQ` and tries ten times; after ten clashes with rows
   other doctors inserted at once, the audit row of that action is dropped (the action itself and its
   report row stand).
+
+## Settings
+
+A set can opt individual DSL defaults into production tuning. The manifest uses
+one list and optional bounds:
+
+```yaml
+settings:
+  tunable: [retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, piles.checks.size]
+  bounds:
+    fuses.max_alerts: {min: 1, max: 100000}
+```
+
+The available names are `retry.max`, `retry.backoff`, `stale`,
+`fuses.max_alerts`, `keep.days`, `piles.size` (an unstaged set),
+`piles.<stage>.size`, `schedule.every`, and `params.<name>` for a set parameter
+with a DSL default. A name not in `settings.tunable` remains a compiled
+constant. Bounds narrow the compiler range; they never enlarge it. A period
+uses the schedule grammar (`1m`, `2h`, `1d`, `1w`, within the unit's JOB_CLOSE
+width). `fuses.max_alerts` is tunable only with `bounds: {max: n}`: tunable up to
+INT4, the fuse could be tuned off, so the compiler refuses it without a ceiling. Character, NUMC, date and time parameters keep their DDIC width and
+format; integer parameters keep their exact DDIC ranges, including INT8.
+Packed decimal and RAW parameters are excluded from `settings.tunable` for now:
+the generated validator cannot prove their precision or byte encoding from
+the CHAR 40 settings row. The compiler rejects those names rather than
+accepting a value that could change on assignment to the typed parameter.
+
+`ZOSD_L3_CONF` holds one row per set and parameter. It is delivery class A:
+application data, maintained without a customizing or workbench transport.
+`PARAM_VAL` is effective when valid, `ORIGIN` says `DSL` or `USER`, and
+`DSL_VALUE` is the current compiled default. `CHANGED_BY`, `CHANGED_AT` and
+`NOTE_TEXT` explain the edit. The names `PARAM_NAME`, `PARAM_VAL` and `ORIGIN`
+avoid dictionary reserved words. The generated `settings_seed( )` is callable
+directly; the first run, schedule or doctor pass also seeds. On a new build a
+DSL row takes the new default; a USER row keeps its tuned value while
+`DSL_VALUE` moves to the new default. The report displays their difference as
+`DRIFT`. Every insert, tune, reset and default migration writes
+`ZOSD_L3_CONF_LOG` with the old and new values, actor, time and note. That
+history is audit data: `purge( )` never deletes it.
+
+The runner loads the set's settings with one SELECT at the start of each run;
+all later uses in that run use the in-memory structure. Values outside their
+type or bounds fall back to the compiled default, appear in
+`ty_result-settings_warnings`, and create an audit entry, once per stored value
+rather than once per pass. A job receives the same effective values in its
+selection fields because a submitted job can start before its submitter
+commits. `ZOSD_L3_RUN_CONF` also stores those values per run, with origin, DSL
+default, actor and time; a value that fell back is stored as the default with
+`ORIGIN = FALLBACK` and no actor. `dsl-l3 explain` prints the snapshot after
+the alert's run line, including the actor and time for USER values. `purge( )`
+retains these snapshots so older alert traces remain explainable.
+
+What a run was planned with belongs to the run: the fuse (`fuses.max_alerts`),
+the pile sizes (`piles.size`, `piles.<stage>.size`) and the parameters
+(`params.*`). Whoever works an open run again reads them from its snapshot
+(`ZCL_L3_<SET>_CONF=>scope( )`), not from the table: `heal( )` (the doctor and
+`resume( )`) for the jobs it submits again and the stages it plans, and
+`collect( )` for a stage it advances. A pile submitted again after an operator
+tuned the fuse therefore runs with the fuse its run started with, and a stage
+the doctor plans is cut by the run's own size. The retry budget, the backoff,
+staleness, retention and the schedule are the operator's policy of the moment:
+the doctor reads them fresh once per pass. A run with no snapshot (planned
+before 5b, or by hand in a test) and a snapshot value that is not valid read as
+the compiled default, never as the table's value and never as zero. A job whose
+selection fields did not arrive (all initial) reads the run's snapshot after
+its `SELECT ... FOR UPDATE` of the plan row, which waits for the step that
+wrote both to commit; a single field that arrived as zero where zero is out of
+bounds is the compiled default (`sane( )`). A dry run reads the settings and
+writes none: nothing seeded, logged or snapshot (`load( iv_write = abap_false )`).
+Two first runs that seed at once write one seed each: the INSERT that finds the
+row already there takes it and logs nothing. `reset_setting( )` of a value that
+is already its DSL default changes and logs nothing; `reset_settings( )` resets
+every setting of the set, which is what each proof method does in `setup` and
+`teardown`, so no method inherits another's tuning in whatever order a system
+runs them (alphabetically, ANORMALIES.md `ANOMALY-2026-10-02-abap-unit-method-order`).
+The schedule and its doctor period use the values at the next `schedule( )`.
+
+**On A4H (5b).** Two runs (e46f70f2, df332eac) each failed `DOCTOR_HEALS` alone, at
+`'the healed run ends DONE'`, with no database exception, where 5a had passed. Read off the code,
+settings could not have changed that run: nothing read `ZOSD_L3_RUN_CONF` at run time (it was
+written only), `doctor_heals` runs first on a system and every run there starts from freshly
+created tables, so no tuning of `settings_tune` (which runs later, and resets) could reach it,
+and with the seed of the proof no rule writes more than one alert per pile, so even a fuse of 1
+would not have fused it. Every reader saw the DSL defaults. The review's P2-1 (the doctor
+re-reading the live table for an open run) is a real defect, fixed above and proven by
+`doctor_keeps_run_values`, but not what failed there. The cause of the A4H failure is not
+identified from the code; `doctor_heals` and `doctor_keeps_run_values` now name every pile's stage,
+rule, number, state, reason and attempt when the run does not end `DONE`, so the next system run
+says which pile ended how.
+
+It did (516df864): stage 1 `DONE` (the doctor's pile at attempt 2), and all six stage 2 piles
+`FAILED` at attempt 0 with no reason, the mark only `collect( )` writes (`heal( )` and `submit( )`
+always set a reason or an attempt). The job the doctor submitted again ended stage 1 and planned
+stage 2, and `collect( )` in the proof's wait took the piles for lost before they had jobs. On a
+system the plan is committed before its jobs exist (by this evidence `JOB_OPEN` commits; inferred,
+not measured with a probe of its own): the plan rows `advance( )` inserts are visible from the first
+`JOB_OPEN` on, while all but the first pile still have no job, and `collect( )` read "PLANNED,
+no job" as lost (`NO-JOB`) and wrote `FAILED` from its own read of the row, overwriting the job
+the planner gave the pile meanwhile. `doctor_heals` meets that window every time and
+`stages_mode_p` does not: there the wait polls once a second, while after the doctor's `COMMIT`
+the wait's first `collect( )` starts at the very moment the resubmitted job, which was waiting
+on the doctor's claim of its pile (`FOR UPDATE`), goes on, opens stage 2 and starts submitting.
+Locally `JOB_OPEN` does not commit and no job runs inside a step, so the window never opens.
+The fix, in a set with `resilience:`: `collect( )` leaves a `PLANNED` pile without a job alone
+while its stage opened less than `stale` ago (the doctor resubmits it after that, `STALE-PLAN`),
+and marks a pile `FAILED` with one conditional `UPDATE` on the row as read (status and job
+count), so a job given to it meanwhile is never overwritten. `collect_waits_for_submit` is the
+state on its own, with no job: red before the fix
+(`'a pile its planner is still submitting is not lost'`), green after. Review round 2 added two more: `collect( )` fails a pile only for the job whose state it
+read (job name and count in the conditional `UPDATE`), so a pile resubmitted between its
+`SHOW_JOBSTATE` and its reread keeps its new job; and every assignment of the runner's settings
+other than the run's own (`doctor`, `resume`, `schedule`, `purge`, the restore after `heal( )` and
+`collect( )`) clears the cached run id, so a later `run_rule( )` of that run without selection
+values reads the run's scope again instead of the live values the doctor left behind. Clearing
+the cache was chosen over scoping on every call: a dry run has no snapshot, and its mode S
+`run_rule( )` calls must keep the values `run( )` loaded.
+
+`ZCL_L3_<SET>=>set_setting( iv_param, iv_value, iv_note )` validates with the
+same type and bounds rule as reading, writes a USER row and audit row, and
+returns false for an unknown or invalid setting. `reset_setting( iv_param )`
+restores the current DSL default. The generated `ZL3_<SET>_CONF` report lists
+value, source, DSL default and drift; its selection screen can tune one value
+or reset it. The generated authority seam currently returns true. A deployment
+must wire it to a role and an authorisation object chosen by that system's
+security team; the generator does not invent an SAP object.
+
+The key arithmetic follows the system's dictionary `LENG` convention, including
+INT4 as 10: CONF is 3 + 16 + 30 = 49, CONF_LOG is 3 + 32 = 35, and RUN_CONF is
+3 + 32 + 30 = 65. Each is below the 120 key limit.
 
 ## Not yet
 

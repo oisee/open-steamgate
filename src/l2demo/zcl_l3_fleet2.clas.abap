@@ -45,6 +45,7 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES: BEGIN OF ty_params,
              active_status TYPE zosd_l2_ship-status,
            END OF ty_params.
+    TYPES tt_settings_warnings TYPE string_table.
     TYPES: BEGIN OF ty_result,
              set_name TYPE zosd_l3_alert-set_name,
              run_id TYPE zosd_l3_alert-run_id,
@@ -52,6 +53,7 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
              mode TYPE c LENGTH 1,
              alerts TYPE i,
              rules TYPE tt_rule,
+             settings_warnings TYPE tt_settings_warnings,
              bind TYPE string,
              status TYPE c LENGTH 12,
              stages TYPE tt_stage,
@@ -96,6 +98,15 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_keep_days TYPE i VALUE 30.
     " the fuse: a rule writes at most c_max_alerts alerts in a run
     CONSTANTS c_max_alerts TYPE i VALUE 500.
+    CLASS-METHODS settings_seed.
+    CLASS-METHODS set_setting
+      IMPORTING iv_param TYPE csequence iv_value TYPE csequence iv_note TYPE csequence
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
+    CLASS-METHODS reset_setting
+      IMPORTING iv_param TYPE csequence
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
+    CLASS-METHODS reset_settings
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
     " iv_bind: the variant of each port for this run, "port=variant,port=variant";
     " a port it does not name keeps the manifest's binding. A source that is not
     " live replaces table content in the caller's LUW: a test and dev seam, never
@@ -128,6 +139,7 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_rule TYPE csequence
                 iv_date TYPE d
                 iv_run TYPE csequence
+                is_settings TYPE zcl_l3_fleet2_conf=>ty_values OPTIONAL
                 iv_pile TYPE i
                 iv_bind TYPE string OPTIONAL
                 is_params TYPE ty_params OPTIONAL
@@ -169,11 +181,19 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " c_keep_days; never an alert, never anything of an open run
     CLASS-METHODS purge
       IMPORTING iv_now TYPE timestamp OPTIONAL
+                iv_loaded TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rt_report) TYPE tt_doctor.
     " true while zosd_l3_kill holds a row of the set: the kill switch
     CLASS-METHODS killed
       RETURNING VALUE(rv_killed) TYPE abap_bool.
   PRIVATE SECTION.
+    CLASS-DATA gs_settings TYPE zcl_l3_fleet2_conf=>ty_state.
+    " the run whose values gs_settings-vals holds: run( ) and run_rule( ) set
+    " it, and every other assignment of gs_settings clears it, so a later
+    " run_rule( ) of that run without selection values reads its scope again
+    CLASS-DATA gv_settings_run TYPE zosd_l3_run-run_id.
+    " set by dry( ) for the run( ) it calls, and cleared by that run( )
+    CLASS-DATA gv_dry TYPE abap_bool.
     CLASS-METHODS write
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
@@ -269,6 +289,18 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 
 CLASS zcl_l3_fleet2 IMPLEMENTATION.
+  METHOD settings_seed.
+    zcl_l3_fleet2_conf=>settings_seed( ).
+  ENDMETHOD.
+  METHOD set_setting.
+    rv_ok = zcl_l3_fleet2_conf=>set_setting( iv_param = iv_param iv_value = iv_value iv_note = iv_note ).
+  ENDMETHOD.
+  METHOD reset_setting.
+    rv_ok = zcl_l3_fleet2_conf=>reset_setting( iv_param ).
+  ENDMETHOD.
+  METHOD reset_settings.
+    rv_ok = zcl_l3_fleet2_conf=>reset_all( ).
+  ENDMETHOD.
   METHOD run.
     " stage by stage: a stage opens through its gate row in ZOSD_L3_STAGE
     " (WAITING to OPEN), is planned then (a later stage reads the worklist an
@@ -289,6 +321,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_stamp TYPE timestampl.
     DATA lv_parallel TYPE abap_bool.
     DATA lx_error TYPE REF TO cx_root.
+    DATA lv_dry TYPE abap_bool.
     DATA li_src_1 TYPE REF TO zif_l3_fleet2_ships.
     DATA lv_swap_1 TYPE abap_bool.
     DATA lt_keep_1 TYPE zif_l3_fleet2_ships=>tt_rows.
@@ -302,6 +335,15 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                        iv_allow_replay = iv_allow_replay ).
       RETURN.
     ENDIF.
+    " a dry run (dry( ) runs this in mode S) reads the settings and writes
+    " none: nothing seeded, logged or snapshot
+    lv_dry = gv_dry.
+    CLEAR gv_dry.
+    IF lv_dry = abap_true.
+      gs_settings = zcl_l3_fleet2_conf=>load( iv_write = abap_false ).
+    ELSE.
+      gs_settings = zcl_l3_fleet2_conf=>load( ).
+    ENDIF.
     IF iv_mode = c_parallel.
       lv_parallel = abap_true.
     ENDIF.
@@ -310,6 +352,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                           iv_allow_replay = iv_allow_replay ).
     rs_result-set_name = c_set.
     rs_result-mode = iv_mode.
+    rs_result-settings_warnings = gs_settings-warnings.
     rs_result-bind = iv_bind.
     rs_result-params = is_params.
     rs_result-check_date = iv_date.
@@ -319,6 +362,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         GET TIME STAMP FIELD lv_stamp.
         rs_result-run_id = lv_stamp.
     ENDTRY.
+    gv_settings_run = rs_result-run_id.
     " the kill switch: while zosd_l3_kill holds a row of the set no run starts
     IF killed( ) = abap_true.
       rs_result-status = 'KILLED'.
@@ -329,6 +373,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF lock( iv_run = rs_result-run_id iv_date = rs_result-check_date ) = abap_false.
       rs_result-status = 'BUSY'.
       RETURN.
+    ENDIF.
+    IF lv_dry = abap_false.
+      zcl_l3_fleet2_conf=>snapshot( iv_run = rs_result-run_id is_state = gs_settings ).
     ENDIF.
     lt_rules = rules( ).
     " a source that is not live replaces table content for this run, and the
@@ -538,7 +585,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           ENDIF.
           ls_pile-range_high = ls_key_2-ship_id.
           lv_count = lv_count + 1.
-          IF lv_count = 2.
+          IF lv_count = gs_settings-vals-piles_checks_size.
             APPEND ls_pile TO lt_cut.
             lv_count = 0.
           ENDIF.
@@ -799,10 +846,6 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lt_keys_1 TYPE zcl_l2_ship_busy=>tt_range.
     DATA ls_key_1 LIKE LINE OF lt_keys_1.
     DATA ls_params TYPE ty_params.
-    ls_params = is_params.
-    IF ls_params-active_status IS INITIAL.
-      ls_params-active_status = 'A'.
-    ENDIF.
     rs_rule-rule = iv_rule.
     SELECT SINGLE FOR UPDATE * FROM zosd_l3_pile INTO ls_pile
       WHERE set_name = c_set
@@ -821,6 +864,24 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF ls_pile-status <> 'PLANNED'.
       rs_rule-status = 'NOT-PLANNED'.
       RETURN.
+    ENDIF.
+    IF is_settings IS NOT INITIAL.
+      " the values the submitter planned this run with, each checked: one
+      " that did not arrive reads as zero and is the compiled default
+      gs_settings-vals = zcl_l3_fleet2_conf=>sane( is_settings ).
+      gv_settings_run = iv_run.
+    ELSEIF gv_settings_run <> iv_run.
+      " the run's own values: its snapshot, else the compiled defaults, never
+      " the live table's values of the moment. Read after the plan row: a
+      " job may start before the step that submitted it commits, and the
+      " read of the row above waits for that commit
+      gs_settings = zcl_l3_fleet2_conf=>load( iv_write = abap_false ).
+      gs_settings-vals = zcl_l3_fleet2_conf=>scope( iv_run = iv_run is_vals = gs_settings-vals ).
+      gv_settings_run = iv_run.
+    ENDIF.
+    ls_params = is_params.
+    IF ls_params-active_status IS INITIAL.
+      ls_params-active_status = 'A'.
     ENDIF.
     " the kill switch: the pile goes back to PLANNED without a job and its
     " attempt is not spent; resume( ) or the doctor submits it again
@@ -1010,7 +1071,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       lv_total = lv_total + lv_before.
     ENDLOOP.
     lv_total = lv_total + lines( lt_rows ).
-    IF lv_total > c_max_alerts.
+    IF lv_total > gs_settings-vals-fuses_max_alerts.
       cs_rule-failed = lines( lt_rows ).
       cs_rule-status = 'FUSED'.
       RETURN.
@@ -1120,6 +1181,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       WITH p_run = iv_run
       WITH p_pile = cs_pile-pile_no
       WITH p_bind = iv_bind
+      WITH s_1 = gs_settings-vals-retry_max
+      WITH s_2 = gs_settings-vals-retry_backoff
+      WITH s_3 = gs_settings-vals-stale
+      WITH s_4 = gs_settings-vals-fuses_max_alerts
+      WITH s_5 = gs_settings-vals-keep_days
+      WITH s_6 = gs_settings-vals-piles_checks_size
       WITH p_active = is_params-active_status
       VIA JOB lv_jobname NUMBER lv_jobcount
       AND RETURN.
@@ -1149,6 +1216,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_time TYPE t.
     DATA lv_period TYPE tbtcjob-prddays.
     DATA lv_released TYPE btch0000-char1.
+    gs_settings = zcl_l3_fleet2_conf=>load( ).
+    CLEAR gv_settings_run.
     " the doctor goes with the schedule, as a periodic job of its own
     schedule_doctor( ).
     " already scheduled: the waiting instance is the chain, a second would run the set twice
@@ -1156,8 +1225,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF rv_jobcount IS NOT INITIAL.
       RETURN.
     ENDIF.
-    lv_jobname = c_driver.
     lv_period = 1.
+    lv_jobname = c_driver.
     GET TIME.
     lv_date = sy-datum.
     lv_time = '020000'.
@@ -1283,6 +1352,11 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_final TYPE abap_bool VALUE abap_true.
     DATA lv_closed TYPE abap_bool.
     DATA lv_stamp TYPE timestampl.
+    DATA ls_pass TYPE zcl_l3_fleet2_conf=>ty_values.
+    DATA lv_now TYPE timestamp.
+    DATA lv_stale TYPE timestamp.
+    DATA lv_job_name TYPE zosd_l3_pile-job_name.
+    DATA lv_job_count TYPE zosd_l3_pile-job_count.
     DATA lv_fused TYPE abap_bool.
     DATA ls_rule TYPE ty_rule.
     DATA lv_aborted TYPE btch0000-char1.
@@ -1293,7 +1367,16 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_preliminary TYPE btch0000-char1.
     rs_result = is_result.
     CLEAR: rs_result-rules, rs_result-alerts.
+    " a stage advanced here is planned and submitted with the run's own
+    " values (its snapshot), not with the table's values of the moment
+    ls_pass = gs_settings-vals.
+    gs_settings-vals = zcl_l3_fleet2_conf=>scope( iv_run = is_result-run_id is_vals = ls_pass ).
     CLEAR rs_result-stages.
+    GET TIME STAMP FIELD lv_now.
+    lv_stale = ago( iv_now = lv_now iv_secs = gs_settings-vals-stale ).
+    SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
+      WHERE run_id = is_result-run_id
+      ORDER BY PRIMARY KEY.
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = c_set
         AND run_id = is_result-run_id
@@ -1325,17 +1408,39 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           lv_state = 'OPEN'.
         ENDIF.
       ENDIF.
+      " PLANNED and no job yet: its planner may still be submitting it. On a
+      " system the plan rows of a stage are visible before the jobs of all
+      " but the first are made (JOB_OPEN commits, A4H 2026-10-02); such
+      " a pile is lost only once its stage opened longer than stale ago, as
+      " heal( ) sees it, and the doctor submits it then
+      IF lv_state = 'NO-JOB' AND ls_pile-status = 'PLANNED'.
+        READ TABLE lt_gates INTO ls_gate WITH KEY stage_no = ls_pile-stage_no.
+        IF sy-subrc = 0 AND ls_gate-opened > lv_stale.
+          lv_state = 'OPEN'.
+        ENDIF.
+      ENDIF.
       IF lv_state <> 'OPEN'.
-        " the job is over: the row as it left it, DONE or not
+        " the job is over: the row as it left it, DONE or not. Only for the
+        " job whose state was read above: a pile given another job meanwhile
+        " (its planner's, or a later submit of it) is not this job's to fail
+        lv_job_name = ls_pile-job_name.
+        lv_job_count = ls_pile-job_count.
         SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
           WHERE set_name = c_set
             AND run_id = ls_pile-run_id
             AND rule_name = ls_pile-rule_name
             AND pile_no = ls_pile-pile_no.
-        IF ls_pile-status <> 'DONE' AND ls_pile-status <> 'FUSED'.
-          ls_pile-status = 'FAILED'.
+        IF ls_pile-status <> 'DONE' AND ls_pile-status <> 'FUSED'
+            AND ls_pile-job_name = lv_job_name AND ls_pile-job_count = lv_job_count.
+          " one UPDATE on the row as read, and on the job that was checked
           GET TIME STAMP FIELD ls_pile-ended.
-          UPDATE zosd_l3_pile FROM ls_pile.
+          UPDATE zosd_l3_pile SET status = 'FAILED' ended = ls_pile-ended
+            WHERE run_id = ls_pile-run_id
+              AND rule_name = ls_pile-rule_name
+              AND pile_no = ls_pile-pile_no
+              AND status = ls_pile-status
+              AND job_name = lv_job_name
+              AND job_count = lv_job_count.
         ENDIF.
       ENDIF.
     ENDLOOP.
@@ -1458,6 +1563,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ELSE.
       rs_result-status = 'RUNNING'.
     ENDIF.
+    gs_settings-vals = ls_pass.
+    CLEAR gv_settings_run.
   ENDMETHOD.
 
   METHOD dry.
@@ -1469,6 +1576,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_rule TYPE ty_rule.
     zcl_l3_fleet2_alerts_capture=>reset( ).
     CONCATENATE iv_bind ',alerts=capture' INTO lv_bind.
+    gv_dry = abap_true.
     rs_result = run( iv_date = iv_date
                      iv_mode = c_sequential
                      iv_bind = lv_bind
@@ -1491,6 +1599,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_now TYPE timestamp.
     DATA ls_gate TYPE zosd_l3_stage.
     DATA ls_lock TYPE zosd_l3_run.
+    gs_settings = zcl_l3_fleet2_conf=>load( ).
+    CLEAR gv_settings_run.
     lv_now = iv_now.
     IF lv_now IS INITIAL.
       GET TIME STAMP FIELD lv_now.
@@ -1549,6 +1659,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_reason TYPE zosd_l3_doctor-reason.
     DATA ls_result TYPE ty_result.
     DATA lt_purged TYPE tt_doctor.
+    gs_settings = zcl_l3_fleet2_conf=>load( ).
+    CLEAR gv_settings_run.
     lv_now = iv_now.
     IF lv_now IS INITIAL.
       GET TIME STAMP FIELD lv_now.
@@ -1561,7 +1673,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
            CHANGING ct_report = rt_report ).
       RETURN.
     ENDIF.
-    lv_stale = ago( iv_now = lv_now iv_secs = c_stale ).
+    lv_stale = ago( iv_now = lv_now iv_secs = gs_settings-vals-stale ).
     SELECT * FROM zosd_l3_run INTO TABLE lt_locks
       WHERE set_name = c_set
         AND status = 'HELD'
@@ -1591,7 +1703,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           IF ls_pile-status = 'DONE' OR ls_pile-status = 'FUSED'.
             CONTINUE.
           ENDIF.
-          IF ls_pile-status = 'FAILED' AND ls_pile-attempt > c_retry_max.
+          IF ls_pile-status = 'FAILED' AND ls_pile-attempt > gs_settings-vals-retry_max.
             CONTINUE.
           ENDIF.
           lv_final = abap_false.
@@ -1644,7 +1756,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                      iv_now = lv_now
            CHANGING ct_report = rt_report ).
     ENDLOOP.
-    lt_purged = purge( lv_now ).
+    lt_purged = purge( iv_now = lv_now iv_loaded = abap_true ).
     APPEND LINES OF lt_purged TO rt_report.
   ENDMETHOD.
 
@@ -1676,7 +1788,14 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_ready TYPE btch0000-char1.
     DATA lv_scheduled TYPE btch0000-char1.
     DATA lv_preliminary TYPE btch0000-char1.
-    lv_stale = ago( iv_now = iv_now iv_secs = c_stale ).
+    DATA ls_pass TYPE zcl_l3_fleet2_conf=>ty_values.
+    " the retry budget, the backoff and staleness are this pass's; what the
+    " run was planned with (the fuse, the pile sizes, the parameters) is the
+    " run's own, from its snapshot: a job submitted again, or a stage planned
+    " here, runs as the run's first jobs ran, whatever the table says now
+    ls_pass = gs_settings-vals.
+    gs_settings-vals = zcl_l3_fleet2_conf=>scope( iv_run = iv_run is_vals = ls_pass ).
+    lv_stale = ago( iv_now = iv_now iv_secs = gs_settings-vals-stale ).
     lt_rules = rules( ).
     SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
       WHERE run_id = iv_run
@@ -1735,7 +1854,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         ls_pile-ended = iv_now.
       ENDIF.
       " the retry budget: ATTEMPT counts the submits, c_retry_max the ones after the first
-      IF ls_pile-attempt > c_retry_max.
+      IF ls_pile-attempt > gs_settings-vals-retry_max.
         CONTINUE.
       ENDIF.
       IF ls_pile-status = 'FAILED'.
@@ -1901,6 +2020,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
              CHANGING ct_report = ct_report ).
       ENDIF.
     ENDLOOP.
+    gs_settings-vals = ls_pass.
+    CLEAR gv_settings_run.
   ENDMETHOD.
 
   METHOD due.
@@ -1912,7 +2033,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       rv_due = abap_true.
       RETURN.
     ENDIF.
-    lv_wait = c_backoff.
+    lv_wait = gs_settings-vals-retry_backoff.
     lv_times = is_pile-attempt - 1.
     DO lv_times TIMES.
       IF lv_wait > 302400.
@@ -1942,11 +2063,15 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_lock TYPE zosd_l3_run.
     DATA lt_audit TYPE STANDARD TABLE OF zosd_l3_doctor WITH DEFAULT KEY.
     DATA ls_audit TYPE zosd_l3_doctor.
+    IF iv_loaded = abap_false.
+      gs_settings = zcl_l3_fleet2_conf=>load( ).
+      CLEAR gv_settings_run.
+    ENDIF.
     lv_now = iv_now.
     IF lv_now IS INITIAL.
       GET TIME STAMP FIELD lv_now.
     ENDIF.
-    lv_secs = c_keep_days * 86400.
+    lv_secs = gs_settings-vals-keep_days * 86400.
     lv_cut = ago( iv_now = lv_now iv_secs = lv_secs ).
     SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
       WHERE set_name = c_set
@@ -2080,10 +2205,21 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_job TYPE tbtcjob.
     DATA lv_jobname TYPE tbtcjob-jobname.
     DATA lv_jobcount TYPE tbtcjob-jobcount.
-    DATA lv_period TYPE tbtcjob-prdmins.
+    DATA lv_minutes TYPE tbtcjob-prdmins.
+    DATA lv_hours TYPE tbtcjob-prdhours.
+    DATA lv_period TYPE i.
     DATA lv_released TYPE btch0000-char1.
     DATA lv_date TYPE d.
     DATA lv_time TYPE t.
+    lv_period = ( gs_settings-vals-stale + 30 ) DIV 60.
+    IF lv_period < 1.
+      lv_period = 1.
+    ENDIF.
+    IF lv_period <= 99.
+      lv_minutes = lv_period.
+    ELSE.
+      lv_hours = ( lv_period + 30 ) DIV 60.
+    ENDIF.
     ls_select-jobname = c_doctor.
     ls_select-username = sy-uname.
     ls_select-schedul = 'X'.
@@ -2097,11 +2233,22 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         OTHERS = 1.
     IF sy-subrc = 0.
       LOOP AT lt_jobs INTO ls_job WHERE status = 'S'.
-        RETURN.
+        IF ls_job-prdmins = lv_minutes AND ls_job-prdhours = lv_hours.
+          RETURN.
+        ENDIF.
+        CALL FUNCTION 'BP_JOB_DELETE'
+          EXPORTING
+            jobname = c_doctor
+            jobcount = ls_job-jobcount
+          EXCEPTIONS
+            OTHERS = 1.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        EXIT.
       ENDLOOP.
     ENDIF.
     lv_jobname = c_doctor.
-    lv_period = 15.
     GET TIME.
     lv_date = sy-datum.
     lv_time = sy-uzeit.
@@ -2125,7 +2272,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         jobcount = lv_jobcount
         sdlstrtdt = lv_date
         sdlstrttm = lv_time
-        prdmins = lv_period
+        prdmins = lv_minutes
+        prdhours = lv_hours
       IMPORTING
         job_was_released = lv_released
       EXCEPTIONS

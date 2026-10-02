@@ -42,7 +42,8 @@ const FLEET = {
 };
 const COLUMNS = {zosd_l2_ship: ["ship_id", "name", "status"], zosd_l2_voy: ["voyage_id", "ship_id", "dep_date"],
   zosd_l2_crew: ["crew_id", "ship_id", "role", "since"], zosd_l2_cargo: ["cargo_id", "ship_id", "weight"]};
-const TABLES = ["zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor", "zosd_l3_kill"];
+const TABLES = ["zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor", "zosd_l3_kill",
+  "zosd_l3_conf", "zosd_l3_conf_log", "zosd_l3_run_conf"];
 
 describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", function () {
   this.timeout(900000);

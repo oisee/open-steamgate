@@ -132,6 +132,12 @@
         "class": "ltcl_proof",
         "method": "doctor_heals",
         "_why": "as mode_p: the doctor submits a pile again as a real job, which needs STG_DB=file, a dialog step per method and a worker; test/dsl-l3.mjs runs it with all three (docs/dsl-l3.md, Resilience)"
+      },
+      {
+        "object": "ZCL_L3_FLEET_PROOF",
+        "class": "ltcl_proof",
+        "method": "doctor_keeps_run_values",
+        "_why": "as doctor_heals: the doctor's resubmit and stage 2 run as real jobs; test/dsl-l3.mjs runs it with a worker (docs/dsl-l3.md, Settings)"
       }
     ]
   },

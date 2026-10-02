@@ -41,7 +41,7 @@ const FLEET = {
 };
 const COLUMNS = {zosd_l2_ship: ["ship_id", "name", "status"], zosd_l2_voy: ["voyage_id", "ship_id", "dep_date"],
   zosd_l2_crew: ["crew_id", "ship_id", "role", "since"], zosd_l2_cargo: ["cargo_id", "ship_id", "weight"]};
-const TABLES = ["zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor", "zosd_l3_kill"];
+const TABLES = ["zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor", "zosd_l3_kill", "zosd_l3_conf", "zosd_l3_conf_log", "zosd_l3_run_conf"];
 // the sections of this slice in the templates
 const SECTIONS = ["resilience", "fused", "killable"];
 
@@ -75,7 +75,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
         return text;
       };
       const file = join(OUT, `zz_plain_${process.pid}.l3.yaml`);
-      writeFileSync(file, SET_TEXT.replace(/^resilience:\n(  .*\n)+/m, ""));
+      writeFileSync(file, SET_TEXT.replace(/^resilience:\n(  .*\n)+/m, "").replace(/^settings:\n(  .*\n|    .*\n)+/m, ""));
       try {
         const model = compileSet(file);
         expect([model.resilience, model.fused, model.killable]).to.deep.equal([undefined, undefined, undefined]);
@@ -111,7 +111,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
       expect(error, "refused").to.be.instanceOf(SetError);
       expect(error.message.slice(where(file).length), error.message).to.match(new RegExp(`^:${line}: ${message.source}`));
     };
-    const BLOCK = SET_TEXT.slice(SET_TEXT.indexOf("resilience:\n"));
+    const BLOCK = SET_TEXT.slice(SET_TEXT.indexOf("resilience:\n"), SET_TEXT.indexOf("settings:\n"));
 
     it("refusals, each at its line", () => {
       refusedAt(manifest("nostages", [], readFileSync(ONE, "utf8") + BLOCK), /resilience needs stages:/, /^resilience:$/);
@@ -148,9 +148,9 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
       expect(of(runner, /CONSTANTS c_keep_days /)[0]).to.include({node: "set/fleet2/resilience/keep", set_line: setLine(/^  keep:/)});
       expect(of(runner, /iv_dry_run TYPE abap_bool DEFAULT abap_false/)[0]).to.include({node: "set/fleet2/resilience/dry_run", set_line: setLine(/dry_run:/)});
       expect(of(runner, /SELECT SINGLE set_name FROM zosd_l3_kill/)[0]).to.include({node: "set/fleet2/resilience/fuses/kill", set_line: setLine(/kill: ZOSD_L3_KILL/)});
-      expect(of(runner, /IF lv_total > c_max_alerts\./)[0].set_line).to.equal(setLine(/max_alerts:/));
+      expect(of(runner, /IF lv_total > gs_settings-vals-fuses_max_alerts\./)[0].set_line).to.equal(setLine(/max_alerts:/));
       expect(of(runner, /METHOD doctor\./)[0]).to.include({node: "set/fleet2/resilience", set_line: setLine(/^resilience:/)});
-      expect(of(runner, /^ +prd[a-z]+ = lv_period$/).map((e) => e.set_line), "the driver's period, the doctor's").to.deep.equal([setLine(/^schedule:/), setLine(/^  stale:/)]);
+      expect(of(runner, /^ +prd[a-z]+ = lv_(period|minutes|hours)$/).map((e) => e.set_line), "the driver's period, the doctor's").to.deep.equal([setLine(/^schedule:/), setLine(/^settings:/), setLine(/^settings:/)]);
       expect(of(`${REPORT}.prog.abap`, /IF p_mode = 'H'\./)[0].set_line).to.equal(setLine(/^resilience:/));
     });
 
@@ -417,7 +417,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
     });
 
     it("mutant: the retry budget ignored: a fourth submit", async () => {
-      const {resubmits} = await mutant("zcl_l3_fleet2_m_budget", mutate("      IF ls_pile-attempt > c_retry_max.\n        CONTINUE.\n      ENDIF.\n      IF ls_pile-status = 'FAILED'.\n",
+      const {resubmits} = await mutant("zcl_l3_fleet2_m_budget", mutate("      IF ls_pile-attempt > gs_settings-vals-retry_max.\n        CONTINUE.\n      ENDIF.\n      IF ls_pile-status = 'FAILED'.\n",
         "      IF ls_pile-status = 'FAILED'.\n"), () => dumpProblems({times: Infinity}));
       expect(resubmits).to.be.greaterThan(2);
     });
@@ -684,6 +684,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
       for (const r of before) counts[r.rule] = (counts[r.rule] ?? 0) + 1;
       const [big] = Object.entries(counts).filter(([, n]) => n > limit).map(([rule]) => rule);
       if (!big) problems.push(`no rule writes more than ${limit} alerts: ${JSON.stringify(counts)}`);
+      await dialogStep(() => cls().set_setting({iv_param: str("fuses.max_alerts"), iv_value: str(String(limit)), iv_note: str("resilience test")}));
       const second = await runSet({className: name});
       const rule = second.rules.find((r) => r.rule === big);
       if (rule?.status !== "FUSED") problems.push(`rule ${big} is ${rule?.status}`);
@@ -708,8 +709,33 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
     });
 
     it("mutant: a fuse that keeps writing", async () => {
-      const {problems} = await fuseProblems({limit: 1, label: "m_fuse", edit: mutate("    IF lv_total > c_max_alerts.\n", "    IF lv_total < 0.\n")});
+      const {problems} = await fuseProblems({limit: 1, label: "m_fuse", edit: mutate("    IF lv_total > gs_settings-vals-fuses_max_alerts.\n", "    IF lv_total < 0.\n")});
       expect(problems.join("\n")).to.match(/wrote \d+ rows in the run, past 1/);
+    });
+
+    it("settings mutant: re-reading at each fuse use changes one run midway", async () => {
+      await exec(["INSERT INTO zosd_l2_voy (mandt, voyage_id, ship_id, dep_date) VALUES ('123', 'V00099', 'S003', '20261020')"]);
+      const name = "zcl_l3_fleet2_m_refresh";
+      await loadClass(RUNNER, name, mutate("    IF lv_total > gs_settings-vals-fuses_max_alerts.\n",
+        "    gs_settings = zcl_l3_fleet2_conf=>load( ).\n    IF lv_total > gs_settings-vals-fuses_max_alerts.\n"));
+      const source = abap.Classes.ZCL_L2_SHIP_BUSY;
+      const old = source.keys;
+      let changed = false;
+      source.keys = async function (...args) {
+        if (!changed) {
+          changed = true;
+          await client.execute("UPDATE zosd_l3_conf SET param_val = '1', origin = 'USER' WHERE set_name = 'fleet2' AND param_name = 'fuses.max_alerts'");
+        }
+        return old.apply(this, args);
+      };
+      let result;
+      try { result = await runSet({className: name}); } finally {
+        source.keys = old;
+        await exec(["DELETE FROM zosd_l2_voy WHERE voyage_id = 'V00099'"]);
+      }
+      expect(changed).to.equal(true);
+      expect(result.rules.some((r) => r.status === "FUSED"), "the mutant used the mid-run edit").to.equal(true);
+      expect(trim(read("SELECT param_val FROM zosd_l3_run_conf WHERE run_id = ? AND param_name = 'fuses.max_alerts'", result.run)[0].param_val)).to.equal("500");
     });
 
     // ---- the kill switch --------------------------------------------------------
@@ -837,6 +863,30 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
         expect(jobs("L3_FLEET2_DOC").filter((j) => j.started).length, "nothing runs after unschedule").to.equal(started);
         expect(jobs("L3_FLEET2_D").filter((j) => j.state === "WAITING")).to.deep.equal([]);
       } finally { scheduler.stop(); }
+    });
+
+    it("schedule( ) replaces a waiting doctor job when its tuned period changes", async () => {
+      const waiting = () => store.db.prepare("SELECT id, job_count, prd_mins FROM batch_runs WHERE job_name = 'L3_FLEET2_DOC' AND state = 'WAITING'").all();
+      store.db.prepare("DELETE FROM batch_runs WHERE job_name IN ('L3_FLEET2_D', 'L3_FLEET2_DOC')").run();
+      const call = () => dialogStep(async () => (await cls().schedule()).get());
+      await call();
+      await drainJobOutbox(store);
+      const original = waiting();
+      expect(original).to.have.length(1);
+      expect(Number(original[0].prd_mins)).to.equal(15);
+      const tuned = await dialogStep(() => cls().set_setting({iv_param: str("stale"), iv_value: str("1200"), iv_note: str("doctor period")}));
+      expect(trim(tuned.get())).to.equal("X");
+      await call();
+      await drainJobOutbox(store);
+      const changed = waiting();
+      expect(changed).to.have.length(1);
+      // a new job, not the old one retimed: compare the run, not the count. A
+      // system hands a deleted top count out again in the same second (A4H,
+      // ANOMALY-2026-10-02-jobcount-unique-per-name), so the count may repeat
+      expect(changed[0].id).to.not.equal(original[0].id);
+      expect(store.db.prepare("SELECT state FROM batch_runs WHERE id = ?").get(original[0].id).state).to.equal("DELETED");
+      expect(Number(changed[0].prd_mins)).to.equal(20);
+      await dialogStep(() => cls().unschedule());
     });
   });
 });

@@ -17,12 +17,25 @@ PARAMETERS p_date TYPE d.
 PARAMETERS p_run TYPE c LENGTH 32.
 PARAMETERS p_pile TYPE i.
 PARAMETERS p_bind TYPE c LENGTH 255 LOWER CASE.
+PARAMETERS s_1 TYPE c LENGTH 40 LOWER CASE.
+PARAMETERS s_2 TYPE c LENGTH 40 LOWER CASE.
+PARAMETERS s_3 TYPE c LENGTH 40 LOWER CASE.
+PARAMETERS s_4 TYPE c LENGTH 40 LOWER CASE.
+PARAMETERS s_5 TYPE c LENGTH 40 LOWER CASE.
+PARAMETERS s_6 TYPE c LENGTH 40 LOWER CASE.
 PARAMETERS p_active TYPE zosd_l2_ship-status.
 PARAMETERS p_mode TYPE c LENGTH 1 DEFAULT 'R'.
 
 START-OF-SELECTION.
   DATA ls_rule TYPE zcl_l3_fleet2=>ty_rule.
   DATA lv_bind TYPE string.
+  DATA ls_settings TYPE zcl_l3_fleet2_conf=>ty_values.
+  ls_settings-retry_max = s_1.
+  ls_settings-retry_backoff = s_2.
+  ls_settings-stale = s_3.
+  ls_settings-fuses_max_alerts = s_4.
+  ls_settings-keep_days = s_5.
+  ls_settings-piles_checks_size = s_6.
   DATA ls_params TYPE zcl_l3_fleet2=>ty_params.
   DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
   IF p_mode = 'D'.
@@ -47,6 +60,7 @@ START-OF-SELECTION.
     iv_rule = p_rule
     iv_date = p_date
     iv_run = p_run
+    is_settings = ls_settings
     iv_pile = p_pile
     is_params = ls_params
     iv_bind = lv_bind ).

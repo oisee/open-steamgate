@@ -64,6 +64,9 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
 {{#with_params}}
            END OF ty_params.
 {{/with_params}}
+{{#settings}}
+    TYPES tt_settings_warnings TYPE string_table.
+{{/settings}}
     TYPES: BEGIN OF ty_result,
              set_name TYPE zosd_l3_alert-set_name,
              run_id TYPE zosd_l3_alert-run_id,
@@ -71,6 +74,9 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
              mode TYPE c LENGTH 1,
              alerts TYPE i,
              rules TYPE tt_rule,
+{{#settings}}
+             settings_warnings TYPE tt_settings_warnings,
+{{/settings}}
 {{#planned}}
              bind TYPE string,
              status TYPE c LENGTH 12,
@@ -136,6 +142,17 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " the fuse: a rule writes at most c_max_alerts alerts in a run
     CONSTANTS c_max_alerts TYPE i VALUE {{count}}.
 {{/fused}}
+{{#settings}}
+    CLASS-METHODS settings_seed.
+    CLASS-METHODS set_setting
+      IMPORTING iv_param TYPE csequence iv_value TYPE csequence iv_note TYPE csequence
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
+    CLASS-METHODS reset_setting
+      IMPORTING iv_param TYPE csequence
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
+    CLASS-METHODS reset_settings
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
+{{/settings}}
     " iv_bind: the variant of each port for this run, "port=variant,port=variant";
     " a port it does not name keeps the manifest's binding. A source that is not
     " live replaces table content in the caller's LUW: a test and dev seam, never
@@ -190,6 +207,9 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_rule TYPE csequence
                 iv_date TYPE d
                 iv_run TYPE csequence
+{{#settings}}
+                is_settings TYPE {{settings.class}}=>ty_values OPTIONAL
+{{/settings}}
 {{#planned}}
                 iv_pile TYPE i
 {{/planned}}
@@ -240,6 +260,9 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " c_keep_days; never an alert, never anything of an open run
     CLASS-METHODS purge
       IMPORTING iv_now TYPE timestamp OPTIONAL
+{{#settings}}
+                iv_loaded TYPE abap_bool DEFAULT abap_false
+{{/settings}}
       RETURNING VALUE(rt_report) TYPE tt_doctor.
 {{/resilience}}
 {{#killable}}
@@ -248,6 +271,15 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rv_killed) TYPE abap_bool.
 {{/killable}}
   PRIVATE SECTION.
+{{#settings}}
+    CLASS-DATA gs_settings TYPE {{settings.class}}=>ty_state.
+    " the run whose values gs_settings-vals holds: run( ) and run_rule( ) set
+    " it, and every other assignment of gs_settings clears it, so a later
+    " run_rule( ) of that run without selection values reads its scope again
+    CLASS-DATA gv_settings_run TYPE zosd_l3_run-run_id.
+    " set by dry( ) for the run( ) it calls, and cleared by that run( )
+    CLASS-DATA gv_dry TYPE abap_bool.
+{{/settings}}
     CLASS-METHODS write
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
@@ -366,6 +398,20 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 
 CLASS {{class}} IMPLEMENTATION.
+{{#settings}}
+  METHOD settings_seed.
+    {{settings.class}}=>settings_seed( ).
+  ENDMETHOD.
+  METHOD set_setting.
+    rv_ok = {{settings.class}}=>set_setting( iv_param = iv_param iv_value = iv_value iv_note = iv_note ).
+  ENDMETHOD.
+  METHOD reset_setting.
+    rv_ok = {{settings.class}}=>reset_setting( iv_param ).
+  ENDMETHOD.
+  METHOD reset_settings.
+    rv_ok = {{settings.class}}=>reset_all( ).
+  ENDMETHOD.
+{{/settings}}
   METHOD run.
 {{^planned}}
     " mode S runs every rule in this step; mode P submits one job per rule,
@@ -406,6 +452,9 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_stamp TYPE timestampl.
     DATA lv_parallel TYPE abap_bool.
     DATA lx_error TYPE REF TO cx_root.
+{{#settings}}
+    DATA lv_dry TYPE abap_bool.
+{{/settings}}
 {{#sources}}
     DATA li_src_{{index}} TYPE REF TO {{iface}}.
     DATA lv_swap_{{index}} TYPE abap_bool.
@@ -427,6 +476,17 @@ CLASS {{class}} IMPLEMENTATION.
     ENDIF.
 {{/dry_run}}
 {{/resilience}}
+{{#settings}}
+    " a dry run (dry( ) runs this in mode S) reads the settings and writes
+    " none: nothing seeded, logged or snapshot
+    lv_dry = gv_dry.
+    CLEAR gv_dry.
+    IF lv_dry = abap_true.
+      gs_settings = {{settings.class}}=>load( iv_write = abap_false ).
+    ELSE.
+      gs_settings = {{settings.class}}=>load( ).
+    ENDIF.
+{{/settings}}
     IF iv_mode = c_parallel.
       lv_parallel = abap_true.
     ENDIF.
@@ -435,6 +495,9 @@ CLASS {{class}} IMPLEMENTATION.
                           iv_allow_replay = iv_allow_replay ).
     rs_result-set_name = c_set.
     rs_result-mode = iv_mode.
+{{#settings}}
+    rs_result-settings_warnings = gs_settings-warnings.
+{{/settings}}
 {{#planned}}
     rs_result-bind = iv_bind.
 {{/planned}}
@@ -457,6 +520,9 @@ CLASS {{class}} IMPLEMENTATION.
         GET TIME STAMP FIELD lv_stamp.
         rs_result-run_id = lv_stamp.
     ENDTRY.
+{{#settings}}
+    gv_settings_run = rs_result-run_id.
+{{/settings}}
 {{#killable}}
     " the kill switch: while {{table}} holds a row of the set no run starts
     IF killed( ) = abap_true.
@@ -472,6 +538,11 @@ CLASS {{class}} IMPLEMENTATION.
       RETURN.
     ENDIF.
 {{/planned}}
+{{#settings}}
+    IF lv_dry = abap_false.
+      {{settings.class}}=>snapshot( iv_run = rs_result-run_id is_state = gs_settings ).
+    ENDIF.
+{{/settings}}
     lt_rules = rules( ).
     " a source that is not live replaces table content for this run, and the
     " table is put back whatever happens: after the loop, or when an exception
@@ -738,6 +809,15 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_size TYPE i.
     " a size below one is the manifest's
     lv_size = iv_size.
+{{#settings.pile_size}}
+    IF lv_size = c_pile_size OR lv_size < 1.
+      IF gs_settings-vals-piles_size = 0.
+        gs_settings = {{settings.class}}=>load( ).
+        CLEAR gv_settings_run.
+      ENDIF.
+      lv_size = gs_settings-vals-piles_size.
+    ENDIF.
+{{/settings.pile_size}}
     IF lv_size < 1.
       lv_size = c_pile_size.
     ENDIF.
@@ -828,7 +908,7 @@ CLASS {{class}} IMPLEMENTATION.
           ENDIF.
           ls_pile-range_high = ls_key_{{no}}-{{source.key}}.
           lv_count = lv_count + 1.
-          IF lv_count = {{size}}.
+          IF lv_count = {{#tunable_size}}gs_settings-vals-{{settings_field}}{{/tunable_size}}{{^tunable_size}}{{size}}{{/tunable_size}}.
             APPEND ls_pile TO lt_cut.
             lv_count = 0.
           ENDIF.
@@ -1047,12 +1127,33 @@ CLASS {{class}} IMPLEMENTATION.
 {{/piles}}
 {{#with_params}}
     DATA ls_params TYPE ty_params.
+{{/with_params}}
+{{#settings}}
+    IF is_settings IS NOT INITIAL.
+      " the values the submitter ran with, each checked: one that did not
+      " arrive reads as zero and is the compiled default, never a zero
+      gs_settings-vals = {{settings.class}}=>sane( is_settings ).
+      gv_settings_run = iv_run.
+    ELSEIF gv_settings_run <> iv_run.
+      " the run's own values (its snapshot, else the compiled defaults), never
+      " the live table's values of the moment
+      gs_settings = {{settings.class}}=>load( iv_write = abap_false ).
+      gs_settings-vals = {{settings.class}}=>scope( iv_run = iv_run is_vals = gs_settings-vals ).
+      gv_settings_run = iv_run.
+    ENDIF.
+{{/settings}}
+{{#with_params}}
     ls_params = is_params.
 {{/with_params}}
 {{#params}}
 {{#default}}
     IF ls_params-{{name}} IS INITIAL.
+{{#tunable}}
+      ls_params-{{name}} = gs_settings-vals-params_{{name}}.
+{{/tunable}}
+{{^tunable}}
       ls_params-{{name}} = {{default | literal}}.
+{{/tunable}}
     ENDIF.
 {{/default}}
 {{/params}}
@@ -1146,15 +1247,7 @@ CLASS {{class}} IMPLEMENTATION.
 {{/rules}}
 {{#with_params}}
     DATA ls_params TYPE ty_params.
-    ls_params = is_params.
 {{/with_params}}
-{{#params}}
-{{#default}}
-    IF ls_params-{{name}} IS INITIAL.
-      ls_params-{{name}} = {{default | literal}}.
-    ENDIF.
-{{/default}}
-{{/params}}
     rs_rule-rule = iv_rule.
     SELECT SINGLE{{#resilience}} FOR UPDATE{{/resilience}} * FROM zosd_l3_pile INTO ls_pile
       WHERE set_name = c_set
@@ -1176,6 +1269,37 @@ CLASS {{class}} IMPLEMENTATION.
       RETURN.
     ENDIF.
 {{/resilience}}
+{{#settings}}
+    IF is_settings IS NOT INITIAL.
+      " the values the submitter planned this run with, each checked: one
+      " that did not arrive reads as zero and is the compiled default
+      gs_settings-vals = {{settings.class}}=>sane( is_settings ).
+      gv_settings_run = iv_run.
+    ELSEIF gv_settings_run <> iv_run.
+      " the run's own values: its snapshot, else the compiled defaults, never
+      " the live table's values of the moment. Read after the plan row: a
+      " job may start before the step that submitted it commits, and the
+      " read of the row above waits for that commit
+      gs_settings = {{settings.class}}=>load( iv_write = abap_false ).
+      gs_settings-vals = {{settings.class}}=>scope( iv_run = iv_run is_vals = gs_settings-vals ).
+      gv_settings_run = iv_run.
+    ENDIF.
+{{/settings}}
+{{#with_params}}
+    ls_params = is_params.
+{{/with_params}}
+{{#params}}
+{{#default}}
+    IF ls_params-{{name}} IS INITIAL.
+{{#tunable}}
+      ls_params-{{name}} = gs_settings-vals-params_{{name}}.
+{{/tunable}}
+{{^tunable}}
+      ls_params-{{name}} = {{default | literal}}.
+{{/tunable}}
+    ENDIF.
+{{/default}}
+{{/params}}
 {{#killable}}
     " the kill switch: the pile goes back to PLANNED without a job and its
     " attempt is not spent; resume( ) or the doctor submits it again
@@ -1314,7 +1438,7 @@ CLASS {{class}} IMPLEMENTATION.
       lv_total = lv_total + lv_before.
     ENDLOOP.
     lv_total = lv_total + lines( lt_rows ).
-    IF lv_total > c_max_alerts.
+    IF lv_total > {{#settings.max_alerts}}gs_settings-vals-fuses_max_alerts{{/settings.max_alerts}}{{^settings.max_alerts}}c_max_alerts{{/settings.max_alerts}}.
       cs_rule-failed = lines( lt_rows ).
       cs_rule-status = 'FUSED'.
       RETURN.
@@ -1457,6 +1581,9 @@ CLASS {{class}} IMPLEMENTATION.
       WITH p_pile = cs_pile-pile_no
 {{/planned}}
       WITH p_bind = iv_bind
+{{#settings.entries}}
+      WITH {{screen}} = gs_settings-vals-{{field}}
+{{/settings.entries}}
 {{#params}}
       WITH {{screen}} = is_params-{{name}}
 {{/params}}
@@ -1498,19 +1625,85 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_jobname TYPE tbtcjob-jobname.
     DATA lv_date TYPE d.
     DATA lv_time TYPE t.
+{{#settings.schedule_every}}
+    DATA lv_minutes TYPE tbtcjob-prdmins.
+    DATA lv_hours TYPE tbtcjob-prdhours.
+    DATA lv_days TYPE tbtcjob-prddays.
+    DATA lv_weeks TYPE tbtcjob-prdweeks.
+    DATA ls_select TYPE btcselect.
+    DATA lt_jobs TYPE STANDARD TABLE OF tbtcjob WITH DEFAULT KEY.
+    DATA ls_job TYPE tbtcjob.
+    DATA lv_offset TYPE i.
+    DATA lv_count TYPE i.
+    DATA lv_unit TYPE c LENGTH 1.
+{{/settings.schedule_every}}
+{{^settings.schedule_every}}
     DATA lv_period TYPE tbtcjob-{{field}}.
+{{/settings.schedule_every}}
     DATA lv_released TYPE btch0000-char1.
+{{#settings}}
+    gs_settings = {{settings.class}}=>load( ).
+    CLEAR gv_settings_run.
+{{/settings}}
 {{#resilience}}
     " the doctor goes with the schedule, as a periodic job of its own
     schedule_doctor( ).
 {{/resilience}}
+{{#settings.schedule_every}}
+    lv_offset = strlen( gs_settings-vals-schedule_every ) - 1.
+    lv_unit = gs_settings-vals-schedule_every+lv_offset(1).
+    lv_count = gs_settings-vals-schedule_every(lv_offset).
+    CASE lv_unit.
+      WHEN 'm'. lv_minutes = lv_count.
+      WHEN 'h'. lv_hours = lv_count.
+      WHEN 'd'. lv_days = lv_count.
+      WHEN 'w'. lv_weeks = lv_count.
+    ENDCASE.
+    " Keep the waiting chain only while its period matches the effective setting.
+    rv_jobcount = scheduled( ).
+    IF rv_jobcount IS NOT INITIAL.
+      ls_select-jobname = c_driver.
+      ls_select-username = sy-uname.
+      ls_select-schedul = 'X'.
+      CALL FUNCTION 'BP_JOB_SELECT'
+        EXPORTING
+          jobselect_dialog = 'N'
+          jobsel_param_in = ls_select
+        TABLES
+          jobselect_joblist = lt_jobs
+        EXCEPTIONS
+          OTHERS = 1.
+      IF sy-subrc <> 0.
+        RETURN.
+      ENDIF.
+      LOOP AT lt_jobs INTO ls_job WHERE status = 'S' AND jobcount = rv_jobcount.
+        IF ls_job-prdmins = lv_minutes AND ls_job-prdhours = lv_hours
+          AND ls_job-prddays = lv_days AND ls_job-prdweeks = lv_weeks.
+          RETURN.
+        ENDIF.
+        CALL FUNCTION 'BP_JOB_DELETE'
+          EXPORTING
+            jobname = c_driver
+            jobcount = rv_jobcount
+          EXCEPTIONS
+            OTHERS = 1.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        EXIT.
+      ENDLOOP.
+      CLEAR rv_jobcount.
+    ENDIF.
+{{/settings.schedule_every}}
+{{^settings.schedule_every}}
     " already scheduled: the waiting instance is the chain, a second would run the set twice
     rv_jobcount = scheduled( ).
     IF rv_jobcount IS NOT INITIAL.
       RETURN.
     ENDIF.
-    lv_jobname = c_driver.
     lv_period = {{count}}.
+{{/settings.schedule_every}}
+    lv_jobname = c_driver.
     GET TIME.
     lv_date = sy-datum.
 {{#at}}
@@ -1544,7 +1737,15 @@ CLASS {{class}} IMPLEMENTATION.
         jobcount = rv_jobcount
         sdlstrtdt = lv_date
         sdlstrttm = lv_time
+{{#settings.schedule_every}}
+        prdmins = lv_minutes
+        prdhours = lv_hours
+        prddays = lv_days
+        prdweeks = lv_weeks
+{{/settings.schedule_every}}
+{{^settings.schedule_every}}
         {{field}} = lv_period
+{{/settings.schedule_every}}
       IMPORTING
         job_was_released = lv_released
       EXCEPTIONS
@@ -1663,6 +1864,15 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_final TYPE abap_bool VALUE abap_true.
     DATA lv_closed TYPE abap_bool.
     DATA lv_stamp TYPE timestampl.
+{{#settings}}
+    DATA ls_pass TYPE {{settings.class}}=>ty_values.
+{{/settings}}
+{{#resilience}}
+    DATA lv_now TYPE timestamp.
+    DATA lv_stale TYPE timestamp.
+{{/resilience}}
+    DATA lv_job_name TYPE zosd_l3_pile-job_name.
+    DATA lv_job_count TYPE zosd_l3_pile-job_count.
 {{/staged}}
 {{#fused}}
     DATA lv_fused TYPE abap_bool.
@@ -1840,7 +2050,20 @@ CLASS {{class}} IMPLEMENTATION.
     ENDIF.
 {{/piles}}
 {{#staged}}
+{{#settings}}
+    " a stage advanced here is planned and submitted with the run's own
+    " values (its snapshot), not with the table's values of the moment
+    ls_pass = gs_settings-vals.
+    gs_settings-vals = {{settings.class}}=>scope( iv_run = is_result-run_id is_vals = ls_pass ).
+{{/settings}}
     CLEAR rs_result-stages.
+{{#resilience}}
+    GET TIME STAMP FIELD lv_now.
+    lv_stale = ago( iv_now = lv_now iv_secs = {{#settings.stale}}gs_settings-vals-stale{{/settings.stale}}{{^settings.stale}}c_stale{{/settings.stale}} ).
+    SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
+      WHERE run_id = is_result-run_id
+      ORDER BY PRIMARY KEY.
+{{/resilience}}
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = c_set
         AND run_id = is_result-run_id
@@ -1872,17 +2095,41 @@ CLASS {{class}} IMPLEMENTATION.
           lv_state = 'OPEN'.
         ENDIF.
       ENDIF.
+{{#resilience}}
+      " PLANNED and no job yet: its planner may still be submitting it. On a
+      " system the plan rows of a stage are visible before the jobs of all
+      " but the first are made (JOB_OPEN commits, A4H 2026-10-02); such
+      " a pile is lost only once its stage opened longer than stale ago, as
+      " heal( ) sees it, and the doctor submits it then
+      IF lv_state = 'NO-JOB' AND ls_pile-status = 'PLANNED'.
+        READ TABLE lt_gates INTO ls_gate WITH KEY stage_no = ls_pile-stage_no.
+        IF sy-subrc = 0 AND ls_gate-opened > lv_stale.
+          lv_state = 'OPEN'.
+        ENDIF.
+      ENDIF.
+{{/resilience}}
       IF lv_state <> 'OPEN'.
-        " the job is over: the row as it left it, DONE or not
+        " the job is over: the row as it left it, DONE or not. Only for the
+        " job whose state was read above: a pile given another job meanwhile
+        " (its planner's, or a later submit of it) is not this job's to fail
+        lv_job_name = ls_pile-job_name.
+        lv_job_count = ls_pile-job_count.
         SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
           WHERE set_name = c_set
             AND run_id = ls_pile-run_id
             AND rule_name = ls_pile-rule_name
             AND pile_no = ls_pile-pile_no.
-        IF ls_pile-status <> 'DONE'{{#fused}} AND ls_pile-status <> 'FUSED'{{/fused}}.
-          ls_pile-status = 'FAILED'.
+        IF ls_pile-status <> 'DONE'{{#fused}} AND ls_pile-status <> 'FUSED'{{/fused}}
+            AND ls_pile-job_name = lv_job_name AND ls_pile-job_count = lv_job_count.
+          " one UPDATE on the row as read, and on the job that was checked
           GET TIME STAMP FIELD ls_pile-ended.
-          UPDATE zosd_l3_pile FROM ls_pile.
+          UPDATE zosd_l3_pile SET status = 'FAILED' ended = ls_pile-ended
+            WHERE run_id = ls_pile-run_id
+              AND rule_name = ls_pile-rule_name
+              AND pile_no = ls_pile-pile_no
+              AND status = ls_pile-status
+              AND job_name = lv_job_name
+              AND job_count = lv_job_count.
         ENDIF.
       ENDIF.
     ENDLOOP.
@@ -2013,6 +2260,10 @@ CLASS {{class}} IMPLEMENTATION.
     ELSE.
       rs_result-status = 'RUNNING'.
     ENDIF.
+{{#settings}}
+    gs_settings-vals = ls_pass.
+    CLEAR gv_settings_run.
+{{/settings}}
 {{/staged}}
   ENDMETHOD.
 {{#resilience}}
@@ -2028,6 +2279,9 @@ CLASS {{class}} IMPLEMENTATION.
     {{capture}}=>reset( ).
 {{/dry_run}}
     CONCATENATE iv_bind ',{{sink.name}}=capture' INTO lv_bind.
+{{#settings}}
+    gv_dry = abap_true.
+{{/settings}}
     rs_result = run( iv_date = iv_date
                      iv_mode = c_sequential
                      iv_bind = lv_bind
@@ -2054,6 +2308,10 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_now TYPE timestamp.
     DATA ls_gate TYPE zosd_l3_stage.
     DATA ls_lock TYPE zosd_l3_run.
+{{#settings}}
+    gs_settings = {{settings.class}}=>load( ).
+    CLEAR gv_settings_run.
+{{/settings}}
     lv_now = iv_now.
     IF lv_now IS INITIAL.
       GET TIME STAMP FIELD lv_now.
@@ -2116,6 +2374,10 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_reason TYPE zosd_l3_doctor-reason.
     DATA ls_result TYPE ty_result.
     DATA lt_purged TYPE tt_doctor.
+{{#settings}}
+    gs_settings = {{settings.class}}=>load( ).
+    CLEAR gv_settings_run.
+{{/settings}}
     lv_now = iv_now.
     IF lv_now IS INITIAL.
       GET TIME STAMP FIELD lv_now.
@@ -2130,7 +2392,7 @@ CLASS {{class}} IMPLEMENTATION.
       RETURN.
     ENDIF.
 {{/killable}}
-    lv_stale = ago( iv_now = lv_now iv_secs = c_stale ).
+    lv_stale = ago( iv_now = lv_now iv_secs = {{#settings.stale}}gs_settings-vals-stale{{/settings.stale}}{{^settings.stale}}c_stale{{/settings.stale}} ).
     SELECT * FROM zosd_l3_run INTO TABLE lt_locks
       WHERE set_name = c_set
         AND status = 'HELD'
@@ -2160,7 +2422,7 @@ CLASS {{class}} IMPLEMENTATION.
           IF ls_pile-status = 'DONE' OR ls_pile-status = 'FUSED'.
             CONTINUE.
           ENDIF.
-          IF ls_pile-status = 'FAILED' AND ls_pile-attempt > c_retry_max.
+          IF ls_pile-status = 'FAILED' AND ls_pile-attempt > {{#settings.retry_max}}gs_settings-vals-retry_max{{/settings.retry_max}}{{^settings.retry_max}}c_retry_max{{/settings.retry_max}}.
             CONTINUE.
           ENDIF.
           lv_final = abap_false.
@@ -2213,7 +2475,12 @@ CLASS {{class}} IMPLEMENTATION.
                      iv_now = lv_now
            CHANGING ct_report = rt_report ).
     ENDLOOP.
+{{#settings}}
+    lt_purged = purge( iv_now = lv_now iv_loaded = abap_true ).
+{{/settings}}
+{{^settings}}
     lt_purged = purge( lv_now ).
+{{/settings}}
     APPEND LINES OF lt_purged TO rt_report.
   ENDMETHOD.
 
@@ -2245,7 +2512,16 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_ready TYPE btch0000-char1.
     DATA lv_scheduled TYPE btch0000-char1.
     DATA lv_preliminary TYPE btch0000-char1.
-    lv_stale = ago( iv_now = iv_now iv_secs = c_stale ).
+{{#settings}}
+    DATA ls_pass TYPE {{settings.class}}=>ty_values.
+    " the retry budget, the backoff and staleness are this pass's; what the
+    " run was planned with (the fuse, the pile sizes, the parameters) is the
+    " run's own, from its snapshot: a job submitted again, or a stage planned
+    " here, runs as the run's first jobs ran, whatever the table says now
+    ls_pass = gs_settings-vals.
+    gs_settings-vals = {{settings.class}}=>scope( iv_run = iv_run is_vals = ls_pass ).
+{{/settings}}
+    lv_stale = ago( iv_now = iv_now iv_secs = {{#settings.stale}}gs_settings-vals-stale{{/settings.stale}}{{^settings.stale}}c_stale{{/settings.stale}} ).
     lt_rules = rules( ).
     SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
       WHERE run_id = iv_run
@@ -2304,7 +2580,7 @@ CLASS {{class}} IMPLEMENTATION.
         ls_pile-ended = iv_now.
       ENDIF.
       " the retry budget: ATTEMPT counts the submits, c_retry_max the ones after the first
-      IF ls_pile-attempt > c_retry_max.
+      IF ls_pile-attempt > {{#settings.retry_max}}gs_settings-vals-retry_max{{/settings.retry_max}}{{^settings.retry_max}}c_retry_max{{/settings.retry_max}}.
         CONTINUE.
       ENDIF.
       IF ls_pile-status = 'FAILED'.
@@ -2482,6 +2758,10 @@ CLASS {{class}} IMPLEMENTATION.
              CHANGING ct_report = ct_report ).
       ENDIF.
     ENDLOOP.
+{{#settings}}
+    gs_settings-vals = ls_pass.
+    CLEAR gv_settings_run.
+{{/settings}}
   ENDMETHOD.
 
   METHOD due.
@@ -2493,7 +2773,7 @@ CLASS {{class}} IMPLEMENTATION.
       rv_due = abap_true.
       RETURN.
     ENDIF.
-    lv_wait = c_backoff.
+    lv_wait = {{#settings.retry_backoff}}gs_settings-vals-retry_backoff{{/settings.retry_backoff}}{{^settings.retry_backoff}}c_backoff{{/settings.retry_backoff}}.
     lv_times = is_pile-attempt - 1.
     DO lv_times TIMES.
       IF lv_wait > 302400.
@@ -2523,11 +2803,17 @@ CLASS {{class}} IMPLEMENTATION.
     DATA ls_lock TYPE zosd_l3_run.
     DATA lt_audit TYPE STANDARD TABLE OF zosd_l3_doctor WITH DEFAULT KEY.
     DATA ls_audit TYPE zosd_l3_doctor.
+{{#settings}}
+    IF iv_loaded = abap_false.
+      gs_settings = {{settings.class}}=>load( ).
+      CLEAR gv_settings_run.
+    ENDIF.
+{{/settings}}
     lv_now = iv_now.
     IF lv_now IS INITIAL.
       GET TIME STAMP FIELD lv_now.
     ENDIF.
-    lv_secs = c_keep_days * 86400.
+    lv_secs = {{#settings.keep_days}}gs_settings-vals-keep_days{{/settings.keep_days}}{{^settings.keep_days}}c_keep_days{{/settings.keep_days}} * 86400.
     lv_cut = ago( iv_now = lv_now iv_secs = lv_secs ).
     SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
       WHERE set_name = c_set
@@ -2664,10 +2950,28 @@ CLASS {{class}} IMPLEMENTATION.
     DATA ls_job TYPE tbtcjob.
     DATA lv_jobname TYPE tbtcjob-jobname.
     DATA lv_jobcount TYPE tbtcjob-jobcount.
+{{#settings.stale}}
+    DATA lv_minutes TYPE tbtcjob-prdmins.
+    DATA lv_hours TYPE tbtcjob-prdhours.
+    DATA lv_period TYPE i.
+{{/settings.stale}}
+{{^settings.stale}}
     DATA lv_period TYPE tbtcjob-{{stale.job.field}}.
+{{/settings.stale}}
     DATA lv_released TYPE btch0000-char1.
     DATA lv_date TYPE d.
     DATA lv_time TYPE t.
+{{#settings.stale}}
+    lv_period = ( gs_settings-vals-stale + 30 ) DIV 60.
+    IF lv_period < 1.
+      lv_period = 1.
+    ENDIF.
+    IF lv_period <= 99.
+      lv_minutes = lv_period.
+    ELSE.
+      lv_hours = ( lv_period + 30 ) DIV 60.
+    ENDIF.
+{{/settings.stale}}
     ls_select-jobname = c_doctor.
     ls_select-username = sy-uname.
     ls_select-schedul = 'X'.
@@ -2681,11 +2985,30 @@ CLASS {{class}} IMPLEMENTATION.
         OTHERS = 1.
     IF sy-subrc = 0.
       LOOP AT lt_jobs INTO ls_job WHERE status = 'S'.
+{{#settings.stale}}
+        IF ls_job-prdmins = lv_minutes AND ls_job-prdhours = lv_hours.
+          RETURN.
+        ENDIF.
+        CALL FUNCTION 'BP_JOB_DELETE'
+          EXPORTING
+            jobname = c_doctor
+            jobcount = ls_job-jobcount
+          EXCEPTIONS
+            OTHERS = 1.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        EXIT.
+{{/settings.stale}}
+{{^settings.stale}}
         RETURN.
+{{/settings.stale}}
       ENDLOOP.
     ENDIF.
     lv_jobname = c_doctor.
+{{^settings.stale}}
     lv_period = {{stale.job.count}}.
+{{/settings.stale}}
     GET TIME.
     lv_date = sy-datum.
     lv_time = sy-uzeit.
@@ -2709,7 +3032,13 @@ CLASS {{class}} IMPLEMENTATION.
         jobcount = lv_jobcount
         sdlstrtdt = lv_date
         sdlstrttm = lv_time
+{{#settings.stale}}
+        prdmins = lv_minutes
+        prdhours = lv_hours
+{{/settings.stale}}
+{{^settings.stale}}
         {{stale.job.field}} = lv_period
+{{/settings.stale}}
       IMPORTING
         job_was_released = lv_released
       EXCEPTIONS
