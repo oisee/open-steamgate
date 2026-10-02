@@ -152,7 +152,7 @@
     },
     "tools/adt-facade.mjs": {
       "lines": 3136,
-      "reason": "2026-10-02 +34 against origin/main: the ABAP sessions adapter awaits Node route calls, handles async failures, and deletes objects with lock release in one dialog step; these routes move to ABAP in later slices"
+      "reason": "2026-10-02, this PR +18 net (+41/-23 against its merge base; the rest of the step from 3102 was already on main): the ABAP sessions adapter awaits Node route calls, handles async failures, and deletes objects with lock release in one dialog step; these routes move to ABAP in later slices"
     },
     "tools/cds2ddic.mjs": {
       "lines": 1100,
