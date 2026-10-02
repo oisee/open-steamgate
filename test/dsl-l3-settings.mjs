@@ -7,6 +7,7 @@ import {basename, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DatabaseSync} from "node:sqlite";
 import {checkSet, compileSet, explainAlert, renderSet, SetError} from "../tools/dsl-l3.mjs";
+import {compileSettings} from "../tools/dsl-l3-settings.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 
 const SET = "src/l2demo/fleet2.l3.yaml";
@@ -43,6 +44,19 @@ describe("DSL L3 slice 5b: settings", function () {
         expect(() => compileSet(file)).to.throw(SetError).and.to.match(message);
       }
     } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
+  it("keeps integer parameter ranges and refuses unsupported parameter encodings", () => {
+    const model = {"@id": "set/test", set: "test", params: [{name: "counter", default: "-1", type_name: "zosd_l2_days",
+      "default@type": {built_in: "INT2", length: 5}}]};
+    const compile = (bounds) => compileSettings({settings: {tunable: ["params.counter"], ...(bounds ? {bounds} : {})}}, model,
+      {line: () => 1, fail: (_line, reason) => { throw new Error(reason); }});
+    expect(compile().entries[0]).to.include({min: "-32768", max: "32767", value_type: "zosd_l2_days"});
+    expect(() => compile({"params.counter": {max: "32768"}})).to.throw(/bounds must lie within/);
+    model.params[0].default = "9223372036854775807";
+    model.params[0]["default@type"].built_in = "INT8";
+    expect(compile().entries[0].max).to.equal("9223372036854775807");
+    model.params[0]["default@type"].built_in = "DEC";
+    expect(() => compile()).to.throw(/unavailable tunable/);
   });
   it("renders schedule, parameter and each stage pile from typed settings", async () => {
     const text = readFileSync(SET, "utf8");

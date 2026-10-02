@@ -4,7 +4,7 @@ CLASS {{settings.class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_values,
 {{#settings.entries}}
-             {{field}} TYPE {{#numeric}}i{{/numeric}}{{#char}}c LENGTH 40{{/char}}{{#period}}c LENGTH 40{{/period}},
+             {{field}} TYPE {{#value_type}}{{value_type}}{{/value_type}}{{^value_type}}{{#numeric}}i{{/numeric}}{{#char}}c LENGTH 40{{/char}}{{#period}}c LENGTH 40{{/period}}{{/value_type}},
 {{/settings.entries}}
            END OF ty_values.
     TYPES tt_conf TYPE STANDARD TABLE OF zosd_l3_conf WITH DEFAULT KEY.
@@ -46,7 +46,7 @@ CLASS {{settings.class}} IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD valid.
-    DATA lv_number TYPE p LENGTH 8 DECIMALS 0.
+    DATA lv_number TYPE p LENGTH 16 DECIMALS 0.
     DATA lv_text TYPE string.
     DATA lv_length TYPE i.
     DATA lv_offset TYPE i.
@@ -57,10 +57,10 @@ CLASS {{settings.class}} IMPLEMENTATION.
 {{#settings.entries}}
       WHEN {{name | literal}}.
 {{#numeric}}
-        IF lv_text IS INITIAL OR strlen( lv_text ) > 10.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
         ENDIF.
-        FIND REGEX '^[0-9]+$' IN lv_text.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
         IF sy-subrc <> 0.
           RETURN.
         ENDIF.
@@ -73,6 +73,24 @@ CLASS {{settings.class}} IMPLEMENTATION.
         IF strlen( lv_text ) < {{min}} OR strlen( lv_text ) > {{max}}.
           RETURN.
         ENDIF.
+{{#digit_text}}
+        FIND REGEX '^[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+{{/digit_text}}
+{{#date_text}}
+        FIND REGEX '^[0-9]{8}$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+{{/date_text}}
+{{#time_text}}
+        FIND REGEX '^[0-9]{6}$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+{{/time_text}}
 {{/char}}
 {{#period}}
         FIND REGEX '^[1-9][0-9]{0,2}[mhdw]$' IN lv_text.

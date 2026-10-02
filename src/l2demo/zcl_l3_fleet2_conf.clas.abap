@@ -72,7 +72,7 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD valid.
-    DATA lv_number TYPE p LENGTH 8 DECIMALS 0.
+    DATA lv_number TYPE p LENGTH 16 DECIMALS 0.
     DATA lv_text TYPE string.
     DATA lv_length TYPE i.
     DATA lv_offset TYPE i.
@@ -81,10 +81,10 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     rv_ok = abap_false.
     CASE iv_param.
       WHEN 'retry.max'.
-        IF lv_text IS INITIAL OR strlen( lv_text ) > 10.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
         ENDIF.
-        FIND REGEX '^[0-9]+$' IN lv_text.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
         IF sy-subrc <> 0.
           RETURN.
         ENDIF.
@@ -94,10 +94,10 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
         ENDIF.
         rv_ok = abap_true.
       WHEN 'retry.backoff'.
-        IF lv_text IS INITIAL OR strlen( lv_text ) > 10.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
         ENDIF.
-        FIND REGEX '^[0-9]+$' IN lv_text.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
         IF sy-subrc <> 0.
           RETURN.
         ENDIF.
@@ -107,10 +107,10 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
         ENDIF.
         rv_ok = abap_true.
       WHEN 'stale'.
-        IF lv_text IS INITIAL OR strlen( lv_text ) > 10.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
         ENDIF.
-        FIND REGEX '^[0-9]+$' IN lv_text.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
         IF sy-subrc <> 0.
           RETURN.
         ENDIF.
@@ -120,10 +120,10 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
         ENDIF.
         rv_ok = abap_true.
       WHEN 'fuses.max_alerts'.
-        IF lv_text IS INITIAL OR strlen( lv_text ) > 10.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
         ENDIF.
-        FIND REGEX '^[0-9]+$' IN lv_text.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
         IF sy-subrc <> 0.
           RETURN.
         ENDIF.
@@ -133,10 +133,10 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
         ENDIF.
         rv_ok = abap_true.
       WHEN 'keep.days'.
-        IF lv_text IS INITIAL OR strlen( lv_text ) > 10.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
         ENDIF.
-        FIND REGEX '^[0-9]+$' IN lv_text.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
         IF sy-subrc <> 0.
           RETURN.
         ENDIF.
@@ -146,10 +146,10 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
         ENDIF.
         rv_ok = abap_true.
       WHEN 'piles.checks.size'.
-        IF lv_text IS INITIAL OR strlen( lv_text ) > 10.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
         ENDIF.
-        FIND REGEX '^[0-9]+$' IN lv_text.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
         IF sy-subrc <> 0.
           RETURN.
         ENDIF.

@@ -1254,7 +1254,12 @@ The available names are `retry.max`, `retry.backoff`, `stale`,
 with a DSL default. A name not in `settings.tunable` remains a compiled
 constant. Bounds narrow the compiler range; they never enlarge it. A period
 uses the schedule grammar (`1m`, `2h`, `1d`, `1w`, within the unit's JOB_CLOSE
-width). A character parameter keeps its DDIC width.
+width). Character, NUMC, date and time parameters keep their DDIC width and
+format; integer parameters keep their exact DDIC ranges, including INT8.
+Packed decimal and RAW parameters are excluded from `settings.tunable` for now:
+the generated validator cannot prove their precision or byte encoding from
+the CHAR 40 settings row. The compiler rejects those names rather than
+accepting a value that could change on assignment to the typed parameter.
 
 `ZOSD_L3_CONF` holds one row per set and parameter. It is delivery class A:
 application data, maintained without a customizing or workbench transport.

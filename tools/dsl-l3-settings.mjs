@@ -1,5 +1,8 @@
 // Tunable L3 defaults. The compiler preserves all non-tunable values as constants.
 const INT4 = 2147483647;
+const integerRanges = {INT1: [0n, 255n], INT2: [-32768n, 32767n], INT4: [-2147483648n, 2147483647n],
+  INT8: [-9223372036854775808n, 9223372036854775807n]};
+const characterTypes = new Set(["CHAR", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "NUMC", "DATS", "TIMS"]);
 const numeric = [
   ["retry.max", (m) => m.resilience?.retry?.max, 0, 99],
   ["retry.backoff", (m) => m.resilience?.retry?.backoff, 0, 86400],
@@ -26,9 +29,14 @@ export function compileSettings(doc, model, {line, fail}) {
   for (const p of model.params ?? []) {
     if (p.default === undefined) continue;
     const built = p["default@type"]?.built_in;
-    const kind = ["INT1", "INT2", "INT4", "INT8", "DEC", "NUMC"].includes(built) ? "N" : "C";
-    available.set(`params.${p.name}`, {defaultValue: String(p.default), kind, min: kind === "N" ? 0 : 0,
-      max: kind === "N" ? INT4 : Number(p["default@type"]?.length ?? 40)});
+    if (integerRanges[built]) {
+      const [min, max] = integerRanges[built];
+      available.set(`params.${p.name}`, {defaultValue: String(p.default), kind: "N", min, max,
+        valueType: p.type_name});
+    } else if (characterTypes.has(built)) {
+      available.set(`params.${p.name}`, {defaultValue: String(p.default), kind: "C", min: 0,
+        max: Number(p["default@type"]?.length ?? 40), valueType: p.type_name, built});
+    }
   }
   const seen = new Set();
   const entries = spec.tunable.map((name, i) => {
@@ -40,16 +48,22 @@ export function compileSettings(doc, model, {line, fail}) {
     const base = available.get(name);
     const bound = bounds[name] ?? {};
     if (!bound || typeof bound !== "object" || Array.isArray(bound) || Object.keys(bound).some((k) => !["min", "max"].includes(k))) fail(line(`settings/bounds/${name}`), `bounds for ${name} are {min, max}`);
-    const min = bound.min === undefined ? base.min : Number(bound.min);
-    const max = bound.max === undefined ? base.max : Number(bound.max);
-    if (!Number.isInteger(min) || !Number.isInteger(max) || min < base.min || max > base.max || min > max) fail(line(`settings/bounds/${name}`), `${name} bounds must lie within ${base.min}..${base.max}`);
-    if (base.kind === "N" && (+base.defaultValue < min || +base.defaultValue > max)) fail(at, `DSL default of ${name} is outside its bounds`);
+    const integerParam = typeof base.min === "bigint";
+    const integer = (raw) => /^-?[0-9]+$/.test(String(raw)) ? BigInt(raw) : undefined;
+    const min = bound.min === undefined ? base.min : integerParam ? integer(bound.min) : Number(bound.min);
+    const max = bound.max === undefined ? base.max : integerParam ? integer(bound.max) : Number(bound.max);
+    if (min === undefined || max === undefined || (!integerParam && (!Number.isInteger(min) || !Number.isInteger(max)))
+      || min < base.min || max > base.max || min > max) fail(line(`settings/bounds/${name}`), `${name} bounds must lie within ${base.min}..${base.max}`);
+    if (base.kind === "N" && (integerParam ? BigInt(base.defaultValue) < min || BigInt(base.defaultValue) > max
+      : +base.defaultValue < min || +base.defaultValue > max)) fail(at, `DSL default of ${name} is outside its bounds`);
     if (base.kind === "C" && (base.defaultValue.length < min || base.defaultValue.length > max)) fail(at, `DSL default of ${name} is outside its bounds`);
     if (base.kind === "P" && (+base.defaultValue.slice(0, -1) < min || +base.defaultValue.slice(0, -1) > max)) fail(at, `DSL default of ${name} is outside its bounds`);
     const field = name.replace(/\./g, "_");
     return {"@id": `${model["@id"]}/setting/${name}`, set_line: at, name, "name@type": {built_in: "CHAR", length: 30},
       field, screen: `s_${i + 1}`, default: base.defaultValue, "default@type": {built_in: "CHAR", length: 40},
-      kind: base.kind, min: String(min), max: String(max), numeric: base.kind === "N", period: base.kind === "P", char: base.kind === "C"};
+      kind: base.kind, min: String(min), max: String(max), numeric: base.kind === "N", period: base.kind === "P", char: base.kind === "C",
+      value_type: base.valueType, digit_text: base.built === "NUMC", date_text: base.built === "DATS",
+      time_text: base.built === "TIMS"};
   });
   for (const name of Object.keys(bounds)) if (!seen.has(name)) fail(line(`settings/bounds/${name}`), `bounds names non-tunable ${name}`);
   const has = (name) => seen.has(name);
