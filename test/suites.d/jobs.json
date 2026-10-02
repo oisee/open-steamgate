@@ -10,6 +10,7 @@
     "test/job-status-snapshot.mjs",
     "test/submit-semantics.mjs",
     "test/osd-queue-check.mjs",
-    "test/job-periodic.mjs"
+    "test/job-periodic.mjs",
+    "test/job-count.mjs"
   ]
 }

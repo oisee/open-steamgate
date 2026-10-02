@@ -5,6 +5,7 @@ FUNCTION job_open.
   DATA lv_error TYPE string.
   DATA lv_jobname TYPE string.
   DATA lv_candidate TYPE string.
+  DATA lv_message TYPE string.
   DATA lv_insert_subrc TYPE i.
   DATA ls_identity TYPE zosd_job_identity.
   DATA ls_existing TYPE zosd_job_identity.
@@ -24,6 +25,11 @@ FUNCTION job_open.
                 iv_owner = sy-uname iv_client = sy-mandt
       IMPORTING ev_jobcount = jobcount ev_jobname = lv_jobname ev_error = lv_error.
     IF lv_error IS NOT INITIAL OR jobcount IS INITIAL OR lv_jobname IS INITIAL.
+*     The refusal says why (for example no free count for this name in
+*     this second) in the message variables, like a system's message.
+      IF lv_error IS NOT INITIAL.
+        MESSAGE ID '00' TYPE 'E' NUMBER '398' WITH lv_error INTO lv_message.
+      ENDIF.
       RAISE cant_create_job.
     ENDIF.
     CLEAR ls_identity.
