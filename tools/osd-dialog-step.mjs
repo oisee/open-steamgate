@@ -86,6 +86,48 @@ export function registerWaitPump(callback) {
   waitPump = callback;
 }
 
+// The clock WAIT UP TO waits on inside a step. A system has one clock: after
+// WAIT UP TO 10 SECONDS, sy-uzeit is ten seconds on. Here sy-datum, sy-uzeit
+// and GET TIME STAMP follow the jobs facade's injectable clock once a test
+// installs it (installAbapClock in tools/osd-job-scheduler.mjs), and WAIT
+// followed the wall clock regardless, so a manual clock that moved hours left
+// a WAIT of a minute waiting a minute (ANORMALIES
+// ANOMALY-2026-10-02-wait-off-the-injected-clock). installAbapClock installs
+// the same clock here: a deadline is that clock's now plus the seconds, and
+// the step sleeps through the clock's own timer, which a manual clock fires
+// when a test advances it. Without one, the wall clock, as before.
+//
+// A clock nobody moves would hold such a WAIT for ever: the work process is
+// given up, so nothing deadlocks, but the request hangs. So a WAIT on an
+// injected clock also has a wall-clock ceiling (OSD_WAIT_CLOCK_CEILING_MS,
+// default two minutes): past it the WAIT ends as if its time had passed,
+// and says so on stderr, loudly, because a twin or a test that nobody drives
+// is a bug of the driver, not of the ABAP.
+export const WAIT_CEILING_MS = 120000;
+const WALL = {now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(() => r("time"), ms)), chunk: 100};
+let waitClock = WALL;
+/** WAIT inside a step waits on `clock` ({now(), setTimer(fn, ms),
+ *  clearTimer(handle)}) until the returned function restores the one
+ *  before; `ceilingMs`: the wall time a WAIT waits for the clock to move */
+export function setWaitClock(clock, {ceilingMs} = {}) {
+  const before = waitClock;
+  const ceiling = ceilingMs ?? (Number(process.env.OSD_WAIT_CLOCK_CEILING_MS) || WAIT_CEILING_MS);
+  waitClock = clock === undefined ? WALL : {now: () => clock.now(), chunk: Infinity,
+    sleep: (ms) => new Promise((resolve) => {
+      let wall;
+      // {wait: true}: a WAIT, which a manual clock's advance knows belongs to
+      // the callback it runs under (the job its scheduler pass started)
+      const handle = clock.setTimer(() => { clearTimeout(wall); resolve("time"); }, ms, {wait: true});
+      wall = setTimeout(() => {
+        clock.clearTimer?.(handle);
+        console.error(`osd-dialog-step: WAIT UP TO ${ms / 1000} s on an injected clock: nobody moved the clock for ${ceiling} ms of wall time; the WAIT ends now (OSD_WAIT_CLOCK_CEILING_MS)`);
+        resolve("ceiling");
+      }, ceiling);
+      wall.unref?.();
+    })};
+  return () => { waitClock = before; };
+}
+
 // Host services with pending ABAP definitions may keep data only for the
 // current execution. The browser has no AsyncLocalStorage: fail closed there
 // rather than treating every request as one caller.
@@ -298,8 +340,8 @@ function installWait() {
     if (!mine()) return original(options);
     const token = holder;
     const subrc = (value) => globalThis.abap.builtin.sy.get().subrc.set(value);
+    const clock = waitClock;
     const timeout = options.seconds === undefined ? undefined : options.seconds.get() * 1000;
-    const deadline = timeout === undefined ? undefined : Date.now() + timeout;
     if (options.cond === undefined) {
       // committed while still holding it: a failed commit ends the step
       // here, and the step's own bracket releases
@@ -307,9 +349,11 @@ function installWait() {
       rollOut(token);
       release();
       try {
-        const until = Date.now() + timeout;
-        while (Date.now() < until) {
-          await new Promise((r) => setTimeout(r, Math.min(100, until - Date.now())));
+        // the deadline starts once the commit is done, as it always did: a
+        // slow commit does not eat the time the WAIT asked for
+        const deadline = clock.now() + timeout;
+        while (clock.now() < deadline) {
+          if (await clock.sleep(Math.min(clock.chunk, deadline - clock.now())) === "ceiling") break;
           await waitPump?.(token);
         }
       } finally {
@@ -321,18 +365,19 @@ function installWait() {
     }
     // the condition is the session's own code, so it is asked as a system
     // asks it: rolled in, with the work process, and rolled out again when
-    // it is still false
+    // it is still false; its deadline starts at the statement, as before
+    const deadline = timeout === undefined ? undefined : clock.now() + timeout;
     let held = true;
     try {
       for (;;) {
         if (options.cond() === true) { subrc(0); return; }
-        const remaining = deadline === undefined ? 500 : deadline - Date.now();
+        const remaining = deadline === undefined ? 500 : deadline - clock.now();
         if (remaining <= 0) { subrc(8); return; }
         await commitAll();
         rollOut(token);
         release();
         held = false;
-        await new Promise((r) => setTimeout(r, Math.min(500, remaining)));
+        if (await clock.sleep(Math.min(500, remaining)) === "ceiling") { subrc(8); return; }
         await waitPump?.(token);
         await acquire(token);
         held = true;

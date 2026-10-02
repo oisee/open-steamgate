@@ -184,6 +184,40 @@ export function migrateJobScheduleFile(native, found, wanted, ddl, fingerprintOf
   return true;
 }
 
+// The release order of the outbox (DSL L3 slice 5d, 2026-10-02): RELEASE_SEQ,
+// which JOB_CLOSE writes and the drain sorts by, and in the same change the
+// gate table's RUN_BIND, the binding a DSL L3 run started with. Both are
+// additive; a pending intent written before has an empty RELEASE_SEQ and
+// drains first, in the order it drained before.
+export function beforeJobReleaseDDL(ddl) {
+  return ddl.map((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement)
+    ? statement.replace(/,\s*['"]release_seq['"]\s+NCHAR\(16\)/i, "")
+    : /^CREATE TABLE ['"]zosd_l3_stage['"] /i.test(statement)
+      ? statement.replace(/,\s*['"]run_bind['"]\s+NCHAR\(255\)\s+COLLATE RTRIM/i, "") : statement);
+}
+
+export function migrateJobReleaseFile(native, found, wanted, ddl, fingerprintOf) {
+  if (fingerprintOf(ddl) !== wanted) return false;
+  const previous = beforeJobReleaseDDL(ddl);
+  if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
+  native.exec("BEGIN IMMEDIATE");
+  try {
+    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
+    if (current === wanted) { native.exec("COMMIT"); return true; }
+    if (current !== found) { native.exec("COMMIT"); return false; }
+    native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN release_seq NCHAR(16)");
+    native.exec("UPDATE zosd_job_outbox SET release_seq = ''");
+    if (native.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zosd_l3_stage'").get()) {
+      native.exec("ALTER TABLE zosd_l3_stage ADD COLUMN run_bind NCHAR(255) COLLATE RTRIM");
+      native.exec("UPDATE zosd_l3_stage SET run_bind = ''");
+    }
+    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
+      .run(wanted, new Date().toISOString());
+    native.exec("COMMIT");
+  } catch (error) { native.exec("ROLLBACK"); throw error; }
+  return true;
+}
+
 export function ensureJobEventMetadata(native) {
   native.exec("BEGIN IMMEDIATE");
   try {
@@ -588,7 +622,9 @@ async function setupDatabase(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     let found = await db.stampedSchema();
-    const beforeSchedule = beforeJobScheduleDDL(schemas.sqlite);
+    const beforeRelease = beforeJobReleaseDDL(schemas.sqlite);
+    const releasePriorWanted = fingerprintOf(beforeRelease);
+    const beforeSchedule = beforeJobScheduleDDL(beforeRelease);
     const schedulePriorWanted = fingerprintOf(beforeSchedule);
     const beforeInput = beforeJobStepInputDDL(beforeSchedule);
     const inputPriorWanted = fingerprintOf(beforeInput);
@@ -600,7 +636,8 @@ async function setupDatabase(abap, schemas, insert) {
     if (migrateJobPredecessorFile(db.db, found, eventPriorWanted, beforeEvent, fingerprintOf)) found = eventPriorWanted;
     if (migrateJobEventFile(db.db, found, inputPriorWanted, beforeInput, fingerprintOf)) found = inputPriorWanted;
     if (migrateJobStepInputFile(db.db, found, schedulePriorWanted, beforeSchedule, fingerprintOf)) found = schedulePriorWanted;
-    if (migrateJobScheduleFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
+    if (migrateJobScheduleFile(db.db, found, releasePriorWanted, beforeRelease, fingerprintOf)) found = releasePriorWanted;
+    if (migrateJobReleaseFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
     if (found === wanted) {
       // the rows are already there, made for this DDIC. The tables the
       // generation writes at start (wwwparams: which SMW0 objects exist and

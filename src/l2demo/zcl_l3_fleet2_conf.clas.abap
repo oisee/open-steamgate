@@ -12,6 +12,8 @@ CLASS zcl_l3_fleet2_conf DEFINITION PUBLIC FINAL CREATE PUBLIC.
              stale TYPE i,
              fuses_max_alerts TYPE i,
              keep_days TYPE i,
+             simulate_seed TYPE i,
+             simulate_time_scale TYPE i,
              piles_checks_size TYPE i,
            END OF ty_values.
     TYPES tt_conf TYPE STANDARD TABLE OF zosd_l3_conf WITH DEFAULT KEY.
@@ -110,6 +112,16 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     APPEND ls_spec TO rt_specs.
     CLEAR ls_spec.
     ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'simulate.seed'.
+    ls_spec-dsl_value = '42'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'simulate.time_scale'.
+    ls_spec-dsl_value = '10000'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
     ls_spec-param_name = 'piles.checks.size'.
     ls_spec-dsl_value = '2'.
     APPEND ls_spec TO rt_specs.
@@ -125,6 +137,8 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     rs_vals-stale = '900'.
     rs_vals-fuses_max_alerts = '500'.
     rs_vals-keep_days = '30'.
+    rs_vals-simulate_seed = '42'.
+    rs_vals-simulate_time_scale = '10000'.
     rs_vals-piles_checks_size = '2'.
   ENDMETHOD.
 
@@ -215,6 +229,24 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     IF valid( iv_param = 'keep.days' iv_value = lv_text ) = abap_false.
       rs_vals-keep_days = ls_def-keep_days.
     ENDIF.
+    lv_number = is_vals-simulate_seed.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'simulate.seed' iv_value = lv_text ) = abap_false.
+      rs_vals-simulate_seed = ls_def-simulate_seed.
+    ENDIF.
+    lv_number = is_vals-simulate_time_scale.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'simulate.time_scale' iv_value = lv_text ) = abap_false.
+      rs_vals-simulate_time_scale = ls_def-simulate_time_scale.
+    ENDIF.
     lv_number = is_vals-piles_checks_size.
     lv_text = abs( lv_number ).
     CONDENSE lv_text.
@@ -273,6 +305,22 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
       lv_value = ls_row-param_val.
       IF valid( iv_param = 'fuses.max_alerts' iv_value = lv_value ) = abap_true.
         rs_vals-fuses_max_alerts = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-simulate_seed = ls_def-simulate_seed.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'simulate.seed'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'simulate.seed' iv_value = lv_value ) = abap_true.
+        rs_vals-simulate_seed = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-simulate_time_scale = ls_def-simulate_time_scale.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'simulate.time_scale'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'simulate.time_scale' iv_value = lv_value ) = abap_true.
+        rs_vals-simulate_time_scale = lv_value.
       ENDIF.
     ENDIF.
     rs_vals-piles_checks_size = ls_def-piles_checks_size.
@@ -411,6 +459,32 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
           RETURN.
         ENDIF.
         rv_ok = abap_true.
+      WHEN 'simulate.seed'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < 1 OR lv_number > 2147483646.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
+      WHEN 'simulate.time_scale'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < 0 OR lv_number > 1000000.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
       WHEN 'piles.checks.size'.
         IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
@@ -540,6 +614,10 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
           rs_state-vals-fuses_max_alerts = lv_effective.
         WHEN 'keep.days'.
           rs_state-vals-keep_days = lv_effective.
+        WHEN 'simulate.seed'.
+          rs_state-vals-simulate_seed = lv_effective.
+        WHEN 'simulate.time_scale'.
+          rs_state-vals-simulate_time_scale = lv_effective.
         WHEN 'piles.checks.size'.
           rs_state-vals-piles_checks_size = lv_effective.
       ENDCASE.

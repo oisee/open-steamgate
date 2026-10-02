@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-settings/report.tpl",
- "model": "sha256:75a07f51b5315b98bdae55b9a27b114034116e34b33ea80065684ac1e4bd24db",
+ "model": "sha256:6afc59bfa786fd8ed203a3c12562e5e195330b645a16199d9849da9af9f4064e",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",
@@ -46,203 +46,203 @@
    "template_line": 1,
    "path": "/settings/report",
    "node": "set/fleet2/settings",
-   "set_line": 71
+   "set_line": 100
   },
   {
    "line": 2,
    "template_line": 2,
    "path": "/source",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 3,
    "template_line": 3,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 4,
    "template_line": 4,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 5,
    "template_line": 5,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 6,
    "template_line": 6,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 7,
    "template_line": 7,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 8,
    "template_line": 8,
    "path": "/settings/class",
    "node": "set/fleet2/settings",
-   "set_line": 71
+   "set_line": 100
   },
   {
    "line": 9,
    "template_line": 9,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 10,
    "template_line": 10,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 11,
    "template_line": 11,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 12,
    "template_line": 12,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 13,
    "template_line": 13,
    "path": "/class",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 14,
    "template_line": 14,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 15,
    "template_line": 15,
    "path": "/class",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 16,
    "template_line": 16,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 17,
    "template_line": 17,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 18,
    "template_line": 18,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 19,
    "template_line": 19,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 20,
    "template_line": 20,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 21,
    "template_line": 21,
    "path": "/class",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 22,
    "template_line": 22,
    "path": "/set",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 23,
    "template_line": 23,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 24,
    "template_line": 24,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 25,
    "template_line": 25,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 26,
    "template_line": 26,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 27,
    "template_line": 27,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 28,
    "template_line": 28,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   },
   {
    "line": 29,
    "template_line": 29,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 11
+   "set_line": 15
   }
  ]
 }

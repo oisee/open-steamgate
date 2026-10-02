@@ -43,6 +43,7 @@
     "test/dsl-l3-resilience.mjs",
     "test/dsl-l3-settings.mjs",
     "test/dsl-l3-governor.mjs",
+    "test/dsl-l3-sim.mjs",
     "test/xml-wellformed.mjs",
     "test/prove-on-system.mjs",
     "test/prove-inplace.mjs",

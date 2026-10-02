@@ -118,6 +118,17 @@ export async function migrateDuckdbFile(access, statements) {
       await access.execute('ALTER TABLE "zosd_job_step" ADD COLUMN "input_json" TEXT');
       await access.execute("UPDATE zosd_job_step SET input_json = '[]'");
     }
+    // DSL L3 slice 5d: the outbox's release order and the binding a DSL L3
+    // run started with. A file from before has neither; its pending outbox
+    // rows get an empty RELEASE_SEQ (so they drain first, in their old order)
+    // and its gate rows an empty RUN_BIND (a run from before the record: real)
+    for (const [table, column] of [["zosd_job_outbox", "release_seq"], ["zosd_l3_stage", "run_bind"]]) {
+      const present = await access.query(`SELECT column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = '${table}'`);
+      if (present.length && !present.some((row) => String(row.column_name).toLowerCase() === column)) {
+        await access.execute(`ALTER TABLE "${table}" ADD COLUMN "${column}" TEXT`);
+        await access.execute(`UPDATE "${table}" SET "${column}" = ''`);
+      }
+    }
     const views = await refreshDuckdbViews(access, statements);
     await access.execute("COMMIT");
     return {renamed, ...views};

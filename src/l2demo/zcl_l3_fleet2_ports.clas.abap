@@ -32,6 +32,9 @@ CLASS zcl_l3_fleet2_ports DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS get_close
       IMPORTING iv_variant TYPE csequence
       RETURNING VALUE(ri_port) TYPE REF TO zif_l3_fleet2_close.
+    CLASS-METHODS get_work
+      IMPORTING iv_variant TYPE csequence
+      RETURNING VALUE(ri_port) TYPE REF TO zif_l3_fleet2_work.
 ENDCLASS.
 
 CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
@@ -47,6 +50,8 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
         rv_variant = 'log'.
       WHEN 'close'.
         rv_variant = 'none'.
+      WHEN 'work'.
+        rv_variant = 'real'.
       WHEN OTHERS.
         RAISE EXCEPTION TYPE zcx_l3_fleet2_port
           EXPORTING iv_port = iv_port iv_reason = 'no such port in the set'.
@@ -82,6 +87,7 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
     DATA lv_volatile_port TYPE string.
     DATA lv_replay_port TYPE string.
     DATA lv_hand_port TYPE string.
+    DATA lv_work TYPE string.
     DATA lv_planner_port TYPE string.
     SPLIT iv_bind AT ',' INTO TABLE lt_parts.
     LOOP AT lt_parts INTO lv_part.
@@ -99,6 +105,9 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
         lv_known = abap_true.
       ENDIF.
       IF lv_name = 'close'.
+        lv_known = abap_true.
+      ENDIF.
+      IF lv_name = 'work'.
         lv_known = abap_true.
       ENDIF.
       IF lv_known = abap_false.
@@ -156,15 +165,47 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
       lv_known = abap_true.
       lv_hand_port = 'close'.
     ENDIF.
+    IF lv_variant = 'sim'.
+      lv_known = abap_true.
+    ENDIF.
     IF lv_known = abap_false.
       RAISE EXCEPTION TYPE zcx_l3_fleet2_port
         EXPORTING iv_port = 'close' iv_variant = lv_variant
+                  iv_reason = 'no such variant for the port'.
+    ENDIF.
+    lv_variant = variant( iv_port = 'work' iv_bind = iv_bind ).
+    lv_known = abap_false.
+    IF lv_variant = 'real'.
+      lv_known = abap_true.
+    ENDIF.
+    IF lv_variant = 'sim'.
+      lv_known = abap_true.
+    ENDIF.
+    IF lv_known = abap_false.
+      RAISE EXCEPTION TYPE zcx_l3_fleet2_port
+        EXPORTING iv_port = 'work' iv_variant = lv_variant
                   iv_reason = 'no such variant for the port'.
     ENDIF.
     IF lv_planner_port IS NOT INITIAL.
       RAISE EXCEPTION TYPE zcx_l3_fleet2_port
         EXPORTING iv_port = lv_planner_port
                   iv_reason = 'the worklist variant is read by the planner of a stage; a run does not bind it'.
+    ENDIF.
+    " a simulated run never writes to a production sink variant that
+    " simulate.allow_sink does not name, and never replays: its WAIT commits,
+    " and a replay swaps table content in one LUW. A sim variant of another
+    " port answers by chance and is bound only beside work=sim
+    lv_work = variant( iv_port = 'work' iv_bind = iv_bind ).
+    IF lv_work = 'sim'.
+      IF lv_replay_port IS NOT INITIAL.
+        RAISE EXCEPTION TYPE zcx_l3_fleet2_port
+          EXPORTING iv_port = 'work' iv_variant = lv_work
+                    iv_reason = 'a simulated run waits, and WAIT commits; a replay swaps table content in one LUW'.
+      ENDIF.
+    ELSEIF variant( iv_port = 'close' iv_bind = iv_bind ) = 'sim'.
+      RAISE EXCEPTION TYPE zcx_l3_fleet2_port
+        EXPORTING iv_port = 'close' iv_variant = 'sim'
+                  iv_reason = 'a sim variant answers by chance: it is bound only beside work=sim'.
     ENDIF.
     IF iv_parallel = abap_true AND lv_volatile_port IS NOT INITIAL.
       RAISE EXCEPTION TYPE zcx_l3_fleet2_port
@@ -226,9 +267,25 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
         CREATE OBJECT ri_port TYPE zcl_l3_fleet2_close_capture.
       WHEN 'maintenance'.
         CREATE OBJECT ri_port TYPE zcl_l3_fleet2_autoclose.
+      WHEN 'sim'.
+        CREATE OBJECT ri_port TYPE zcl_l3_fleet2_close_sim.
       WHEN OTHERS.
         RAISE EXCEPTION TYPE zcx_l3_fleet2_port
           EXPORTING iv_port = 'close' iv_variant = iv_variant
+                    iv_reason = 'no such variant for the port'.
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD get_work.
+    CASE iv_variant.
+      WHEN 'real'.
+        " the runner's own static calls of the L2 classes: no object
+        CLEAR ri_port.
+      WHEN 'sim'.
+        CREATE OBJECT ri_port TYPE zcl_l3_fleet2_work_sim.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zcx_l3_fleet2_port
+          EXPORTING iv_port = 'work' iv_variant = iv_variant
                     iv_reason = 'no such variant for the port'.
     ENDCASE.
   ENDMETHOD.
