@@ -47,5 +47,10 @@
     "test/unit-run.mjs",
     "test/osd-dumps.mjs",
     "test/warm.mjs"
-  ]
+  ],
+  "groups": {
+    "gogen": [
+      "test/osgo-unit.mjs"
+    ]
+  }
 }

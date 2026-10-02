@@ -24,6 +24,7 @@ import * as core from "@abaplint/core";
 import {Transpiler, Chunk} from "@abaplint/transpiler";
 import * as guiConverter from "../.local/lars/open-abap-gui/converter/src/api.mjs";
 import * as setup from "../test/setup.mjs";
+import {pathToFileURL} from "node:url";
 import {dirname, resolve} from "node:path";
 import {createRequire} from "node:module";
 import {systemId} from "../tools/osd-identity.mjs";
@@ -35,7 +36,7 @@ const [, , mode = "up", ...rawArgs] = process.argv;
 const {folders: userLayers, rest} = mode === "run" ? {folders: [], rest: rawArgs} : layerList(rawArgs);
 if (userLayers.length > 0) process.env.OSD_LAYERS = userLayers.join(process.platform === "win32" ? ";" : ":");
 if (compiled && !isCheckout(process.cwd()) && process.env.OSD_BINARY_HOME !== process.cwd()
-    && mode !== "ready" && mode !== "doctor") {
+    && mode !== "ready" && mode !== "doctor" && !(mode === "unit" && rest.includes("--go"))) {
   if (!embeddedSeed) throw new Error("checkout-mode binary requires an open-steamgate checkout; build with --seed for standalone use");
   const home = await ensureBinaryHome(resolve(import.meta.dir, "osd-seed.tar.gz"), dataDirOf());
   process.chdir(home);
@@ -86,6 +87,7 @@ if (typeof Bun !== "undefined") {
 setHostModules({Transpiler, Chunk, core, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
 
 const GENERATORS = {
+  "gogen-unit.mjs": () => import(pathToFileURL(resolve(process.cwd(), "tools/gogen/unit.mjs")).href),
   "osd-transpiler.mjs": () => import("../tools/osd-transpiler.mjs"),
   "osd-inputs.mjs": () => import("../tools/osd-inputs.mjs"),
   "cds2ddic.mjs": () => import("../tools/cds2ddic.mjs"),
@@ -151,6 +153,10 @@ switch (mode) {
     break;
   }
   case "unit": {
+    if (rest.includes("--go")) {
+      const {main} = await import("../tools/osgo-unit.mjs");
+      process.exit(await main(rest.filter((arg) => arg !== "--go")));
+    }
     process.argv = [process.argv[0], "osd-host", ...rest];
     const {main} = await import("../tools/osd-unit.mjs");
     process.exit(await main(rest));

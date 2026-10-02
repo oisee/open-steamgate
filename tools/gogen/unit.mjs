@@ -11,8 +11,7 @@ import {emitGo, referencedClasses} from "./emit-go.mjs";
 import {reconcile} from "./unit-results.mjs";
 import {home} from "./home.mjs";
 import {cacheLocation, frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
-import {inputFoldersOf} from "../osd-packs.mjs";
-import {libraryPath} from "../osd-lib-path.mjs";
+import {unitInputs} from "./unit-inputs.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const commandStarted = performance.now();
@@ -24,17 +23,17 @@ if (!Number.isSafeInteger(jobs) || jobs < 1 || jobs > 256) throw new Error("--jo
 const selected = new Set(values("--class").map((x) => x.toUpperCase()));
 const out = resolve(values("--out")[0] ?? join(here, ".out", "unit"));
 const fixture = values("--fixture")[0];
+const extraInputs = values("--input").map((folder) => {
+  if (!folder || folder.startsWith("--")) throw new Error("--input needs a directory");
+  return resolve(folder);
+});
 const config = JSON.parse(readFileSync(join(home, "abap_transpile.json"), "utf8"));
 const skipped = new Set((config.options?.skip ?? config.skip ?? []).map((s) =>
   `${s.object}/${s.class}/${s.method}`.toUpperCase()));
 const walk = (dir) => !existsSync(dir) ? [] : readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((e) => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
-// Discover tests from the same input layers the compiler sees. Packs can
-// contribute test includes even when abap_transpile.json lists only src/test.
-const sourceFolders = fixture ? [fixture] : inputFoldersOf(home, config).map((f) => join(home, f));
-const sources = sourceFolders.flatMap(walk)
-  .filter((f) => f.endsWith(".clas.testclasses.abap") && !f.includes("/test/fixtures/"));
-const owners = [...new Set(sources.map((f) => f.split("/").at(-1).replace(/\.clas\.testclasses\.abap$/, "").toUpperCase()))]
+const {sources, folders, libDirs, skip} = unitInputs({home, config, fixture, extraInputs});
+const owners = [...new Set(sources.map((f) => f.split("/").at(-1).replace(/\.clas\.testclasses\.abap$/, "").replaceAll("#", "/").toUpperCase()))]
   .filter((o) => selected.size === 0 || selected.has(o));
 if (selected.size && owners.length !== selected.size) throw new Error(`unknown test owner: ${[...selected].filter((x) => !owners.includes(x)).join(", ")}`);
 // One bad generated method must not hide every other owner's verdict. Keep
@@ -45,7 +44,7 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
   const cacheCounts = {hit: 0, miss: 0, bypass: 0};
   const timingMs = {frontendClosureRounds: [], emit: 0, goBuild: 0, run: 0};
   for (const owner of owners) {
-    const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--unlayered", ...(args.includes("--no-cache") ? ["--no-cache"] : []), "--jobs", String(jobs), "--out", join(out, owner.toLowerCase())], {
+    const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--unlayered", ...(args.includes("--no-cache") ? ["--no-cache"] : []), "--jobs", String(jobs), "--out", join(out, owner.toLowerCase()), ...extraInputs.flatMap((folder) => ["--input", folder])], {
       cwd: home, encoding: "utf8", timeout: 180000, maxBuffer: 20e6, env: process.env,
     });
     if (!child.stdout) {
@@ -73,11 +72,6 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
 mkdirSync(out, {recursive: true});
 const runDir = mkdtempSync(join(out, "run-"));
 const goDir = join(runDir, "go");
-const libDirs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
-  .map((x) => join(existsSync(join(home, "libs.lock.json")) ? libraryPath(home, x.split("/")[0]) : join(home, ".local/lars", x.split("/")[0]), x.slice(x.indexOf("/") + 1))).filter(existsSync);
-const folders = [...(fixture ? sourceFolders : inputFoldersOf(home, config).map((f) => join(home, f))), ...libDirs].filter(existsSync);
-const excluded = (config.exclude_filter ?? []).map((p) => new RegExp(p));
-const skip = (file) => excluded.some((re) => re.test("/" + file.slice(home.length + 1)));
 const timingMs = {frontendClosureRounds: [], emit: 0, goBuild: 0, run: 0};
 const cacheRoot = cacheLocation(home);
 const cacheEnabled = !args.includes("--no-cache");
@@ -124,7 +118,7 @@ while (sourceQueue.length) {
   const name = sourceQueue.shift();
   const file = sourceByName.get(name);
   if (!file) continue;
-  const testFile = owners.includes(name) ? sources.find((f) => f.split("/").at(-1).startsWith(name.toLowerCase() + ".")) : undefined;
+  const testFile = owners.includes(name) ? sources.find((f) => f.split("/").at(-1).startsWith(name.toLowerCase().replaceAll("/", "#") + ".")) : undefined;
   const contents = readFileSync(file, "utf8") + (testFile ? "\n" + readFileSync(testFile, "utf8") : "");
   for (const ref of contents.matchAll(/(?<![A-Z0-9_/])(?:\/[A-Z0-9_]+\/)?(?:ZCL|ZCX|CL|CX)_[A-Z0-9_]+\b/gi)) {
     const target = ref[0].toUpperCase();
@@ -596,11 +590,13 @@ const runProcess = (argv, env, cwd) => new Promise((resolveRun) => {
       catch (e) { if (e.code !== "ESRCH") throw e; }
     }
   };
+  const onSignal = () => kill("interrupted");
+  process.on("SIGINT", onSignal); process.on("SIGTERM", onSignal);
   const timer = setTimeout(() => kill("timeout after 120000 ms"), 120000);
   child.stdout.on("data", (chunk) => { stdout += chunk; if (stdout.length > 20e6) kill("stdout limit exceeded (20 MB)"); });
   child.stderr.on("data", (chunk) => { stderr += chunk; if (stderr.length > 20e6) kill("stderr limit exceeded (20 MB)"); });
   child.on("error", (e) => { error = e; });
-  child.on("close", (status, signal) => { clearTimeout(timer); resolveRun({status, signal, stdout, stderr, error, killReason}); });
+  child.on("close", (status, signal) => { process.off("SIGINT", onSignal); process.off("SIGTERM", onSignal); clearTimeout(timer); resolveRun({status, signal, stdout, stderr, error, killReason}); });
 });
 let actual = [];
 let durations = {};

@@ -28,6 +28,11 @@ on:
       - 'libs.lock.json'
       - 'src/**'
       - 'test/unit/**'
+      - 'test/osgo-unit.mjs'
+      - 'tools/osgo-unit.mjs'
+      - 'tools/osd-host.mjs'
+      - 'bin/osd.mjs'
+      - 'test/suites.d/gogen-osgo.json'
       - 'packs/**'
       - 'abap_transpile.json'
       - '.github/workflows/gogen.yml'
@@ -40,6 +45,11 @@ on:
       - 'libs.lock.json'
       - 'src/**'
       - 'test/unit/**'
+      - 'test/osgo-unit.mjs'
+      - 'tools/osgo-unit.mjs'
+      - 'tools/osd-host.mjs'
+      - 'bin/osd.mjs'
+      - 'test/suites.d/gogen-osgo.json'
       - 'packs/**'
       - 'abap_transpile.json'
       - '.github/workflows/gogen.yml'
@@ -104,6 +114,8 @@ jobs:
         env:
           OSABAP_STRICT_PINS: "1"
         run: node --test tools/gogen/lib-pins.test.mjs tools/gogen/osabap-f4.test.mjs tools/gogen/osabap.test.mjs tools/gogen/osabap-sql-corpus.test.mjs tools/gogen/unit.test.mjs
+      - name: Generated-class ABAP Unit CI entry point (real Go builds)
+        run: node tools/osd-suites.mjs --group gogen
 
   unit-inventory:
     runs-on: ubuntu-latest

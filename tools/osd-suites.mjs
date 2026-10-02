@@ -49,7 +49,7 @@ export const SUITE_FRAGMENTS = {
   "apc-daemons.json": ["apc-", "amc.", "dialog-step", "pages-push", "osd-apc", "osd-icf-apc"],
   "cds-sadl.json": ["cds-", "analytics", "ddic-"],
   "gateway-odata.json": ["batch-inserts", "conformance", "database-", "db-migrate", "demo-data", "gateway-", "http-case", "mocha.", "reference-", "replay-", "rfc-", "sapevent", "se16", "seed-", "sql-", "sqlite-", "store-", "transaction", "write-boundary"],
-  "gogen-osgo.json": ["generation-", "osd-", "preview-", "stg-", "type-", "unit-run", "warm.", "xref-"],
+  "gogen-osgo.json": ["generation-", "osd-", "osgo-", "preview-", "stg-", "type-", "unit-run", "warm.", "xref-"],
   "infra-misc.json": ["osd-dataset", "osd-suites"],
   "jobs.json": ["batch-runs", "job-", "jobs-", "osd-job", "osd-queue", "telegram-"],
   "segw.json": ["bsp-", "editor.", "flp-", "generated-", "osd-bsp", "pages-index", "segw-", "segw.", "webgui"],

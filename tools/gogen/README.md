@@ -1572,6 +1572,62 @@ it is not the oracle. The compare output separates same, different,
 Node-only, Go-only, and configured skips. `node --test tools/gogen/unit.test.mjs`
 checks pass, assertion failure, exception, hook order, and a dropped method.
 
+### CI for generated classes
+
+From an open-steamgate checkout pinned to the SHA your CI uses:
+
+```sh
+git checkout <pinned-sha>
+node tools/osd-libs.mjs --sync
+npm ci
+export GOTOOLCHAIN=go1.26.0
+npm run osgo:unit -- <generated-classes-dir> --json
+```
+
+Install Go 1.26 (and Node) on the runner. The directory is read without
+recursion; each `*.clas.testclasses.abap` owner with a matching
+`*.clas.abap` is selected. `--jobs N` defaults to 4. `--class NAME...`
+filters owners; put the directory before the filter. Immediate ABAP/XML
+files, including helper classes and local includes, are copied into a
+temporary layer after the checkout's inputs and packs. The caller's directory
+and `abap_transpile.json` are unchanged, and the staging/build tree is
+removed on completion. The underlying runner also accepts repeatable
+`--input <dir>` overlays, with the last layer winning the complete object.
+
+Missing class XML gets a default `VSEOCLASS`: EXPOSURE 2, STATE 1,
+UNICODE X, FIXPT X, WITH_UNIT_TESTS X, and the class name as DESCRIPT.
+Existing XML is copied unchanged. abaplint can discover a class from source
+without XML; gogen reads its parsed class/method definitions rather than
+requiring XML merely to find tests. Staging supplies explicit metadata for
+source-only generators. A real abapGit import creates a class from the
+`VSEOCLASS` properties in its XML; source files alone are not a complete
+abapGit import repository.
+
+JSON keeps the runner's fields (`classes`, `compiled`, `rows`, `timingMs`,
+`layers`, `cache`, `buildDir`) and adds
+`totals: {success, failure, not_compiled, error, tests}`. Rows contain
+`{class, testclass, method, status, message}` and may include diagnostics.
+`FAILED` is normalized to `FAILURE`; runner crashes, skipped methods, and
+unknown statuses become `ERROR`. `tests` counts method rows. `buildDir`
+is diagnostic only: that temporary directory has already been removed.
+Human output prints each non-SUCCESS method on one line, then totals.
+Use `npm run --silent osgo:unit -- <dir> --json` when piping stdout to a
+JSON parser, to suppress npm's script banner.
+
+Exit codes: **0** means at least one test and all SUCCESS; **1** means any
+FAILURE without NOT_COMPILED or ERROR; **2** means any NOT_COMPILED or ERROR
+(including invocation/infrastructure errors); **3** means no tests found.
+NOT_COMPILED/ERROR take precedence over failure or an empty method inventory.
+
+`osd unit --go <dir> [--json]` dispatches the same tool through the osd host
+when run from source in a checkout. The compiled binary carries neither
+the Go toolchain nor the gogen tree, so this remains a checkout command;
+`osd unit --go --help` explains the prerequisite and checkout recipe.
+
+The real-build integration suite is registered in the `gogen` group and
+runs in the Go workflow, alongside the gogen JS tests. Locally run
+`flock /tmp/osd-heavy.lock node tools/osd-suites.mjs --group gogen`.
+
 On this tree: **44 of 50 local test classes** built and ran at least one
 method, across 25 of 28 owners. Of 271 repository methods, 56 matched
 Node, 186 differed, 28 were Node-only because three owners did not build,

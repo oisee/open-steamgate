@@ -11,7 +11,7 @@ The table below routes by **filename prefix**, without `test/`. A trailing `.` m
 | `apc-`, `amc.`, `dialog-step`, `pages-push`, `osd-apc`, `osd-icf-apc` | `apc-daemons.json` |
 | `cds-`, `analytics`, `ddic-` | `cds-sadl.json` |
 | `batch-inserts`, `conformance`, `database-`, `db-migrate`, `demo-data`, `gateway-`, `http-case`, `mocha.`, `reference-`, `replay-`, `rfc-`, `sapevent`, `se16`, `seed-`, `sql-`, `sqlite-`, `store-`, `transaction`, `write-boundary` | `gateway-odata.json` |
-| `generation-`, `osd-`, `preview-`, `stg-`, `type-`, `unit-run`, `warm.`, `xref-` | `gogen-osgo.json` |
+| `generation-`, `osd-`, `osgo-`, `preview-`, `stg-`, `type-`, `unit-run`, `warm.`, `xref-` | `gogen-osgo.json` |
 | `osd-dataset`, `osd-suites` | `infra-misc.json` |
 | `batch-runs`, `job-`, `jobs-`, `osd-job`, `osd-queue`, `telegram-` | `jobs.json` |
 | `bsp-`, `editor.`, `flp-`, `generated-`, `osd-bsp`, `pages-index`, `segw-`, `segw.`, `webgui` | `segw.json` |
