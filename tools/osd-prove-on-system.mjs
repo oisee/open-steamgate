@@ -268,7 +268,7 @@ export function classCheckAbap(classes) {
 // shown, and a check that needs the list fails rather than guess
 export const MAX_LIST = 200;
 
-export const OBJECT_ITEM = /^[A-Z0-9]{4} [A-Z0-9_/]{1,40}$/;
+export const OBJECT_ITEM = /^[A-Z0-9]{4} [A-Z0-9_/](?:[A-Z0-9_/ ]{0,38}[A-Z0-9_/])?$/; // inner spaces: abapGit's padded IWSV/IWMO names; SPLIT at the first space keeps them whole
 
 export function checkItems(items) {
   for (const i of items) if (!OBJECT_ITEM.test(i)) throw new Error(`object "${i}" cannot be put into an ABAP literal`);

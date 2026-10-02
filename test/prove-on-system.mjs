@@ -1088,6 +1088,17 @@ describe("osd-prove-on-system", () => {
     };
   };
 
+  it("takes a service's padded registration names whole and still refuses what a literal cannot hold", () => {
+    // abapGit names IWSV/IWMO with the object padded to a fixed width before the version
+    const padded = ["IWMO ZL3C_FLEET2_MDL                 0001", "IWSV ZL3C_FLEET2_SRV                    0001"];
+    const code = preflightAbap("$ZOSG_TMP_X", ["CLAS ZCL_A", ...padded]);
+    for (const p of padded) assert.ok(code.includes(`APPEND \`${p}\` TO lt_items.`), p);
+    assert.match(code, /SPLIT lv_item AT space INTO lv_type lv_name\./);
+    for (const bad of ["IWMO ZL3C_MDL `x", "IWMO ZL3C_MDL'", "IWMO  ZL3C", "IWMO ZL3C ", "CLAS zcl_a", "CLAS " + "A".repeat(41)]) {
+      assert.throws(() => preflightAbap("$ZOSG_TMP_X", [bad]), /cannot be put into an ABAP literal/, bad);
+    }
+  });
+
   it("snippets are ASCII, named, and each ends with its one RETURN_VALUE( lt_out ) after the end row", () => {
     for (const [name, code] of Object.entries(allSnippets())) {
       assert.ok(/^[\x00-\x7f]*$/.test(code), name);
