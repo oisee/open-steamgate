@@ -41,7 +41,7 @@ const FLEET = {
 };
 const COLUMNS = {zosd_l2_ship: ["ship_id", "name", "status"], zosd_l2_voy: ["voyage_id", "ship_id", "dep_date"],
   zosd_l2_crew: ["crew_id", "ship_id", "role", "since"], zosd_l2_cargo: ["cargo_id", "ship_id", "weight"]};
-const TABLES = ["zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor", "zosd_l3_kill", "zosd_l3_conf", "zosd_l3_conf_log", "zosd_l3_run_conf"];
+const TABLES = ["zosd_l3_budget", "zosd_l3_event", "zosd_l3_object", "zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor", "zosd_l3_kill", "zosd_l3_conf", "zosd_l3_conf_log", "zosd_l3_run_conf"];
 // the sections of this slice in the templates
 const SECTIONS = ["resilience", "fused", "killable"];
 
@@ -75,7 +75,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
         return text;
       };
       const file = join(OUT, `zz_plain_${process.pid}.l3.yaml`);
-      writeFileSync(file, SET_TEXT.replace(/^resilience:\n(  .*\n)+/m, "").replace(/^settings:\n(  .*\n|    .*\n)+/m, ""));
+      writeFileSync(file, SET_TEXT.replace(/^governor:\n(  .*\n)+/m, "").replace(/^resilience:\n(  .*\n)+/m, "").replace(/^settings:\n(  .*\n|    .*\n)+/m, ""));
       try {
         const model = compileSet(file);
         expect([model.resilience, model.fused, model.killable]).to.deep.equal([undefined, undefined, undefined]);

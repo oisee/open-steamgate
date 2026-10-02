@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-settings/class.tpl",
- "model": "sha256:b4d41d3a9256ef1475e09f0d7f135e15a264314286a84b4eaf5aa738fdf3aa25",
+ "model": "sha256:75a07f51b5315b98bdae55b9a27b114034116e34b33ea80065684ac1e4bd24db",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",
@@ -60,7 +60,7 @@
    "template_line": 3,
    "path": "/settings/class",
    "node": "set/fleet2/settings",
-   "set_line": 61
+   "set_line": 71
   },
   {
    "line": 4,
@@ -80,3421 +80,4674 @@
    "line": 6,
    "template_line": 7,
    "path": "/settings/entries/1/field",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 7,
    "template_line": 7,
    "path": "/settings/entries/2/field",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 8,
    "template_line": 7,
    "path": "/settings/entries/3/field",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 9,
    "template_line": 7,
    "path": "/settings/entries/4/field",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
    "line": 10,
    "template_line": 7,
    "path": "/settings/entries/5/field",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
    "line": 11,
    "template_line": 7,
    "path": "/settings/entries/6/field",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
    "line": 12,
+   "template_line": 7,
+   "path": "/settings/entries/7/field",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 13,
+   "template_line": 7,
+   "path": "/settings/entries/8/field",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 14,
+   "template_line": 7,
+   "path": "/settings/entries/9/field",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 15,
+   "template_line": 7,
+   "path": "/settings/entries/10/field",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 16,
    "template_line": 9,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 13,
+   "line": 17,
    "template_line": 10,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 14,
+   "line": 18,
    "template_line": 11,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 15,
+   "line": 19,
    "template_line": 12,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 16,
+   "line": 20,
    "template_line": 13,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 17,
+   "line": 21,
    "template_line": 14,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 18,
+   "line": 22,
    "template_line": 15,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 19,
+   "line": 23,
    "template_line": 16,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 20,
+   "line": 24,
    "template_line": 17,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 21,
+   "line": 25,
    "template_line": 18,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 22,
+   "line": 26,
    "template_line": 19,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 23,
+   "line": 27,
    "template_line": 20,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 24,
+   "line": 28,
    "template_line": 21,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 25,
+   "line": 29,
    "template_line": 22,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 26,
+   "line": 30,
    "template_line": 23,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 27,
+   "line": 31,
    "template_line": 24,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 28,
+   "line": 32,
    "template_line": 25,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 29,
+   "line": 33,
    "template_line": 26,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 30,
+   "line": 34,
    "template_line": 27,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 31,
+   "line": 35,
    "template_line": 28,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 32,
+   "line": 36,
    "template_line": 29,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 33,
+   "line": 37,
    "template_line": 30,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 34,
+   "line": 38,
    "template_line": 31,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 35,
+   "line": 39,
    "template_line": 32,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 36,
+   "line": 40,
    "template_line": 33,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 37,
+   "line": 41,
    "template_line": 34,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 38,
+   "line": 42,
    "template_line": 35,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 39,
+   "line": 43,
    "template_line": 36,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 40,
+   "line": 44,
    "template_line": 37,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 41,
+   "line": 45,
    "template_line": 38,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 42,
+   "line": 46,
    "template_line": 39,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 43,
+   "line": 47,
    "template_line": 40,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 44,
+   "line": 48,
    "template_line": 41,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 45,
+   "line": 49,
    "template_line": 42,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 46,
+   "line": 50,
    "template_line": 43,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 47,
+   "line": 51,
    "template_line": 44,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 48,
+   "line": 52,
    "template_line": 45,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 49,
+   "line": 53,
    "template_line": 46,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 50,
+   "line": 54,
    "template_line": 47,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 51,
+   "line": 55,
    "template_line": 48,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 52,
+   "line": 56,
    "template_line": 49,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 53,
+   "line": 57,
    "template_line": 50,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 54,
+   "line": 58,
    "template_line": 51,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 55,
+   "line": 59,
    "template_line": 52,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 56,
+   "line": 60,
    "template_line": 53,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 57,
+   "line": 61,
    "template_line": 54,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 58,
+   "line": 62,
    "template_line": 55,
    "path": "/settings/class",
    "node": "set/fleet2/settings",
-   "set_line": 61
+   "set_line": 71
   },
   {
-   "line": 59,
+   "line": 63,
    "template_line": 56,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 60,
+   "line": 64,
    "template_line": 57,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 61,
+   "line": 65,
    "template_line": 58,
    "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 62,
+   "line": 66,
    "template_line": 60,
    "path": "/settings/entries/1",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 63,
-   "template_line": 61,
-   "path": "/set",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 64,
-   "template_line": 62,
-   "path": "/settings/entries/1/name",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 65,
-   "template_line": 63,
-   "path": "/settings/entries/1/default",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 66,
-   "template_line": 64,
-   "path": "/settings/entries/1",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 67,
-   "template_line": 60,
-   "path": "/settings/entries/2",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "template_line": 61,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
   },
   {
    "line": 68,
-   "template_line": 61,
-   "path": "/set",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 62,
+   "path": "/settings/entries/1/name",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 69,
-   "template_line": 62,
-   "path": "/settings/entries/2/name",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "template_line": 63,
+   "path": "/settings/entries/1/default",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 70,
-   "template_line": 63,
-   "path": "/settings/entries/2/default",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "template_line": 64,
+   "path": "/settings/entries/1",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 71,
-   "template_line": 64,
+   "template_line": 60,
    "path": "/settings/entries/2",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 72,
-   "template_line": 60,
-   "path": "/settings/entries/3",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "template_line": 61,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
   },
   {
    "line": 73,
-   "template_line": 61,
-   "path": "/set",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 62,
+   "path": "/settings/entries/2/name",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 74,
-   "template_line": 62,
-   "path": "/settings/entries/3/name",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "template_line": 63,
+   "path": "/settings/entries/2/default",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 75,
-   "template_line": 63,
-   "path": "/settings/entries/3/default",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "template_line": 64,
+   "path": "/settings/entries/2",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 76,
-   "template_line": 64,
+   "template_line": 60,
    "path": "/settings/entries/3",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 77,
-   "template_line": 60,
-   "path": "/settings/entries/4",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 61,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
   },
   {
    "line": 78,
-   "template_line": 61,
-   "path": "/set",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 62,
+   "path": "/settings/entries/3/name",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 79,
-   "template_line": 62,
-   "path": "/settings/entries/4/name",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 63,
+   "path": "/settings/entries/3/default",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 80,
-   "template_line": 63,
-   "path": "/settings/entries/4/default",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 64,
+   "path": "/settings/entries/3",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 81,
-   "template_line": 64,
+   "template_line": 60,
    "path": "/settings/entries/4",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
    "line": 82,
-   "template_line": 60,
-   "path": "/settings/entries/5",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 61,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
   },
   {
    "line": 83,
-   "template_line": 61,
-   "path": "/set",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 62,
+   "path": "/settings/entries/4/name",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
    "line": 84,
-   "template_line": 62,
-   "path": "/settings/entries/5/name",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 63,
+   "path": "/settings/entries/4/default",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
    "line": 85,
-   "template_line": 63,
-   "path": "/settings/entries/5/default",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 64,
+   "path": "/settings/entries/4",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
    "line": 86,
-   "template_line": 64,
+   "template_line": 60,
    "path": "/settings/entries/5",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
    "line": 87,
-   "template_line": 60,
-   "path": "/settings/entries/6",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
-  },
-  {
-   "line": 88,
    "template_line": 61,
    "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 89,
+   "line": 88,
    "template_line": 62,
-   "path": "/settings/entries/6/name",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "path": "/settings/entries/5/name",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
+  },
+  {
+   "line": 89,
+   "template_line": 63,
+   "path": "/settings/entries/5/default",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
    "line": 90,
-   "template_line": 63,
-   "path": "/settings/entries/6/default",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "template_line": 64,
+   "path": "/settings/entries/5",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
    "line": 91,
-   "template_line": 64,
+   "template_line": 60,
    "path": "/settings/entries/6",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
    "line": 92,
+   "template_line": 61,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 93,
+   "template_line": 62,
+   "path": "/settings/entries/6/name",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 94,
+   "template_line": 63,
+   "path": "/settings/entries/6/default",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 95,
+   "template_line": 64,
+   "path": "/settings/entries/6",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 96,
+   "template_line": 60,
+   "path": "/settings/entries/7",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 97,
+   "template_line": 61,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 98,
+   "template_line": 62,
+   "path": "/settings/entries/7/name",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 99,
+   "template_line": 63,
+   "path": "/settings/entries/7/default",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 100,
+   "template_line": 64,
+   "path": "/settings/entries/7",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 101,
+   "template_line": 60,
+   "path": "/settings/entries/8",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 102,
+   "template_line": 61,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 103,
+   "template_line": 62,
+   "path": "/settings/entries/8/name",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 104,
+   "template_line": 63,
+   "path": "/settings/entries/8/default",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 105,
+   "template_line": 64,
+   "path": "/settings/entries/8",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 106,
+   "template_line": 60,
+   "path": "/settings/entries/9",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 107,
+   "template_line": 61,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 108,
+   "template_line": 62,
+   "path": "/settings/entries/9/name",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 109,
+   "template_line": 63,
+   "path": "/settings/entries/9/default",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 110,
+   "template_line": 64,
+   "path": "/settings/entries/9",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 111,
+   "template_line": 60,
+   "path": "/settings/entries/10",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 112,
+   "template_line": 61,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 113,
+   "template_line": 62,
+   "path": "/settings/entries/10/name",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 114,
+   "template_line": 63,
+   "path": "/settings/entries/10/default",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 115,
+   "template_line": 64,
+   "path": "/settings/entries/10",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 116,
    "template_line": 66,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 93,
+   "line": 117,
    "template_line": 67,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 94,
+   "line": 118,
    "template_line": 68,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 95,
+   "line": 119,
    "template_line": 70,
    "path": "/settings/entries/1/field",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 96,
+   "line": 120,
    "template_line": 70,
    "path": "/settings/entries/2/field",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 97,
+   "line": 121,
    "template_line": 70,
    "path": "/settings/entries/3/field",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 98,
+   "line": 122,
    "template_line": 70,
    "path": "/settings/entries/4/field",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 99,
+   "line": 123,
    "template_line": 70,
    "path": "/settings/entries/5/field",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 100,
+   "line": 124,
    "template_line": 70,
    "path": "/settings/entries/6/field",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 101,
+   "line": 125,
+   "template_line": 70,
+   "path": "/settings/entries/7/field",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 126,
+   "template_line": 70,
+   "path": "/settings/entries/8/field",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 127,
+   "template_line": 70,
+   "path": "/settings/entries/9/field",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 128,
+   "template_line": 70,
+   "path": "/settings/entries/10/field",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 129,
    "template_line": 72,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 102,
+   "line": 130,
    "template_line": 73,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 103,
+   "line": 131,
    "template_line": 74,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 104,
+   "line": 132,
    "template_line": 75,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 105,
+   "line": 133,
    "template_line": 76,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 106,
+   "line": 134,
    "template_line": 77,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 107,
+   "line": 135,
    "template_line": 78,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 108,
+   "line": 136,
    "template_line": 79,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 109,
-   "template_line": 82,
-   "path": "/settings/entries/1/field",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 110,
-   "template_line": 83,
-   "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 111,
-   "template_line": 84,
-   "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 112,
-   "template_line": 85,
-   "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 113,
-   "template_line": 86,
-   "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 114,
-   "template_line": 87,
-   "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 115,
-   "template_line": 92,
-   "path": "/settings/entries/1/name",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 116,
-   "template_line": 93,
-   "path": "/settings/entries/1/field",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 117,
-   "template_line": 94,
-   "path": "/settings/entries/1",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
-  },
-  {
-   "line": 118,
-   "template_line": 82,
-   "path": "/settings/entries/2/field",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
-  },
-  {
-   "line": 119,
-   "template_line": 83,
-   "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
-  },
-  {
-   "line": 120,
-   "template_line": 84,
-   "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
-  },
-  {
-   "line": 121,
-   "template_line": 85,
-   "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
-  },
-  {
-   "line": 122,
-   "template_line": 86,
-   "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
-  },
-  {
-   "line": 123,
-   "template_line": 87,
-   "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
-  },
-  {
-   "line": 124,
-   "template_line": 92,
-   "path": "/settings/entries/2/name",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
-  },
-  {
-   "line": 125,
-   "template_line": 93,
-   "path": "/settings/entries/2/field",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
-  },
-  {
-   "line": 126,
-   "template_line": 94,
-   "path": "/settings/entries/2",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
-  },
-  {
-   "line": 127,
-   "template_line": 82,
-   "path": "/settings/entries/3/field",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
-  },
-  {
-   "line": 128,
-   "template_line": 83,
-   "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
-  },
-  {
-   "line": 129,
-   "template_line": 84,
-   "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
-  },
-  {
-   "line": 130,
-   "template_line": 85,
-   "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
-  },
-  {
-   "line": 131,
-   "template_line": 86,
-   "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
-  },
-  {
-   "line": 132,
-   "template_line": 87,
-   "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
-  },
-  {
-   "line": 133,
-   "template_line": 92,
-   "path": "/settings/entries/3/name",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
-  },
-  {
-   "line": 134,
-   "template_line": 93,
-   "path": "/settings/entries/3/field",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
-  },
-  {
-   "line": 135,
-   "template_line": 94,
-   "path": "/settings/entries/3",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
-  },
-  {
-   "line": 136,
-   "template_line": 82,
-   "path": "/settings/entries/4/field",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
-  },
-  {
    "line": 137,
-   "template_line": 83,
-   "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 82,
+   "path": "/settings/entries/1/field",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 138,
-   "template_line": 84,
-   "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 83,
+   "path": "/settings/entries/1/numeric",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 139,
-   "template_line": 85,
-   "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 84,
+   "path": "/settings/entries/1/numeric",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 140,
-   "template_line": 86,
-   "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 85,
+   "path": "/settings/entries/1/numeric",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 141,
-   "template_line": 87,
-   "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 86,
+   "path": "/settings/entries/1/numeric",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 142,
-   "template_line": 92,
-   "path": "/settings/entries/4/name",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 87,
+   "path": "/settings/entries/1/numeric",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 143,
-   "template_line": 93,
-   "path": "/settings/entries/4/field",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 92,
+   "path": "/settings/entries/1/name",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 144,
-   "template_line": 94,
-   "path": "/settings/entries/4",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "template_line": 93,
+   "path": "/settings/entries/1/field",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 145,
-   "template_line": 82,
-   "path": "/settings/entries/5/field",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 94,
+   "path": "/settings/entries/1",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
    "line": 146,
-   "template_line": 83,
-   "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 82,
+   "path": "/settings/entries/2/field",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 147,
-   "template_line": 84,
-   "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 83,
+   "path": "/settings/entries/2/numeric",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 148,
-   "template_line": 85,
-   "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 84,
+   "path": "/settings/entries/2/numeric",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 149,
-   "template_line": 86,
-   "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 85,
+   "path": "/settings/entries/2/numeric",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 150,
-   "template_line": 87,
-   "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 86,
+   "path": "/settings/entries/2/numeric",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 151,
-   "template_line": 92,
-   "path": "/settings/entries/5/name",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 87,
+   "path": "/settings/entries/2/numeric",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 152,
-   "template_line": 93,
-   "path": "/settings/entries/5/field",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 92,
+   "path": "/settings/entries/2/name",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 153,
-   "template_line": 94,
-   "path": "/settings/entries/5",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "template_line": 93,
+   "path": "/settings/entries/2/field",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 154,
-   "template_line": 82,
-   "path": "/settings/entries/6/field",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "template_line": 94,
+   "path": "/settings/entries/2",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
    "line": 155,
-   "template_line": 83,
-   "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "template_line": 82,
+   "path": "/settings/entries/3/field",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 156,
-   "template_line": 84,
-   "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "template_line": 83,
+   "path": "/settings/entries/3/numeric",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 157,
-   "template_line": 85,
-   "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "template_line": 84,
+   "path": "/settings/entries/3/numeric",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 158,
-   "template_line": 86,
-   "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "template_line": 85,
+   "path": "/settings/entries/3/numeric",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 159,
-   "template_line": 87,
-   "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "template_line": 86,
+   "path": "/settings/entries/3/numeric",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 160,
-   "template_line": 92,
-   "path": "/settings/entries/6/name",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "template_line": 87,
+   "path": "/settings/entries/3/numeric",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 161,
-   "template_line": 93,
-   "path": "/settings/entries/6/field",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "template_line": 92,
+   "path": "/settings/entries/3/name",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 162,
-   "template_line": 94,
-   "path": "/settings/entries/6",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "template_line": 93,
+   "path": "/settings/entries/3/field",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
    "line": 163,
+   "template_line": 94,
+   "path": "/settings/entries/3",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
+  },
+  {
+   "line": 164,
+   "template_line": 82,
+   "path": "/settings/entries/4/field",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
+  },
+  {
+   "line": 165,
+   "template_line": 83,
+   "path": "/settings/entries/4/numeric",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
+  },
+  {
+   "line": 166,
+   "template_line": 84,
+   "path": "/settings/entries/4/numeric",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
+  },
+  {
+   "line": 167,
+   "template_line": 85,
+   "path": "/settings/entries/4/numeric",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
+  },
+  {
+   "line": 168,
+   "template_line": 86,
+   "path": "/settings/entries/4/numeric",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
+  },
+  {
+   "line": 169,
+   "template_line": 87,
+   "path": "/settings/entries/4/numeric",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
+  },
+  {
+   "line": 170,
+   "template_line": 92,
+   "path": "/settings/entries/4/name",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
+  },
+  {
+   "line": 171,
+   "template_line": 93,
+   "path": "/settings/entries/4/field",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
+  },
+  {
+   "line": 172,
+   "template_line": 94,
+   "path": "/settings/entries/4",
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
+  },
+  {
+   "line": 173,
+   "template_line": 82,
+   "path": "/settings/entries/5/field",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
+  },
+  {
+   "line": 174,
+   "template_line": 83,
+   "path": "/settings/entries/5/numeric",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
+  },
+  {
+   "line": 175,
+   "template_line": 84,
+   "path": "/settings/entries/5/numeric",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
+  },
+  {
+   "line": 176,
+   "template_line": 85,
+   "path": "/settings/entries/5/numeric",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
+  },
+  {
+   "line": 177,
+   "template_line": 86,
+   "path": "/settings/entries/5/numeric",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
+  },
+  {
+   "line": 178,
+   "template_line": 87,
+   "path": "/settings/entries/5/numeric",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
+  },
+  {
+   "line": 179,
+   "template_line": 92,
+   "path": "/settings/entries/5/name",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
+  },
+  {
+   "line": 180,
+   "template_line": 93,
+   "path": "/settings/entries/5/field",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
+  },
+  {
+   "line": 181,
+   "template_line": 94,
+   "path": "/settings/entries/5",
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
+  },
+  {
+   "line": 182,
+   "template_line": 82,
+   "path": "/settings/entries/6/field",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 183,
+   "template_line": 83,
+   "path": "/settings/entries/6/numeric",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 184,
+   "template_line": 84,
+   "path": "/settings/entries/6/numeric",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 185,
+   "template_line": 85,
+   "path": "/settings/entries/6/numeric",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 186,
+   "template_line": 86,
+   "path": "/settings/entries/6/numeric",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 187,
+   "template_line": 87,
+   "path": "/settings/entries/6/numeric",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 188,
+   "template_line": 92,
+   "path": "/settings/entries/6/name",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 189,
+   "template_line": 93,
+   "path": "/settings/entries/6/field",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 190,
+   "template_line": 94,
+   "path": "/settings/entries/6",
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
+  },
+  {
+   "line": 191,
+   "template_line": 82,
+   "path": "/settings/entries/7/field",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 192,
+   "template_line": 83,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 193,
+   "template_line": 84,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 194,
+   "template_line": 85,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 195,
+   "template_line": 86,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 196,
+   "template_line": 87,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 197,
+   "template_line": 92,
+   "path": "/settings/entries/7/name",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 198,
+   "template_line": 93,
+   "path": "/settings/entries/7/field",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 199,
+   "template_line": 94,
+   "path": "/settings/entries/7",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 200,
+   "template_line": 82,
+   "path": "/settings/entries/8/field",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 201,
+   "template_line": 83,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 202,
+   "template_line": 84,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 203,
+   "template_line": 85,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 204,
+   "template_line": 86,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 205,
+   "template_line": 87,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 206,
+   "template_line": 92,
+   "path": "/settings/entries/8/name",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 207,
+   "template_line": 93,
+   "path": "/settings/entries/8/field",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 208,
+   "template_line": 94,
+   "path": "/settings/entries/8",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 209,
+   "template_line": 82,
+   "path": "/settings/entries/9/field",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 210,
+   "template_line": 83,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 211,
+   "template_line": 84,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 212,
+   "template_line": 85,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 213,
+   "template_line": 86,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 214,
+   "template_line": 87,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 215,
+   "template_line": 92,
+   "path": "/settings/entries/9/name",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 216,
+   "template_line": 93,
+   "path": "/settings/entries/9/field",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 217,
+   "template_line": 94,
+   "path": "/settings/entries/9",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 218,
+   "template_line": 82,
+   "path": "/settings/entries/10/field",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 219,
+   "template_line": 83,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 220,
+   "template_line": 84,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 221,
+   "template_line": 85,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 222,
+   "template_line": 86,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 223,
+   "template_line": 87,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 224,
+   "template_line": 92,
+   "path": "/settings/entries/10/name",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 225,
+   "template_line": 93,
+   "path": "/settings/entries/10/field",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 226,
+   "template_line": 94,
+   "path": "/settings/entries/10",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 227,
    "template_line": 96,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 164,
+   "line": 228,
    "template_line": 97,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 165,
+   "line": 229,
    "template_line": 98,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 166,
+   "line": 230,
    "template_line": 100,
    "path": "/settings/has_scoped",
    "node": "set/fleet2/settings",
-   "set_line": 61
+   "set_line": 71
   },
   {
-   "line": 167,
+   "line": 231,
    "template_line": 101,
    "path": "/settings/has_scoped",
    "node": "set/fleet2/settings",
-   "set_line": 61
+   "set_line": 71
   },
   {
-   "line": 168,
+   "line": 232,
    "template_line": 102,
    "path": "/settings/has_scoped",
    "node": "set/fleet2/settings",
-   "set_line": 61
+   "set_line": 71
   },
   {
-   "line": 169,
+   "line": 233,
    "template_line": 103,
    "path": "/settings/has_scoped",
    "node": "set/fleet2/settings",
-   "set_line": 61
+   "set_line": 71
   },
   {
-   "line": 170,
+   "line": 234,
    "template_line": 105,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 171,
+   "line": 235,
    "template_line": 107,
    "path": "/settings/has_scoped",
    "node": "set/fleet2/settings",
-   "set_line": 61
+   "set_line": 71
   },
   {
-   "line": 172,
+   "line": 236,
    "template_line": 108,
    "path": "/settings/has_scoped",
    "node": "set/fleet2/settings",
-   "set_line": 61
+   "set_line": 71
   },
   {
-   "line": 173,
+   "line": 237,
    "template_line": 109,
    "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 174,
+   "line": 238,
+   "template_line": 113,
+   "path": "/settings/entries/1/field",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
+  },
+  {
+   "line": 239,
+   "template_line": 114,
+   "path": "/settings/entries/1/name",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
+  },
+  {
+   "line": 240,
+   "template_line": 115,
+   "path": "/settings/entries/1/scoped",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
+  },
+  {
+   "line": 241,
+   "template_line": 116,
+   "path": "/settings/entries/1/scoped",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
+  },
+  {
+   "line": 242,
+   "template_line": 117,
+   "path": "/settings/entries/1/name",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
+  },
+  {
+   "line": 243,
+   "template_line": 118,
+   "path": "/settings/entries/1/field",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
+  },
+  {
+   "line": 244,
+   "template_line": 119,
+   "path": "/settings/entries/1/scoped",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
+  },
+  {
+   "line": 245,
+   "template_line": 120,
+   "path": "/settings/entries/1/scoped",
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
+  },
+  {
+   "line": 246,
+   "template_line": 113,
+   "path": "/settings/entries/2/field",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
+  },
+  {
+   "line": 247,
+   "template_line": 114,
+   "path": "/settings/entries/2/name",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
+  },
+  {
+   "line": 248,
+   "template_line": 115,
+   "path": "/settings/entries/2/scoped",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
+  },
+  {
+   "line": 249,
+   "template_line": 116,
+   "path": "/settings/entries/2/scoped",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
+  },
+  {
+   "line": 250,
+   "template_line": 117,
+   "path": "/settings/entries/2/name",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
+  },
+  {
+   "line": 251,
+   "template_line": 118,
+   "path": "/settings/entries/2/field",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
+  },
+  {
+   "line": 252,
+   "template_line": 119,
+   "path": "/settings/entries/2/scoped",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
+  },
+  {
+   "line": 253,
+   "template_line": 120,
+   "path": "/settings/entries/2/scoped",
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
+  },
+  {
+   "line": 254,
+   "template_line": 113,
+   "path": "/settings/entries/3/field",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
+  },
+  {
+   "line": 255,
+   "template_line": 114,
+   "path": "/settings/entries/3/name",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
+  },
+  {
+   "line": 256,
+   "template_line": 115,
+   "path": "/settings/entries/3/scoped",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
+  },
+  {
+   "line": 257,
+   "template_line": 116,
+   "path": "/settings/entries/3/scoped",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
+  },
+  {
+   "line": 258,
+   "template_line": 117,
+   "path": "/settings/entries/3/name",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
+  },
+  {
+   "line": 259,
+   "template_line": 118,
+   "path": "/settings/entries/3/field",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
+  },
+  {
+   "line": 260,
+   "template_line": 119,
+   "path": "/settings/entries/3/scoped",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
+  },
+  {
+   "line": 261,
+   "template_line": 120,
+   "path": "/settings/entries/3/scoped",
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
+  },
+  {
+   "line": 262,
    "template_line": 113,
    "path": "/settings/entries/4/field",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 175,
+   "line": 263,
    "template_line": 114,
    "path": "/settings/entries/4/name",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 176,
+   "line": 264,
    "template_line": 115,
    "path": "/settings/entries/4/scoped",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 177,
+   "line": 265,
    "template_line": 116,
    "path": "/settings/entries/4/scoped",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 178,
+   "line": 266,
    "template_line": 117,
    "path": "/settings/entries/4/name",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 179,
+   "line": 267,
    "template_line": 118,
    "path": "/settings/entries/4/field",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 180,
+   "line": 268,
    "template_line": 119,
    "path": "/settings/entries/4/scoped",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 181,
+   "line": 269,
    "template_line": 120,
    "path": "/settings/entries/4/scoped",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 182,
+   "line": 270,
    "template_line": 113,
-   "path": "/settings/entries/6/field",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "path": "/settings/entries/8/field",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
   },
   {
-   "line": 183,
+   "line": 271,
    "template_line": 114,
-   "path": "/settings/entries/6/name",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "path": "/settings/entries/8/name",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
   },
   {
-   "line": 184,
+   "line": 272,
    "template_line": 115,
-   "path": "/settings/entries/6/scoped",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "path": "/settings/entries/8/scoped",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
   },
   {
-   "line": 185,
+   "line": 273,
    "template_line": 116,
-   "path": "/settings/entries/6/scoped",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "path": "/settings/entries/8/scoped",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
   },
   {
-   "line": 186,
+   "line": 274,
    "template_line": 117,
-   "path": "/settings/entries/6/name",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "path": "/settings/entries/8/name",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
   },
   {
-   "line": 187,
+   "line": 275,
    "template_line": 118,
-   "path": "/settings/entries/6/field",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "path": "/settings/entries/8/field",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
   },
   {
-   "line": 188,
+   "line": 276,
    "template_line": 119,
-   "path": "/settings/entries/6/scoped",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "path": "/settings/entries/8/scoped",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
   },
   {
-   "line": 189,
+   "line": 277,
    "template_line": 120,
-   "path": "/settings/entries/6/scoped",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "path": "/settings/entries/8/scoped",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
   },
   {
-   "line": 190,
+   "line": 278,
+   "template_line": 113,
+   "path": "/settings/entries/10/field",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 279,
+   "template_line": 114,
+   "path": "/settings/entries/10/name",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 280,
+   "template_line": 115,
+   "path": "/settings/entries/10/scoped",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 281,
+   "template_line": 116,
+   "path": "/settings/entries/10/scoped",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 282,
+   "template_line": 117,
+   "path": "/settings/entries/10/name",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 283,
+   "template_line": 118,
+   "path": "/settings/entries/10/field",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 284,
+   "template_line": 119,
+   "path": "/settings/entries/10/scoped",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 285,
+   "template_line": 120,
+   "path": "/settings/entries/10/scoped",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 286,
    "template_line": 123,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 191,
+   "line": 287,
    "template_line": 124,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 192,
+   "line": 288,
    "template_line": 125,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 193,
+   "line": 289,
    "template_line": 126,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 194,
+   "line": 290,
    "template_line": 127,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 195,
+   "line": 291,
    "template_line": 128,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 196,
+   "line": 292,
    "template_line": 129,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 197,
+   "line": 293,
    "template_line": 130,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 198,
+   "line": 294,
    "template_line": 131,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 199,
+   "line": 295,
    "template_line": 132,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 200,
+   "line": 296,
    "template_line": 133,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 201,
+   "line": 297,
    "template_line": 135,
    "path": "/settings/entries/1/name",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 202,
+   "line": 298,
    "template_line": 137,
    "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 203,
+   "line": 299,
    "template_line": 138,
    "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 204,
+   "line": 300,
    "template_line": 139,
    "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 205,
+   "line": 301,
    "template_line": 140,
    "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 206,
+   "line": 302,
    "template_line": 141,
    "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 207,
+   "line": 303,
    "template_line": 142,
    "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 208,
+   "line": 304,
    "template_line": 143,
    "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 209,
+   "line": 305,
    "template_line": 144,
    "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 210,
+   "line": 306,
    "template_line": 145,
    "path": "/settings/entries/1/min",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 211,
+   "line": 307,
    "template_line": 146,
    "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 212,
+   "line": 308,
    "template_line": 147,
    "path": "/settings/entries/1/numeric",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 213,
+   "line": 309,
    "template_line": 188,
    "path": "/settings/entries/1",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 214,
+   "line": 310,
    "template_line": 135,
    "path": "/settings/entries/2/name",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 215,
+   "line": 311,
    "template_line": 137,
    "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 216,
+   "line": 312,
    "template_line": 138,
    "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 217,
+   "line": 313,
    "template_line": 139,
    "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 218,
+   "line": 314,
    "template_line": 140,
    "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 219,
+   "line": 315,
    "template_line": 141,
    "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 220,
+   "line": 316,
    "template_line": 142,
    "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 221,
+   "line": 317,
    "template_line": 143,
    "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 222,
+   "line": 318,
    "template_line": 144,
    "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 223,
+   "line": 319,
    "template_line": 145,
    "path": "/settings/entries/2/min",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 224,
+   "line": 320,
    "template_line": 146,
    "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 225,
+   "line": 321,
    "template_line": 147,
    "path": "/settings/entries/2/numeric",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 226,
+   "line": 322,
    "template_line": 188,
    "path": "/settings/entries/2",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 227,
+   "line": 323,
    "template_line": 135,
    "path": "/settings/entries/3/name",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 228,
+   "line": 324,
    "template_line": 137,
    "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 229,
+   "line": 325,
    "template_line": 138,
    "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 230,
+   "line": 326,
    "template_line": 139,
    "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 231,
+   "line": 327,
    "template_line": 140,
    "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 232,
+   "line": 328,
    "template_line": 141,
    "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 233,
+   "line": 329,
    "template_line": 142,
    "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 234,
+   "line": 330,
    "template_line": 143,
    "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 235,
+   "line": 331,
    "template_line": 144,
    "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 236,
+   "line": 332,
    "template_line": 145,
    "path": "/settings/entries/3/min",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 237,
+   "line": 333,
    "template_line": 146,
    "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 238,
+   "line": 334,
    "template_line": 147,
    "path": "/settings/entries/3/numeric",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 239,
+   "line": 335,
    "template_line": 188,
    "path": "/settings/entries/3",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 240,
+   "line": 336,
    "template_line": 135,
    "path": "/settings/entries/4/name",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 241,
+   "line": 337,
    "template_line": 137,
    "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 242,
+   "line": 338,
    "template_line": 138,
    "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 243,
+   "line": 339,
    "template_line": 139,
    "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 244,
+   "line": 340,
    "template_line": 140,
    "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 245,
+   "line": 341,
    "template_line": 141,
    "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 246,
+   "line": 342,
    "template_line": 142,
    "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 247,
+   "line": 343,
    "template_line": 143,
    "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 248,
+   "line": 344,
    "template_line": 144,
    "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 249,
+   "line": 345,
    "template_line": 145,
    "path": "/settings/entries/4/min",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 250,
+   "line": 346,
    "template_line": 146,
    "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 251,
+   "line": 347,
    "template_line": 147,
    "path": "/settings/entries/4/numeric",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 252,
+   "line": 348,
    "template_line": 188,
    "path": "/settings/entries/4",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 253,
+   "line": 349,
    "template_line": 135,
    "path": "/settings/entries/5/name",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 254,
+   "line": 350,
    "template_line": 137,
    "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 255,
+   "line": 351,
    "template_line": 138,
    "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 256,
+   "line": 352,
    "template_line": 139,
    "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 257,
+   "line": 353,
    "template_line": 140,
    "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 258,
+   "line": 354,
    "template_line": 141,
    "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 259,
+   "line": 355,
    "template_line": 142,
    "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 260,
+   "line": 356,
    "template_line": 143,
    "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 261,
+   "line": 357,
    "template_line": 144,
    "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 262,
+   "line": 358,
    "template_line": 145,
    "path": "/settings/entries/5/min",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 263,
+   "line": 359,
    "template_line": 146,
    "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 264,
+   "line": 360,
    "template_line": 147,
    "path": "/settings/entries/5/numeric",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 265,
+   "line": 361,
    "template_line": 188,
    "path": "/settings/entries/5",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 266,
+   "line": 362,
    "template_line": 135,
    "path": "/settings/entries/6/name",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 267,
+   "line": 363,
    "template_line": 137,
    "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 268,
+   "line": 364,
    "template_line": 138,
    "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 269,
+   "line": 365,
    "template_line": 139,
    "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 270,
+   "line": 366,
    "template_line": 140,
    "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 271,
+   "line": 367,
    "template_line": 141,
    "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 272,
+   "line": 368,
    "template_line": 142,
    "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 273,
+   "line": 369,
    "template_line": 143,
    "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 274,
+   "line": 370,
    "template_line": 144,
    "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 275,
+   "line": 371,
    "template_line": 145,
    "path": "/settings/entries/6/min",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 276,
+   "line": 372,
    "template_line": 146,
    "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 277,
+   "line": 373,
    "template_line": 147,
    "path": "/settings/entries/6/numeric",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 278,
+   "line": 374,
    "template_line": 188,
    "path": "/settings/entries/6",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 279,
+   "line": 375,
+   "template_line": 135,
+   "path": "/settings/entries/7/name",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 376,
+   "template_line": 137,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 377,
+   "template_line": 138,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 378,
+   "template_line": 139,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 379,
+   "template_line": 140,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 380,
+   "template_line": 141,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 381,
+   "template_line": 142,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 382,
+   "template_line": 143,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 383,
+   "template_line": 144,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 384,
+   "template_line": 145,
+   "path": "/settings/entries/7/min",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 385,
+   "template_line": 146,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 386,
+   "template_line": 147,
+   "path": "/settings/entries/7/numeric",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 387,
+   "template_line": 188,
+   "path": "/settings/entries/7",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 388,
+   "template_line": 135,
+   "path": "/settings/entries/8/name",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 389,
+   "template_line": 137,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 390,
+   "template_line": 138,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 391,
+   "template_line": 139,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 392,
+   "template_line": 140,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 393,
+   "template_line": 141,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 394,
+   "template_line": 142,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 395,
+   "template_line": 143,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 396,
+   "template_line": 144,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 397,
+   "template_line": 145,
+   "path": "/settings/entries/8/min",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 398,
+   "template_line": 146,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 399,
+   "template_line": 147,
+   "path": "/settings/entries/8/numeric",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 400,
+   "template_line": 188,
+   "path": "/settings/entries/8",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 401,
+   "template_line": 135,
+   "path": "/settings/entries/9/name",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 402,
+   "template_line": 137,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 403,
+   "template_line": 138,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 404,
+   "template_line": 139,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 405,
+   "template_line": 140,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 406,
+   "template_line": 141,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 407,
+   "template_line": 142,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 408,
+   "template_line": 143,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 409,
+   "template_line": 144,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 410,
+   "template_line": 145,
+   "path": "/settings/entries/9/min",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 411,
+   "template_line": 146,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 412,
+   "template_line": 147,
+   "path": "/settings/entries/9/numeric",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 413,
+   "template_line": 188,
+   "path": "/settings/entries/9",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 414,
+   "template_line": 135,
+   "path": "/settings/entries/10/name",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 415,
+   "template_line": 137,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 416,
+   "template_line": 138,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 417,
+   "template_line": 139,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 418,
+   "template_line": 140,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 419,
+   "template_line": 141,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 420,
+   "template_line": 142,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 421,
+   "template_line": 143,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 422,
+   "template_line": 144,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 423,
+   "template_line": 145,
+   "path": "/settings/entries/10/min",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 424,
+   "template_line": 146,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 425,
+   "template_line": 147,
+   "path": "/settings/entries/10/numeric",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 426,
+   "template_line": 188,
+   "path": "/settings/entries/10",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 427,
    "template_line": 190,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 280,
+   "line": 428,
    "template_line": 191,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 281,
+   "line": 429,
    "template_line": 192,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 282,
+   "line": 430,
    "template_line": 193,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 283,
+   "line": 431,
    "template_line": 194,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 284,
+   "line": 432,
    "template_line": 195,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 285,
+   "line": 433,
    "template_line": 196,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 286,
+   "line": 434,
    "template_line": 197,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 287,
+   "line": 435,
    "template_line": 198,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 288,
+   "line": 436,
    "template_line": 199,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 289,
+   "line": 437,
    "template_line": 200,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 290,
+   "line": 438,
    "template_line": 201,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 291,
+   "line": 439,
    "template_line": 202,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 292,
+   "line": 440,
    "template_line": 203,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 293,
+   "line": 441,
    "template_line": 204,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 294,
+   "line": 442,
    "template_line": 205,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 295,
+   "line": 443,
    "template_line": 206,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 296,
+   "line": 444,
    "template_line": 207,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 297,
+   "line": 445,
    "template_line": 208,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 298,
+   "line": 446,
    "template_line": 209,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 299,
+   "line": 447,
    "template_line": 210,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 300,
+   "line": 448,
    "template_line": 211,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 301,
+   "line": 449,
    "template_line": 212,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 302,
+   "line": 450,
    "template_line": 213,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 303,
+   "line": 451,
    "template_line": 214,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 304,
+   "line": 452,
    "template_line": 215,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 305,
+   "line": 453,
    "template_line": 216,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 306,
+   "line": 454,
    "template_line": 217,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 307,
+   "line": 455,
    "template_line": 218,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 308,
+   "line": 456,
    "template_line": 219,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 309,
+   "line": 457,
    "template_line": 220,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 310,
+   "line": 458,
    "template_line": 221,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 311,
+   "line": 459,
    "template_line": 222,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 312,
+   "line": 460,
    "template_line": 223,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 313,
+   "line": 461,
    "template_line": 224,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 314,
+   "line": 462,
    "template_line": 225,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 315,
+   "line": 463,
    "template_line": 226,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 316,
+   "line": 464,
    "template_line": 227,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 317,
+   "line": 465,
    "template_line": 228,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 318,
+   "line": 466,
    "template_line": 229,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 319,
+   "line": 467,
    "template_line": 230,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 320,
+   "line": 468,
    "template_line": 231,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 321,
+   "line": 469,
    "template_line": 232,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 322,
+   "line": 470,
    "template_line": 233,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 323,
+   "line": 471,
    "template_line": 234,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 324,
+   "line": 472,
    "template_line": 235,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 325,
+   "line": 473,
    "template_line": 236,
    "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 326,
+   "line": 474,
    "template_line": 237,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 327,
+   "line": 475,
    "template_line": 238,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 328,
+   "line": 476,
    "template_line": 239,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 329,
+   "line": 477,
    "template_line": 240,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 330,
+   "line": 478,
    "template_line": 241,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 331,
+   "line": 479,
    "template_line": 242,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 332,
+   "line": 480,
    "template_line": 243,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 333,
+   "line": 481,
    "template_line": 244,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 334,
+   "line": 482,
    "template_line": 245,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 335,
+   "line": 483,
    "template_line": 246,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 336,
+   "line": 484,
    "template_line": 247,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 337,
+   "line": 485,
    "template_line": 248,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 338,
+   "line": 486,
    "template_line": 249,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 339,
+   "line": 487,
    "template_line": 250,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 340,
+   "line": 488,
    "template_line": 251,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 341,
+   "line": 489,
    "template_line": 252,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 342,
+   "line": 490,
    "template_line": 253,
    "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 343,
+   "line": 491,
    "template_line": 254,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 344,
+   "line": 492,
    "template_line": 255,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 345,
+   "line": 493,
    "template_line": 256,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 346,
+   "line": 494,
    "template_line": 257,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 347,
+   "line": 495,
    "template_line": 258,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 348,
+   "line": 496,
    "template_line": 259,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 349,
+   "line": 497,
    "template_line": 260,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 350,
+   "line": 498,
    "template_line": 261,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 351,
+   "line": 499,
    "template_line": 262,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 352,
+   "line": 500,
    "template_line": 263,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 353,
+   "line": 501,
    "template_line": 264,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 354,
+   "line": 502,
    "template_line": 265,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 355,
+   "line": 503,
    "template_line": 266,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 356,
+   "line": 504,
    "template_line": 267,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 357,
+   "line": 505,
    "template_line": 268,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 358,
+   "line": 506,
    "template_line": 269,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 359,
+   "line": 507,
    "template_line": 270,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 360,
+   "line": 508,
    "template_line": 271,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 361,
+   "line": 509,
    "template_line": 272,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 362,
+   "line": 510,
    "template_line": 273,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 363,
+   "line": 511,
    "template_line": 274,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 364,
+   "line": 512,
    "template_line": 275,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 365,
+   "line": 513,
    "template_line": 276,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 366,
+   "line": 514,
    "template_line": 277,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 367,
+   "line": 515,
    "template_line": 278,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 368,
+   "line": 516,
    "template_line": 279,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 369,
+   "line": 517,
    "template_line": 280,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 370,
+   "line": 518,
    "template_line": 281,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 371,
+   "line": 519,
    "template_line": 282,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 372,
+   "line": 520,
    "template_line": 283,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 373,
+   "line": 521,
    "template_line": 284,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 374,
+   "line": 522,
    "template_line": 285,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 375,
+   "line": 523,
    "template_line": 286,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 376,
+   "line": 524,
    "template_line": 287,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 377,
+   "line": 525,
    "template_line": 289,
    "path": "/settings/entries/1/name",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 378,
+   "line": 526,
    "template_line": 290,
    "path": "/settings/entries/1/field",
-   "node": "set/fleet2/setting/retry.max",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.glass",
+   "set_line": 72
   },
   {
-   "line": 379,
+   "line": 527,
    "template_line": 289,
    "path": "/settings/entries/2/name",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 380,
+   "line": 528,
    "template_line": 290,
    "path": "/settings/entries/2/field",
-   "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.warn",
+   "set_line": 72
   },
   {
-   "line": 381,
+   "line": 529,
    "template_line": 289,
    "path": "/settings/entries/3/name",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 382,
+   "line": 530,
    "template_line": 290,
    "path": "/settings/entries/3/field",
-   "node": "set/fleet2/setting/stale",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.narrow_at",
+   "set_line": 72
   },
   {
-   "line": 383,
+   "line": 531,
    "template_line": 289,
    "path": "/settings/entries/4/name",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 384,
+   "line": 532,
    "template_line": 290,
    "path": "/settings/entries/4/field",
-   "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 62
+   "node": "set/fleet2/setting/budget.per_pile",
+   "set_line": 72
   },
   {
-   "line": 385,
+   "line": 533,
    "template_line": 289,
    "path": "/settings/entries/5/name",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 386,
+   "line": 534,
    "template_line": 290,
    "path": "/settings/entries/5/field",
-   "node": "set/fleet2/setting/keep.days",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.max",
+   "set_line": 72
   },
   {
-   "line": 387,
+   "line": 535,
    "template_line": 289,
    "path": "/settings/entries/6/name",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 388,
+   "line": 536,
    "template_line": 290,
    "path": "/settings/entries/6/field",
-   "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 62
+   "node": "set/fleet2/setting/retry.backoff",
+   "set_line": 72
   },
   {
-   "line": 389,
+   "line": 537,
+   "template_line": 289,
+   "path": "/settings/entries/7/name",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 538,
+   "template_line": 290,
+   "path": "/settings/entries/7/field",
+   "node": "set/fleet2/setting/stale",
+   "set_line": 72
+  },
+  {
+   "line": 539,
+   "template_line": 289,
+   "path": "/settings/entries/8/name",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 540,
+   "template_line": 290,
+   "path": "/settings/entries/8/field",
+   "node": "set/fleet2/setting/fuses.max_alerts",
+   "set_line": 72
+  },
+  {
+   "line": 541,
+   "template_line": 289,
+   "path": "/settings/entries/9/name",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 542,
+   "template_line": 290,
+   "path": "/settings/entries/9/field",
+   "node": "set/fleet2/setting/keep.days",
+   "set_line": 72
+  },
+  {
+   "line": 543,
+   "template_line": 289,
+   "path": "/settings/entries/10/name",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 544,
+   "template_line": 290,
+   "path": "/settings/entries/10/field",
+   "node": "set/fleet2/setting/piles.checks.size",
+   "set_line": 72
+  },
+  {
+   "line": 545,
    "template_line": 292,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 390,
+   "line": 546,
    "template_line": 293,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 391,
+   "line": 547,
    "template_line": 294,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 392,
+   "line": 548,
    "template_line": 295,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 393,
+   "line": 549,
    "template_line": 296,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 394,
+   "line": 550,
    "template_line": 297,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 395,
+   "line": 551,
    "template_line": 298,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 396,
+   "line": 552,
    "template_line": 299,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 397,
+   "line": 553,
    "template_line": 300,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 398,
+   "line": 554,
    "template_line": 301,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 399,
+   "line": 555,
    "template_line": 302,
    "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 400,
+   "line": 556,
    "template_line": 303,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 401,
+   "line": 557,
    "template_line": 304,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 402,
+   "line": 558,
    "template_line": 305,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 403,
+   "line": 559,
    "template_line": 306,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 404,
+   "line": 560,
    "template_line": 307,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 405,
+   "line": 561,
    "template_line": 308,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 406,
+   "line": 562,
    "template_line": 309,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 407,
+   "line": 563,
    "template_line": 310,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 408,
+   "line": 564,
    "template_line": 311,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 409,
+   "line": 565,
    "template_line": 312,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 410,
+   "line": 566,
    "template_line": 313,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 411,
+   "line": 567,
    "template_line": 314,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 412,
+   "line": 568,
    "template_line": 315,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 413,
+   "line": 569,
    "template_line": 316,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 414,
+   "line": 570,
    "template_line": 317,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 415,
+   "line": 571,
    "template_line": 318,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 416,
+   "line": 572,
    "template_line": 319,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 417,
+   "line": 573,
    "template_line": 320,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 418,
+   "line": 574,
    "template_line": 321,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 419,
+   "line": 575,
    "template_line": 322,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 420,
+   "line": 576,
    "template_line": 323,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 421,
+   "line": 577,
    "template_line": 324,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 422,
-   "template_line": 325,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 423,
+   "line": 578,
    "template_line": 326,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 424,
+   "line": 579,
    "template_line": 327,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 425,
+   "line": 580,
    "template_line": 328,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 426,
-   "template_line": 329,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 427,
+   "line": 581,
    "template_line": 330,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 428,
+   "line": 582,
    "template_line": 331,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 429,
+   "line": 583,
    "template_line": 332,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 430,
+   "line": 584,
    "template_line": 333,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 431,
+   "line": 585,
    "template_line": 334,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 432,
+   "line": 586,
    "template_line": 335,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 433,
+   "line": 587,
    "template_line": 336,
-   "path": "/set",
+   "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 434,
+   "line": 588,
    "template_line": 337,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 435,
+   "line": 589,
    "template_line": 338,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 436,
+   "line": 590,
    "template_line": 339,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 437,
-   "template_line": 340,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 438,
+   "line": 591,
    "template_line": 341,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 439,
+   "line": 592,
    "template_line": 342,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 440,
+   "line": 593,
    "template_line": 343,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 441,
+   "line": 594,
    "template_line": 344,
-   "path": "/",
+   "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 442,
+   "line": 595,
    "template_line": 345,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 443,
+   "line": 596,
    "template_line": 346,
-   "path": "/",
+   "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 444,
+   "line": 597,
    "template_line": 347,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 445,
+   "line": 598,
    "template_line": 348,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor/warn",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 446,
+   "line": 599,
    "template_line": 349,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor/narrow_at",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 447,
-   "template_line": 350,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 448,
+   "line": 600,
    "template_line": 351,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/settings/budget_warn",
+   "node": "set/fleet2/settings",
+   "set_line": 71
   },
   {
-   "line": 449,
-   "template_line": 352,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 450,
-   "template_line": 353,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 451,
+   "line": 601,
    "template_line": 354,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/settings/budget_narrow_at",
+   "node": "set/fleet2/settings",
+   "set_line": 71
   },
   {
-   "line": 452,
-   "template_line": 355,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 453,
+   "line": 602,
    "template_line": 356,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 454,
+   "line": 603,
    "template_line": 357,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 455,
+   "line": 604,
    "template_line": 358,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 456,
+   "line": 605,
    "template_line": 359,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 457,
+   "line": 606,
    "template_line": 360,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 458,
+   "line": 607,
    "template_line": 361,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 459,
+   "line": 608,
    "template_line": 362,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 460,
+   "line": 609,
    "template_line": 363,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 461,
+   "line": 610,
    "template_line": 364,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
-   "line": 462,
-   "template_line": 365,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 463,
+   "line": 611,
    "template_line": 366,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 464,
+   "line": 612,
    "template_line": 367,
    "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 465,
+   "line": 613,
    "template_line": 368,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 466,
+   "line": 614,
    "template_line": 369,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 467,
+   "line": 615,
    "template_line": 370,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 468,
+   "line": 616,
    "template_line": 371,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 469,
+   "line": 617,
    "template_line": 372,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 470,
+   "line": 618,
    "template_line": 373,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 471,
+   "line": 619,
    "template_line": 374,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 472,
+   "line": 620,
    "template_line": 375,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 473,
+   "line": 621,
    "template_line": 376,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 474,
+   "line": 622,
    "template_line": 377,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 475,
+   "line": 623,
    "template_line": 378,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 476,
+   "line": 624,
    "template_line": 379,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 477,
+   "line": 625,
    "template_line": 380,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 478,
+   "line": 626,
    "template_line": 381,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 479,
+   "line": 627,
    "template_line": 382,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 480,
+   "line": 628,
    "template_line": 383,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 481,
+   "line": 629,
    "template_line": 384,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 482,
+   "line": 630,
    "template_line": 385,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 483,
+   "line": 631,
    "template_line": 386,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 484,
+   "line": 632,
    "template_line": 387,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 485,
+   "line": 633,
    "template_line": 388,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 486,
+   "line": 634,
    "template_line": 389,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 487,
+   "line": 635,
    "template_line": 390,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 488,
+   "line": 636,
    "template_line": 391,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 489,
+   "line": 637,
    "template_line": 392,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 490,
+   "line": 638,
    "template_line": 393,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 491,
+   "line": 639,
    "template_line": 394,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 492,
+   "line": 640,
    "template_line": 395,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 493,
+   "line": 641,
    "template_line": 396,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 494,
+   "line": 642,
    "template_line": 397,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 643,
+   "template_line": 398,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 644,
+   "template_line": 399,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 645,
+   "template_line": 400,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 646,
+   "template_line": 401,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 647,
+   "template_line": 402,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 648,
+   "template_line": 403,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 649,
+   "template_line": 404,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 650,
+   "template_line": 405,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 651,
+   "template_line": 406,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 652,
+   "template_line": 407,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 653,
+   "template_line": 408,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 654,
+   "template_line": 409,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 655,
+   "template_line": 410,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 656,
+   "template_line": 411,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 657,
+   "template_line": 412,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 658,
+   "template_line": 413,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 659,
+   "template_line": 414,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 660,
+   "template_line": 415,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 661,
+   "template_line": 416,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 662,
+   "template_line": 417,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 663,
+   "template_line": 418,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 664,
+   "template_line": 419,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 665,
+   "template_line": 420,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 666,
+   "template_line": 421,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 667,
+   "template_line": 422,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 668,
+   "template_line": 423,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 669,
+   "template_line": 424,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 670,
+   "template_line": 425,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 671,
+   "template_line": 426,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 672,
+   "template_line": 427,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 673,
+   "template_line": 428,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11

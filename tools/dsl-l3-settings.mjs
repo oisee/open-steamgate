@@ -4,6 +4,10 @@ const integerRanges = {INT1: [0n, 255n], INT2: [-32768n, 32767n], INT4: [-214748
   INT8: [-9223372036854775808n, 9223372036854775807n]};
 const characterTypes = new Set(["CHAR", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "NUMC", "DATS", "TIMS"]);
 const numeric = [
+  ["budget.glass", (m) => m.governor?.glass, 1, INT4],
+  ["budget.warn", (m) => m.governor?.warn, 1, 10000],
+  ["budget.narrow_at", (m) => m.governor?.narrow_at, 1, 10000],
+  ["budget.per_pile", (m) => m.governor?.per_pile, 0, INT4],
   ["retry.max", (m) => m.resilience?.retry?.max, 0, 99],
   ["retry.backoff", (m) => m.resilience?.retry?.backoff, 0, 86400],
   ["stale", (m) => m.resilience?.stale?.seconds, 60, 99 * 3600],
@@ -15,7 +19,7 @@ const numeric = [
 // run is worked again (a job, the doctor, collect( )). The rest (retry budget,
 // backoff, staleness, retention, the schedule) is the operator's policy of the
 // moment and is read fresh once per pass.
-export const runScoped = (name) => name === "fuses.max_alerts" || /^piles\.([a-z0-9_]+\.)?size$/.test(name) || name.startsWith("params.");
+export const runScoped = (name) => name.startsWith("budget.") || name === "fuses.max_alerts" || /^piles\.([a-z0-9_]+\.)?size$/.test(name) || name.startsWith("params.");
 export function compileSettings(doc, model, {line, fail}) {
   if (doc.settings === undefined) return undefined;
   const spec = doc.settings;
@@ -82,6 +86,8 @@ export function compileSettings(doc, model, {line, fail}) {
   }
   return {"@id": `${model["@id"]}/settings`, set_line: line("settings"), entries, has_scoped: entries.some((e) => e.scoped),
     class: `zcl_l3_${model.set}_conf`, report: `zl3_${model.set}_conf`,
+    ...(model.governor ? {budget_glass: has("budget.glass"), budget_warn: has("budget.warn"),
+      budget_narrow_at: has("budget.narrow_at"), budget_per_pile: has("budget.per_pile")} : {}),
     retry_max: has("retry.max"), retry_backoff: has("retry.backoff"), stale: has("stale"),
     max_alerts: has("fuses.max_alerts"), keep_days: has("keep.days"),
     schedule_every: has("schedule.every"), pile_size: has("piles.size"),

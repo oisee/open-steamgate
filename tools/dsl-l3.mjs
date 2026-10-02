@@ -24,12 +24,14 @@ import {compileRule, lineIndex, misfit, modelHash, renderModel, rulePath, RuleEr
 import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
 import {compileSchedule, compileStages, explainStage, readStages, worklistVariants} from "./dsl-l3-stages.mjs";
 import {compileResilience, resilienceNodes} from "./dsl-l3-resilience.mjs";
+import {compileGovernor, governorTemplate} from "./dsl-l3-governor.mjs";
 import {compileSettings} from "./dsl-l3-settings.mjs";
 
 export const SET_TEMPLATE = "recipes/l3-set/template.tpl";
 export const JOB_TEMPLATE = "recipes/l3-job/template.tpl";
 // the templates of the ports (docs/dsl-l3.md, "Ports and adapters")
 export const PORT_TEMPLATES = {
+  "iface-autoclose": "recipes/l3-ports/iface-autoclose.tpl", "autoclose": "recipes/l3-ports/autoclose.tpl",
   "iface-source": "recipes/l3-ports/iface-source.tpl", "iface-sink": "recipes/l3-ports/iface-sink.tpl",
   factory: "recipes/l3-ports/factory.tpl", exception: "recipes/l3-ports/exception.tpl",
   "source-table": "recipes/l3-ports/source-table.tpl", "source-mem": "recipes/l3-ports/source-mem.tpl",
@@ -37,9 +39,9 @@ export const PORT_TEMPLATES = {
   "sink-capture": "recipes/l3-ports/sink-capture.tpl", "source-worklist": "recipes/l3-ports/source-worklist.tpl",
 };
 // what a port of each kind may be served by without a class of its own
-export const GENERATED = {source: ["table", "dummy", "capture"], sink: ["log", "dummy", "capture"]};
+export const GENERATED = {source: ["table", "dummy", "capture"], sink: ["log", "dummy", "capture"], autoclose: ["none", "capture"]};
 // the methods a hand-written variant class must implement through the port's interface
-export const PORT_METHODS = {source: ["read"], sink: ["put"]};
+export const PORT_METHODS = {source: ["read"], sink: ["put"], autoclose: ["apply"]};
 // the alert log is the one sink the runner knows how to fill
 export const SINK_TABLE = "ZOSD_L3_ALERT";
 export const SINK_GROUP = ["set_name", "rule_name", "model_hash", "check_date"];
@@ -122,7 +124,7 @@ export function classShape(text, name, className) {
   return shape.line === undefined ? undefined : shape;
 }
 
-const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience", "settings"];
+const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience", "settings", "governor"];
 const PORT_KEYS = ["kind", "table", "key", "group", "seq", "variants"];
 const PORT_NAME = /^[a-z][a-z0-9_]{0,11}$/;
 const RULE_KEYS = ["rule", "enabled"];
@@ -329,8 +331,8 @@ export function compileSet(file, {ddic, registry, out} = {}) {
       return v;
     };
     const kind = text("kind", true);
-    if (!GENERATED[kind]) fail(line(`${key}/kind`), `kind of port ${name} is source or sink, not ${JSON.stringify(kind)}`);
-    const table = text("table", true).toLowerCase();
+    if (!GENERATED[kind]) fail(line(`${key}/kind`), `kind of port ${name} is source, sink or autoclose, not ${JSON.stringify(kind)}`);
+    const table = kind === "autoclose" ? "zosd_l3_alert" : text("table", true).toLowerCase();
     const {names, client} = implicit ? {names: null, client: undefined} : columnsOf(table, key);
     const column = (k, v) => {
       if (names && !names.includes(v.toLowerCase())) fail(line(`${key}/${k}`), `${table.toUpperCase()} has no field ${v.toUpperCase()}`);
@@ -340,7 +342,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     if (kind === "source") {
       keyField = column("key", text("key", true));
       for (const k of ["group", "seq"]) if (def[k] !== undefined) fail(line(`${key}/${k}`), `${k} belongs to a sink, port ${name} is a source`);
-    } else {
+    } else if (kind === "sink") {
       if (def.key !== undefined) fail(line(`${key}/key`), `key belongs to a source, port ${name} is a sink`);
       if (table.toUpperCase() !== SINK_TABLE) fail(line(`${key}/table`), `a sink writes ${SINK_TABLE}, the table the runner fills, not ${table.toUpperCase()}`);
       if (!Array.isArray(def.group) || def.group.some((g) => typeof g !== "string")) fail(line(`${key}/group`), `group of sink ${name} is a list of field names`);
@@ -385,7 +387,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     if (typeof bound !== "string" || !variants.some((v) => v.name === bound)) fail(bat, `binding ${name}: ${JSON.stringify(bound)} is not a variant of the port (${variants.map((v) => v.name).join(", ")})`);
     return {
       "@id": `${id}/port/${name}`, set_line: at,
-      name, "name@type": CHAR(30), kind, is_source: kind === "source", is_sink: kind === "sink",
+      name, "name@type": CHAR(30), kind, is_source: kind === "source", is_sink: kind === "sink", ...(kind === "autoclose" ? {is_autoclose: true} : {}),
       table, key: keyField, seq, iface, exception: `zcx_l3_${set}_port`, ports_class: `zcl_l3_${set}_ports`,
       group: group?.map((g, i) => ({name: g, lead: i === 0 ? "WHERE" : "AND"})) ?? [],
       has_client: client !== undefined, client: client ?? "",
@@ -475,6 +477,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   // each stage's rules, for the stage's plan; a worklist variant makes the factory refuse binding it
   if (staged) for (const stage of staged.stages) stage.members = model.rules.filter((r) => r.stage_no === stage.no);
   if (ports.some((p) => p.has_worklist)) model.with_worklist = {"@id": `${id}/stages`, set_line: line("stages")};
+  if (doc.governor !== undefined) model.governor = compileGovernor(doc, model, all, {line, fail});
   if (doc.settings !== undefined) model.settings = compileSettings(doc, model, {line, fail});
   Object.defineProperty(model, "where", {value: where});
   return model;
@@ -494,6 +497,7 @@ function provenance(model, tracePath) {
 function sidecar(model, template, rendered) {
   return JSON.stringify({
     generator: "dsl-l3", set: model.source, template,
+    ...(model.governor && [SET_TEMPLATE, JOB_TEMPLATE].includes(template) ? {overlay: `recipes/l3-governor/${template === SET_TEMPLATE ? "runner" : "job"}.patch.json`} : {}),
     model: `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`,
     ...(model.rules ? {rules: Object.fromEntries(model.rules.map((r) => [r.name, {file: r.file, class: r.check_class, model: r.hash}]))} : {}),
     lines: rendered.trace.map((entry) => ({line: entry.line, template_line: entry.template_line, path: entry.path,
@@ -550,8 +554,10 @@ export async function renderSet(model) {
   let runner, job;
   try {
     console.log = (...items) => console.error(...items); // runtime bootstrap diagnostics
-    runner = await renderRecipe(model, SET_TEMPLATE, {profile: "abap"});
-    job = await renderRecipe(model, JOB_TEMPLATE, {profile: "abap"});
+    runner = await renderRecipe(model, SET_TEMPLATE, {profile: "abap", ...(model.governor ? {templateText:
+      governorTemplate(readFileSync(SET_TEMPLATE, "utf8"), JSON.parse(readFileSync("recipes/l3-governor/runner.patch.json", "utf8")))} : {})});
+    job = await renderRecipe(model, JOB_TEMPLATE, {profile: "abap", ...(model.governor ? {templateText:
+      governorTemplate(readFileSync(JOB_TEMPLATE, "utf8"), JSON.parse(readFileSync("recipes/l3-governor/job.patch.json", "utf8")))} : {})});
   } finally {
     console.log = quiet;
   }
@@ -567,7 +573,8 @@ export async function renderSet(model) {
   if (model.settings) {
     for (const [name, template, kind] of [[model.settings.class, "recipes/l3-settings/class.tpl", "clas"],
       [model.settings.report, "recipes/l3-settings/report.tpl", "prog"]]) {
-      const rendered = await renderRecipe(model, template, {profile: "abap"});
+      const rendered = await renderRecipe(model, template, {profile: "abap", ...(model.governor && kind === "clas" ? {templateText:
+        governorTemplate(readFileSync(template, "utf8"), JSON.parse(readFileSync("recipes/l3-governor/settings.patch.json", "utf8")))} : {})});
       results.push([`${name}.${kind}.abap`, rendered]);
     }
   }
@@ -621,12 +628,12 @@ async function renderPorts(model) {
   for (const port of model.ports) {
     const {variants, binding, ...fields} = port;
     const portRoot = {...base, ...fields, port: port.name, "@id": port["@id"], set_line: port.set_line};
-    await one(port.iface, "intf", portRoot, port.is_source ? "iface-source" : "iface-sink", `L3 port ${port.name} of ${model.set}`, true);
+    await one(port.iface, "intf", portRoot, port.is_autoclose ? "iface-autoclose" : port.is_source ? "iface-source" : "iface-sink", `L3 port ${port.name} of ${model.set}`, true);
     for (const variant of variants) {
       if (!variant.generated) continue;
       const root = {...portRoot, "@id": variant["@id"], set_line: variant.set_line, variant: variant.name, class: variant.class,
         capture: variant.is_capture, dummy: variant.is_dummy};
-      const template = port.is_source ? (variant.is_table ? "source-table" : variant.is_worklist ? "source-worklist" : "source-mem")
+      const template = port.is_autoclose ? "autoclose" : port.is_source ? (variant.is_table ? "source-table" : variant.is_worklist ? "source-worklist" : "source-mem")
         : variant.is_log ? "sink-log" : variant.is_dummy ? "sink-dummy" : "sink-capture";
       await one(variant.class, "clas", root, template, `L3 port ${port.name}, variant ${variant.name}`);
     }
@@ -730,7 +737,7 @@ function alertRow(db, key) {
         AND check_date = ? AND pile_no = ? AND alert_seq = ?`).get(key.set, key.rule, `sha256:${key.hash}%`, key.date, key.pile, key.seq);
       // the plan row of the alert's pile, by its run (an older database has no plan table)
       let pile;
-      let settings = [];
+      let settings = [], events = [], budget;
       try {
         pile = alert && handle.prepare(`SELECT * FROM zosd_l3_pile WHERE set_name = ? AND run_id = ? AND rule_name = ? AND pile_no = ?`)
           .get(key.set, alert.run_id, key.rule, key.pile);
@@ -739,7 +746,13 @@ function alertRow(db, key) {
         if (alert) settings = handle.prepare(`SELECT * FROM zosd_l3_run_conf WHERE set_name = ? AND run_id = ? ORDER BY param_name`)
           .all(key.set, alert.run_id);
       } catch { settings = []; }
-      return alert && {...alert, pile, settings};
+      try {
+        if (alert) {
+          events = handle.prepare(`SELECT * FROM zosd_l3_event WHERE run_id = ? AND set_name = ? ORDER BY seq`).all(alert.run_id, key.set);
+          budget = handle.prepare(`SELECT * FROM zosd_l3_budget WHERE run_id = ? AND set_name = ?`).get(alert.run_id, key.set);
+        }
+      } catch { events = []; }
+      return alert && {...alert, pile, settings, events, budget};
     } finally { handle.close(); }
   });
 }
@@ -780,6 +793,8 @@ export async function explainAlert(key, {sets = setFiles(), db, row} = {}) {
     ...(alertRowFound ? [`text    ${String(alertRowFound.alert_text).trimEnd()}`, `run     ${String(alertRowFound.run_id).trim()} at ${alertRowFound.run_ts}`] : []),
     ...(alertRowFound?.settings?.length ? ["settings effective for this run:", ...alertRowFound.settings.map((s) =>
       `  ${String(s.param_name).trim()} = ${String(s.param_val).trim()} (${String(s.origin).trim()}, DSL ${String(s.dsl_value).trim()}${String(s.origin).trim() === "USER" ? `; ${String(s.changed_by).trim()} at ${s.changed_at}` : ""})`)] : []),
+    ...(alertRowFound?.budget ? [`governor ${String(alertRowFound.budget.state).trim()}: open ${alertRowFound.budget.reserved}, glass ${alertRowFound.budget.glass}, consumed ${alertRowFound.budget.consumed}, refunded ${alertRowFound.budget.refunded}`,
+      ...(alertRowFound.events ?? []).map((e) => `  ${e.seq} ${String(e.kind).trim()}: open ${e.reserved}/${e.glass}, amount ${e.amount}, ${String(e.reason).trim()} (${String(e.actor).trim()} at ${e.acted})`)] : []),
     `set     ${path(found.file)}:${entry.set_line}: ${readFileSync(found.file, "utf8").split("\n")[entry.set_line - 1].trim()}`,
     `rule    ${k.rule}, ${entry.file} as of ${version.where}, model ${version.trace.model}`,
     `line    ${entry.file}:${ruleLine}: ${(ruleLines[ruleLine - 1] ?? "").trim()}`,

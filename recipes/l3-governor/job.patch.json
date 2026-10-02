@@ -1,0 +1,17 @@
+[
+  {
+    "before": [
+      "  WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.\n"
+    ],
+    "after": [
+      "  WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.\n",
+      "{{#governor}}\n",
+      "  IF ls_rule-status = 'GLASS' OR ls_rule-status = 'HELD'.\n",
+      "    \" a human hold is a completed job, never an aborted retry\n",
+      "    COMMIT WORK.\n",
+      "    RETURN.\n",
+      "  ENDIF.\n",
+      "{{/governor}}\n"
+    ]
+  }
+]

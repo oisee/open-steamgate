@@ -10,6 +10,9 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
              status TYPE c LENGTH 12,
              alerts TYPE i,
              failed TYPE i,
+             budget_alerts TYPE i,
+             closed TYPE i,
+             open_alerts TYPE i,
              piles TYPE i,
              piles_done TYPE i,
              stage_no TYPE i,
@@ -111,6 +114,15 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " a port it does not name keeps the manifest's binding. A source that is not
     " live replaces table content in the caller's LUW: a test and dev seam, never
     " production, and refused unless iv_allow_replay says so.
+    TYPES tt_events TYPE STANDARD TABLE OF zosd_l3_event WITH DEFAULT KEY.
+    CLASS-METHODS events IMPORTING iv_run TYPE csequence RETURNING VALUE(rt_events) TYPE tt_events.
+    CLASS-METHODS continue_glass
+      IMPORTING iv_run TYPE csequence iv_new_glass TYPE i iv_reason TYPE csequence
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
+    CLASS-METHODS release_pile
+      IMPORTING iv_run TYPE csequence iv_rule TYPE csequence iv_pile TYPE i
+                iv_reason TYPE csequence iv_per_pile TYPE i DEFAULT 0
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
     CLASS-METHODS run
       IMPORTING iv_date TYPE d
                 iv_mode TYPE c DEFAULT 'S'
@@ -187,6 +199,19 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS killed
       RETURNING VALUE(rv_killed) TYPE abap_bool.
   PRIVATE SECTION.
+    CLASS-METHODS budget_start IMPORTING iv_run TYPE csequence.
+    CLASS-METHODS budget_counts IMPORTING iv_run TYPE csequence CHANGING ct_rules TYPE tt_rule.
+    CLASS-METHODS budget_guard IMPORTING iv_run TYPE csequence RETURNING VALUE(rv_work) TYPE abap_bool.
+    CLASS-METHODS budget_state IMPORTING iv_run TYPE csequence RETURNING VALUE(rv_state) TYPE zosd_l3_budget-state.
+    CLASS-METHODS budget_event
+      IMPORTING iv_run TYPE csequence iv_kind TYPE csequence iv_amount TYPE i DEFAULT 0
+                iv_reason TYPE csequence OPTIONAL iv_rule_no TYPE i DEFAULT 0 iv_pile TYPE i DEFAULT 0
+                iv_rule TYPE csequence OPTIONAL.
+    CLASS-METHODS break_glass IMPORTING iv_run TYPE csequence iv_amount TYPE i.
+    CLASS-METHODS budget_refresh IMPORTING iv_run TYPE csequence.
+    CLASS-METHODS flow
+      IMPORTING iv_run TYPE csequence iv_date TYPE d iv_stage TYPE i iv_bind TYPE string OPTIONAL
+                is_params TYPE ty_params OPTIONAL.
     CLASS-DATA gs_settings TYPE zcl_l3_fleet2_conf=>ty_state.
     " the run whose values gs_settings-vals holds: run( ) and run_rule( ) set
     " it, and every other assignment of gs_settings clears it, so a later
@@ -202,6 +227,7 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_file TYPE csequence
                 iv_line TYPE i
                 it_alerts TYPE string_table
+                iv_key_offset TYPE i DEFAULT 0 iv_key_length TYPE i DEFAULT 4 iv_rule_no TYPE i DEFAULT 0
                 iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
     " one run of the set per check date at a time: ZOSD_L3_RUN
@@ -377,6 +403,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF lv_dry = abap_false.
       zcl_l3_fleet2_conf=>snapshot( iv_run = rs_result-run_id is_state = gs_settings ).
     ENDIF.
+    budget_start( rs_result-run_id ).
     lt_rules = rules( ).
     " a source that is not live replaces table content for this run, and the
     " table is put back whatever happens: after the loop, or when an exception
@@ -522,6 +549,10 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF lv_swap_1 = abap_true.
       restore_1( lt_keep_1 ).
     ENDIF.
+    budget_counts( EXPORTING iv_run = rs_result-run_id CHANGING ct_rules = rs_result-rules ).
+    IF budget_state( rs_result-run_id ) = 'GLASS'.
+      rs_result-status = 'GLASS'.
+    ENDIF.
   ENDMETHOD.
 
   METHOD plan.
@@ -657,6 +688,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_stamp TYPE timestampl.
     " the kill switch: no gate opens while it is set; resume( ) opens it later
     IF killed( ) = abap_true.
+      RETURN.
+    ENDIF.
+    IF budget_state( iv_run ) = 'GLASS'.
       RETURN.
     ENDIF.
     SELECT COUNT(*) FROM zosd_l3_pile
@@ -840,6 +874,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     " a filter rule's keys go to its worklist, a check rule's alerts to the log
     DATA lt_alerts TYPE string_table.
     DATA lt_found TYPE string_table.
+    DATA ls_budget TYPE zosd_l3_budget.
     DATA ls_pile TYPE zosd_l3_pile.
     DATA lt_range_1 TYPE tt_range_1.
     DATA lt_range_2 TYPE tt_range_2.
@@ -847,6 +882,14 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_key_1 LIKE LINE OF lt_keys_1.
     DATA ls_params TYPE ty_params.
     rs_rule-rule = iv_rule.
+    SELECT SINGLE * FROM zosd_l3_budget INTO ls_budget
+      WHERE run_id = iv_run AND set_name = c_set.
+    IF sy-subrc <> 0 OR ls_budget-state = 'GLASS'.
+      UPDATE zosd_l3_pile SET status = 'GLASS' reason = 'GLASS'
+        WHERE run_id = iv_run AND rule_name = iv_rule AND pile_no = iv_pile AND status = 'PLANNED'.
+      rs_rule-status = 'GLASS'.
+      RETURN.
+    ENDIF.
     SELECT SINGLE FOR UPDATE * FROM zosd_l3_pile INTO ls_pile
       WHERE set_name = c_set
         AND run_id = iv_run
@@ -929,6 +972,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/maintenance_ship.l2.yaml'
                          iv_line = 13
                          it_alerts = lt_alerts
+                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 2
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_3.
@@ -944,6 +988,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/grounded_ship_crew.l2.yaml'
                          iv_line = 14
                          it_alerts = lt_alerts
+                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 3
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_4.
@@ -959,6 +1004,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_captain.l2.yaml'
                          iv_line = 15
                          it_alerts = lt_alerts
+                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 4
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_5.
@@ -974,6 +1020,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_voyage_limit.l2.yaml'
                          iv_line = 11
                          it_alerts = lt_alerts
+                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 5
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_6.
@@ -989,6 +1036,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_min_crew.l2.yaml'
                          iv_line = 11
                          it_alerts = lt_alerts
+                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 6
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN c_rule_7.
@@ -1004,6 +1052,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                          iv_file = 'src/l2demo/ship_cargo_limit.l2.yaml'
                          iv_line = 10
                          it_alerts = lt_alerts
+                         iv_key_offset = 0 iv_key_length = 4 iv_rule_no = 7
                          iv_bind = iv_bind
                CHANGING cs_rule = rs_rule ).
       WHEN OTHERS.
@@ -1019,11 +1068,24 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       " past the fuse: this pile wrote nothing and the rule stops for this run
       ls_pile-status = 'FUSED'.
       ls_pile-reason = 'MAX-ALERTS'.
+    ELSEIF rs_rule-status = 'HELD' OR rs_rule-status = 'GLASS'.
+      ls_pile-status = rs_rule-status.
+      ls_pile-reason = rs_rule-status.
+      IF rs_rule-status = 'HELD'.
+        ls_pile-reason = 'PER-PILE'.
+      ENDIF.
     ELSE.
       ls_pile-status = 'FAILED'.
       ls_pile-reason = rs_rule-status.
     ENDIF.
+    ls_pile-hits = lines( lt_alerts ).
+    ls_pile-closed = rs_rule-closed.
+    ls_pile-open_alerts = rs_rule-open_alerts.
     UPDATE zosd_l3_pile FROM ls_pile.
+    IF ls_pile-job_count IS NOT INITIAL AND rs_rule-status <> 'GLASS'.
+      flow( iv_run = iv_run iv_date = iv_date iv_stage = ls_pile-stage_no iv_bind = iv_bind
+            is_params = is_params ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD write.
@@ -1039,6 +1101,22 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lt_counts TYPE STANDARD TABLE OF zosd_l3_pile-alerts WITH DEFAULT KEY.
     DATA lv_before TYPE i.
     DATA lv_total TYPE i.
+    DATA lt_grouped LIKE lt_rows.
+    DATA ls_grouped LIKE ls_row.
+    DATA ls_object TYPE zosd_l3_object.
+    DATA lt_objects TYPE STANDARD TABLE OF zosd_l3_object WITH DEFAULT KEY.
+    DATA lv_new TYPE i.
+    DATA lv_room TYPE i.
+    DATA lv_total_room TYPE i.
+    DATA lv_candidates TYPE i.
+    FIELD-SYMBOLS <ls_hit> TYPE zosd_l3_alert.
+    DATA lv_closed TYPE i.
+    DATA lv_cap TYPE i.
+    DATA ls_guard TYPE zosd_l3_budget.
+    DATA ls_plan TYPE zosd_l3_pile.
+    DATA li_autoclose TYPE REF TO zif_l3_fleet2_close.
+    DATA lt_closed TYPE zif_l3_fleet2_close=>tt_rows.
+    DATA ls_closed TYPE zosd_l3_alert.
     ls_row-set_name = c_set.
     ls_row-rule_name = cs_rule-rule.
     ls_row-model_hash = cs_rule-model_hash.
@@ -1052,6 +1130,10 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     LOOP AT it_alerts INTO lv_alert.
       ls_row-alert_seq = sy-tabix.
       ls_row-alert_text = lv_alert.
+      IF strlen( lv_alert ) < iv_key_offset + iv_key_length.
+        RAISE EXCEPTION TYPE zcx_l3_fleet2_port EXPORTING iv_reason = 'alert lacks its declared driving key'.
+      ENDIF.
+      ls_row-object_key = lv_alert+iv_key_offset(iv_key_length).
       APPEND ls_row TO lt_rows.
     ENDLOOP.
     ls_group-set_name = c_set.
@@ -1076,9 +1158,104 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       cs_rule-status = 'FUSED'.
       RETURN.
     ENDIF.
+    SELECT SINGLE * FROM zosd_l3_budget INTO ls_guard
+      WHERE run_id = iv_run AND set_name = c_set.
+    IF sy-subrc <> 0 OR ls_guard-state = 'GLASS'.
+      cs_rule-status = 'GLASS'.
+      RETURN.
+    ENDIF.
+    LOOP AT lt_rows INTO ls_grouped.
+      READ TABLE lt_grouped TRANSPORTING NO FIELDS WITH KEY object_key = ls_grouped-object_key.
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
+      SELECT SINGLE * FROM zosd_l3_object INTO ls_object
+        WHERE run_id = iv_run AND rule_no = iv_rule_no AND object_key = ls_grouped-object_key.
+      IF sy-subrc <> 0.
+        CLEAR ls_object.
+        ls_object-run_id = iv_run.
+        ls_object-rule_no = iv_rule_no.
+        ls_object-object_key = ls_grouped-object_key.
+        APPEND ls_object TO lt_objects.
+        lv_new = lv_new + 1.
+        lv_candidates = lv_candidates + 1.
+      ELSEIF ls_object-closed = 'X'.
+        ls_grouped-closed = 'X'.
+      ELSE.
+        lv_candidates = lv_candidates + 1.
+      ENDIF.
+      APPEND ls_grouped TO lt_grouped.
+    ENDLOOP.
+    LOOP AT lt_rows ASSIGNING <ls_hit>.
+      READ TABLE lt_grouped INTO ls_grouped WITH KEY object_key = <ls_hit>-object_key.
+      <ls_hit>-closed = ls_grouped-closed.
+    ENDLOOP.
+    SELECT SINGLE * FROM zosd_l3_pile INTO ls_plan
+      WHERE run_id = iv_run AND rule_name = cs_rule-rule AND pile_no = iv_pile.
+    lv_cap = ls_guard-per_pile.
+    IF ls_plan-per_pile > 0.
+      lv_cap = ls_plan-per_pile.
+    ENDIF.
+    IF lv_cap > 0 AND lv_candidates > lv_cap.
+      cs_rule-status = 'HELD'.
+      RETURN.
+    ENDIF.
+    lv_room = ls_guard-glass - lv_new.
+    lv_total_room = 2147483647 - lv_new.
+    UPDATE zosd_l3_budget SET reserved = reserved + lv_new consumed = consumed + lv_new
+      WHERE run_id = iv_run AND set_name = c_set AND state <> 'GLASS'
+        AND reserved <= lv_room AND consumed <= lv_total_room.
+    IF sy-dbcnt <> 1.
+      break_glass( iv_run = iv_run iv_amount = lv_new ).
+      cs_rule-status = 'GLASS'.
+      RETURN.
+    ENDIF.
+    LOOP AT lt_objects INTO ls_object.
+      INSERT zosd_l3_object FROM ls_object.
+    ENDLOOP.
+    budget_refresh( iv_run ).
     li_sink = zcl_l3_fleet2_ports=>get_alerts( zcl_l3_fleet2_ports=>variant( iv_port = 'alerts' iv_bind = iv_bind ) ).
     lv_count = li_sink->put( it_rows = lt_rows
                              is_group = ls_group ).
+    IF lv_count <> lines( lt_rows ).
+      RAISE EXCEPTION TYPE zcx_l3_fleet2_port EXPORTING iv_reason = 'governor sink incomplete; roll back this LUW'.
+    ENDIF.
+    li_autoclose = zcl_l3_fleet2_ports=>get_close( zcl_l3_fleet2_ports=>variant( iv_port = 'close' iv_bind = iv_bind ) ).
+    lt_closed = li_autoclose->apply( lt_grouped ).
+    LOOP AT lt_closed INTO ls_closed.
+      READ TABLE lt_grouped INTO ls_grouped WITH KEY object_key = ls_closed-object_key.
+      IF sy-subrc <> 0.
+        CONTINUE.
+      ENDIF.
+      ls_closed-closed = ls_grouped-closed.
+      IF ls_closed <> ls_grouped.
+        CONTINUE.
+      ENDIF.
+      UPDATE zosd_l3_object SET closed = 'X'
+        WHERE run_id = iv_run AND rule_no = iv_rule_no AND object_key = ls_closed-object_key AND closed = ''.
+      IF sy-dbcnt = 1.
+        lv_closed = lv_closed + 1.
+      ENDIF.
+    ENDLOOP.
+    cs_rule-budget_alerts = lines( lt_grouped ).
+    LOOP AT lt_grouped INTO ls_grouped.
+      SELECT SINGLE * FROM zosd_l3_object INTO ls_object
+        WHERE run_id = iv_run AND rule_no = iv_rule_no AND object_key = ls_grouped-object_key.
+      IF sy-subrc = 0 AND ls_object-closed = 'X'.
+        cs_rule-closed = cs_rule-closed + 1.
+      ELSE.
+        cs_rule-open_alerts = cs_rule-open_alerts + 1.
+      ENDIF.
+    ENDLOOP.
+    IF lv_closed > 0.
+      UPDATE zosd_l3_budget SET reserved = reserved - lv_closed refunded = refunded + lv_closed
+        WHERE run_id = iv_run AND set_name = c_set AND reserved >= lv_closed.
+      IF sy-dbcnt <> 1.
+        RAISE EXCEPTION TYPE zcx_l3_fleet2_port EXPORTING iv_reason = 'invalid governor refund; roll back this LUW'.
+      ENDIF.
+      budget_event( iv_run = iv_run iv_kind = 'REFUND' iv_amount = lv_closed ).
+      budget_refresh( iv_run ).
+    ENDIF.
     cs_rule-alerts = lines( lt_rows ).
     cs_rule-failed = cs_rule-alerts - lv_count.
     IF cs_rule-failed = 0.
@@ -1113,6 +1290,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD release.
+    IF budget_state( iv_run ) = 'GLASS'.
+      RETURN.
+    ENDIF.
     UPDATE zosd_l3_run SET status = 'RELEASED'
       WHERE set_name = c_set
         AND check_date = iv_date
@@ -1151,6 +1331,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_jobname TYPE tbtcjob-jobname.
     DATA lv_jobcount TYPE tbtcjob-jobcount.
     DATA lv_released TYPE btch0000-char1.
+    DATA ls_guard TYPE zosd_l3_budget.
+    DATA lv_chains TYPE i.
     DATA lv_pile TYPE n LENGTH 4.
     lv_pile = cs_pile-pile_no.
     CONCATENATE iv_jobname '_' lv_pile INTO lv_jobname.
@@ -1158,6 +1340,27 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF cs_pile-attempt = 0.
       cs_pile-attempt = 1.
     ENDIF.
+    budget_start( iv_run ).
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_budget INTO ls_guard
+      WHERE run_id = iv_run AND set_name = c_set.
+    IF sy-subrc <> 0 OR ls_guard-state = 'GLASS'.
+      RETURN.
+    ENDIF.
+    IF ls_guard-state = 'NARROW'.
+      SELECT COUNT(*) FROM zosd_l3_pile INTO lv_chains
+        WHERE run_id = iv_run AND set_name = c_set
+          AND ( status = 'RUNNING' OR ( status = 'PLANNED' AND ( job_count <> '' OR reason = 'GOV-CLAIM' ) ) ).
+      IF lv_chains > 0.
+        RETURN.
+      ENDIF.
+    ENDIF.
+    UPDATE zosd_l3_pile SET reason = 'GOV-CLAIM'
+      WHERE run_id = iv_run AND rule_name = cs_pile-rule_name AND pile_no = cs_pile-pile_no
+        AND status = 'PLANNED' AND job_count = '' AND reason <> 'GOV-CLAIM'.
+    IF sy-dbcnt <> 1.
+      RETURN.
+    ENDIF.
+    " the durable claim lasts until the job pair replaces it; retain RETRY
     CALL FUNCTION 'JOB_OPEN'
       EXPORTING
         jobname = lv_jobname
@@ -1181,12 +1384,16 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       WITH p_run = iv_run
       WITH p_pile = cs_pile-pile_no
       WITH p_bind = iv_bind
-      WITH s_1 = gs_settings-vals-retry_max
-      WITH s_2 = gs_settings-vals-retry_backoff
-      WITH s_3 = gs_settings-vals-stale
-      WITH s_4 = gs_settings-vals-fuses_max_alerts
-      WITH s_5 = gs_settings-vals-keep_days
-      WITH s_6 = gs_settings-vals-piles_checks_size
+      WITH s_1 = gs_settings-vals-budget_glass
+      WITH s_2 = gs_settings-vals-budget_warn
+      WITH s_3 = gs_settings-vals-budget_narrow_at
+      WITH s_4 = gs_settings-vals-budget_per_pile
+      WITH s_5 = gs_settings-vals-retry_max
+      WITH s_6 = gs_settings-vals-retry_backoff
+      WITH s_7 = gs_settings-vals-stale
+      WITH s_8 = gs_settings-vals-fuses_max_alerts
+      WITH s_9 = gs_settings-vals-keep_days
+      WITH s_10 = gs_settings-vals-piles_checks_size
       WITH p_active = is_params-active_status
       VIA JOB lv_jobname NUMBER lv_jobcount
       AND RETURN.
@@ -1365,6 +1572,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_ready TYPE btch0000-char1.
     DATA lv_scheduled TYPE btch0000-char1.
     DATA lv_preliminary TYPE btch0000-char1.
+    IF budget_state( is_result-run_id ) = 'GLASS'.
+      rs_result = is_result.
+      budget_counts( EXPORTING iv_run = rs_result-run_id CHANGING ct_rules = rs_result-rules ).
+      rs_result-status = 'GLASS'.
+      RETURN.
+    ENDIF.
     rs_result = is_result.
     CLEAR: rs_result-rules, rs_result-alerts.
     " a stage advanced here is planned and submitted with the run's own
@@ -1381,7 +1594,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       WHERE set_name = c_set
         AND run_id = is_result-run_id
       ORDER BY PRIMARY KEY.
-    LOOP AT lt_piles INTO ls_pile WHERE status <> 'DONE' AND status <> 'FAILED' AND status <> 'FUSED'.
+    LOOP AT lt_piles INTO ls_pile WHERE status <> 'DONE' AND status <> 'FAILED' AND status <> 'HELD' AND status <> 'GLASS' AND status <> 'FUSED'.
       lv_state = 'NO-JOB'.
       IF ls_pile-job_count IS NOT INITIAL.
         CLEAR: lv_aborted, lv_finished, lv_running, lv_ready, lv_scheduled, lv_preliminary.
@@ -1414,6 +1627,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       " a pile is lost only once its stage opened longer than stale ago, as
       " heal( ) sees it, and the doctor submits it then
       IF lv_state = 'NO-JOB' AND ls_pile-status = 'PLANNED'.
+        IF budget_state( is_result-run_id ) = 'NARROW' OR budget_state( is_result-run_id ) = 'GLASS'.
+          lv_state = 'OPEN'.
+        ENDIF.
         READ TABLE lt_gates INTO ls_gate WITH KEY stage_no = ls_pile-stage_no.
         IF sy-subrc = 0 AND ls_gate-opened > lv_stale.
           lv_state = 'OPEN'.
@@ -1473,6 +1689,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           ls_stage-piles_done = ls_stage-piles_done + 1.
         ELSEIF ls_pile-status = 'FAILED'.
           lv_lost = abap_true.
+        ELSEIF ls_pile-status = 'HELD' OR ls_pile-status = 'GLASS'.
+          lv_lost = abap_true.
         ELSEIF ls_pile-status = 'FUSED'.
           lv_lost = abap_true.
         ELSE.
@@ -1526,6 +1744,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           ENDIF.
         ELSEIF ls_pile-status = 'FAILED'.
           lv_lost = abap_true.
+        ELSEIF ls_pile-status = 'HELD' OR ls_pile-status = 'GLASS'.
+          lv_lost = abap_true.
         ELSEIF ls_pile-status = 'FUSED'.
           lv_fused = abap_true.
         ELSEIF lv_open IS INITIAL.
@@ -1565,6 +1785,10 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ENDIF.
     gs_settings-vals = ls_pass.
     CLEAR gv_settings_run.
+    budget_counts( EXPORTING iv_run = rs_result-run_id CHANGING ct_rules = rs_result-rules ).
+    IF budget_state( rs_result-run_id ) = 'GLASS'.
+      rs_result-status = 'GLASS'.
+    ENDIF.
   ENDMETHOD.
 
   METHOD dry.
@@ -1599,6 +1823,11 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_now TYPE timestamp.
     DATA ls_gate TYPE zosd_l3_stage.
     DATA ls_lock TYPE zosd_l3_run.
+    IF budget_state( iv_run ) = 'GLASS'.
+      act( EXPORTING iv_run = iv_run iv_action = 'GLASS' iv_reason = 'a person must continue_glass with a reason'
+                     iv_audit = abap_false CHANGING ct_report = rt_report ).
+      RETURN.
+    ENDIF.
     gs_settings = zcl_l3_fleet2_conf=>load( ).
     CLEAR gv_settings_run.
     lv_now = iv_now.
@@ -1659,6 +1888,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_reason TYPE zosd_l3_doctor-reason.
     DATA ls_result TYPE ty_result.
     DATA lt_purged TYPE tt_doctor.
+    DATA lt_events TYPE tt_events.
+    DATA ls_last TYPE zosd_l3_event.
+    DATA lv_manual TYPE string.
     gs_settings = zcl_l3_fleet2_conf=>load( ).
     CLEAR gv_settings_run.
     lv_now = iv_now.
@@ -1679,11 +1911,25 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         AND status = 'HELD'
       ORDER BY PRIMARY KEY.
     LOOP AT lt_locks INTO ls_lock.
+      IF budget_state( ls_lock-run_id ) = 'GLASS'.
+        lt_events = events( ls_lock-run_id ).
+        READ TABLE lt_events INTO ls_last INDEX lines( lt_events ).
+        lv_manual = ls_last-reserved && '/' && ls_last-glass && ' ' && ls_last-kind && ' ' && ls_last-reason.
+        act( EXPORTING iv_run = ls_lock-run_id iv_action = 'GLASS' iv_reason = lv_manual
+                       iv_audit = abap_false CHANGING ct_report = rt_report ).
+        CONTINUE.
+      ENDIF.
       heal( EXPORTING iv_run = ls_lock-run_id
                       iv_date = ls_lock-check_date
                       iv_now = lv_now
                       iv_force = abap_false
             CHANGING ct_report = rt_report ).
+      IF budget_guard( ls_lock-run_id ) = abap_false.
+        act( EXPORTING iv_run = ls_lock-run_id iv_date = ls_lock-check_date
+                       iv_action = 'GLASS' iv_reason = 'manual continuation required'
+                       iv_audit = abap_false CHANGING ct_report = rt_report ).
+        CONTINUE.
+      ENDIF.
       IF ls_lock-started > lv_stale.
         CONTINUE.
       ENDIF.
@@ -1700,7 +1946,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         " final: no pile can still run or be retried, no gate can still advance
         lv_final = abap_true.
         LOOP AT lt_piles INTO ls_pile.
-          IF ls_pile-status = 'DONE' OR ls_pile-status = 'FUSED'.
+          IF ls_pile-status = 'DONE' OR ls_pile-status = 'FUSED' OR ls_pile-status = 'HELD'.
             CONTINUE.
           ENDIF.
           IF ls_pile-status = 'FAILED' AND ls_pile-attempt > gs_settings-vals-retry_max.
@@ -1778,6 +2024,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_since TYPE timestamp.
     DATA lv_reason TYPE zosd_l3_pile-reason.
     DATA lv_next TYPE i.
+    DATA ls_guard TYPE zosd_l3_budget.
+    DATA lv_chains TYPE i.
+    DATA ls_claim TYPE zosd_l3_pile.
     DATA lv_count TYPE i.
     DATA lv_open TYPE i.
     DATA lv_prev TYPE i.
@@ -1805,6 +2054,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         AND run_id = iv_run
       ORDER BY PRIMARY KEY.
     LOOP AT lt_piles INTO ls_pile WHERE status = 'PLANNED' OR status = 'RUNNING' OR status = 'FAILED'.
+      " lock budget before plan rows; recheck after a JOB_OPEN commit
+      IF budget_guard( iv_run ) = abap_false.
+        gs_settings-vals = ls_pass.
+        CLEAR gv_settings_run.
+        RETURN.
+      ENDIF.
       " a job that is over without its pile DONE (the pair, name and count), or
       " a pile RUNNING without a job: the pile is FAILED, with the reason
       CLEAR lv_reason.
@@ -1877,6 +2132,17 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       ELSE.
         CONTINUE.
       ENDIF.
+      " budget_guard holds the submission lock until submit makes its claim
+      SELECT SINGLE * FROM zosd_l3_budget INTO ls_guard WHERE run_id = iv_run AND set_name = c_set.
+      IF ls_guard-state = 'NARROW'.
+        SELECT COUNT(*) FROM zosd_l3_pile INTO lv_chains
+          WHERE run_id = iv_run AND set_name = c_set
+            AND ( status = 'RUNNING' OR ( status = 'PLANNED' AND ( job_count <> '' OR reason = 'GOV-CLAIM' ) ) ).
+        IF lv_chains > 0.
+          CONTINUE.
+        ENDIF.
+      ENDIF.
+      ls_claim = ls_pile.
       " the claim: PLANNED again with the next attempt, on the row as it was read
       lv_next = ls_pile-attempt + 1.
       UPDATE zosd_l3_pile SET status = 'PLANNED' attempt = lv_next reason = lv_reason
@@ -1900,6 +2166,14 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                         is_params = is_params
                         iv_jobname = ls_rule-jobname
               CHANGING cs_pile = ls_pile ).
+      IF ls_pile-job_count IS INITIAL.
+        " a refused submit did not spend an attempt or create a RESUBMIT
+        UPDATE zosd_l3_pile SET status = ls_claim-status attempt = ls_claim-attempt reason = ls_claim-reason
+                                job_name = ls_claim-job_name job_count = ls_claim-job_count
+          WHERE run_id = iv_run AND rule_name = ls_claim-rule_name AND pile_no = ls_claim-pile_no
+            AND status = 'PLANNED' AND attempt = lv_next AND job_count = ''.
+        CONTINUE.
+      ENDIF.
       act( EXPORTING iv_run = iv_run
                      iv_date = iv_date
                      iv_stage = ls_pile-stage_no
@@ -1916,6 +2190,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         AND run_id = iv_run
       ORDER BY PRIMARY KEY.
     LOOP AT lt_gates INTO ls_gate WHERE status = 'OPEN'.
+      " lock budget before plan rows; recheck after a JOB_OPEN commit
+      IF budget_guard( iv_run ) = abap_false.
+        gs_settings-vals = ls_pass.
+        CLEAR gv_settings_run.
+        RETURN.
+      ENDIF.
       lv_count = 0.
       lv_open = 0.
       LOOP AT lt_piles INTO ls_pile WHERE stage_no = ls_gate-stage_no.
@@ -2001,6 +2281,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     " stopped between the two (the kill switch set in between); the next
     " gate opens through advance( ), whose WAITING to OPEN is the one UPDATE
     LOOP AT lt_gates INTO ls_gate WHERE status = 'WAITING' AND stage_no > 1.
+      " lock budget before plan rows; recheck after a JOB_OPEN commit
+      IF budget_guard( iv_run ) = abap_false.
+        gs_settings-vals = ls_pass.
+        CLEAR gv_settings_run.
+        RETURN.
+      ENDIF.
       lv_prev = ls_gate-stage_no - 1.
       READ TABLE lt_gates INTO ls_prev WITH KEY stage_no = lv_prev.
       IF sy-subrc <> 0 OR ls_prev-status <> 'DONE'.
@@ -2103,6 +2389,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       DELETE FROM zosd_l3_work WHERE run_id = ls_run-run_id.
       DELETE FROM zosd_l3_doctor WHERE run_id = ls_run-run_id.
       DELETE FROM zosd_l3_stage WHERE run_id = ls_run-run_id.
+      DELETE FROM zosd_l3_event WHERE run_id = ls_run-run_id.
+      DELETE FROM zosd_l3_object WHERE run_id = ls_run-run_id.
+      DELETE FROM zosd_l3_budget WHERE run_id = ls_run-run_id.
       act( EXPORTING iv_run = ls_run-run_id
                      iv_date = ls_run-check_date
                      iv_action = 'PURGE'
@@ -2318,5 +2607,261 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         rv_deleted = rv_deleted + 1.
       ENDIF.
     ENDLOOP.
+  ENDMETHOD.
+  METHOD budget_start.
+    DATA ls_budget TYPE zosd_l3_budget.
+    SELECT SINGLE * FROM zosd_l3_budget INTO ls_budget WHERE run_id = iv_run AND set_name = c_set.
+    IF sy-subrc = 0.
+      RETURN.
+    ENDIF.
+    IF gv_settings_run <> iv_run.
+      gs_settings = zcl_l3_fleet2_conf=>load( iv_write = abap_false ).
+      gs_settings-vals = zcl_l3_fleet2_conf=>scope( iv_run = iv_run is_vals = gs_settings-vals ).
+      gv_settings_run = iv_run.
+    ENDIF.
+    ls_budget-run_id = iv_run.
+    ls_budget-set_name = c_set.
+    ls_budget-state = 'RUNNING'.
+    ls_budget-glass = gs_settings-vals-budget_glass.
+    ls_budget-warn_at = gs_settings-vals-budget_warn.
+    ls_budget-narrow_at = gs_settings-vals-budget_narrow_at.
+    ls_budget-per_pile = gs_settings-vals-budget_per_pile.
+    INSERT zosd_l3_budget FROM ls_budget.
+  ENDMETHOD.
+
+  METHOD budget_counts.
+    DATA lv_rule TYPE i.
+    FIELD-SYMBOLS <ls_rule> TYPE ty_rule.
+    LOOP AT ct_rules ASSIGNING <ls_rule>.
+      CLEAR: <ls_rule>-budget_alerts, <ls_rule>-closed, <ls_rule>-open_alerts.
+      CASE <ls_rule>-rule.
+        WHEN c_rule_2.
+          lv_rule = 2.
+        WHEN c_rule_3.
+          lv_rule = 3.
+        WHEN c_rule_4.
+          lv_rule = 4.
+        WHEN c_rule_5.
+          lv_rule = 5.
+        WHEN c_rule_6.
+          lv_rule = 6.
+        WHEN c_rule_7.
+          lv_rule = 7.
+        WHEN OTHERS.
+          CONTINUE.
+      ENDCASE.
+      SELECT COUNT(*) FROM zosd_l3_object WHERE run_id = iv_run AND rule_no = lv_rule.
+      <ls_rule>-budget_alerts = sy-dbcnt.
+      SELECT COUNT(*) FROM zosd_l3_object WHERE run_id = iv_run AND rule_no = lv_rule AND closed = 'X'.
+      <ls_rule>-closed = sy-dbcnt.
+      <ls_rule>-open_alerts = <ls_rule>-budget_alerts - <ls_rule>-closed.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD budget_guard.
+    DATA ls_budget TYPE zosd_l3_budget.
+    budget_start( iv_run ).
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_budget INTO ls_budget
+      WHERE run_id = iv_run AND set_name = c_set.
+    IF sy-subrc = 0 AND ls_budget-state <> 'GLASS'.
+      rv_work = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD budget_state.
+    SELECT SINGLE state FROM zosd_l3_budget INTO rv_state
+      WHERE run_id = iv_run AND set_name = c_set.
+  ENDMETHOD.
+
+  METHOD budget_event.
+    DATA ls_budget TYPE zosd_l3_budget.
+    DATA ls_event TYPE zosd_l3_event.
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_budget INTO ls_budget
+      WHERE run_id = iv_run AND set_name = c_set.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    UPDATE zosd_l3_budget SET event_seq = event_seq + 1 WHERE run_id = iv_run AND set_name = c_set.
+    SELECT SINGLE * FROM zosd_l3_budget INTO ls_budget WHERE run_id = iv_run AND set_name = c_set.
+    MOVE-CORRESPONDING ls_budget TO ls_event.
+    ls_event-seq = ls_budget-event_seq.
+    ls_event-kind = iv_kind.
+    ls_event-amount = iv_amount.
+    ls_event-reason = iv_reason.
+    ls_event-rule_no = iv_rule_no.
+    ls_event-rule_name = iv_rule.
+    ls_event-pile_no = iv_pile.
+    ls_event-actor = sy-uname.
+    GET TIME STAMP FIELD ls_event-acted.
+    INSERT zosd_l3_event FROM ls_event.
+    IF sy-subrc <> 0.
+      RAISE EXCEPTION TYPE zcx_l3_fleet2_port EXPORTING iv_reason = 'governor audit failed; roll back this LUW'.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD events.
+    SELECT * FROM zosd_l3_event INTO TABLE rt_events
+      WHERE run_id = iv_run AND set_name = c_set ORDER BY PRIMARY KEY.
+  ENDMETHOD.
+
+  METHOD break_glass.
+    DATA lt_gates TYPE STANDARD TABLE OF zosd_l3_stage WITH DEFAULT KEY.
+    DATA ls_gate TYPE zosd_l3_stage.
+    UPDATE zosd_l3_budget SET state = 'GLASS'
+      WHERE run_id = iv_run AND set_name = c_set AND state <> 'GLASS'.
+    IF sy-dbcnt = 1.
+      budget_event( iv_run = iv_run iv_kind = 'GLASS' iv_amount = iv_amount iv_reason = 'reservation does not fit' ).
+      SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
+        WHERE run_id = iv_run AND set_name = c_set AND status = 'OPEN' ORDER BY PRIMARY KEY.
+      LOOP AT lt_gates INTO ls_gate.
+        UPDATE zosd_l3_stage SET status = 'PARTIAL'
+          WHERE run_id = iv_run AND stage_no = ls_gate-stage_no AND status = 'OPEN'.
+        IF sy-dbcnt = 1.
+          budget_event( iv_run = iv_run iv_kind = 'GLASS-STAGE' iv_amount = ls_gate-stage_no ).
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD budget_refresh.
+    DATA ls_budget TYPE zosd_l3_budget.
+    DATA lv_level TYPE p LENGTH 16 DECIMALS 0.
+    DATA lv_threshold TYPE p LENGTH 16 DECIMALS 0.
+    DATA lv_next TYPE zosd_l3_budget-state.
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_budget INTO ls_budget
+      WHERE run_id = iv_run AND set_name = c_set.
+    IF sy-subrc <> 0 OR ls_budget-state = 'GLASS'.
+      RETURN.
+    ENDIF.
+    lv_level = ls_budget-reserved.
+    lv_level = lv_level * 10000.
+    lv_threshold = ls_budget-glass.
+    lv_threshold = lv_threshold * ls_budget-warn_at.
+    IF lv_level >= lv_threshold AND ls_budget-warned IS INITIAL.
+      UPDATE zosd_l3_budget SET warned = 'X' WHERE run_id = iv_run AND set_name = c_set AND warned = ''.
+      IF sy-dbcnt = 1.
+        budget_event( iv_run = iv_run iv_kind = 'WARN' ).
+      ENDIF.
+    ENDIF.
+    lv_next = 'RUNNING'.
+    lv_threshold = ls_budget-glass.
+    lv_threshold = lv_threshold * ls_budget-narrow_at.
+    IF lv_level >= lv_threshold.
+      lv_next = 'NARROW'.
+    ENDIF.
+    IF lv_next <> ls_budget-state.
+      UPDATE zosd_l3_budget SET state = lv_next WHERE run_id = iv_run AND set_name = c_set AND state <> 'GLASS'.
+      budget_event( iv_run = iv_run iv_kind = lv_next ).
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD flow.
+    DATA lt_piles TYPE tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lt_rules TYPE tt_rule.
+    DATA ls_rule TYPE ty_rule.
+    IF budget_state( iv_run ) = 'GLASS'.
+      RETURN.
+    ENDIF.
+    lt_rules = rules( ).
+    SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
+      WHERE run_id = iv_run AND set_name = c_set AND stage_no = iv_stage
+        AND status = 'PLANNED' AND job_count = '' ORDER BY PRIMARY KEY.
+    LOOP AT lt_piles INTO ls_pile.
+      READ TABLE lt_rules INTO ls_rule WITH KEY rule = ls_pile-rule_name.
+      submit( EXPORTING iv_run = iv_run iv_date = iv_date iv_bind = iv_bind
+                        is_params = is_params
+                        iv_jobname = ls_rule-jobname CHANGING cs_pile = ls_pile ).
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD continue_glass.
+    DATA ls_budget TYPE zosd_l3_budget.
+    DATA lt_events TYPE tt_events.
+    DATA ls_event TYPE zosd_l3_event.
+    DATA lv_after TYPE i.
+    DATA lt_report TYPE tt_doctor.
+    DATA lv_reason TYPE string.
+    lv_reason = iv_reason.
+    CONDENSE lv_reason.
+    IF lv_reason IS INITIAL OR strlen( iv_reason ) > 80 OR iv_new_glass < 1.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_budget INTO ls_budget
+      WHERE run_id = iv_run AND set_name = c_set.
+    IF sy-subrc <> 0 OR ls_budget-state <> 'GLASS' OR iv_new_glass <= ls_budget-glass.
+      RETURN.
+    ENDIF.
+    UPDATE zosd_l3_budget SET glass = iv_new_glass state = 'RUNNING'
+      WHERE run_id = iv_run AND set_name = c_set AND state = 'GLASS'.
+    IF sy-dbcnt <> 1.
+      RETURN.
+    ENDIF.
+    lt_events = events( iv_run ).
+    LOOP AT lt_events INTO ls_event WHERE kind = 'CONTINUE'.
+      lv_after = ls_event-seq.
+    ENDLOOP.
+    budget_event( iv_run = iv_run iv_kind = 'CONTINUE' iv_amount = iv_new_glass iv_reason = iv_reason ).
+    budget_refresh( iv_run ).
+    UPDATE zosd_l3_pile SET status = 'PLANNED' job_count = '' job_name = '' reason = 'CONTINUE'
+      WHERE run_id = iv_run AND set_name = c_set AND status = 'GLASS'.
+    LOOP AT lt_events INTO ls_event WHERE kind = 'GLASS-STAGE' AND seq > lv_after.
+      UPDATE zosd_l3_stage SET status = 'OPEN'
+        WHERE run_id = iv_run AND set_name = c_set AND stage_no = ls_event-amount AND status = 'PARTIAL'.
+    ENDLOOP.
+    lt_report = resume( iv_run ).
+    rv_ok = abap_true.
+  ENDMETHOD.
+
+  METHOD release_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lv_reason TYPE string.
+    DATA lv_locked TYPE abap_bool.
+    DATA lv_cap TYPE i.
+    DATA ls_budget TYPE zosd_l3_budget.
+    lv_reason = iv_reason.
+    CONDENSE lv_reason.
+    IF lv_reason IS INITIAL OR strlen( iv_reason ) > 80 OR iv_per_pile < 0.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_budget INTO ls_budget
+      WHERE run_id = iv_run AND set_name = c_set.
+    IF sy-subrc <> 0 OR ls_budget-state = 'GLASS'.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_pile INTO ls_pile
+      WHERE run_id = iv_run AND set_name = c_set AND rule_name = iv_rule AND pile_no = iv_pile.
+    IF sy-subrc <> 0 OR ls_pile-status <> 'HELD'.
+      RETURN.
+    ENDIF.
+    IF iv_per_pile > 0 AND ( iv_per_pile < ls_budget-per_pile OR iv_per_pile < ls_pile-per_pile ).
+      RETURN.
+    ENDIF.
+    SELECT SINGLE status FROM zosd_l3_run INTO lv_reason
+      WHERE set_name = c_set AND check_date = ls_pile-check_date AND run_id = iv_run.
+    IF lv_reason = 'RELEASED'.
+      lv_locked = lock( iv_run = iv_run iv_date = ls_pile-check_date ).
+      IF lv_locked = abap_false.
+        RETURN.
+      ENDIF.
+    ELSEIF lv_reason <> 'HELD'.
+      RETURN.
+    ENDIF.
+    lv_cap = ls_pile-per_pile.
+    IF iv_per_pile > 0.
+      lv_cap = iv_per_pile.
+    ENDIF.
+    UPDATE zosd_l3_pile SET status = 'PLANNED' job_count = '' job_name = '' reason = 'RELEASE'
+                           per_pile = lv_cap
+      WHERE run_id = iv_run AND rule_name = iv_rule AND pile_no = iv_pile AND status = 'HELD'.
+    IF sy-dbcnt <> 1.
+      RETURN.
+    ENDIF.
+    budget_event( iv_run = iv_run iv_kind = 'RELEASE' iv_amount = lv_cap iv_reason = iv_reason iv_pile = iv_pile iv_rule = iv_rule ).
+    UPDATE zosd_l3_stage SET status = 'OPEN'
+      WHERE run_id = iv_run AND stage_no = ls_pile-stage_no AND ( status = 'PARTIAL' OR status = 'DONE' ).
+    UPDATE zosd_l3_stage SET status = 'WAITING'
+      WHERE run_id = iv_run AND stage_no > ls_pile-stage_no AND status = 'NOT-RUN'.
+    rv_ok = abap_true.
   ENDMETHOD.
 ENDCLASS.

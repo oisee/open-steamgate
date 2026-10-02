@@ -203,7 +203,7 @@ export function constantsModel(model, className) {
 // A model rendered through ZCL_OSD_TPL: the text, one trace entry per line
 // with the nearest @id on its data path, and, when a profile is named, what
 // ZCL_OSD_DSL_PROFILE finds on the result (with the trace in hand).
-export async function renderRecipe(data, template, {profile} = {}) {
+export async function renderRecipe(data, template, {profile, templateText} = {}) {
   await import("../test/start.mjs");
   await import("../output/zcl_osd_tpl.clas.mjs");
   await import("../output/zcl_ajson.clas.mjs");
@@ -214,7 +214,7 @@ export async function renderRecipe(data, template, {profile} = {}) {
   let result;
   try {
     result = await abap.Classes.ZCL_OSD_TPL.render({
-      iv_template: box(readFileSync(template, "utf8")), ii_data: json,
+      iv_template: box(templateText ?? readFileSync(template, "utf8")), ii_data: json,
     });
   } catch (error) {
     if (error.text?.get) throw new Error(error.text.get(), {cause: error});
