@@ -170,6 +170,17 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       expect(tag).to.deep.equal(await call(node, "GET", bases[0], {"If-None-Match": `W/\"${feed.etag}\"`}));
       expect(tag.status).to.equal(304);
       expect(served).to.deep.equal([`ABAP GET ${bases[0]}`]);
+      // If-None-Match that is no tag of this body: shorter than the W/ prefix,
+      // a wildcard, a list; and a matching one on a content route
+      const content = `${bases[0]}/19700101101123/00000/content`;
+      const source = await call(node, "GET", content);
+      for (const [path, header] of [[bases[0], "*"], [bases[0], "a"], [bases[0], `"x", W/"${feed.etag}"`],
+        [content, `"${source.etag}"`], [content, "*"]]) {
+        served.length = 0;
+        const actual = await call(ported, "GET", path, {"If-None-Match": header});
+        expect(actual, `${path} If-None-Match: ${header}`).to.deep.equal(await call(node, "GET", path, {"If-None-Match": header}));
+        expect(served, `${path} If-None-Match: ${header}`).to.deep.equal([`ABAP GET ${path}`]);
+      }
     } finally {
       rmSync(versionRoot, {recursive: true, force: true});
     }

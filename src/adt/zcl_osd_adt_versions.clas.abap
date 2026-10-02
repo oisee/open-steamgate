@@ -20,6 +20,33 @@ CLASS zcl_osd_adt_versions DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS uri_name
       IMPORTING iv_name TYPE string
       RETURNING VALUE(rv_name) TYPE string.
+    "! one version's source, as versionSource reads it (not 00000)
+    CLASS-METHODS content
+      IMPORTING is_request         TYPE zif_osd_adt_route=>ty_request
+                iv_type            TYPE string
+                iv_name            TYPE string
+                iv_include         TYPE string
+                iv_version         TYPE string
+                iv_file            TYPE string
+                iv_missing         TYPE abap_bool
+                it_revision        TYPE tt_revision
+      RETURNING VALUE(rs_response) TYPE zif_osd_adt_route=>ty_response
+      RAISING   zcx_osd_adt.
+    "! the Atom feed of the versions, as versionsFeedDocument writes it
+    CLASS-METHODS feed
+      IMPORTING is_request         TYPE zif_osd_adt_route=>ty_request
+                iv_collection      TYPE string
+                iv_type            TYPE string
+                iv_name            TYPE string
+                iv_title           TYPE csequence
+                iv_include         TYPE string
+                iv_missing         TYPE abap_bool
+                iv_state           TYPE string
+                iv_changed         TYPE string
+                iv_note            TYPE string
+                it_revision        TYPE tt_revision
+      RETURNING VALUE(rs_response) TYPE zif_osd_adt_route=>ty_response
+      RAISING   zcx_osd_adt.
     CLASS-METHODS entity
       IMPORTING is_request TYPE zif_osd_adt_route=>ty_request
                 iv_body TYPE string
@@ -101,8 +128,11 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
     SPLIT lv_none AT `,` INTO TABLE lv_candidates.
     LOOP AT lv_candidates INTO lv_candidate.
       CONDENSE lv_candidate NO-GAPS.
-      IF lv_candidate(2) = `W/`.
-        lv_candidate = substring( val = lv_candidate off = 2 ).
+*     a candidate shorter than the prefix (If-None-Match: *) is no tag
+      IF strlen( lv_candidate ) >= 2.
+        IF lv_candidate(2) = `W/`.
+          lv_candidate = substring( val = lv_candidate off = 2 ).
+        ENDIF.
       ENDIF.
       REPLACE ALL OCCURRENCES OF `"` IN lv_candidate WITH ``.
       IF lv_candidate = lv_hash.
@@ -129,19 +159,11 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
     DATA lv_state TYPE string.
     DATA lv_changed TYPE string.
     DATA lv_limit TYPE string VALUE `100000`.
-    DATA lv_base TYPE string.
     DATA lv_collection TYPE string.
-    DATA lv_title_type TYPE string.
-    DATA lv_feed TYPE string.
-    DATA lv_date TYPE string.
-    DATA lv_author TYPE string.
-    DATA lv_stamp TYPE string.
-    DATA lv_number TYPE string.
     DATA lv_index TYPE i.
     DATA lv_count TYPE i.
     DATA lv_content TYPE abap_bool.
     DATA lv_missing TYPE abap_bool.
-    DATA ls_identity TYPE zcl_osd_adt_host=>ty_identity.
     DATA lt_revision TYPE tt_revision.
     DATA ls_revision TYPE zosd_revision_s.
     DATA lt_object TYPE STANDARD TABLE OF zosd_object_s WITH DEFAULT KEY.
@@ -191,6 +213,13 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
       RAISE EXCEPTION lx_error.
     ENDIF.
     READ TABLE lt_object INDEX 1 INTO ls_object.
+*   version 00000 is the active source READ gave: no git work for it, as in
+*   the Node facade's versionSource
+    IF lv_content = abap_true AND lv_version = `00000`.
+      rs_response = entity( is_request = is_request iv_body = lv_source
+                            iv_type = `text/plain; charset=utf-8` ).
+      RETURN.
+    ENDIF.
     CLEAR lv_error.
     CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
       EXPORTING iv_command = `HISTORY` iv_type = lv_type iv_name = lv_name
@@ -212,66 +241,97 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
     ENDIF.
 
     IF lv_content = abap_true.
-      IF strlen( lv_version ) <> 5 OR lv_version CN `0123456789`.
-        lv_error = |{ lv_version } is not a version number|.
-      ELSEIF lv_version <> `00000`.
-        IF lv_missing = abap_true.
-          lv_error = `the include has no file, so no version but 00000`.
-        ELSE.
-          lv_count = lines( lt_revision ).
-          lv_index = lv_count - lv_version + 1.
-          IF lv_index < 1 OR lv_index > lv_count.
-            lv_error = |{ lv_file } has no version { lv_version }|.
-          ELSE.
-            READ TABLE lt_revision INDEX lv_index INTO ls_revision.
-            CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
-              EXPORTING iv_command = `REVISION` iv_type = lv_type iv_name = lv_name
-                        iv_include = lv_include iv_revision = ls_revision-revision
-              IMPORTING ev_source = lv_source ev_error = lv_error
-              EXCEPTIONS system_failure = 1 MESSAGE lv_msg communication_failure = 2 MESSAGE lv_msg OTHERS = 3.
-            IF sy-subrc <> 0.
-              lv_error = |no object store here: { lv_msg }|.
-            ENDIF.
-          ENDIF.
-        ENDIF.
-      ENDIF.
-      IF lv_error IS NOT INITIAL.
-        lx_error = zcx_osd_adt=>not_found(
-          |{ lv_type } { lv_name } version { lv_version } ({ lv_error }) does not exist| ).
-        RAISE EXCEPTION lx_error.
-      ENDIF.
-      rs_response = entity( is_request = is_request iv_body = lv_source
-                            iv_type = `text/plain; charset=utf-8` ).
+      rs_response = content( is_request = is_request iv_type = lv_type iv_name = lv_name
+                             iv_include = lv_include iv_version = lv_version iv_file = lv_file
+                             iv_missing = lv_missing it_revision = lt_revision ).
       RETURN.
     ENDIF.
 
+    rs_response = feed( is_request = is_request iv_collection = ls_type-collection iv_type = lv_type
+                        iv_name = lv_name iv_title = ls_object-name iv_include = lv_include
+                        iv_missing = lv_missing iv_state = lv_state iv_changed = lv_changed
+                        iv_note = lv_note it_revision = lt_revision ).
+  ENDMETHOD.
+
+  METHOD content.
+    DATA lv_error TYPE string.
+    DATA lv_msg TYPE c LENGTH 255.
+    DATA lv_source TYPE string.
+    DATA lv_index TYPE i.
+    DATA lv_count TYPE i.
+    DATA ls_revision TYPE zosd_revision_s.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+    IF strlen( iv_version ) <> 5 OR iv_version CN `0123456789`.
+      lv_error = |{ iv_version } is not a version number|.
+    ELSEIF iv_version <> `00000`.
+      IF iv_missing = abap_true.
+        lv_error = `the include has no file, so no version but 00000`.
+      ELSE.
+        lv_count = lines( it_revision ).
+        lv_index = lv_count - iv_version + 1.
+        IF lv_index < 1 OR lv_index > lv_count.
+          lv_error = |{ iv_file } has no version { iv_version }|.
+        ELSE.
+          READ TABLE it_revision INDEX lv_index INTO ls_revision.
+          CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
+            EXPORTING iv_command = `REVISION` iv_type = iv_type iv_name = iv_name
+                      iv_include = iv_include iv_revision = ls_revision-revision
+            IMPORTING ev_source = lv_source ev_error = lv_error
+            EXCEPTIONS system_failure = 1 MESSAGE lv_msg communication_failure = 2 MESSAGE lv_msg OTHERS = 3.
+          IF sy-subrc <> 0.
+            lv_error = |no object store here: { lv_msg }|.
+          ENDIF.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+    IF lv_error IS NOT INITIAL.
+      lx_error = zcx_osd_adt=>not_found(
+        |{ iv_type } { iv_name } version { iv_version } ({ lv_error }) does not exist| ).
+      RAISE EXCEPTION lx_error.
+    ENDIF.
+    rs_response = entity( is_request = is_request iv_body = lv_source
+                          iv_type = `text/plain; charset=utf-8` ).
+  ENDMETHOD.
+
+  METHOD feed.
+    DATA lv_base TYPE string.
+    DATA lv_title_type TYPE string.
+    DATA lv_feed TYPE string.
+    DATA lv_date TYPE string.
+    DATA lv_author TYPE string.
+    DATA lv_stamp TYPE string.
+    DATA lv_number TYPE string.
+    DATA lv_index TYPE i.
+    DATA lv_count TYPE i.
+    DATA ls_identity TYPE zcl_osd_adt_host=>ty_identity.
+    DATA ls_revision TYPE zosd_revision_s.
     ls_identity = zcl_osd_adt_host=>identity( ).
-    lv_base = zcl_osd_adt_router=>c_base && `/` && ls_type-collection
-      && `/` && uri_name( to_lower( lv_name ) ).
-    IF lv_include IS INITIAL.
+    lv_base = zcl_osd_adt_router=>c_base && `/` && iv_collection
+      && `/` && uri_name( to_lower( iv_name ) ).
+    IF iv_include IS INITIAL.
       lv_base = lv_base && `/source/main/versions`.
     ELSE.
-      lv_base = lv_base && `/includes/` && lv_include && `/versions`.
+      lv_base = lv_base && `/includes/` && iv_include && `/versions`.
     ENDIF.
-    lv_title_type = lv_type.
-    IF lv_type = `PROG` OR lv_type = `INCL`.
+    lv_title_type = iv_type.
+    IF iv_type = `PROG` OR iv_type = `INCL`.
       lv_title_type = `REPS`.
     ENDIF.
     lv_feed = `<?xml version="1.0" encoding="utf-8"?>`
       && `<atom:feed xmlns:atom="http://www.w3.org/2005/Atom" xmlns:adtcore="http://www.sap.com/adt/core">`
-      && `<atom:title>Version List of ` && xml( ls_object-name )
+      && `<atom:title>Version List of ` && xml( iv_title )
       && ` (` && lv_title_type && `)</atom:title>`
       && `<atom:updated>1970-01-01T10:11:23Z</atom:updated>`.
     lv_date = `1970-01-01T00:00:00Z`.
     lv_author = ls_identity-user_name.
-    lv_count = lines( lt_revision ).
-    IF lv_missing = abap_false.
-      IF lv_state = `clean` AND lv_count > 0.
-        READ TABLE lt_revision INDEX 1 INTO ls_revision.
+    lv_count = lines( it_revision ).
+    IF iv_missing = abap_false.
+      IF iv_state = `clean` AND lv_count > 0.
+        READ TABLE it_revision INDEX 1 INTO ls_revision.
         lv_date = iso( iv_date = ls_revision-date iv_time = ls_revision-time ).
         lv_author = ls_revision-author.
-      ELSEIF strlen( lv_changed ) >= 19.
-        lv_date = lv_changed(19) && `Z`.
+      ELSEIF strlen( iv_changed ) >= 19.
+        lv_date = iv_changed(19) && `Z`.
       ENDIF.
     ENDIF.
     lv_feed = lv_feed && `<atom:entry><atom:author><atom:name>` && xml( lv_author )
@@ -280,7 +340,7 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
       && `"/><atom:id>00000</atom:id><atom:updated>` && lv_date
       && `</atom:updated></atom:entry>`.
     lv_index = 0.
-    LOOP AT lt_revision INTO ls_revision.
+    LOOP AT it_revision INTO ls_revision.
       lv_index = lv_index + 1.
       lv_number = lv_count - lv_index + 1.
       lv_number = |{ lv_number WIDTH = 5 PAD = '0' ALIGN = RIGHT }|.
@@ -294,6 +354,6 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
     ENDLOOP.
     lv_feed = lv_feed && `</atom:feed>`.
     rs_response = entity( is_request = is_request iv_body = lv_feed
-                          iv_type = `application/atom+xml;type=feed` iv_note = lv_note ).
+                          iv_type = `application/atom+xml;type=feed` iv_note = iv_note ).
   ENDMETHOD.
 ENDCLASS.
