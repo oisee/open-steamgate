@@ -1,0 +1,23 @@
+{
+ "meta": {
+  "source": "A4H (sandbox), ABAP Unit probe ZCL_OSD_ORA2 + report ZOSD_ORA2_SUB in a throwaway package, 2026-10-02, deleted after",
+  "probe": "subpool-probe.testclasses.abap.txt (P8 lifetime; P9 limit, run separately in a fresh session with DO 36 and DO 37) and subpool-probe-sub.prog.abap.txt",
+  "asked_by": "dell, for point 7 (GENERATE SUBROUTINE POOL)"
+ },
+ "expect": {
+  "P8": {
+   "name": "%_T002QE",
+   "name length": "8",
+   "name shape": "%_T followed by 5 characters, counting up per generation (next %_T002QF)",
+   "tadir rows": "0",
+   "trdir rows": "0",
+   "reposrc rows": "0",
+   "perform after commit": "42",
+   "second internal session": "r0 (SUBMIT ... AND RETURN; PERFORM ... IN PROGRAM (name) IF FOUND does not find the pool)"
+  },
+  "P9": {
+   "36 pools in one internal session": "generated=36",
+   "37th": "runtime error GENERATE_SUBPOOL_DIR_FULL, 'Maximum number of temporary subroutine pools exceeded.' (not catchable, no sy-subrc)"
+  }
+ }
+}
