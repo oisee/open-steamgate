@@ -164,6 +164,83 @@ describe("tools/osd-warm: the supervisor and the dev loop", () => {
   });
 });
 
+// A warm build is not a warm activation: the build can be warm and the load
+// a recycle -- the swap refused, or a module the serving process holds. The
+// activation's X-OSD-Build said "warm" for both, while osd.log said the swap
+// was refused and the runtime recycled (vsp-i7, 2026-10-02).
+describe("tools/osd-warm: a refused swap is not answered as warm", () => {
+  const fakeRuntime = (generation, hot) => ({
+    running: true, generation, swaps: 0,
+    hot, recycle: async () => ({generation: "h2", ms: 7}),
+  });
+  const warmBuild = {ok: true, warm: true, hash: "h2", from: "h1", modules: ["zcl_a.clas.mjs"], hostHeld: []};
+
+  it("publish() says it recycled, and why, when the swap is refused", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-warm-refused-"));
+    try {
+      const store = new ObjectStore({root: dir, libs: []});
+      store.transpile = async () => warmBuild;
+      store.served = fakeRuntime("h1", async () => { throw new Error("the runtime carries h0, and the swap is from h1"); });
+      const result = await store.publish();
+      expect(result).to.include({ok: true, recycled: true});
+      expect(result.hot).to.not.equal(true);
+      expect(result.why).to.match(/swap was refused: the runtime carries h0/);
+      // a second caller of the same save (the dev loop beside the façade)
+      // finds the generation already live: still not a swap
+      store.served.generation = "h2";
+      store.transpile = async () => ({...warmBuild, modules: [], cached: true});
+      const again = await store.publish();
+      expect(again).to.include({ok: true, recycled: false, hot: false});
+      expect(again.why).to.match(/^the runtime was recycled onto it: the swap was refused/);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  const activateWith = async (publishResult) => {
+    const express = (await import("express")).default;
+    const {adtRouter} = await import("../tools/adt-facade.mjs");
+    const store = {
+      roots: [], find: () => undefined, root: REPO,
+      warm: () => ({on: true, compiler: {primed: true}}),
+      warmActivation: (type, name) => ({type, name, active: true, revision: "r1"}),
+      completeActivations: () => true,
+      publish: async () => publishResult,
+    };
+    const app = express();
+    app.use(adtRouter({store, data: {}, logMisses: false}).router);
+    const server = await new Promise((done) => { const s = app.listen(0, "127.0.0.1", () => done(s)); });
+    try {
+      const base = `http://127.0.0.1:${server.address().port}/sap/bc/adt`;
+      const login = await fetch(base + "/core/discovery", {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+      const cookie = (login.headers.getSetCookie?.() ?? []).map((v) => v.split(";", 1)[0]).join("; ");
+      const res = await fetch(base + "/activation?method=activate", {
+        method: "POST", headers: {"x-csrf-token": login.headers.get("x-csrf-token"), cookie},
+        body: `<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">
+  <adtcore:objectReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_a" adtcore:name="ZCL_A"/>
+</adtcore:objectReferences>`,
+      });
+      expect(res.status).to.equal(200);
+      return {build: res.headers.get("x-osd-build"), swap: res.headers.get("x-osd-swap-ms")};
+    } finally {
+      await new Promise((done) => server.close(done));
+    }
+  };
+
+  it("X-OSD-Build is warm for a swap", async () => {
+    const h = await activateWith({ok: true, transpile: warmBuild, recycled: false, hot: true, ms: 12});
+    expect(h).to.deep.equal({build: "warm", swap: "12"});
+  });
+
+  it("X-OSD-Build is not warm when the swap was refused and the runtime recycled", async () => {
+    const h = await activateWith({ok: true, transpile: warmBuild, recycled: true, ms: 900,
+      why: "the swap was refused: the runtime carries h0, and the swap is from h1"});
+    expect(h.build).to.not.equal("warm");
+    expect(h.build).to.match(/^cold; recycled after a warm build: the swap was refused: the runtime carries h0/);
+    expect(h.swap).to.equal(null);
+  });
+});
+
 describe("tools/osd-warm: where the filesystem will not link", () => {
   it("copies instead, for the errors that mean 'not here', and rethrows the rest", () => {
     const dir = mkdtempSync(join(tmpdir(), "osd-link-"));

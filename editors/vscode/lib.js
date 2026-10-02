@@ -1032,19 +1032,20 @@ function warmStatusText(warm) {
 
 /** An activation's (or activateMany's) own build, off the headers
  *  activate()/activateMany() already read into the result (`build`,
- *  `swapMs`): "hot-swapped in <ms> ms (warm)", "recycled (host-held
- *  module)" for a warm build with no swap header (docs/warm-compile.md
- *  "What the process holds itself" -- a HOST_HELD module recycles the
- *  process instead of swapping it, and that is not a failure), or "cold
- *  build" / "cold build: <reason>" (tools/adt-facade.mjs warmHeaders()
- *  folds `cold; <reason>` into one header value). `undefined` when the
+ *  `swapMs`): "hot-swapped in <ms> ms (warm)", "warm, already live" for a
+ *  warm build with no swap header (the generation was already the one
+ *  serving, nothing to load), or "cold build" / "cold build: <reason>"
+ *  (tools/adt-facade.mjs warmHeaders() folds `cold; <reason>` into one
+ *  header value -- a warm build the runtime was recycled for, a refused
+ *  swap or a HOST_HELD module, is `cold; recycled after a warm build:
+ *  <why>`, never "warm"). `undefined` when the
  *  answer carried no `X-OSD-Build` at all (an activation that never
  *  reached publish(), such as a checked-only edit). */
 function activationBuildText(result) {
   const build = result?.build;
   if (build === undefined) return undefined;
   if (build === "warm") {
-    return result.swapMs === undefined ? "recycled (host-held module)" : `hot-swapped in ${result.swapMs} ms (warm)`;
+    return result.swapMs === undefined ? "warm, already live" : `hot-swapped in ${result.swapMs} ms (warm)`;
   }
   const reason = /^cold;\s*(.*)$/.exec(build)?.[1];
   return reason ? `cold build: ${reason}` : "cold build";

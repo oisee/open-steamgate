@@ -965,27 +965,38 @@ export class ObjectStore {
     }
     // a warm build is loaded into the process that serves, not a new one
     // (tools/osd-hot.mjs); when that cannot be done, the recycle below does
+    let why;
     if (transpile.warm === true && (transpile.hostHeld ?? []).length === 0) {
       if (transpile.modules.length === 0 && transpile.hash === runtime.generation) {
-        return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash};
+        // nothing to load: another caller (the dev loop, beside the façade's
+        // activation of the same save) already brought this generation in --
+        // and if that was a recycle, this answer must not read as a swap
+        const last = this.lastLoad?.generation === transpile.hash ? this.lastLoad : undefined;
+        return {ok: true, transpile, recycled: false, hot: false, generation: transpile.hash,
+          ...(last?.why === undefined ? {} : {why: `the runtime was recycled onto it: ${last.why}`})};
       }
       try {
         const swap = await runtime.hot({generation: transpile.hash, from: transpile.from,
           modules: transpile.modules, verified: transpile.unverified !== true});
         this.#afterSwap(transpile.hash, swap);
+        this.lastLoad = {generation: transpile.hash};
         return {ok: true, transpile, recycled: false, hot: true, generation: transpile.hash, ms: swap.ms, swaps: swap.swaps};
       } catch (error) {
         console.log(`warm: the swap was refused, recycling instead: ${error.message}`);
+        why = `the swap was refused: ${error.message}`;
       }
     }
     if (transpile.warm === true && (transpile.hostHeld ?? []).length > 0) {
       console.log(`warm: ${transpile.hostHeld.join(", ")} is held by the serving process itself, recycling instead of swapping`);
+      why = `${transpile.hostHeld.join(", ")} is held by the serving process itself`;
     }
     try {
       const recycle = await runtime.recycle();
       this.#cleanHot();
       if (this.warmState !== undefined) this.warmState.heapBase = undefined;
-      return {ok: true, transpile, recycled: true, generation: recycle.generation, ms: recycle.ms};
+      // a warm build loaded by a recycle says why, so no answer reports it as a swap
+      this.lastLoad = {generation: recycle.generation, why};
+      return {ok: true, transpile, recycled: true, generation: recycle.generation, ms: recycle.ms, ...(why === undefined ? {} : {why})};
     } catch (error) {
       // the modules are good and the process that should carry them is not:
       // that is a failure of the activation, not a detail to log quietly
