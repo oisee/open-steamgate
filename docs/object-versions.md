@@ -8,7 +8,7 @@ They are stored nowhere else: git answers (ADR 0001, `docs/backlog/adt.md`,
 
 `CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'` gains two commands, on the Node
 host (`tools/osd-store-destination.mjs` over `tools/osd-git-history.mjs`) and
-the Go host (`tools/gogen/go/abap/store_history.go`):
+the Go host (`tools/gogen/go/objstore/history.go`):
 
 | command | in | out |
 | --- | --- | --- |
@@ -86,4 +86,4 @@ same git history over ADT (`tools/adt-versions.mjs`, routes in
 
 - **`SVRS_*` substitutes.** `SVRS_GET_VERSION_DIRECTORY_46` and `SVRS_GET_REPS_FROM_OBJECT` return VRSD-shaped rows: version 00000 as the active one, commits as 00001..n like the feed, the short SHA in `KORRNUM` (A4H writes `LOCAL` there for a local object), `VERSMODE` `U`. They are built on the lazy table providers once that ADR is accepted.
 
-Tests: `test/store-history.mjs` and `test/adt-versions.mjs` (Node), `store_history_test.go` (Go), and `test/unit/zcl_osd_versions_test` (ABAP, on both hosts).
+Tests: `test/store-history.mjs` and `test/adt-versions.mjs` (Node), `objstore/history_test.go` (Go), and `test/unit/zcl_osd_versions_test` (ABAP, on both hosts).

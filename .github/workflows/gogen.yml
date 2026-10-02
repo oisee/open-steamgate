@@ -87,10 +87,10 @@ jobs:
       - name: Go vet and tests
         working-directory: tools/gogen/go
         run: |
-          go vet ./abap/ ./termgui/ ./filepick/ ./amc/ ./session/... ./enq/ ./sandbox/
-          go test ./abap/... ./termgui/... ./filepick/... ./session/... ./sandbox/...
+          go vet ./abap/ ./termgui/ ./filepick/ ./amc/ ./session/... ./enq/ ./sandbox/ ./objstore/
+          go test ./abap/... ./termgui/... ./filepick/... ./session/... ./sandbox/... ./objstore/...
           # the sandbox builds for the browser too (nofollow_other.go)
-          GOOS=js GOARCH=wasm go build ./sandbox/
+          GOOS=js GOARCH=wasm go build ./sandbox/ ./objstore/
           # the AMC broker and the lock server are concurrent by nature: their
           # tests run under the race detector (enq: the E0 contract gate)
           go test -race ./amc/... ./enq/...

@@ -1,4 +1,4 @@
-package abap
+package objstore
 
 import (
 	"sort"
@@ -30,12 +30,12 @@ func TestCollateIsLocaleCompare(t *testing.T) {
 // Activate button here; with no store it is the same named error as any call
 func TestStoreCapabilities(t *testing.T) {
 	cmd := "CAPABILITIES"
-	if a := StoreCall(map[string]*string{"IV_COMMAND": &cmd}); a.Scalars["EV_ERROR"] == "" {
+	if a := Call(map[string]*string{"IV_COMMAND": &cmd}); a.Scalars["EV_ERROR"] == "" {
 		t.Fatalf("no store, and yet capabilities: %v", a.Scalars)
 	}
-	storeState.cfg = &StoreConfig{Roots: []StoreRoot{{Path: "src", Writable: true}}}
+	storeState.cfg = &Config{Roots: []Root{{Path: "src", Writable: true}}}
 	defer func() { storeState.cfg = nil }()
-	a := StoreCall(map[string]*string{"IV_COMMAND": &cmd})
+	a := Call(map[string]*string{"IV_COMMAND": &cmd})
 	if a.Scalars["EV_ERROR"] != "" || a.Scalars["EV_NOTE"] != "LIST READ WRITE HISTORY REVISION" {
 		t.Fatalf("CAPABILITIES: note %q error %q", a.Scalars["EV_NOTE"], a.Scalars["EV_ERROR"])
 	}
@@ -43,7 +43,7 @@ func TestStoreCapabilities(t *testing.T) {
 
 // a WRITE touches only a file inside a writable root of the tree
 func TestStoreConfined(t *testing.T) {
-	storeState.cfg = &StoreConfig{Roots: []StoreRoot{{Path: "src", Writable: true}, {Path: "gen"}, {Path: "packs/o4d/src", Writable: true}}}
+	storeState.cfg = &Config{Roots: []Root{{Path: "src", Writable: true}, {Path: "gen"}, {Path: "packs/o4d/src", Writable: true}}}
 	defer func() { storeState.cfg = nil }()
 	for file, want := range map[string]bool{
 		"src/osd/x.prog.abap":             true,

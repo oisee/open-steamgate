@@ -1,4 +1,4 @@
-package abap
+package objstore
 
 import (
 	"bytes"
@@ -10,9 +10,9 @@ import (
 	"time"
 )
 
-// StoreRevision is one version of an object: a commit that changed its file
+// Revision is one version of an object: a commit that changed its file
 // (ZOSD_REVISION_S), as tools/osd-store-destination.mjs answers HISTORY.
-type StoreRevision struct {
+type Revision struct {
 	REVISION, SHORT, AUTHOR, DATE, TIME, SUBJECT string
 	path                                         string
 }
@@ -53,7 +53,7 @@ func storeSapUser(author string) string {
 // its first-parent diff),
 // followed across renames and cut at a copy. The reason is
 // set, and the list nil, when git has no history for it.
-func storeHistory(root, file string, limit int) ([]StoreRevision, string) {
+func storeHistory(root, file string, limit int) ([]Revision, string) {
 	if out, err := storeGit(root, "rev-parse", "--is-inside-work-tree"); err != nil || strings.TrimSpace(out) != "true" {
 		return nil, "the object store is not inside a git worktree"
 	}
@@ -69,7 +69,7 @@ func storeHistory(root, file string, limit int) ([]StoreRevision, string) {
 	if err != nil {
 		return nil, "git history is unavailable for this object store"
 	}
-	revs := []StoreRevision{}
+	revs := []Revision{}
 	for _, rec := range strings.Split(out, "\x1e") {
 		rec = strings.TrimSpace(rec)
 		if rec == "" {
@@ -95,7 +95,7 @@ func storeHistory(root, file string, limit int) ([]StoreRevision, string) {
 		if len(change) > 1 {
 			path = change[len(change)-1]
 		}
-		r := StoreRevision{REVISION: f[0], AUTHOR: storeSapUser(f[1]), SUBJECT: f[3], DATE: "00000000", TIME: "000000", path: path}
+		r := Revision{REVISION: f[0], AUTHOR: storeSapUser(f[1]), SUBJECT: f[3], DATE: "00000000", TIME: "000000", path: path}
 		r.SHORT = r.REVISION
 		if len(r.SHORT) > 12 {
 			r.SHORT = r.SHORT[:12]
