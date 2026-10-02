@@ -268,7 +268,11 @@ export function classCheckAbap(classes) {
 // shown, and a check that needs the list fails rather than guess
 export const MAX_LIST = 200;
 
-export const OBJECT_ITEM = /^[A-Z0-9]{4} [A-Z0-9_/]{1,40}$/;
+// a name may hold inner spaces: abapGit pads the registration objects of a
+// service (IWSV, IWMO) to a fixed width before their version, and TADIR keeps
+// them so; the snippets put an item in a backtick literal and SPLIT it at the
+// first space, which leaves the padded name whole
+export const OBJECT_ITEM = /^[A-Z0-9]{4} [A-Z0-9_/](?:[A-Z0-9_/ ]{0,38}[A-Z0-9_/])?$/;
 
 export function checkItems(items) {
   for (const i of items) if (!OBJECT_ITEM.test(i)) throw new Error(`object "${i}" cannot be put into an ABAP literal`);
