@@ -291,5 +291,38 @@ describe("the lock server through the generated ENQUEUE_ modules (ENQ E0 as ABAP
         endEnqSession(key);
       }
     });
+
+    it("gives a step that binds after a dump a new context, which the old one's drop does not take", async () => {
+      const key = "lifecycle:after";
+      const heard = [];
+      onEnqContextEnded((k) => heard.push(k));
+      try {
+        const parked = signal();
+        const parkedStep = dialogStep(async () => {
+          bindEnqSession(key);
+          await enqueue(dialogLock("LCAFTA"));
+          parked.fire();
+          await abap.statements.wait({seconds: {get: () => 0.5}});
+        }, "ENQ lifecycle: step A, parked across the dump");
+        await parked.fired;
+        await dialogStep(async () => {
+          bindEnqSession(key);
+          throw new Error("step B dumps");
+        }, "ENQ lifecycle: step B, dumping").catch(() => {});
+        // step C comes after the dump: a new context, not the dead one
+        expect((await call(key, "ENQUEUE_EZOSD_PRB", dialogLock("LCAFTC"))).subrc).to.equal(0);
+        expect(held("LCAFTA"), "A's lock while A runs").to.have.length(1);
+        await parkedStep;
+        expect(held("LCAFTA"), "the old context went with A").to.have.length(0);
+        expect(held("LCAFTC"), "C's lock is the new context's").to.have.length(1);
+        expect(heard).to.deep.equal([key]);
+        // and the new context is the key's: its next step sees the lock as its own (602)
+        const again = await call(key, "ENQUEUE_EZOSD_PRB", {...dialogLock("LCAFTC"), MODE_ZOSD_PRB: "X"});
+        expect(again.msgno, "602: its own lock, not a foreign one").to.equal("602");
+      } finally {
+        endEnqSession(key);
+      }
+      expect(held("LCAFTC"), "the host's end takes the new context's locks").to.have.length(0);
+    });
   });
 });
