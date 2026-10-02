@@ -4,7 +4,7 @@ import {createHash} from "node:crypto";
 // the workspace file. Without it the filesystem synchronizer refuses to
 // create the editor part. The tag describes the representation, so properties
 // and source intentionally get different values and change with their body.
-const entityTag = (body) => createHash("sha256")
+export const entityTag = (body) => createHash("sha256")
   .update(Buffer.from(String(body))).digest("hex").slice(0, 32);
 export const normalizedTag = (value) => String(value ?? "").trim()
   .replace(/^W\//, "").replace(/^"|"$/g, "");

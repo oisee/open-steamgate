@@ -42,7 +42,7 @@ import {entitySetMapFor} from "./segw-entityset-map.mjs";
 import {testClassesIn} from "./osd-unit-run.mjs";
 import {serviceTree} from "./osd-status.mjs";
 import {transactions} from "./osd-tran-registry.mjs";
-import {normalizedTag, sendEntity} from "./adt-entity.mjs";
+import {entityTag, normalizedTag, sendEntity} from "./adt-entity.mjs";
 
 export const BASE = "/sap/bc/adt";
 
