@@ -19,3 +19,7 @@ The table below routes by **filename prefix**, without `test/`. A trailing `.` m
 | No matching prefix | `infra-misc.json` |
 
 For example, `osd-job-next.mjs` goes to `jobs.json` rather than the broader `osd-` rule for `gogen-osgo.json`. `osd-dataset-next.mjs` goes to `infra-misc.json`.
+
+The generated-class CI entry suites `test/osgo-unit.mjs` and
+`test/osgjs-unit.mjs` belong to `groups.gogen` in `gogen-osgo.json`. The gogen
+workflow gates both with real builds under the shared heavy-test lock.
