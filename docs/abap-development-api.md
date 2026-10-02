@@ -133,6 +133,14 @@ with `import()`. Nothing that is already loaded is replaced. It is safe only whe
 4. **A name nobody else uses,** and no `@KERNEL` lines (section 6).
 5. **A primed registry.** Without `OSD_WARM` or the transpiler fixes there is no fast path.
 
+**The speed model.** The prime (11 to 17 s as measured: vsp `osd.log`, "primed 1166 files in 11029 ms") is paid
+**once**: after a start, and again after a cold build. Every fast-path build after it compiles one standalone
+object warm, and the target is sub-second, the cost of a warm class edit (about 0.5 to 1.5 s measured,
+`docs/warm-compile.md`). **The prime is eager:** with `OSD_WARM` on it already runs in the background once the
+runtime is up, and again `OSD_WARM_REPRIME_MS` (5 s) after a cold build (`warmUp` in `tools/osd-store.mjs`,
+`WARM_REPRIME_MS`; `docs/warm-compile.md`, "How it works" step 1). So a GENERATE normally finds it ready, and
+nothing new is needed for eagerness.
+
 The verifier does not see a module that is outside a generation. A fast-path module is therefore checked on
 its own: a cold transpile of the same source in the verify child, compared byte for byte. #1899 makes the
 numbering per object. Until the check passes, the object is reported `warm-unverified`. A repository object
@@ -153,8 +161,19 @@ built on the fast path still enters the next cold build, and from then on it is 
   oracle's `USING 21` needs USING passed as well.
 - **Errors.** The first issue gives sy-subrc 4, LINE (the issue row) and WORD (the token at the issue start).
   A parser error gives WORD `SYS$$INCOMPLETE$$`. MESSAGE is abaplint's text, not the kernel's. The tests
-  compare subrc, LINE and WORD, and MESSAGE only for the few messages mapped. Anything else (no registry,
-  limits) gives the M1 refusal, subrc 8.
+  compare subrc, LINE and WORD, and MESSAGE only for the few messages mapped. Anything else (a prime that
+  fails or goes silent, limits) gives the M1 refusal, subrc 8.
+- **Speed.** On a primed registry a GENERATE is a warm compile of one pool, with a sub-second target (section 3),
+  and a cache hit costs nothing. The 11 to 17 s prime is paid once, eagerly, not per GENERATE.
+- **No registry yet (rare).** GENERATE waits for the prime rolled out, with the work process released,
+  through `rollOut`/`rollIn`
+  (`tools/osd-dialog-step.mjs`), so other requests run meanwhile. The limit is silence, like #466's transition
+  wait (`#bounded` in `tools/osd-store.mjs`): it waits while the prime reports progress and refuses with subrc 8
+  only when the prime fails or says nothing for `OSD_TRANSITION_MS`; the overall bound is the boot timeout. The
+  browser preview and OSGo refuse at once (decision 5, section 8).
+  Today `prime()` in `tools/osd-warm.mjs` reports nothing
+  until its last line (`warm: primed N files in M ms`) and blocks the process that holds the store, so the
+  progress heartbeat is phase P4a.
 - **Lifetime.** A pool lives for the internal session: the step for a stateless request, and the session
   token for a stateful one (ADT, APC, webgui). At the end its `abap.Forms` entries are removed. An ES module
   cannot be unloaded, so pools count toward the catch-up recycle's heap limit (`OSD_WARM_HEAP_MB`), and there
@@ -199,7 +218,8 @@ activate through ADT, so the API gives such a client nothing new. The new risks 
 | P2 | `ZCL_OSD_DEVELOPMENT` over CREATE, WRITE, DELETE, OBJECT and ACTIVATE (verdict only), `ZCX_OSD_DEVELOPMENT`, ENQ, the dev-only gate; ADT group A routes moved onto it | M | slice 3 adapter, group A host commands |
 | P3 | publish after the step: a `publish` continuation (front-up) and the after-step queue in `osd-dialog-step` | M | slice 3 B and the continuation registry (`feat/adt-front-up`), 4b; neither merged |
 | P4 | fast path for a new standalone object, with its own verify | M | transpiler #1899, #1900 and #1921 on npm or linked |
-| P5 | GENERATE: kernel hook, pool area, cache, error mapping, lifetime, PERFORM USING fix | M | P0, P4 |
+| P4a | progress heartbeats from `prime()` (none today), so a waiter can tell slow from silent | S | P4 |
+| P5 | GENERATE: kernel hook, pool area, cache, error mapping, lifetime, PERFORM USING fix | M | P0, P4, P4a |
 | P6 | FUGR and FUNC creation (always cold, after the step) | M | P2, P3 |
 
 **Measure on A4H first (P0),** with throwaway ABAP Unit probes in `$ZOSG_TMP`:
@@ -223,7 +243,9 @@ activate through ADT, so the API gives such a client nothing new. The new risks 
 3. **Decided:** both signals, as on a system (`CCCATEGORY` development and `CCNOCLIIND` changes allowed); OSG's own
    client row says "development" by default. Which signal is authoritative stays UNMEASURED until probed.
 4. **Decided:** `@KERNEL` in generated code is always refused.
-5. **Decided:** without a primed registry GENERATE waits for a prime up to a bound (about 10 s, a chosen bound, not a measurement), then refuses
-   with subrc 8; the browser preview and OSGo refuse at once.
+5. **Decided (Alice, 2026-10-02):** hot activation must be fast. The prime is eager and paid once; a GENERATE on
+   a primed registry is a warm compile; the rare wait releases the work process and is silence-bound. The
+   earlier 10 s cap is withdrawn (a prime takes 11 to 17 s as measured, vsp `osd.log`: "primed 1166 files in
+   11029 ms", so the cap would have refused the first GENERATE after nearly every start).
 6. **Decided:** not now; ADT covers callers outside ABAP. RFC-enabled modules when a caller needs them.
 7. **Decided:** yes; subrc, LINE and WORD follow the kernel, the MESSAGE text is abaplint's.
