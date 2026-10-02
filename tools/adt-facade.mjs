@@ -932,7 +932,7 @@ export function adtRouter(options = {}) {
   // system's, by capture line: package drawers a4h-adt.jsonl:44 and :232,
   // several selected packages :231, group and type drawers :90 and :91,
   // objects :92, the direct-only spelling :233 and :239.
-  router.post(`${BASE}/repository/informationsystem/virtualfolders/contents`, async (req, res) => {
+  router.post(`${BASE}/repository/informationsystem/virtualfolders/contents`, (req, res) => answer(res, async () => {
     const asked = virtualFoldersRequest((await rawBody(req)).toString("utf8"));
     const tree = packageTree();
     const packageValues = asked.preselection.get("package") ?? [];
@@ -1033,7 +1033,7 @@ export function adtRouter(options = {}) {
       preselectionInfo + rootLink + body +
       "</vfs:virtualFoldersResult>",
     );
-  });
+  }));
 
   // ---- The rest of what a client asks for before it will work.
   //
@@ -2772,10 +2772,17 @@ export function adtRouter(options = {}) {
   });
 
   advertise("repository/nodestructure");
-  router.post(`${BASE}/repository/nodepath`, async (req, res) => {
+  router.post(`${BASE}/repository/nodepath`, (req, res) => answer(res, async () => {
     await rawBody(req);
     const uri = typeof req.query.uri === "string" ? req.query.uri : "";
-    const parsed = objectFromUri(uri.replace(/\/includes\/.*$/, ""), collections);
+    let parsed;
+    try {
+      parsed = objectFromUri(uri.replace(/\/includes\/.*$/, ""), collections);
+    } catch (error) {
+      if (!(error instanceof URIError)) throw error;
+      refuse(res, 400, "ExceptionInvalidRequest", "an object uri is required");
+      return;
+    }
     if (parsed === undefined || parsed.type === "DEVC") {
       res.status(400).type("application/xml")
         .send(exceptionDocument("ExceptionInvalidRequest", "an object uri is required"));
@@ -2797,7 +2804,7 @@ export function adtRouter(options = {}) {
       ...packages,
       {name: entry.name, type: ADT_TYPE[entry.type] ?? entry.type, uri: objectUri},
     ]));
-  });
+  }));
   router.post(`${BASE}/repository/nodestructure`, async (req, res) => {
     const body = await rawBody(req);
     answer(res, () => {
