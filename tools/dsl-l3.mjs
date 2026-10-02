@@ -573,7 +573,8 @@ export async function renderSet(model) {
   if (model.settings) {
     for (const [name, template, kind] of [[model.settings.class, "recipes/l3-settings/class.tpl", "clas"],
       [model.settings.report, "recipes/l3-settings/report.tpl", "prog"]]) {
-      const rendered = await renderRecipe(model, template, {profile: "abap"});
+      const rendered = await renderRecipe(model, template, {profile: "abap", ...(model.governor && kind === "clas" ? {templateText:
+        governorTemplate(readFileSync(template, "utf8"), JSON.parse(readFileSync("recipes/l3-governor/settings.patch.json", "utf8")))} : {})});
       results.push([`${name}.${kind}.abap`, rendered]);
     }
   }

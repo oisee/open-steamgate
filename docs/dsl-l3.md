@@ -1450,33 +1450,50 @@ and already-closed keys refund nothing. A partial sink write raises a port
 exception so the caller rolls back the whole LUW, including its reservation.
 
 The admission predicate is the equivalent atomic UPDATE
-`reserved <= lv_room`, where `lv_room = glass - n` is read from the locked
-budget row. **Written implementation deviation:** the pinned transpiler
-mis-emits the sketch's `reserved + n <= glass` SQL arithmetic (a host variable
-becomes a column, and the right-hand field becomes a JavaScript variable).
-The equivalent subtraction avoids that defect and avoids addition overflow.
-The budget read uses `FOR UPDATE`, and `sy-dbcnt = 1` alone admits a write.
-The real-session test releases two pile sessions together against one file DB;
-each fits alone and exactly one writes. Removing the predicate makes the
-same admission oracle fail with overshoot.
+`reserved <= lv_room`, where `lv_room = glass - n` comes from a plain read.
+ABAP 7.02 Open SQL does not support arithmetic expressions in WHERE, so the
+subtraction is computed before the UPDATE; it also avoids addition overflow.
+GLASS only grows through an audited continuation, so a stale limit is
+conservative. Admission is the single conditional UPDATE with
+`state <> 'GLASS'`, the capacity predicate and the INT4 consumed guard;
+`sy-dbcnt = 1` alone admits a write. Its row lock serializes the tail: sink,
+autoclose, counters and commit. The expensive L2 check holds no budget lock.
+Filter piles reserve nothing and access the budget only through the plain
+early GLASS read. The real-session test releases two piles together against
+one file DB; each fits alone and exactly one writes. The sequential
+refund/key test is a sequence, not a race; the reserve mutant pins the
+predicate and fails with overshoot. A separate two-session L2 pause test
+models the budget row lock SQLite lacks and verifies B admits while A checks;
+putting FOR UPDATE back into run_rule fails that test.
 
 A WARN event records the first crossing without changing state. At
-`RESERVED / GLASS >= narrow_at`, state becomes NARROW. Submission counts
-existing RUNNING piles and PLANNED piles that already have a job or claim,
-and allows only one chain. Each finishing job conditionally claims the next
-PLANNED pile of its stage. A refund below the threshold restores RUNNING and
-allows pending submissions again. Claims prevent a gate and a finishing job
-from submitting the same pile twice; jobs still use the pair (name, count).
+`RESERVED / GLASS >= narrow_at`, state becomes NARROW. This is a submission
+cap: no new job is submitted while a RUNNING pile or a PLANNED pile with a
+job or durable claim has taken the chain. Jobs submitted before the crossing
+still run and can be refused by admission. There is no strict one-RUNNING
+invariant at the crossing. Each finishing job conditionally claims the next
+PLANNED pile of its stage, including when it ends HELD or FUSED. The doctor
+retries a dumped chain and submits the next waiting pile after that chain
+exhausts its retries. Waiting piles spend no attempts and get no RESUBMIT
+audit while the slot is taken. Only a real job pair gets RESUBMIT. A refund
+below the threshold restores RUNNING with its own RUNNING event and allows
+pending submissions again. Claims prevent a gate and a finishing job from
+submitting the same pile twice; jobs still use the pair (name, count).
+Settings enforce `warn <= narrow_at <= 1` for edits of either threshold.
 
-**Written concurrency tradeoff:** a governor pile holds the budget row lock
-through its pile LUW, before it marks the pile RUNNING. On a system this also
-serializes governed pile execution in RUNNING state, although normal
-submission can create multiple jobs. It gives the strict one-RUNNING-pile
-invariant immediately on entering NARROW, including jobs already submitted
-before the crossing. Moving expensive checks outside that lock requires a
-separate durable admission lease and is deferred. The conditional UPDATE
-still enforces capacity on the offline file DB, where `FOR UPDATE` does not
-provide a system's row lock.
+Lock order follows the LUW's purpose. A pile job locks its own plan row to
+wait for the submitter, then takes the budget row only at admission. Collect
+can update a finished job's pile row before advance/submission takes the
+budget row. Submission and heal take budget before the next PLANNED row;
+the pile job's flow uses that same order for subsequent rows. JOB_OPEN ends
+the preceding LUW, and each later claim rechecks the budget. These are not a
+single global lock order: a collector with stale job state and a submitting
+or finishing session can contend in opposite orders. System deadlock victims
+must roll back and be recovered by the doctor; the file DB concurrency tests
+do not prove freedom from system deadlocks. No budget lock spans L2, but a
+pile's own row lock remains until its LUW ends. The L2 pause seam defers that
+one row's RUNNING write because SQLite instead locks the whole database for
+any writer; the independent admission test uses the unmodified file client.
 
 A reservation that does not fit sets GLASS and writes a GLASS event. No new
 pile is submitted, jobs already submitted refuse before doing work, and the
@@ -1486,8 +1503,10 @@ silently clear GLASS. A person calls
 `continue_glass( iv_run, iv_new_glass, iv_reason )` with a strictly higher
 run-only limit and a nonblank reason of at most 80 characters. It writes
 CONTINUE with the user, time and numbers, restores RUNNING or NARROW,
-replans refused piles and calls resume. The original settings snapshot stays
-as evidence of the initial limit; events show the human override.
+replans refused piles and calls resume. GLASS-STAGE events record the OPEN
+stages stopped by each GLASS episode; continuation reopens only those
+PARTIAL stages, leaving unrelated PARTIAL and NOT-RUN stages alone. The
+original settings snapshot stays as evidence of the initial limit; events show the human override.
 
 The three limits serve different purposes:
 
@@ -1538,7 +1557,8 @@ proofs it is skipped in the memory-only unit loop and **run** by the file-DB
 Mocha harness, in alphabetical method order. The lead runs the same proof on
 A4H. `test/dsl-l3-governor.mjs` covers the funnel, competing sessions, refunds,
 chains, WARN, GLASS, human continuation, snapshots, byte stability and holds.
-Its seven copied-runner mutants remove the reservation predicate, refund,
-narrow cap, glass submission guard, continue audit, distinct-key counting,
-or per-pile guard. Every mutant uses the same oracle as the original, and
+Its nine copied-runner mutants remove the reservation predicate, refund,
+narrow submission cap, glass submission guard, continue audit, distinct-key
+counting or per-pile guard, spend waiting attempts under NARROW, or restore
+the early budget FOR UPDATE. Every mutant uses the same oracle as the original, and
 the original is re-run green after the copied class is restored.

@@ -32,6 +32,7 @@ export function compileGovernor(doc, model, rules, {line, fail}) {
     ? model.ports.find((p) => p.name === autoclose.slice(5) && p.is_autoclose) : undefined;
   if (autoclose !== "none" && !port) bad("autoclose is none or port:<an autoclose port>");
   const node = {"@id": `${model["@id"]}/governor`, set_line: at, glass, warn, narrow_at: narrow,
+    exception: model.exception, ports_class: model.ports_class,
     per_pile: whole(budget.per_pile ?? "0", "budget.per_pile", 0),
     ...(port ? {autoclose_port: port.name, "autoclose_port@type": {built_in: "CHAR", length: 30}, autoclose_iface: port.iface} : {})};
   // Existing L2 checks return rendered alert rows. Carry the declared driving

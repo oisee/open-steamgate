@@ -62,6 +62,7 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS stages_mode_p FOR TESTING.
     METHODS stages_mode_s FOR TESTING.
     METHODS stages_partial FOR TESTING.
+    METHODS plan_budget IMPORTING iv_run TYPE csequence.
     METHODS open_run
       IMPORTING iv_failed TYPE abap_bool
       RETURNING VALUE(rs_result) TYPE zcl_l3_fleet2=>ty_result.
@@ -859,6 +860,8 @@ CLASS ltcl_proof IMPLEMENTATION.
     ls_result-rules = zcl_l3_fleet2=>rules( ).
     ls_result-run_id = cl_system_uuid=>create_uuid_c32_static( ).
     APPEND ls_result-run_id TO mt_runs.
+    " run( ) creates the budget before any pile is visible to a job
+    plan_budget( ls_result-run_id ).
     " the run as run( ) leaves it: its lock held, stage 1 open, stage 2 waiting
     ls_lock-set_name = zcl_l3_fleet2=>c_set.
     ls_lock-check_date = zcl_l3_fleet_proof=>c_check_date.
@@ -1026,6 +1029,21 @@ CLASS ltcl_proof IMPLEMENTATION.
     ENDDO.
   ENDMETHOD.
 
+  METHOD plan_budget.
+    " fixture counterpart of run( )'s budget, before any pile can execute
+    DATA ls_budget TYPE zosd_l3_budget.
+    DATA ls_defaults TYPE zcl_l3_fleet2_conf=>ty_values.
+    ls_defaults = zcl_l3_fleet2_conf=>defaults( ).
+    ls_budget-run_id = iv_run.
+    ls_budget-set_name = zcl_l3_fleet2=>c_set.
+    ls_budget-state = 'RUNNING'.
+    ls_budget-glass = ls_defaults-budget_glass.
+    ls_budget-warn_at = ls_defaults-budget_warn.
+    ls_budget-narrow_at = ls_defaults-budget_narrow_at.
+    ls_budget-per_pile = ls_defaults-budget_per_pile.
+    INSERT zosd_l3_budget FROM ls_budget.
+  ENDMETHOD.
+
   METHOD open_run.
     " a run in jobs as run( ) leaves it once stage 1 has run: its lock held
     " (since long ago), stage 1 open, stage 2 waiting. Every pile of stage 1
@@ -1043,6 +1061,8 @@ CLASS ltcl_proof IMPLEMENTATION.
     rs_result-rules = zcl_l3_fleet2=>rules( ).
     rs_result-run_id = cl_system_uuid=>create_uuid_c32_static( ).
     APPEND rs_result-run_id TO mt_runs.
+    " run( ) creates the budget before any pile is visible to a job
+    plan_budget( rs_result-run_id ).
     ls_lock-set_name = zcl_l3_fleet2=>c_set.
     ls_lock-check_date = zcl_l3_fleet_proof=>c_check_date.
     ls_lock-run_id = rs_result-run_id.

@@ -575,6 +575,9 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     DATA ls_spec TYPE zosd_l3_conf.
     DATA ls_row TYPE zosd_l3_conf.
     DATA ls_old TYPE zosd_l3_conf.
+    DATA ls_current TYPE ty_state.
+    DATA lv_warn TYPE i.
+    DATA lv_narrow TYPE i.
     rv_ok = abap_false.
     IF authorised( ) = abap_false OR valid( iv_param = iv_param iv_value = iv_value ) = abap_false.
       RETURN.
@@ -585,6 +588,26 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
       RETURN.
     ENDIF.
     settings_seed( ).
+    IF iv_param = 'budget.warn' OR iv_param = 'budget.narrow_at'.
+      " fixed lock order for concurrent edits of the two thresholds
+      SELECT SINGLE FOR UPDATE * FROM zosd_l3_conf INTO ls_old
+        WHERE set_name = 'fleet2' AND param_name = 'budget.warn'.
+      SELECT SINGLE FOR UPDATE * FROM zosd_l3_conf INTO ls_old
+        WHERE set_name = 'fleet2' AND param_name = 'budget.narrow_at'.
+      ls_current = load( iv_write = abap_false ).
+      lv_warn = 7000.
+      lv_narrow = 8000.
+      lv_warn = ls_current-vals-budget_warn.
+      lv_narrow = ls_current-vals-budget_narrow_at.
+      IF iv_param = 'budget.warn'.
+        lv_warn = iv_value.
+      ELSE.
+        lv_narrow = iv_value.
+      ENDIF.
+      IF lv_warn > lv_narrow OR lv_narrow > 10000.
+        RETURN.
+      ENDIF.
+    ENDIF.
     SELECT SINGLE * FROM zosd_l3_conf INTO ls_row
       WHERE set_name = 'fleet2' AND param_name = iv_param.
     IF sy-subrc <> 0.

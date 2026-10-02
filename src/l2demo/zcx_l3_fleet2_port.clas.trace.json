@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-ports/exception.tpl",
- "model": "sha256:76f703bbe17180d5da1fd6324633c90c14faf5b07aa1d7e0c7021de22030a2e2",
+ "model": "sha256:75a07f51b5315b98bdae55b9a27b114034116e34b33ea80065684ac1e4bd24db",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",

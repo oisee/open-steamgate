@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-settings/class.tpl",
- "model": "sha256:76f703bbe17180d5da1fd6324633c90c14faf5b07aa1d7e0c7021de22030a2e2",
+ "model": "sha256:75a07f51b5315b98bdae55b9a27b114034116e34b33ea80065684ac1e4bd24db",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",
@@ -4082,511 +4082,672 @@
   },
   {
    "line": 578,
-   "template_line": 325,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 326,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 579,
-   "template_line": 326,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 327,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 580,
-   "template_line": 327,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 328,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 581,
-   "template_line": 328,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 582,
-   "template_line": 329,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 583,
    "template_line": 330,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 584,
+   "line": 582,
    "template_line": 331,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 585,
+   "line": 583,
    "template_line": 332,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 586,
+   "line": 584,
    "template_line": 333,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 587,
+   "line": 585,
    "template_line": 334,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 588,
+   "line": 586,
    "template_line": 335,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 589,
+   "line": 587,
    "template_line": 336,
-   "path": "/set",
+   "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 590,
+   "line": 588,
    "template_line": 337,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 591,
+   "line": 589,
    "template_line": 338,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 592,
+   "line": 590,
    "template_line": 339,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
+   "line": 591,
+   "template_line": 341,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
+  },
+  {
+   "line": 592,
+   "template_line": 342,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
+  },
+  {
    "line": 593,
-   "template_line": 340,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 343,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 594,
-   "template_line": 341,
-   "path": "/",
+   "template_line": 344,
+   "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
    "line": 595,
-   "template_line": 342,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 345,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 596,
-   "template_line": 343,
-   "path": "/",
+   "template_line": 346,
+   "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
    "line": 597,
-   "template_line": 344,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 347,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 598,
-   "template_line": 345,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 348,
+   "path": "/governor/warn",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 599,
-   "template_line": 346,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 349,
+   "path": "/governor/narrow_at",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 600,
-   "template_line": 347,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 351,
+   "path": "/settings/budget_warn",
+   "node": "set/fleet2/settings",
+   "set_line": 71
   },
   {
    "line": 601,
-   "template_line": 348,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 354,
+   "path": "/settings/budget_narrow_at",
+   "node": "set/fleet2/settings",
+   "set_line": 71
   },
   {
    "line": 602,
-   "template_line": 349,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 356,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 603,
-   "template_line": 350,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 357,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 604,
-   "template_line": 351,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 358,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 605,
-   "template_line": 352,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 359,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 606,
-   "template_line": 353,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 360,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 607,
-   "template_line": 354,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 361,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 608,
-   "template_line": 355,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 362,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 609,
-   "template_line": 356,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 363,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 610,
-   "template_line": 357,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
+   "template_line": 364,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 68
   },
   {
    "line": 611,
-   "template_line": 358,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 612,
-   "template_line": 359,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 613,
-   "template_line": 360,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 614,
-   "template_line": 361,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 615,
-   "template_line": 362,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 616,
-   "template_line": 363,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 617,
-   "template_line": 364,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 618,
-   "template_line": 365,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 11
-  },
-  {
-   "line": 619,
    "template_line": 366,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 620,
+   "line": 612,
    "template_line": 367,
    "path": "/set",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 621,
+   "line": 613,
    "template_line": 368,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 622,
+   "line": 614,
    "template_line": 369,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 623,
+   "line": 615,
    "template_line": 370,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 624,
+   "line": 616,
    "template_line": 371,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 625,
+   "line": 617,
    "template_line": 372,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 626,
+   "line": 618,
    "template_line": 373,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 627,
+   "line": 619,
    "template_line": 374,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 628,
+   "line": 620,
    "template_line": 375,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 629,
+   "line": 621,
    "template_line": 376,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 630,
+   "line": 622,
    "template_line": 377,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 631,
+   "line": 623,
    "template_line": 378,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 632,
+   "line": 624,
    "template_line": 379,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 633,
+   "line": 625,
    "template_line": 380,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 634,
+   "line": 626,
    "template_line": 381,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 635,
+   "line": 627,
    "template_line": 382,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 636,
+   "line": 628,
    "template_line": 383,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 637,
+   "line": 629,
    "template_line": 384,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 638,
+   "line": 630,
    "template_line": 385,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 639,
+   "line": 631,
    "template_line": 386,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 640,
+   "line": 632,
    "template_line": 387,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 641,
+   "line": 633,
    "template_line": 388,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 642,
+   "line": 634,
    "template_line": 389,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 643,
+   "line": 635,
    "template_line": 390,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 644,
+   "line": 636,
    "template_line": 391,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 645,
+   "line": 637,
    "template_line": 392,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 646,
+   "line": 638,
    "template_line": 393,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 647,
+   "line": 639,
    "template_line": 394,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 648,
+   "line": 640,
    "template_line": 395,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 649,
+   "line": 641,
    "template_line": 396,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11
   },
   {
-   "line": 650,
+   "line": 642,
    "template_line": 397,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 643,
+   "template_line": 398,
+   "path": "/set",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 644,
+   "template_line": 399,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 645,
+   "template_line": 400,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 646,
+   "template_line": 401,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 647,
+   "template_line": 402,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 648,
+   "template_line": 403,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 649,
+   "template_line": 404,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 650,
+   "template_line": 405,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 651,
+   "template_line": 406,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 652,
+   "template_line": 407,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 653,
+   "template_line": 408,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 654,
+   "template_line": 409,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 655,
+   "template_line": 410,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 656,
+   "template_line": 411,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 657,
+   "template_line": 412,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 658,
+   "template_line": 413,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 659,
+   "template_line": 414,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 660,
+   "template_line": 415,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 661,
+   "template_line": 416,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 662,
+   "template_line": 417,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 663,
+   "template_line": 418,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 664,
+   "template_line": 419,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 665,
+   "template_line": 420,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 666,
+   "template_line": 421,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 667,
+   "template_line": 422,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 668,
+   "template_line": 423,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 669,
+   "template_line": 424,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 670,
+   "template_line": 425,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 671,
+   "template_line": 426,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 672,
+   "template_line": 427,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 11
+  },
+  {
+   "line": 673,
+   "template_line": 428,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 11

@@ -882,8 +882,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_key_1 LIKE LINE OF lt_keys_1.
     DATA ls_params TYPE ty_params.
     rs_rule-rule = iv_rule.
-    budget_start( iv_run ).
-    SELECT SINGLE FOR UPDATE * FROM zosd_l3_budget INTO ls_budget
+    SELECT SINGLE * FROM zosd_l3_budget INTO ls_budget
       WHERE run_id = iv_run AND set_name = c_set.
     IF sy-subrc <> 0 OR ls_budget-state = 'GLASS'.
       UPDATE zosd_l3_pile SET status = 'GLASS' reason = 'GLASS'
@@ -1159,7 +1158,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       cs_rule-status = 'FUSED'.
       RETURN.
     ENDIF.
-    SELECT SINGLE FOR UPDATE * FROM zosd_l3_budget INTO ls_guard
+    SELECT SINGLE * FROM zosd_l3_budget INTO ls_guard
       WHERE run_id = iv_run AND set_name = c_set.
     IF sy-subrc <> 0 OR ls_guard-state = 'GLASS'.
       cs_rule-status = 'GLASS'.
@@ -1688,7 +1687,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         ls_stage-piles = ls_stage-piles + 1.
         IF ls_pile-status = 'DONE'.
           ls_stage-piles_done = ls_stage-piles_done + 1.
-        ELSEIF ls_pile-status = 'FAILED' OR ls_pile-status = 'HELD' OR ls_pile-status = 'GLASS'.
+        ELSEIF ls_pile-status = 'FAILED'.
+          lv_lost = abap_true.
+        ELSEIF ls_pile-status = 'HELD' OR ls_pile-status = 'GLASS'.
           lv_lost = abap_true.
         ELSEIF ls_pile-status = 'FUSED'.
           lv_lost = abap_true.
@@ -1741,7 +1742,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           ELSE.
             ls_rule-alerts = ls_rule-alerts + ls_pile-alerts.
           ENDIF.
-        ELSEIF ls_pile-status = 'FAILED' OR ls_pile-status = 'HELD' OR ls_pile-status = 'GLASS'.
+        ELSEIF ls_pile-status = 'FAILED'.
+          lv_lost = abap_true.
+        ELSEIF ls_pile-status = 'HELD' OR ls_pile-status = 'GLASS'.
           lv_lost = abap_true.
         ELSEIF ls_pile-status = 'FUSED'.
           lv_fused = abap_true.
@@ -2021,6 +2024,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_since TYPE timestamp.
     DATA lv_reason TYPE zosd_l3_pile-reason.
     DATA lv_next TYPE i.
+    DATA ls_guard TYPE zosd_l3_budget.
+    DATA lv_chains TYPE i.
+    DATA ls_claim TYPE zosd_l3_pile.
     DATA lv_count TYPE i.
     DATA lv_open TYPE i.
     DATA lv_prev TYPE i.
@@ -2126,6 +2132,17 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       ELSE.
         CONTINUE.
       ENDIF.
+      " budget_guard holds the submission lock until submit makes its claim
+      SELECT SINGLE * FROM zosd_l3_budget INTO ls_guard WHERE run_id = iv_run AND set_name = c_set.
+      IF ls_guard-state = 'NARROW'.
+        SELECT COUNT(*) FROM zosd_l3_pile INTO lv_chains
+          WHERE run_id = iv_run AND set_name = c_set
+            AND ( status = 'RUNNING' OR ( status = 'PLANNED' AND ( job_count <> '' OR reason = 'GOV-CLAIM' ) ) ).
+        IF lv_chains > 0.
+          CONTINUE.
+        ENDIF.
+      ENDIF.
+      ls_claim = ls_pile.
       " the claim: PLANNED again with the next attempt, on the row as it was read
       lv_next = ls_pile-attempt + 1.
       UPDATE zosd_l3_pile SET status = 'PLANNED' attempt = lv_next reason = lv_reason
@@ -2149,6 +2166,14 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                         is_params = is_params
                         iv_jobname = ls_rule-jobname
               CHANGING cs_pile = ls_pile ).
+      IF ls_pile-job_count IS INITIAL.
+        " a refused submit did not spend an attempt or create a RESUBMIT
+        UPDATE zosd_l3_pile SET status = ls_claim-status attempt = ls_claim-attempt reason = ls_claim-reason
+                                job_name = ls_claim-job_name job_count = ls_claim-job_count
+          WHERE run_id = iv_run AND rule_name = ls_claim-rule_name AND pile_no = ls_claim-pile_no
+            AND status = 'PLANNED' AND attempt = lv_next AND job_count = ''.
+        CONTINUE.
+      ENDIF.
       act( EXPORTING iv_run = iv_run
                      iv_date = iv_date
                      iv_stage = ls_pile-stage_no
@@ -2680,10 +2705,21 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD break_glass.
+    DATA lt_gates TYPE STANDARD TABLE OF zosd_l3_stage WITH DEFAULT KEY.
+    DATA ls_gate TYPE zosd_l3_stage.
     UPDATE zosd_l3_budget SET state = 'GLASS'
       WHERE run_id = iv_run AND set_name = c_set AND state <> 'GLASS'.
     IF sy-dbcnt = 1.
       budget_event( iv_run = iv_run iv_kind = 'GLASS' iv_amount = iv_amount iv_reason = 'reservation does not fit' ).
+      SELECT * FROM zosd_l3_stage INTO TABLE lt_gates
+        WHERE run_id = iv_run AND set_name = c_set AND status = 'OPEN' ORDER BY PRIMARY KEY.
+      LOOP AT lt_gates INTO ls_gate.
+        UPDATE zosd_l3_stage SET status = 'PARTIAL'
+          WHERE run_id = iv_run AND stage_no = ls_gate-stage_no AND status = 'OPEN'.
+        IF sy-dbcnt = 1.
+          budget_event( iv_run = iv_run iv_kind = 'GLASS-STAGE' iv_amount = ls_gate-stage_no ).
+        ENDIF.
+      ENDLOOP.
     ENDIF.
   ENDMETHOD.
 
@@ -2715,7 +2751,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ENDIF.
     IF lv_next <> ls_budget-state.
       UPDATE zosd_l3_budget SET state = lv_next WHERE run_id = iv_run AND set_name = c_set AND state <> 'GLASS'.
-      budget_event( iv_run = iv_run iv_kind = 'NARROW' iv_reason = lv_next ).
+      budget_event( iv_run = iv_run iv_kind = lv_next ).
     ENDIF.
   ENDMETHOD.
 
@@ -2741,6 +2777,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
 
   METHOD continue_glass.
     DATA ls_budget TYPE zosd_l3_budget.
+    DATA lt_events TYPE tt_events.
+    DATA ls_event TYPE zosd_l3_event.
+    DATA lv_after TYPE i.
     DATA lt_report TYPE tt_doctor.
     DATA lv_reason TYPE string.
     lv_reason = iv_reason.
@@ -2758,14 +2797,18 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF sy-dbcnt <> 1.
       RETURN.
     ENDIF.
+    lt_events = events( iv_run ).
+    LOOP AT lt_events INTO ls_event WHERE kind = 'CONTINUE'.
+      lv_after = ls_event-seq.
+    ENDLOOP.
     budget_event( iv_run = iv_run iv_kind = 'CONTINUE' iv_amount = iv_new_glass iv_reason = iv_reason ).
     budget_refresh( iv_run ).
     UPDATE zosd_l3_pile SET status = 'PLANNED' job_count = '' job_name = '' reason = 'CONTINUE'
       WHERE run_id = iv_run AND set_name = c_set AND status = 'GLASS'.
-    UPDATE zosd_l3_stage SET status = 'OPEN'
-      WHERE run_id = iv_run AND set_name = c_set AND status = 'PARTIAL'.
-    UPDATE zosd_l3_stage SET status = 'WAITING'
-      WHERE run_id = iv_run AND set_name = c_set AND status = 'NOT-RUN'.
+    LOOP AT lt_events INTO ls_event WHERE kind = 'GLASS-STAGE' AND seq > lv_after.
+      UPDATE zosd_l3_stage SET status = 'OPEN'
+        WHERE run_id = iv_run AND set_name = c_set AND stage_no = ls_event-amount AND status = 'PARTIAL'.
+    ENDLOOP.
     lt_report = resume( iv_run ).
     rv_ok = abap_true.
   ENDMETHOD.

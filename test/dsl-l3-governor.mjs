@@ -48,9 +48,18 @@ describe("DSL L3 slice 5c-1: governor", function () {
     const trace = JSON.parse(readFileSync("src/l2demo/zcl_l3_fleet2.clas.trace.json", "utf8"));
     const line = readFileSync(SET, "utf8").split("\n").findIndex((l) => l === "governor:") + 1;
     for (const re of [/METHOD budget_/, /METHOD break_glass/, /METHOD continue_glass/, /METHOD release_pile/,
-      /reserved = reserved [+-]/, /iv_key_offset =/, /state = 'NARROW'/]) {
+      /reserved = reserved [+-]/, /iv_key_offset =/, /state = 'NARROW'/,
+      /budget_state\(/, /status = 'HELD' OR .*status = 'GLASS'/, /LOOP.*status <> 'HELD'/,
+      /RAISE EXCEPTION.*(?:governor|alert lacks)/, /li_autoclose =/]) {
       const matches = trace.lines.filter((t) => re.test(text[t.line - 1]));
+      expect(matches.length, String(re)).above(0);
       for (const t of matches) expect(t.set_line, text[t.line - 1]).to.equal(line);
+    }
+    const factory = readFileSync("src/l2demo/zcl_l3_fleet2_ports.clas.abap", "utf8").split("\n");
+    const factoryTrace = JSON.parse(readFileSync("src/l2demo/zcl_l3_fleet2_ports.clas.trace.json", "utf8"));
+    const closeLine = readFileSync(SET, "utf8").split("\n").findIndex((l) => l === "  close:") + 1;
+    for (const t of factoryTrace.lines.filter((t) => /(?:CLASS-METHODS|METHOD) get_close/.test(factory[t.line - 1]))) {
+      expect(t.set_line).to.equal(closeLine);
     }
   });
 
@@ -132,6 +141,17 @@ describe("DSL L3 slice 5c-1: governor", function () {
       expect(read("SELECT * FROM zosd_l3_conf WHERE origin='USER'")).to.have.length(0);
     });
 
+    it("settings keep warn <= narrow_at, including edits of either threshold", async () => {
+      expect(trim((await tune("budget.warn", "9000")).get())).to.equal("");
+      expect(trim((await tune("budget.narrow_at", "6000")).get())).to.equal("");
+      expect(read("SELECT * FROM zosd_l3_conf WHERE origin='USER'")).to.have.length(0);
+      expect(trim((await tune("budget.narrow_at", "9000")).get())).to.equal("X");
+      expect(trim((await tune("budget.warn", "9000")).get())).to.equal("X");
+      expect(trim((await tune("budget.narrow_at", "8999")).get())).to.equal("");
+      expect(trim((await tune("budget.narrow_at", "10001")).get())).to.equal("");
+      expect(read("SELECT param_val FROM zosd_l3_conf WHERE param_name='budget.narrow_at'")[0].param_val).to.equal("9000");
+    });
+
     it("funnel: hits become distinct keys; maintenance autoclose refunds those keys once", async () => {
       const r = await run("S", "close=maintenance"); const runId = id(r);
       expect(status(r)).to.equal("DONE");
@@ -169,6 +189,8 @@ describe("DSL L3 slice 5c-1: governor", function () {
         expect(read("SELECT * FROM zosd_l3_alert WHERE run_id = ?", runId)).to.have.length(1);
       } finally { for (const {child} of children) if (child.exitCode === null) child.kill("SIGTERM"); }
     });
+    // This refund/key oracle is deliberately sequential. The reserve mutant
+    // pins the predicate; the independent-session test above pins concurrency.
     it("refund allows a later pile to fit; repeated keys in other piles consume nothing more", async () => {
       const runId = await planned(1);
       await exec(["UPDATE zosd_l2_ship SET status='M' WHERE ship_id='S001'", `UPDATE zosd_l3_pile SET rule_name='maintenance-ship-no-future-voyage' WHERE run_id='${runId}' AND pile_no=1`]);
@@ -207,30 +229,35 @@ describe("DSL L3 slice 5c-1: governor", function () {
       expect(piles(glassRun)).to.have.length(2); expect(events(glassRun)).to.deep.equal(before); expect(budget(glassRun).state).to.equal("GLASS");
     });
     it("WARN is an event, NARROW admits one chain and every deferred pile runs", async () => {
-      await tune("budget.glass", "5"); await tune("budget.warn", "1"); await tune("budget.narrow_at", "1");
-      const r = await run("P"); const runId = id(r);
+      const runId = await planned(5);
+      await exec([`UPDATE zosd_l3_budget SET warn_at=1, narrow_at=1 WHERE run_id='${runId}'`,
+        `INSERT INTO zosd_l3_pile (mandt,run_id,rule_name,pile_no,set_name,stage_no,model_hash,check_date,range_low,range_high,status,job_name,job_count,alerts,started,ended,attempt,reason,per_pile) VALUES ('','${runId}','ship-min-crew',3,'fleet2',2,'','${DATE}','S001','S001','PLANNED','','',0,0,0,0,'',0)`]);
+      // A real completed pile crosses the threshold before the two waiting
+      // piles are submitted. Those waiting piles have never had jobs.
+      expect(status(await pile(runId, 3))).to.equal("DONE");
+      const r = await dialogStep(() => cls().dry({iv_date: date()})); r.get().run_id.set(runId);
       const realUpdate = client.update;
-      let peak = 0, samples = 0;
+      let conflicts = 0, samples = 0;
       client.update = async function (options) {
         const result = await realUpdate.call(this, options);
         const states = await this.query(`SELECT state FROM zosd_l3_budget WHERE run_id='${runId}'`);
-        if (trim(states[0]?.state) === "NARROW") {
+        if (trim(states[0]?.state) === "NARROW" && options.table.replaceAll('"', "").toLowerCase() === "zosd_l3_pile"
+            && options.set.some((s) => /GOV-CLAIM/.test(s)) && result.dbcnt === 1) {
           samples++;
-          const active = await this.query(`SELECT COUNT(*) AS n FROM zosd_l3_pile WHERE run_id='${runId}' AND status='RUNNING'`);
-          peak = Math.max(peak, Number(active[0].n));
+          const active = await this.query(`SELECT COUNT(*) AS n FROM zosd_l3_pile WHERE run_id='${runId}' AND (status='RUNNING' OR (status='PLANNED' AND (job_count<>'' OR reason='GOV-CLAIM')))`);
+          if (Number(active[0].n) > 1) conflicts++;
         }
         return result;
       };
-      try { await drain(); } finally { client.update = realUpdate; }
-      expect(samples).above(0); expect(peak).at.most(1);
-      // Basis-point threshold 1 puts the real stage-2 chain into NARROW after
-      // the first nonempty pile. Every subsequent submit must have one claim.
+      try { await dialogStep(() => cls().resume({iv_run: str(runId)})); await drain(); } finally { client.update = realUpdate; }
+      expect(samples).above(0); expect(conflicts).to.equal(0);
+      // Basis-point threshold 1 keeps the stage-2 chain in NARROW. Only new submissions are capped; jobs
+      // submitted before the crossing are allowed to finish.
       expect(status(await collect(r))).to.equal("DONE");
       expect(piles(runId).every((p) => p.status === "DONE")).to.equal(true);
       expect(events(runId).filter((e) => e.kind === "WARN")).to.have.length(1);
       expect(events(runId).some((e) => e.kind === "NARROW")).to.equal(true);
-      const active = read("SELECT * FROM zosd_l3_pile WHERE run_id=? AND status='RUNNING'", runId);
-      expect(active.length).at.most(1);
+
     });
     it("GLASS stops submissions; doctor is hands-off, resume refuses, reasoned continue is audited", async () => {
       await tune("budget.glass", "1"); const r = await run("P"); const runId = id(r); await drain();
@@ -271,6 +298,107 @@ describe("DSL L3 slice 5c-1: governor", function () {
       expect(piles(runId).find((p) => p.rule_name === held.rule_name).status).to.equal("DONE");
     });
 
+    it("NARROW doctor/resume passes leave waiting attempts and audit untouched", async () => {
+      expect(await waitingOracle()).to.equal(true);
+      await drain();
+    });
+    it("NARROW retries a dumping chain to exhaustion, then runs the next pile and ends PARTIAL", async () => {
+      const runId = await planned(10, 50, "NARROW");
+      const check = abap.Classes.ZCL_L2_SHIP_MIN_CREW.check;
+      let dumps = 0;
+      abap.Classes.ZCL_L2_SHIP_MIN_CREW.check = async function (args) {
+        if (args.it_range.array().some((r) => trim(r.get().low.get()) === "S001")) {
+          dumps++; throw new Error("governor chain dump");
+        }
+        return check.call(this, args);
+      };
+      try {
+        await tune("retry.max", "2"); await tune("retry.backoff", "0");
+        await dialogStep(() => cls().resume({iv_run: str(runId)}));
+        for (let i = 0; i < 3; i++) {
+          await drainJobOutbox(store);
+          expect((await workQueuedBatch(process.cwd(), store)).kind).to.equal("failed");
+          await exec([`UPDATE zosd_l3_pile SET ended=20000101000000 WHERE run_id='${runId}' AND pile_no=1`,
+            `UPDATE zosd_l3_run SET started=20000101000000 WHERE run_id='${runId}'`]);
+          // The doctor has no force flag: old timestamps make real backoff due.
+          await dialogStep(() => cls().doctor({}));
+        }
+        expect(dumps).to.equal(3);
+        await drain();
+        const ps = piles(runId);
+        expect(ps.find((p) => p.pile_no === 1)).to.include({status: "FAILED", attempt: 3});
+        expect(ps.find((p) => p.pile_no === 2).status).to.equal("DONE");
+        const r = await dialogStep(() => cls().dry({iv_date: date()}));
+        r.get().run_id.set(runId);
+        expect(status(await collect(r))).to.equal("PARTIAL");
+        expect(read("SELECT status FROM zosd_l3_run WHERE run_id=?", runId)[0].status).to.equal("RELEASED");
+      } finally { abap.Classes.ZCL_L2_SHIP_MIN_CREW.check = check; }
+    });
+    it("RUNNING after a refund has its own event kind", async () => {
+      await tune("budget.glass", "5"); await tune("budget.warn", "1"); await tune("budget.narrow_at", "1");
+      const r = await run("S", "close=maintenance"), es = events(id(r));
+      expect(es.some((e) => e.kind === "RUNNING")).to.equal(true);
+      expect(es.some((e) => e.kind === "NARROW" && e.reason === "RUNNING")).to.equal(false);
+    });
+    it("continue_glass reopens only stages stopped by the current GLASS episode", async () => {
+      const runId = await planned(1);
+      await exec([`UPDATE zosd_l3_stage SET status='PARTIAL' WHERE run_id='${runId}' AND stage_no=1`,
+        `INSERT INTO zosd_l3_stage (mandt,run_id,stage_no,set_name,check_date,stage_name,status,opened,ended) VALUES ('','${runId}',3,'fleet2','${DATE}','later','NOT-RUN',0,0)`]);
+      await pile(runId, 1); await pile(runId, 2);
+      expect(events(runId).filter((e) => e.kind === "GLASS-STAGE").map((e) => e.amount)).to.deep.equal([2]);
+      expect(trim((await continueGlass(runId, 10, "capacity reviewed")).get())).to.equal("X");
+      expect(read("SELECT status FROM zosd_l3_stage WHERE run_id=? AND stage_no=1", runId)[0].status).to.equal("PARTIAL");
+      expect(read("SELECT status FROM zosd_l3_stage WHERE run_id=? AND stage_no=2", runId)[0].status).to.equal("OPEN");
+      expect(read("SELECT status FROM zosd_l3_stage WHERE run_id=? AND stage_no=3", runId)[0].status).to.equal("NOT-RUN");
+      await drain();
+    });
+    it("a governed filter pile only reads GLASS and never reserves or writes the budget", async () => {
+      const runId = await planned(10);
+      await exec([`UPDATE zosd_l3_pile SET rule_name='ship-busy', stage_no=1 WHERE run_id='${runId}'`]);
+      const select = client.select, update = client.update;
+      let reads = 0, writes = 0;
+      client.select = async function (o) { if (/FROM "?zosd_l3_budget/i.test(o.select)) reads++; return select.call(this, o); };
+      client.update = async function (o) { if (o.table.replaceAll('"', "").toLowerCase() === "zosd_l3_budget") writes++; return update.call(this, o); };
+      try {
+        const r = await dialogStep(() => cls().run_rule({iv_rule: str("ship-busy"), iv_run: str(runId), iv_date: date(), iv_pile: int(1)}));
+        expect(status(r)).to.equal("DONE"); expect(reads).to.equal(1); expect(writes).to.equal(0);
+      } finally { client.select = select; client.update = update; }
+    });
+    it("jobs submitted before the NARROW crossing still execute", async () => {
+      const runId = await planned(10);
+      await exec([`UPDATE zosd_l3_budget SET warn_at=1, narrow_at=1 WHERE run_id='${runId}'`]);
+      const rows = await dialogStep(() => cls().plan({iv_run: str(runId), iv_date: date(), iv_stage: int(2)}));
+      const base = rows.array().find((r) => trim(r.get().rule_name.get()) === "ship-min-crew");
+      for (const n of [1, 2]) {
+        const p = base.clone(); p.get().pile_no.set(n); p.get().range_low.set(`S00${n}`); p.get().range_high.set(`S00${n}`);
+        await dialogStep(() => cls().submit({iv_run: str(runId), iv_date: date(), iv_jobname: str("L3_FLEET2_206"), cs_pile: p}));
+      }
+      await drainJobOutbox(store);
+      expect((await workQueuedBatch(process.cwd(), store)).kind).to.equal("completed");
+      expect(budget(runId).state).to.equal("NARROW");
+      expect((await workQueuedBatch(process.cwd(), store)).kind).to.equal("completed");
+      expect(piles(runId).every((p) => p.status === "DONE")).to.equal(true);
+    });
+    for (const terminal of ["HELD", "FUSED"]) {
+      it(`a NARROW chain ending ${terminal} submits its next pile`, async () => {
+        const runId = await planned(10, terminal === "HELD" ? 1 : 50, "NARROW");
+        if (terminal === "HELD") {
+          await exec([`UPDATE zosd_l3_pile SET range_high='S002' WHERE run_id='${runId}' AND pile_no=1`]);
+        } else {
+          await exec(["UPDATE zosd_l2_ship SET status='M' WHERE ship_id='S001'",
+            `UPDATE zosd_l3_pile SET rule_name='maintenance-ship-no-future-voyage' WHERE run_id='${runId}' AND pile_no=1`,
+            `INSERT INTO zosd_l3_run_conf (mandt,run_id,set_name,param_name,param_val,origin,dsl_value) VALUES ('','${runId}','fleet2','fuses.max_alerts','1','DSL','500')`]);
+        }
+        await dialogStep(() => cls().resume({iv_run: str(runId)})); await drain();
+        expect(piles(runId).find((p) => p.pile_no === 1).status).to.equal(terminal);
+        expect(piles(runId).find((p) => p.pile_no === 2).status).to.equal("DONE");
+      });
+    }
+    it("non-narrow piles hold no budget lock across L2; B admits while A checks", async () => {
+      expect(await lockOracle()).to.equal(true);
+    });
+
+    const loaded = new Map();
     async function loadClass(real, name, edit) {
       const out = join(dir, name);
       mkdirSync(out, {recursive: true});
@@ -279,6 +407,8 @@ describe("DSL L3 slice 5c-1: governor", function () {
       const text = readFileSync(join(OUT, `${real}.clas.abap`), "utf8").replace(new RegExp(`\\b${real}\\b`, "g"), name);
       const edited = edit(text);
       expect(edited, `${name} differs from ${real}`).to.not.equal(text);
+      writeFileSync(join(out, `${name}.clas.abap`), edited);
+      loaded.set(name.toUpperCase(), {source: join(out, `${name}.clas.abap`), module: pathToFileURL(join(out, `${name}.clas.mjs`)).href});
       const files = {[`${name}.clas.abap`]: edited, [`${name}.clas.xml`]: readFileSync(join(OUT, `${real}.clas.xml`), "utf8").replace(real.toUpperCase(), name.toUpperCase())};
       for (const [f, t] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(t, f, core)));
       const deps = [...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
@@ -334,9 +464,66 @@ describe("DSL L3 slice 5c-1: governor", function () {
       const next = await pile(runId, 2), b = budget(runId);
       return status(next) === "DONE" && b.reserved === b.consumed - b.refunded;
     }
-    async function narrowOracle() {
+    async function waitingOracle() {
       const runId = await planned(10, 50, "NARROW");
       await dialogStep(() => cls().resume({iv_run: str(runId)}));
+      const audit = read("SELECT * FROM zosd_l3_doctor WHERE run_id=?", runId);
+      for (let i = 0; i < 5; i++) {
+        await dialogStep(() => cls().resume({iv_run: str(runId)}));
+        await dialogStep(() => cls().doctor({}));
+      }
+      const waiting = piles(runId).find((p) => p.pile_no === 2);
+      return waiting.attempt === 0 && !waiting.job_count
+        && read("SELECT * FROM zosd_l3_doctor WHERE run_id=? AND doc_action='RESUBMIT' AND pile_no=2", runId).length === 0
+        && read("SELECT * FROM zosd_l3_doctor WHERE run_id=?", runId).length === audit.length;
+    }
+    async function lockOracle() {
+      const runId = await planned(10);
+      const name = cls().INTERNAL_NAME, variant = loaded.get(name);
+      const children = [];
+      function launch(p) {
+        const child = fork("test/helpers/dsl-governor-lock.mjs", [], {env: {...process.env,
+          GOVERNOR_RUN: runId, GOVERNOR_PILE: String(p), GOVERNOR_PAUSE: p === 1 ? "1" : "0",
+          GOVERNOR_LOCK: join(dir, "budget-row.lock"), GOVERNOR_CLASS: name,
+          GOVERNOR_SOURCE: variant?.source ?? join(process.cwd(), OUT, `${RUNNER}.clas.abap`),
+          ...(variant ? {GOVERNOR_MODULE: variant.module} : {})}, stdio: ["ignore", "pipe", "pipe", "ipc"]});
+        let errors = "", answer;
+        child.stderr.on("data", (x) => { errors += x; });
+        const message = (field) => new Promise((resolve, reject) => {
+          child.on("message", (m) => { if (m[field]) resolve(m); });
+          child.once("exit", () => reject(new Error(errors || "child exited before " + field)));
+        });
+        const ready = message("ready"), checking = message("checking");
+        checking.catch(() => {});
+        const result = new Promise((resolve, reject) => {
+          child.on("message", (m) => { if (m.status || m.error) answer = m; });
+          child.once("exit", (code) => code || answer?.error ? reject(new Error(answer?.error ?? errors)) : resolve(answer));
+        });
+        result.catch(() => {}); children.push(child);
+        return {child, ready, checking, result};
+      }
+      const a = launch(1); let b, timer;
+      try {
+        await a.ready; a.child.send("go");
+        const checking = await a.checking;
+        b = launch(2); await b.ready; b.child.send("go");
+        const beforeRelease = await Promise.race([b.result, new Promise((resolve) => { timer = setTimeout(() => resolve(undefined), 1500); })]);
+        return !checking.budgetLocked && checking.pilePending && beforeRelease?.status === "DONE";
+      } finally {
+        clearTimeout(timer);
+        if (a.child.connected) a.child.send("release");
+        await Promise.all([a.result, b?.result]);
+        for (const child of children) if (child.exitCode === null) child.kill("SIGTERM");
+      }
+    }
+    async function narrowOracle() {
+      const runId = await planned(10, 50, "NARROW");
+      const rows = await dialogStep(() => cls().plan({iv_run: str(runId), iv_date: date(), iv_stage: int(2)}));
+      const base = rows.array().find((r) => trim(r.get().rule_name.get()) === "ship-min-crew");
+      for (const n of [1, 2]) {
+        const p = base.clone(); p.get().pile_no.set(n);
+        await dialogStep(() => cls().submit({iv_run: str(runId), iv_date: date(), iv_jobname: str("L3_FLEET2_206"), cs_pile: p}));
+      }
       return piles(runId).filter((p) => p.status === "PLANNED" && p.job_count).length === 1;
     }
     async function glassOracle() {
@@ -363,6 +550,9 @@ describe("DSL L3 slice 5c-1: governor", function () {
       return held.length > 0 && held.every((p) => read("SELECT * FROM zosd_l3_alert WHERE run_id=? AND rule_name=? AND pile_no=?", id(r), p.rule_name, p.pile_no).length === 0);
     }
     for (const [name, edit, oracle] of [
+      ["heal_narrow", (text) => methodEdit("heal", "attempt = ls_claim-attempt", "attempt = lv_next")(
+        methodEdit("heal", "IF lv_chains > 0.", "IF abap_false = abap_true.")(text)), waitingOracle],
+      ["early_lock", methodEdit("run_rule", "SELECT SINGLE * FROM zosd_l3_budget INTO ls_budget", "SELECT SINGLE FOR UPDATE * FROM zosd_l3_budget INTO ls_budget"), lockOracle],
       ["reserve", mutate("        AND reserved <= lv_room AND consumed <= lv_total_room.", "        AND consumed <= lv_total_room."), admissionOracle],
       ["refund", mutate("reserved = reserved - lv_closed refunded = refunded + lv_closed", "reserved = reserved - 0 refunded = refunded + lv_closed"), refundOracle],
       ["narrow", methodEdit("submit", "IF ls_guard-state = 'NARROW'.", "IF abap_false = abap_true."), narrowOracle],
