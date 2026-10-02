@@ -2,9 +2,9 @@
 import {expect} from "chai";
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
-import {copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {basename, isAbsolute, join, win32} from "node:path";
-import {excludeStagedPackSources} from "../scripts/build-vsix.mjs";
+import {copySeedTree, excludeStagedPackSources, loadSeedDependencies, shipsTestPath} from "../scripts/build-vsix.mjs";
 import {inventoryThirdParties} from "../scripts/third-party-notices.mjs";
 import {tilesOf} from "../tools/osd-packs.mjs";
 import {root, currentVsixFile, packagedSeedEntries, packagedPacks, testScratch, buildTestVsix, packagedController, timeVsixTests} from "./helpers/vsix.mjs";
@@ -79,6 +79,45 @@ describe("packaging changed seed content", function () {
   });
 });
 
+describe("packaging: test-only ABAP stays out of a system seed", function () {
+  this.timeout(120000);
+
+  it("the staging filter names the session double and the fleet reports", () => {
+    for (const rel of ["unit/zcl_osd_adt_session_mem.clas.abap", "unit/zcl_osd_adt_session_mem.clas.xml",
+      "integration/zosd_voyage.prog.abap", "integration/zosd_ready.prog.xml", "e2e", "e2e/flp.spec.mjs",
+      "fixtures", "fixtures/enq/contract.json"]) {
+      expect(shipsTestPath(rel), rel).to.equal(false);
+    }
+    for (const rel of ["start.mjs", "setup.mjs", "unit/zcl_osd_timer_probe.clas.abap"]) {
+      expect(shipsTestPath(rel), rel).to.equal(true);
+    }
+  });
+
+  it("copySeedTree, which the VSIX and the binary seed both stage through, leaves the double out", async () => {
+    await loadSeedDependencies();
+    const scratch = mkdtempSync(join(root, ".local", "seed-test-only-"));
+    try {
+      copySeedTree(scratch, []);
+      expect(existsSync(join(root, "test", "unit", "zcl_osd_adt_session_mem.clas.abap"))).to.equal(true);
+      for (const ext of ["abap", "xml"]) {
+        expect(existsSync(join(scratch, "test", "unit", `zcl_osd_adt_session_mem.clas.${ext}`)), ext).to.equal(false);
+      }
+      expect(existsSync(join(scratch, "test", "start.mjs"))).to.equal(true);
+      expect(existsSync(join(scratch, "test", "integration", "zosd_voyage.prog.abap"))).to.equal(false);
+    } finally {
+      // the libraries arrive with the read-only modes of their locked clones
+      const writable = (path) => {
+        chmodSync(path, 0o700);
+        for (const entry of readdirSync(path, {withFileTypes: true})) {
+          if (entry.isDirectory()) writable(join(path, entry.name));
+        }
+      };
+      writable(scratch);
+      rmSync(scratch, {recursive: true, force: true});
+    }
+  });
+});
+
 describe("packaging selected packs", function () {
   timeVsixTests();
   this.timeout(240000);
@@ -122,9 +161,10 @@ describe("packaging selected packs", function () {
       const {out, notices} = await buildTestVsix(scratch, {OSD_VSIX_PROFILE: "marketplace", OSD_VSIX_PRERELEASE: "1"});
       expect(packagedPacks(out)).to.deep.equal(["zork"]);
       expect(packagedSeedEntries(out)).not.to.match(/(?:^|\/)zork-mini[^\n]*/m);
-      for (const name of ["zosd_voyage", "zosd_ready"]) {
+      for (const [dir, name, kind] of [["integration", "zosd_voyage", "prog"], ["integration", "zosd_ready", "prog"],
+        ["unit", "zcl_osd_adt_session_mem", "clas"]]) {
         for (const ext of ["abap", "xml"]) {
-          const rel = `test/integration/${name}.prog.${ext}`;
+          const rel = `test/${dir}/${name}.${kind}.${ext}`;
           expect(existsSync(join(scratch, "seed-stage", rel))).to.equal(false);
           expect(packagedSeedEntries(out)).not.to.contain(rel);
         }

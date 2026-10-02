@@ -94,6 +94,7 @@ CLASS ltcl_csrf DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
     METHODS a_write_with_the_token FOR TESTING RAISING cx_static_check.
     METHODS safe_methods_are_not_gated FOR TESTING RAISING cx_static_check.
     METHODS the_token_is_case_exact FOR TESTING RAISING cx_static_check.
+    METHODS a_mixed_case_method FOR TESTING RAISING cx_static_check.
     METHODS cookies_go_first FOR TESTING RAISING cx_static_check.
     METHODS a_refusal_keeps_cookies FOR TESTING RAISING cx_static_check.
     METHODS a_route_header_is_replaced FOR TESTING RAISING cx_static_check.
@@ -252,6 +253,14 @@ CLASS ltcl_csrf IMPLEMENTATION.
 
   METHOD the_token_is_case_exact.
     assert_refused( call( iv_method = `POST` iv_token = to_upper( c_token ) ) ).
+  ENDMETHOD.
+
+  METHOD a_mixed_case_method.
+*   a host that hands the method over as sent: Post, delete and Merge are
+*   writes all the same
+    assert_refused( call( `Post` ) ).
+    assert_refused( call( iv_method = `delete` iv_token = `wrong` ) ).
+    assert_refused( call( `Merge` ) ).
   ENDMETHOD.
 
   METHOD cookies_go_first.

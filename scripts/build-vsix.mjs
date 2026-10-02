@@ -101,6 +101,11 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXT_DIR = join(ROOT, "editors", "vscode");
 const BUILD_DIR = join(ROOT, "build", "vsix");
 let minimatch;
+/** load what copySeedTree needs and a preflight may find missing (minimatch,
+ *  for the libraries' `files` filters); stageSystemSeed calls it first */
+export async function loadSeedDependencies() {
+  ({minimatch} = await import("minimatch"));
+}
 const require = createRequire(import.meta.url);
 const {writeSeedId, writeTar} = require("../editors/vscode/launcher.js");
 
@@ -316,6 +321,24 @@ function libEntries() {
 
 // ---- stage layout ---------------------------------------------------------
 
+// ABAP under test/ that exists only for a suite that is not shipped: the
+// two synthetic fleet reports exercise orchestration locally, and the
+// in-memory ADT session double (test/adt-abap-csrf.mjs) stands in for the
+// real ZIF_OSD_ADT_SESSION until it lands. None of them is a product object,
+// and a double in an installed system would be one more session store.
+export const TEST_ONLY_ABAP = [
+  /^integration[/\\]zosd_(voyage|ready)\.prog\.(abap|xml)$/,
+  /^unit[/\\]zcl_osd_adt_session_mem\.clas\.(abap|xml)$/,
+];
+
+/** whether a path under test/ (relative to it) goes into a system seed: the
+ *  VSIX's and the binary's, which both stage through copySeedTree */
+export function shipsTestPath(rel) {
+  const parts = String(rel).split(/[/\\]/);
+  if (parts[0] === "e2e" || parts[0] === "fixtures") return false;
+  return TEST_ONLY_ABAP.every((pattern) => pattern.test(rel) === false);
+}
+
 export function copySeedTree(seedRoot, selectedPacks) {
   mkdirSync(seedRoot, {recursive: true});
 
@@ -349,13 +372,7 @@ export function copySeedTree(seedRoot, selectedPacks) {
   // non-JS file can never appear in.
   cpSync(join(ROOT, "test"), join(seedRoot, "test"), {
     recursive: true,
-    filter: (src) => {
-      const rel = relative(join(ROOT, "test"), src);
-      // These reports exercise orchestration locally; they are not product programs.
-      return rel !== "e2e" && rel !== "fixtures" && rel.startsWith(`e2e${"/"}`) === false &&
-        rel.startsWith(`fixtures${"/"}`) === false &&
-        !/^integration[/\\]zosd_(voyage|ready)\.prog\.(abap|xml)$/.test(rel);
-    },
+    filter: (src) => shipsTestPath(relative(join(ROOT, "test"), src)),
   });
 
   for (const lib of libEntries()) {
@@ -534,7 +551,7 @@ export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = f
   const transpilerRef = pinnedTranspilerRef();
   const preflight = describeVsixPreflight(vsixPreflightMissing(ROOT));
   if (preflight !== undefined) throw new Error(preflight);
-  ({minimatch} = await import("minimatch"));
+  await loadSeedDependencies();
   const {describeUnfetched} = await import("../tools/osd-fetch.mjs");
   const selectedPacks = vsixPacks(env);
   const missing = selectedPacks.flatMap((pack) => pack.missing.map((source) => ({

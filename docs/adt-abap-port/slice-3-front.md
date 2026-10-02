@@ -3,7 +3,7 @@
 ADR 0007 puts the session, the CSRF token and the router in ABAP. Slice 3 splits that between two owners:
 the session itself (`ZIF_OSD_ADT_SESSION`, #458, and its implementation on `feat/adt-session-impl`) is stoker's;
 the CSRF gate and the move of the front are dell's. This note covers dell's half. Part A is built. Part B is a
-design with one open fork, and stops there.
+design; its fork was decided for B (below) and it waits for the session implementation and its adapter.
 
 ## Part A: the CSRF gate (built)
 
@@ -32,7 +32,7 @@ carries the token too.
 
 Evidence:
 
-- **ABAP Unit:** 18 cases in `zcl_osd_adt_handler.clas.testclasses.abap` (`ltcl_csrf`) against a local session
+- **ABAP Unit:** 19 cases in `zcl_osd_adt_handler.clas.testclasses.abap` (`ltcl_csrf`) against a local session
   double. They cover the token on GET and HEAD, fetch, every unsafe method with no token or a wrong one, a wrong
   case, the admitted write, the safe methods, cookie order, cookies kept on a refusal, a route's own token header
   replaced, no session meaning no gate, a session that raises, a `fetch` or empty token, and Cookie header parsing.
@@ -41,10 +41,16 @@ Evidence:
   session. It compares against the Node façade:
   - status, type, length, ETag, token and body of GET and HEAD with and without fetch;
   - 76 refusals: five methods, three paths, five header shapes, plus another session's token;
+  - the attacks a critic named, on both sides: an empty token, OPTIONS, a mixed-case method (refused by the HTTP
+    parser on both; the handler's own upper-casing is the unit case `a_mixed_case_method`), a method override
+    either way, a HEAD with a body, an ended session's cookie and token, and a cookie-free request carrying another
+    session's token. No refusal shows either session's token in a header or the body;
   - a token that stays the same within one session and changes for a new one;
   - a write with the right token passing the gate.
 
   The token is compared by its shape, not its value, because it is random on both sides.
+  The double is test-only ABAP and stays out of every system seed: `TEST_ONLY_ABAP` in `scripts/build-vsix.mjs`,
+  through `copySeedTree`, which the VSIX and the binary seed both stage with (`test/vscode-vsix-packaging.mjs`).
 - **Red:** with the gate opened (`ADMITS` always true), the unit run and the diff test both fail. With the token
   stamp removed, all five diff cases fail.
 - **Green:** `adt-abap-csrf`, `adt-abap-diff`, `adt-session` and `adt-facade` give 158 passing. ABAP-FS conformance
@@ -56,7 +62,7 @@ Evidence:
 stub in open-abap-core. The answer record (`ty_response-headers`) keeps both lines. The diff test pins the one line
 that survives, so this case flips when the gap is fixed.
 
-## Part B: the front moves up (design; one fork open)
+## Part B: the front moves up (design; B chosen)
 
 ### Today
 
@@ -107,12 +113,20 @@ Costs and benefits:
 
 - no new seam, no roll-out and no synthetic express request;
 - each delegated request costs one step;
-- because the front reads the answer record (`ANSWER`, or the shim's recorder), the two Set-Cookie lines can travel
-  in the record, which sidesteps risk 5 on Node. On a system, ICF owns the cookies (the interface says so) and there
-  is no host behind the handler, so a HOST row is the 404 it already is.
+- risk 5 is sidestepped on Node **only if the front takes the cookies from `ANSWER`'s own record**
+  (`es_response-headers`), which keeps both Set-Cookie lines. The shim's recorder does not: `HANDLE_REQUEST` writes
+  the record through `set_header_field`, which replaces the first `set-cookie` with the second before the shim
+  reads anything, and no recording downstream of the shim can bring the lost line back (measured: a fresh GET with
+  `fetch` through the shim arrives with one cookie, `test/adt-abap-csrf.mjs`). So under B the front calls
+  `ZCL_OSD_ADT_HANDLER=>ANSWER` with the request record, in the step, and replays that record; the shim stays the
+  path of a real ICF only. On a system, ICF owns the cookies (the interface says so) and there is no host behind
+  the handler, so a HOST row is the 404 it already is.
 
-B is the smaller mechanism. A is closer to the brief's wording, "delegate through a host call". This is a real fork,
-not a detail, so it stops here for a decision.
+B is the smaller mechanism. A is closer to the brief's wording, "delegate through a host call".
+
+**Decision (dell and stoker, 2026-10-02): B.** stoker builds the Node session adapter over `ZCL_OSD_ADT_SESSION`
+(item 1 below). The order is: the session implementation (`feat/adt-session-impl`), then the adapter, then B is
+switched on (`USE_SESSION` bound, the front moved up, the Node middleware and the JS matcher removed).
 
 ### Needed whichever way the fork goes
 
@@ -134,7 +148,22 @@ not a detail, so it stops here for a decision.
 4. **The ENQ binding** (`enter`) moves into `RESOLVE` (stoker's `KERNEL_ENQ_SESSION`), so the front's `enter` and
    `ended` options go. A session that ended while its step waited then has to come back as the CSRF refusal, out of
    the handler.
-5. **Risk 5.** Under A, or for the shim path on any host, two Set-Cookie lines need open-abap-core's
+
+   **A session that ends during a WAIT** is not covered by the step boundary. A WAIT (an ABAP route polling a job,
+   or `_WAIT` on an ENQUEUE) commits, rolls out and gives the work process up; a logoff or a session DELETE can run
+   in that gap and end the session. When the step rolls back in, nothing re-resolves it, so:
+   - the step's answer is still stamped with the old token and cookies. That is harmless: the next request names a
+     session that is gone, opens a fresh one, and its write is refused with `Required`, which makes a client log on
+     again;
+   - an ENQUEUE after the WAIT runs under an ENQ key that is ended and stays ended (#433), so `KERNEL_ENQ_SESSION`
+     throws `EnqSessionEnded`, no lock is taken, and the request is answered as one from a session that is gone
+     (the CSRF refusal), as slice 2 answers a LOCK queued behind its own logoff;
+   - a handle the step wrote after the WAIT belongs to a session row that is deleted. The implementation must not
+     resurrect the row on that write (stoker's `ADOPT_HANDLE` on an unknown id: nothing, or an error);
+   - under B a delegated Node route runs after the step, so the session can also end between the verdict and the
+     route. The adapter therefore re-checks at use (`holds`, `get` read the tables) rather than trusting the
+     verdict's copy.
+5. **Risk 5.** For the shim path on any host (a real ICF, or option A), two Set-Cookie lines need open-abap-core's
    `if_http_entity~set_cookie`. It should append a `set-cookie` row rather than assert. That is a fork PR like
    #1218, with an ANORMALIES entry first.
 

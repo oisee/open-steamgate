@@ -13,6 +13,7 @@
 // this one. What is compared byte for byte is the gate's answer.
 import {expect} from "chai";
 import express from "express";
+import {request as httpRequest} from "node:http";
 import "./start.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
@@ -47,8 +48,25 @@ async function call(server, method, path, headers = {}) {
     token: response.headers.get("x-csrf-token"),
     servedBy: response.headers.get(SERVED_BY),
     cookies: response.headers.getSetCookie(),
+    all: [...response.headers].map(([name, value]) => `${name}: ${value}`).join("\n"),
     body: Buffer.from(await response.arrayBuffer()).toString("utf8"),
   };
+}
+
+// a request fetch will not send as asked: a method in mixed case (fetch
+// upper-cases POST), a HEAD with a body
+function raw(server, method, path, headers = {}, body = undefined) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({host: "127.0.0.1", port: server.address().port, path, method,
+      headers: body === undefined ? headers : {...headers, "content-length": Buffer.byteLength(body)}}, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => resolve({status: res.statusCode, token: res.headers["x-csrf-token"] ?? null,
+        all: JSON.stringify(res.headers), body: Buffer.concat(chunks).toString("utf8")}));
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
 }
 
 // what the gate is answerable for: the session values are random on both
@@ -65,6 +83,7 @@ describe("ADT façade in ABAP: the CSRF gate against the Node middleware", funct
   let abap;
   let handler;
   let identity;
+  let double;
   const servers = [];
 
   before(async () => {
@@ -83,7 +102,8 @@ describe("ADT façade in ABAP: the CSRF gate against the Node middleware", funct
     ({zcl_osd_adt_handler: handler} = await output("zcl_osd_adt_handler.clas.mjs"));
     const {zcl_osd_adt_session_mem: mem} = await output("zcl_osd_adt_session_mem.clas.mjs");
     await mem.reset();
-    await handler.use_session({io_session: await new mem().constructor_()});
+    double = await new mem().constructor_();
+    await handler.use_session({io_session: double});
     const abapApp = express();
     abapApp.use(BASE, async (req, res) => {
       const url = req.originalUrl;
@@ -184,6 +204,64 @@ describe("ADT façade in ABAP: the CSRF gate against the Node middleware", funct
       const reference = await call(node, method, `${BASE}/oo/classes/zcl_x/source/main`,
         {cookie: cookieOf(nodeLogon), "x-csrf-token": nodeLogon.token});
       expect(reference.status, method).to.not.equal(403);
+    }
+  });
+
+  it("the attacks a critic named: each refused or harmless on both sides, and no refusal shows a token", async () => {
+    const logon = async (server) => {
+      const answer = await call(server, "GET", SYSINFO, {"x-csrf-token": "fetch"});
+      return {cookie: cookieOf(answer), token: answer.token};
+    };
+    const sides = {node, abap};
+    const refused = (answer, what, tokens) => {
+      expect(answer.status, what).to.equal(403);
+      expect(answer.token, what).to.equal("Required");
+      expect(answer.body, what).to.equal("CSRF token validation failed");
+      for (const token of tokens) {
+        expect(answer.all, `${what}: a token in the headers`).to.not.contain(token);
+        expect(answer.body, `${what}: a token in the body`).to.not.contain(token);
+      }
+    };
+    for (const [side, server] of Object.entries(sides)) {
+      const mine = await logon(server);
+      const other = await logon(server);
+      const tokens = [mine.token, other.token];
+      // an explicit empty token
+      refused(await call(server, "POST", SYSINFO, {cookie: mine.cookie, "x-csrf-token": ""}), `${side} empty`, tokens);
+      // a cookie-free request carrying another session's token: a fresh
+      // session opens, and its token is not answered on the refusal either
+      const clone = await call(server, "POST", SYSINFO, {"x-csrf-token": other.token});
+      refused(clone, `${side} clone`, tokens);
+      // a method override does not turn a refused write into a read
+      refused(await call(server, "POST", SYSINFO, {cookie: mine.cookie, "x-http-method-override": "GET"}),
+        `${side} override`, tokens);
+      // and does not make a read a write either: the GET answers as a GET
+      const read = await call(server, "GET", SYSINFO, {cookie: mine.cookie, "x-http-method-override": "POST"});
+      expect(read.status, `${side} override on GET`).to.equal(200);
+      expect(read.token, `${side} override on GET`).to.equal(mine.token);
+      // OPTIONS is safe: not refused, and it carries the session's token
+      const options = await call(server, "OPTIONS", SYSINFO, {cookie: mine.cookie});
+      expect(options.status, `${side} OPTIONS`).to.not.equal(403);
+      expect(options.token, `${side} OPTIONS`).to.equal(mine.token);
+      // a method in mixed case never reaches a route as a write: the HTTP
+      // parser refuses it before either side runs (ABAP Unit covers the
+      // handler's own upper-casing, a_mixed_case_method)
+      const mixed = await raw(server, "Post", SYSINFO, {cookie: mine.cookie});
+      expect(mixed.status, `${side} Post`).to.be.within(400, 499);
+      for (const token of tokens) expect(mixed.all + mixed.body, `${side} Post`).to.not.contain(token);
+      // a HEAD with a body is a HEAD: answered as the GET, no write route
+      const head = await raw(server, "HEAD", SYSINFO, {cookie: mine.cookie, "content-type": "text/plain"}, "payload");
+      expect(head.status, `${side} HEAD with a body`).to.equal(200);
+      expect(head.token, `${side} HEAD with a body`).to.equal(mine.token);
+      expect(head.body, `${side} HEAD with a body`).to.equal("");
+      // a session that ended, with its old cookie and token
+      if (side === "node") {
+        await call(server, "GET", "/sap/public/bc/icf/logoff", {cookie: mine.cookie});
+      } else {
+        await double["zif_osd_adt_session$end"]({iv_id: mine.cookie.split("=")[1].split(";")[0]});
+      }
+      refused(await call(server, "POST", SYSINFO, {cookie: mine.cookie, "x-csrf-token": mine.token}),
+        `${side} ended session`, tokens);
     }
   });
 
