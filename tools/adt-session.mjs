@@ -9,6 +9,7 @@
 //
 // OSD has no user store. Anyone may log on, and the name they send is
 // remembered only so the documents that quote a user can quote one.
+import {claimAdtSessions, adtEnqOwner} from "./adt-enq-key.mjs";
 import {randomBytes} from "node:crypto";
 import {identity, sessionCookieName} from "./osd-identity.mjs";
 
@@ -137,6 +138,7 @@ export class Sessions {
     // system. A session's own map says which handles it has; this one says
     // whether anybody else may take the object.
     this.owners = options.owners ?? new SessionOwners();
+    if (this.owners.prefix === adtEnqOwner.prefix) claimAdtSessions("node");
   }
 
   #sweep() {

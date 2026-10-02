@@ -1595,22 +1595,22 @@ export function adtRouter(options = {}) {
   // of a session's locks (the other is expiry): DELETE on the security
   // session the poll named, when it names the caller's own, and the logoff
   // resource for whichever session the cookies carry.
-  router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => {
+  router.delete(`${BASE}/core/http/sessions/:id`, (req, res) => answer(res, async () => {
     if (String(req.params.id).toUpperCase() === sessionIdentifier(req)) {
-      sessions.end(req.adt.session.id);
+      await sessions.end(req.adt.session.id);
     }
     res.status(200).end();
-  });
-  router.get("/sap/public/bc/icf/logoff", (req, res) => {
+  }));
+  router.get("/sap/public/bc/icf/logoff", (req, res) => answer(res, async () => {
     // exactly the one session the cookies name, by the middleware's own
     // precedence: two cookies naming two sessions end only the one the
     // client is using, never the other
     const id = sessionIdOf(parseCookies(req.headers.cookie));
     if (id) {
-      sessions.end(id);
+      await sessions.end(id);
     }
     res.status(200).type("text/plain").send("logged off");
-  });
+  }));
 
   // ---- The workbench type list, which the client pre-loads before it will
   // open anything.
@@ -2097,17 +2097,26 @@ export function adtRouter(options = {}) {
       });
     });
     router.delete(`${BASE}/${adt}/:name`, (req, res) => {
-      answer(res, () => {
+      answer(res, async () => {
         const name = decodeURIComponent(req.params.name);
+        if (req.adt.sessions.deleteObject !== undefined) {
+          const result = await req.adt.sessions.deleteObject(req.adt.session, type, name, store);
+          if (result.holder !== undefined) {
+            res.status(403).type("application/xml").send(lockedByOtherDocument(result.holder.session.user, String(name).toUpperCase()));
+            return;
+          }
+          res.status(200).end();
+          return;
+        }
         // an object another session holds is not this one's to delete
-        const holder = req.adt.sessions.holderOf(type, store.find(type, name)?.name ?? name);
-        if (holder !== undefined && holder.session !== req.adt.session) {
+        const holder = await req.adt.sessions.holderOf(type, store.find(type, name)?.name ?? name);
+        if (holder !== undefined && holder.session.id !== req.adt.session.id) {
           res.status(403).type("application/xml").send(lockedByOtherDocument(holder.session.user, String(name).toUpperCase()));
           return;
         }
         const gone = store.delete(type, name);
         // and a lock on an object that is gone holds nothing
-        req.adt.sessions.release(gone.type, gone.name);
+        await req.adt.sessions.release(gone.type, gone.name);
         res.status(200).end();
       });
     });
@@ -2117,7 +2126,7 @@ export function adtRouter(options = {}) {
   // deletes it), and has no source to write
   for (const {type, adt} of [...SOURCE_TYPES, {type: "DEVC", adt: "packages"}]) {
     // LOCK and UNLOCK arrive on the object's own URI, told apart by _action
-    router.post(`${BASE}/${adt}/:name`, (req, res) => {
+    router.post(`${BASE}/${adt}/:name`, (req, res) => answer(res, async () => {
       const action = String(req.query._action ?? "").toUpperCase();
       const {session} = req.adt;
       const entry = store.find(type, req.params.name);
@@ -2143,7 +2152,7 @@ export function adtRouter(options = {}) {
         // a lock lives with a stateful session: without one it is refused, not given (statelessLock)
         if (session.stateful !== true) return void refuse(res, 400, "ExceptionInvalidRequest", statelessLock(entry));
         // one holder per object; the same session gets its handle again
-        const taken = req.adt.sessions.lock(session, entry.type, entry.name, () => randomUUID());
+        const taken = await req.adt.sessions.lock(session, entry.type, entry.name, () => randomUUID());
         if (taken.heldBy !== undefined) {
           res.status(403).type("application/xml").send(lockedByOtherDocument(taken.heldBy.user, entry.name));
           return;
@@ -2153,13 +2162,13 @@ export function adtRouter(options = {}) {
       }
 
       if (action === "UNLOCK") {
-        req.adt.sessions.unlock(session, String(req.query.lockHandle ?? ""));
+        await req.adt.sessions.unlock(session, String(req.query.lockHandle ?? ""));
         res.status(200).type("text/plain").send("");
         return;
       }
 
       res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", `unknown action ${action || "(none)"}`));
-    });
+    }));
     if (type === "DEVC") {
       continue;
     }
@@ -2186,11 +2195,11 @@ export function adtRouter(options = {}) {
     };
     // the handle of mayWrite, asked again just before a write: still this
     // session's, still the object's holder
-    const stillHeld = (req, res) => {
+    const stillHeld = async (req, res) => {
       const {session, sessions} = req.adt;
       const handle = String(req.query.lockHandle ?? "");
       const lock = session.locks.get(handle);
-      if (lock === undefined || sessions.holds(session, handle, lock.type, lock.name) === false) {
+      if (lock === undefined || await sessions.holds(session, handle, lock.type, lock.name) === false) {
         res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked",
           `lock handle ${handle} was released before the source arrived`));
         return false;
@@ -2204,7 +2213,7 @@ export function adtRouter(options = {}) {
         return;
       }
       rawBody(req).then((body) => {
-        answer(res, () => {
+        answer(res, async () => {
           const include = req.params.include ?? "main";
           // Validate the include name before writing. Known empty includes may
           // be created, but arbitrary suffixes are not repository objects.
@@ -2229,7 +2238,7 @@ export function adtRouter(options = {}) {
           // while it does (an UNLOCK, a logoff, an expiry, another session
           // taking the object after that). Checked again right beside the
           // write, which is the moment the handle has to be good for.
-          if (stillHeld(req, res) === false) {
+          if (await stillHeld(req, res) === false) {
             return;
           }
           store.write(type, req.params.name, body.toString("utf8"), include);
@@ -2260,7 +2269,7 @@ export function adtRouter(options = {}) {
         if (mayWrite(req, res) === false) {
           return;
         }
-        answer(res, () => {
+        answer(res, async () => {
           const include = attribute(body, undefined, "class:includeType") ?? "";
           if (include === "" || include === "main" || Object.hasOwn(CLASS_INCLUDES, include) === false) {
             res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest",
@@ -2271,7 +2280,7 @@ export function adtRouter(options = {}) {
           if (current.empty !== true) {
             throw new Conflict(type, `${current.name} include ${include}`);
           }
-          if (stillHeld(req, res) === false) {
+          if (await stillHeld(req, res) === false) {
             return;
           }
           store.write(type, req.params.name, "", include);
@@ -3030,9 +3039,12 @@ function typeOf(asked) {
 // SAP framework has a name for; it answers in this project's namespace so
 // that nobody reading it mistakes our bug for a system's.
 export function answered(res, body, record) {
-  try {
-    body();
-  } catch (e) {
+  const safeFailed = (e) => {
+    try { failed(e); } catch (failure) {
+      console.error(`ADT response error after headers were sent: ${String(failure?.message ?? failure)}`);
+    }
+  };
+  const failed = (e) => {
     if (e instanceof NotFound) {
       // a 404 from here is a different animal from a 404 off the catch-all:
       // the resource is served and the object is not there. Both are things
@@ -3054,6 +3066,12 @@ export function answered(res, body, record) {
       refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e),
         {namespace: "org.open-steamgate.osd"});
     }
+  };
+  try {
+    const result = body();
+    return result?.catch(safeFailed);
+  } catch (e) {
+    safeFailed(e);
   }
 }
 
