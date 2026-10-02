@@ -549,6 +549,90 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
       expect(content(log())).to.deep.equal(want);
     });
 
+    // ---- the kill switch set by another session during the doctor's pass ----------
+    // stage 1 done, its gate still OPEN: the job that ended the stage dumped in advance( )
+    async function gateLeftOpen() {
+      const real = cls(RUNNER).advance;
+      let left = 2;
+      cls(RUNNER).advance = async function (...args) {
+        if (left > 0) { left--; throw new Error("advance dumps (a test fault)"); }
+        return real.apply(this, args);
+      };
+      try {
+        const run = (await runSet({mode: "P"})).run;
+        await drainAndWork();
+        return run;
+      } finally { cls(RUNNER).advance = real; }
+    }
+    const KILL = "INSERT INTO zosd_l3_kill (mandt, set_name, reason) VALUES ('', 'fleet2', 'another session stops the set')";
+    // a stale run whose gate the doctor would advance; the switch is set in the
+    // doctor's own step, `at` "check": right after its first killed( ), or
+    // "advance": between its ADVANCE (OPEN to DONE) and advance( ). Then the
+    // switch goes and a second pass and the jobs must complete the run
+    async function killRaceProblems(at) {
+      const problems = [];
+      const want = await expected();
+      const run = await gateLeftOpen();
+      tick(901);
+      const key = at === "advance" ? "advance" : "killed";
+      const real = cls(RUNNER)[key];
+      let armed = true;
+      cls(RUNNER)[key] = async function (...args) {
+        if (!armed) return real.apply(this, args);
+        armed = false;
+        if (at === "advance") { await client.execute(KILL); return real.apply(this, args); }
+        const answer = await real.apply(this, args);
+        await client.execute(KILL);
+        return answer;
+      };
+      let pass;
+      try { pass = actions(await doctor()); } finally { cls(RUNNER)[key] = real; }
+      const between = gates(run);
+      if (lockRow().status !== "HELD") problems.push(`the lock is ${lockRow().status} after a pass that could not advance`);
+      if (at === "check" && (pass.length || JSON.stringify(between) !== JSON.stringify(["OPEN", "WAITING"]))) {
+        problems.push(`the switch set before the ADVANCE: ${JSON.stringify(pass)}, gates ${JSON.stringify(between)}`);
+      }
+      await exec(["DELETE FROM zosd_l3_kill"]);
+      const healed = actions(await doctor());
+      await drainAndWork();
+      if (JSON.stringify(gates(run)) !== JSON.stringify(["DONE", "DONE"]) || lockRow().status !== "RELEASED") {
+        problems.push(`once the switch is gone: ${JSON.stringify(healed)}, gates ${JSON.stringify(gates(run))}, lock ${lockRow().status}`);
+      }
+      if (JSON.stringify(content(log())) !== JSON.stringify(want)) problems.push("the log is not a clean run's");
+      return {problems, pass, between, healed};
+    }
+
+    it("the kill switch set before the doctor's ADVANCE: the gate stays OPEN and the lock HELD; once it is gone the run completes", async () => {
+      const {problems, healed} = await killRaceProblems("check");
+      expect(problems).to.deep.equal([]);
+      expect(healed).to.deep.equal(["ADVANCE STAGE-DONE stage 1"]);
+    });
+
+    it("the kill switch set between the ADVANCE and advance( ): stage 1 DONE, stage 2 WAITING, the lock HELD; once it is gone the doctor opens stage 2", async () => {
+      const {problems, pass, between, healed} = await killRaceProblems("advance");
+      expect(problems).to.deep.equal([]);
+      expect([pass, between]).to.deep.equal([["ADVANCE STAGE-DONE stage 1"], ["DONE", "WAITING"]]);
+      expect(healed).to.deep.equal(["ADVANCE NEXT-WAITING stage 1"]);
+    });
+
+    it("mutant: the doctor's ADVANCE without its kill check: the stage goes DONE with the next gate shut", async () => {
+      const {problems} = await mutant("zcl_l3_fleet2_m_advkill", mutate("        IF killed( ) = abap_true.\n          CONTINUE.\n        ENDIF.\n        UPDATE zosd_l3_stage SET status = 'DONE'",
+        "        UPDATE zosd_l3_stage SET status = 'DONE'"), () => killRaceProblems("check"));
+      expect(problems.join("\n")).to.match(/the switch set before the ADVANCE: \["ADVANCE STAGE-DONE stage 1"\], gates \["DONE","WAITING"\]/);
+    });
+
+    it("mutant: the release ignoring an OPEN gate that could still advance: the lock goes while the gate cannot", async () => {
+      const {problems} = await mutant("zcl_l3_fleet2_m_relopen", mutate("          IF lv_open = 0.\n            lv_final = abap_false.\n          ENDIF.\n", ""),
+        () => killRaceProblems("check"));
+      expect(problems.join("\n")).to.match(/the lock is RELEASED after a pass that could not advance/);
+    });
+
+    it("mutant: the release ignoring a WAITING gate after a DONE one: the lock goes with stage 2 never opened", async () => {
+      const {problems} = await mutant("zcl_l3_fleet2_m_relwait", mutate("          IF sy-subrc = 0 AND ls_prev-status = 'DONE'.\n            lv_final = abap_false.\n          ENDIF.\n",
+        "          IF sy-subrc = 0 AND ls_prev-status = 'DONE'.\n          ENDIF.\n"), () => killRaceProblems("advance"));
+      expect(problems.join("\n")).to.match(/the lock is RELEASED after a pass that could not advance/);
+    });
+
     // ---- the fuse ---------------------------------------------------------------
     // a copy of the runner whose c_max_alerts is `limit`: a complete run of the real
     // runner first, then the copy's run; what is wrong, as a list

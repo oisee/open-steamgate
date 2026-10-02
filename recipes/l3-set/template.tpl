@@ -2101,6 +2101,8 @@ CLASS {{class}} IMPLEMENTATION.
     DATA ls_gate TYPE zosd_l3_stage.
     DATA lv_final TYPE abap_bool.
     DATA lv_open TYPE i.
+    DATA lv_prev TYPE i.
+    DATA ls_prev TYPE zosd_l3_stage.
     DATA lv_reason TYPE zosd_l3_doctor-reason.
     DATA ls_result TYPE ty_result.
     DATA lt_purged TYPE tt_doctor.
@@ -2162,6 +2164,14 @@ CLASS {{class}} IMPLEMENTATION.
             lv_final = abap_false.
           ENDIF.
         ENDLOOP.
+        " nor a stage DONE whose next gate never opened (its advance( ) was stopped)
+        LOOP AT lt_gates INTO ls_gate WHERE status = 'WAITING' AND stage_no > 1.
+          lv_prev = ls_gate-stage_no - 1.
+          READ TABLE lt_gates INTO ls_prev WITH KEY stage_no = lv_prev.
+          IF sy-subrc = 0 AND ls_prev-status = 'DONE'.
+            lv_final = abap_false.
+          ENDIF.
+        ENDLOOP.
         IF lv_final = abap_false.
           CONTINUE.
         ENDIF.
@@ -2217,6 +2227,8 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_next TYPE i.
     DATA lv_count TYPE i.
     DATA lv_open TYPE i.
+    DATA lv_prev TYPE i.
+    DATA ls_prev TYPE zosd_l3_stage.
     DATA lv_aborted TYPE btch0000-char1.
     DATA lv_finished TYPE btch0000-char1.
     DATA lv_running TYPE btch0000-char1.
@@ -2405,6 +2417,13 @@ CLASS {{class}} IMPLEMENTATION.
       ELSEIF lv_open = 0.
         " every pile DONE and the gate still OPEN: the job that ended the
         " stage did not get to advance( )
+{{#killable}}
+        " not while the kill switch is set: advance( ) would open nothing, and
+        " the stage would be DONE with the next gate shut
+        IF killed( ) = abap_true.
+          CONTINUE.
+        ENDIF.
+{{/killable}}
         UPDATE zosd_l3_stage SET status = 'DONE' ended = iv_now
           WHERE run_id = iv_run
             AND stage_no = ls_gate-stage_no
@@ -2426,6 +2445,31 @@ CLASS {{class}} IMPLEMENTATION.
                  is_params = is_params
 {{/with_params}}
                  iv_bind = iv_bind ).
+      ENDIF.
+    ENDLOOP.
+    " a stage DONE whose next gate is still WAITING: its advance( ) was
+    " stopped between the two (the kill switch set in between); the next
+    " gate opens through advance( ), whose WAITING to OPEN is the one UPDATE
+    LOOP AT lt_gates INTO ls_gate WHERE status = 'WAITING' AND stage_no > 1.
+      lv_prev = ls_gate-stage_no - 1.
+      READ TABLE lt_gates INTO ls_prev WITH KEY stage_no = lv_prev.
+      IF sy-subrc <> 0 OR ls_prev-status <> 'DONE'.
+        CONTINUE.
+      ENDIF.
+      IF advance( iv_run = iv_run
+                  iv_date = iv_date
+                  iv_stage = lv_prev
+{{#with_params}}
+                  is_params = is_params
+{{/with_params}}
+                  iv_bind = iv_bind ) = abap_true.
+        act( EXPORTING iv_run = iv_run
+                       iv_date = iv_date
+                       iv_stage = lv_prev
+                       iv_action = 'ADVANCE'
+                       iv_reason = 'NEXT-WAITING'
+                       iv_now = iv_now
+             CHANGING ct_report = ct_report ).
       ENDIF.
     ENDLOOP.
   ENDMETHOD.

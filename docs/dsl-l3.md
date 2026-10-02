@@ -1019,8 +1019,9 @@ fails leaves the run `PARTIAL` and its lock released, as before.
 | a pile `FAILED` with `ATTEMPT` at most `c_retry_max`, its backoff passed | `PLANNED` with the next `ATTEMPT`, then `submit( )` | `RESUBMIT`, `RETRY` |
 | a pile `PLANNED` without a job, older than `stale`, within the budget | as above | `RESUBMIT`, `STALE-PLAN` |
 | a gate `OPEN` with no pile of its stage, older than `stale` (slice 3b's crash window) | `plan( )` the stage again and submit its piles; a stage with no key advances | `REPLAN`, `OPEN-NO-PILES` |
-| a gate `OPEN` whose piles are all `DONE` (the job that ended the stage dumped after its commit) | the stage `DONE`, then `advance( )` | `ADVANCE`, `STAGE-DONE` |
-| a lock older than `stale` whose run has every pile final (`DONE`, `FUSED`, or `FAILED` past the budget) and no gate that could still advance | released, then made final as `collect( )` makes it (a stage with a lost pile `PARTIAL`, the ones after it `NOT-RUN`, every `DONE` rule finalised) | `RELEASE`, `ALL-FINAL` |
+| a gate `OPEN` whose piles are all `DONE` (the job that ended the stage dumped after its commit); not while the kill switch is set | the stage `DONE`, then `advance( )` | `ADVANCE`, `STAGE-DONE` |
+| a gate `WAITING` after a stage `DONE` (an `advance( )` stopped in between, by a kill switch another session set after the check above) | `advance( )` of that stage, which opens the gate with its one `UPDATE` from `WAITING` | `ADVANCE`, `NEXT-WAITING` |
+| a lock older than `stale` whose run has every pile final (`DONE`, `FUSED`, or `FAILED` past the budget), no gate `OPEN` whose piles are all `DONE` and no gate `WAITING` after a `DONE` one | released, then made final as `collect( )` makes it (a stage with a lost pile `PARTIAL`, the ones after it `NOT-RUN`, every `DONE` rule finalised) | `RELEASE`, `ALL-FINAL` |
 | a lock older than `stale` whose run has no plan row and no gate at all | released | `RELEASE`, `NO-PLAN` |
 | (after every run) | `purge( )` | `PURGE`, ... |
 
@@ -1082,7 +1083,7 @@ doctor calls it at the end of every pass.
 
 ### Proof
 
-`test/dsl-l3-resilience.mjs` (registered in `test/suites.d/infra-misc.json`, 28 tests), on a file
+`test/dsl-l3-resilience.mjs` (registered in `test/suites.d/infra-misc.json`, 33 tests), on a file
 database with the jobs facade (`drainJobOutbox`, `workQueuedBatch`) and the injectable clock:
 
 - the manifest: the committed `fleet2` is a fresh build and the one-stage `fleet` is too; the model;
@@ -1103,6 +1104,12 @@ database with the jobs facade (`drainJobOutbox`, `workQueuedBatch`) and the inje
 - a `HELD` lock of a dead run with no plan row: a run meanwhile is `BUSY`; nothing at 899 s,
   `RELEASE NO-PLAN` at 900 s, and a new run starts; a stale lock whose run still has open jobs is
   left alone, and the jobs then complete the run;
+- the kill switch set by another session during the doctor's pass (the test sets the row in the
+  doctor's own step, through a seam on `killed( )` or `advance( )`): set right after the doctor's
+  first check, the gate stays `OPEN` and the lock `HELD`; set between the `ADVANCE` and `advance( )`,
+  stage 1 is `DONE`, stage 2 `WAITING` and the lock `HELD`. Once the row is gone the next pass
+  answers `ADVANCE STAGE-DONE` or `ADVANCE NEXT-WAITING`, and the jobs complete the run with a clean
+  run's log;
 - a job that dumps after its commit, before the gate (`advance( )` throws twice): stage 1 `OPEN`
   with both piles `DONE`; the doctor answers `ADVANCE STAGE-DONE`, stage 2's jobs run, and the log
   equals a clean run's; an `OPEN` gate with no piles: nothing before stale, `REPLAN OPEN-NO-PILES`
@@ -1137,6 +1144,9 @@ against the test named:
 | a dry run that writes to the log (the capture binding dropped) | the dry run: it wrote rows to the log |
 | `purge( )` touching an open run (no `HELD` check) | `purge( )`: the open run's plan rows are gone |
 | `purge( )` deleting alerts | `purge( )`: the log lost rows |
+| the doctor's `ADVANCE` without its kill check | the switch set before the `ADVANCE`: stage 1 `DONE`, stage 2 shut |
+| the release ignoring an `OPEN` gate that could still advance | the switch set before the `ADVANCE`: the lock is released |
+| the release ignoring a `WAITING` gate after a `DONE` one | the switch set between the `ADVANCE` and `advance( )`: the lock is released |
 
 **The ABAP Unit proof** (`src/l3proof`) gains two methods of `ltcl_proof` over `ZCL_L3_FLEET2`, on
 the same seed and check date: `doctor_heals` (a run as mode P leaves it, its lock and stage 1 gate
@@ -1193,7 +1203,13 @@ stages, every one `COMPLETED`), and its teardown deletes the runs' doctor rows t
 - a scheduled driver instance whose date is still held by the previous run answers `BUSY`; the
   doctor heals the previous run, but that date's missed instance is not run again;
 - the doctor's job, like the driver's, is the user's who scheduled it (`sy-uname`);
-- `purge( )` keeps the log's old versions: the log is history, and its retention stays open.
+- `purge( )` keeps the log's old versions: the log is history, and its retention stays open;
+- a dry run takes the set's lock row for its date and leaves it naming the dry run: a late
+  `collect( )` of an older real run of that date then finds itself not the latest run and does not
+  finalise (the latest real run of the date still does);
+- the doctor's audit row takes the run's next `SEQ` and tries ten times; after ten clashes with rows
+  other doctors inserted at once, the audit row of that action is dropped (the action itself and its
+  report row stand).
 
 ## Not yet
 
