@@ -304,6 +304,27 @@ export class ObjectStore {
   // So the same bytes again -- another editor, a checkout, a watcher event
   // that comes late -- are that same inactive source, and wait for it to be
   // activated, however long.
+  // The inactive objects other than `activating`, each with its files'
+  // active copy (empty when it never had one) and saved text: what a warm
+  // build asks to refuse a generator input the build view cannot cover
+  // (WarmCompiler#generatorInput).
+  inactiveSources(activating = new Set()) {
+    const out = [];
+    for (const key of this.inactive) {
+      if (activating.has(key)) continue;
+      const [type, ...rest] = key.split(" ");
+      const entry = this.find(type, rest.join(" "));
+      if (entry === undefined) continue;
+      const files = this.#filesOfEntry(entry).map((file) => {
+        const copy = join(this.root, this.#snapshotOf(file));
+        const tree = join(this.root, file);
+        return {file, before: existsSync(copy) ? readFileSync(copy, "utf8") : "", after: existsSync(tree) ? readFileSync(tree, "utf8") : ""};
+      });
+      out.push({key, type, files});
+    }
+    return out;
+  }
+
   // the object a file of the tree belongs to, "TYPE NAME", among the
   // inactive ones (what a warm prime asks of a file read from its copy)
   objectKeyOf(file) {
@@ -1508,7 +1529,7 @@ export class ObjectStore {
       const {WarmCompiler} = await import("./osd-warm.mjs");
       // primed on the build view: inactive objects as their active copies
       w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m), overlay: (activating) => this.overlay(activating),
-        keyOf: (file) => this.objectKeyOf(file)});
+        keyOf: (file) => this.objectKeyOf(file), inactiveSources: (activating) => this.inactiveSources(activating)});
       try {
         const r = await w.compiler.prime();
         w.reason = undefined;

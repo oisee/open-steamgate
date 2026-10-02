@@ -1149,6 +1149,69 @@ describe("tools/osd-warm: a renamed view is primed only on proof", function () {
   });
 });
 
+// critic on d75d8fdc: the generators read the raw tree, not the build view.
+// A DDLS inactive when live was built, saved again with a source cds2ddic
+// refuses, hashes as its unchanged active copy -- and a class activation
+// built warm over the gen/ of the last cold build, where a cold build runs
+// cds2ddic over the saved source and fails. Until the generators read the
+// build view, an inactive generator input forces cold.
+describe("tools/osd-warm: an inactive generator input forces cold", function () {
+  this.timeout(180000);
+  let root;
+  let store;
+  const src = (name, v) => `CLASS ${name.toLowerCase()} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    CLASS-METHODS v RETURNING VALUE(rv) TYPE i.\nENDCLASS.\nCLASS ${name.toLowerCase()} IMPLEMENTATION.\n  METHOD v.\n    rv = ${v}.\n  ENDMETHOD.\nENDCLASS.\n`;
+  const view = (field) => `define view ZWG_V as select from t000 { ${field} }\n`;
+  const activate = async (name) => {
+    const checked = store.warmActivation("CLAS", name);
+    const r = await store.publish({activate: [{type: "CLAS", name}]});
+    if (r.ok === true) store.completeActivations([checked], r.transpile.built);
+    return r;
+  };
+
+  before(async function () {
+    const {Transpiler, core, plugin} = modulesOf(REPO);
+    const missing = plugin !== undefined ? "a transpiler plugin is installed" : await probe(Transpiler, core);
+    if (missing !== undefined) {
+      console.log(`      (skipped: ${missing})`);
+      this.skip();
+    }
+    root = realpathSync(mkdtempSync(join(tmpdir(), "osd-warm-gen-")));
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src", "zcl_wg_a.clas.abap"), src("ZCL_WG_A", 1));
+    writeFileSync(join(root, "src", "zwg_v.ddls.asddls"), view("mandt"));
+    writeFileSync(join(root, "src", "zwg_v.ddls.xml"), "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<abapGit version=\"v1.0.0\" serializer=\"LCL_OBJECT_DDLS\" serializer_version=\"v1.0.0\">\n <asx:abap xmlns:asx=\"http://www.sap.com/abapxml\" version=\"1.0\">\n  <asx:values>\n   <DDLS>\n    <DDLNAME>ZWG_V</DDLNAME>\n   </DDLS>\n  </asx:values>\n </asx:abap>\n</abapGit>\n");
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
+      input_folder: "src", input_filter: [], exclude_filter: ["\\.ddls\\."], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
+      options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+    }));
+    writeFileSync(join(root, "package.json"), "{}");
+    symlinkSync(join(REPO, "node_modules"), join(root, "node_modules"));
+    store = new ObjectStore({root, roots: [{path: "src", writable: true}], libs: [], build: {generators: false}});
+    expect((await store.publish()).ok).to.equal(true);
+    // the DDLS saved and not activated, and live built over it
+    store.write("DDLS", "ZWG_V", view("mtext"));
+    store.write("CLAS", "ZCL_WG_A", src("ZCL_WG_A", 2));
+    const r = await activate("ZCL_WG_A");
+    expect(r.ok, JSON.stringify(r.transpile)).to.equal(true);
+    expect(store.stateOf(store.find("DDLS", "ZWG_V")).version).to.equal("inactive");
+  });
+  after(() => {
+    store?.warmState?.compiler?.drop?.();
+    clearTimeout(store?.warmState?.reprime);
+    if (root !== undefined) rmSync(root, {recursive: true, force: true});
+  });
+
+  it("the DDLS saved again with a source a generator refuses: the class activation is not warm", async () => {
+    store.warmState = {on: true, compiler: undefined, priming: undefined, reason: undefined, verifying: undefined, next: undefined, last: undefined, timer: undefined};
+    await store.warmUp();
+    store.write("DDLS", "ZWG_V", "define view ZWG_V as select from { this is not cds\n");
+    store.write("CLAS", "ZCL_WG_A", src("ZCL_WG_A", 3));
+    const r = await activate("ZCL_WG_A");
+    expect(r.transpile.warm, "built warm over an inactive generator input").to.not.equal(true);
+    expect(store.warmState.reason).to.match(/DDLS ZWG_V is inactive, and the generators read its saved source/);
+  });
+});
+
 describe("tools/osd-warm: the real path on a small tree", function () {
   this.timeout(180000);
   let root;

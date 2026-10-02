@@ -207,6 +207,12 @@ them cherry-picked).
 
 ## Not yet
 
+- **Generators should read the build view; until then, any inactive
+  generator input forces cold.** They read the raw tree (a saved DDLS, YAML,
+  TABL, a class's `INTERFACES` or AMDP), so while such an object is
+  inactive, or a class's saved source differs from its copy in a way the
+  warm rule refuses, every build is cold (`WarmCompiler#generatorInput`).
+
 - **The cross-reference after a swap** stays at the generation the process
   started on until the catch-up recycle: where-used over a class edited
   since reads the old rows. Incremental over the closure is the follow-up.

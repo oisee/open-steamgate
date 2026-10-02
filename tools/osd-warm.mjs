@@ -251,8 +251,33 @@ export class WarmCompiler {
     this.overlayOf = options.overlay ?? (() => undefined);
     // the object a file belongs to, "TYPE NAME" (ObjectStore#objectKeyOf)
     this.keyOf = options.keyOf ?? (() => undefined);
+    // the inactive objects and their copies (ObjectStore#inactiveSources)
+    this.inactiveSources = options.inactiveSources ?? (() => []);
     // the view each generation this made was built from, for its comparison
     this.views = new Map();
+  }
+
+  // **The generators read the raw tree, not the build view** (#460's known
+  // limit): cds2ddic reads a saved DDLS, stg-compile a saved YAML, the
+  // registries a saved class's INTERFACES lines, whether or not the object
+  // is active. A warm build trusts gen/ as the last cold build left it, so
+  // an inactive object a generator would read differently than its active
+  // copy says makes every build cold -- a cold build is what runs the
+  // generators over it, and fails where they fail (critic on d75d8fdc: a
+  // DDLS inactive at the live build, saved again with an invalid source,
+  // and a class activation built warm over it). Any inactive object that is
+  // not a class or interface counts, and a class or interface whose saved
+  // source the warm rule would not take as an edit of its copy.
+  #generatorInput(activating = new Set()) {
+    for (const {key, type, files} of this.inactiveSources(activating)) {
+      if (type !== "CLAS" && type !== "INTF") return `${key} is inactive, and the generators read its saved source`;
+      for (const {file, before, after} of files) {
+        if (before === after) continue;
+        const reason = warmRule({path: file, before, after, amdpText: this.amdpText ?? ""});
+        if (reason !== undefined) return `${key} is inactive, and the generators read its saved source (${reason})`;
+      }
+    }
+    return undefined;
   }
 
   // A file is known by where it lives in the tree, whichever copy the view
@@ -302,6 +327,8 @@ export class WarmCompiler {
     if (live === undefined) {
       throw new NotWarm("there is no live generation to start from");
     }
+    const input = this.#generatorInput();
+    if (input !== undefined) throw new NotWarm(input);
     const {config, stack} = prepare(root);
     // the libraries are pinned clones and most of the inputs; a watcher per
     // library lets a build reuse their walk until something moves in one
@@ -562,6 +589,8 @@ export class WarmCompiler {
     const transpiler = this.identity.transpiler;
     // the view this build makes live: S promoted, every other inactive
     // object as its copy -- the overlay a cold build of S would read
+    const input = this.#generatorInput(activating);
+    if (input !== undefined) throw new NotWarm(input);
     const overlay = this.overlayOf(activating);
     const raw = new Map();
     const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
