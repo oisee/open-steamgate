@@ -11,12 +11,36 @@ CLASS zcl_osd_adt_js DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS js_int IMPORTING iv_text TYPE string iv_radix TYPE i DEFAULT 0 RETURNING VALUE(rs_number) TYPE ty_number.
     CLASS-METHODS glob IMPORTING iv_pattern TYPE string iv_text TYPE string RETURNING VALUE(rv_match) TYPE abap_bool.
     CLASS-METHODS collate IMPORTING iv_text TYPE string RETURNING VALUE(rv_key) TYPE string.
+    CLASS-METHODS unescape IMPORTING iv_text TYPE string RETURNING VALUE(rv_text) TYPE string.
     CLASS-METHODS trim IMPORTING iv_text TYPE string RETURNING VALUE(rv_text) TYPE string.
   PRIVATE SECTION.
     CLASS-METHODS radix IMPORTING iv_text TYPE string iv_base TYPE i iv_prefix TYPE abap_bool
       RETURNING VALUE(rs_number) TYPE ty_number.
 ENDCLASS.
 CLASS zcl_osd_adt_js IMPLEMENTATION.
+  METHOD unescape.
+    DATA lv_off TYPE i.
+    DATA lv_char TYPE string.
+    IF find( val = iv_text sub = `\` ) < 0.
+      rv_text = iv_text.
+      RETURN.
+    ENDIF.
+    WHILE lv_off < strlen( iv_text ).
+      lv_char = iv_text+lv_off(1).
+      lv_off = lv_off + 1.
+      IF lv_char = `\` AND lv_off < strlen( iv_text ).
+        lv_char = iv_text+lv_off(1).
+        lv_off = lv_off + 1.
+        CASE lv_char.
+          WHEN `t`.
+            lv_char = cl_abap_char_utilities=>horizontal_tab.
+          WHEN `n`.
+            lv_char = cl_abap_char_utilities=>newline.
+        ENDCASE.
+      ENDIF.
+      rv_text = rv_text && lv_char.
+    ENDWHILE.
+  ENDMETHOD.
   METHOD trim.
     DATA lv_space TYPE string.
     DATA lv_start TYPE i.
@@ -141,6 +165,14 @@ CLASS zcl_osd_adt_js IMPLEMENTATION.
     DATA lv_t TYPE i.
     DATA lv_star TYPE i VALUE -1.
     DATA lv_retry TYPE i.
+*   A single trailing star is a prefix test; avoid retrying every suffix.
+    lv_star = find( val = iv_pattern sub = `*` ).
+    IF lv_star = strlen( iv_pattern ) - 1 AND lv_star >= 0.
+      rv_match = boolc( strlen( iv_text ) >= lv_star AND
+        substring( val = iv_text len = lv_star ) = substring( val = iv_pattern len = lv_star ) ).
+      RETURN.
+    ENDIF.
+    lv_star = -1.
     WHILE lv_t < strlen( iv_text ).
       IF lv_p < strlen( iv_pattern ) AND iv_pattern+lv_p(1) = `*`.
         lv_star = lv_p.

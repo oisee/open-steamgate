@@ -1,8 +1,15 @@
 CLASS ltcl_vfs DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
   PRIVATE SECTION.
+    METHODS line_unescape FOR TESTING.
     METHODS raw_response FOR TESTING.
 ENDCLASS.
 CLASS ltcl_vfs IMPLEMENTATION.
+  METHOD line_unescape.
+    DATA lv_text TYPE string.
+    lv_text = `literal\t` && cl_abap_char_utilities=>horizontal_tab && `line`
+      && cl_abap_char_utilities=>newline && `\`.
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_adt_js=>unescape( `literal\\t\tline\n\\` ) exp = lv_text ).
+  ENDMETHOD.
   METHOD raw_response.
     DATA ls_response TYPE zif_osd_adt_route=>ty_response.
     DATA lv_body TYPE string.

@@ -1,4 +1,4 @@
-// B6 acceptance instrument: full repository PACKAGES(OBJECTS), 20 medians.
+// B6 acceptance instrument: full repository, 20 warm wire medians.
 import {expect} from 'chai';
 import './start.mjs';
 import {ObjectStore} from '../tools/osd-store.mjs';
@@ -54,7 +54,9 @@ describe('B6 full repository wire cost', function () {
             if(ported) expect(served).to.equal('ABAP');
             if(i) times.push(performance.now()-start);
           }
-          console.log(`B6 WIRE ${ported?'ABAP':'Node'} ${name} median ${median(times).toFixed(2)} ms`);
+          const ms=median(times);
+          console.log(`B6 WIRE ${ported?'ABAP':'Node'} ${name} median ${ms.toFixed(2)} ms`);
+          if(ported && name==='search') expect(ms, 'B6 search must stay below 10 ms').to.be.lessThan(10);
         }
       }
     } finally {

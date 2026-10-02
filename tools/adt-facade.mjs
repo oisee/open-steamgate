@@ -741,7 +741,6 @@ export function adtRouter(options = {}) {
     generation: () => liveHash(store.root),
     sessions, ...abapSession(sessions, (kind, name) => {
       if (kind === "IDENTITY") return identity;
-      if (kind === "VFS") return {raw: virtualFoldersDocument(store, name)};
       return undefined;
     })}));
 

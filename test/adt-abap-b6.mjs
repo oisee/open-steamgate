@@ -41,7 +41,7 @@ describe("ADT B6: search and virtual folders Node diff", function () {
       mkdirSync(join(root,folder), {recursive:true});
       writeFileSync(join(root,folder,"package.devc.xml"), `<abapGit><DEVC><DEVCLASS>${name}</DEVCLASS><CTEXT>${text}</CTEXT></DEVC></abapGit>`);
     };
-    pkg("work/root", "$ROOT", "Root &amp; &lt; raw text");
+    pkg("work/root", "$ROOT", "Root &amp; &lt; raw text\tline\n\\n");
     pkg("work/a", "$ZT_A"); pkg("work/b", "$ZTA"); pkg("work/ns", "/DEMO/PKG");
     pkg("lib", "$LIB");
     const source = (folder,name,kind,body) => writeFileSync(join(root,folder,name.toLowerCase()+"."+kind+".abap"),body);
@@ -55,7 +55,7 @@ describe("ADT B6: search and virtual folders Node diff", function () {
     for (let i=0;i<12;i++) source("work/root", `ZSEED_B_${String(i).padStart(2,"0")}`, "prog", "REPORT zseed.");
     source("work/root", "ZSEED_END_B", "prog", "REPORT zseed.");
     const store = new ObjectStore({root, libs: ["lib"], roots: [["work/root","$ROOT"],["work/a","$ZT_A"],["work/b","$ZTA"],["work/ns","/DEMO/PKG"]].map(([path,packageName]) => ({path,package:packageName,writable:true,library:false}))});
-    store.create("DEVC", "$ROOT_CHILD", {package:"$ROOT", description:"Child & raw text"});
+    store.create("DEVC", "$ROOT_CHILD", {package:"$ROOT", description:"Child & raw text\tline\n\\t"});
     store.create("PROG", "ZT_USER_A", {package:"$TMP", author:"BUILDER_A"});
     store.create("PROG", "ZT_USER_B", {package:"$TMP", author:"BUILDER_B"});
     store.create("DEVC", "$TMP_KID", {package:"$TMP", author:"BUILDER_A"});
@@ -129,8 +129,8 @@ describe("ADT B6: search and virtual folders Node diff", function () {
   }
   const base = "/sap/bc/adt/repository/informationsystem/";
   const searches = ["", "query=ZCL*", "query=*B", "query=*", "query=", "search=ZCL", "query=ZT+PROG", "query=ZT%20PROG", "query=50%", "query=%zz",
-    "query=ZCL&objectType=CLAS/OC", "objectType=DEVC/K", "type=PROG", "objectType=&type=CLAS", "query=LIBRARY", "query=ZCL&query=TREE"];
-  for (const query of searches) for (const max of [undefined,"", "0", "1", "3", "-1", "2.5", "abc", "NaN", "1e1", " 7 ", "Infinity", "-Infinity", "0x10"])
+    "query=ZCL&objectType=CLAS/OC", "objectType=DEVC/K", "type=PROG", "objectType=&type=CLAS", "objectType=/K", "query=LIBRARY", "query=ZCL&query=TREE"];
+  for (const query of searches) for (const max of [undefined,"", "0", "1", "3", "-1", "2.5", "abc", "NaN", "1e1", " 7 ", "Infinity", "-Infinity", "0x10", "-1e100"])
     it(`search ${query} max=${max}`, async () => {
       const path = base+"search?"+query+(max === undefined ? "" : "&maxResults="+encodeURIComponent(max));
       expect((await diff(path)).status).to.equal(200);
@@ -164,14 +164,19 @@ describe("ADT B6: search and virtual folders Node diff", function () {
       it(`vfs ${JSON.stringify(selected)} ${order} ${pattern}`, async () => {
         expect((await diff(base+"virtualfolders/contents","POST",{},request(selected,order,pattern))).status).to.equal(200);
       });
-  it("VFS raw channel never parses the tree or finished XML through ajson", async () => {
+  it("VFS bulk channel never delegates rendering or parses the tree through ajson", async () => {
     const original=abap.Classes.ZCL_AJSON.parse;
+    const call=StoreDestination.prototype.call;
+    StoreDestination.prototype.call=async function(name,signature) {
+      expect(signature.exporting.iv_type?.get()).not.to.equal("VFS");
+      return call.call(this,name,signature);
+    };
     abap.Classes.ZCL_AJSON.parse=async function(input) {
       expect(input.iv_json.get().length).to.be.lessThan(1000);
       return original.call(this,input);
     };
     try {expect((await diff(base+"virtualfolders/contents","POST",{},"")).status).to.equal(200);}
-    finally {abap.Classes.ZCL_AJSON.parse=original;}
+    finally {abap.Classes.ZCL_AJSON.parse=original;StoreDestination.prototype.call=call;}
   });
   it("VFS invalid UTF-8 and case-sensitive captures", async () => {
     for(const body of [Buffer.from([255]), '<vfs:preselection FACET="package"><vfs:value>$UNKNOWN</vfs:value></vfs:preselection>', '<vfs:facet></vfs:facet>'])
@@ -197,36 +202,48 @@ describe("ADT B6: search and virtual folders Node diff", function () {
 describe("B6 PACKAGES and SEARCH bound destination envelopes", () => {
   const call = async (destination,command,input) => {
     const signature = {exporting:{iv_command:box(command),iv_json:box(JSON.stringify(input))},
-      importing:{ev_json:box("stale"),ev_error:box("stale"),et_object:box([])}};
+      importing:{ev_source:box("stale"),ev_json:box("stale"),ev_error:box("stale"),et_object:box([])}};
     await destination.call("ZOSD_STORE",signature);
     return answerOf(signature);
   };
   const long = '/DEMO/LONG_PACKAGE_NAME_123456789012345678901234567890';
-  for(const objects of [false,true]) it(`PACKAGES objects=${objects} keeps order and full names from bound stores`, async () => {
+  for(const format of [undefined,"lines","vfs-lines"]) it(`PACKAGES format=${format} keeps order and full names from bound stores`, async () => {
     let opens=0;
     const destination=new StoreDestination({store:()=>{opens++;throw new Error('default must not open');}});
-    const results=await Promise.all(['ONE','TWO'].map((marker)=>withSystem(()=>({}),()=>call(destination,'PACKAGES',{objects}),{store:{
-      packages:()=>[{name:'$ZT_A',description:marker},{name:'$ZTA'},{name:long}],
-      package:(name)=>({objects:[{type:'CLAS',name:long+marker,library:true}]})
+    const results=await Promise.all(['ONE','TWO'].map((marker)=>withSystem(()=>({}),()=>call(destination,'PACKAGES',{format}),{store:{
+      packages:()=>[{name:'$ZT_A',description:marker+'\tline\n\\t',subpackages:[long]},{name:'$ZTA'},{name:long}],
+      package:()=>({objects:[{type:'CLAS',name:long+marker,library:true,description:'escaped\tline\n\\n'}]})
     }})));
     expect(opens).to.equal(0);
     for(const [i,result] of results.entries()) {
       expect(result.EV_ERROR).to.equal(''); expect(result.ET_OBJECT).to.deep.equal([]);
-      const rows=JSON.parse(result.EV_JSON);
-      expect(rows.map((r)=>r.name)).to.deep.equal(['$ZT_A','$ZTA',long]);
-      expect(rows[0].description).to.equal(['ONE','TWO'][i]);
-      if(objects) expect(rows[0].objects[0].name).to.equal(long+['ONE','TWO'][i]);
-      else expect(rows[0]).not.to.have.property('objects');
+      if(format === undefined) {
+        const rows=JSON.parse(result.EV_JSON);
+        expect(rows.map((r)=>r.name)).to.deep.equal(['$ZT_A','$ZTA',long]);
+        expect(rows[0]).not.to.have.property('objects');
+      } else {
+        expect(result.EV_JSON).to.equal('');
+        const rows=result.EV_SOURCE.split('\n');
+        expect(rows.filter((r)=>r.startsWith('P\t')).map((r)=>r.split('\t')[1])).to.deep.equal(['$ZT_A','$ZTA',long]);
+        expect(rows[0].split('\t')[3]).to.equal(['ONE','TWO'][i]+'\\tline\\n\\\\t');
+        if(format==='vfs-lines') {
+          expect(rows[1]).to.equal('C\t$ZT_A\t'+long);
+          expect(rows[2].split('\t')).to.deep.equal(['O','$ZT_A','CLAS',long+['ONE','TWO'][i],'escaped\\tline\\n\\\\n','X']);
+        } else expect(rows).to.have.length(3);
+      }
     }
   });
-  for(const limit of ['16',null,'-4','0','10','Infinity']) it(`SEARCH limit ${limit} preserves index order and NaN`, async () => {
+  for(const format of [undefined,'lines']) for(const limit of ['16',null,'-4','0','10','Infinity']) it(`SEARCH ${format} limit ${limit} preserves index order and NaN`, async () => {
     let options;
     const destination=new StoreDestination({store:()=>{throw new Error('default must not open');}});
     const rows=[{type:'CLAS',name:long},{type:'CLAS',name:'$ZT_A'}];
-    const result=await withSystem(()=>({}),()=>call(destination,'SEARCH',{seed:'B',type:'CLAS',limit}),{store:{
+    const result=await withSystem(()=>({}),()=>call(destination,'SEARCH',{seed:'B',type:'CLAS',limit,format}),{store:{
       search:(seed,asked)=>{expect(seed).to.equal('B');options=asked;return rows;}
     }});
-    expect(JSON.parse(result.EV_JSON)).to.deep.equal(rows);
+    if(format === "lines") {
+      expect(result.EV_JSON).to.equal("");
+      expect(result.EV_SOURCE).to.equal("CLAS\t"+long+"\t\nCLAS\t$ZT_A\t");
+    } else expect(JSON.parse(result.EV_JSON)).to.deep.equal(rows);
     expect(options.type).to.equal('CLAS');
     if(limit===null) expect(Number.isNaN(options.max)).to.equal(true);
     else expect(options.max).to.equal(Number(limit));

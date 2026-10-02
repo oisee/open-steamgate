@@ -13,7 +13,7 @@ CLASS zcl_osd_adt_search DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rt_refs) TYPE zcl_osd_adt_doc_common=>tt_reference RAISING zcx_osd_adt zcx_ajson_error.
     CLASS-METHODS objects IMPORTING iv_pattern TYPE string iv_type TYPE string is_max TYPE zcl_osd_adt_js=>ty_number
       RETURNING VALUE(rt_refs) TYPE zcl_osd_adt_doc_common=>tt_reference RAISING zcx_osd_adt zcx_ajson_error.
-    CLASS-METHODS reference IMPORTING io_json TYPE REF TO zcl_ajson iv_path TYPE string iv_type TYPE string
+    CLASS-METHODS reference IMPORTING iv_name TYPE string iv_library TYPE string iv_type TYPE string it_types TYPE zcl_osd_adt_types=>tt_type
       RETURNING VALUE(rs_ref) TYPE zcl_osd_adt_doc_common=>ty_reference.
 ENDCLASS.
 CLASS zcl_osd_adt_search IMPLEMENTATION.
@@ -21,7 +21,7 @@ CLASS zcl_osd_adt_search IMPLEMENTATION.
     IF iv_pattern CS `*`.
       rv_yes = zcl_osd_adt_js=>glob( iv_pattern = iv_pattern iv_text = iv_name ).
     ELSE.
-      rv_yes = boolc( iv_name CS iv_pattern ).
+      rv_yes = boolc( find( val = iv_name sub = iv_pattern ) >= 0 ).
     ENDIF.
   ENDMETHOD.
   METHOD slice_end.
@@ -32,46 +32,60 @@ CLASS zcl_osd_adt_search IMPLEMENTATION.
     IF is_max-infinity > 0 OR is_max-value >= iv_length.
       RETURN.
     ENDIF.
+    IF is_max-value <= - iv_length.
+      rv_end = 0.
+      RETURN.
+    ENDIF.
     rv_end = trunc( is_max-value ).
     IF rv_end < 0.
       rv_end = nmax( val1 = 0 val2 = iv_length + rv_end ).
     ENDIF.
   ENDMETHOD.
   METHOD reference.
-    DATA lt_types TYPE zcl_osd_adt_types=>tt_type.
     DATA ls_type TYPE zcl_osd_adt_types=>ty_type.
-    rs_ref-name = io_json->get_string( iv_path && `/name` ).
-    rs_ref-type = zcl_osd_adt_types=>adt_type( iv_type ).
-    lt_types = zcl_osd_adt_types=>all( ).
-    READ TABLE lt_types INTO ls_type WITH KEY type = iv_type.
+    rs_ref-name = iv_name.
+    rs_ref-type = iv_type.
+    READ TABLE it_types INTO ls_type WITH KEY type = iv_type.
     IF sy-subrc <> 0.
       ls_type-collection = `unknown`.
+    ELSE.
+      rs_ref-type = ls_type-adt_type.
+    ENDIF.
+    IF iv_type = `STRU`.
+      rs_ref-type = `TABL/DS`.
     ENDIF.
     rs_ref-uri = `/sap/bc/adt/` && ls_type-collection && `/`
       && zcl_osd_adt_uri=>encode_component( to_lower( rs_ref-name ) ).
     rs_ref-has_uri = abap_true.
-    IF io_json->get_boolean( iv_path && `/library` ) = abap_true.
+    IF iv_library = abap_true.
       rs_ref-description = `library object`.
     ENDIF.
     rs_ref-has_description = boolc( rs_ref-description IS NOT INITIAL ).
   ENDMETHOD.
   METHOD packages.
     DATA ls_answer TYPE zcl_osd_adt_host=>ty_answer.
-    DATA lo_json TYPE REF TO zcl_ajson.
-    DATA lt_members TYPE string_table.
-    DATA lv_member TYPE string.
-    DATA lv_path TYPE string.
+    DATA lt_lines TYPE string_table.
+    DATA lv_line TYPE string.
+    DATA lv_kind TYPE string.
+    DATA lv_name TYPE string.
+    DATA lv_parent TYPE string.
+    DATA lv_description TYPE string.
+    DATA lv_library TYPE string.
+    DATA lv_root TYPE string.
     DATA ls_ref TYPE zcl_osd_adt_doc_common=>ty_reference.
     DATA lv_end TYPE i.
     zcl_osd_adt_host=>require( `PACKAGES` ).
-    ls_answer = zcl_osd_adt_host=>store( iv_command = `PACKAGES` iv_json = `{}` ).
-    lo_json = zcl_ajson=>parse( iv_json = ls_answer-json iv_keep_item_order = abap_true ).
-    lt_members = zcl_osd_adt_json=>ordered_members( io_json = lo_json iv_path = `/` ).
-    LOOP AT lt_members INTO lv_member.
-      lv_path = `/` && lv_member.
-      IF matches( iv_name = lo_json->get_string( lv_path && `/name` ) iv_pattern = iv_pattern ) = abap_true.
-        ls_ref = reference( io_json = lo_json iv_path = lv_path iv_type = `DEVC` ).
-        ls_ref-description = lo_json->get_string( lv_path && `/description` ).
+    ls_answer = zcl_osd_adt_host=>store( iv_command = `PACKAGES` iv_json = `{"format":"lines"}` ).
+    SPLIT ls_answer-source AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
+    LOOP AT lt_lines INTO lv_line WHERE table_line IS NOT INITIAL.
+      SPLIT lv_line AT cl_abap_char_utilities=>horizontal_tab INTO lv_kind lv_name lv_parent lv_description lv_library lv_root.
+      IF matches( iv_name = lv_name iv_pattern = iv_pattern ) = abap_true.
+        CLEAR ls_ref.
+        ls_ref-name = lv_name.
+        ls_ref-type = `DEVC/K`.
+        ls_ref-uri = `/sap/bc/adt/packages/` && zcl_osd_adt_uri=>encode_component( to_lower( lv_name ) ).
+        ls_ref-has_uri = abap_true.
+        ls_ref-description = zcl_osd_adt_js=>unescape( lv_description ).
         ls_ref-has_description = boolc( ls_ref-description IS NOT INITIAL ).
         APPEND ls_ref TO rt_refs.
       ENDIF.
@@ -83,16 +97,20 @@ CLASS zcl_osd_adt_search IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
   METHOD objects.
+    DATA lt_types TYPE zcl_osd_adt_types=>tt_type.
     DATA lo_input TYPE REF TO zcl_osd_adt_json.
     DATA ls_answer TYPE zcl_osd_adt_host=>ty_answer.
-    DATA lo_json TYPE REF TO zcl_ajson.
+
     DATA lt_parts TYPE string_table.
-    DATA lt_members TYPE string_table.
+    DATA lt_lines TYPE string_table.
     DATA lv_seed TYPE string.
     DATA lv_limit TYPE string.
-    DATA lv_member TYPE string.
-    DATA lv_path TYPE string.
+    DATA lv_line TYPE string.
+    DATA lv_name TYPE string.
+    DATA lv_type TYPE string.
+    DATA lv_library TYPE string.
     DATA ls_ref TYPE zcl_osd_adt_doc_common=>ty_reference.
+    lt_types = zcl_osd_adt_types=>all( ).
     SPLIT iv_pattern AT `*` INTO TABLE lt_parts.
     LOOP AT lt_parts INTO lv_seed WHERE table_line IS NOT INITIAL.
       EXIT.
@@ -108,19 +126,19 @@ CLASS zcl_osd_adt_search IMPLEMENTATION.
       lv_limit = zcl_osd_adt_json=>quote( lv_limit ).
     ENDIF.
     CREATE OBJECT lo_input.
+    lo_input->add( iv_name = `format` iv_value = `lines` ).
     lo_input->add( iv_name = `seed` iv_value = lv_seed ).
     lo_input->add( iv_name = `type` iv_value = iv_type ).
     lo_input->add_raw( iv_name = `limit` iv_json = lv_limit ).
     zcl_osd_adt_host=>require( `SEARCH` ).
     ls_answer = zcl_osd_adt_host=>store( iv_command = `SEARCH` iv_json = lo_input->document( ) ).
-    lo_json = zcl_ajson=>parse( iv_json = ls_answer-json iv_keep_item_order = abap_true ).
-    lt_members = zcl_osd_adt_json=>ordered_members( io_json = lo_json iv_path = `/` ).
-    LOOP AT lt_members INTO lv_member.
-      lv_path = `/` && lv_member.
-      IF matches( iv_name = lo_json->get_string( lv_path && `/name` ) iv_pattern = iv_pattern ) = abap_false.
+    SPLIT ls_answer-source AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
+    LOOP AT lt_lines INTO lv_line WHERE table_line IS NOT INITIAL.
+      SPLIT lv_line AT cl_abap_char_utilities=>horizontal_tab INTO lv_type lv_name lv_library.
+      IF matches( iv_name = lv_name iv_pattern = iv_pattern ) = abap_false.
         CONTINUE.
       ENDIF.
-      ls_ref = reference( io_json = lo_json iv_path = lv_path iv_type = lo_json->get_string( lv_path && `/type` ) ).
+      ls_ref = reference( iv_name = lv_name iv_library = lv_library iv_type = lv_type it_types = lt_types ).
       APPEND ls_ref TO rt_refs.
       IF is_max-nan = abap_false AND ( is_max-infinity < 0 OR
           ( is_max-infinity = 0 AND lines( rt_refs ) >= is_max-value ) ).
@@ -137,6 +155,7 @@ CLASS zcl_osd_adt_search IMPLEMENTATION.
     DATA lt_refs TYPE zcl_osd_adt_doc_common=>tt_reference.
     DATA lt_rest TYPE zcl_osd_adt_doc_common=>tt_reference.
     DATA lv_end TYPE i.
+    DATA lv_given_type TYPE abap_bool.
     zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `query` IMPORTING ev_value = lv_pattern ev_found = lv_found ).
     IF lv_found = abap_false.
       zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `search` IMPORTING ev_value = lv_pattern ).
@@ -146,7 +165,12 @@ CLASS zcl_osd_adt_search IMPLEMENTATION.
     IF lv_found = abap_false.
       zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `type` IMPORTING ev_value = lv_type ).
     ENDIF.
+    lv_given_type = boolc( lv_type IS NOT INITIAL ).
     SPLIT to_upper( lv_type ) AT `/` INTO lv_type lv_max.
+    IF lv_given_type = abap_true AND lv_type IS INITIAL.
+      rv_body = zcl_osd_adt_doc_common=>object_references( lt_refs ).
+      RETURN.
+    ENDIF.
     zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `maxResults` IMPORTING ev_value = lv_max ev_found = lv_found ).
     IF lv_found = abap_false.
       lv_max = `100`.

@@ -574,6 +574,28 @@ Every landing also:
     - ADR 0007 should record five host families (store, git, build, system, SQL check) and 17 destination commands.
 ## Rules decided in S0
 
+**Bulk lists: line format.** Bulk STORE replies travel as raw `EV_SOURCE`,
+with one record per LF-delimited line and TAB-delimited fields, no trailing
+LF, and no fixed-width DDIC fields. Lists retain host order. Escape backslash
+as `\\`, TAB as `\t`, and LF as `\n`; `ZCL_OSD_ADT_JS=>UNESCAPE` decodes
+text fields in one pass (so a literal `\n` stays literal). Repository
+identifiers cannot contain TAB, LF or backslash; descriptions can.
+
+B6 PACKAGES input `{format:"lines"}` returns
+`P<TAB>name<TAB>parent<TAB>description<TAB>library<TAB>root`.
+`{format:"vfs-lines"}` adds `C<TAB>parent<TAB>child` for each package's
+subpackages and `O<TAB>package<TAB>type<TAB>name<TAB>description<TAB>library`
+for its raw objects. P, C and O records retain package, child and object
+host order; `X` means true, empty means false. Root is true only when parent
+is absent. Object descriptions default to names only when absent/null.
+PACKAGES without a format retains its existing package JSON answer;
+there is no `objects` flag. SEARCH adds `{format:"lines"}` to its existing
+`{seed,type,limit}` input and returns `type<TAB>name<TAB>library` records in
+index order. Its default JSON answer remains available. Empty lists return
+an empty string. Only bulk facts cross this seam: VFS request parsing,
+patterns, facets, subtrees, counts, sorting and XML rendering are ABAP.
+SYSTEM VFS has been removed.
+
 Slice 0b establishes the host seam without adding route rows. `ZOSD_STORE`
 accepts optional `IV_JSON`; every STORE operation uses the request-bound
 store before the destination default. Refusals carry
@@ -598,7 +620,7 @@ their first users or with slice 0a/the front, rather than in the host seam:
   ...}`. Dell owns its dispatcher. `structureOf`, the `cdsEntityOf` halves and
   `runner.classes` become shared exports used by Node and PARSE.
 - PACKAGE is one command: `IV_JSON {name, mode: raw | local, user}` gives
-  EV_JSON. PACKAGES (OBJECTS) and SEARCH are separate commands. ET_OBJECT
+  EV_JSON. PACKAGES and SEARCH are separate commands. ET_OBJECT
   never carries names for these commands: CHAR40/CHAR30 would truncate them.
 - Git stays on STORE in the HISTORY/REVISION family (ADR 0007). GIT_STATE
   and GIT_BLOB are the new commands. The revision route uses

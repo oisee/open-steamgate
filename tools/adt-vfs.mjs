@@ -1,5 +1,4 @@
-// B6: shared VFS renderer. SYSTEM raw avoids ajson for the full tree.
-// Node retains this as the live route reference in child mode.
+// Live Node VFS renderer: the independent oracle for the ABAP port.
 import {TYPES} from "./osd-store-types.mjs";
 import {ADT_TYPE, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL} from "./adt-documents.mjs";
 const BASE = "/sap/bc/adt";

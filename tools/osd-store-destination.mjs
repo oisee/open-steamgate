@@ -71,7 +71,7 @@ const PARSE_KINDS = {
 // object), SESSION (does the request's session hold state) and LOCK_HOLDER
 // (IV_NAME "TYPE NAME": is the holder a live session; a dead one is ended).
 // They go when the session moves into ABAP.
-const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER", "VFS"];
+const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER"];
 let systemCalls;
 try {
   if (typeof process !== "undefined" && process.versions?.node !== undefined) {
@@ -185,15 +185,32 @@ export class StoreDestination {
         }
         case "PACKAGES": {
           const input = JSON.parse(givenText(signature, "IV_JSON"));
-          return {EV_JSON: JSON.stringify(store.packages().map((pkg) => ({
-            name: pkg.name, parent: pkg.parent, description: pkg.description, library: pkg.library, subpackages: pkg.subpackages,
-            ...(input.objects === true ? {objects: store.package(pkg.name).objects} : {})})))};
+          const packages = store.packages();
+          if (["lines", "vfs-lines"].includes(input.format)) {
+            const field = (value) => String(value ?? "").replaceAll("\\", "\\\\").replaceAll("\t", "\\t").replaceAll("\n", "\\n");
+            const records = [];
+            const row = (...fields) => records.push(fields.map(field).join("\t"));
+            for (const pkg of packages) {
+              row("P", pkg.name, pkg.parent, pkg.description, pkg.library ? "X" : "", pkg.parent === undefined ? "X" : "");
+              if (input.format === "vfs-lines") {
+                for (const child of pkg.subpackages ?? []) row("C", pkg.name, child);
+                for (const object of store.package(pkg.name).objects) {
+                  row("O", pkg.name, object.type, object.name, object.description ?? object.name, object.library ? "X" : "");
+                }
+              }
+            }
+            return {EV_SOURCE: records.join("\n")};
+          }
+          return {EV_JSON: JSON.stringify(packages.map((pkg) => ({
+            name: pkg.name, parent: pkg.parent, description: pkg.description, library: pkg.library, subpackages: pkg.subpackages})))};
         }
         case "SEARCH": {
           const input = JSON.parse(givenText(signature, "IV_JSON"));
-          return {EV_JSON: JSON.stringify(store.search(input.seed ?? "", {
+          const rows = store.search(input.seed ?? "", {
             type: input.type || undefined, max: input.limit === null ? NaN : Number(input.limit),
-          }))};
+          });
+          if (input.format === "lines") return {EV_SOURCE: rows.map((o) => [o.type, o.name, o.library ? "X" : ""].join("\t")).join("\n")};
+          return {EV_JSON: JSON.stringify(rows)};
         }
         case "PACKAGE": {
           const input = JSON.parse(givenText(signature, "IV_JSON"));
