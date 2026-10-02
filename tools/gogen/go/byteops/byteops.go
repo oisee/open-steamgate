@@ -1,6 +1,7 @@
 package byteops
 
 import (
+	"osg/gogen/abaperr"
 	"osg/gogen/bytesection"
 	"strings"
 )
@@ -18,8 +19,10 @@ func Replace(s, with string, off, n int32, xLen int) (string, int32) {
 }
 
 // All returns non-overlapping absolute byte offsets (A4H oracle P2 ALL C3).
-// Empty patterns match each boundary, with forward progress between matches.
 func All(s, p string) [][]int32 {
+	if len(p) == 0 {
+		panic(abaperr.NotCompiled("FIND ALL OCCURRENCES IN BYTE MODE", "an empty pattern is not measured"))
+	}
 	var out [][]int32
 	for off := 0; off <= len(s); {
 		i := strings.Index(s[off:], p)
@@ -29,9 +32,6 @@ func All(s, p string) [][]int32 {
 		at := off + i
 		out = append(out, []int32{int32(at), int32(len(p))})
 		off = at + len(p)
-		if len(p) == 0 {
-			off++
-		}
 	}
 	return out
 }

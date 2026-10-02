@@ -24,6 +24,7 @@ CLASS ltcl_oracle DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
     METHODS p2_09 FOR TESTING.
     METHODS p2_10 FOR TESTING.
     METHODS p2_11 FOR TESTING.
+    METHODS p2_fixed_needle FOR TESTING.
 ENDCLASS.
 CLASS ltcl_oracle IMPLEMENTATION.
   METHOD p1_01.
@@ -277,7 +278,8 @@ CLASS ltcl_oracle IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = actual exp = 'rc0 o0' ).
   ENDMETHOD.
   METHOD p2_05.
-* A4H oracle P2: ALL C3
+* A4H oracle P2: ALL C3; probe read sy-subrc after the LOOP.
+* Here FIND rc is saved before LOOP as an additional regression check.
     DATA xs TYPE xstring.
     DATA p TYPE xstring.
     DATA m TYPE i.
@@ -403,5 +405,18 @@ CLASS ltcl_oracle IMPLEMENTATION.
         actual = 'CX_SY_RANGE_OUT_OF_BOUNDS'.
     ENDTRY.
     cl_abap_unit_assert=>assert_equals( act = actual exp = 'rc0 o1' ).
+  ENDMETHOD.
+  METHOD p2_fixed_needle.
+* A4H P2 A3C3 bounded hit, with the probe's fixed x LENGTH 2 needle.
+    DATA xs TYPE xstring.
+    DATA p TYPE x LENGTH 2.
+    DATA m TYPE i.
+    DATA ml TYPE i.
+    xs = 'C3A3C3'.
+    p = 'A3C3'.
+    FIND p IN SECTION OFFSET 0 LENGTH 3 OF xs IN BYTE MODE MATCH OFFSET m MATCH LENGTH ml.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = m exp = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = ml exp = 2 ).
   ENDMETHOD.
 ENDCLASS.

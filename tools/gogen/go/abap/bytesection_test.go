@@ -15,7 +15,6 @@ func TestReplaceByteSection(t *testing.T) {
 		{"longer", "XYZ", 1, 1, "aXYZcd"}, {"start", "X", 0, 1, "Xbcd"},
 		{"end", "X", 4, 0, "abcdX"}, {"default", "X", 0, NoLength, "X"},
 		{"rest", "X", 2, NoLength, "abX"}, {"empty", "", 1, 2, "ad"},
-		{"negative JS overlap", "X", 2, -1, "abXbcd"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			got, rc := ReplaceBytes("abcd", c.with, c.off, c.n, -1)
@@ -58,7 +57,7 @@ func TestFindByteSection(t *testing.T) {
 }
 
 func TestByteSectionRangeLeavesTarget(t *testing.T) {
-	for _, c := range []struct{ off, n int32 }{{-1, 1}, {5, 0}, {3, 2}, {1, math.MaxInt32}, {0, -1}} {
+	for _, c := range []struct{ off, n int32 }{{-1, 1}, {5, 0}, {3, 2}, {1, math.MaxInt32}, {0, -1}, {2, -1}} {
 		for _, replace := range []bool{false, true} {
 			t.Run("range", func(t *testing.T) {
 				target := "abcd"
