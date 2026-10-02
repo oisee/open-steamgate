@@ -284,3 +284,5 @@ delegated request, measured as option B. The in-memory session adds up to 0.15 m
 
 A delegated request also waits for the work process once the front moves up, so it queues behind a long OData step,
 which it does not do today.
+
+When the ZCX miss flag lands in slice 0, the ICF entry `handle_request` must strip `X-OSD-Miss`.

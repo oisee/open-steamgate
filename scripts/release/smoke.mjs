@@ -43,8 +43,8 @@ async function ready() {
   for (let i = 0; i < 120; i++) {
     if (child.exitCode !== null) throw new Error(`OSD exited before ready:\n${log}`);
     try {
-      const r = await fetch(`${base}/sap/bc/adt/core/http/build`, {signal: AbortSignal.timeout(3000)});
-      if (r.ok && (await r.json()).system?.serving) return;
+      const r = await fetch(`${base}/osd/ready`, {signal: AbortSignal.timeout(3000)});
+      if (r.ok && (await r.json()).ready === true) return;
     } catch { /* still starting */ }
     await sleep(1000);
   }

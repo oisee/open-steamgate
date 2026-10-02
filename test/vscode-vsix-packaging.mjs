@@ -84,6 +84,7 @@ describe("packaging: test-only ABAP stays out of a system seed", function () {
 
   it("the staging filter names the session double and the fleet reports", () => {
     for (const rel of ["unit/zcl_osd_adt_session_mem.clas.abap", "unit/zcl_osd_adt_session_mem.clas.xml",
+      "unit/zcl_osd_adt_route_f2.clas.abap", "unit/zcl_osd_adt_route_f2.clas.xml",
       "unit/zcl_osd_adt_route_echo.clas.abap", "unit/zcl_osd_adt_route_echo.clas.xml",
       "integration/zosd_voyage.prog.abap", "integration/zosd_ready.prog.xml", "e2e", "e2e/flp.spec.mjs",
       "fixtures", "fixtures/enq/contract.json"]) {
@@ -102,6 +103,7 @@ describe("packaging: test-only ABAP stays out of a system seed", function () {
       expect(existsSync(join(root, "test", "unit", "zcl_osd_adt_session_mem.clas.abap"))).to.equal(true);
       for (const ext of ["abap", "xml"]) {
         expect(existsSync(join(scratch, "test", "unit", `zcl_osd_adt_session_mem.clas.${ext}`)), ext).to.equal(false);
+        expect(existsSync(join(scratch, "test", "unit", `zcl_osd_adt_route_f2.clas.${ext}`)), ext).to.equal(false);
       }
       expect(existsSync(join(scratch, "test", "start.mjs"))).to.equal(true);
       expect(existsSync(join(scratch, "test", "integration", "zosd_voyage.prog.abap"))).to.equal(false);

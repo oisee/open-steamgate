@@ -56,8 +56,8 @@ if (env.STG_PROTOCOLS !== "0") {
   for (let attempt = 0; attempt < 300 && !stopping; attempt++) {
     if (osd.exitCode !== null || osd.signalCode !== null) break;
     try {
-      const response = await fetch(`${localHttp}/sap/bc/adt/core/http/build`, {signal: AbortSignal.timeout(3000)});
-      if (response.ok && (await response.json()).system?.serving) { ready = true; break; }
+      const response = await fetch(`${localHttp}/osd/ready`, {signal: AbortSignal.timeout(3000)});
+      if (response.ok && (await response.json()).ready === true) { ready = true; break; }
     } catch { /* startup still in progress */ }
     await delay(2000);
   }
