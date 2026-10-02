@@ -159,12 +159,12 @@
       "reason": "re-taken after #419 (pins): +3 lines routing library paths through tools/osd-lib-path.mjs"
     },
     "tools/dsl-l2-eval.mjs": {
-      "lines": 1277,
-      "reason": "baseline 2026-10-01"
+      "lines": 1164,
+      "reason": "lowered 2026-10-02: the DDIC value semantics went to tools/dsl-l2-values.mjs; holds the range filter of L3 slice 3a"
     },
     "tools/dsl-l2.mjs": {
-      "lines": 1474,
-      "reason": "baseline 2026-10-01"
+      "lines": 1430,
+      "reason": "lowered 2026-10-02: the YAML line index went to tools/dsl-yaml-lines.mjs; holds the range: of L3 slice 3a"
     },
     "tools/gogen/emit-go.mjs": {
       "lines": 2290,

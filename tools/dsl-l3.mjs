@@ -18,6 +18,7 @@ import {createRequire} from "node:module";
 import {pathToFileURL} from "node:url";
 import yaml from "js-yaml";
 const abaplint = createRequire(import.meta.url)("@abaplint/core");
+import {lineOf} from "./dsl-yaml-lines.mjs";
 import {compileRule, lineIndex, modelHash, renderModel, rulePath, RuleError} from "./dsl-l2.mjs";
 import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
 
@@ -125,15 +126,6 @@ export class SetError extends RuleError {}
 
 const path = (file) => relative(process.cwd(), file).split(sep).join("/");
 
-// The nearest line of a manifest path (`rules/2/enabled`), or of its parent.
-function lineOf(index, key) {
-  let current = `/${key}`;
-  while (current) {
-    if (index.has(current)) return index.get(current);
-    current = current.slice(0, current.lastIndexOf("/"));
-  }
-  return 1;
-}
 
 // the source of a hand-written variant class, beside the set or under src
 function findClassFile(className, roots) {
