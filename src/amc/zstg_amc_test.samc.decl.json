@@ -8,6 +8,7 @@
     "/pcp": {"scope": "C"}
   },
   "callSites": {
+    "zcl_osd_amc_test.clas.abap:32": {"messageType": "TEXT"},
     "zcl_osd_amc_test.clas.testclasses.abap:29": {"messageType": "TEXT"},
     "zcl_osd_amc_test.clas.testclasses.abap:86": {"authority": "none", "reason": "negative authorization test expects the send to fail"},
     "zcl_osd_amc_test.clas.testclasses.abap:102": {"messageType": "BINARY"},

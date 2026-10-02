@@ -3,7 +3,7 @@
 import {readFileSync, readdirSync, statSync} from "node:fs";
 import {basename, join} from "node:path";
 import {generatorFoldersOf, winningByLayer} from "./osd-packs.mjs";
-import {currentStepToken, dialogStep, outsideStepContext, registerWaitPump} from "./osd-dialog-step.mjs";
+import {currentStepToken, dialogStep, inSession, outsideStepContext, registerWaitPump} from "./osd-dialog-step.mjs";
 
 const tag = (xml, name) => new RegExp(`<${name}>([^<]*)</${name}>`, "i").exec(xml)?.[1]?.trim();
 const rows = (xml, name) => [...xml.matchAll(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, "gi"))].map((m) => m[1]);
@@ -194,7 +194,9 @@ export async function drainAmcSession(abap, session) {
       const receiver = sub.receiver;
       if (!receiver) break;
       delivered = true;
-      await outsideStepContext(() => dialogStep(async () => {
+      // in the waiting session's shared state (its ICF server), not in
+      // whatever the step served meanwhile left there
+      await outsideStepContext(() => dialogStep(() => inSession(session, async () => {
         const Context = abap.Classes.ZCL_AMC_MESSAGE_CONTEXT;
         const context = new Context();
         await context.constructor_({iv_client: new abap.types.Character(3).set(publication.client),
@@ -203,7 +205,7 @@ export async function drainAmcSession(abap, session) {
           i_message: publication.message,
           i_context: new abap.types.ABAPObject({qualifiedName: "IF_AMC_MESSAGE_CONTEXT"}).set(context),
         });
-      }));
+      })));
     }
   }
   return delivered;
