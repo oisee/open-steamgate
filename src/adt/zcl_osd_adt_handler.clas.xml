@@ -5,7 +5,7 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_OSD_ADT_HANDLER</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>ADT facade: ICF handler for /sap/bc/adt</DESCRIPT>
+    <DESCRIPT>ADT facade: ICF handler for the ADT REST path</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>
