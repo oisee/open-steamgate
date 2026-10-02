@@ -82,29 +82,52 @@ export function missing(inTree, ran) {
   return inTree.filter((name) => !seen.has(name.replace(/\s+\(.*$/, "")));
 }
 
-if (basename(process.argv[1] ?? "") === "osd-unit-run.mjs") {
-  const inTree = testClassesIn();
+/**
+ * Runs `node <args>` with stdout captured through a regular file (see below)
+ * and resolves {code, signal, captured}. A child ended by a signal has
+ * code === null, which is why both are returned.
+ */
+export async function runCaptured(args, {echo = true} = {}) {
   // The transpiled runner calls process.exit(0) immediately after logging.
   // Node can discard pending writes to a pipe, producing a false 0-ran report.
   // A regular file descriptor makes those writes synchronous on all hosts.
   const captureDir = mkdtempSync(join(tmpdir(), "osd-unit-"));
   const capturePath = join(captureDir, "stdout.log");
   const fd = openSync(capturePath, "w");
-  let code;
-  let captured;
   try {
-    const child = spawn("node", ["--expose-gc", "--import", "./tools/osd-unit-bootstrap.mjs", "output/index.mjs"], {stdio: ["inherit", fd, "inherit"]});
-    code = await new Promise((resolve) => child.on("close", resolve));
+    const child = spawn("node", args, {stdio: ["inherit", fd, "inherit"]});
+    const {code, signal} = await new Promise((resolve) => child.on("close", (c, s) => resolve({code: c, signal: s})));
     closeSync(fd);
-    captured = readFileSync(capturePath, "utf8");
-    process.stdout.write(captured);
+    const captured = readFileSync(capturePath, "utf8");
+    if (echo) process.stdout.write(captured);
+    return {code, signal, captured};
   } finally {
     try { closeSync(fd); } catch { /* already closed */ }
     rmSync(captureDir, {recursive: true, force: true});
   }
-  if (code !== 0) process.exit(code);
+}
 
-  const ran = reported(captured);
+/**
+ * The exit code a finished child stands for. `process.exit(null)` exits 0,
+ * so a child killed by a signal (code null) would have read as a pass even
+ * after it had reported every class; anything but a clean 0 is a failure.
+ */
+export function exitCodeOf({code, signal}) {
+  if (signal) return 1;
+  if (code === 0) return 0;
+  return Number.isInteger(code) && code > 0 ? code : 1;
+}
+
+if (basename(process.argv[1] ?? "") === "osd-unit-run.mjs") {
+  const inTree = testClassesIn();
+  // tools/osd-unit-all.mjs runs the generated harness's list but goes on
+  // past a failure, so one red class no longer hides every class after it
+  const result = await runCaptured(["--expose-gc", "--import", "./tools/osd-unit-bootstrap.mjs", "tools/osd-unit-all.mjs", ...process.argv.slice(2)]);
+  const exitCode = exitCodeOf(result);
+  if (result.signal) console.log(`\nunit: FAILED -- the run was ended by ${result.signal}`);
+  // a failing run still gets its inventory: what never ran is a second
+  // finding, not one the first should hide
+  const ran = reported(result.captured);
   const never = missing(inTree, ran);
   // "12 of 11" reads like an error in the counter. They are two different
   // populations: what ran includes classes the libraries bring, and what the
@@ -118,5 +141,6 @@ if (basename(process.argv[1] ?? "") === "osd-unit-run.mjs") {
     console.log("different claims, and only one of them used to be printable.");
     process.exit(1);
   }
+  if (exitCode !== 0) process.exit(exitCode);
   console.log("OK");
 }
