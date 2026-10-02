@@ -8,6 +8,9 @@
 //
 // Listeners are registered during the initial evaluation, as the service
 // worker specification requires; the runtime is imported on the first request.
+// ADT continuations share preview-backend.mjs's preview-continuations.mjs
+// stub: every kind retains the current host-front 500 bytes. A browser
+// continuation slice supplies host work and a fresh RESUME step there.
 import {services, channels} from "./generated/services.mjs";
 import {shim} from "./generated/socket-shim.mjs";
 import {describe} from "../tools/osd-describe.mjs";
