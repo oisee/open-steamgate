@@ -16,6 +16,18 @@ import {readdirSync, readFileSync, statSync, writeFileSync, mkdirSync} from "nod
 import {generatorFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {basename, join} from "node:path";
 
+// Deduplicate readers and live service-tree rows for an ADT class.
+export function countServiceRegistrations(readers, rows, className) {
+  const ids = new Set(readers.flatMap((reader) => reader.services).map((service) =>
+    `/sap/opu/odata/sap/${service}`.toUpperCase()));
+  for (const row of rows) {
+    if ([row.handler, row.mpc].some((candidate) => String(candidate ?? "").toUpperCase() === className)) {
+      ids.add(String(row.path).toUpperCase());
+    }
+  }
+  return ids.size;
+}
+
 const OUT = "gen/segw";
 
 function tag(xml, name) {

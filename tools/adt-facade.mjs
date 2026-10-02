@@ -36,7 +36,7 @@ import {portabilityWarnings} from "./amdp-gen.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 import {objectVersions, versionSource, versionsFeedDocument} from "./adt-versions.mjs";
-import {segwRegistrations, registeredServices} from "./segw-registry.mjs";
+import {segwRegistrations, registeredServices, countServiceRegistrations} from "./segw-registry.mjs";
 import {generatorFoldersOf} from "./osd-packs.mjs";
 import {entitySetMapFor} from "./segw-entityset-map.mjs";
 import {testClassesIn} from "./osd-unit-run.mjs";
@@ -45,16 +45,7 @@ import {transactions} from "./osd-tran-registry.mjs";
 
 export const BASE = "/sap/bc/adt";
 
-export function countServiceRegistrations(readers, rows, className) {
-  const ids = new Set(readers.flatMap((reader) => reader.services).map((service) =>
-    `/sap/opu/odata/sap/${service}`.toUpperCase()));
-  for (const row of rows) {
-    if ([row.handler, row.mpc].some((candidate) => String(candidate ?? "").toUpperCase() === className)) {
-      ids.add(String(row.path).toUpperCase());
-    }
-  }
-  return ids.size;
-}
+export {countServiceRegistrations} from "./segw-registry.mjs";
 
 const xmlEscape = (s) => String(s)
   .replaceAll("&", "&amp;")
@@ -3095,7 +3086,7 @@ function facadeBuildStamp() {
   }
   const here = dirname(fileURLToPath(import.meta.url));
   const digest = createHash("sha256");
-  for (const file of ["adt-facade.mjs", "adt-documents.mjs", "adt-session.mjs", "adt-source-properties.mjs", "osd-store.mjs", "osd-git-history.mjs"]) {
+  for (const file of ["adt-facade.mjs", "adt-documents.mjs", "adt-session.mjs", "adt-source-properties.mjs", "osd-store.mjs", "osd-store-types.mjs", "osd-git-history.mjs", "segw-registry.mjs"]) {
     try {
       digest.update(readFileSync(join(here, file)));
     } catch {
