@@ -220,6 +220,7 @@ CLASS ltcl_import DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT FIN
     METHODS function_group_fills_the_table FOR TESTING.
     METHODS value_too_long_is_400 FOR TESTING.
     METHODS repo_is_an_abapgit_repository FOR TESTING.
+    METHODS repo_of_a_local_object_is_400 FOR TESTING.
     METHODS count IMPORTING iv_set TYPE string iv_needle TYPE string RETURNING VALUE(rv_count) TYPE i.
     METHODS iwpr IMPORTING iv_second_type TYPE abap_bool DEFAULT abap_true RETURNING VALUE(rv_xml) TYPE string.
     METHODS post IMPORTING iv_xml TYPE string RETURNING VALUE(rs_response) TYPE zcl_stg_dispatcher=>ty_response.
@@ -239,6 +240,7 @@ CLASS ltcl_import IMPLEMENTATION.
     DELETE FROM zstg_sbo_pr WHERE project = 'ZUT_IMP'.
     DELETE FROM zstg_sbo_prt WHERE project = 'ZUT_IMP'.
     DELETE FROM zstg_sbd_ga WHERE project = 'ZUT_IMP'.
+    DELETE FROM tadir WHERE pgmid = 'R3TR' AND object = 'CLAS' AND obj_name = 'ZCL_ZUT_IMP_MPC'.
   ENDMETHOD.
 
   METHOD iwpr.
@@ -577,6 +579,34 @@ CLASS ltcl_import IMPLEMENTATION.
                                                 iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/RepoSet('ZUT_IMP')` ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 msg = ls_response-body ).
     cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS '"Content":"UEsDB' ) ).
+  ENDMETHOD.
+
+  METHOD repo_of_a_local_object_is_400.
+* an object of $TMP is never transported (tools/osd-tmp.mjs): TADIR saying
+* $TMP for one class of the project refuses both routes of the export
+    DATA ls_response TYPE zcl_stg_dispatcher=>ty_response.
+    DATA lt_options  TYPE tihttpnvp.
+    DATA ls_tadir    TYPE tadir.
+
+    ls_response = post( iwpr( ) ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 201 msg = ls_response-body ).
+    ls_tadir-pgmid    = 'R3TR'.
+    ls_tadir-object   = 'CLAS'.
+    ls_tadir-obj_name = 'ZCL_ZUT_IMP_MPC'.
+    ls_tadir-devclass = '$TMP'.
+    MODIFY tadir FROM ls_tadir.
+
+    lt_options = cl_http_utility=>string_to_fields( `$filter=Project eq 'ZUT_IMP'` ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method  = 'GET'
+                                                iv_path    = '/sap/opu/odata/sap/ZSTG_SEGW_SRV/RepoFileSet'
+                                                it_options = lt_options ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 400 msg = ls_response-body ).
+    cl_abap_unit_assert=>assert_true( xsdbool( ls_response-body CS 'never transported' ) ).
+    ls_response = zcl_stg_dispatcher=>dispatch( iv_method = 'GET'
+                                                iv_path   = `/sap/opu/odata/sap/ZSTG_SEGW_SRV/RepoSet('ZUT_IMP')` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 400 msg = ls_response-body ).
+
+    DELETE FROM tadir WHERE pgmid = 'R3TR' AND object = 'CLAS' AND obj_name = 'ZCL_ZUT_IMP_MPC'.
   ENDMETHOD.
 
 ENDCLASS.

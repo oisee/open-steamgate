@@ -1,0 +1,47 @@
+{
+  "about": "$TMP on a real system. EXPECT=A4H is read off the A4H sandbox through the vsp MCP tool on 2026-10-02 (TDEVC/TDEVCT/TADIR reads, ADT reads and one create each of a PROG and a sub-package, both deleted again and their absence read back). UNMEASURED is what OSD does without a measurement behind it. No host, user or system id: users are named by role.",
+  "tdevc": {
+    "EXPECT": "A4H",
+    "rows": 1,
+    "row": {
+      "DEVCLASS": "$TMP", "PARENTCL": "", "PDEVCLASS": "", "DLVUNIT": "LOCAL", "KORRFLAG": "",
+      "COMPONENT": "", "NAMESPACE": "/*/", "PACKTYPE": "", "MAINPACK": "",
+      "AS4USER": "SAP", "CREATED_BY": "SAP", "CREATED_ON": "00000000"
+    },
+    "texts": {"E": "Temporary Objects (never transported!)"},
+    "note": "one $TMP for the whole system, not one per user; delivered (AS4USER is SAP's delivery user, CREATED_ON is initial)"
+  },
+  "tadir": {
+    "EXPECT": "A4H",
+    "objectsInTmp": 12137,
+    "distinctAuthors": 8,
+    "createdProg": {"PGMID": "R3TR", "OBJECT": "PROG", "DEVCLASS": "$TMP", "AUTHOR": "<the logged-on user>", "GENFLAG": ""},
+    "note": "every object in $TMP carries TADIR-AUTHOR; a local package itself has no TADIR row"
+  },
+  "nodestructure": {
+    "EXPECT": "A4H",
+    "request": "POST /sap/bc/adt/repository/nodestructure?parent_type=DEVC/K&parent_name=$TMP&withShortDescriptions=true (no user_name sent)",
+    "objects": "only the logged-on user's: the listed objects were exactly the 290 TADIR rows of $TMP whose AUTHOR is that user (2 FUGR, 1 CLAS, 13 PROG, 273 NROB, 1 SUSH not shown as a node), none of the other 7 authors' 11847",
+    "subpackages": "the logged-on user's local packages (TDEVC-AS4USER = user) whose PARENTCL is '' or '$TMP'; a package of another user with PARENTCL '$TMP' is not listed",
+    "user_name": "UNMEASURED: the parameter was not sent; OSD reads it as 'whose objects' when a client sends it"
+  },
+  "createProg": {
+    "EXPECT": "A4H",
+    "result": "created and activated with package $TMP and no transport; the lock answered isLocal=true",
+    "cleanup": "deleted through ADT (lock + DELETE); TADIR and REPOSRC read back empty"
+  },
+  "subpackage": {
+    "EXPECT": "A4H",
+    "existing": 14,
+    "createdThroughAdt": "a $-package with superPackage $TMP was created (PARENTCL $TMP, DLVUNIT LOCAL, KORRFLAG ''), then deleted; TDEVC read back empty",
+    "note": "$TMP CAN be a parent: a spike note saying otherwise does not hold on this release"
+  },
+  "deleteTmp": {
+    "EXPECT": "UNMEASURED",
+    "note": "not attempted on a shared system; OSD refuses it because the row is delivered and every client assumes the package"
+  },
+  "packageDocument": {
+    "EXPECT": "UNMEASURED",
+    "note": "the raw GET /sap/bc/adt/packages/%24tmp document was not captured; OSD answers its usual package document with softwareComponent LOCAL and no superPackage"
+  }
+}

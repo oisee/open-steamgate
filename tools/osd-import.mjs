@@ -22,6 +22,7 @@ import {basename, join} from "node:path";
 import {Git} from "./osd-git.mjs";
 import {ObjectStore, TYPES, nameOf} from "./osd-store.mjs";
 import {runsAs} from "./osd-main.mjs";
+import {TMP_FOLDER, TMP_PACKAGE} from "./osd-tmp.mjs";
 
 export const ABAPGIT_XML = ".abapgit.xml";
 
@@ -92,6 +93,10 @@ export class Import {
       throw new NotARepository(folder, config.startingFolder);
     }
     const target = options.target ?? join("local", options.name ?? basename(folder).toLowerCase());
+    // local/tmp is $TMP (tools/osd-tmp.mjs), not a place for a repository
+    if (target.replaceAll("\\", "/") === TMP_FOLDER) {
+      throw new Error(`${TMP_FOLDER} holds ${TMP_PACKAGE}; import under another --name`);
+    }
     const written = [];
     const skipped = [];
     const packages = new Set();

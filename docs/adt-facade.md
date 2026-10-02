@@ -628,3 +628,41 @@ than a workaround here.
 - Activation answers `200` in every case; the body says whether it held, and
   a success is answered only after the modules are written and the process
   that serves them has them.
+
+## $TMP, the local package
+
+`$TMP` is a package of the store (`tools/osd-tmp.mjs`), measured against
+A4H in `test/fixtures/tmp-package/a4h.json`: one package, no parent,
+software component LOCAL, never transported. Its objects live in
+`local/tmp/` (gitignored), which becomes a build layer once something is
+created there. Who created what is kept in `local/tmp/tadir.json`, written
+atomically.
+
+What a session sees under `$TMP` in the tree (`nodestructure`, the package
+document):
+
+- its own objects and its own sub-packages, the author being the session's
+  user, or `user_name` if the client sends one;
+- the local root packages of the system (`$STG`, `$ZOSD_TEST`, ...), which
+  belong to nobody;
+- nothing it did not create. An object without a recorded author (a file
+  put into `local/tmp/` by hand) is in nobody's tree but still opens by its
+  URI. A record that cannot be read hides every `$TMP` object from everyone
+  and says so on stderr.
+
+An anonymous session (no Basic header) has the system's own name as its
+user, so it sees what was created anonymously and nothing else. A caller
+that names no user at all sees none of `$TMP`'s own objects.
+
+Names are SAP's character set (A-Z, 0-9, `_`, a leading `$` for a package,
+an optional `/NAMESPACE/`), and a create never writes outside its root. Any
+`$` package may be a child of `$TMP`, as on A4H; its folder is its name.
+
+`$TMP` never leaves: the deploy gate refuses its objects by the same key
+normalisation it admits with, `segw:zip` refuses the folder, `RepoSet` and
+`RepoFileSet` refuse a project whose objects TADIR files under `$TMP`, and a
+preview (`OSD_TMP=off`) leaves it out and refuses a generation that holds
+one of its modules.
+
+Still in Node, to be ported to ABAP with the ADT façade: the package and
+create routes, the author record and the tree filter.

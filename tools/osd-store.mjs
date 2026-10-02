@@ -22,6 +22,9 @@ import {libraryFiles} from "./osd-inputs.mjs";
 import {hashOf, inputsOf, loadConfig, normalPath} from "./osd-build.mjs";
 import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
+import {TMP_FOLDER, TMP_TEXT, isTmpPackage, tmpAuthors, tmpRoot} from "./osd-tmp.mjs";
+import {authorNow, checkName, indexTmp, noteAuthor, tmpChild, tmpDelete, tmpPackageFile, withTmp, writeCheck, writeChecked} from "./osd-store-tmp.mjs";
+export {InvalidName} from "./osd-store-tmp.mjs";
 
 import {basename, dirname, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -153,7 +156,7 @@ export function exclusionsOf(root) {
 export function rootsOf(root, env = process.env) {
   const config = loadConfig(root);
   const packs = new Map(packRootsOf(root, env).map((pack) => [pack.path, pack]));
-  return inputFoldersOf(root, config, env).map((path) => packs.get(path) ?? ({
+  return inputFoldersOf(root, config, env).map((path) => packs.get(path) ?? (path === TMP_FOLDER ? tmpRoot() : {
     path, writable: path !== "gen", library: false,
     ...(path === "local" || path.startsWith("local/") ? {imported: true} : {}),
   }));
@@ -162,8 +165,10 @@ export function rootsOf(root, env = process.env) {
 export class ObjectStore {
   constructor(options = {}) {
     this.root = options.root ?? process.cwd();
+    // test seams: beforeWrite(file) runs between a create's check and its write
+    this.hooks = options.hooks ?? {};
     this.explicitRoots = options.roots !== undefined;
-    this.roots = options.roots ?? rootsOf(this.root);
+    this.roots = withTmp(options.roots ?? rootsOf(this.root));
     // the build's exclusions are the store's too, from the same file
     this.excluded = options.excluded ?? exclusionsOf(this.root);
     this.superPackage = options.superPackage === undefined ? SUPER_PACKAGE : options.superPackage;
@@ -486,7 +491,7 @@ export class ObjectStore {
   // the roots are read again, unless a caller chose them
   reroot() {
     if (this.explicitRoots === false) {
-      this.roots = rootsOf(this.root);
+      this.roots = withTmp(rootsOf(this.root));
     }
     this.index = undefined;
     this.#forget();
@@ -580,7 +585,7 @@ export class ObjectStore {
     inside.pop();
     const chain = [...bases];
     for (const folder of inside) {
-      chain.push(`${chain[chain.length - 1]}_${folder.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`);
+      chain.push(tmpChild(root, chain, folder) ?? `${chain[chain.length - 1]}_${folder.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}`);
     }
     return chain;
   }
@@ -623,6 +628,7 @@ export class ObjectStore {
         }
       }
     }
+    indexTmp(index, this.root); // $TMP, and who made what in it
     this.index = index;
     // the index was rebuilt because files changed under us and we do not
     // know which, an import being the reason this exists. The parse
@@ -782,6 +788,7 @@ export class ObjectStore {
       throw new Error(`${type} ${name} already belongs to ${entry.root}, not ${requestedRoot.path}`);
     }
     if (entry === undefined) {
+      checkName(type, name, CREATABLE[type] !== undefined); // a W3MI id, an IWSV keep their own
       const root = requestedRoot ?? this.roots.find((r) => r.writable);
       const file = join(root.path, "osd", fileOf(name) + meta.ext);
       const packages = this.#packagesOf(file, root);
@@ -832,6 +839,7 @@ export class ObjectStore {
       throw new NotSupported(`creating an object of type ${type}`);
     }
     const upper = String(name).toUpperCase();
+    checkName(type, upper);
     if (this.find(type, upper) !== undefined) {
       throw new Conflict(type, upper);
     }
@@ -846,19 +854,22 @@ export class ObjectStore {
     const folder = dirname(home.file);
     const root = this.roots.find((r) => folder === r.path || folder.startsWith(r.path + "/"));
     const description = String(options.description ?? "");
-    let file;
-    if (type === "DEVC") {
+    let file = tmpPackageFile(this.root, parent, upper, folder, type); // $TMP: tools/osd-store-tmp.mjs
+    if (file === undefined && type === "DEVC") {
       if (!upper.startsWith(parent + "_") || upper.length === parent.length + 1) {
         throw new NotSupported(`a package under ${parent} is named ${parent}_<FOLDER>; ${upper}`);
       }
       file = join(folder, upper.slice(parent.length + 1).toLowerCase(), "package.devc.xml");
-    } else {
+    } else if (file === undefined) {
       file = join(folder, fileOf(upper) + meta.ext);
     }
+    const safe = writeCheck(this.root, root, `${type} ${upper}`); // inside its root, no link
+    safe(file);
     if (existsSync(join(this.root, file))) {
       throw new Conflict(type, upper);
     }
     mkdirSync(join(this.root, dirname(file)), {recursive: true});
+    safe(file);
     const made = CREATABLE[type](upper, description, options.source);
     const writes = Object.entries(made).map(([suffix, content]) =>
       [type === "DEVC" ? file : file.slice(0, -meta.ext.length) + suffix, content]);
@@ -870,14 +881,14 @@ export class ObjectStore {
     const entry = {type, name: upper, file, root: root.path, writable: true, library: false,
                    imported: root.imported === true, description,
                    package: packages[packages.length - 1], packages};
+    const author = noteAuthor(this.root, root.path, type, upper, options.author);
+    if (author !== undefined) entry.changedBy = author;
     // the intent first: a crash before the files leaves a set naming files
     // that are all absent, which the next start drops (#loadInactive)
     if (type !== "DEVC") {
       this.#markInactive(entry, new Map(writes.map(([target, content]) => [target, Buffer.from(String(content), "utf8")])));
     }
-    for (const [target, content] of writes) {
-      writeFileSync(join(this.root, target), content);
-    }
+    for (const [target, content] of writes) writeChecked(this.root, target, content, safe, this.hooks);
     this.#entries().set(`${type} ${upper}`, entry);
     this.#forget();
     return {...entry, ...this.stateOf(entry), created: true};
@@ -942,6 +953,7 @@ export class ObjectStore {
     if (entry.writable === false) {
       throw new ReadOnly(type, name);
     }
+    tmpDelete(this.root, entry, true);
     const meta = TYPES[type];
     const files = [entry.file];
     if (type === "CLAS") {
@@ -968,6 +980,7 @@ export class ObjectStore {
     this.#entries().delete(`${entry.type} ${entry.name}`);
     if (this.inactive.delete(`${entry.type} ${entry.name}`)) this.#saveInactive();
     this.#dropActiveCopy(entry);
+    tmpDelete(this.root, entry, false);
     this.#forget();
     return {type: entry.type, name: entry.name, deleted: true};
   }
@@ -1096,10 +1109,13 @@ export class ObjectStore {
       throw new NotFound("DEVC", wanted);
     }
     const objects = [];
+    const authors = [...this.#entries().values()].some((e) => e.package === wanted && e.root === TMP_FOLDER)
+      ? (tmpAuthors(this.root) ?? {}) : {};
     for (const entry of this.#entries().values()) {
       if (entry.package === wanted && !(entry.type === "DEVC" && entry.name === wanted)) {
+        const author = authorNow(this.root, entry, authors);
         objects.push({type: entry.type, name: entry.name, library: entry.library, writable: entry.writable,
-          version: this.stateOf(entry).version});
+          version: this.stateOf(entry).version, ...(author === undefined ? {} : {author})});
       }
     }
     return {
@@ -1108,17 +1124,22 @@ export class ObjectStore {
     };
   }
 
+  authorOf(type, name) {
+    const entry = this.find(type, name);
+    return entry?.root === TMP_FOLDER ? authorNow(this.root, entry) : undefined;
+  }
+
   // the text of a package: a real one carries it in package.devc.xml, and
   // until content arrives the folder speaks for itself
   #packageText(name) {
     const file = this.#devcOf(name);
-    if (file !== undefined) {
+    if (file !== undefined && existsSync(join(this.root, file))) {
       const text = /<CTEXT>([^<]*)<\/CTEXT>/.exec(readFileSync(join(this.root, file), "utf8"));
       if (text !== null) {
         return text[1];
       }
     }
-    return undefined;
+    return isTmpPackage(name) ? TMP_TEXT : undefined;
   }
 
   // a package object is named after the package it describes

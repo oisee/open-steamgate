@@ -123,9 +123,11 @@ Safety rules:
 clients: restore-fatal, cleanup after a read error, handle validation, the
 MISSING→FAIL regression and the hash diff.
 
-## Current matrix (2026-10-02, origin/main b3df2f86)
+## Current matrix (2026-10-02, fix/tmp-package)
 
-**29 PASS, 2 FAIL, 16 MISSING of 47**. A run with `--start` takes 12 to 35
+**30 PASS, 1 FAIL, 16 MISSING of 47** (was 29 / 2 / 16 on origin/main
+b3df2f86; `create.createDelete` went FAIL -> PASS once `$TMP` became a
+package of the store, `tools/osd-tmp.mjs`). A run with `--start` takes 12 to 35
 s, including starting the system. Most of the spread is activation. It
 answers in under 1 s when nothing needs building, and in about 20 s when it
 waits for the rebuild. The syntax check takes about 3.6 s and ABAP Unit about
@@ -147,24 +149,20 @@ What works end to end:
 - the transport check;
 - debugger listeners;
 - feeds, dumps and users;
-- create + delete in a real package.
+- create + delete in a real package and in `$TMP`.
 
 Gaps, by what an ABAP-FS user loses:
 
-1. **Create in `$TMP` fails** (FAIL). `POST /programs/programs` with
-   parent `$TMP` answers 404 "DEVC $TMP does not exist", although the
-   same create in `$ZOSD_TEST` passes. `$TMP` is the default package of
-   every scratch object.
-2. **New-object name validation** (MISSING, `*/validation`). ABAP-FS's
+1. **New-object name validation** (MISSING, `*/validation`). ABAP-FS's
    create wizard validates first and stops on the 404, so no object can be
    created from the UI at all.
-3. **Code completion** (MISSING, `abapsource/codecompletion/proposal`).
-4. **Go to definition** (MISSING, `navigation/target`).
-5. **Function groups and modules cannot be opened** (MISSING, `functions/groups/*`).
-6. **Message classes cannot be opened** (MISSING, `messageclass/*`).
+2. **Code completion** (MISSING, `abapsource/codecompletion/proposal`).
+3. **Go to definition** (MISSING, `navigation/target`).
+4. **Function groups and modules cannot be opened** (MISSING, `functions/groups/*`).
+5. **Message classes cannot be opened** (MISSING, `messageclass/*`).
    ABAP-FS has a custom editor for them.
-7. **Where-used** (MISSING, `informationsystem/usageReferences`).
-8. **Debugging cannot start** (FAIL + MISSING). `core/discovery` returns
+6. **Where-used** (MISSING, `informationsystem/usageReferences`).
+7. **Debugging cannot start** (FAIL + MISSING). `core/discovery` returns
    several collections per workspace, and abap-adt-api expects one, so
    `adtCoreDiscovery` throws while parsing. `debugger/breakpoints` is not
    served.

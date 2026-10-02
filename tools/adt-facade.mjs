@@ -28,7 +28,7 @@ import {Sessions, parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {abapFront} from "./adt-abap-front.mjs";
 import {EnqOwners, abapSession, statelessLock} from "./adt-enq.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
-import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict} from "./osd-store.mjs";
+import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict, InvalidName} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
 import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
@@ -2097,6 +2097,8 @@ export function adtRouter(options = {}) {
         const made = store.create(type, name, {
           description: attribute(body, undefined, "adtcore:description") ?? "",
           package: home ?? "",
+          // an object of $TMP carries who made it (tools/osd-tmp.mjs)
+          author: req.adt.session.user,
         });
         res.status(201)
           .set("Location", `${BASE}/${adt}/${encodeURIComponent(made.name.toLowerCase())}`)
@@ -2754,7 +2756,7 @@ export function adtRouter(options = {}) {
       const wants2 = String(req.headers.accept ?? "").includes("packages.v2+xml");
       const describe = (name) => store.packages().find((p) => p.name === name)?.description ?? "";
       res.type(`application/vnd.sap.adt.packages.v${wants2 ? 2 : 1}+xml`)
-        .send(packageDocument(packageOf(store, req.params.name), {describe}));
+        .send(packageDocument(packageOf(store, req.params.name, {user: req.adt.session.user}), {describe}));
     });
   });
 
@@ -2819,6 +2821,9 @@ export function adtRouter(options = {}) {
         // its outline is parked; a client that accepts anything builds its
         // own tree from this and needs the flag to name a class's files.
         .send(nodeStructureDocument(nodesOf(store, name, parentType, {
+          // whose objects of $TMP: the logged-on user's, as on A4H, unless the
+          // client names a user (user_name; its exact semantics UNMEASURED)
+          user: String(req.query.user_name ?? "") || req.adt.session.user,
           classFolders: /dataname=com\.sap\.adt\.RepositoryObjectTreeContent/i.test(String(req.headers.accept ?? "")) === false,
         }), {
           flat: name === "" && parentType === "DEVC",
@@ -3046,6 +3051,8 @@ export function answered(res, body, record) {
       refuse(res, 404, "ExceptionResourceNotFound", e.message);
     } else if (e instanceof ReadOnly) {
       refuse(res, 405, "ExceptionResourceNoAccess", e.message);
+    } else if (e instanceof InvalidName) {
+      refuse(res, 400, "ExceptionInvalidRequest", e.message);
     } else if (e instanceof NotSupported) {
       refuse(res, 501, "ExceptionResourceNoAccess", e.message);
     } else if (e instanceof Conflict) {

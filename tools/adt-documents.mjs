@@ -9,6 +9,7 @@
 // the places where a guess is load-bearing are marked.
 import {Visibility} from "@abaplint/core";
 import {TYPES, NotFound} from "./osd-store.mjs";
+import {localView} from "./osd-tmp-view.mjs";
 
 const xmlEscape = (s) => String(s)
   .replaceAll("&", "&amp;")
@@ -832,13 +833,7 @@ ${objectTypes.map(typeRow).join("\n")}
 // $TMP is the local package every ABAP system has: the one an object goes
 // to when nobody chose a package for it. A client does not discover it, it
 // assumes it, and asks for it by name before it has asked for anything else.
-//
-// Our packages are folders, so the store has no $TMP and honestly cannot
-// invent one: it reports what this tree holds. The protocol guarantee is a
-// different statement from the tree's contents, so it is answered here, at
-// the façade, where the other client-shaped compatibility lives. Simulated
-// and empty is the whole of it — the package resolves, and it holds nothing
-// because nothing in this tree was created without a package.
+// The store has it (tools/osd-tmp.mjs); this names it for the documents.
 export const LOCAL_PACKAGE = "$TMP";
 
 // A data element as the client's editor reads it.
@@ -1036,39 +1031,12 @@ ${lines.join("\n")}
 `;
 }
 
-export function packageOf(store, name) {
+// A package as a tree sees it. $TMP and every package below it are the
+// session user's (tools/osd-tmp-view.mjs); every other package is answered
+// whole.
+export function packageOf(store, name, options = {}) {
   const wanted = String(name ?? "").toUpperCase();
-  try {
-    return store.package(wanted);
-  } catch (error) {
-    // only this one name, and only when the store's answer was that it is
-    // missing: any other failure is the store's to report, not ours to hide
-    if (wanted !== LOCAL_PACKAGE || error?.code !== "NOT_FOUND") {
-      throw error;
-    }
-    // $TMP is the one package a client shows without being asked — it sits
-    // in Favorite Packages from the first logon — so every root package is
-    // its child here: opening the default favourite opens everything, with
-    // no package in between. The roots stay roots of the system library as
-    // well; a package reachable from two places is a convenience, a package
-    // reachable from none was the complaint.
-    // Which of them, though. Every root under $TMP means the default
-    // favourite opens the whole system, substrate included — seven packages
-    // of somebody else's runtime above the one package a person is working
-    // in. A real system puts its delivered code in the System Library and
-    // keeps $TMP for local objects, so the library roots stay roots and only
-    // the rest are shown here. They lose nothing: a root is in the System
-    // Library either way, which is what made putting them in both places a
-    // convenience rather than a necessity.
-    //
-    // OSD_LOCAL_PACKAGES overrides it with a comma list, for a tree where
-    // the line falls somewhere else — "$ZOSD_TEST" to show exactly one.
-    const asked = (process.env.OSD_LOCAL_PACKAGES ?? "").split(",").map((s) => s.trim().toUpperCase()).filter((s) => s !== "");
-    const roots = store.rootPackages()
-      .filter((node) => (asked.length > 0 ? asked.includes(node.name) : node.library !== true))
-      .map((node) => node.name);
-    return {name: LOCAL_PACKAGE, parent: undefined, description: "Local objects", objects: [], subpackages: roots, library: false, simulated: true};
-  }
+  return localView(store, wanted, store.package(wanted), options);
 }
 
 export function nodesOf(store, name, type, options = {}) {
@@ -1088,7 +1056,7 @@ export function nodesOf(store, name, type, options = {}) {
   if (String(type ?? "").split("/")[0] === "CLAS") {
     return classNodesOf(store, name);
   }
-  const pkg = packageOf(store, name);
+  const pkg = packageOf(store, name, {user: options.user});
   const nodes = [];
   for (const child of pkg.subpackages ?? []) {
     nodes.push({

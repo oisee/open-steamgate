@@ -30,7 +30,7 @@ import {packAppName} from "./osd-bsp-registry.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {deliveredAt} from "./osd-nodes.mjs";
 import {exclusionsOf} from "./osd-store.mjs";
-import {admit, isStructural, loadManifest, refusalMessage, unitFor} from "./osd-deploy-manifest.mjs";
+import {admit, isStructural, loadManifest, refusalMessage, refuseTmp, unitFor} from "./osd-deploy-manifest.mjs";
 
 const BOM = "﻿";
 
@@ -226,6 +226,8 @@ export function preparePack(dir, out) {
 /** `unit` is the deploy unit of `deploy/manifest.json` this folder is
  *  (`unitFor`); without one nothing may go, because nothing is listed. */
 export function layout(from, into, description, data, unit) {
+  // fail closed on $TMP before anything is written (tools/osd-tmp.mjs)
+  refuseTmp(resolve(process.env.OSD_ROOT ?? process.cwd()), resolve(from));
   rmSync(into, {recursive: true, force: true});
   mkdirSync(join(into, "src"), {recursive: true});
   writeFileSync(join(into, ".abapgit.xml"), abapgitXml());

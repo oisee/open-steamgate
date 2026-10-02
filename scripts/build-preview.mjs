@@ -20,6 +20,9 @@ import {packsInfo, servicesOf} from "../tools/osd-status.mjs";
 import {identity} from "../tools/osd-identity.mjs";
 import {SANDBOX_CONFIG_PATH, SANDBOX_CONFIG_BODY} from "../tools/osd-sandbox-config.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
+import {forPublishing, generationTmpProblem, tmpModulesIn} from "../tools/osd-tmp.mjs";
+import {realpathSync} from "node:fs";
+import {localObjectKeys} from "../tools/osd-deploy-manifest.mjs";
 import {tableFieldsOf} from "../tools/adt-documents.mjs";
 import {cdsEntityOf} from "../tools/adt-cds.mjs";
 
@@ -35,6 +38,28 @@ if (!["sql.js", "duckdb"].includes(database)) {
 }
 // the seed and the packs read the tree the builder built; say which one
 process.env.OSD_ROOT = root;
+
+// $TMP never publishes (tools/osd-tmp.mjs): the store and the layers below
+// leave it out, and a generation that was built with it in is refused rather
+// than bundled -- fail closed, checked by the modules output/ actually holds.
+forPublishing(process.env);
+{
+  // by provenance: what the build read, whatever the tree holds now
+  let generation;
+  try {
+    generation = dirname(realpathSync(resolve(root, "output")));
+  } catch {
+    throw new Error("no output/ to publish: run node tools/osd-build.mjs --publish first");
+  }
+  const problem = generationTmpProblem(generation);
+  if (problem !== undefined) throw new Error(problem);
+  // and by content, for a generation whose record is right and output is not
+  const localModules = tmpModulesIn(resolve(root, "output"), localObjectKeys(root));
+  if (localModules.length > 0) {
+    throw new Error(`the generation in output/ carries ${localModules.length} object(s) of $TMP (${localModules.join(", ")}): `
+      + "a preview publishes what it bundles. Build it with OSD_TMP=off npm run transpile, then run this again.");
+  }
+}
 
 // The packs are in this build the way they are in a served system: their
 // ABAP went through the transpile already (tools/osd-build.mjs lists them
