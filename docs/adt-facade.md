@@ -75,12 +75,16 @@ the runtime child actually runs). `source` ahead of `live` means unbuilt saves;
 `live` ahead of `serving` means a build that went live without a recycle.
 Diagnose a stale answer by comparing the three before suspecting the client.
 
-The system identity is `OS2` by default; `STG_ADT_SID` changes it. A client
-compares the id it stored when the project was created with the one the
-system reports and refuses the logon when they differ, so the id is a default
-in the code rather than something a restart has to remember. Change it only
-together with the projects that point at it. `OSD` is the product, `OS2` the
-system.
+The system identity is the one system id of `tools/osd-identity.mjs`:
+`OSD_SID` (its alias `STG_ADT_SID` means the same), `OSD` when neither is set.
+`sy-sysid`, the status service, this façade's `systeminformation` and the
+session cookie `SAP_SESSIONID_<SID>_001` all carry it, and `osd doctor` prints
+it with its source. A client compares the id it stored when the project was
+created with the one the system reports and refuses the logon when they
+differ, so change it only together with the projects that point at it. Until
+2026-10-02 the façade said `OS2` and the runtime `OSG`, kept apart for that
+reason; nobody had an Eclipse project against this system yet, so the two
+became one.
 
 ## Capabilities and boundaries
 
@@ -352,7 +356,7 @@ rather than reports.
   attempt sends an empty `Cookie: sap-contextid=` to force a fresh context.
 - **Required back:** an `X-CSRF-Token` header whose value is never the
   literal `Required` (a client reads that as "no token yet"), on every
-  answer, and `Set-Cookie` for `sap-contextid` and `SAP_SESSIONID_OS2_001`.
+  answer, and `Set-Cookie` for `sap-contextid` and `SAP_SESSIONID_<SID>_001` (`SAP_SESSIONID_OSD_001` by default).
 - **Discovery:** `GET /sap/bc/adt/core/discovery`, `Accept:
   application/atomsvc+xml` or `*/*`, answered with the ADT Atom service
   document. `core/discovery` is the reachability and token probe;

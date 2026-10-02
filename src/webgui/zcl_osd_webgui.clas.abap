@@ -834,7 +834,7 @@ CLASS zcl_osd_webgui IMPLEMENTATION.
       `</table>` &&
       `<p class="dim">The identity is one setting at boot (tools/osd-identity.mjs): it sets sy-sysid, ` &&
       `sy-mandt and sy-uname, names the system in the status tables, and is what the ADT facade ` &&
-      `presents to Eclipse. docs/webgui.md says why the facade's own id is allowed to differ.</p>` &&
+      `presents to Eclipse (OSD_SID, default OSD). Only the facade's client, 001, differs from sy-mandt.</p>` &&
       |<p><a class="back" href="{ gc_path }/">Back to Easy Success</a></p>| &&
       `</div></div></body></html>`.
   ENDMETHOD.

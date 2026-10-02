@@ -16,6 +16,7 @@ import {
 } from "./rfc.mjs";
 import {encodeAdtBxmlResponse, parseAdtBxmlRequest} from "./bxml.mjs";
 import {fieldInfoResponse, functionInterfaceResponse} from "./rfc-metadata.mjs";
+import {identity as osdIdentity} from "../osd-identity.mjs";
 
 const MAX_FRAME = 16 * 1024 * 1024;
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"]);
@@ -264,7 +265,7 @@ function writeFrame(socket, frame) {
   if (!socket.destroyed) socket.write(encodeNIFrame(frame));
 }
 
-export function createRfcAdtServer({backend, backendUser = "", backendPassword = "", backendClient = "", backendLanguage = "", rfcAuthMode = "demo", rfcUser = "", rfcPassword = "", rfcClient = "", systemID = "OSD", systemHost = "osd-bridge", host, env = process.env, port, timeoutMs = 120000, maxConnections = 64, log = () => {}}) {
+export function createRfcAdtServer({backend, backendUser = "", backendPassword = "", backendClient = "", backendLanguage = "", rfcAuthMode = "demo", rfcUser = "", rfcPassword = "", rfcClient = "", systemID = osdIdentity().sid, systemHost = "osd-bridge", host, env = process.env, port, timeoutMs = 120000, maxConnections = 64, log = () => {}}) {
   const backendURL = new URL(backend);
   if (!/^https?:$/.test(backendURL.protocol) || backendURL.username || backendURL.password) throw new Error("backend must be an HTTP(S) origin without embedded credentials");
   if (!["demo", "static"].includes(rfcAuthMode)) throw new Error("RFC auth mode must be demo or static");
@@ -372,7 +373,7 @@ async function main() {
     rfcUser: process.env.STG_RFC_USER,
     rfcPassword: process.env.STG_RFC_PASSWORD,
     rfcClient: process.env.STG_RFC_CLIENT,
-    systemID: process.env.STG_SYSTEM_ID ?? process.env.OSD_SID ?? "OSD",
+    systemID: osdIdentity().sid,
     systemHost: process.env.STG_HOST_NAME ?? "osd-bridge",
     port,
     log: (event) => console.error(JSON.stringify(event)),

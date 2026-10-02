@@ -1336,9 +1336,9 @@ describe("editors/vscode: the extension's logic", function () {
     expect(table).not.to.contain("__metadata");
     expect(table).not.to.contain("__deferred");
     // one row reads down as field / value
-    const single = overviewStatusSection("System", [{Sid: "OSG", Port: 3531}]);
+    const single = overviewStatusSection("System", [{Sid: "OSD", Port: 3531}]);
     expect(single).to.contain('class="record"');
-    expect(single).to.contain("<tr><th>Sid</th><td>OSG</td></tr>");
+    expect(single).to.contain("<tr><th>Sid</th><td>OSD</td></tr>");
     // sections are stacked, not two to a row
 
     const stopped = systemOverviewModel({state: "stopped", homeKind: "osd.home", homePath: "/work/osd", layers: ["/work/app"]});

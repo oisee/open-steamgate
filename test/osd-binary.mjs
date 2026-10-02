@@ -51,6 +51,17 @@ describe("binary build modes from a clean checkout", function () {
     const doctor = spawnSync(output, ["doctor"], {cwd: checkout, encoding: "utf8"});
     expect(doctor.status, doctor.stderr).to.equal(0);
     expect(doctor.stdout).to.contain("binary mode: checkout (no embedded system seed)");
+    // the one system id (tools/osd-identity.mjs) and where it came from
+    const clean = {...process.env};
+    delete clean.OSD_SID;
+    delete clean.STG_ADT_SID;
+    const doctorWith = (env) => spawnSync(output, ["doctor"], {cwd: checkout, encoding: "utf8", env: {...clean, ...env}}).stdout;
+    expect(doctorWith({}), "the default").to.contain("system id: OSD (default)");
+    expect(doctorWith({OSD_SID: "qrs"}), "the setting").to.contain("system id: QRS (setting OSD_SID)");
+    expect(doctorWith({STG_ADT_SID: "osx"}), "its alias").to.contain("system id: OSX (setting STG_ADT_SID)");
+    const refused = spawnSync(output, ["doctor"], {cwd: checkout, encoding: "utf8", env: {...clean, OSD_SID: "a;b"}});
+    expect(refused.stdout, "an invalid setting").to.contain('system id: invalid -- OSD_SID="a;b" is not a system id');
+    expect(refused.status, "and doctor says so by its exit").to.equal(1);
   });
 
   it("gives one actionable preflight line when --seed has no libraries", () => {
@@ -190,6 +201,11 @@ describe("the binary: the same system, one file", function () {
       expect(body.d.results).to.have.length(1);
       const build = await (await fetch(`http://127.0.0.1:${port}/sap/bc/adt/core/http/build`)).json();
       expect(build.system.serving).to.equal(build.system.live);
+      // STG_ADT_SID is the alias of OSD_SID: ADT and the runtime say the same id
+      const info = await (await fetch(`http://127.0.0.1:${port}/sap/bc/adt/core/http/systeminformation`)).json();
+      expect(info.systemID).to.equal("OSX");
+      const status = await (await fetch(`http://127.0.0.1:${port}/sap/opu/odata/sap/ZOSD_STATUS_SRV/SystemSet?$format=json`)).json();
+      expect(String(status.d.results[0].Sid).trim()).to.equal("OSX");
     } finally {
       child.kill("SIGTERM");
       // a host that will not go is killed rather than waited for: a Node

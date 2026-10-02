@@ -3,9 +3,10 @@
 "! docs/adt-abap-port/port-map.md section 3). No second destination.
 "!
 "! Slice 1 asks one thing, SYSTEM with the kind IDENTITY: who this system
-"! says it is to an ADT client. That is not sy-sysid and not sy-mandt on
-"! purpose (tools/osd-identity.mjs says why: a project stores the id it was
-"! created against), so it is the host's to answer, per facade instance.
+"! says it is to an ADT client. The id is the one system id, the same as
+"! sy-sysid (tools/osd-identity.mjs: OSD_SID, default OSD); the client is
+"! the ADT client 001 and not sy-mandt. It stays the host's to answer, per
+"! facade instance, because a facade may be started with its own identity.
 "! On a system there is no STORE destination; the call then fails and the
 "! route answers the failure as a 500 rather than inventing an identity.
 "!

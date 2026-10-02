@@ -123,16 +123,16 @@ G.1b The drop, drawn, and a menu bar that works           [S] DONE 2026-09-18
         bundle and web/preview-backend.mjs hands it over), the status
         snapshot takes ZOSD_SYS-SID from it, and the ADT facade takes its
         identity from it. The bar reads sy and prints
-        "OSG (436726) 123 DEVELOPER · node · open-steamgate" - and the tests
+        "OSD (436726) 123 DEVELOPER · node · open-steamgate" - and the tests
         assert it against SystemSet through the status service rather than
         against a string.
-        ├─ two names on purpose: OSD_SID is runtime-facing (sy-sysid, the
-           status table, default OSG) and STG_ADT_SID is ADT-facing (default
-           OS2), because a project stores the id it was created against and
-           refuses a logon to a system reporting another one - the trap
-           tools/adt-facade.mjs already documents. The facade's client 001
-           is pinned for the same reason while the runtime's is 123, which
-           is the client data/ is seeded in. STG_ADT_SID still renames both
+        ├─ one name since 2026-10-02: OSD_SID (alias STG_ADT_SID, default
+           OSD) is sy-sysid, the status table, the ADT systemID and the
+           session cookie's name alike. It used to be OSG for the runtime
+           and OS2 for ADT, because a project refuses a logon to a system
+           reporting another id; nobody has an Eclipse project against this
+           system yet, so that was moot. The facade's client 001 stays apart
+           from the runtime's 123, which is the client data/ is seeded in
         └─ the session number is a work process: ZOSD_SYS gained PID, the
            process the tables were written in (inline the facade, otherwise
            the child the snapshot is posted to, by the port it posts to).

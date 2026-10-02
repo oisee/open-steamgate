@@ -112,14 +112,14 @@ Express also answers HEAD for every GET automatically. That is one router rule (
    - The miss registry keeps the `kind METHOD path` → {count, first, accept, query, detail} map.
 5. **Session** (`adt-session.mjs:35-274`).
    - The session id is 12 random bytes as lower-case hex (24 characters). The `core/http/sessions` hash depends on this format.
-   - Id lookup: cookie `sap-contextid` wins over `SAP_SESSIONID_OSD_001`. An empty value means "open a fresh session".
+   - Id lookup: cookie `sap-contextid` wins over `SAP_SESSIONID_<SID>_001`. An empty value means "open a fresh session".
    - The user comes from Basic auth, upper-cased, **only when the session is created**. Default `OSD`, no credential check.
    - `stateful` is set by `x-sap-adt-sessiontype: stateful` and never cleared.
    - TTL is 30 min, swept lazily on each request. `get` touches the session; `holderOf` does not.
    - Cookies are issued only when the session is fresh or stateful, each with `append`:
      - `sap-contextid=<id>; Path=/sap/bc/adt; HttpOnly; SameSite=Strict`
-     - `SAP_SESSIONID_OSD_001=<id>; Path=/; HttpOnly; SameSite=Strict`
-   - The cookie name keeps SID `OSD` and client `001`. This is deliberately different from identity's `OS2`.
+     - `SAP_SESSIONID_<SID>_001=<id>; Path=/; HttpOnly; SameSite=Strict`
+   - The cookie name carries the one system id (`tools/osd-identity.mjs`: `OSD_SID`, alias `STG_ADT_SID`, default `OSD`) and the ADT client `001`.
 6. **CSRF.**
    - The token is 18 random bytes, base64url (24 characters), one per session. Every answer under BASE carries `x-csrf-token`, never the word `fetch`.
    - On POST, PUT, DELETE, PATCH or MERGE, a mismatch answers 403 `text/plain` `CSRF token validation failed` with `x-csrf-token: Required`.
@@ -157,7 +157,7 @@ Express also answers HEAD for every GET automatically. That is one router rule (
     - Rows marked HOST and still served by the JS router are advertised too.
     - `compatibility/graph` (HEAD and GET) is static data, `application/xml`.
 11. **Small static routes.**
-    - `systeminformation`: identity JSON, systemID default `OS2`, not sy-sysid.
+    - `systeminformation`: identity JSON, systemID = the one system id, the same as sy-sysid (default `OSD`); client `001`, not sy-mandt.
     - `repository/typestructure`: type table × LABELS.
     - `debugger/listeners`: 3 rows, 200 empty.
     - One `empty_feed( title, self )` serves `runtime/dumps`, `runtime/systemmessages`, `gw/errorlog`, `feeds` and `feeds/variants`. `system/users` is close to it.

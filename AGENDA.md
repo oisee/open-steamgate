@@ -255,8 +255,10 @@ What made it work, in order of how invisible the cause was:
 
 Method that carried it: read the client's jars for the gate, pull fresh A4H
 captures as oracles, and record what the live client actually sent
-(`STG_ADT_DUMP`) rather than replay what it "must have" sent. The system is
-**OS2** by default so a bare restart keeps a project's logon.
+(`STG_ADT_DUMP`) rather than replay what it "must have" sent. The system id is
+one setting, `OSD_SID` (default **OSD**, alias `STG_ADT_SID`), the same for
+ADT and the runtime; until 2026-10-02 ADT said OS2 so a restart kept a
+project's logon, moot while no Eclipse project exists.
 
 Open next: the editor documents for FUGR/MSAG/DOMA/TTYP/VIEW/SHLP (each its
 own format), function-group create, and the RFC → ADT bridge (Eclipse's

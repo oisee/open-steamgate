@@ -18,6 +18,7 @@ import (
 	"osg/gogen/abap"
 	"osg/gogen/filepick"
 	"osg/gogen/reportargs"
+	"osg/gogen/sysid"
 	"osg/gogen/termgui"
 )
 
@@ -40,6 +41,8 @@ var stopProfile = func() {}
 var dialogSandbox *abap.Sandbox
 
 func main() {
+	// sy-sysid: the one system id, by the rule of tools/osd-identity.mjs
+	abap.SysID, _ = sysid.Must(os.LookupEnv)
 	// OSABAP_CPUPROFILE=<file>: Go's CPU profile of the whole run, for
 	// go tool pprof; an environment variable, so no report option is taken
 	if path := os.Getenv("OSABAP_CPUPROFILE"); path != "" {

@@ -3,6 +3,7 @@
 import {pathToFileURL} from "node:url";
 import {listenDiagTape} from "./diag-server.mjs";
 import {createRfcAdtServer} from "./rfc-server.mjs";
+import {identity} from "../osd-identity.mjs";
 
 const connections = new WeakMap();
 
@@ -29,6 +30,7 @@ export async function listenProtocols(env = process.env) {
     port: diagPort,
     host: env.STG_DIAG_HOST,
     env,
+    sid: identity(env).sid,
     logger: (event, peer, error) => {
       if (error) console.error(`diag ${event} ${peer}: ${error.message}`);
     },
@@ -44,7 +46,7 @@ export async function listenProtocols(env = process.env) {
     rfcUser: env.STG_RFC_USER,
     rfcPassword: env.STG_RFC_PASSWORD,
     rfcClient: env.STG_RFC_CLIENT,
-    systemID: env.STG_SYSTEM_ID ?? env.OSD_SID ?? "OSD",
+    systemID: identity(env).sid,
     systemHost: env.STG_HOST_NAME ?? "osd-bridge",
     host: env.STG_RFC_HOST,
     env,

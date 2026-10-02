@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -75,33 +74,6 @@ func TestSelectedDB(t *testing.T) {
 		t.Fatal(got)
 	}
 	if got := selectedDB("", "", false, func(string) string { return "" }); got != "" {
-		t.Fatal(got)
-	}
-}
-
-func TestSelectedSID(t *testing.T) {
-	for _, tc := range []struct{ osd, adt, want string }{
-		{"", "", "OSG"}, {"", "osx", "OSX"}, {"abcde", "xyz", "ABC"}, {"  ", "os2", "OSG"},
-	} {
-		lookup := func(name string) (string, bool) {
-			if name == "OSD_SID" {
-				return tc.osd, tc.osd != ""
-			}
-			return tc.adt, tc.adt != ""
-		}
-		if got := selectedSID(lookup); got != tc.want {
-			t.Fatalf("%q/%q: %q", tc.osd, tc.adt, got)
-		}
-	}
-	if got := selectedSID(func(string) (string, bool) { return strings.Repeat("x", 4), true }); got != "XXX" {
-		t.Fatal(got)
-	}
-	if got := selectedSID(func(name string) (string, bool) {
-		if name == "OSD_SID" {
-			return "", true
-		}
-		return "OS2", true
-	}); got != "OSG" {
 		t.Fatal(got)
 	}
 }

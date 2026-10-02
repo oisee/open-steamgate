@@ -1,0 +1,24 @@
+{
+  "about": "The system id rule, one list of cases for tools/osd-identity.mjs (test/osd-identity.mjs) and go/sysid (sysid_test.go): env in, sid and source out, or error. Exactly three characters, A-Z or 0-9, the first a letter; lower case is upper-cased; ASCII blanks are trimmed; blank is unset.",
+  "cases": [
+    {"name": "nothing set", "env": {}, "sid": "OSD", "source": "default"},
+    {"name": "blank", "env": {"OSD_SID": "  "}, "sid": "OSD", "source": "default"},
+    {"name": "blank, both", "env": {"OSD_SID": "", "STG_ADT_SID": " \t"}, "sid": "OSD", "source": "default"},
+    {"name": "lowercase", "env": {"OSD_SID": "qrs"}, "sid": "QRS", "source": "OSD_SID"},
+    {"name": "surrounding blanks", "env": {"OSD_SID": " qrs\n"}, "sid": "QRS", "source": "OSD_SID"},
+    {"name": "digits after a letter", "env": {"OSD_SID": "A12"}, "sid": "A12", "source": "OSD_SID"},
+    {"name": "the alias", "env": {"STG_ADT_SID": "osx"}, "sid": "OSX", "source": "STG_ADT_SID"},
+    {"name": "both: OSD_SID wins", "env": {"OSD_SID": "abc", "STG_ADT_SID": "xyz"}, "sid": "ABC", "source": "OSD_SID"},
+    {"name": "blank setting, alias", "env": {"OSD_SID": " ", "STG_ADT_SID": "xyz"}, "sid": "XYZ", "source": "STG_ADT_SID"},
+    {"name": "too long", "env": {"OSD_SID": "ABCDE"}, "error": "OSD_SID"},
+    {"name": "too short", "env": {"OSD_SID": "AB"}, "error": "OSD_SID"},
+    {"name": "a semicolon", "env": {"OSD_SID": "A;B"}, "error": "OSD_SID"},
+    {"name": "a space inside", "env": {"OSD_SID": "A B"}, "error": "OSD_SID"},
+    {"name": "an accented letter", "env": {"OSD_SID": "éxy"}, "error": "OSD_SID"},
+    {"name": "sharp s", "env": {"OSD_SID": "ßab"}, "error": "OSD_SID"},
+    {"name": "a non-breaking space", "env": {"OSD_SID": " AB"}, "error": "OSD_SID"},
+    {"name": "a leading digit", "env": {"OSD_SID": "1AB"}, "error": "OSD_SID"},
+    {"name": "an invalid alias", "env": {"STG_ADT_SID": "os-"}, "error": "STG_ADT_SID"},
+    {"name": "an invalid setting is not skipped for a valid alias", "env": {"OSD_SID": "ABCD", "STG_ADT_SID": "xyz"}, "error": "OSD_SID"}
+  ]
+}

@@ -9,6 +9,7 @@ import {adtRouter} from "../tools/adt-facade.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {undoOnExit} from "./helpers/undo-on-exit.mjs";
 import {adtAbap} from "./helpers/adt-abap.mjs";
+import {SESSION_COOKIE} from "../tools/adt-session.mjs";
 
 // The state-changing half of the façade: lock, write, unlock, activate.
 //
@@ -1271,7 +1272,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       const {id, other} = await otherSession();
       expectLockedBy(await lockIt(other), "OSD");
       await unlockIt(handle);
-      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${id}`}});
+      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `${SESSION_COOKIE}=${id}`}});
     });
 
     it("an object locked in one session is refused to another, naming the holder", async () => {
@@ -1298,7 +1299,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       const {id, other} = await otherSession("OTHERDEV");
       expect((await lockIt(other)).status).to.equal(200);
       expect((await lockIt()).status).to.equal(403);
-      const off = await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${id}`}});
+      const off = await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `${SESSION_COOKIE}=${id}`}});
       expect(off.status).to.equal(200);
       const after = await lockIt();
       expect(after.status).to.equal(200);
@@ -1322,7 +1323,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       const gone = await other(`/oo/classes/${DOOMED.toLowerCase()}`, {method: "DELETE"});
       expect(gone.status).to.equal(200);
       expect(existsSync(join(root, "src/demo/zcl_made_doomed.clas.abap"))).to.equal(false);
-      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${id}`}});
+      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `${SESSION_COOKIE}=${id}`}});
     });
 
     it("the security session advertised and deleted is the one the middleware chose", async () => {
@@ -1331,7 +1332,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       expect((await lockIt(holder.other)).status).to.equal(200);
       // the context cookie names the holder, the session cookie the bystander:
       // the middleware picks the holder, and so must the advertised URL
-      const mixed = {cookie: `sap-contextid=${holder.id}; SAP_SESSIONID_OSD_001=${bystander.id}`};
+      const mixed = {cookie: `sap-contextid=${holder.id}; ${SESSION_COOKIE}=${bystander.id}`};
       const poll = await holder.other("/core/http/sessions", {headers: mixed});
       const url = /href="([^"]*\/core\/http\/sessions\/[0-9A-F]+)"/.exec(await poll.text())?.[1];
       expect(url).to.be.a("string");
@@ -1344,7 +1345,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       const mine = await lockIt();
       expect(mine.status, "the holder's session is the one that ended").to.equal(200);
       await unlockIt(mine.handle);
-      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${bystander.id}`}});
+      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `${SESSION_COOKIE}=${bystander.id}`}});
     });
 
     it("a logoff carrying two cookies for two sessions ends only the one the context cookie names", async () => {
@@ -1353,10 +1354,10 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       expect((await lockIt(holder.other)).status).to.equal(200);
       // the context cookie names the bystander, the session cookie the holder
       const off = await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`,
-        {headers: {cookie: `sap-contextid=${bystander.id}; SAP_SESSIONID_OSD_001=${holder.id}`}});
+        {headers: {cookie: `sap-contextid=${bystander.id}; ${SESSION_COOKIE}=${holder.id}`}});
       expect(off.status).to.equal(200);
       expectLockedBy(await lockIt(), "OTHERDEV");
-      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `SAP_SESSIONID_OSD_001=${holder.id}`}});
+      await fetch(`http://localhost:${port}/sap/public/bc/icf/logoff`, {headers: {cookie: `${SESSION_COOKIE}=${holder.id}`}});
       const mine = await lockIt();
       expect(mine.status).to.equal(200);
       await unlockIt(mine.handle);

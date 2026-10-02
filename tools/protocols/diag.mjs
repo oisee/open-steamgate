@@ -2,6 +2,7 @@
 // This is protocol structure, not replayed session, host, user, or system data.
 
 import {diagTapeTemplate} from "./diag-tape-template.mjs";
+import {identity} from "../osd-identity.mjs";
 
 export const DIAG_HEADER_LENGTH = 8;
 export const DIAG_DP_HEADER_LENGTH = 200;
@@ -155,8 +156,13 @@ export function encodeDiagLabel({row, col, text}) {
   return encodeAtomHeader({type: DIAG_ATOM.LABEL, row, col, body});
 }
 
-/** A scrubbed, uncompressed SAP GUI shell whose two DYNT atoms are generated here. */
-export function buildDiagTapeScreen({text = "R Tape loading error, 0:1"} = {}) {
+// The R3INFO items (APPL 06) that name the system: 06/23 and 06/24. The
+// template carries a placeholder there; the screen carries this system's id
+// (tools/osd-identity.mjs), blank-padded to the field's own width.
+export const DIAG_SYSTEM_ID_FIELDS = Object.freeze([0x23, 0x24]);
+
+/** A scrubbed, uncompressed SAP GUI shell whose two DYNT atoms and system id fields are generated here. */
+export function buildDiagTapeScreen({text = "R Tape loading error, 0:1", sid = identity().sid} = {}) {
   const atoms = Buffer.concat([
     encodeDiagFrame({row: 1, col: 1, width: 78, height: 22}),
     encodeDiagLabel({row: 20, col: 3, text}),
@@ -166,7 +172,9 @@ export function buildDiagTapeScreen({text = "R Tape loading error, 0:1"} = {}) {
   const items = parseDiagItems(template.subarray(DIAG_HEADER_LENGTH)).map((item) =>
     item.type === DIAG_ITEM.APPL4 && item.id === 0x09 && item.sid === 0x02
       ? {...item, value: atoms}
-      : item);
+      : item.type === DIAG_ITEM.APPL && item.id === 0x06 && DIAG_SYSTEM_ID_FIELDS.includes(item.sid)
+        ? {...item, value: Buffer.from(sid.padEnd(item.value.length, " ").slice(0, item.value.length), "latin1")}
+        : item);
   return encodeDiagMessage({
     mode: template[0], comFlag: template[1], modeStat: template[2], errNo: template[3],
     msgType: template[4], msgInfo: template[5], msgRC: template[6], compress: template[7],

@@ -69,7 +69,14 @@ export async function drainJobOutbox(store, {env = process.env, afterRead, after
         if (!predName || !predCount || !predIntent) throw new Error(`outbox ${intent.intentId} has incomplete predecessor`);
         intent.afterEvent = {jobname: predName, jobcount: predCount, intentId: predIntent};
       }
-      if (intent.sourceDb !== sourceDb || intent.client !== who.client || intent.sysid !== who.sid) {
+      // the system id is the one identity (tools/osd-identity.mjs); a row
+      // written under another id is refused, and the message says both ways out
+      if (intent.sysid !== who.sid) {
+        throw new Error(`outbox ${intent.intentId} belongs to another business instance: it was written by system ` +
+          `${intent.sysid}, this system is ${who.sid} (OSD_SID). Start with OSD_SID=${intent.sysid}, or reset the ` +
+          `business database ${sourceDb} and the operations store to begin again under ${who.sid}`);
+      }
+      if (intent.sourceDb !== sourceDb || intent.client !== who.client) {
         throw new Error(`outbox ${intent.intentId} belongs to another business instance`);
       }
       if (sourceInstance && sourceInstance !== sourceInstanceOnDisk) {

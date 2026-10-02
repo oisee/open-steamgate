@@ -10,13 +10,16 @@
 // OSD has no user store. Anyone may log on, and the name they send is
 // remembered only so the documents that quote a user can quote one.
 import {randomBytes} from "node:crypto";
+import {identity, sessionCookieName} from "./osd-identity.mjs";
 
-// the three-letter system id and the client OSD presents itself as; the
-// session cookie of a real system carries both, and vsp's profile is
-// configured against these
-export const SID = "OSD";
-export const CLIENT = "001";
-export const SESSION_COOKIE = `SAP_SESSIONID_${SID}_${CLIENT}`;
+// the session cookie of a real system carries its id and the client, and so
+// does this one: SAP_SESSIONID_<SID>_<client>, both from the one identity
+// (tools/osd-identity.mjs: OSD_SID, default OSD; the ADT client, 001)
+export const SID = identity().adt.systemID;
+export const CLIENT = identity().adt.client;
+export const SESSION_COOKIE = sessionCookieName();
+// who a request without a Basic header is quoted as
+const ANONYMOUS = "OSD";
 export const CONTEXT_COOKIE = "sap-contextid";
 
 // what a client sends to ask for a token, and what a server sends back to
@@ -292,12 +295,12 @@ export class Sessions {
   static user(req) {
     const header = String(req.headers.authorization ?? "");
     if (/^Basic /i.test(header) === false) {
-      return SID;
+      return ANONYMOUS;
     }
     try {
-      return (Buffer.from(header.slice(6), "base64").toString("utf8").split(":")[0] || SID).toUpperCase();
+      return (Buffer.from(header.slice(6), "base64").toString("utf8").split(":")[0] || ANONYMOUS).toUpperCase();
     } catch {
-      return SID;
+      return ANONYMOUS;
     }
   }
 

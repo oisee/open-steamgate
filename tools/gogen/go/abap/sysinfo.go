@@ -14,7 +14,7 @@ import (
 // environment tab says about the host.
 
 var (
-	SysID = "OSG"
+	SysID = "OSD"
 	UName = "DEVELOPER"
 	// sy-dbsys and sy-saprl as the Node hosts have them: the database
 	// client's name (the Go host's database is SQLite) and the transpiler

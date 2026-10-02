@@ -1,5 +1,6 @@
 import {test, expect, chromium} from "@playwright/test";
 import {packsOf} from "../../tools/osd-packs.mjs";
+import {identity} from "../../tools/osd-identity.mjs";
 import {mkdtemp, rm} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -894,7 +895,7 @@ test("the status app says what the deployment in the browser is", async () => {
     await expect(row).toBeVisible({timeout: 60000});
     await row.click();
 
-    await expect(page.locator(".sapUxAPObjectPageHeaderTitle").first()).toContainText("OSG");
+    await expect(page.locator(".sapUxAPObjectPageHeaderTitle").first()).toContainText(identity().sid);
     const section = (id) => page.locator(`[id$="--${id}::Section"]`).first();
     // one work process, and it is the worker itself (the count is in the
     // section title, which a hidden header row in the table would not fake)

@@ -2,6 +2,12 @@
 // the route list and the browser assertions in one place so the Node server
 // and the static Pages build exercise the same user journey.
 
+import {identity} from "../../tools/osd-identity.mjs";
+
+// the system id the server (and the preview, at build) took from the one
+// identity: OSD_SID, its alias STG_ADT_SID, else OSD
+const SID = identity().sid;
+
 const CORE_APPS = [
   {
     title: "Travels",
@@ -36,7 +42,7 @@ const CORE_APPS = [
   {
     title: "System status",
     intent: "System-status",
-    ready: (page) => page.locator(".sapMListTblRow", {hasText: "OSG"}).first(),
+    ready: (page) => page.locator(".sapMListTblRow", {hasText: SID}).first(),
   },
 ];
 

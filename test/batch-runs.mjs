@@ -12,6 +12,11 @@ import {beforeJobPredecessorDDL, ensureJobEventMetadata, migrateJobEventFile,
   migrateJobStepInputFile, beforeJobScheduleDDL, migrateJobScheduleFile,
   migrateJobIdentityFile, migrateJobPredecessorFile} from "./setup.mjs";
 import {fingerprintOf} from "../tools/osd-persist.mjs";
+import {identity} from "../tools/osd-identity.mjs";
+
+// the system id the job port checks an outbox row against: the one
+// identity of this process (OSD_SID, its alias, else OSD), never a literal
+const SID = identity().sid;
 
 const root = resolve(".");
 
@@ -190,7 +195,7 @@ describe("durable one-shot batch runs", function () {
       db.exec(`CREATE TABLE osd_schema (fingerprint TEXT, at TEXT); ${oldParent}; ${step};`);
       const intentId = randomUUID().replaceAll("-", "");
       db.prepare(`INSERT INTO zosd_job_outbox VALUES
-        ('123', ?, 'OSG', ?, 'OLD_PENDING', '00000001', 'DEVELOPER',
+        ('123', ?, '${SID}', ?, 'OLD_PENDING', '00000001', 'DEVELOPER',
          'Z_FIRST', '01', 'generation-1', '20260929', '091500')`).run(intentId, sourceDb);
       db.prepare(`INSERT INTO zosd_job_step VALUES ('123', ?, '01', 'Z_FIRST')`).run(intentId);
       db.prepare("INSERT INTO osd_schema VALUES (?, 'old')").run(fingerprintOf(old));
