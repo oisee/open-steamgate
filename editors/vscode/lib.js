@@ -151,13 +151,24 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
   // of a script outside resolveSourceMapLocations, so a breakpoint there
   // looks bound and never stops (0.5.1467, osg-demo).
   let outputRoot = `${buildRoot}/live/output`;
-  // Node reports scripts by real path; build/ itself may be a link.
+  // Node reports scripts by real path. build/ itself may be a link, and so
+  // may the generation store inside it (by-input/, hot/, shared with
+  // another checkout): each is admitted by where it really is.
   let realBuildRoot = buildRoot;
+  const realStores = [];
   if (root !== undefined) {
     try {
       realBuildRoot = fs.realpathSync(path.join(root, "build")).replaceAll("\\", "/");
     } catch {
       // No build yet: the literal path is the only one there is.
+    }
+    for (const store of ["by-input", "hot"]) {
+      try {
+        const real = fs.realpathSync(path.join(root, "build", store)).replaceAll("\\", "/");
+        if (!real.startsWith(`${realBuildRoot}/`)) realStores.push(real);
+      } catch {
+        // not there yet
+      }
     }
     try {
       outputRoot = fs.realpathSync(path.join(root, "build", "live", "output")).replaceAll("\\", "/");
@@ -187,7 +198,8 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
     restart,
     ...(target === "unit" ? {continueOnAttach: true} : {}),
     timeout: 30000,
-    resolveSourceMapLocations: [...new Set([`${buildRoot}/**`, `${realBuildRoot}/**`])].concat("!**/node_modules/**"),
+    resolveSourceMapLocations: [...new Set([`${buildRoot}/**`, `${realBuildRoot}/**`, ...realStores.map((store) => `${store}/**`)])]
+      .concat("!**/node_modules/**"),
     skipFiles: ["<node_internals>/**", `${modulesRoot}/@abaplint/runtime/**`],
     outFiles: [`${outputRoot}/**/*.mjs`],
     pauseForSourceMap: true,

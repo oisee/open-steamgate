@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
-import {execFileSync, spawn} from "node:child_process";
+import {spawn} from "node:child_process";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, matchesGlob, relative, resolve} from "node:path";
 import {pathToFileURL, fileURLToPath} from "node:url";
@@ -441,6 +441,27 @@ describe("VS Code debugger configuration: which generations' maps js-debug may r
     }
   });
 
+  it("resolves maps from a generation store that build/ only links to", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-debug-store-link-"));
+    try {
+      const home = join(dir, "home");
+      const store = join(dir, "shared", "by-input");
+      const hot = join(dir, "shared", "hot");
+      mkdirSync(join(store, "booted", "output"), {recursive: true});
+      mkdirSync(hot, {recursive: true});
+      mkdirSync(join(home, "build", "other", "output"), {recursive: true});
+      symlinkSync(store, join(home, "build", "by-input"), "dir");
+      symlinkSync(hot, join(home, "build", "hot"), "dir");
+      symlinkSync(join(home, "build", "other"), join(home, "build", "live"), "dir");
+      const config = debuggerConfiguration(9229, {root: home});
+      expect(sourceMapAllowed(config, join(realpathSync(store), "booted", "output", "x.clas.mjs.map"))).to.equal(true);
+      expect(sourceMapAllowed(config, join(realpathSync(store), "booted", "output", "node_modules", "x.js.map"))).to.equal(false);
+      expect(sourceMapAllowed(config, join(realpathSync(store), "..", "elsewhere", "x.clas.mjs.map"))).to.equal(false);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
   it("resolves maps through a build folder that is itself a link", () => {
     const dir = mkdtempSync(join(tmpdir(), "osd-debug-build-link-"));
     try {
@@ -460,7 +481,7 @@ describe("VS Code debugger configuration: which generations' maps js-debug may r
 });
 
 describe("VS Code debugger transport: a generation goes live ahead of the serving process", function () {
-  this.timeout(600000);
+  this.timeout(240000);
 
   // osg-demo on 0.5.1467: "Run as ABAP Application with debugger" and
   // "Attach debugger and call" showed a bound breakpoint and never stopped.
@@ -469,42 +490,20 @@ describe("VS Code debugger transport: a generation goes live ahead of the servin
   // source maps from the live generation only. Read the real script URLs off
   // the running process's inspector and check them against the configuration
   // the extension builds at that moment.
-  // The test moves build/live, so it runs on a home of its own rather than
-  // on this checkout: every entry of ROOT linked, except build/ (its own,
-  // seeded with a hard-linked copy of the generation ROOT would serve, so
-  // nothing is transpiled when one exists) and output/.
-  function mirrorHome() {
-    const dir = mkdtempSync(join(tmpdir(), "osd-debug-ahead-home-"));
-    const home = join(dir, "home");
-    mkdirSync(join(home, "build", "by-input"), {recursive: true});
-    for (const entry of readdirSync(ROOT)) {
-      if (["build", "output", "node_modules"].includes(entry)) continue;
-      symlinkSync(join(ROOT, entry), join(home, entry));
-    }
-    // a generation's modules resolve @abaplint/runtime from where they lie
-    const runtime = createRequire(import.meta.url).resolve("@abaplint/runtime/package.json");
-    symlinkSync(dirname(dirname(dirname(runtime))), join(home, "node_modules"), "dir");
-    const hash = hashOf(ROOT);
-    const cached = join(ROOT, "build", "by-input", hash);
-    try {
-      readFileSync(join(cached, "manifest.json"));
-      execFileSync("cp", ["-al", cached, join(home, "build", "by-input", hash)]);
-    } catch {
-      // no cached generation: the start below builds one in the mirror
-    }
-    return {dir, home};
-  }
-
+  // The system serves from this checkout as it is; nothing here moves its
+  // build/live. The "other generation goes live" is staged in a temp home
+  // whose build/ reuses this checkout's generation store read-only (a link
+  // to build/by-input) and whose own build/live names a different, empty
+  // generation, so the configuration is built exactly as for a home where
+  // live has moved on while the serving process kept the one it booted.
   it("keeps the classrun class and the DPC the process loaded inside resolveSourceMapLocations", async () => {
     const storageDir = mkdtempSync(join(tmpdir(), "osd-debug-ahead-"));
-    const {dir, home} = mirrorHome();
-    const launcher = new Launcher({osdHome: home, storageDir, workspaceFolders: [], warm: "off"});
-    const liveLink = join(home, "build", "live");
-    const other = join(home, "build", "by-input", `osd-test-ahead-${process.pid}`);
-    const rootLive = readlinkSync(join(ROOT, "build", "live"));
+    const dir = mkdtempSync(join(tmpdir(), "osd-debug-ahead-home-"));
+    const launcher = new Launcher({osdHome: ROOT, storageDir, workspaceFolders: [], warm: "off"});
     let client;
     try {
       const {port} = await launcher.start();
+      const rootLive = readlinkSync(join(ROOT, "build", "live"));
       const osdClient = new Osd(`http://127.0.0.1:${port}`);
       // The class run and the OData call load both modules before any debugger.
       expect((await osdClient.classrun("ZCL_OSD_CLASSRUN_DEMO")).text).to.be.a("string");
@@ -522,15 +521,17 @@ describe("VS Code debugger transport: a generation goes live ahead of the servin
         event.params.url.endsWith(`/${name}.clas.mjs`))?.params;
       const scripts = ["zcl_osd_classrun_demo", "zcl_zstg_demo_dpc_ext"].map(loaded);
       expect(scripts.every(Boolean), "both modules are loaded in the serving process").to.equal(true);
-      // Another generation goes live; the serving process is not recycled.
-      mkdirSync(join(other, "output"), {recursive: true});
-      rmSync(liveLink);
-      symlinkSync(other, liveLink, "dir");
+      // a home where another generation is live, over the same store
+      const home = join(dir, "home");
+      const other = join(home, "build", "other", "output");
+      mkdirSync(other, {recursive: true});
+      symlinkSync(join(ROOT, "build", "by-input"), join(home, "build", "by-input"), "dir");
+      symlinkSync(dirname(other), join(home, "build", "live"), "dir");
       const config = debuggerConfiguration(inspectPort, {root: home, storageDir, layers: launcher.layers});
-      expect(config.outFiles[0]).to.include(`osd-test-ahead-${process.pid}`);
+      expect(config.outFiles[0]).to.equal(`${realpathSync(other)}/**/*.mjs`);
       for (const script of scripts) {
         const moduleFile = fileURLToPath(script.url);
-        expect(moduleFile.includes(`osd-test-ahead-${process.pid}`)).to.equal(false);
+        expect(moduleFile.startsWith(realpathSync(join(ROOT, "build", "by-input")))).to.equal(true);
         const mapFile = script.sourceMapURL.startsWith("file:")
           ? fileURLToPath(script.sourceMapURL) : resolve(dirname(moduleFile), script.sourceMapURL);
         expect(sourceMapAllowed(config, mapFile), `${mapFile} against ${config.resolveSourceMapLocations}`).to.equal(true);
