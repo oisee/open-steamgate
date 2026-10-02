@@ -186,7 +186,7 @@
       "feature": "New object wizard: name validation"
     },
     "create.createDelete": {
-      "status": "FAIL",
+      "status": "PASS",
       "feature": "Create + delete in $TMP"
     },
     "create.createDeleteInPackage": {
