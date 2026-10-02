@@ -28,6 +28,14 @@
 // the list's `accepted` names the word with a measurement, or `allow` names
 // the table field with a reason.
 //
+// The same run checks a second thing a system refuses at activation: a key
+// longer than 120. Measured on A4H (2026-10-02, ZOSD_L3_PILE): "Key length >
+// 120 (restricted functions)", where the length is the sum of the key
+// fields' DD03P LENG -- an INT4 counts 10 (its LENG), not its 4 bytes, and a
+// CHAR its characters; MANDT (a data element with no LENG in the XML) is 3.
+// A key field whose length the XML does not give is a finding too, rather
+// than a guess. Transparent tables only; structures have no key.
+//
 //   node tools/osd-ddic-reserved.mjs [paths...]
 //
 // Exit 0 clean, 1 with findings, 2 when it could not do its job.
@@ -73,6 +81,34 @@ export function tableOf(text) {
     if (name && !name.startsWith(".")) fields.push(name);
   }
   return {table, tabclass, fields};
+}
+
+export const KEY_LIMIT = 120;
+// data elements a key field names without a LENG in the XML, with the LENG a system has
+const KNOWN_ROLLNAMES = {MANDT: 3};
+
+/** the key length of one TRANSP table as a system counts it: {table, length, unmeasured} */
+export function keyLength(text) {
+  const table = /<TABNAME>([^<]*)<\/TABNAME>/.exec(text)?.[1]?.trim().toUpperCase();
+  if (/<TABCLASS>([^<]*)<\/TABCLASS>/.exec(text)?.[1]?.trim() !== "TRANSP") return undefined;
+  let length = 0;
+  const unmeasured = [];
+  for (const block of text.matchAll(/<DD03P>([\s\S]*?)<\/DD03P>/g)) {
+    if (!/<KEYFLAG>X<\/KEYFLAG>/.test(block[1])) continue;
+    const leng = /<LENG>(\d+)<\/LENG>/.exec(block[1]);
+    const rollname = /<ROLLNAME>([^<]*)<\/ROLLNAME>/.exec(block[1])?.[1]?.trim().toUpperCase();
+    if (leng) length += Number(leng[1]);
+    else if (KNOWN_ROLLNAMES[rollname] !== undefined) length += KNOWN_ROLLNAMES[rollname];
+    else unmeasured.push(/<FIELDNAME>([^<]*)<\/FIELDNAME>/.exec(block[1])?.[1]?.trim().toUpperCase());
+  }
+  return {table, length, unmeasured};
+}
+
+/** key-length findings of one table: [{table, length, unmeasured}] */
+export function keyFindings(text) {
+  const key = keyLength(text);
+  if (!key?.table || sapNameRule(key.table) !== undefined) return [];
+  return key.length > KEY_LIMIT || key.unmeasured.length ? [key] : [];
 }
 
 /** findings of one table against the list: [{table, field, parts}] */
@@ -157,6 +193,13 @@ if (basename(process.argv[1] ?? "") === "osd-ddic-reserved.mjs") {
         + "a system refuses to activate the table (\"choose another field name\")");
       count++;
     }
+    for (const k of keyFindings(text)) {
+      console.log(k.unmeasured.length
+        ? `${relative(process.cwd(), file)}: ${k.table}: the length of key field(s) ${k.unmeasured.join(", ")} is not in the XML (no LENG, no known data element); the key length cannot be checked`
+        : `${relative(process.cwd(), file)}: ${k.table}: the key is ${k.length} long (the sum of the key fields' LENG, INT4 = 10); `
+          + `a system refuses more than ${KEY_LIMIT} ("Key length > 120 (restricted functions)")`);
+      count++;
+    }
   }
   // an allow entry no field of the tree needs any more: said, and a failure
   // when the whole tree was read, so the list cannot outlive its reasons
@@ -172,7 +215,7 @@ if (basename(process.argv[1] ?? "") === "osd-ddic-reserved.mjs") {
   const kinds = {};
   for (const {kind} of list.allow.values()) kinds[kind] = (kinds[kind] ?? 0) + 1;
   console.log(`\nosd-ddic-reserved: ${files.length} tables and structures, ${list.words.size} reserved words, `
-    + `${list.allow.size} allowed field(s) (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(", ") || "none"}), ${count} finding(s)`);
+    + `${list.allow.size} allowed field(s) (${Object.entries(kinds).map(([k, n]) => `${n} ${k}`).join(", ") || "none"}), keys at most ${KEY_LIMIT}, ${count} finding(s)`);
   // The local list is a system's own and is never printed: neither its words
   // nor a parse error, whose message quotes the input (as the leak scan
   // treats its identifier list). A field it names that neither the public
