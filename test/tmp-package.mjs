@@ -343,4 +343,39 @@ describe("$TMP, the local package", () => {
     expect(read("../scripts/build-binary.mjs"), "the binary seeds through the VSIX staging").to.match(/stageSystemSeed/);
     expect(read("../docker/image/build.mjs"), "Docker").to.match(/run\("node", \["tools\/osd-build\.mjs", "--publish"\]\)/);
   });
+
+  // ---- with #460: an object of $TMP can be inactive; its copies never publish
+
+  it("is inactive like any object, and its active copies never reach a published build", async () => {
+    const call = await logon("ALICE");
+    expect((await createProg(call, "ZOSD_TMP_INACTIVE")).status).to.equal(201);
+    const store = new ObjectStore({root, libs: []});
+    expect(store.inactive.has("PROG ZOSD_TMP_INACTIVE"), "a create is inactive until activated").to.equal(true);
+    const overlay = store.overlay();
+    expect(overlay?.exclude ?? [], "its saved file is kept out of the build").to.include(join(root, TMP_FOLDER, "zosd_tmp_inactive.prog.abap"));
+    // where an active copy of it would be kept: under build/, which git ignores
+    expect(String(store.inactiveDir).split(/[\\/]/)[0]).to.equal("build");
+    // a generation an activation built from such a copy is refused for publishing
+    const {generationTmpProblem} = await import("../tools/osd-tmp.mjs");
+    const generation = join(root, "build", "by-input", "copy");
+    mkdirSync(generation, {recursive: true});
+    writeFileSync(join(generation, "manifest.json"), JSON.stringify({inputs: {folders: ["src"],
+      overlay: [`build/inactive/active/${TMP_FOLDER}/zosd_tmp_inactive.prog.abap`]}}));
+    expect(generationTmpProblem(generation)).to.match(/never published/);
+    writeFileSync(join(generation, "manifest.json"), JSON.stringify({inputs: {folders: ["src"],
+      overlay: ["build/inactive/active/src/zcl_tmp_neighbour.clas.abap"]}}));
+    expect(generationTmpProblem(generation), "another object's copy is fine").to.equal(undefined);
+    // and with OSD_TMP=off the store has no $TMP object to overlay at all
+    const previous = process.env.OSD_TMP;
+    process.env.OSD_TMP = "off";
+    try {
+      const off = new ObjectStore({root, libs: []});
+      expect(JSON.stringify(off.overlay() ?? {})).to.not.contain(TMP_FOLDER);
+    } finally {
+      if (previous === undefined) delete process.env.OSD_TMP;
+      else process.env.OSD_TMP = previous;
+    }
+    // the build records the copies it read, so the check above has them
+    expect(readFileSync(new URL("../tools/osd-build.mjs", import.meta.url), "utf8")).to.match(/overlay: overlayFilesOf\(root, options\.overlay\)/);
+  });
 });

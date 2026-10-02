@@ -22,8 +22,8 @@ import {libraryFiles} from "./osd-inputs.mjs";
 import {hashOf, inputsOf, loadConfig, normalPath} from "./osd-build.mjs";
 import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
-import {TMP_FOLDER, TMP_PACKAGE, TMP_TEXT, ensureTmp, forgetAuthor, isTmpPackage, tmpAuthors, tmpRoot} from "./osd-tmp.mjs";
-import {authorNow, checkName, indexTmp, noteAuthor, tmpChild, withTmp, writeCheck, writeChecked} from "./osd-store-tmp.mjs";
+import {TMP_FOLDER, TMP_TEXT, isTmpPackage, tmpAuthors, tmpRoot} from "./osd-tmp.mjs";
+import {authorNow, checkName, indexTmp, noteAuthor, tmpChild, tmpDelete, tmpPackageFile, withTmp, writeCheck, writeChecked} from "./osd-store-tmp.mjs";
 export {InvalidName} from "./osd-store-tmp.mjs";
 
 import {basename, dirname, join, relative, resolve} from "node:path";
@@ -851,23 +851,16 @@ export class ObjectStore {
     if (home.writable === false) {
       throw new ReadOnly("DEVC", parent);
     }
-    if (isTmpPackage(parent)) {
-      ensureTmp(this.root);
-    }
     const folder = dirname(home.file);
     const root = this.roots.find((r) => folder === r.path || folder.startsWith(r.path + "/"));
     const description = String(options.description ?? "");
-    let file;
-    if (type === "DEVC") {
-      if (isTmpPackage(parent) && upper.startsWith("$") && !upper.startsWith(parent + "_")) {
-        // a local package of any name under $TMP, as on A4H: its folder is its name
-        file = join(folder, upper.toLowerCase(), "package.devc.xml");
-      } else if (!upper.startsWith(parent + "_") || upper.length === parent.length + 1) {
+    let file = tmpPackageFile(this.root, parent, upper, folder, type); // $TMP: tools/osd-store-tmp.mjs
+    if (file === undefined && type === "DEVC") {
+      if (!upper.startsWith(parent + "_") || upper.length === parent.length + 1) {
         throw new NotSupported(`a package under ${parent} is named ${parent}_<FOLDER>; ${upper}`);
-      } else {
-        file = join(folder, upper.slice(parent.length + 1).toLowerCase(), "package.devc.xml");
       }
-    } else {
+      file = join(folder, upper.slice(parent.length + 1).toLowerCase(), "package.devc.xml");
+    } else if (file === undefined) {
       file = join(folder, fileOf(upper) + meta.ext);
     }
     const safe = writeCheck(this.root, root, `${type} ${upper}`); // inside its root, no link
@@ -960,10 +953,7 @@ export class ObjectStore {
     if (entry.writable === false) {
       throw new ReadOnly(type, name);
     }
-    if (type === "DEVC" && isTmpPackage(entry.name)) {
-      // delivered with every system; on one its row belongs to SAP
-      throw new NotSupported(`deleting ${TMP_PACKAGE}, the local package every system has`);
-    }
+    tmpDelete(this.root, entry, true);
     const meta = TYPES[type];
     const files = [entry.file];
     if (type === "CLAS") {
@@ -990,9 +980,7 @@ export class ObjectStore {
     this.#entries().delete(`${entry.type} ${entry.name}`);
     if (this.inactive.delete(`${entry.type} ${entry.name}`)) this.#saveInactive();
     this.#dropActiveCopy(entry);
-    if (entry.root === TMP_FOLDER) {
-      forgetAuthor(this.root, entry.type, entry.name);
-    }
+    tmpDelete(this.root, entry, false);
     this.#forget();
     return {type: entry.type, name: entry.name, deleted: true};
   }
@@ -1121,7 +1109,6 @@ export class ObjectStore {
       throw new NotFound("DEVC", wanted);
     }
     const objects = [];
-    // who made what in $TMP, read now (tools/osd-store-tmp.mjs)
     const authors = [...this.#entries().values()].some((e) => e.package === wanted && e.root === TMP_FOLDER)
       ? (tmpAuthors(this.root) ?? {}) : {};
     for (const entry of this.#entries().values()) {
@@ -1137,7 +1124,6 @@ export class ObjectStore {
     };
   }
 
-  /** who created an object of $TMP, from the record as it is now */
   authorOf(type, name) {
     const entry = this.find(type, name);
     return entry?.root === TMP_FOLDER ? authorNow(this.root, entry) : undefined;

@@ -203,9 +203,19 @@ export function generationTmpProblem(generationDir) {
   } catch {
     // the manifest's list is the record; the config is a second witness only
   }
-  const local = layers.filter((f) => f === TMP_FOLDER || String(f).startsWith(TMP_FOLDER + "/"));
+  // and the active copies of inactive objects an activation built from
+  // (build/inactive/active/<file>, ObjectStore#overlay): a copy of a $TMP file
+  // is a $TMP object as much as the file is
+  let copies = [];
+  try {
+    copies = JSON.parse(readFileSync(join(generationDir, "manifest.json"), "utf8")).inputs?.overlay ?? [];
+  } catch {
+    // read above already; nothing more to learn
+  }
+  const local = [...layers.filter((f) => f === TMP_FOLDER || String(f).startsWith(TMP_FOLDER + "/")),
+    ...copies.filter((f) => String(f).includes(`/active/${TMP_FOLDER}/`))];
   return local.length === 0 ? undefined
-    : `${generationDir} was built with ${TMP_FOLDER} as a layer: it holds ${TMP_PACKAGE} objects and is never published. Rebuild with OSD_TMP=off (osd-build --publish).`;
+    : `${generationDir} was built with ${TMP_FOLDER} as a layer (${local.slice(0, 3).join(", ")}): it holds ${TMP_PACKAGE} objects and is never published. Rebuild with OSD_TMP=off (osd-build --publish).`;
 }
 
 // ------------------------------------------------------------ names

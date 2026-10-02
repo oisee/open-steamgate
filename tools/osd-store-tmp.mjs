@@ -4,7 +4,9 @@
 // (tools/osd-size-budget.json).
 import {closeSync, constants as fsConstants, existsSync, lstatSync, openSync, realpathSync, renameSync, rmSync, writeSync} from "node:fs";
 import {dirname, isAbsolute, join, relative, resolve} from "node:path";
-import {TMP_FOLDER, TMP_PACKAGE, nameProblem, recordAuthor, tmpAuthors, tmpDisabled, tmpRoot} from "./osd-tmp.mjs";
+import {TMP_FOLDER, TMP_PACKAGE, ensureTmp, forgetAuthor, isTmpPackage, nameProblem, recordAuthor, tmpAuthors, tmpDisabled, tmpRoot} from "./osd-tmp.mjs";
+// the store's own refusal, imported lazily-safe: osd-store re-exports it
+import {NotSupported} from "./osd-store.mjs";
 
 export class InvalidName extends Error {
   constructor(message) {
@@ -130,4 +132,22 @@ export function noteAuthor(base, rootPath, type, name, author) {
   if (rootPath !== TMP_FOLDER || author === undefined || author === "") return undefined;
   recordAuthor(base, type, name, author);
   return String(author).toUpperCase();
+}
+
+/** a create into $TMP: its folder exists first, and a local package of any
+ *  name (not only $TMP_<X>) is a child of it, its folder its name (A4H) */
+export function tmpPackageFile(base, parent, name, folder, type) {
+  if (!isTmpPackage(parent)) return undefined;
+  ensureTmp(base);
+  return type === "DEVC" && name.startsWith("$") && !name.startsWith(parent + "_")
+    ? join(folder, name.toLowerCase(), "package.devc.xml") : undefined;
+}
+
+/** a delete in $TMP: $TMP itself is delivered with every system (refused,
+ *  `before`), and an object that goes takes its author record with it */
+export function tmpDelete(base, entry, before) {
+  if (before && entry.type === "DEVC" && isTmpPackage(entry.name)) {
+    throw new NotSupported(`deleting ${TMP_PACKAGE}, the local package every system has`);
+  }
+  if (!before && entry.root === TMP_FOLDER) forgetAuthor(base, entry.type, entry.name);
 }

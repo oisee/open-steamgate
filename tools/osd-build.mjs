@@ -29,7 +29,7 @@ import {libraryPath} from "./osd-lib-path.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
-import {basename, dirname, join, relative, resolve, resolve as resolvePath} from "node:path";
+import {basename, dirname, join, relative, resolve, resolve as resolvePath, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
@@ -676,6 +676,11 @@ export function ownConfig(root, config, stack, outputFolder, overlay = undefined
 // (ObjectStore#overlay): their files are excluded by absolute path, and the
 // last active version of each, when it had one, comes from `folder` instead.
 // {exclude: [absolute files], folder: root-relative folder | undefined}
+const overlayFilesOf = (root, overlay) => {
+  const dir = activeOverlay(overlay)?.folder === undefined ? undefined : join(root, overlay.folder);
+  return dir !== undefined && existsSync(dir) ? walk(dir).map((f) => relative(root, f).split(sep).join("/")).sort() : [];
+};
+
 export function activeOverlay(overlay) {
   if (overlay === undefined || overlay === null) return undefined;
   const exclude = new Set([...(overlay.exclude ?? [])].map((f) => resolve(f)));
@@ -812,7 +817,9 @@ export async function build(options = {}) {
       ms: Date.now() - started,
       objects,
       transpiler: describeBuild(root),
-      inputs: {folders: inputs.folders.map((f) => relative(root, f)), libs: inputs.libs.map((f) => relative(root, f))},
+      inputs: {folders: inputs.folders.map((f) => relative(root, f)), libs: inputs.libs.map((f) => relative(root, f)),
+        // the active copies an overlay added: a publisher reads them too (osd-tmp.mjs)
+        overlay: overlayFilesOf(root, options.overlay)},
       // What `gen/` held when this generation was made. `gen/` is an OUTPUT
       // and is out of the hash (it used to be in it, which made the name
       // self-referential) -- and taking it out removed an accidental
