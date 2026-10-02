@@ -1,9 +1,10 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {spawnSync} from "node:child_process";
 import {frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
 
 test("every input category changes the frontend key", () => {
@@ -101,6 +102,46 @@ test("resolved abaplint package overrides change the frontend key", () => {
     writeFileSync(join(transpiler, "package.json"), JSON.stringify({version: "1.0.0"}));
     writeFileSync(join(transpiler, "node_modules", "@abaplint", "core", "package.json"), JSON.stringify({version: "2.0.0"}));
     assert.notEqual(frontendInputs({...options, toolchainRequire: firstRequire}).key, first, "core version");
+  } finally { rmSync(home, {recursive: true, force: true}); }
+});
+
+test("touching build code in a local abaplint override misses the snapshot", () => {
+  const home = mkdtempSync(join(tmpdir(), "gogen-cache-build-"));
+  try {
+    const transpiler = join(home, "node_modules", "@abaplint", "transpiler");
+    const core = join(transpiler, "node_modules", "@abaplint", "core");
+    for (const dir of [transpiler, core]) {
+      mkdirSync(join(dir, "build"), {recursive: true});
+      writeFileSync(join(dir, "package.json"), JSON.stringify({version: "1.0.0"}));
+      writeFileSync(join(dir, "build", "index.js"), "module.exports = 1;");
+    }
+    // Each build runs in a fresh process, as unit.mjs does. The fingerprint
+    // is memoized only while that process's loaded toolchain is in use.
+    const script = `import {createRequire} from "node:module";
+      import {join} from "node:path";
+      import {frontendInputs} from ${JSON.stringify(new URL("./frontend-cache.mjs", import.meta.url).href)};
+      const home = process.argv[1];
+      process.stdout.write(frontendInputs({home, folders: [], owners: [], fixture: false,
+        unlayered: false, env: {}, toolchainRequire: createRequire(join(home, "frontend.mjs"))}).key);`;
+    const key = () => {
+      const result = spawnSync(process.execPath, ["--input-type=module", "-e", script, home], {encoding: "utf8"});
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout;
+    };
+    let current = key();
+    const cacheRoot = join(home, "cache");
+    const go = join(home, "go");
+    mkdirSync(join(go, "cmd", "unit"), {recursive: true});
+    writeFileSync(join(go, "cmd", "unit", "zz_generated.go"), "package main\n");
+    for (const dir of [transpiler, core]) {
+      writeFrontendCache(cacheRoot, current, go, {});
+      const file = join(dir, "build", "index.js");
+      utimesSync(file, new Date(2_000_000_000_000), new Date(2_000_000_000_000));
+      const changed = key();
+      assert.notEqual(changed, current, `${dir} build edit`);
+      assert.equal(readFrontendCache(cacheRoot, changed, join(home, "copy")), null);
+      current = changed;
+    }
   } finally { rmSync(home, {recursive: true, force: true}); }
 });
 

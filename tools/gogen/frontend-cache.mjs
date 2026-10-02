@@ -2,19 +2,32 @@
 // generators, seed inputs, configuration and the Go runtime copied to a run.
 // The conservative whole-folder key also covers newly added closure members.
 import {createHash} from "node:crypto";
-import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {dirname, join, relative} from "node:path";
 import {dataDirsOf, ddicDirsOf} from "../osd-packs.mjs";
 
-const version = 2;
-const walk = (dir) => !existsSync(dir) ? [] : readdirSync(dir, {withFileTypes: true})
+const version = 3;
+const packageBuildFingerprints = new Map();
+const walk = (dir, skipIgnored = true) => !existsSync(dir) ? [] : readdirSync(dir, {withFileTypes: true})
   .sort((a, b) => a.name.localeCompare(b.name))
-  .flatMap((entry) => entry.isDirectory() ? ([".out", ".git", "node_modules"].includes(entry.name) ? [] : walk(join(dir, entry.name))) : entry.isFile() ? [join(dir, entry.name)] : []);
+  .flatMap((entry) => entry.isDirectory() ? (skipIgnored && [".out", ".git", "node_modules"].includes(entry.name) ? [] : walk(join(dir, entry.name), skipIgnored)) : entry.isFile() ? [join(dir, entry.name)] : []);
 
 function packageIdentity(name, from) {
   const path = from.resolve(`${name}/package.json`);
-  return {dir: realpathSync(dirname(path)), version: JSON.parse(readFileSync(path, "utf8")).version};
+  const dir = realpathSync(dirname(path));
+  let build = packageBuildFingerprints.get(dir);
+  if (build === undefined) {
+    const hash = createHash("sha256");
+    for (const file of walk(join(dir, "build"), false)) {
+      const {size, mtimeNs} = statSync(file, {bigint: true});
+      hash.update(relative(dir, file)); hash.update("\0");
+      hash.update(`${size}:${mtimeNs}`); hash.update("\0");
+    }
+    build = hash.digest("hex");
+    packageBuildFingerprints.set(dir, build);
+  }
+  return {dir, version: JSON.parse(readFileSync(path, "utf8")).version, build};
 }
 
 function toolchainIdentity(from) {
