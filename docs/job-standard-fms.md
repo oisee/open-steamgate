@@ -186,21 +186,27 @@ running job or one the scheduler is releasing does. An unknown one raises
 `JOB_DOES_NOT_EXIST`, another user's `NO_DELETE_AUTHORITY`, and a nonempty
 `FORCEDMODE` `CANT_DELETE_JOB`.
 
-How it goes depends on where the job lives. Not imported, its business rows
-(identity, outbox, steps) are deleted in the caller's LUW. Imported, its
-operations run is marked `DELETED` at once and its business rows go in the
-caller's LUW too, outbox rows included when the import's acknowledgement has
-not landed, so the next drain has nothing half to acknowledge. The delete then
+A delete and an outbox drain, in this process or in an independent worker
+(`node tools/osd-batch-runs.mjs worker`), meet in the business database, not
+in memory: both begin by deleting the job's outbox row, which takes SQLite's
+write lock, and whoever deletes it owns the job. The drain claims the outbox
+and step rows, imports into the operations store and only then commits, in one
+business transaction; a claim that finds no row imports nothing (a delete won,
+or another drain). The delete claims the identity, outbox and step rows in the
+caller's LUW and, still holding the lock, asks the operations ledger whether
+an earlier drain imported the job: if so its run is marked `DELETED` (or the
+delete is refused while it is queued or running, and the claim undone); if not,
+the claimed outbox row decides (a ready job is refused). A drain that crashed
+after its import and before its commit leaves the outbox rows, which the delete
+claims with the rest, so nothing is left half acknowledged. The delete then
 ends with `COMMIT WORK`: the default `COMMITMODE = 'X'` commits the caller's
 LUW on a system, other pending writes included (measured with a sentinel row),
 and a later `ROLLBACK WORK` does not bring the job back. `COMMITMODE = space`
 (on a system: the delete stays in the caller's LUW) is not honoured here,
 because a function module cannot tell an omitted parameter from a space
-(ANORMALIES.md, fm-is-supplied). A worker's drain imports only committed
-outbox rows and takes the work process the deleting step holds, so it either
-imported the job before the delete, which then takes the imported path, or
-never sees it. A deleted job's operations run stays, as `DELETED`, for its
-ledger, log and chain link; every read answers as for an unknown job.
+(ANORMALIES.md, fm-is-supplied). A deleted job's operations run stays, as
+`DELETED`, for its ledger, log and chain link; every read answers as for an
+unknown job.
 
 On a system `JOB_OPEN` and `JOB_CLOSE` commit the caller's LUW as well; here
 they do not (ANORMALIES.md, job-open-commits).

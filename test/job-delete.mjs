@@ -3,7 +3,9 @@
 // EXPECT = A4H), driven through the real ABAP facade and the scheduler, and
 // the races between a delete and a worker's outbox drain.
 import {expect} from "chai";
+import {spawn} from "node:child_process";
 import {mkdtempSync, readFileSync, rmSync} from "node:fs";
+import {createInterface} from "node:readline";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
@@ -80,17 +82,18 @@ describe("BP_JOB_DELETE of a job still in the outbox or in the caller's LUW", fu
     w.scheduler = new JobScheduler({root, store: w.store, env: process.env, clock, execute: w.execute});
     w.name = (job) => w.prefix + job;
     w.at = (seconds) => msStamp(clock.now() + seconds * 1000);
+    w.intents = {};
+    // the rows a job left, counted by its key and by the intent its close
+    // made, so a step row whose outbox parent is gone still counts
     w.rows = (job) => {
       const count = w.counts[job];
-      const ids = readBusiness(`SELECT intent_id FROM zosd_job_identity WHERE jobname = ? AND jobcount = ?`,
-        w.name(job), count);
+      const intent = w.intents[job] ?? "";
       return {
-        identity: ids.length,
-        outbox: readBusiness("SELECT COUNT(*) AS n FROM zosd_job_outbox WHERE jobname = ? AND jobcount = ?",
+        identity: readBusiness("SELECT COUNT(*) AS n FROM zosd_job_identity WHERE jobname = ? AND jobcount = ?",
           w.name(job), count)[0].n,
-        steps: readBusiness(`SELECT COUNT(*) AS n FROM zosd_job_step s JOIN zosd_job_outbox o
-          ON o.mandt = s.mandt AND o.intent_id = s.intent_id WHERE o.jobname = ? AND o.jobcount = ?`,
-          w.name(job), count)[0].n,
+        outbox: readBusiness(`SELECT COUNT(*) AS n FROM zosd_job_outbox WHERE (jobname = ? AND jobcount = ?)
+          OR intent_id = ?`, w.name(job), count, intent)[0].n,
+        steps: readBusiness("SELECT COUNT(*) AS n FROM zosd_job_step WHERE intent_id = ?", intent)[0].n,
       };
     };
     w.runs = (job) => w.store.db.prepare("SELECT state FROM batch_runs WHERE job_name = ? ORDER BY rowid")
@@ -120,6 +123,10 @@ describe("BP_JOB_DELETE of a job still in the outbox or in the caller's LUW", fu
       exporting.predjob_checkstat = box("X"); // required here, not on the sandbox (job-standard-facade)
     }
     await abap.FunctionModules.JOB_CLOSE({exporting});
+    // the caller's own connection sees the close before any COMMIT
+    w.intents[job] = String(client.db.prepare(`SELECT intent_id FROM zosd_job_identity
+      WHERE jobname = ? AND jobcount = ?`).get(w.name(job), w.counts[job])?.intent_id ?? "").trim();
+    expect(w.intents[job], `intent of ${job}`).to.match(/^[0-9a-f]{32}$/);
   }
   async function del(w, job, {count, commitmode} = {}) {
     const exporting = {jobname: box(w.name(job)), jobcount: box(count ?? w.counts[job])};
@@ -209,27 +216,128 @@ describe("BP_JOB_DELETE of a job still in the outbox or in the caller's LUW", fu
     w.scheduler.stop();
   });
 
-  it("gives a drain that starts during the delete nothing to import", async () => {
+  it("blocks a drain that starts inside the delete until its COMMIT, and gives it nothing to import", async () => {
     const w = world();
     await dialogStep(() => close(w, "RACE2", {start: 3600}));
-    let release, drained;
-    const held = new Promise((resolve) => { release = resolve; });
-    const step = dialogStep(async () => {
-      const answer = await del(w, "RACE2", {commitmode: ""});
-      // the drain asks for the work process while this step still has it
-      drained = outsideStepContext(() => drainJobOutbox(w.store, {env: process.env}));
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      release();
-      return answer;
-    });
-    await held;
-    expect(await step).to.equal(0);
+    const port = abap.context.RFCDestinations.JOBS;
+    let drained, settled = false;
+    port.afterDeleteClaim = async () => {
+      // the delete has claimed the job and not committed: a drain asked for
+      // now must not import it, here or once it gets the work process
+      drained = outsideStepContext(() => drainJobOutbox(w.store, {env: process.env}))
+        .finally(() => { settled = true; });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(settled, "the drain waits for the deleting step").to.equal(false);
+    };
+    try { expect(await deleteJob(w, "RACE2")).to.equal(0); }
+    finally { port.afterDeleteClaim = undefined; }
+    expect(drained, "the seam ran").to.exist;
     expect(await drained).to.deep.equal({imported: 0});
     expect(w.runs("RACE2")).to.deep.equal([]);
     expect(w.rows("RACE2")).to.deep.equal({identity: 0, outbox: 0, steps: 0});
     w.clock.set(w.clock.now() + 7200 * 1000);
     await w.scheduler.tick();
     expect(w.ran[w.name("RACE2")] ?? 0).to.equal(0);
+    w.scheduler.stop();
+  });
+
+  // An independent worker (`node tools/osd-batch-runs.mjs worker`) shares no
+  // lock with this process: only the business database fences it.
+  function worker(w, {pause = false} = {}) {
+    const child = spawn(process.execPath, [join(root, "test/fixtures/job-delete/worker.mjs"), ...(pause ? ["pause"] : [])],
+      {cwd: root, env: {...process.env}, stdio: ["pipe", "pipe", "inherit"]});
+    const seen = [];
+    const waiters = [];
+    createInterface({input: child.stdout}).on("line", (line) => {
+      seen.push(line);
+      for (const waiter of waiters.splice(0)) waiter();
+    });
+    const until = (prefix) => new Promise((resolve, reject) => {
+      const look = () => {
+        const line = seen.find((item) => item.startsWith(prefix));
+        if (line !== undefined) return resolve(line.slice(prefix.length).trim());
+        if (child.exitCode !== null) return reject(new Error(`worker ended without ${prefix}: ${seen.join(" | ")}`));
+        waiters.push(look);
+      };
+      child.on("exit", () => { for (const waiter of waiters.splice(0)) waiter(); });
+      look();
+    });
+    return {
+      ready: () => until("READY"),
+      go: () => child.stdin.write("go\n"),
+      read: () => until("READ "),
+      result: async () => JSON.parse(await until("RESULT ")),
+      done: () => child.exitCode !== null ? Promise.resolve() : new Promise((resolve) => child.on("exit", resolve)),
+      seen,
+    };
+  }
+
+  it("an independent worker that read the outbox before the delete committed imports nothing", async () => {
+    const w = world();
+    await dialogStep(() => close(w, "IND1", {start: 3600}));
+    const other = worker(w, {pause: true});
+    await other.ready();
+    other.go();
+    expect(Number(await other.read()), "the worker read the job").to.be.at.least(1);
+    expect(await deleteJob(w, "IND1")).to.equal(0);
+    other.go(); // the worker claims and imports what it read
+    expect(await other.result()).to.deep.equal({imported: 0});
+    await other.done();
+    expect(w.runs("IND1")).to.deep.equal([]);
+    expect(w.rows("IND1")).to.deep.equal({identity: 0, outbox: 0, steps: 0});
+    w.clock.set(w.clock.now() + 7200 * 1000);
+    await w.scheduler.tick();
+    expect(w.ran[w.name("IND1")] ?? 0).to.equal(0);
+    w.scheduler.stop();
+  });
+
+  it("an independent worker that imports after the delete read the job leaves the delete the imported job", async () => {
+    const w = world();
+    await dialogStep(() => close(w, "IND2", {start: 3600}));
+    const other = worker(w);
+    await other.ready();
+    const port = abap.context.RFCDestinations.JOBS;
+    let imported;
+    port.beforeDeleteLock = async () => {
+      other.go();
+      imported = await other.result();
+    };
+    try { expect(await deleteJob(w, "IND2")).to.equal(0); }
+    finally { port.beforeDeleteLock = undefined; }
+    if (imported === undefined) { other.go(); imported = await other.result(); }
+    await other.done();
+    expect(imported).to.deep.equal({imported: 1});
+    expect(w.runs("IND2")).to.deep.equal(["DELETED"]);
+    expect(w.rows("IND2")).to.deep.equal({identity: 0, outbox: 0, steps: 0});
+    w.clock.set(w.clock.now() + 7200 * 1000);
+    await w.scheduler.tick();
+    expect([w.ran[w.name("IND2")] ?? 0, w.runs("IND2")]).to.deep.equal([0, ["DELETED"]]);
+    w.scheduler.stop();
+  });
+
+  it("an independent worker that starts while the delete holds its claim waits and imports nothing", async () => {
+    const w = world();
+    await dialogStep(() => close(w, "IND3", {start: 3600}));
+    const other = worker(w);
+    await other.ready();
+    const port = abap.context.RFCDestinations.JOBS;
+    let started = false;
+    port.afterDeleteClaim = async () => {
+      started = true;
+      other.go();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(other.seen.some((line) => line.startsWith("RESULT")), "the worker waits for the COMMIT").to.equal(false);
+    };
+    try { expect(await deleteJob(w, "IND3")).to.equal(0); }
+    finally { port.afterDeleteClaim = undefined; }
+    if (!started) other.go();
+    expect(await other.result()).to.deep.equal({imported: 0});
+    await other.done();
+    expect(w.runs("IND3")).to.deep.equal([]);
+    expect(w.rows("IND3")).to.deep.equal({identity: 0, outbox: 0, steps: 0});
+    w.clock.set(w.clock.now() + 7200 * 1000);
+    await w.scheduler.tick();
+    expect(w.ran[w.name("IND3")] ?? 0).to.equal(0);
     w.scheduler.stop();
   });
 

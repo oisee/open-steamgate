@@ -87,14 +87,13 @@ export class JobDestination {
   // BP_JOB_DELETE, as measured on the sandbox (2026-10-02,
   // test/fixtures/job-delete/contract.json): a job that waits (S), an
   // opened one (P) and an ended one go; a ready (Y) or running one is
-  // refused. Where the job still lives decides how it goes:
-  // - imported (OPERATIONS): the operations run is marked DELETED at once,
-  //   and its business rows (identity, outbox, steps) go in the caller's LUW;
-  // - in the outbox or in the caller's own LUW (not imported): its
-  //   business rows go in the caller's LUW, which the facade's COMMITMODE
-  //   commits. A worker imports only committed outbox rows and the import
-  //   takes the work process this step holds, so it either imported the job
-  //   before (first case) or never sees it.
+  // refused. The delete and an outbox drain meet in the business database,
+  // not in this process: both start by deleting the job's outbox row, which
+  // takes SQLite's write lock, and whoever deletes it owns the job. The
+  // drain imports only what it claimed (tools/osd-job-outbox.mjs); the
+  // delete, holding the lock, then asks the operations ledger whether an
+  // earlier drain imported the job and deletes its run there too. The
+  // business rows go in the caller's LUW, which the facade commits.
   async #delete(db, jobname, count, token) {
     const who = identity(this.env);
     const sourceDb = resolve(db.path);
@@ -107,70 +106,68 @@ export class JobDestination {
     if (transient && !transient.closed) {
       if (transient.owner !== who.user || transient.client !== who.client) return "FORBIDDEN";
       jobs.delete(keyOf(name, count));
-      await this.#deleteRows(db, who.client, name, count, "");
+      await db.beginTransaction();
+      db.db.prepare(`DELETE FROM zosd_job_identity WHERE mandt = ? AND jobname = ? AND jobcount = ?
+        AND COALESCE(TRIM(intent_id), '') = ''`).run(who.client, name, count);
       return "";
     }
-    let snapshot;
     try {
-      snapshot = readJobSnapshot({sourceDb, jobName: name, jobCount: count,
+      readJobSnapshot({sourceDb, jobName: name, jobCount: count,
         caller: {client: who.client, user: who.user, sid: who.sid}, root: this.root, env: this.env});
     } catch (error) {
-      return error?.code === "JOB_READ_FORBIDDEN" ? "FORBIDDEN" : "UNAVAILABLE";
+      if (error?.code === "JOB_READ_FORBIDDEN") return "FORBIDDEN";
+      if (error?.code !== "JOB_SNAPSHOT_INCONSISTENT") return "UNAVAILABLE";
+      // a snapshot taken while a drain committed half its view; the rows
+      // read under the lock below decide
     }
-    const local = db.db.prepare(`SELECT owner, intent_id FROM zosd_job_identity
-      WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(who.client, name, count);
-    if (local && String(local.owner ?? "").trim() !== who.user) return "FORBIDDEN";
-    const localIntent = String(local?.intent_id ?? "").trim();
-    if (!snapshot && !local) return "NOT_FOUND";
-    // committed nowhere yet, or closed in this LUW over a committed reservation
-    if (!snapshot || (local && localIntent !== (snapshot.intentId ?? ""))) {
-      if (!local) return "NOT_FOUND"; // deleted in this LUW already
-      return this.#deleteUnimported(db, who.client, name, count, localIntent);
-    }
-    if (!local) return "NOT_FOUND"; // deleted in this LUW, not yet committed
-    if (snapshot.state === "DELETED") return "NOT_FOUND";
-    if (snapshot.phase === "RESERVED" || snapshot.phase === "OUTBOX") {
-      return this.#deleteUnimported(db, who.client, name, count, localIntent);
-    }
-    if (snapshot.phase !== "OPERATIONS") return "NOT_IMPORTED";
-    const id = snapshot.intentId.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
-    const store = new BatchRuns(this.root, this.env);
-    let kind;
-    try { kind = store.deleteJob(id); } finally { store.close(); }
-    if (kind !== "deleted") return kind === "running" ? "RUNNING" : "NOT_FOUND";
-    // A deleted system job no longer holds its (name, count) row. Keep the
-    // operations run as a tombstone for the scheduler and reorg. An import
-    // whose acknowledgement did not land yet leaves its outbox rows; they go
-    // too, so a later drain has nothing half to acknowledge.
-    await this.#deleteRows(db, who.client, name, count, snapshot.intentId);
-    return "";
-  }
-
-  // a job not imported: a ready one (no start condition) is Y on a system
-  // from JOB_CLOSE on and is refused; anything else goes with its rows
-  async #deleteUnimported(db, client, name, count, intentId) {
-    if (intentId) {
-      const row = db.db.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?")
-        .get(client, intentId);
-      if (row) {
-        const field = (key) => String(row[key] ?? "").trim();
-        let timed;
-        try { timed = !!scheduleOfOutbox(row); } catch { return "UNAVAILABLE"; }
-        if (!timed && !field("event_id") && !field("pred_jobname")) return "RUNNING";
-      }
-    }
-    await this.#deleteRows(db, client, name, count, intentId);
-    return "";
-  }
-
-  // the job's business rows, in the caller's LUW (the facade commits it)
-  async #deleteRows(db, client, name, count, intentId) {
+    await this.beforeDeleteLock?.(); // test seam: another process may drain here
+    // From here under the business write lock: the first statement writes.
     await db.beginTransaction();
-    db.db.prepare(`DELETE FROM zosd_job_identity WHERE mandt = ? AND jobname = ?
-      AND jobcount = ? AND COALESCE(TRIM(intent_id), '') = ?`).run(client, name, count, intentId);
-    if (!intentId) return;
-    db.db.prepare("DELETE FROM zosd_job_step WHERE mandt = ? AND intent_id = ?").run(client, intentId);
-    db.db.prepare("DELETE FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?").run(client, intentId);
+    const savepoint = `osd_job_delete_${randomUUID().replaceAll("-", "")}`;
+    db.db.exec(`SAVEPOINT ${savepoint}`);
+    const undo = (answer) => {
+      db.db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      db.db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+      return answer;
+    };
+    try {
+      const local = db.db.prepare(`DELETE FROM zosd_job_identity WHERE mandt = ? AND jobname = ?
+        AND jobcount = ? RETURNING owner, intent_id`).get(who.client, name, count);
+      if (!local) return undo("NOT_FOUND");
+      if (String(local.owner ?? "").trim() !== who.user) return undo("FORBIDDEN");
+      const intentId = String(local.intent_id ?? "").trim();
+      if (!intentId) { // reserved: opened, never closed
+        db.db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+        return "";
+      }
+      const claimed = db.db.prepare("DELETE FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ? RETURNING *")
+        .get(who.client, intentId);
+      db.db.prepare("DELETE FROM zosd_job_step WHERE mandt = ? AND intent_id = ?").run(who.client, intentId);
+      const store = new BatchRuns(this.root, this.env);
+      try {
+        if (store.importedCount(intentId) !== undefined) {
+          // imported by an earlier drain (one that crashed before its
+          // acknowledgement leaves the outbox rows, claimed above)
+          const id = intentId.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
+          const kind = store.deleteJob(id);
+          if (kind !== "deleted") return undo(kind === "running" ? "RUNNING" : "NOT_FOUND");
+        } else if (claimed) {
+          // a job released to start at once is Y from JOB_CLOSE on
+          let timed;
+          try { timed = !!scheduleOfOutbox(claimed); } catch { return undo("UNAVAILABLE"); }
+          const field = (key) => String(claimed[key] ?? "").trim();
+          if (!timed && !field("event_id") && !field("pred_jobname")) return undo("RUNNING");
+        } else {
+          return undo("NOT_FOUND"); // neither in the outbox nor imported
+        }
+      } finally { store.close(); }
+      db.db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+      await this.afterDeleteClaim?.(); // test seam: the lock is held until the COMMIT
+      return "";
+    } catch (error) {
+      try { undo(); } catch { /* the savepoint went with a failed statement */ }
+      throw error;
+    }
   }
 
   async call(_name, signature) {

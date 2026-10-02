@@ -79,8 +79,9 @@ The private port returns the canonical name (trimmed and upper case) to both
 reservation to the intent in that same LUW. A private savepoint surrounds
 these writes. Handled failures roll back to it, including SQLite statements
 whose trigger changed a row before reporting failure, while preserving earlier
-caller writes in the LUW. A successful outbox acknowledgement deletes the dispatch
-rows and leaves the identity row. The reservation's owner is checked when
+caller writes in the LUW. A drain claims the dispatch rows (deletes them) before
+it imports and commits after, in one business transaction, so the claim fences
+it against `BP_JOB_DELETE` and other drains; it leaves the identity row. The reservation's owner is checked when
 binding; the key is scoped by client and the business database containing it.
 
 The additive SQLite migration recognizes the exact preceding schema stamp,

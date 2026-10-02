@@ -682,14 +682,18 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
         BEGIN SELECT RAISE(ABORT, 'ack refused'); END`);
     } finally { writer.close(); }
     try {
-      await drainJobOutbox(store);
-      throw new Error("drain unexpectedly acknowledged intent");
-    } catch (error) { expect(error.message).to.equal("outbox acknowledgement failed"); }
-    expect(rows()).to.have.length(1);
-    expect(store.list()).to.have.length(before + 1);
-    const clean = new DatabaseSync(dbPath);
-    try { clean.exec("DROP TRIGGER refuse_job_ack"); }
-    finally { clean.close(); }
+      try {
+        await drainJobOutbox(store);
+        throw new Error("drain unexpectedly acknowledged intent");
+      } catch (error) { expect(error.message).to.equal("outbox acknowledgement failed"); }
+      // the drain claims before it imports: a refused claim imports nothing
+      expect(rows()).to.have.length(1);
+      expect(store.list()).to.have.length(before);
+    } finally {
+      const clean = new DatabaseSync(dbPath);
+      try { clean.exec("DROP TRIGGER refuse_job_ack"); }
+      finally { clean.close(); }
+    }
     expect((await drainJobOutbox(store)).imported).to.equal(1);
     expect(rows()).to.have.length(0);
     expect(store.list()).to.have.length(before + 1);
@@ -779,7 +783,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       catch (error) { expect(error.message).to.equal("outbox acknowledgement failed"); }
       expect(rows().filter((row) => row.mandt.trim() === "123")).to.have.length(1);
       expect(stepRows().filter((row) => row.mandt.trim() === "123")).to.have.length(1);
-      expect(store.list()).to.have.length(before + 1);
+      expect(store.list()).to.have.length(before); // claimed before import: nothing imported
     } finally {
       const clean = new DatabaseSync(dbPath);
       try { clean.exec("DROP TRIGGER refuse_step_ack"); } finally { clean.close(); }
@@ -790,18 +794,26 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     expect(store.list()).to.have.length(before + 1);
   });
 
-  it("accepts a row another drainer acknowledged after the same intent was imported", async () => {
+  it("a second drainer that starts while the first holds its claim imports nothing", async () => {
     await schedule();
     const before = store.list().length;
     const fixture = join(root, "test", "fixtures", "job-outbox-restart.mjs");
-    const result = await drainJobOutbox(store, {afterImport: () => {
-      const child = spawnSync(process.execPath, [fixture, "retry"], {
-        cwd: root, env: {...process.env}, encoding: "utf8", timeout: 120000,
+    let other;
+    const result = await drainJobOutbox(store, {afterImport: async () => {
+      // the first drainer has claimed and imported, and not committed: the
+      // second waits for the business write lock and then finds no row
+      other = new Promise((resolve) => {
+        const child = spawn(process.execPath, [fixture, "retry"], {cwd: root, env: {...process.env}});
+        let out = "", err = "";
+        child.stdout.on("data", (chunk) => { out += chunk; });
+        child.stderr.on("data", (chunk) => { err += chunk; });
+        child.on("exit", (status) => resolve({status, out, err}));
       });
-      expect(child.error, String(child.error)).to.equal(undefined);
-      expect(child.status, child.stderr).to.equal(0);
-      expect(JSON.parse(child.stdout.trim())).to.deep.equal({imported: 1});
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     }});
+    const child = await other;
+    expect(child.status, child.err).to.equal(0);
+    expect(JSON.parse(child.out.trim())).to.deep.equal({imported: 0});
     expect(result.imported).to.equal(1);
     expect(rows()).to.have.length(0);
     expect(store.list()).to.have.length(before + 1);
