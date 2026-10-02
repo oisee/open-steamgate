@@ -268,6 +268,7 @@ rm -rf .local/stage/l3demo && mkdir -p .local/stage/l3demo && cp \
   src/dsl/zosd_l3_doctor.tabl.xml src/dsl/zosd_l3_kill.tabl.xml src/dsl/zosd_l3_conf.tabl.xml src/dsl/zosd_l3_conf_log.tabl.xml src/dsl/zosd_l3_run_conf.tabl.xml \
   src/l2demo/zcl_l3_fleet2.clas.* src/l2demo/zcl_l3_fleet2_*.clas.* src/l2demo/zif_l3_fleet2_*.intf.* \
   src/l2demo/zcx_l3_fleet2_port.clas.* src/l2demo/zl3_fleet2.prog.* src/l2demo/zl3_fleet2_conf.prog.* \
+  src/l2demo/zcl_l3_fleet_seed.clas.* src/l2demo/zl3_fleet_seed.prog.* \
   .local/stage/l3demo/
 node tools/stg-compile.mjs src/l2demo/zl3c_fleet2.stg.yaml --out .local/stage/l3demo
 cp src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.* .local/stage/l3demo/
@@ -289,6 +290,14 @@ The second run (2026-10-01, after the rename) passed end to end on A4H:
 - 109 ABAP Unit methods, all green: the six rule classes' own tests and the three proof methods, mode S, rerun and mode P;
 - **mode P ran on the system's own job scheduler**: six background jobs, `L3_FLEET_01` to `L3_FLEET_06`, all with status F (finished), within about a second. The log equals mode S's. This is the first check of this runtime's job emulation against a real scheduler;
 - cleanup by receipt removed every object and the package. The jobs stay in SM37's history, as a system keeps them.
+
+**A fleet to watch.** The four tables hold a handful of rows; a run of a few piles ends before
+anyone looks. `ZL3_FLEET_SEED` (`ZCL_L3_FLEET_SEED=>generate`) fills them with a synthetic fleet of
+up to 999 ships drawn from a seed: one ship in ten in maintenance, zero to four voyages from ten
+days back to thirty ahead, zero to five crew of whom the first is usually the captain and sometimes
+signed on late, zero to three cargo items of up to 600.00. The same seed and date give the same
+fleet; `p_wipe` empties the four tables of the client first. With 200 ships fleet2 plans about a
+hundred piles in its first stage, enough to see the twin, the governor and the doctor at work.
 
 ## Ports and adapters
 
