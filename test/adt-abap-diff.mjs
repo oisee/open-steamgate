@@ -802,6 +802,25 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       await logoff(two);
     });
 
+    it("a live session whose ENQ context the lock server ended: GET 200, a PUT with the old handle 409, and it locks again", async () => {
+      const {server, sessions} = await withSessions();
+      const one = await logon(server);
+      const locked = await lock(one);
+      expect(locked.status).to.equal(200);
+      const {endEnqSession} = await import("../tools/osd-enq-host.mjs");
+      endEnqSession(sessions.owners.key(one.id));
+      expect((await rows()).map((r) => r.arg), "the lock went with the context").to.deep.equal([]);
+      const read = await send(one, "GET", `${at(LOCKED)}/source/main`);
+      expect(read.status, read.body).to.equal(200);
+      const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${locked.handle}`,
+        {headers: {"content-type": "text/plain"}, body: "* no\n"});
+      expect(put.status, put.body).to.equal(409);
+      const again = await lock(one);
+      expect(again.status, again.body).to.equal(200);
+      await logoff(one);
+      expect((await rows()).map((r) => r.arg), "logoff released the new context").to.deep.equal([]);
+    });
+
     it("a holder this owner table issued and no longer knows is dead, and gives way", async () => {
       // holderOf: an id under this table's own prefix that no session carries
       // is a session that ended without its lock going (nothing makes one now

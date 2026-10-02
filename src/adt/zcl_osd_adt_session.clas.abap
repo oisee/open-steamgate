@@ -5,8 +5,12 @@
 "! Foreign holder prefixes stay live. No issued-id ledger is needed.
 "! Dump cleanup is pulled before binding: no ABAP runs from an onEnd hook.
 "! Missing ENQ context clears handles, then BIND opens the next context.
-"! Ended keys delete their rows before the named refusal, never touch them.
-"! The request handler catches that refusal inside its step so cleanup commits.
+"! A key the lock server ended while the session's row still exists (a
+"! rolled-back logoff, a context ended under a queued request) keeps the
+"! session: BIND drops the handles (the locks went with the context),
+"! revives the key and binds again. The session and its token stay, so a
+"! read is answered and a write with a dead handle is the route's 409.
+"! Only logoff and expiry end a session; a second failed bind raises.
 CLASS zcl_osd_adt_session DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     INTERFACES zif_osd_adt_session.
@@ -161,9 +165,12 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
     IF zcl_osd_enq_kernel=>context_alive( lv_id ) = abap_false.
       zif_osd_adt_session~enq_context_ended( lv_id ).
     ENDIF.
+    IF zcl_osd_enq_kernel=>bind( iv_id = lv_id iv_user = lv_user ) = abap_true.
+      RETURN.
+    ENDIF.
+    zif_osd_adt_session~enq_context_ended( lv_id ).
+    zcl_osd_enq_kernel=>revive( lv_id ).
     IF zcl_osd_enq_kernel=>bind( iv_id = lv_id iv_user = lv_user ) = abap_false.
-      DELETE FROM zosd_adt_shdl WHERE mandt = sy-mandt AND id = lv_id.
-      DELETE FROM zosd_adt_sess WHERE mandt = sy-mandt AND id = lv_id.
       lx_error = zcx_osd_adt=>session_ended( ).
       RAISE EXCEPTION lx_error.
     ENDIF.

@@ -95,8 +95,8 @@ export function abapRunner({shim, router, step}) {
   return {
     // enter runs first inside the step, where a binding to the step (the
     // ENQ session) takes hold
-    run: (args) => step(() => {
-      args.enter?.();
+    run: (args) => step(async () => {
+      await args.enter?.();
       return shim.run({...args, base: new globalThis.abap.types.String().set(args.base)});
     },
       `ADT ${args.req.method} ${args.req.path}`),

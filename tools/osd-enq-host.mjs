@@ -201,6 +201,15 @@ export function endEnqSession(key) {
   for (const [sid, k] of [...doomed]) if (k === key) retireNow(sid, key, false);
 }
 
+/** The host knows the key's session still exists (its logon row survived,
+ * e.g. the logoff that ended the key was rolled back, or the lock server
+ * ended only its context): the key may be bound again. Its earlier locks
+ * went with the end; a step bound after this starts a new context. */
+export function reviveEnqSession(key) {
+  if (isObject(key)) endedObjects.delete(key);
+  else endedValues.delete(key);
+}
+
 /** the session behind key goes, with its locks; the key may open a new one */
 function dropEnqSession(key) {
   const sid = sessions.get(key);
@@ -317,7 +326,7 @@ export function installEnq(abap, {updateModules = []} = {}) {
   if (abap.__osdEnq === true) return;
   abap.__osdEnq = true;
   installEnqSession(abap, {
-    bind: bindEnqSession, end: endEnqSession, Ended: EnqSessionEnded,
+    bind: bindEnqSession, end: endEnqSession, revive: reviveEnqSession, Ended: EnqSessionEnded,
     contextAlive: (key) => !isEnded(key) && sessions.has(key),
   });
 

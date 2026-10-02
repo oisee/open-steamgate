@@ -238,7 +238,7 @@ describe("AbapSessions on the Node façade", function () {
     }
   });
 
-  it("commits a session_ended refusal, then opens a fresh session", async () => {
+  it("a session whose ENQ context the lock server ended: GET 200 in the same session, twice", async () => {
     resetAdtSessionClaimForTests();
     const sessions = new AbapSessions();
     const app = express();
@@ -248,22 +248,16 @@ describe("AbapSessions on the Node façade", function () {
     });
     const url = `http://127.0.0.1:${server.address().port}${BASE}/core/discovery`;
     try {
-      const first = await fetch(url, {headers: {"x-sap-adt-sessiontype": "stateful"}});
+      const first = await fetch(url, {headers: {"x-sap-adt-sessiontype": "stateful", "x-csrf-token": "fetch"}});
       const id = first.headers.getSetCookie().join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+      const token = first.headers.get("x-csrf-token");
       expect(id).to.match(/^[a-f0-9]{24}$/);
-      endEnqSession(adtEnqOwner.key(id));
-      const ended = await fetch(url, {headers: {cookie: `sap-contextid=${id}`,
-        "x-sap-adt-sessiontype": "stateful"}});
-      expect([ended.status, ended.headers.get("x-csrf-token"), await ended.text()])
-        .to.deep.equal([403, "Required", "CSRF token validation failed"]);
-      expect(await sessions.get(id)).to.equal(undefined);
-      const fresh = await fetch(url, {headers: {cookie: `sap-contextid=${id}`,
-        "x-sap-adt-sessiontype": "stateful"}});
-      expect(fresh.status).to.equal(200);
-      const nextId = fresh.headers.getSetCookie().join("; ").match(/sap-contextid=([^;]+)/)?.[1];
-      expect(nextId).to.match(/^[a-f0-9]{24}$/);
-      expect(nextId).to.not.equal(id);
-      await sessions.end(nextId);
+      for (const round of [1, 2]) {
+        endEnqSession(adtEnqOwner.key(id));
+        const read = await fetch(url, {headers: {cookie: `sap-contextid=${id}`, "x-sap-adt-sessiontype": "stateful"}});
+        expect([round, read.status, read.headers.get("x-csrf-token")]).to.deep.equal([round, 200, token]);
+        expect((await sessions.get(id))?.id).to.equal(id);
+      }
     } finally {
       await new Promise((resolve) => server.close(resolve));
       resetAdtSessionClaimForTests();

@@ -18,7 +18,7 @@
 // it, so the two sides cannot disagree on it.
 import {adtEnqOwner} from "./adt-enq-key.mjs";
 import {randomUUID} from "node:crypto";
-import {bindEnqSession, endEnqSession, enqDrop, enqHolder, enqTake, onEnqContextEnded} from "./osd-enq-host.mjs";
+import {EnqSessionEnded, bindEnqSession, endEnqSession, enqDrop, enqHolder, enqTake, onEnqContextEnded, reviveEnqSession} from "./osd-enq-host.mjs";
 import {Sessions, refuseToken} from "./adt-session.mjs";
 
 export const LOCK_TABLE = "ZOSD_ADT_LOCK";
@@ -110,9 +110,24 @@ export function abapSession(sessions, other) {
     sessions.byId.get(key.slice(prefix.length))?.locks.clear();
   });
   return {
-    enter(req) {
+    async enter(req) {
       const session = req.adt?.session;
-      if (session?.stateful === true) bindEnqSession(sessions.owners.key(session.id), {user: session.user});
+      if (session?.stateful !== true) return;
+      const key = sessions.owners.key(session.id);
+      try {
+        bindEnqSession(key, {user: session.user});
+      } catch (e) {
+        // The lock server ended this context. If the session still exists it
+        // goes on in a new context: a read is answered, a write with a handle
+        // of the old one is the 409 of a handle that holds nothing.
+        if (!(e instanceof EnqSessionEnded)) throw e;
+        // ...but the request resolved its session before it queued, so ask
+        // again: a logoff that ran meanwhile has removed it, and then this is
+        // the refusal (#432: no lock under a logged-off session)
+        if (await sessions.get(session.id) === undefined) throw e;
+        reviveEnqSession(key);
+        bindEnqSession(key, {user: session.user});
+      }
     },
     ended: refuseToken,
     async system(kind, name, req) {

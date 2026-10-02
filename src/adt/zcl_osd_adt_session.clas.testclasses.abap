@@ -24,7 +24,7 @@ CLASS ltcl_session DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FI
     METHODS logoff FOR TESTING RAISING cx_static_check.
     METHODS context_end FOR TESTING RAISING cx_static_check.
     METHODS holders FOR TESTING RAISING cx_static_check.
-    METHODS ended_is_catchable FOR TESTING RAISING cx_static_check.
+    METHODS ended_context_keeps_session FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_session IMPLEMENTATION.
@@ -197,25 +197,20 @@ CLASS ltcl_session IMPLEMENTATION.
     cl_abap_unit_assert=>assert_true( mo_api->token_valid( iv_id = ms_one-id iv_token = ms_one-token ) ).
   ENDMETHOD.
 
-  METHOD ended_is_catchable.
-    DATA lx_error TYPE REF TO zcx_osd_adt.
-    DATA lv_caught TYPE abap_bool.
+  METHOD ended_context_keeps_session.
     DATA ls_again TYPE zif_osd_adt_session=>ty_session.
+    DATA lv_handle TYPE string.
     ls_again = by_cookie( iv_context = ms_one-id iv_state = `stateful` ).
+    lv_handle = mo_api->adopt_handle( iv_id = ms_one-id iv_type = `CLAS` iv_name = `ZENDED` ).
     zcl_osd_enq_kernel=>end( ms_one-id ).
-    TRY.
-        ls_again = by_cookie( iv_context = ms_one-id ).
-      CATCH zcx_osd_adt INTO lx_error.
-        lv_caught = abap_true.
-        cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 403 ).
-        cl_abap_unit_assert=>assert_equals( act = lx_error->type_id exp = zcx_osd_adt=>c_session_ended ).
-        cl_abap_unit_assert=>assert_equals( act = lx_error->namespace exp = zcx_osd_adt=>c_namespace_osd ).
-    ENDTRY.
-    cl_abap_unit_assert=>assert_true( lv_caught ).
+*   the lock server ended the context while the row stays: the session and
+*   its token stay, its handles go with the locks
     ls_again = by_cookie( iv_context = ms_one-id ).
-    cl_abap_unit_assert=>assert_true( ls_again-fresh ).
-    cl_abap_unit_assert=>assert_differs( act = ls_again-id exp = ms_one-id ).
-    cl_abap_unit_assert=>assert_differs( act = ls_again-token exp = ms_one-token ).
+    cl_abap_unit_assert=>assert_false( ls_again-fresh ).
+    cl_abap_unit_assert=>assert_equals( act = ls_again-id exp = ms_one-id ).
+    cl_abap_unit_assert=>assert_equals( act = ls_again-token exp = ms_one-token ).
+    cl_abap_unit_assert=>assert_false( mo_api->holds(
+      iv_id = ms_one-id iv_handle = lv_handle iv_type = `CLAS` iv_name = `ZENDED` ) ).
   ENDMETHOD.
 
   METHOD holders.
