@@ -191,7 +191,7 @@ it in front of the table with `ZCL_OSD_ADT_HANDLER=>USE_ROUTES`.
   row of `ZOSD_ADT_SESS`, a foreign-token write is not refused by ABAP, and `an_ended_session` fails (an
   exception document instead of the refusal).
 - **Green:** the `adt` suite group (`test/suites.d/adt.json`) together with `osd-enq` and `osd-enq-abap` gives
-  527 passing and 6 pending: 11 cases in `test/adt-abap-front.mjs` (two of them are #471's acceptance test and pending until it lands, see below). The adapter's parity suite, `adt-abap-diff` (rewritten for option B), `adt-abap-csrf`,
+  542 passing and 4 pending, with `osd-child` in the run, on main after #471: 11 cases in `test/adt-abap-front.mjs`, including #471's acceptance test (old handle 409, GET 200, relock a new handle), which now runs. The adapter's parity suite, `adt-abap-diff` (rewritten for option B), `adt-abap-csrf`,
   `adt-abap-session`, `adt-devloop`, `adt-activation` and `tmp-package` are all part of that run.
 - **ABAP-FS conformance** (`--start`, own port): 30 PASS, 1 FAIL, 16 MISSING, no regressions.
 
@@ -216,8 +216,7 @@ request, then the adapter's `peek` and `handles` for `req.adt`, and the commit.
 `ZOSD_ADT_SESS` by `TOUCHED`, which has no index. Measured through the adapter: 0.54 ms with 1 session, 0.58 ms
 with 1 001, 1.61 ms with 11 001 and 7.86 ms with 61 001, so about 0.12 ms per thousand. Sessions nobody needs no
 longer stay (above), so the table holds only the sessions of real clients. An index on `TOUCHED`, or a sweep at
-most every N seconds, is a change to `ZCL_OSD_ADT_SESSION` and its table, and is left to that class's owner (#471
-is open on both).
+most every N seconds, is a change to `ZCL_OSD_ADT_SESSION` and its table, and is left to that class's owner.
 
 ### Measured overhead (before the session existed)
 
