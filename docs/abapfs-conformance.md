@@ -1,0 +1,219 @@
+# ABAP-FS conformance
+
+How well the ADT façade serves [ABAP-FS](https://github.com/marcellourbani/vscode_abap_remote_fs)
+(`murbani.vscode-abap-remote-fs` 2.10.3, MIT, Marcello Urbani). The aim is for
+OSG to be the local system ABAP-FS can browse, edit, check, activate and test
+against with no SAP system behind it, and to name what it still cannot do.
+
+There are two layers:
+
+1. **Protocol layer** (this document, done). ABAP-FS's own ADT client is run
+   against the façade, call by call, as the extension calls it. It takes
+   seconds and needs no VS Code.
+2. **UI layer** (planned, below). The real extension is driven in a real VS
+   Code under Xvfb, with screenshots.
+
+Both run on demand. Neither is part of `npm test`.
+
+## Run it
+
+```sh
+npm run conformance:abapfs -- --start             # own OSG on :3393, stopped afterwards
+npm run conformance:abapfs -- --url http://localhost:3030   # a system that is already running
+npm run conformance:abapfs -- --start --only write,create   # some groups (connect always runs)
+npm run conformance:abapfs -- --start --update-expected     # accept the current matrix
+```
+
+`--update-expected` refuses to write after an aborted or unclean run. A
+scenario that did not run keeps its previous expectation.
+
+`--start` runs `test/run.mjs` from this checkout with `STG_PORT` and a
+database under `.local/conformance/abapfs/db/`. It waits for `/osd/serving`
+and stops the process group at the end. Run it under
+`flock /tmp/open-steamgate-heavy.lock` when other sessions are building. It
+needs a built generation (`npm run transpile`).
+
+Output:
+
+- `.local/conformance/abapfs/report.md`: the matrix (feature → endpoints →
+  result → ms → note), the gaps sorted by user impact, and the diff against
+  the expectations;
+- `report.json` in the same folder: every scenario with each HTTP call and
+  its status;
+- a summary on stdout.
+
+The exit code is 1 on a regression against
+`test/fixtures/abapfs-conformance/expected.json`, meaning a PASS that was
+lost or a MISSING that became a FAIL. It is 2 if a restore failed or anything
+was left behind:
+
+- **On the system.** A scratch object counts as gone only when a read
+  answers a confirmed 404. A timeout, an auth error or a 500 is reported as
+  "existence unknown".
+- **In the checkout.** With `--start`, every tracked and untracked file
+  (except `.local/`) is recorded before the run, as git sees it: its mode and a content hash and again after OSG has
+  stopped. That also catches a second change to a file that was already
+  dirty. With `--url` the checkout is not this tool's to judge, so the repo
+  check is skipped and the report says so. The system-side cleanup is still
+  verified.
+
+## The client, and why it is pinned this way
+
+The tool uses `abap-adt-api` 8.4.3 (MIT), the library ABAP-FS 2.10.3 ships.
+Its version and integrity come from ABAP-FS's `pnpm-lock.yaml`. The library
+is **not** in the root `package.json`. `tools/abapfs-conformance/` holds a
+`package.json` and a `package-lock.json` of its own. Its `overrides` pin
+every transitive package to the version in that same pnpm lock: 42 packages,
+and every integrity in our lock equals the one in theirs. On first use the
+tool copies the pair into `.local/conformance/abapfs/deps` (ignored) and
+runs `npm ci` there, which verifies each tarball's integrity.
+
+Why a separate lockfile rather than a bare fetch of one tarball: the library
+has seven dependencies. Their transitive versions decide how the XML is
+parsed (fast-xml-parser 5.11.1), and floating them would test a client
+ABAP-FS does not ship. Why not the root package: the main install would carry
+a dependency that only an on-demand check uses.
+`test/adt-abapfs-conformance.mjs` checks that the lock still pins the
+ABAP-FS integrity and that the licence is MIT.
+
+## Coverage
+
+Every scenario is a sequence of client calls taken from the extension's
+source, with the extension's own arguments. The client logs in with a dummy
+user and password, client 001, and uses a stateful session for lock, write,
+delete and activate. Reads go through its stateless clone, as ABAP-FS does.
+Fixtures are the `$ZOSD_TEST` package, which has one object of each kind and
+a test class with one pass and one deliberate failure.
+
+| Group | Scenarios |
+|---|---|
+| connect | compatibility/graph login + CSRF token, stateless clone, discovery and its CTS/abapGit gates |
+| tree | nodestructure for `$TMP`, `$ZOSD_TEST` and the System Library root, nodepath, object types |
+| objects | structure + source for CLAS, INTF, PROG, INCL, FUGR, FM, DDLS, MSAG, TABL; class includes; outline; include main programs |
+| write | lock, PUT source with a marker, read back, PUT original, unlock, verify byte-equal |
+| check / activate / unit | checkruns on clean and on broken source, activation, inactive objects, ABAP Unit with the deliberate failure |
+| search / whereused / editor | quickSearch, usageReferences, completion, navigation target, element info, pretty printer, type hierarchy |
+| versions / data | revisions + one revision's content, datapreview freestyle and ddic |
+| transports / atc / debugger | transportchecks, transport requests and configurations, ATC customizing and run, core discovery, listeners, breakpoints |
+| create | name validation, create + delete of a scratch program in `$TMP` and in `$ZOSD_TEST`, verified gone |
+
+The statuses:
+
+- **PASS**: the calls answered, and the result passed the scenario's check.
+  For example, the unit run must report exactly the one deliberate failure.
+- **MISSING**: the façade does not serve the endpoint. That is its
+  catch-all 404 ("is not served"), or a 501.
+- **FAIL**: anything else. That covers a served route that refused, a
+  document the client could not parse, or a check that did not hold. A
+  routed 404 such as "DEVC $TMP does not exist" is a FAIL and not a
+  MISSING.
+
+Safety rules:
+
+- The write scenario restores the original source on every path and
+  verifies the restore on every path. A failed or unverified restore is
+  fatal: the run stops before activation, and every remaining scenario is
+  reported as not run.
+- No delete runs without a non-empty lock handle.
+- Each scratch object is deleted in its own scenario, and checked again in a
+  `finally` at the end of the run, one object at a time. Both checks only
+  accept a confirmed 404.
+
+`test/adt-abapfs-conformance.mjs` proves each rule offline with fake
+clients: restore-fatal, cleanup after a read error, handle validation, the
+MISSING→FAIL regression and the hash diff.
+
+## Current matrix (2026-10-02, origin/main b3df2f86)
+
+**29 PASS, 2 FAIL, 16 MISSING of 47**. A run with `--start` takes 12 to 35
+s, including starting the system. Most of the spread is activation. It
+answers in under 1 s when nothing needs building, and in about 20 s when it
+waits for the rebuild. The syntax check takes about 3.6 s and ABAP Unit about
+2 s. Everything else takes milliseconds.
+
+What works end to end:
+
+- connect;
+- the tree (`$TMP`, packages, root, reveal);
+- opening CLAS, INTF, PROG, INCL, DDLS and TABL;
+- class includes and the outline;
+- lock/save/unlock with a verified restore;
+- the syntax check, which reports errors on broken source;
+- activation;
+- ABAP Unit, with the failure reaching the client;
+- quick search;
+- versions;
+- SQL and table preview;
+- the transport check;
+- debugger listeners;
+- feeds, dumps and users;
+- create + delete in a real package.
+
+Gaps, by what an ABAP-FS user loses:
+
+1. **Create in `$TMP` fails** (FAIL). `POST /programs/programs` with
+   parent `$TMP` answers 404 "DEVC $TMP does not exist", although the
+   same create in `$ZOSD_TEST` passes. `$TMP` is the default package of
+   every scratch object.
+2. **New-object name validation** (MISSING, `*/validation`). ABAP-FS's
+   create wizard validates first and stops on the 404, so no object can be
+   created from the UI at all.
+3. **Code completion** (MISSING, `abapsource/codecompletion/proposal`).
+4. **Go to definition** (MISSING, `navigation/target`).
+5. **Function groups and modules cannot be opened** (MISSING, `functions/groups/*`).
+6. **Message classes cannot be opened** (MISSING, `messageclass/*`).
+   ABAP-FS has a custom editor for them.
+7. **Where-used** (MISSING, `informationsystem/usageReferences`).
+8. **Debugging cannot start** (FAIL + MISSING). `core/discovery` returns
+   several collections per workspace, and abap-adt-api expects one, so
+   `adtCoreDiscovery` throws while parsing. `debugger/breakpoints` is not
+   served.
+
+Then: include main programs, ATC (customizing, runs), element-info hover,
+the pretty printer, the transport organizer and its search configuration
+(all expected missing), and the type hierarchy. The transport and abapGit
+panels stay hidden on their own, because the façade does not advertise
+their discovery gates. That is the intended state while those endpoints do
+not exist.
+
+`test/fixtures/abapfs-conformance/expected.json` holds this matrix. A later
+run reports each change against it as a regression or an improvement.
+
+## The UI layer (next)
+
+The protocol layer proves what the client library receives. It does not prove
+what a user sees. The UI layer follows the harness that osg-demo already uses
+for VS Code screenshots (`test/vscode-shots.mjs` there):
+
+- **Real desktop VS Code under Xvfb**, launched with Playwright `_electron`.
+  Headless Chromium renders a blank workbench, and code-server adds a
+  server we do not need. Use the official linux-x64 tarball, pinned here by
+  URL and sha256. Without sudo, Xvfb and xauth come from `apt download` +
+  `dpkg -x`.
+- **ABAP-FS VSIX pinned by sha256.** Take the release asset, check its hash
+  ourselves, and install it with `<tarball>/bin/code --install-extension`
+  into a fresh `--user-data-dir` / `--extensions-dir`. Its dependencies
+  `larshp.vscode-abap` and `hudakf.cds` are installed and pinned the same
+  way (`docs/vscode-workbench-spike.md` has 2.9.1-era hashes).
+- **Settings before launch**:
+  - `abapfs.remote.osg = {url: http://localhost:<STG_PORT>, username, client: "001"}`;
+  - workspace trust off, startup editor none, updates and telemetry off,
+    AI features off;
+  - the workspace is an `adt://osg` folder in a neutral `/tmp` path.
+- **The password prompt** is the one interactive step left (ABAP-FS
+  research, PR candidate A). The harness types a dummy password once, and
+  ABAP-FS keeps it in its own SecretStorage.
+- **Steps mirror the groups above**: open the tree, open a class, edit and
+  save, activate, run the unit test (`1 passed, 1 failed`), search, and run
+  an SQL query.
+- **Waits and evidence**:
+  - wait on the proving text, never on fixed sleeps;
+  - read output channels from the profile logs;
+  - copy screenshots out only when every step passed, and keep the failing
+    window otherwise;
+  - restore sources and close debug sessions in `finally`.
+- **Budget**: 3–5 minutes locally, so it stays on demand and out of CI.
+
+Each gap this protocol layer names gets a UI step, so the UI layer shows the
+failure where the user would see it: completion, definition, the create
+wizard, and opening an FM or a message class.

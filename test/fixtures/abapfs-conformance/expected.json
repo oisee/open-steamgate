@@ -1,0 +1,197 @@
+{
+  "client": {
+    "name": "abap-adt-api",
+    "version": "8.4.3",
+    "integrity": "sha512-/DXovX+xjqycHyrcSEQnbuDQqlmegdIDfJpfL38i5vYRfjiBoEHzxfKOzB3/gvYxbuAfxKzytwLdSQG2leh8sA=="
+  },
+  "scenarios": {
+    "connect.login": {
+      "status": "PASS",
+      "feature": "Connect (login, CSRF token)"
+    },
+    "connect.statelessClone": {
+      "status": "PASS",
+      "feature": "Second (stateless) session for reads"
+    },
+    "connect.discovery": {
+      "status": "PASS",
+      "feature": "Discovery (feature gates)"
+    },
+    "tree.tmp": {
+      "status": "PASS",
+      "feature": "Browse $TMP"
+    },
+    "tree.package": {
+      "status": "PASS",
+      "feature": "Browse a package ($ZOSD_TEST)"
+    },
+    "tree.systemLibrary": {
+      "status": "PASS",
+      "feature": "Browse System Library (root)"
+    },
+    "tree.nodepath": {
+      "status": "PASS",
+      "feature": "Reveal object in tree (nodepath)"
+    },
+    "tree.objecttypes": {
+      "status": "PASS",
+      "feature": "Object type registry"
+    },
+    "object.CLAS": {
+      "status": "PASS",
+      "feature": "Open CLAS (structure + source)"
+    },
+    "object.INTF": {
+      "status": "PASS",
+      "feature": "Open INTF (structure + source)"
+    },
+    "object.PROG": {
+      "status": "PASS",
+      "feature": "Open PROG (structure + source)"
+    },
+    "object.INCL": {
+      "status": "PASS",
+      "feature": "Open INCL (structure + source)"
+    },
+    "object.FUGR": {
+      "status": "MISSING",
+      "feature": "Open FUGR (structure + source)"
+    },
+    "object.FM": {
+      "status": "MISSING",
+      "feature": "Open FM (structure + source)"
+    },
+    "object.DDLS": {
+      "status": "PASS",
+      "feature": "Open DDLS (structure + source)"
+    },
+    "object.MSAG": {
+      "status": "MISSING",
+      "feature": "Open MSAG (structure + source)"
+    },
+    "object.TABL": {
+      "status": "PASS",
+      "feature": "Open TABL (structure + source)"
+    },
+    "object.CLAS.includes": {
+      "status": "PASS",
+      "feature": "Class includes (locals, test classes)"
+    },
+    "object.CLAS.outline": {
+      "status": "PASS",
+      "feature": "Outline (objectstructure)"
+    },
+    "object.INCL.mainprograms": {
+      "status": "MISSING",
+      "feature": "Include main program"
+    },
+    "write.lockWriteUnlock": {
+      "status": "PASS",
+      "feature": "Edit + save (lock, PUT source, unlock)"
+    },
+    "check.syntax": {
+      "status": "PASS",
+      "feature": "Syntax check (checkruns)"
+    },
+    "activate.object": {
+      "status": "PASS",
+      "feature": "Activate"
+    },
+    "activate.inactiveObjects": {
+      "status": "PASS",
+      "feature": "Inactive objects list"
+    },
+    "unit.run": {
+      "status": "PASS",
+      "feature": "ABAP Unit (Test Explorer)"
+    },
+    "search.quick": {
+      "status": "PASS",
+      "feature": "Object search (quickSearch)"
+    },
+    "whereused.references": {
+      "status": "MISSING",
+      "feature": "Where-used / find references"
+    },
+    "editor.completion": {
+      "status": "MISSING",
+      "feature": "Code completion"
+    },
+    "editor.definition": {
+      "status": "MISSING",
+      "feature": "Go to definition (navigation/target)"
+    },
+    "editor.elementinfo": {
+      "status": "MISSING",
+      "feature": "Hover (completion elementinfo)"
+    },
+    "editor.prettyprinter": {
+      "status": "MISSING",
+      "feature": "Format (pretty printer)"
+    },
+    "editor.typehierarchy": {
+      "status": "MISSING",
+      "feature": "Type hierarchy"
+    },
+    "versions.list": {
+      "status": "PASS",
+      "feature": "Versions / revisions"
+    },
+    "data.freestyle": {
+      "status": "PASS",
+      "feature": "SQL query (datapreview freestyle)"
+    },
+    "data.table": {
+      "status": "PASS",
+      "feature": "Table contents (datapreview ddic)"
+    },
+    "transport.check": {
+      "status": "PASS",
+      "feature": "Transport check on save/create"
+    },
+    "transport.userTransports": {
+      "status": "MISSING",
+      "feature": "Transport organizer view"
+    },
+    "transport.configurations": {
+      "status": "MISSING",
+      "feature": "Transport search configuration"
+    },
+    "atc.customizing": {
+      "status": "MISSING",
+      "feature": "ATC customizing"
+    },
+    "atc.run": {
+      "status": "MISSING",
+      "feature": "ATC run on an object"
+    },
+    "debugger.coreDiscovery": {
+      "status": "FAIL",
+      "feature": "Debug session start (core discovery)"
+    },
+    "debugger.listeners": {
+      "status": "PASS",
+      "feature": "Debugger listener probe"
+    },
+    "debugger.breakpoints": {
+      "status": "MISSING",
+      "feature": "Set breakpoints"
+    },
+    "misc.feeds": {
+      "status": "PASS",
+      "feature": "Feeds / dumps / users"
+    },
+    "create.validate": {
+      "status": "MISSING",
+      "feature": "New object wizard: name validation"
+    },
+    "create.createDelete": {
+      "status": "FAIL",
+      "feature": "Create + delete in $TMP"
+    },
+    "create.createDeleteInPackage": {
+      "status": "PASS",
+      "feature": "Create + delete in a package ($ZOSD_TEST)"
+    }
+  }
+}
