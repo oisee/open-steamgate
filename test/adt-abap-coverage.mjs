@@ -127,9 +127,6 @@ const HOST_ALLOWED = [
   "GET /sap/bc/adt/programs/includes/:name/objectstructure",
   "GET /sap/bc/adt/ddic/srvd/sources/:name",
   "GET /sap/bc/adt/programs/includes/:name",
-  // B6: search and virtual folders
-  "POST /sap/bc/adt/repository/informationsystem/virtualfolders/contents",
-  "GET /sap/bc/adt/repository/informationsystem/search",
   // C2b: ABAP Unit test runs (continuation behind an ABAP row)
   "POST /sap/bc/adt/abapunit/testruns/evaluation",
   "POST /sap/bc/adt/abapunit/testruns",

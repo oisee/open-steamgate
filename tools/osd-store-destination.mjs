@@ -32,7 +32,7 @@ import {basename, join} from "node:path";
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
-export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN", "PARSE"];
+export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN", "PARSE", "PACKAGES", "SEARCH"];
 
 /** What this host can do, as the screen asks it (CAPABILITIES, EV_NOTE):
  *  the editor draws a button only for a command named here. Node holds the
@@ -71,7 +71,7 @@ const PARSE_KINDS = {
 // object), SESSION (does the request's session hold state) and LOCK_HOLDER
 // (IV_NAME "TYPE NAME": is the holder a live session; a dead one is ended).
 // They go when the session moves into ABAP.
-const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER"];
+const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER", "VFS"];
 let systemCalls;
 try {
   if (typeof process !== "undefined" && process.versions?.node !== undefined) {
@@ -182,6 +182,18 @@ export class StoreDestination {
           return {EV_JSON: JSON.stringify(checkRunReport(store, {type, name,
             include: givenText(signature, "IV_INCLUDE") || undefined,
             source: givenText(signature, "IV_FILTER") === "SOURCE" ? givenText(signature, "IV_SOURCE") : undefined}))};
+        }
+        case "PACKAGES": {
+          const input = JSON.parse(givenText(signature, "IV_JSON"));
+          return {EV_JSON: JSON.stringify(store.packages().map((pkg) => ({
+            name: pkg.name, parent: pkg.parent, description: pkg.description, library: pkg.library, subpackages: pkg.subpackages,
+            ...(input.objects === true ? {objects: store.package(pkg.name).objects} : {})})))};
+        }
+        case "SEARCH": {
+          const input = JSON.parse(givenText(signature, "IV_JSON"));
+          return {EV_JSON: JSON.stringify(store.search(input.seed ?? "", {
+            type: input.type || undefined, max: input.limit === null ? NaN : Number(input.limit),
+          }))};
         }
         case "PACKAGE": {
           const input = JSON.parse(givenText(signature, "IV_JSON"));
