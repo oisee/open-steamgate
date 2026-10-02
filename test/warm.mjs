@@ -635,6 +635,93 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     }
   });
 
+  // the recycle a publish asks for itself (here the verifier's forced
+  // rebuild) is bounded the same way, and the chain moves on: the next
+  // publish meets the transition and is bounded too, and once the recycle
+  // settles publishes load again
+  it("a recycle that does not settle is answered, the chain moves on, and recovers once it settles", async () => {
+    const {store, done} = setup();
+    try {
+      store.transitionMs = 50;
+      const runtime = store.served;
+      let finish;
+      let stuck = true;
+      runtime.recycle = function () {
+        if (!stuck) return Promise.resolve({generation: this.generation, ms: 1});
+        this.recycling ??= new Promise((ok) => { finish = ok; }).then(() => {
+          stuck = false;
+          this.recycling = undefined;
+          return {generation: this.generation, ms: 1};
+        });
+        return this.recycling;
+      };
+      store.transpile = async () => ({ok: true, hash: "g1", cached: false, objects: 1});
+      const first = await Promise.race([store.publish({force: true, replace: true}), sleep(1000).then(() => "hung")]);
+      expect(first, "the forced publish hung").to.not.equal("hung");
+      expect(first).to.include({ok: false});
+      expect(first.error).to.match(/still changing hands .*the recycle/);
+      const second = await Promise.race([store.publish(), sleep(1000).then(() => "hung")]);
+      expect(second, "the next publish hung").to.not.equal("hung");
+      expect(second).to.include({ok: false});
+      finish();
+      await sleep(10);
+      expect(await store.publish({force: true, replace: true})).to.include({ok: true, recycled: true});
+    } finally {
+      done();
+    }
+  });
+
+  it("a catch-up recycle that does not settle answers the activation as nothing loaded, not warm", async () => {
+    const {store, src, done} = setup();
+    try {
+      store.transitionMs = 50;
+      store.warmSwapLimit = 1;
+      store.served.recycle = () => new Promise(() => {});
+      src.text = "rv = 2.";
+      const a = await Promise.race([activate(store), sleep(1500).then(() => "hung")]);
+      expect(a, "the activation hung").to.not.equal("hung");
+      expect(a.build).to.match(/^failed; the runtime is still changing hands .*the catch-up recycle/);
+      expect(a.swap).to.equal(null);
+      expect(a.body).to.match(/still changing hands/);
+    } finally {
+      done();
+    }
+  });
+
+  // a partial recycle of a pool (one work process failed to come up on the
+  // new generation) is repaired by the next publish, not reported as served
+  it("a pool with one work process on the old generation is loaded, not reported as served", async () => {
+    const {store, src, compiler, events, done} = setup();
+    try {
+      src.text = "rv = 2.";
+      compiler.built = src.text;
+      compiler.hash = "g2";
+      const pool = new RuntimePool({size: 2, root: store.root});
+      pool.runtimes.forEach((r, i) => {
+        Object.defineProperty(r, "running", {get: () => true, configurable: true});
+        r.generation = i === 0 ? "g2" : "g1";
+        r.hot = async (swap) => {
+          if (swap.from !== r.generation) throw new Error(`the runtime carries ${r.generation}, and the swap is from ${swap.from}`);
+          r.generation = swap.generation;
+          return {ms: 1, swaps: 1};
+        };
+        r.recycle = async () => {
+          events.push({what: `recycle ${i}`, at: Date.now()});
+          r.generation = compiler.hash;
+          return {generation: compiler.hash, ms: 1, recycled: true};
+        };
+      });
+      store.served = pool;
+      const r = await store.publish();
+      expect(r.ok).to.equal(true);
+      expect(pool.runtimes.map((m) => m.generation)).to.deep.equal(["g2", "g2"]);
+      expect(events.map((e) => e.what)).to.deep.equal(["recycle 0", "recycle 1"]);
+      expect(r.recycled).to.equal(true);
+    } finally {
+      done();
+    }
+  });
+
   it("a load belongs to the process that made it: after a catch-up recycle the answer is not a swap", async () => {
     const {store, src, done} = setup();
     try {

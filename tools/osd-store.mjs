@@ -1043,16 +1043,8 @@ export class ObjectStore {
     const deadline = Date.now() + this.transitionMs;
     for (let changing = runtime?.recycling ?? runtime?.starting; changing !== undefined;
       changing = runtime?.recycling ?? runtime?.starting) {
-      let timer;
-      const late = await Promise.race([
-        changing.then(() => false, () => false),
-        new Promise((done) => { timer = setTimeout(() => done(true), Math.max(0, deadline - Date.now())); }),
-      ]);
-      clearTimeout(timer);
-      if (late) {
-        return {ok: false, transpile, recycled: false,
-          error: `the runtime is still changing hands after ${this.transitionMs} ms; nothing was loaded`};
-      }
+      const waited = await this.#bounded(changing.catch(() => undefined), "a runtime changing hands", deadline);
+      if (waited.late) return {ok: false, transpile, recycled: false, error: waited.error};
       runtime = this.served;
     }
     if (runtime === undefined || runtime.running !== true) {
@@ -1067,8 +1059,11 @@ export class ObjectStore {
     // after this build switched it). A load is the process's only while its
     // epoch is the one serving. A forced build replaces the generation's
     // files under the same name, and is always loaded.
+    // For a pool, every work process: one a partial recycle left on the old
+    // generation is loaded (swapped or recycled), not reported as served.
+    const members = Array.isArray(runtime.runtimes) ? runtime.runtimes : [runtime];
     if (options.force !== true && options.replace !== true && (transpile.warm === true || transpile.cached === true) &&
-        transpile.hash === runtime.generation) {
+        members.every((m) => m.running === true && m.generation === transpile.hash)) {
       const last = this.lastLoad?.generation === transpile.hash && this.lastLoad.epoch === runtime.epoch
         ? this.lastLoad : undefined;
       const how = last?.why !== undefined ? {why: `the runtime was recycled onto it: ${last.why}`}
@@ -1086,7 +1081,9 @@ export class ObjectStore {
         this.lastLoad = {generation: transpile.hash, epoch: runtime.epoch, hot: true, ms: swap.ms};
         // the swap limit or the heap: the catch-up recycle is part of this
         // activation, and its answer is the load that recycle made
-        const caught = await this.#afterSwap(transpile.hash, swap);
+        const after = this.#afterSwap(transpile.hash, swap);
+        const waited = after === undefined ? undefined : await this.#bounded(after, "the catch-up recycle");
+        const caught = waited === undefined ? undefined : waited.late ? {ok: false, error: waited.error} : waited.value;
         if (caught !== undefined) {
           if (caught.ok !== true) return {ok: false, transpile, recycled: false, error: caught.error};
           return {ok: true, transpile, recycled: true, generation: caught.generation, ms: caught.ms,
@@ -1103,7 +1100,9 @@ export class ObjectStore {
       why = `${transpile.hostHeld.join(", ")} is held by the serving process itself`;
     }
     try {
-      const recycle = await runtime.recycle();
+      const bounded = await this.#bounded(runtime.recycle(), "the recycle");
+      if (bounded.late) return {ok: false, transpile, recycled: false, error: bounded.error};
+      const recycle = bounded.value;
       this.#cleanHot();
       if (this.warmState !== undefined) this.warmState.heapBase = undefined;
       // a warm build loaded by a recycle says why, so no answer reports it as a swap
@@ -1114,6 +1113,29 @@ export class ObjectStore {
       // that is a failure of the activation, not a detail to log quietly
       return {ok: false, transpile, recycled: false, error: error.message};
     }
+  }
+
+  // A runtime changing hands -- a recycle already underway, the one this
+  // publish asks for, the catch-up a swap brings -- is waited for at most
+  // transitionMs (OSD_TRANSITION_MS), and then the publish answers that it
+  // is still changing rather than hold the chain: the next publish meets
+  // the same transition and is bounded the same way, and once it settles
+  // publishes load again. {late: false, value} or {late: true, error};
+  // a rejection is the caller's.
+  async #bounded(promise, what, deadline = Date.now() + this.transitionMs) {
+    let timer;
+    const late = Symbol("late");
+    const value = await Promise.race([
+      promise,
+      new Promise((done) => {
+        timer = setTimeout(() => done(late), Math.max(0, deadline - Date.now()));
+        timer.unref?.();
+      }),
+    ]).finally(() => clearTimeout(timer));
+    if (value !== late) return {late: false, value};
+    // whatever it settles to later is nobody's answer, and not unhandled
+    Promise.resolve(promise).catch(() => undefined);
+    return {late: true, error: `the runtime is still changing hands after ${this.transitionMs} ms (${what}); nothing was loaded`};
   }
 
   // ---- the warm compile (tools/osd-warm.mjs, docs/warm-compile.md) --------

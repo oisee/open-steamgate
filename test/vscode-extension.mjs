@@ -3732,6 +3732,11 @@ describe("editors/vscode: T7 warm status and build text", function () {
       .to.equal("cold build: the transpiler has no `only` option (abaplint/transpiler#1900)");
   });
 
+  it("activationBuildText: a load that failed says nothing was loaded, never warm or cold", () => {
+    expect(activationBuildText({build: "failed; the runtime is still changing hands after 60000 ms (the recycle); nothing was loaded"}))
+      .to.equal("nothing loaded: the runtime is still changing hands after 60000 ms (the recycle); nothing was loaded");
+  });
+
   it("activationBuildText: undefined when the answer carried no X-OSD-Build at all", () => {
     expect(activationBuildText({})).to.equal(undefined);
     expect(activationBuildText(undefined)).to.equal(undefined);
