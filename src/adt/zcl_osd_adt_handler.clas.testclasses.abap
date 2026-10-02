@@ -417,3 +417,40 @@ CLASS ltcl_csrf IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+* The ICF entry puts WIRE_HEADERS on the response; the miss marker stays
+* in ANSWER's record for the Node front and never reaches the wire.
+CLASS ltcl_icf DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+  PRIVATE SECTION.
+    METHODS strips_resource_miss FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+CLASS ltcl_icf IMPLEMENTATION.
+  METHOD strips_resource_miss.
+    DATA ls_request TYPE zif_osd_adt_route=>ty_request.
+    DATA ls_response TYPE zif_osd_adt_route=>ty_response.
+    DATA lt_wire TYPE tihttpnvp.
+    DATA ls_header TYPE ihttpnvp.
+    DATA lv_found TYPE abap_bool.
+    zcl_osd_adt_handler=>use_session( ).
+    zcl_osd_adt_handler=>use_routes( ).
+    ls_request-method = `GET`.
+    ls_request-path = `/sap/bc/adt/ddic/tables/parser/info`.
+    zcl_osd_adt_handler=>answer( EXPORTING is_request = ls_request
+      IMPORTING es_response = ls_response ).
+    LOOP AT ls_response-headers INTO ls_header.
+      IF to_lower( ls_header-name ) = `x-osd-miss`.
+        lv_found = abap_true.
+        cl_abap_unit_assert=>assert_equals( act = ls_header-value exp = zcx_osd_adt=>c_miss_resource ).
+      ENDIF.
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_equals( act = lv_found exp = abap_true ).
+    ls_header-name = `X-OSD-MISS`.
+    ls_header-value = `resource`.
+    APPEND ls_header TO ls_response-headers.
+    lt_wire = zcl_osd_adt_handler=>wire_headers( ls_response-headers ).
+    LOOP AT lt_wire INTO ls_header.
+      cl_abap_unit_assert=>assert_differs( act = to_lower( ls_header-name ) exp = `x-osd-miss` ).
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_wire ) exp = lines( ls_response-headers ) - 2 ).
+  ENDMETHOD.
+ENDCLASS.

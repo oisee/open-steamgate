@@ -3,9 +3,9 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <VSEOCLASS>
-    <CLSNAME>ZCL_OSD_ADT_XML</CLSNAME>
+    <CLSNAME>ZCL_OSD_ADT_TYPESTRUCTURE</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>ADT facade: XML escaping</DESCRIPT>
+    <DESCRIPT>ADT repository type descriptors</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>
