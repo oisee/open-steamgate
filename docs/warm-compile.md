@@ -119,8 +119,29 @@ registry is primed again.
   recycle, sessions kept -- and says how that process got it. A catch-up
   recycle a swap brings (the swap limit, the heap) is awaited by that
   swap's activation, which then answers cold with the reason. A runtime
-  changing hands is waited for, at most `OSD_TRANSITION_MS` (60 s), and
-  then the activation fails saying so rather than hang.
+  changing hands is waited for while its boot keeps talking, and the
+  activation fails, saying so rather than hang, once it has said nothing
+  for `OSD_TRANSITION_MS` (60 s) -- silence, not slowness, as the
+  runtime's own boot limit already was. A fixed 60 s had turned a boot
+  that was slow and correct into a failed activation (vsp-i7, 0.6.1511: a
+  boot past 60 s under load, the cross-reference alone 21.6 s).
+- **A save is not an activation.** The dev loop (`STG_DEV=1`) leaves a
+  file alone while it is exactly what the store itself last wrote there,
+  or still gone where the store deleted it (`ObjectStore#ownWrite`): an
+  ADT create, save or delete, whose activation is the façade's. Without
+  this every create, PUT and delete through the façade was a cold build
+  and a recycle of its own -- 21 recycles in vsp-i7's suite, 1.52x the
+  cold run's wall time, and the activation behind them timed out. The rule
+  is state, not a time window: other bytes there are another editor's, and
+  the record goes, so that editor's next save is a change whatever it
+  holds. Measured on a create, two edits and a delete, twice
+  (`OSD_WARM=1 STG_DEV=1`): 290 s and 10 recycles before, 83-90 s and 2
+  recycles after, both edits warm (1.3-1.5 s).
+- **The prime waits for a runtime changing hands**, and a cold build stops
+  a comparison of a warm generation the tree has left (it could only end
+  inconclusive, and it was a second cold transpile beside the build). The
+  prime blocks the process that supervises the runtime; landing in the
+  middle of a recycle, it made that recycle read 17-30 s slower.
 
 ## What a swap means, compared with a system
 
@@ -148,6 +169,14 @@ them cherry-picked).
 - **The cross-reference after a swap** stays at the generation the process
   started on until the catch-up recycle: where-used over a class edited
   since reads the old rows. Incremental over the closure is the follow-up.
+- **The cross-reference is still a full parse per new generation** at every
+  start (~5 s alone, 21.6 s on vsp-i7 under load). `build/xref/` now keeps
+  the last eight generations' rows rather than one, so a tree that goes
+  back to a generation (an object created and deleted again) is a hit.
+  Seeding after the runtime answers would not take the parse off the
+  child's single thread, only move the stall to the first requests and
+  leave where-used empty meanwhile; per-object rows keyed by the file
+  digest are the follow-up.
 - **The dev loop's cold path** still reparses the tree three times (the
   parent's check, the build, the child's cross-reference seed; foreman-dell's
   measurement) and runs every generator on every save. The warm path skips

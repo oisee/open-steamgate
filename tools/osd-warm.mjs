@@ -664,6 +664,20 @@ export class WarmCompiler {
     }
   }
 
+  // A comparison of a generation the tree has left is inconclusive by the
+  // time it ends (verifyMain checks the hash before and after), and a cold
+  // transpile of the whole tree meanwhile is a second one beside the cold
+  // build that replaced it: the two share the cores, and the activation
+  // waiting on the build pays for both. So the cold build stops it, unless
+  // the tree is still the generation it compares (`keep`).
+  cancelVerify(keep, why = "a cold build replaced the tree it compared") {
+    const child = this.verifying;
+    if (child === undefined || child.osdHash === keep || child.exitCode !== null) return false;
+    child.osdCancelled = why;
+    child.kill("SIGTERM");
+    return true;
+  }
+
   // Compare a generation this made with a cold transpile of the same inputs,
   // in a child process so nobody waits for it. Inconclusive when the tree
   // changed while it ran.
@@ -672,6 +686,7 @@ export class WarmCompiler {
       const [cmd, ...args] = toolCommand(join(TOOLS, "osd-warm.mjs"), ["verify", hash]);
       const child = spawn(cmd, args, {cwd: this.root, env: {...process.env, OSD_ROOT: this.root}, stdio: ["ignore", "pipe", "pipe"]});
       this.verifying = child;
+      child.osdHash = hash;
       let out = "";
       child.stdout.on("data", (d) => { out += d; });
       child.stderr.on("data", (d) => { out += d; });
@@ -679,7 +694,8 @@ export class WarmCompiler {
         this.verifying = undefined;
         let result;
         try {
-          result = JSON.parse(out.trim().split("\n").pop());
+          result = child.osdCancelled !== undefined ? {verdict: "inconclusive", why: child.osdCancelled}
+            : JSON.parse(out.trim().split("\n").pop());
         } catch {
           result = {verdict: "failed", code, output: out.slice(-2000)};
         }

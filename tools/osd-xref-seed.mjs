@@ -70,6 +70,8 @@ export const WIDTHS = {
 // what the cache key carries besides the generation: bump it when what
 // tools/osd-xref.mjs derives changes and the tree does not
 const DERIVATION = "xref-1";
+// how many generations' rows build/xref keeps, this one included
+const KEEP = 8;
 
 /** The rows the files say. */
 export async function rows(root = process.cwd(), options = {}) {
@@ -100,14 +102,25 @@ export async function rows(root = process.cwd(), options = {}) {
   if (file !== undefined) {
     try {
       fs.mkdirSync(dir, {recursive: true});
-      // one generation's answer; the others are what this one replaced. A
-      // `.tmp` is somebody's write in flight unless it is old enough to be
-      // the leftover of a writer that died.
+      // the last few generations' answers, not only the newest: a tree goes
+      // back to a generation it was on -- a test creates an object and
+      // deletes it, a branch is checked out and back -- and each return
+      // used to parse the whole tree again (~5 s alone, 21.6 s on vsp-i7
+      // under load, inside every recycle's boot). A `.tmp` is somebody's
+      // write in flight unless it is old enough to be the leftover of a
+      // writer that died.
+      const kept = [];
       for (const old of fs.readdirSync(dir)) {
         const full = path.join(dir, old);
-        if (old.endsWith(".json")) fs.rmSync(full, {force: true});
-        else if (old.endsWith(".tmp") && Date.now() - fs.statSync(full).mtimeMs > 10 * 60 * 1000) fs.rmSync(full, {force: true});
+        try {
+          if (old.endsWith(".json")) kept.push({full, at: fs.statSync(full).mtimeMs});
+          else if (old.endsWith(".tmp") && Date.now() - fs.statSync(full).mtimeMs > 10 * 60 * 1000) fs.rmSync(full, {force: true});
+        } catch {
+          // gone meanwhile: another process's prune
+        }
       }
+      kept.sort((a, b) => b.at - a.at || (a.full < b.full ? -1 : 1));
+      for (const {full} of kept.slice(KEEP - 1)) fs.rmSync(full, {force: true});
       // written aside and renamed, so a second process starting at the same
       // moment reads a whole file or none
       const tmp = `${file}.${process.pid}.tmp`;

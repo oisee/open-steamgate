@@ -223,6 +223,11 @@ describe("tools/osd-xref-seed: the cross-reference on every host", function () {
       expect(after, "gen/ changed and the key did not").to.not.equal(before);
       const probed = await rows(root);
       expect(probed.WBCROSSGT.filter((r) => r.INCLUDE === "ZCL_OSD_XREF_PROBE").map((r) => r.NAME)).to.include("ZIF_STG_CDS_SOURCE");
+      // and the generation before it is still cached: a tree that goes back
+      // (the probe deleted, as a test deletes what it created) is a hit,
+      // not another parse of the whole tree inside a recycle's boot
+      expect(existsSync(`build/xref/${before}.json`), "the previous generation's rows were dropped").to.equal(true);
+      expect(existsSync(`build/xref/${after}.json`)).to.equal(true);
     } finally {
       rmSync(dir, {recursive: true, force: true});
     }

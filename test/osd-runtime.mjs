@@ -584,6 +584,9 @@ describe("tools/osd-runtime: a slow boot is waited for, a silent one is not", fu
       await new Promise((r) => setTimeout(r, 1000));
       // meanwhile a proxy or /osd/serving can say what it is doing
       expect(runtime.booting?.phase).to.equal("seeding over the network");
+      // and when it last said anything, which is what a publish waiting for
+      // it waits on (ObjectStore#bounded), not a fixed limit
+      expect(Date.now() - runtime.booting.heard, "last heard").to.be.below(1000);
       const answer = await starting;
       expect(runtime.booting, "not booting once ready").to.equal(undefined);
       expect(answer).to.include({started: true});

@@ -73,4 +73,62 @@ describe("tools/osd-dev: a save is a check, a build and a recycle", function () 
     expect(r.ok).to.equal(true);
     expect(published.length).to.equal(before + 1);
   });
+
+  // vsp-i7 on 0.6.1511 (OSD_WARM=1 STG_DEV=1): every create, every PUT and
+  // every delete through the ADT façade was a cold build and a recycle of
+  // the dev loop's own, besides the activation's -- 21 recycles, 1.52x the
+  // wall time, and an activation that timed out behind them. A save is not
+  // an activation; the façade's activation is the one that loads.
+  describe("the store's own writes are left to the activation that owns them", () => {
+    it("a create, a save and a delete through the store build nothing", async () => {
+      const before = published.length;
+      // a package the store can create into: a folder with its devc file
+      mkdirSync(join(root, "src", "own"), {recursive: true});
+      writeFileSync(join(root, "src/own/package.devc.xml"), "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<abapGit version=\"v1.0.0\" serializer=\"LCL_OBJECT_DEVC\" serializer_version=\"v1.0.0\">\n <asx:abap xmlns:asx=\"http://www.sap.com/abapxml\" version=\"1.0\">\n  <asx:values>\n   <DEVC>\n    <CTEXT>own</CTEXT>\n   </DEVC>\n  </asx:values>\n </asx:abap>\n</abapGit>\n");
+      store.index = undefined;
+      const home = store.packages().find((p) => p.file === "src/own/package.devc.xml" || /OWN$/.test(p.name));
+      const made = store.create("CLAS", "ZCL_DEV_OWN", {package: home.name});
+      const r1 = await loop.touch(made.file);
+      expect(r1).to.include({ok: true, stage: "own"});
+      const saved = store.write("CLAS", "ZCL_DEV_OWN", CLEAN("zcl_dev_own"));
+      const r2 = await loop.touch(saved.file);
+      expect(r2).to.include({ok: true, stage: "own"});
+      store.delete("CLAS", "ZCL_DEV_OWN");
+      const r3 = await loop.touch(made.file);
+      expect(r3).to.include({ok: true, stage: "own"});
+      expect(published.length, "no build for the store's own writes").to.equal(before);
+      expect(lines.join("\n")).to.match(/changed by the store's own write; left to its activation/);
+    });
+
+    it("another editor's bytes over the store's write are a change, and so is its next save of the same bytes", async () => {
+      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a"));
+      writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a").replace("METHOD run.", "METHOD run.\n    \"edited"));
+      store.index = undefined;
+      store.parsed = undefined;
+      const before = published.length;
+      const r = await loop.touch(saved.file);
+      expect(r).to.include({ok: true, stage: "live"});
+      // the editor puts back exactly what the store had written: its save,
+      // not the store's, since the store's write was overwritten meanwhile
+      writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a"));
+      store.index = undefined;
+      store.parsed = undefined;
+      const again = await loop.touch(saved.file);
+      expect(again).to.include({ok: true, stage: "live"});
+      expect(published.length).to.equal(before + 2);
+    });
+
+    it("a burst with the store's write and another file is a pass for the other file", async () => {
+      const saved = store.write("CLAS", "ZCL_DEV_B", CALLER("zcl_dev_b", "zcl_dev_a"));
+      writeFileSync(join(root, "src/osd/zcl_dev_a.clas.abap"), CLEAN("zcl_dev_a"));
+      store.index = undefined;
+      store.parsed = undefined;
+      const before = published.length;
+      const both = Promise.all([loop.touch(saved.file), loop.touch("src/osd/zcl_dev_a.clas.abap")]);
+      const [, r] = await both;
+      expect(r).to.include({ok: true, stage: "live"});
+      expect(published.length).to.equal(before + 1);
+      expect(lines.slice(-3).join("\n")).to.match(/^1 file changed: CLAS ZCL_DEV_A\n/);
+    });
+  });
 });

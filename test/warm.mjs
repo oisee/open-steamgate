@@ -470,6 +470,15 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     return {store, src, compiler, events, done};
   };
 
+  // a save by an editor that is not the store (VS Code, vim): other bytes on
+  // disk, which the dev loop takes as a change -- the store's own write it
+  // leaves to the activation that owns it (ObjectStore#ownWrite)
+  const editorSave = (store, text) => {
+    writeFileSync(join(store.root, "src/osd/zcl_a.clas.abap"),
+      `CLASS zcl_a DEFINITION PUBLIC. ENDCLASS.\nCLASS zcl_a IMPLEMENTATION. ENDCLASS.\n* ${text}\n`);
+    return "src/osd/zcl_a.clas.abap";
+  };
+
   // an ADT activation of ZCL_A through the real façade router
   const activate = async (store) => {
     const express = (await import("express")).default;
@@ -528,7 +537,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     try {
       src.text = "rv = 2.";
       const loop = devLoop({store, watch: false, log: () => {}});
-      const dev = loop.touch("src/osd/zcl_a.clas.abap");
+      const dev = loop.touch(editorSave(store, src.text));
       await sleep(5);
       const [d, a] = await Promise.all([dev, activate(store)]);
       expect(d).to.include({ok: true, stage: "live"});
@@ -549,7 +558,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     try {
       src.text = "rv = 2.";
       const loop = devLoop({store, watch: false, log: () => {}});
-      await loop.touch("src/osd/zcl_a.clas.abap");
+      await loop.touch(editorSave(store, src.text));
       const a = await activate(store);
       expect(swaps(events)).to.deep.equal(["swap g1->g2"]);
       expect(a).to.include({status: 200, build: "warm", swap: String(SWAP_MS)});
@@ -634,6 +643,84 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
       expect(r, "hung").to.not.equal("hung");
       expect(r).to.include({ok: false});
       expect(r.error).to.match(/still changing hands/);
+    } finally {
+      done();
+    }
+  });
+
+  // vsp-i7 on 0.6.1511: a boot of more than 60 s under load (the
+  // cross-reference alone 21.6 s) and a fixed 60-s limit answered a slow,
+  // correct recycle as a failed activation. A boot that keeps saying it is
+  // booting is waited for; only silence is late.
+  it("a boot that keeps talking is waited for past the limit, then loaded", async () => {
+    const {store, src, events, done} = setup();
+    const runtime = store.served;
+    let talking;
+    try {
+      store.transitionMs = 100;
+      runtime.running = false;
+      runtime.booting = {phase: "seeding the cross-reference", since: Date.now(), heard: Date.now()};
+      talking = setInterval(() => { runtime.booting.heard = Date.now(); }, 30);
+      runtime.recycling = sleep(400).then(() => {
+        clearInterval(talking);
+        runtime.booting = undefined;
+        runtime.recycling = undefined;
+        runtime.running = true;
+        runtime.epoch = 2;
+        return {generation: runtime.generation, ms: 400};
+      });
+      src.text = "rv = 2.";
+      const r = await Promise.race([store.publish(), sleep(3000).then(() => "hung")]);
+      expect(r, "hung").to.not.equal("hung");
+      expect(r.error).to.equal(undefined);
+      expect(r).to.include({ok: true, hot: true, generation: "g2"});
+      expect(swaps(events)).to.deep.equal(["swap g1->g2"]);
+    } finally {
+      clearInterval(talking);
+      done();
+    }
+  });
+
+  it("a boot that falls silent is late after the limit, however long it talked before", async () => {
+    const {store, src, done} = setup();
+    const runtime = store.served;
+    let talking;
+    try {
+      store.transitionMs = 100;
+      runtime.running = false;
+      runtime.booting = {phase: "starting", since: Date.now(), heard: Date.now()};
+      talking = setInterval(() => { runtime.booting.heard = Date.now(); }, 30);
+      setTimeout(() => clearInterval(talking), 250);
+      runtime.recycling = new Promise(() => {});
+      src.text = "rv = 2.";
+      const began = Date.now();
+      const r = await Promise.race([store.publish(), sleep(3000).then(() => "hung")]);
+      expect(r, "hung").to.not.equal("hung");
+      expect(r).to.include({ok: false});
+      expect(r.error).to.match(/still changing hands after \d+ ms, 100 ms of it without a word/);
+      expect(Date.now() - began, "waited while it talked").to.be.at.least(300);
+    } finally {
+      clearInterval(talking);
+      done();
+    }
+  });
+
+  it("the warm registry is not primed while the runtime changes hands, and a build does not wait on that", async () => {
+    const {store, done} = setup();
+    const runtime = store.served;
+    try {
+      let primed = 0;
+      store.warmState.compiler = {primed: false, async prime() { primed++; this.primed = true; return {}; }};
+      let settle;
+      runtime.recycling = new Promise((ok) => { settle = ok; });
+      const prime = store.warmUp();
+      await sleep(20);
+      expect(primed, "primed during the recycle").to.equal(0);
+      expect(store.warmState.priming, "a build would wait on it").to.equal(undefined);
+      runtime.recycling = undefined;
+      settle({generation: runtime.generation, ms: 1});
+      await prime;
+      expect(primed).to.equal(1);
     } finally {
       done();
     }
@@ -730,7 +817,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     const {store, src, done} = setup();
     try {
       src.text = "rv = 2.";
-      await devLoop({store, watch: false, log: () => {}}).touch("src/osd/zcl_a.clas.abap");
+      await devLoop({store, watch: false, log: () => {}}).touch(editorSave(store, src.text));
       // a catch-up recycle onto g2, outside any publish: a new process
       store.served.epoch = 2;
       const a = await activate(store);
@@ -812,6 +899,23 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     } finally {
       done();
     }
+  });
+});
+
+describe("tools/osd-warm: a comparison the tree has left", () => {
+  // vsp's pattern: a warm edit starts a comparison (a cold transpile in a
+  // child), and the next create is a cold build beside it; the comparison
+  // can only end inconclusive, and the activation waiting on the build paid
+  // for both transpiles
+  it("is stopped by a cold build, and one of the tree as it is is kept", () => {
+    const kills = [];
+    const child = (hash) => ({osdHash: hash, exitCode: null, kill: (s) => kills.push(`${hash} ${s}`)});
+    const compiler = {verifying: child("g2")};
+    expect(WarmCompiler.prototype.cancelVerify.call(compiler, "g2"), "the tree is still g2").to.equal(false);
+    expect(WarmCompiler.prototype.cancelVerify.call(compiler, "g3")).to.equal(true);
+    expect(kills).to.deep.equal(["g2 SIGTERM"]);
+    expect(compiler.verifying.osdCancelled).to.match(/a cold build replaced the tree/);
+    expect(WarmCompiler.prototype.cancelVerify.call({verifying: undefined}, "g3")).to.equal(false);
   });
 });
 
