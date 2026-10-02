@@ -34,7 +34,11 @@ COPY .local/release/ /osd/
 # docs/amdp-in-hana.md records about HANA's own data: a writable layer copies
 # on first write and dies with the container.
 VOLUME ["/osd/data-run"]
+# OSD_BIND: every interface, because a published port arrives on the
+# container's own address and never on its loopback (tools/osd-bind.mjs).
+# The system has no real logon; whoever publishes the port secures it.
 ENV STG_PORT=3030 \
+    OSD_BIND=0.0.0.0 \
     STG_DB_PATH=/osd/data-run/osd.sqlite \
     OSD_WORKERS=4
 

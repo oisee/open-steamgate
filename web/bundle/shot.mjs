@@ -2,6 +2,7 @@
 import {createRequire} from "node:module";
 const {chromium} = createRequire(import.meta.url)("/home/alice/dev/open-steamgate-shlp/node_modules/playwright/index.js");
 import {createServer} from "node:http";
+import {listenBound} from "../../tools/osd-bind.mjs";
 import {readFileSync, existsSync} from "node:fs";
 import {join, extname} from "node:path";
 
@@ -17,7 +18,7 @@ const server = createServer((req, res) => {
   res.writeHead(200, {"content-type": TYPES[extname(file)] ?? "application/octet-stream"});
   res.end(readFileSync(file));
 });
-await new Promise(r => server.listen(0, r));
+await new Promise(r => listenBound(server, 0, process.env, r));
 const port = server.address().port;
 
 const browser = await chromium.launch();

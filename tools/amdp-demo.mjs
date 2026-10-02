@@ -8,6 +8,7 @@ import {copyFileSync, readFileSync, readdirSync, mkdirSync, writeFileSync} from 
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {createServer} from "node:http";
+import {describeBind, listenBound} from "./osd-bind.mjs";
 import {extract} from "./amdp-extract.mjs";
 import {compileProcedure} from "./sqlscript-to-procedure-ir.mjs";
 import {runProcedure, UnsupportedSqlScript} from "./sqlscript-procedure-ir.mjs";
@@ -264,7 +265,7 @@ async function main(argv) {
   if (serveAt >= 0) {
     const port = Number(argv[serveAt + 1] ?? 3037);
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("--serve needs a TCP port");
-    createServer((request, response) => {
+    const server = createServer((request, response) => {
       const resolved = resolveDemoRequest(request.url, artifacts);
       if (resolved.status === 404) {
         response.writeHead(404, {"content-type": "text/plain; charset=utf-8", "cache-control": "no-store"});
@@ -273,7 +274,8 @@ async function main(argv) {
       }
       response.writeHead(200, {"content-type": "text/html; charset=utf-8", "cache-control": "no-store"});
       response.end(readFileSync(resolved.file));
-    }).listen(port, "0.0.0.0", () => console.log(`Serving http://0.0.0.0:${port}/`));
+    });
+    listenBound(server, port, process.env, () => console.log(`Serving http://localhost:${port}/  (bound to ${describeBind()})`));
   }
 }
 

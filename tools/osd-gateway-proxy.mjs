@@ -24,6 +24,7 @@ import {createServer} from "node:http";
 import {existsSync, readFileSync} from "node:fs";
 import {extname, join, normalize} from "node:path";
 import {runsAs} from "./osd-main.mjs";
+import {listenBound} from "./osd-bind.mjs";
 
 const TYPES = {
   ".html": "text/html", ".js": "application/javascript", ".json": "application/json",
@@ -101,7 +102,7 @@ export function serve({service, app = "webapp", port = 3912, target = targetOf()
       res.writeHead(502).end(String(error?.message ?? error));
     }
   });
-  return new Promise((ok) => server.listen(port, () => ok(server)));
+  return new Promise((ok) => listenBound(server, port, process.env, () => ok(server)));
 }
 
 if (runsAs("osd-gateway-proxy.mjs")) {

@@ -11,7 +11,14 @@
 // understanding any of them, which is what makes it safe to point at
 // everything at once.
 //
-//   node tools/osd-tcp-forward.mjs --host 10.0.0.1 --ports 3200,3300,50001 [--dump file.jsonl]
+//   node tools/osd-tcp-forward.mjs --host 10.0.0.1 --ports 3200,3300,50001 [--dump file.jsonl] [--bind 0.0.0.0]
+//
+// It exists to expose ports: a client on another machine knocks here and
+// is carried to the host. So the address it listens on is a decision, made
+// with --bind; the default is loopback (127.0.0.1), like every other
+// listener of this tree (tools/osd-bind.mjs), and --bind 0.0.0.0 is what
+// opens it to the network. Whatever it forwards to is then reachable by
+// anyone who can reach this machine.
 //
 // The host is given on the command line and never written down here: this
 // repository is public and the systems we talk to are not.
@@ -19,7 +26,7 @@ import {createServer, connect} from "node:net";
 import {createWriteStream} from "node:fs";
 import {basename} from "node:path";
 
-export function forwardPorts({host, ports, dump, onEvent}) {
+export function forwardPorts({host, ports, dump, onEvent, bind = "127.0.0.1"}) {
   const file = dump === undefined ? undefined : createWriteStream(dump, {flags: "a"});
   const seen = new Map(ports.map((p) => [p, 0]));
   const say = (entry) => {
@@ -54,7 +61,7 @@ export function forwardPorts({host, ports, dump, onEvent}) {
       upstream.pipe(client);
     });
     server.on("error", (e) => say({event: "listen failed", port, why: e.message}));
-    server.listen(port, "0.0.0.0");
+    server.listen(port, bind);
     return server;
   });
 
@@ -69,11 +76,12 @@ if (basename(process.argv[1] ?? "") === "osd-tcp-forward.mjs") {
   const host = arg("host");
   const ports = (arg("ports") ?? "").split(",").filter((p) => p !== "").map(Number);
   if (host === undefined || ports.length === 0) {
-    console.error("usage: node tools/osd-tcp-forward.mjs --host <host> --ports 3200,3300 [--dump file.jsonl]");
+    console.error("usage: node tools/osd-tcp-forward.mjs --host <host> --ports 3200,3300 [--dump file.jsonl] [--bind <address>]");
     process.exit(2);
   }
-  const {seen} = forwardPorts({host, ports, dump: arg("dump"), onEvent: (e) => console.log(JSON.stringify(e))});
-  console.log(`forwarding ${ports.join(", ")} -> ${host}`);
+  const bind = arg("bind", "127.0.0.1");
+  const {seen} = forwardPorts({host, ports, bind, dump: arg("dump"), onEvent: (e) => console.log(JSON.stringify(e))});
+  console.log(`forwarding ${ports.join(", ")} on ${bind} -> ${host}${bind === "127.0.0.1" ? "  (this machine only; --bind 0.0.0.0 exposes the ports)" : "  (exposed to the network)"}`);
   const verdict = () => {
     console.log("connections per port:");
     for (const [port, count] of seen) {

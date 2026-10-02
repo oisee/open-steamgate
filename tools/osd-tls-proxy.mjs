@@ -20,6 +20,7 @@ import {createWriteStream} from "node:fs";
 import {request as httpsRequest} from "node:https";
 import {credentials, exists, generate, fingerprint} from "./osd-tls.mjs";
 import {basename} from "node:path";
+import {listenBound} from "./osd-bind.mjs";
 
 // What went over this wire, one JSON line per exchange.
 //
@@ -271,7 +272,7 @@ export function startProxy(options = {}) {
   });
 
   server.osdRecorder = log;
-  return server.listen(options.port ?? 44300);
+  return listenBound(server, options.port ?? 44300);
 }
 
 function tlsOrThrow(options) {

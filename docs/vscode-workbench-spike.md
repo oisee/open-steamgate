@@ -75,7 +75,13 @@ edit, Activate publishes it, and Commit/Push remain explicit user actions.
 
 ## Run the W0 image
 
-Start OSD from this same checkout on port 3030. Then copy
+Start OSD from this same checkout on port 3030. OSD listens on loopback by
+default (`OSD_BIND`, [docker.md](docker.md#which-address-it-listens-on)), and
+on Linux `host.docker.internal` is the Docker bridge, not the host's
+loopback: start it there with `OSD_BIND=0.0.0.0`, or with the bridge
+address (the `docker0` address, `ip -4 addr show docker0`, which keeps it
+off the LAN but also off 127.0.0.1). Docker Desktop forwards
+`host.docker.internal` to the host's loopback and needs neither. Then copy
 `docker/workbench/ide-password.example` to the ignored
 `docker/workbench/ide-password.txt`, replace its value, and run:
 

@@ -180,6 +180,9 @@ switch (mode) {
     const homes = homesIn(dataDir);
     console.log(`data dir: ${dataDir}`);
     console.log(`system home: ${homes.length === 0 ? "none yet" : homes.join(", ")}`);
+    // the address every listener of `osd up` takes (tools/osd-bind.mjs)
+    const {bindHint, describeBind} = await import("../tools/osd-bind.mjs");
+    console.log(`bind: ${describeBind()}${bindHint() === undefined ? "  (reachable from the network)" : "  (OSD_BIND=0.0.0.0 for the network)"}`);
     // what the bundle did to the runtime: a class the runtime looks up by
     // its name must still carry that name after bundling
     const renamed = [];

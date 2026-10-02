@@ -28,6 +28,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import {listenBound} from "./osd-bind.mjs";
 
 // Headers that belong to one hop and must not be forwarded or recorded:
 // passing `host` on breaks name-based routing, and the rest describe the
@@ -115,7 +116,7 @@ async function record({target, port, out}) {
     res.end(buffer);
   });
 
-  await new Promise((resolve) => server.listen(port, resolve));
+  await new Promise((resolve) => listenBound(server, port, process.env, resolve));
   console.log(`osd-journal: recording ${target} through http://localhost:${port} into ${out}`);
   console.log("point a client at the proxy port; Ctrl-C ends the recording");
   return server;

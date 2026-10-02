@@ -1,6 +1,7 @@
 // MIT-licensed capture-free DIAG tape stub for open-steamgate.
 
 import {createServer} from "node:net";
+import {describeBind, listenBound} from "../osd-bind.mjs";
 import {fileURLToPath} from "node:url";
 import {
   buildDiagTapeScreen, DIAG_DP_HEADER_LENGTH, DIAG_HEADER_LENGTH, DIAG_ITEM, encodeDiagMessage, parseDiagItems,
@@ -110,17 +111,20 @@ export function createDiagTapeServer({
   return server;
 }
 
-export async function listenDiagTape({port, host = "0.0.0.0", logger} = {}) {
+export async function listenDiagTape({port, host, env = process.env, logger} = {}) {
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) {
     throw new RangeError(`DIAG port must be an integer from 0 to 65535, got ${port}`);
   }
   const server = createDiagTapeServer({logger});
   await new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, host, () => {
+    const done = () => {
       server.off("error", reject);
       resolve();
-    });
+    };
+    // no host given: OSD_BIND, with the ::1 twin of the loopback default
+    if (host === undefined) listenBound(server, port, env, done);
+    else server.listen(port, host, done);
   });
   return server;
 }
@@ -132,9 +136,9 @@ function instancePort(value) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const port = process.env.DIAG_PORT ? Number(process.env.DIAG_PORT) : instancePort(process.env.INSTANCE ?? "00");
-  const host = process.env.DIAG_HOST ?? "0.0.0.0";
+  const host = process.env.DIAG_HOST;
   const server = await listenDiagTape({port, host, logger: (event, peer, error) => {
     if (error) console.error(`diag ${event} ${peer}:`, error.message);
   }});
-  console.log(`OSD JS DIAG tape stub listening on ${host}:${server.address().port}`);
+  console.log(`OSD JS DIAG tape stub listening on ${host ?? describeBind()} port ${server.address().port}`);
 }

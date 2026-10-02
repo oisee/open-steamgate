@@ -9,6 +9,9 @@ services:
     image: osd-workbench:local
     init: true
     environment:
+      # on Linux host.docker.internal is the Docker bridge, which an OSD
+      # bound to loopback (its default) does not answer: start it with
+      # OSD_BIND=0.0.0.0 or the bridge address (docs/docker.md)
       OSD_ADT_URL: "${OSD_ADT_URL:-http://host.docker.internal:3030}"
       OSD_ADT_USER: "${OSD_ADT_USER:-developer}"
     extra_hosts:

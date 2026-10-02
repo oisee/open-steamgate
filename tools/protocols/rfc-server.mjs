@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import net from "node:net";
+import {listenBound} from "../osd-bind.mjs";
 import {timingSafeEqual} from "node:crypto";
 import {pathToFileURL} from "node:url";
 import {NIFrameDecoder, encodeNIFrame, niControl, NI_PONG} from "./ni.mjs";
@@ -263,7 +264,7 @@ function writeFrame(socket, frame) {
   if (!socket.destroyed) socket.write(encodeNIFrame(frame));
 }
 
-export function createRfcAdtServer({backend, backendUser = "", backendPassword = "", backendClient = "", backendLanguage = "", rfcAuthMode = "demo", rfcUser = "", rfcPassword = "", rfcClient = "", systemID = "OSD", systemHost = "osd-bridge", host = "0.0.0.0", port, timeoutMs = 120000, maxConnections = 64, log = () => {}}) {
+export function createRfcAdtServer({backend, backendUser = "", backendPassword = "", backendClient = "", backendLanguage = "", rfcAuthMode = "demo", rfcUser = "", rfcPassword = "", rfcClient = "", systemID = "OSD", systemHost = "osd-bridge", host, env = process.env, port, timeoutMs = 120000, maxConnections = 64, log = () => {}}) {
   const backendURL = new URL(backend);
   if (!/^https?:$/.test(backendURL.protocol) || backendURL.username || backendURL.password) throw new Error("backend must be an HTTP(S) origin without embedded credentials");
   if (!["demo", "static"].includes(rfcAuthMode)) throw new Error("RFC auth mode must be demo or static");
@@ -348,7 +349,12 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
     socket.on("error", (error) => log({error: error.message}));
   });
   server.maxConnections = maxConnections;
-  return {server, listen: () => new Promise((resolve, reject) => server.once("error", reject).listen(port, host, resolve))};
+  // no host given: OSD_BIND, with the ::1 twin of the loopback default
+  return {server, listen: () => new Promise((resolve, reject) => {
+    server.once("error", reject);
+    if (host === undefined) listenBound(server, port, env, resolve);
+    else server.listen(port, host, resolve);
+  })};
 }
 
 async function main() {
@@ -372,7 +378,7 @@ async function main() {
     log: (event) => console.error(JSON.stringify(event)),
   });
   await bridge.listen();
-  console.error(`RFC-to-ADT listening on ${port} -> ${backend}`);
+  console.error(`RFC-to-ADT listening on ${bridge.server.address().address}:${port} -> ${backend}`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main().catch((error) => { console.error(error); process.exitCode = 1; });

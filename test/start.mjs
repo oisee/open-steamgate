@@ -25,7 +25,8 @@ import {mountHost, nodes} from "../tools/osd-nodes.mjs";
 import {applyAtStartup, currentRows} from "../tools/osd-icf-apply.mjs";
 import {seedAtStartup} from "../tools/osd-xref-seed.mjs";
 import {snapshot as statusSnapshot} from "../tools/osd-status.mjs";
-import {request as httpRequest} from "node:http";
+import {request as httpRequest, createServer as createHttpServer} from "node:http";
+import {bindAddresses, bindHint, describeBind, listenBound, relisten} from "../tools/osd-bind.mjs";
 import {serveSandboxConfig} from "../tools/osd-sandbox-config.mjs";
 import {mountPortableCells} from "../tools/sqlscript-to-procedure-ir.mjs";
 
@@ -447,13 +448,13 @@ export function startServer(quiet) {
       // still booting: say so now, with the step, rather than hold the
       // question for the boot (the VS Code launcher waits on this answer)
       if (runtime.booting !== undefined && runtime.running !== true) {
-        res.status(200).json({...startingAnswer(runtime), warm: facade.store.warmStatus()});
+        res.status(200).json({...startingAnswer(runtime), warm: facade.store.warmStatus(), bind: bindAddresses()});
         return;
       }
       try {
         const answer = await fetch(`${runtime.url}${req.originalUrl}`, {signal: AbortSignal.timeout(5000)});
         const body = await answer.json();
-        res.status(answer.status).json({...body, warm: facade.store.warmStatus()});
+        res.status(answer.status).json({...body, warm: facade.store.warmStatus(), bind: bindAddresses()});
       } catch {
         proxy(req, res, next);
       }
@@ -544,10 +545,14 @@ export function startServer(quiet) {
   // still held by a server this module started, wait for that close and try
   // again. Measured before: a full suite run on a free port answered
   // EADDRINUSE twenty-four times.
-  const server = app.listen(PORT);
+  //
+  // The host is OSD_BIND, loopback unless said otherwise (tools/osd-bind.mjs):
+  // the ADT facade takes any credentials, which is only fine while nothing
+  // but this machine reaches it. A container sets OSD_BIND=0.0.0.0.
+  const server = listenBound(createHttpServer(app), PORT);
   server.on("error", (error) => {
     if (error?.code !== "EADDRINUSE" || closing === undefined) throw error;
-    void closing.then(() => server.listen(PORT));
+    void closing.then(() => relisten(server, PORT));
   });
 
   // Push channels: the websocket half of what a repository declares.
@@ -589,17 +594,21 @@ export function startServer(quiet) {
   const tls = process.env.STG_TLS === "0" ? undefined : tlsCredentials();
   let secure;
   if (tls !== undefined) {
-    secure = createHttpsServer(tls, app).listen(TLS_PORT);
+    secure = listenBound(createHttpsServer(tls, app), TLS_PORT);
   }
 
   // what the snapshot reports as this instance's ports: what was opened here
-  listeners.push({port: PORT, protocol: "HTTP", purpose: "OData, apps, ADT"});
+  const bound = `bound to ${describeBind()}`;
+  listeners.push({port: PORT, protocol: "HTTP", purpose: "OData, apps, ADT", note: bound});
   if (secure !== undefined) {
-    listeners.push({port: TLS_PORT, protocol: "HTTPS", purpose: "the same, for a client that refuses plain HTTP"});
+    listeners.push({port: TLS_PORT, protocol: "HTTPS", purpose: "the same, for a client that refuses plain HTTP", note: bound});
   }
 
   if (quiet !== true) {
-    console.log("Listening on http://localhost:" + PORT + "/sap/opu/odata/sap/");
+    console.log("Listening on http://localhost:" + PORT + "/sap/opu/odata/sap/  (bound to " + describeBind() + ")");
+    if (bindHint() !== undefined) {
+      console.log(bindHint());
+    }
     console.log("ADT façade   on http://localhost:" + PORT + "/sap/bc/adt/core/discovery");
     if (secure === undefined) {
       console.log("No TLS: run `npm run osd:tls` to make a certificate, for a client that refuses plain HTTP");

@@ -2,7 +2,7 @@
 // other request proxied to an OSG server, so the page, the audio and the
 // images are that server's and only the frames come from here.
 //
-//	go run ./cmd/o4dserve -listen :3092 -upstream http://127.0.0.1:3091
+//	go run ./cmd/o4dserve -listen :3092 (OSD_BIND, default loopback) -upstream http://127.0.0.1:3091
 //
 // The APC framework is the library's (apc.Channel, go/apc/apc.go)
 // around open-abap-apc's ZCL_APC_HOST, compiled with the demo: a host per
@@ -15,14 +15,17 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
 	"osg/gogen/abap"
 	"osg/gogen/apc"
+	"osg/gogen/osdbind"
 )
 
 // apcHost is ZCL_APC_HOST as the library's apc.Host
@@ -51,7 +54,7 @@ func Channel(app, handler string) *apc.Channel {
 }
 
 func main() {
-	listen := flag.String("listen", ":3092", "address to serve")
+	listen := flag.String("listen", ":3092", "address to serve; a bare port takes OSD_BIND (default loopback)")
 	upstream := flag.String("upstream", "http://127.0.0.1:3091", "OSG server for everything but the demo channel")
 	origins := flag.String("origins", "", "comma-separated origin host patterns allowed besides the page's own (path.Match, e.g. 'localhost:*'); empty is same origin only")
 	flag.Parse()
@@ -78,6 +81,15 @@ func main() {
 	http.Handle("/sap/bc/apc/sap/zo4d_demo", ch)
 	http.Handle("/sap/bc/apc/sap/zo4d_demo/", ch)
 	http.Handle("/", httputil.NewSingleHostReverseProxy(u))
-	log.Printf("ZO4D frames from Go on %s, the rest from %s", *listen, *upstream)
-	log.Fatal(http.ListenAndServe(*listen, nil))
+	// the catch-all proxy above reaches the loopback backend, ADT included:
+	// a bare port listens where OSD_BIND says, loopback unless told
+	lns, err := osdbind.ListenFlag(*listen, os.Getenv)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("ZO4D frames from Go on %s, the rest from %s", osdbind.Describe(lns), *upstream)
+	for _, ln := range lns[1:] {
+		go func(ln net.Listener) { log.Printf("listener %s: %v", ln.Addr(), http.Serve(ln, nil)) }(ln)
+	}
+	log.Fatal(http.Serve(lns[0], nil))
 }

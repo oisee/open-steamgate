@@ -73,6 +73,9 @@ services:
     pull_policy: always
     init: true
     environment:
+      # the container listens on every interface (the default is loopback,
+      # which a published port never reaches); secure the published port
+      OSD_BIND: "0.0.0.0"
       INSTANCE: "${INSTANCE:-11}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
@@ -107,6 +110,9 @@ services:
     pull_policy: always
     init: true
     environment:
+      # the container listens on every interface (the default is loopback,
+      # which a published port never reaches); secure the published port
+      OSD_BIND: "0.0.0.0"
       INSTANCE: "${INSTANCE:-15}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
@@ -182,6 +188,9 @@ services:
     pull_policy: always
     init: true
     environment:
+      # the container listens on every interface (the default is loopback,
+      # which a published port never reaches); secure the published port
+      OSD_BIND: "0.0.0.0"
       INSTANCE: "${INSTANCE:-17}"
       OSD_SID: OSD
       STG_ADT_SID: OSD
@@ -244,6 +253,9 @@ services:
     pull_policy: always
     init: true
     environment:
+      # the container listens on every interface (the default is loopback,
+      # which a published port never reaches); secure the published port
+      OSD_BIND: "0.0.0.0"
       INSTANCE: "${INSTANCE:-19}"
       OSD_SID: OSD
       STG_ADT_SID: OSD

@@ -6,6 +6,7 @@
 //   node tools/gogen/o4dserve-js.mjs --listen 3093 --upstream http://127.0.0.1:3091
 import {createHash} from "node:crypto";
 import http from "node:http";
+import {describeBind, listenBound} from "../osd-bind.mjs";
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 
@@ -101,4 +102,6 @@ server.on("upgrade", (req, socket) => {
   if (CHANNEL.test(req.url)) channel(req, socket);
   else socket.destroy();
 });
-server.listen(listen, () => console.log(`ZO4D frames from the IR's JS on :${listen}, the rest from ${upstream.origin}`));
+// OSD_BIND, loopback by default: the catch-all proxy below reaches the
+// loopback backend, ADT included, and must not hand it to the network
+listenBound(server, listen, process.env, () => console.log(`ZO4D frames from the IR's JS on ${describeBind()} port ${listen}, the rest from ${upstream.origin}`));
