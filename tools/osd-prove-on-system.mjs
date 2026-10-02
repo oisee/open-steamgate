@@ -22,40 +22,37 @@
 // **It deletes only what it brought, unchanged.** The package must not
 // exist when the run starts -- the run creates it -- and no object of the
 // zip may exist anywhere. Right after an import that was not refused, the
-// run reads a version stamp for every object the import wrote into the
-// package and writes a receipt, `.local/prove-runs/<package>.json`. The
-// cleanup -- the run's own, or `--cleanup` later -- deletes, in one snippet
-// of ours and one dialog step, the objects that are still the receipt's: in
-// the package, and the stamp unchanged -- or the stamp moved and the content
-// hash (SHA-256 of abapGit's serialisation, read in the same step as the
-// stamp) is still the receipt's, since a re-activation moves stamps and
-// leaves content; then the repository row only when this run's import
-// created it (`OSDPROVE <package>`, the receipt's key, checked in that same
-// step), then the package if nothing is left. No receipt, no delete: the
-// zip's object list alone never authorises one. vsp's git_delete_objects is
-// not used: it has no conditional delete (no expected version per object, no
-// expected repository key), so an object replaced between a decision and
-// its call would be deleted.
+// run reads `git_object_versions` (sha256 asked for) for every object the
+// import wrote into the package and writes a receipt,
+// `.local/prove-runs/<package>.json`. The cleanup -- the run's own, or
+// `--cleanup` later -- is ONE vsp `git_delete_objects` call: every receipt
+// object with `expect: {sha256}`, which vsp checks under the lock its DELETE
+// takes (an object that is another version, or has an inactive one, comes
+// back `changed` and is kept, with the repository and the package), and the
+// repository row only when this run's import created it (`delete_repo` with
+// `expect_repo {key, name}`, rechecked by ZADT_VSP in the step that deletes
+// it). No receipt, no delete: the zip's object list alone never authorises
+// one. vsp too old for this (no `git_object_versions`) is refused before
+// anything is written, and there is no unconditional fallback.
 //
-// What vsp does (v2.58.0-54 or later, `MIN_VSP`) and what stays ours:
+// What vsp does (v2.58.0-72 or later, `MIN_VSP`) and what stays ours:
 //   - the import is vsp's `git_import_zip` (abapGit on the system, as a
 //     background job; overwrite false, so nothing that exists is touched);
-//   - the deletion stays ours (cleanupAbap), decided and done in one step;
+//   - the versions and the conditional delete are vsp's (#320);
 //   - the residue is read twice: vsp's `read DEVC <pkg> {inventory}` and our
 //     own TADIR / repository / REPOSRC-and-DD count, and the two must agree;
-//   - every snippet we still run (preflight, receipt stamps and hashes,
-//     chunk reads, the cleanup, the residue count, the class check)
-//     hands its result back with RETURN_VALUE( ) as a table of rows, which
-//     vsp answers as JSON; no result is read out of an alert title any more.
+//   - every snippet we still run (preflight, the residue count, the class
+//     check) hands its result back with RETURN_VALUE( ) as a table
+//     of rows, which vsp answers as JSON.
 //
 // The steps, each a small MCP call:
 //   1. zip the folder (tools/osd-abapgit-zip.mjs, fail closed on the unit);
 //   2. preflight: refuse (exit 2) when the package exists or an object of
-//      the zip exists already;
+//      the zip exists already, or when vsp has no `git_object_versions`;
 //   3. create the local package (`create DEVC`);
 //   4. `git_import_zip` into the tool's own offline repository, recording
-//      its key and whether this import created it; then stamp what it
-//      wrote and write the receipt;
+//      its key and whether this import created it; then read the sha256 of
+//      what it wrote and write the receipt;
 //   5. read SEOCLASSDF-WITH_UNIT_TESTS and the CCAU line count per class;
 //   6. ABAP Unit per class (`test CLAS`), compared by method identity
 //      (test class -> method), not by count;
@@ -73,15 +70,13 @@ import * as abaplint from "@abaplint/core";
 import {runsAs} from "./osd-main.mjs";
 import {layout, zipInProcess} from "./osd-abapgit-zip.mjs";
 import {loadManifest, unitFor} from "./osd-deploy-manifest.mjs";
-import {
-  FILE_NAME, HASH_DECLS, canonicalXml, collectHashes, fetchFile, hashItemBlock, parseHashes, proveInPlace, readHashes,
-  rollbackFromState, serializeBlock, sha256, snapshotDir,
-} from "./osd-prove-inplace.mjs";
+import {proveInPlace, rollbackFromState, snapshotDir} from "./osd-prove-inplace.mjs";
 
 /** The vsp this tool needs: execute_abap answering JSON with result_text and
  *  RETURN_VALUE( ), ABAP Unit with ok and counts, git_import_zip /
- *  git_import_status, and `read DEVC` with inventory. */
-export const MIN_VSP = "vsp v2.58.0-54 (vibing-steampunk main at 0a83078, #301)";
+ *  git_import_status, `git_object_versions`, `git_delete_objects` with `expect`
+ *  and `expect_repo`, and `read DEVC` with inventory. */
+export const MIN_VSP = "vsp v2.58.0-72 (vibing-steampunk #320: git_object_versions and expect on git_delete_objects)";
 export const DEFAULT_PACKAGE = "$ZOSG_TMP_PROVE";
 export const B64_LINE = 200;
 // abapGit log messages the in-place deploy snippet carries back; the rest are counted
@@ -152,6 +147,9 @@ export function ownRepoName(pkg) {
 }
 
 export const REPO_KEY = /^[0-9]{1,12}$/;
+const SHA256 = /^[0-9a-f]{64}$/;
+/** How many objects one git_object_versions call may name (vsp: 500). */
+const MAX_VERSIONS = 500;
 
 // ------------------------------------------------------------ reading rows
 
@@ -284,26 +282,15 @@ export function checkItems(items) {
 // ---------------------------------------------------------------- receipt
 //
 // A run receipt says which objects this run's import wrote into the package
-// and what each looked like right after: its TADIR identity and a version
-// stamp read on the system. Only an object in the receipt with the same
-// stamp (or a moved stamp and the same content hash) is ever deleted, by the
-// run's own cleanup or by `--cleanup` later. The zip's object list alone
-// never authorises a delete.
+// and what each was right after: its TADIR identity, and the sha256 (and the
+// stamp, for the reader) vsp's `git_object_versions` reports. Only an object
+// in the receipt is ever deleted, by the run's own cleanup or by `--cleanup`
+// later, and vsp deletes it only while it still has the receipt's sha256
+// (`expect`, read under the lock the DELETE takes). The zip's object list
+// alone never authorises a delete.
 
-/** The kinds of object a stamp can be read for, and from where:
- *  CLAS/INTF the newest REPOSRC UDAT+UTIME over abapGit's own include list
- *  (zcl_abapgit_oo_factory, the list abapGit's changed_by reads) and how
- *  many of those includes exist; PROG its REPOSRC row; TABL/DTEL/DOMA/TTYP
- *  the active DD02L/DD04L/DD01L/DD40L row's AS4DATE+AS4TIME; DDLS the
- *  active DDDDLSRC row's AS4DATE+AS4TIME (the table abapGit's own DDLS
- *  object reads through IF_DD_DDL_HANDLER~READ, get_state 'A'; the
- *  field names are read off abapGit's source, not yet measured on a
- *  system). Any other kind gets no stamp, so it is never in a receipt and
- *  never deleted. DCLS has none either: abapGit reads it through a
- *  handler into ACM_S_DCLSRC and the table behind that is not known here. */
-export const STAMPED_KINDS = ["CLAS", "INTF", "PROG", "TABL", "DTEL", "DOMA", "TTYP", "DDLS"];
-const STAMP = /^[A-Z]{4}:[0-9]{14}(\/[0-9]+)?$/;
-
+// The residue read looks for source and dictionary rows of an object whose
+// TADIR row is gone (STAMP_BLOCK: rows found, lv_stamp set).
 const STAMP_DECLARATIONS = [
   "DATA lv_stamp TYPE string.",
   "DATA lv_max TYPE string.",
@@ -313,8 +300,8 @@ const STAMP_DECLARATIONS = [
   "DATA lt_incs TYPE zif_abapgit_oo_object_fnc=>ty_includes_tt.",
 ];
 
-/** ABAP that sets lv_stamp for lv_type / lv_name (empty: no stamp). The
- *  residue check uses it too: a deleted object must have none left. */
+/** ABAP that sets lv_stamp for lv_type / lv_name (empty: no rows). A deleted
+ *  object must have none left. */
 const STAMP_BLOCK = [
   "CLEAR: lv_stamp, lv_max, lv_cnt, lt_incs, lv_d, lv_t.",
   "CASE lv_type.",
@@ -353,48 +340,6 @@ const STAMP_BLOCK = [
   "  lv_stamp = |{ lv_type }:{ lv_d }{ lv_t }|.",
   "ENDIF.",
 ];
-
-/** The prefix of the content-hash rows in the receipt snippet's result. */
-export const RECEIPT_HASH = "h_";
-
-/** After the import: each object of the zip whose TADIR row is in the
- *  package, with its stamp and content hash. Nothing is changed. */
-export function receiptAbap(pkg, items) {
-  checkItems(items);
-  return [
-    head("receipt"),
-    ...OUT_DECLS,
-    "DATA lt_items TYPE string_table.",
-    "DATA lv_type TYPE tadir-object.",
-    "DATA lv_name TYPE tadir-obj_name.",
-    "DATA lv_n TYPE i.",
-    ...STAMP_DECLARATIONS,
-    ...HASH_DECLS,
-    ...items.map((i) => `APPEND \`${i}\` TO lt_items.`),
-    "LOOP AT lt_items INTO DATA(lv_item).",
-    "  SPLIT lv_item AT space INTO lv_type lv_name.",
-    "  SELECT SINGLE devclass FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
-    "    INTO @DATA(lv_where).",
-    "  IF sy-subrc <> 0.",
-    `    ${put("absent", "{ lv_type }:{ lv_name }")}`,
-    `  ELSEIF lv_where <> '${pkg}'.`,
-    `    ${put("elsewhere", "{ lv_type }:{ lv_name }@{ lv_where }")}`,
-    "  ELSE.",
-    ...STAMP_BLOCK.map((l) => `    ${l}`),
-    "    IF lv_stamp IS INITIAL.",
-    `      ${put("nostamp", "{ lv_type }:{ lv_name }")}`,
-    "    ELSE.",
-    `      ${put("stamp", "{ lv_type }:{ lv_name }@{ lv_stamp }")}`,
-    "      \" the content hash in the same dialog step as the stamp, with the",
-    "      \" in-place mode's own serialisation and digest (hashItemBlock)",
-    ...hashItemBlock(pkg, RECEIPT_HASH).map((l) => `      ${l}`),
-    "    ENDIF.",
-    "  ENDIF.",
-    "ENDLOOP.",
-    put("items", "{ lines( lt_items ) }"),
-    report(),
-  ].join("\n") + "\n";
-}
 
 /** Step 2, the preflight: nothing is changed. Does the package exist, has
  *  it a repository, and does any object of the zip exist already (in any
@@ -436,213 +381,6 @@ export function preflightAbap(pkg, items) {
     "  ENDIF.",
     "ENDLOOP.",
     put("existing", "{ lv_n }"),
-    report(),
-  ].join("\n") + "\n";
-}
-
-/** The decision's content check of lv_item: abapGit serialises it now with
- *  the in-place mode's serializeBlock (same serialisation, same digest),
- *  every file becomes `ITEM@name=HEX` in lt_b, and the object is the
- *  receipt's when lt_b equals lt_a (the receipt's lines for the item). A
- *  serialisation that raises, or an object that is not there, leaves
- *  lv_same false: kept. */
-const hashCompare = (pkg) => serializeBlock(pkg, {
-  prefix: "h_",
-  onFile: ["lv_line = |{ lv_item }@{ ls_file-filename }={ lv_hx }|.", "APPEND lv_line TO lt_b."],
-  onOk: ["SORT lt_a.", "SORT lt_b.", "IF lt_a = lt_b.", "  lv_same = abap_true.", "ENDIF."],
-});
-
-/** Step 7a, the cleanup, in ONE snippet so nothing changes between the
- *  check and the delete (vsp's git_delete_objects cannot be used here: it
- *  takes no expected version per object and no expected repository key,
- *  so an object replaced between a decision and its call would be deleted):
- *   a. the package's repository, if any, must be the tool's own by name and,
- *      when `expectedKey` is given, the one this run imported into -- else
- *      `go` is not set and nothing at all is deleted;
- *   b. each receipt entry whose TADIR row is in this package and whose stamp
- *      is unchanged -- or moved, with the receipt's content hashes -- goes
- *      into one list for zcl_abapgit_objects=>delete (abapGit's object
- *      layer, dependency order, a commit per object), in the same step; an
- *      entry in another package, or one that is not there, is reported and
- *      not touched; a changed one is kept; nothing outside the receipt is
- *      ever handed to it;
- *   c. the repository row is deleted (zcl_abapgit_repo_srv->delete, which
- *      removes the persisted repository and no object) only when `dropRepo`:
- *      this run's import created it, and (a) just checked it is that row;
- *   d. the package is deleted (abapGit's DEVC object, which deletes only an
- *      empty package) only if no repository is left registered for it,
- *      TADIR holds nothing else under it and TDEVC has no subpackage of it.
- *      Subpackages are never deleted. */
-export function cleanupAbap(pkg, entries, expectedKey, dropRepo = false) {
-  const items = entries.map((e) => e.item);
-  checkItems(items);
-  for (const e of entries) if (!STAMP.test(e.stamp ?? "")) throw new Error(`not a stamp: ${e.stamp} (${e.item})`);
-  // the receipt's content hashes: `ITEM@file=HEX`, one per file; an entry
-  // without any (an old receipt) is decided by its stamp alone
-  const expected = [];
-  for (const e of entries) {
-    for (const f of e.files ?? []) {
-      if (!FILE_NAME.test(f.name) || !/^[0-9a-fA-F]{64}$/.test(f.sha256)) throw new Error(`not a file entry: ${f.name} (${e.item})`);
-      expected.push(`APPEND \`${e.item}@${f.name}=${f.sha256.toUpperCase()}\` TO lt_exp.`);
-    }
-  }
-  if (expectedKey !== undefined && expectedKey !== "" && !REPO_KEY.test(expectedKey)) throw new Error(`not a repository key: ${expectedKey}`);
-  const keyCheck = expectedKey === undefined ? "" : `li_repo->get_key( ) <> '${expectedKey}' OR `;
-  return [
-    head("cleanup"),
-    ...OUT_DECLS,
-    "DATA lv_go TYPE abap_bool VALUE abap_true.",
-    `DATA lv_drop TYPE abap_bool VALUE ${dropRepo === true ? "abap_true" : "abap_false"}.`,
-    "DATA lv_gone TYPE abap_bool.",
-    "DATA lv_logs TYPE i.",
-    "DATA lt_tadir TYPE zif_abapgit_definitions=>ty_tadir_tt.",
-    "DATA ls_tadir TYPE zif_abapgit_definitions=>ty_tadir.",
-    "DATA lv_key TYPE string.",
-    "DATA(li_log) = CAST zif_abapgit_log( NEW zcl_abapgit_log( ) ).",
-    "DATA lt_items TYPE string_table.",
-    "DATA lv_type TYPE tadir-object.",
-    "DATA lv_name TYPE tadir-obj_name.",
-    "DATA lv_n TYPE i.",
-    "DATA lv_del TYPE i.",
-    "DATA li_repo TYPE REF TO zif_abapgit_repo.",
-    "DATA lt_stamps TYPE string_table.",
-    "DATA lv_want TYPE string.",
-    "DATA lv_same TYPE abap_bool.",
-    "DATA lt_exp TYPE string_table.",
-    "DATA lt_a TYPE string_table.",
-    "DATA lt_b TYPE string_table.",
-    "DATA lv_l TYPE string.",
-    "DATA lv_line TYPE string.",
-    "DATA lv_pre TYPE string.",
-    "DATA lv_pl TYPE i.",
-    ...STAMP_DECLARATIONS,
-    ...HASH_DECLS,
-    ...entries.map((e) => `APPEND \`${e.item}\` TO lt_items.`),
-    ...entries.map((e) => `APPEND \`${e.stamp}\` TO lt_stamps.`),
-    ...expected,
-    "TRY.",
-    "    zcl_abapgit_repo_srv=>get_instance( )->get_repo_from_package(",
-    `      EXPORTING iv_package = '${pkg}' IMPORTING ei_repo = li_repo ).`,
-    "  CATCH cx_root INTO DATA(lx).",
-    `    ${put("err", "repository lookup: { lx->get_text( ) }")}`,
-    "    lv_go = abap_false.",
-    "ENDTRY.",
-    "IF li_repo IS BOUND.",
-    `  ${put("repo", "{ li_repo->get_key( ) }")}`,
-    `  ${put("repo_name", "{ li_repo->get_name( ) }")}`,
-    "ELSE.",
-    `  ${put("repo", "none")}`,
-    "ENDIF.",
-    `IF li_repo IS BOUND AND ( ${keyCheck}li_repo->get_name( ) <> '${ownRepoName(pkg)}' ).`,
-    `  ${put("err", "refused: repository { li_repo->get_key( ) } named { li_repo->get_name( ) } is not the one this run imported into")}`,
-    "  lv_go = abap_false.",
-    "ENDIF.",
-    "IF lv_go = abap_true.",
-    "  LOOP AT lt_items INTO DATA(lv_item).",
-    "    DATA(lv_ix) = sy-tabix.",
-    "    READ TABLE lt_stamps INDEX lv_ix INTO lv_want.",
-    "    SPLIT lv_item AT space INTO lv_type lv_name.",
-    "    SELECT SINGLE * FROM tadir WHERE pgmid = 'R3TR' AND object = @lv_type AND obj_name = @lv_name",
-    "      INTO @DATA(ls_db).",
-    "    IF sy-subrc <> 0.",
-    `      ${put("absent", "{ lv_type }:{ lv_name }")}`,
-    `    ELSEIF ls_db-devclass <> '${pkg}'.`,
-    `      ${put("elsewhere", "{ lv_type }:{ lv_name }@{ ls_db-devclass }")}`,
-    "    ELSE.",
-    ...STAMP_BLOCK.map((l) => `      ${l}`),
-    "      lv_same = abap_true.",
-    "      IF lv_stamp IS INITIAL OR lv_stamp <> lv_want.",
-    "        \" the stamp moved. A re-activation moves it and leaves the content,",
-    "        \" so the object is still ours when abapGit serialises it now to the",
-    "        \" files the receipt hashed; any other edit changes a hash",
-    "        lv_same = abap_false.",
-    "        CLEAR: lt_a, lt_b.",
-    "        lv_pre = |{ lv_item }@|.",
-    "        lv_pl = strlen( lv_pre ).",
-    "        LOOP AT lt_exp INTO lv_l.",
-    "          IF strlen( lv_l ) > lv_pl AND substring( val = lv_l len = lv_pl ) = lv_pre.",
-    "            APPEND lv_l TO lt_a.",
-    "          ENDIF.",
-    "        ENDLOOP.",
-    "        IF lt_a IS NOT INITIAL.",
-    ...hashCompare(pkg).map((l) => `          ${l}`),
-    "        ENDIF.",
-    "        IF lv_same = abap_true.",
-    `          ${put("rehashed", "{ lv_type }:{ lv_name }@{ lv_stamp }")}`,
-    "        ELSE.",
-    `          ${put("changed", "{ lv_type }:{ lv_name }@{ lv_stamp }")}`,
-    "          IF lt_a IS NOT INITIAL.",
-    `            ${put("hashdiff", "{ lv_type }:{ lv_name }")}`,
-    "          ENDIF.",
-    "        ENDIF.",
-    "      ENDIF.",
-    "      IF lv_same = abap_true.",
-    "        lv_del = lv_del + 1.",
-    `        ${put("delete", "{ lv_type }:{ lv_name }")}`,
-    "        CLEAR ls_tadir.",
-    "        MOVE-CORRESPONDING ls_db TO ls_tadir.",
-    "        APPEND ls_tadir TO lt_tadir.",
-    "      ENDIF.",
-    "    ENDIF.",
-    "  ENDLOOP.",
-    "  \" the delete, in the step that checked: exactly what was decided above",
-    "  IF lt_tadir IS NOT INITIAL.",
-    "    TRY.",
-    "        zcl_abapgit_objects=>delete( it_tadir = lt_tadir ii_log = li_log ).",
-    "      CATCH cx_root INTO DATA(lx2).",
-    `        ${put("err", "delete: { lx2->get_text( ) }")}`,
-    "    ENDTRY.",
-    "  ENDIF.",
-    "  LOOP AT li_log->get_messages( ) INTO DATA(ls_m) WHERE type = 'E' OR type = 'A'.",
-    "    lv_logs = lv_logs + 1.",
-    `    IF lv_logs <= ${MAX_LOG}.`,
-    `      ${put("log", "{ ls_m-type }\\|{ ls_m-obj_type } { ls_m-obj_name }: { ls_m-text }")}`,
-    "    ENDIF.",
-    "  ENDLOOP.",
-    `  ${put("logs", "{ lv_logs }")}`,
-    "  IF li_repo IS BOUND.",
-    "    lv_key = li_repo->get_key( ).",
-    "    IF lv_drop = abap_true.",
-    "      TRY.",
-    "          zcl_abapgit_repo_srv=>get_instance( )->delete( li_repo ).",
-    "          COMMIT WORK.",
-    "          lv_gone = abap_true.",
-    `          ${put("repo_deleted", "{ lv_key }")}`,
-    "        CATCH cx_root INTO DATA(lx3).",
-    `          ${put("err", "repo delete: { lx3->get_text( ) }")}`,
-    "      ENDTRY.",
-    "    ELSE.",
-    `      ${put("repo_kept", "{ lv_key }")}`,
-    "    ENDIF.",
-    "  ENDIF.",
-    "ENDIF.",
-    `SELECT object, obj_name FROM tadir WHERE devclass = '${pkg}'`,
-    `  AND NOT ( object = 'DEVC' AND obj_name = '${pkg}' ) INTO TABLE @DATA(lt_rest).`,
-    `SELECT devclass FROM tdevc WHERE parentcl = '${pkg}' INTO TABLE @DATA(lt_children).`,
-    "IF lv_go = abap_true AND ( li_repo IS NOT BOUND OR lv_gone = abap_true )",
-    "    AND lt_rest IS INITIAL AND lt_children IS INITIAL.",
-    "  CLEAR: ls_tadir, lt_tadir.",
-    `  SELECT SINGLE * FROM tadir WHERE pgmid = 'R3TR' AND object = 'DEVC' AND obj_name = '${pkg}' INTO @DATA(ls_devc).`,
-    "  IF sy-subrc = 0.",
-    "    MOVE-CORRESPONDING ls_devc TO ls_tadir.",
-    "  ELSE.",
-    "    ls_tadir-pgmid = 'R3TR'.",
-    "    ls_tadir-object = 'DEVC'.",
-    `    ls_tadir-obj_name = '${pkg}'.`,
-    `    ls_tadir-devclass = '${pkg}'.`,
-    "  ENDIF.",
-    "  APPEND ls_tadir TO lt_tadir.",
-    "  TRY.",
-    "      zcl_abapgit_objects=>delete( it_tadir = lt_tadir ).",
-    "      COMMIT WORK.",
-    `      ${put("package_deleted", "X")}`,
-    "    CATCH cx_root INTO DATA(lx4).",
-    `      ${put("err", "package delete: { lx4->get_text( ) }")}`,
-    "  ENDTRY.",
-    "ENDIF.",
-    put("go", "{ lv_go }"),
-    put("to_delete", "{ lv_del }"),
-    put("items", "{ lines( lt_items ) }"),
     report(),
   ].join("\n") + "\n";
 }
@@ -759,43 +497,6 @@ export function parseClassCheck(rows) {
     if (m !== null) out.set(m[1], {found: m[2] === "0", wut: m[3] === "X", ccau: Number(m[4])});
   }
   return out;
-}
-
-export function parseReceipt(rows) {
-  return {
-    // one entry per object: abapGit must never be handed the same object twice
-    stamped: [...new Map(pairs(rows, "stamp").map((p) => [p.item, {item: p.item, stamp: p.where}])).values()],
-    nostamp: pairs(rows, "nostamp").map((p) => p.item),
-    absent: pairs(rows, "absent").map((p) => p.item),
-    elsewhere: pairs(rows, "elsewhere"),
-    items: num(rows, "items"),
-  };
-}
-
-export function parseCleanup(rows) {
-  return {
-    err: all(rows, "err"),
-    logs: all(rows, "log").map((v) => { const i = v.indexOf("|"); return `[${v.slice(0, i)}] ${v.slice(i + 1).trim()}`; }),
-    repoDeleted: one(rows, "repo_deleted"),
-    repoKept: one(rows, "repo_kept"),
-    packageDeleted: one(rows, "package_deleted") === "X",
-    repo: one(rows, "repo"),
-    repoName: one(rows, "repo_name")?.trim(),
-    go: one(rows, "go") === "X",
-    goSeen: one(rows, "go") !== undefined,
-    toDelete: num(rows, "to_delete"),
-    items: num(rows, "items"),
-    delete: pairs(rows, "delete").map((p) => p.item),
-    absent: pairs(rows, "absent").map((p) => p.item),
-    changed: pairs(rows, "changed"),
-    // the stamp moved and the content is the receipt's: deleted as ours
-    rehashed: pairs(rows, "rehashed"),
-    // the stamp moved, the receipt had hashes and the content differs
-    hashdiff: pairs(rows, "hashdiff").map((p) => p.item),
-    // abapGit could not serialise the object to compare it
-    hashFail: parseHashes(rows, "h_").fail,
-    elsewhere: pairs(rows, "elsewhere"),
-  };
 }
 
 export function parseResidue(rows) {
@@ -1018,6 +719,10 @@ export function receiptPath(pkg, dir = process.env.OSD_PROVE_RUNS ?? join(proces
   return join(dir, `${pkg}.json`);
 }
 
+/** The receipt's shape: 2 = sha256 versions of git_object_versions. A receipt
+ *  without it (stamps and a content snippet) is not deleted by. */
+export const RECEIPT_FORMAT = 2;
+
 export function writeReceipt(file, receipt) {
   mkdirSync(join(file, ".."), {recursive: true});
   writeFileSync(file, JSON.stringify(receipt, undefined, 1) + "\n");
@@ -1026,82 +731,6 @@ export function writeReceipt(file, receipt) {
 export function readReceipt(file) {
   if (!existsSync(file)) return undefined;
   return JSON.parse(readFileSync(file, "utf8"));
-}
-
-/** The receipt's entries with their content hashes, from the same result
- *  as the stamps (the receipt snippet serialised each object in the step
- *  that read its stamp). An XML file also gets `cx`, the SHA-256 of its
- *  canonical element tree, read back by chunks that must carry the reported
- *  hash (so it is that version): the cleanup uses it to tell abapGit
- *  re-writing an XML file from somebody editing it. An object abapGit could
- *  not hash, or whose result is incomplete, keeps no hash and is decided by
- *  its stamp alone, as before; a file that cannot be read back keeps no
- *  `cx` and is compared by bytes only. Neither fails the run: the hashes
- *  only ever add a reason to delete. */
-export async function withHashes(mcp, pkg, entries, rows, log = () => {}) {
-  const h = collectHashes(parseHashes(rows, RECEIPT_HASH), entries.map((e) => e.item));
-  const out = [];
-  for (const e of entries) {
-    const got = h.byItem.get(e.item);
-    if (got === undefined) {
-      log(`receipt: no content hash for ${e.item} (${h.fail.find((f) => f.item === e.item)?.text ?? "the result is incomplete"}); it is decided by its stamp alone`);
-      out.push(e);
-      continue;
-    }
-    const files = [];
-    for (const f of got.files) {
-      const entry = {name: f.name, sha256: f.sha256, size: f.size};
-      if (f.name.endsWith(".xml")) {
-        try {
-          const canon = canonicalXml(await fetchFile(mcp, pkg, e.item, f));
-          if (canon !== undefined) entry.cx = sha256(canon);
-        } catch (err) {
-          log(`receipt: ${e.item} ${f.name} could not be read back (${err.message}); compared by bytes only`);
-        }
-      }
-      files.push(entry);
-    }
-    out.push({...e, hash: got.hash, files});
-  }
-  return out;
-}
-
-/** The pre-pass of a second cleanup call. `names` are the items whose stamp
- *  moved and whose content hash differs from the receipt's. For each, the
- *  files abapGit serialises now are hashed; when every file that differs is
- *  XML and its canonical element tree equals the one the receipt recorded
- *  (`cx`), and the set of files is the same, the object's expected hashes
- *  become the current ones, and the decision snippet re-checks them in its own
- *  step. Anything else (a source file differs, a file came or went, no `cx`,
- *  a file that is not one well-formed tree, a read that fails) leaves the
- *  entry as it was: kept, a foreign edit. */
-export async function acceptCanonicalXml(mcp, pkg, entries, names, log = () => {}) {
-  const want = entries.filter((e) => names.includes(e.item) && e.files?.length);
-  if (want.length === 0) return {entries, accepted: []};
-  const now = await readHashes(mcp, pkg, want.map((e) => e.item), log);
-  const accepted = [];
-  const next = [];
-  for (const e of entries) {
-    const cur = now.byItem.get(e.item);
-    if (!want.includes(e) || cur === undefined) { next.push(e); continue; }
-    const recorded = new Map(e.files.map((f) => [f.name, f]));
-    const same = cur.files.length === e.files.length && cur.files.every((f) => recorded.has(f.name));
-    const differing = same ? cur.files.filter((f) => recorded.get(f.name).sha256 !== f.sha256) : [];
-    let ok = same && differing.length > 0 && differing.every((f) => f.name.endsWith(".xml") && recorded.get(f.name).cx !== undefined);
-    for (const f of ok ? differing : []) {
-      try {
-        const canon = canonicalXml(await fetchFile(mcp, pkg, e.item, f));
-        if (canon === undefined || sha256(canon) !== recorded.get(f.name).cx) ok = false;
-      } catch {
-        ok = false;
-      }
-      if (!ok) break;
-    }
-    if (!ok) { next.push(e); continue; }
-    accepted.push({item: e.item, files: differing.map((f) => f.name)});
-    next.push({...e, files: cur.files.map((f) => ({name: f.name, sha256: f.sha256}))});
-  }
-  return {entries: next, accepted};
 }
 
 /** vsp's `read DEVC <pkg> {inventory}`: the package's TADIR objects (its own
@@ -1124,71 +753,104 @@ export async function inventory(mcp, pkg) {
   };
 }
 
-/** Step 7: the cleanup snippet decides and deletes in one dialog step
- *  (cleanupAbap: stamps, content hashes and the repository key checked where
- *  the delete happens) -- the repository row only when `createdKey` names
- *  this run's own -- then the residue is read twice (our count and vsp's
- *  inventory). `entries` are the receipt's stamped objects; with none, no
- *  object is deleted. Returns the problems; anything left is one. */
-export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log = () => {}} = {}) {
-  // without the key of this run's import the repository cannot be told from
-  // one that appeared since; the snippet then refuses any repository at all
-  if (expectedKey === undefined) expectedKey = "";
-  const dropRepo = createdKey !== undefined && REPO_KEY.test(createdKey) && createdKey === expectedKey;
-  const unhashed = entries.filter((e) => !(e.files?.length > 0));
-  if (unhashed.length > 0) {
-    log(`cleanup: ${unhashed.length === entries.length ? "the receipt carries" : `${unhashed.length} receipt entr(ies) carry`} no content hashes `
-      + "(written by an older version, or an object that could not be hashed): decided by the version stamp alone, as before");
-  }
-  const problems = [];
-  let c;
-  const accepted = [];
-  // errors and abapGit log lines of every call count, not only the last's
-  const seen = [];
-  const check = (x, r) => {
-    if (!x.goSeen || x.items !== entries.length || x.toDelete !== x.delete.length) throw new Error(`cleanup: the result is incomplete: ${r.message}`);
-    seen.push(...x.err.map((e) => `cleanup: ${e}`), ...x.logs.map((l) => `cleanup log ${l}`));
-    if (x.repoDeleted) log(`cleanup: repository ${x.repoDeleted} (${ownRepoName(pkg)}) deleted`);
-    if (x.repoKept) log(`cleanup: repository ${x.repoKept} is not one this run's import created${createdKey === undefined ? " (the receipt does not say it did)" : ""}; it is left registered, and the package with it`);
-  };
-  try {
-    let r = await exec(mcp, cleanupAbap(pkg, entries, expectedKey, dropRepo), "cleanup");
-    c = parseCleanup(r.rows);
-    log(`cleanup: ${r.message}`);
-    check(c, r);
-    // an XML file abapGit rewrote (same tree, other bytes) is not an edit:
-    // when the only difference of a moved object is such a file, say so to
-    // the snippet through the object's current hashes and run it again; the
-    // snippet re-checks them in its own step, so nothing slips in between
-    if (c.hashdiff.length > 0) {
-      const acc = await acceptCanonicalXml(mcp, pkg, entries, c.hashdiff, log);
-      if (acc.accepted.length > 0) {
-        for (const a of acc.accepted) {
-          log(`cleanup: ${a.item}: ${a.files.join(", ")} differs in bytes from the receipt's but is the same XML element tree; accepted as unchanged`);
-        }
-        accepted.push(...acc.accepted);
-        r = await exec(mcp, cleanupAbap(pkg, acc.entries, expectedKey, dropRepo), "cleanup");
-        c = parseCleanup(r.rows);
-        log(`cleanup (second call): ${r.message}`);
-        check(c, r);
-      }
+/** One `git_object_versions` call (sha256 asked for): per object, vsp's
+ *  answer as `{type, name, package, inPackage, stamp, sha256, sha256Error,
+ *  inactive, ...}`, in the order asked. A throw that says why when vsp does
+ *  not know the operation (an older vsp or ZADT_VSP: `needs ...`, code
+ *  NEEDS_VSP), answers an error or something else than the objects asked
+ *  about, or does not say whether an object has an inactive version. */
+export async function objectVersions(mcp, pkg, items, {sha256 = true} = {}) {
+  const needs = (why) => Object.assign(new Error(`git_object_versions: ${why}. The conditional delete needs ${MIN_VSP} `
+    + "and the ZADT_VSP it installs (vsp install zadt-vsp); nothing is deleted without it, and never unconditionally"), {code: "NEEDS_VSP"});
+  const out = [];
+  for (let i = 0; i < items.length; i += MAX_VERSIONS) {
+    const part = items.slice(i, i + MAX_VERSIONS);
+    let json;
+    try {
+      let isError;
+      ({json, isError} = jsonAnswer(await mcp.call("system", undefined, {type: "git_object_versions", package: pkg, objects: part, sha256}), "object versions"));
+      if (isError) throw new Error(JSON.stringify(json).slice(0, 300));
+    } catch (e) {
+      throw needs(e.message.slice(0, 400));
     }
+    if (!Array.isArray(json.objects) || json.objects.length !== part.length) throw needs(`${json.objects?.length ?? "no"} answer(s) for ${part.length} object(s)`);
+    part.forEach((item, k) => {
+      const o = json.objects[k];
+      if (`${String(o?.type).trim().toUpperCase()} ${String(o?.name).trim().toUpperCase()}` !== item) throw needs(`the answer names ${o?.type} ${o?.name} where ${item} was asked`);
+      if (typeof o.inactive !== "boolean") throw needs(`it does not say whether ${item} has an inactive version`);
+      out.push(o);
+    });
+  }
+  return out;
+}
+
+/** Right after the import: each object of the zip with the sha256 (and the
+ *  stamp) vsp reads for it. An object with no version it can be deleted by
+ *  (not in the package, no sha256, an inactive version) is not in the receipt
+ *  and is named in `problems`; it will not be deleted. */
+export async function receiptVersions(mcp, pkg, items) {
+  const versions = [];
+  const problems = [];
+  for (const o of await objectVersions(mcp, pkg, items)) {
+    const item = `${String(o.type).trim().toUpperCase()} ${String(o.name).trim().toUpperCase()}`;
+    const here = String(o.package ?? "").trim();
+    if (o.inPackage !== true && here === "") problems.push(`receipt: ${item} is not on the system after the import`);
+    else if (o.inPackage !== true) problems.push(`receipt: ${item} is in package ${here}, not ${pkg}; not in the receipt, not touched`);
+    else if (o.inactive) problems.push(`receipt: ${item} has an inactive version, which no sha256 covers; it will not be deleted`);
+    else if (!SHA256.test(o.sha256 ?? "")) problems.push(`receipt: no sha256 for ${item}${o.sha256Error ? ` (${o.sha256Error})` : ""}; it will not be deleted`);
+    else versions.push({item, devclass: pkg, sha256: o.sha256, stamp: o.stamp || undefined});
+  }
+  return {versions, problems};
+}
+
+/** Step 7: one `git_delete_objects` call. Every object of the receipt goes
+ *  with `expect: {sha256}`, the receipt's: vsp takes the lock, reads the
+ *  version under it and deletes only on a match; otherwise it answers
+ *  `changed`, keeps the object, the repository and the package, and goes on
+ *  with the others. The repository row goes only when `createdKey` names
+ *  this run's own: `delete_repo` with `expect_repo {key, name}`, which
+ *  ZADT_VSP rechecks in the step that deletes it. With no receipt entry the
+ *  call names the package as its one (skipped) item, which makes vsp delete
+ *  the package if it is empty and no repository is registered for it.
+ *  Then the residue is read twice (our count and vsp's inventory). Returns
+ *  the problems; anything left is one. */
+export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log = () => {}} = {}) {
+  const dropRepo = createdKey !== undefined && REPO_KEY.test(createdKey) && createdKey === expectedKey;
+  const problems = [];
+  let asked;
+  let params;
+  let res;
+  try {
+    asked = entries.map((e) => {
+      if (!OBJECT_ITEM.test(e.item) || !SHA256.test(e.sha256 ?? "")) throw new Error(`not a receipt entry: ${e.item}`);
+      return {type: e.item.slice(0, 4), name: e.item.slice(5), expect: {sha256: e.sha256}};
+    });
+    params = {type: "git_delete_objects", package: pkg, objects: asked.length > 0 ? asked : [{type: "DEVC", name: pkg}]};
+    if (dropRepo) Object.assign(params, {delete_repo: true, expect_repo: {key: createdKey, name: ownRepoName(pkg)}});
+    const {json, isError} = jsonAnswer(await mcp.call("system", undefined, params), "delete");
+    // a changed or failed object is an error answer that still carries the result
+    res = isError ? json.result : json;
+    if (res === undefined || !Array.isArray(res.objects)) throw new Error(`vsp answered no result: ${JSON.stringify(json).slice(0, 300)}`);
+    log(`cleanup: ${res.objects.map((o) => `${o.type} ${o.name} ${o.status}`).join(", ")}`);
   } catch (e) {
-    return {ok: false, problems: [...seen, `cleanup: ${e.message}`]};
+    return {ok: false, problems: [`cleanup: ${e.message}`]};
   }
-  for (const f of c.hashFail) problems.push(`cleanup: ${f.item} could not be serialised to compare its content (${f.text}); kept`);
-  problems.push(...new Set(seen));
-  for (const e of c.elsewhere) problems.push(`cleanup: ${e.item} is in package ${e.where}, not ${pkg}; not touched`);
-  for (const e of c.changed) {
-    problems.push(`cleanup: ${e.item} changed since the import (stamp now "${e.where ?? ""}")`
-      + (c.hashdiff.includes(e.item) && !c.hashFail.some((f) => f.item === e.item) ? " and its content differs from the receipt's hash: a foreign edit" : "")
-      + "; kept");
+  const want = new Map(params.objects.map((o) => [`${o.type} ${o.name}`, o]));
+  for (const o of res.objects) {
+    const item = `${o.type} ${o.name}`;
+    if (!want.delete(item)) problems.push(`cleanup: vsp answered for ${item}, which was not asked about`);
+    else if (o.status === "changed") problems.push(`cleanup: ${item} changed since the import (${o.reason ?? "no reason given"}): a foreign edit; kept`);
+    else if (o.status === "failed") problems.push(`cleanup: ${item} could not be deleted: ${o.reason ?? "no reason given"}`);
+    else if (o.status === "skipped" && asked.length === 0) continue;
+    else if (o.status !== "deleted") problems.push(`cleanup: ${item} came back ${o.status ?? "without a status"}${o.reason ? ` (${o.reason})` : ""}`);
   }
-  for (const e of c.rehashed) {
-    log(`cleanup: ${e.item}: stamp moved to "${e.where ?? ""}" but the content equals the receipt's hash (re-activated, not edited); deleted as ours`);
+  for (const item of want.keys()) problems.push(`cleanup: vsp did not answer for ${item}`);
+  if (res.repoDeleted === true) log(`cleanup: repository ${res.repo?.key ?? createdKey} (${ownRepoName(pkg)}) deleted`);
+  else if (dropRepo && /registered repository is/.test(res.repoNote ?? "")) problems.push(`cleanup: repository ${createdKey}: ${res.repoNote}`);
+  else if (res.repo?.key !== undefined && !dropRepo) {
+    log(`cleanup: repository ${res.repo.key} is not one this run's import created${createdKey === undefined ? " (the receipt does not say it did)" : ""}; it is left registered, and the package with it`);
   }
   if (entries.length === 0) log("cleanup: no receipt entries, so no object was deleted");
-  if (!c.go) log("cleanup: refused, so nothing was deleted");
   // what is left, read twice: our count, and vsp's inventory; they must agree
   let left;
   try {
@@ -1197,7 +859,7 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log =
     log(`residue: ${r.message}`);
   } catch (e) {
     problems.push(`residue: ${e.message}`);
-    return {ok: false, problems, parsed: c, accepted};
+    return {ok: false, problems};
   }
   for (const e of left.err) problems.push(`residue: ${e}`);
   for (const [name, n] of [["repository", left.repoLeft], ["object(s) of the zip", left.itemsLeft]]) {
@@ -1231,7 +893,7 @@ export async function cleanup(mcp, pkg, entries, {expectedKey, createdKey, log =
   } catch (e) {
     problems.push(`residue: ${e.message}`);
   }
-  return {ok: problems.length === 0, problems, parsed: c, residue: left, accepted};
+  return {ok: problems.length === 0, problems, residue: left};
 }
 
 /** git_import_zip's answer, waited for: a job that is still pending after
@@ -1402,6 +1064,14 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
   } catch (e) {
     refusals = [`refused: ${e.message}`];
   }
+  // fail closed before anything is written: no conditional delete, no import
+  if (refusals.length === 0) {
+    try {
+      await objectVersions(mcp, pkg, built.objects.slice(0, 1), {sha256: false});
+    } catch (e) {
+      refusals = [`refused: ${e.message}`];
+    }
+  }
   if (refusals.length > 0) {
     problems.push(...refusals);
     return done({refused: true});
@@ -1458,17 +1128,12 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
     // the receipt: what the import wrote, as it was right after
     if (wrote && importedKey !== undefined) {
       try {
-        const r = await exec(mcp, receiptAbap(pkg, built.objects), "receipt");
-        const got = parseReceipt(r.rows);
-        if (got.items !== built.objects.length) throw new Error(`receipt: the result is incomplete: ${r.message}`);
-        const stamped = await withHashes(mcp, pkg, got.stamped.map((e) => ({...e, devclass: pkg})), r.rows, log);
-        receipt = {package: pkg, repoKey: importedKey, repoName: ownRepoName(pkg), repoCreated: createdKey !== undefined,
-          objects: built.objects, stamped, written: new Date().toISOString()};
+        const got = await receiptVersions(mcp, pkg, built.objects);
+        receipt = {format: RECEIPT_FORMAT, package: pkg, repoKey: importedKey, repoName: ownRepoName(pkg), repoCreated: createdKey !== undefined,
+          objects: built.objects, versions: got.versions, written: new Date().toISOString()};
         writeReceipt(receiptFile, receipt);
-        log(`receipt: ${receipt.stamped.length} object(s) stamped, ${receiptFile}`);
-        for (const i of got.nostamp) problems.push(`receipt: no stamp for ${i}; it will not be deleted`);
-        for (const e of got.elsewhere) problems.push(`receipt: ${e.item} is in package ${e.where}, not ${pkg}; not in the receipt, not touched`);
-        for (const i of got.absent) problems.push(`receipt: ${i} is not on the system after the import`);
+        log(`receipt: ${receipt.versions.length} object(s) with their sha256, ${receiptFile}`);
+        problems.push(...got.problems);
       } catch (e) {
         problems.push(`receipt not written, so no object will be deleted: ${e.message}`);
         receipt = undefined;
@@ -1485,7 +1150,7 @@ export async function prove({folder, unit, manifest, pkg = DEFAULT_PACKAGE, keep
         + `  node tools/osd-prove-on-system.mjs --cleanup --package '${pkg}'\n`
         + `(it deletes only what the receipt ${receiptFile} lists, unchanged)`);
     } else {
-      const c = await cleanup(mcp, pkg, receipt?.stamped ?? [], {expectedKey: importedKey, createdKey, log});
+      const c = await cleanup(mcp, pkg, receipt?.versions ?? [], {expectedKey: importedKey, createdKey, log});
       problems.push(...c.problems);
       if (c.ok && receipt !== undefined) rmSync(receiptFile, {force: true});
     }
@@ -1583,15 +1248,20 @@ export async function cleanupFromReceipt(mcp, pkg, file, out) {
       + "repository list) and remove what is yours there.");
     return 2;
   }
-  if (receipt.package !== pkg || !REPO_KEY.test(receipt.repoKey ?? "") || !Array.isArray(receipt.stamped)) {
+  if (receipt.package !== pkg || !REPO_KEY.test(receipt.repoKey ?? "")) {
     out(`refused: the receipt at ${file} is not a receipt for ${pkg}`);
+    return 2;
+  }
+  if (receipt.format !== RECEIPT_FORMAT || !Array.isArray(receipt.versions) || !receipt.versions.every((v) => SHA256.test(v?.sha256 ?? ""))) {
+    out(`refused: the receipt at ${file} was written by an older version (stamps, no sha256), which vsp's conditional delete cannot take. `
+      + `Nothing is deleted; inspect ${pkg} by hand (SE80 / ADT, abapGit's repository list) and remove what this run brought.`);
     return 2;
   }
   if (receipt.repoCreated === undefined) {
     out(`note: the receipt does not record whether its run created repository ${receipt.repoKey} (written by an older version), `
       + "so the row is left registered and the package with it; remove them by hand in abapGit if they are this tool's");
   }
-  const c = await cleanup(mcp, pkg, receipt.stamped, {expectedKey: receipt.repoKey,
+  const c = await cleanup(mcp, pkg, receipt.versions, {expectedKey: receipt.repoKey,
     createdKey: receipt.repoCreated === true ? receipt.repoKey : undefined, log: out});
   for (const p of c.problems) out(`FAIL ${p}`);
   if (c.ok) rmSync(file, {force: true});

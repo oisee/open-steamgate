@@ -4,11 +4,12 @@
 // the abapGit repository row, and it answers the snippets the way the
 // snippets ask abapGit: hash = SHA-256 of each serialised file, a deploy that
 // guards on the expected hashes and writes the zip's files over the objects
-// it was told it may overwrite. It answers the way vsp v2.58.0-54 does:
+// it was told it may overwrite. It answers the way vsp v2.58.0-72 does:
 // execute_abap as JSON whose result_text is the snippet's RETURN_VALUE( lt_out )
-// table, and, for the fresh mode's sequence below, git_import_zip and
-// `read DEVC` with inventory (the fresh mode deletes with its own one-step
-// cleanup snippet). The fake does not execute
+// table, and, for the fresh mode's sequence below, git_import_zip,
+// git_object_versions, git_delete_objects (with `expect`: the fresh mode
+// deletes through vsp's conditional delete, #320) and `read DEVC` with
+// inventory. The fake does not execute
 // ABAP, so snippet properties are also checked on their text.
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
@@ -83,6 +84,8 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
     [DEMO, oldFiles("zcl_osd_prove_demo")], [PLAIN, oldFiles("zcl_osd_prove_plain")], [OTHER, new Map([["zcl_osd_untouched.clas.abap", "CLASS zcl_osd_untouched.\n"]])],
   ]) put(item, files, devclass);
   const hashes = (item) => [...sys.objects.get(item).files].sort(([a], [b]) => (a < b ? -1 : 1)).map(([n, t]) => ({n, h: sha(t), size: Buffer.byteLength(t)}));
+  // vsp's object sha256: the "<file>=<sha256 of the file>" lines, sorted, joined by LF
+  const objectSha = (item) => createHash("sha256").update(hashes(item).map((f) => `${f.n}=${f.h.toLowerCase()}`).join("\n"), "utf8").digest("hex");
   const guardLines = (obj) => hashes(obj).map((f) => `${f.n}=${f.h}`);
   const info = (name) => {
     const o = sys.objects.get(`CLAS ${name}`);
@@ -98,7 +101,7 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
     async call(action, target, params) {
       const kindOf = (code) => /^" osdprove:(\w+)$/m.exec(code)?.[1] ?? "?";
       const kind = action === "analyze" ? kindOf(params.code)
-        : action === "system" ? {git_import_zip: "import", git_delete_objects: "delete"}[params.type] ?? params.type
+        : action === "system" ? {git_import_zip: "import", git_delete_objects: "delete", git_object_versions: "versions"}[params.type] ?? params.type
           : action === "read" ? "inventory" : action;
       sys.seen[kind] = (sys.seen[kind] ?? 0) + 1;
       sys.calls.push({kind, params});
@@ -138,18 +141,34 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
         return json({status: "imported", job: "ZVSP_GIT_IMPORT", jobCount: "12345678", package: pkg, repoKey: repo.key, repoName: repo.name,
           repoCreated: true, log: [], tadir: [...fresh.keys()].map((i) => ({pgmid: "R3TR", object: i.slice(0, 4), objName: i.slice(5), devclass: pkg, created: true}))});
       }
+      if (kind === "versions") {
+        const objects = params.objects.map((it) => {
+          const o = sys.objects.get(it);
+          const [type, name] = it.split(" ");
+          const inPackage = o?.devclass === params.package;
+          return {type, name, package: o?.devclass ?? "", inPackage, inactive: false,
+            ...(inPackage ? {stamp: `v2:REPOSRC:${sys.stamps.get(it)}:9:0123456789abcdef`, files: o.files.size,
+              ...(params.sha256 === true ? {sha256: objectSha(it)} : {})} : {})};
+        });
+        return json({package: params.package, objects});
+      }
       if (kind === "delete") {
         const pkg = params.package;
         const res = {package: pkg, objects: [], repoDeleted: false, packageDeleted: false};
+        let changed = false;
         for (const it of params.objects) {
-          const [type, name] = it.split(" ");
-          const o = sys.objects.get(it);
-          if (type === "DEVC" || o?.devclass !== pkg) res.objects.push({type, name, status: "skipped"});
-          else { sys.objects.delete(it); res.objects.push({type, name, status: "deleted"}); }
+          const item = `${it.type} ${it.name}`;
+          const o = sys.objects.get(item);
+          if (it.type === "DEVC" || o?.devclass !== pkg) res.objects.push({type: it.type, name: it.name, status: "skipped"});
+          else if (objectSha(item) !== it.expect?.sha256) {
+            changed = true;
+            res.objects.push({type: it.type, name: it.name, status: "changed", reason: "changed since its version was read", observed: {sha256: objectSha(item)}});
+          } else { sys.objects.delete(item); res.objects.push({type: it.type, name: it.name, status: "deleted"}); }
         }
+        if (changed) return json({error: "an object was kept", result: res}, true);
         const empty = ![...sys.objects.values()].some((o) => o.devclass === pkg);
         let repo = sys.repos.find((r) => r.pkg === pkg);
-        if (repo && params.delete_repo && empty) {
+        if (repo && params.delete_repo && empty && params.expect_repo?.key === repo.key && params.expect_repo?.name === repo.name) {
           sys.repos = sys.repos.filter((r) => r !== repo);
           res.repoDeleted = true;
           res.repo = {key: repo.key, name: repo.name, offline: true};
@@ -170,47 +189,9 @@ function fakeSystem({objects, hooks = [], repos = [], restoreCorrupts = false, i
       const items = itemsOf(code);
       const pkg = /'(\$[A-Z0-9_]+)'/.exec(code)?.[1];
       const out = [];
-      // ---- the fresh mode's snippets (the sequence test): preflight, receipt, decision, residue
+      // ---- the fresh mode's snippets (the sequence test): preflight, residue
       if (kind === "preflight") {
         out.push(["tdevc", sys.packages.has(pkg) ? 1 : 0], ["repo", "none"], ["existing", 0]);
-        return answer(out);
-      }
-      if (kind === "receipt") {
-        for (const item of items) {
-          out.push(["stamp", `${colon(item)}@${sys.stamps.get(item)}`]);
-          for (const f of hashes(item)) out.push(["h_file", `${colon(item)}|${f.n}|${f.h}|${f.size}`]);
-          out.push(["h_obj", `${colon(item)}|${sys.objects.get(item).files.size}`]);
-        }
-        out.push(["items", items.length]);
-        return answer(out);
-      }
-      if (kind === "decide" || kind === "cleanup") {
-        const stamps = [...code.matchAll(/APPEND `([A-Z]{4}:[0-9/]+)` TO lt_stamps\./g)].map((m) => m[1]);
-        const exp = [...code.matchAll(/APPEND `([A-Z0-9]{4} [A-Z0-9_/]+)@([^=`]+)=([0-9A-F]{64})` TO lt_exp\./g)];
-        const repo = sys.repos.find((r) => r.pkg === pkg);
-        out.push(...(repo ? [["repo", repo.key], ["repo_name", repo.name]] : [["repo", "none"]]));
-        let n = 0;
-        items.forEach((item, i) => {
-          let same = sys.stamps.get(item) === stamps[i];
-          if (!same) {
-            const want = exp.filter((m) => m[1] === item).map((m) => `${m[2]}=${m[3]}`).sort();
-            same = want.length > 0 && JSON.stringify(want) === JSON.stringify(guardLines(item).sort());
-            if (same) out.push(["rehashed", `${colon(item)}@${sys.stamps.get(item)}`]);
-            else {
-              out.push(["changed", `${colon(item)}@${sys.stamps.get(item)}`]);
-              if (want.length > 0) out.push(["hashdiff", colon(item)]);
-            }
-          }
-          if (same) { n += 1; out.push(["delete", colon(item)]); }
-        });
-        if (kind === "cleanup") {
-          // the cleanup snippet deletes what it decided, in the same call
-          for (const [k, v] of out) if (k === "delete") sys.objects.delete(v.replace(":", " "));
-          if (repo && /DATA lv_drop TYPE abap_bool VALUE abap_true\./.test(code)) { sys.repos = sys.repos.filter((r) => r !== repo); out.push(["repo_deleted", repo.key]); }
-          const empty = ![...sys.objects.values()].some((o) => o.devclass === pkg);
-          if (empty && !sys.repos.some((r) => r.pkg === pkg)) { sys.packages.delete(pkg); out.push(["package_deleted", "X"]); }
-        }
-        out.push(["go", "X"], ["to_delete", n], ["items", items.length]);
         return answer(out);
       }
       if (kind === "residue") {
@@ -691,7 +672,9 @@ describe("osd-prove-on-system --in-place", () => {
   describe("a fresh --keep run, an in-place run on its package, then --cleanup (measured on A4H, 2026-10-01)", () => {
     // The in-place deploy and its restore re-activate every object they
     // write: version stamps move, content does not. The fresh run's receipt
-    // used to hold the stamps alone, so its --cleanup refused those objects.
+    // holds the sha256 vsp reads (git_object_versions), which the stamps do
+    // not enter, so its --cleanup deletes those objects (before #320 the
+    // receipt held stamps and a content snippet decided).
     const freshArgs = (extra = []) => [join(FIXTURE, "src"), "--unit", "prove-demo", "--manifest", MANIFEST, "--package", PKG, ...extra];
     const afterFolder = () => {
       const dir = mkdtempSync(join(tmpdir(), "osd-prove-after-"));
@@ -718,29 +701,32 @@ describe("osd-prove-on-system --in-place", () => {
       return {mcp, runs};
     };
 
-    it("--cleanup deletes both objects by their content hash, although the stamps moved", async () => {
+    it("--cleanup deletes both objects by the receipt's sha256, although the stamps moved", async () => {
       const {mcp, runs} = await sequence();
       const cl = await run(["--cleanup", "--package", PKG], mcp, runs);
       assert.equal(cl.code, 0, cl.text);
-      assert.match(cl.text, /CLAS ZCL_OSD_PROVE_DEMO: stamp moved .* the content equals the receipt's hash/);
       assert.match(cl.text, /cleanup of \$ZOSG_TMP_INPL: complete/);
+      const del = mcp.sys.calls.filter((c) => c.kind === "delete").at(-1).params;
+      assert.ok(del.objects.every((o) => /^[0-9a-f]{64}$/.test(o.expect.sha256)));
       assert.equal(mcp.sys.objects.size, 0);
       assert.deepEqual(mcp.sys.repos, []);
       assert.ok(!mcp.sys.packages.has(PKG));
       assert.ok(!existsSync(join(cl.runs, `${PKG}.json`)));
     });
 
-    it("without the hashes (an old receipt) the same sequence is refused as before: the stamps moved", async () => {
+    it("a receipt of the older kind (stamps, no sha256) is refused: nothing is deleted", async () => {
       const {mcp, runs} = await sequence();
       const file = join(runs, `${PKG}.json`);
       const receipt = JSON.parse(readFileSync(file, "utf8"));
-      for (const e of receipt.stamped) { delete e.files; delete e.hash; }
+      delete receipt.format;
+      receipt.stamped = receipt.versions.map((e) => ({item: e.item, devclass: e.devclass, stamp: "CLAS:20261001120000/9"}));
+      delete receipt.versions;
       writeFileSync(file, JSON.stringify(receipt));
+      const calls = mcp.sys.calls.length;
       const cl = await run(["--cleanup", "--package", PKG], mcp, runs);
-      assert.equal(cl.code, 1, cl.text);
-      assert.match(cl.text, /decided by the version stamp alone, as before/);
-      assert.match(cl.text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_DEMO changed since the import/);
-      assert.match(cl.text, /FAIL cleanup: CLAS ZCL_OSD_PROVE_PLAIN changed since the import/);
+      assert.equal(cl.code, 2, cl.text);
+      assert.match(cl.text, /written by an older version \(stamps, no sha256\)/);
+      assert.equal(mcp.sys.calls.length, calls, "no call to the system");
       assert.equal(mcp.sys.objects.size, 2, "nothing deleted");
     });
 
