@@ -7,6 +7,12 @@
 * (one background job per rule and pile) ends with every pile DONE and the
 * same log as mode S, a run started meanwhile answers BUSY, and the final
 * collect releases the set's lock for the date.
+* The two-stage set ZCL_L3_FLEET2 (a filter stage filling the worklist busy,
+* then the checks piled over it): mode S logs exactly what the check rules
+* answer over the filtered ships called directly, stage 2 plans piles over
+* the worklist's keys only, mode P runs both stages on real jobs with the
+* gate opening stage 2 once, and a stage 1 pile that fails keeps stage 2
+* shut: the run is final with stage 2 NOT-RUN and its lock released.
 * RISK LEVEL DANGEROUS: setup commits rows into the rule tables, every run
 * commits its alerts, and teardown deletes both again and commits. The
 * keys all start with L30, which no generated L2 test uses.
@@ -35,6 +41,9 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS rerun_fewer_piles FOR TESTING.
     METHODS mode_p FOR TESTING.
     METHODS partial_keeps_old FOR TESTING.
+    METHODS stages_mode_s FOR TESTING.
+    METHODS stages_mode_p FOR TESTING.
+    METHODS stages_partial FOR TESTING.
     METHODS add_ship IMPORTING iv_id TYPE csequence iv_name TYPE csequence iv_status TYPE csequence.
     METHODS add_voyage IMPORTING iv_id TYPE csequence iv_ship TYPE csequence iv_date TYPE csequence.
     METHODS add_crew IMPORTING iv_id TYPE csequence iv_ship TYPE csequence iv_role TYPE csequence iv_since TYPE csequence.
@@ -66,6 +75,27 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
       IMPORTING is_result TYPE zcl_l3_fleet=>ty_result
                 iv_status TYPE csequence
                 iv_when TYPE csequence.
+    METHODS staged
+      IMPORTING iv_mode TYPE c
+      RETURNING VALUE(rs_result) TYPE zcl_l3_fleet2=>ty_result.
+    METHODS staged_expected
+      RETURNING VALUE(rt_rows) TYPE tt_row.
+    METHODS staged_logged
+      IMPORTING iv_run TYPE zosd_l3_alert-run_id
+      RETURNING VALUE(rt_rows) TYPE tt_row.
+    METHODS staged_piles
+      IMPORTING iv_run TYPE zosd_l3_alert-run_id
+                iv_stage TYPE i
+      RETURNING VALUE(rv_count) TYPE i.
+    METHODS stage_status
+      IMPORTING is_result TYPE zcl_l3_fleet2=>ty_result
+                iv_stage TYPE i
+      RETURNING VALUE(rv_status) TYPE zosd_l3_stage-status.
+    METHODS assert_cut
+      IMPORTING iv_run TYPE zosd_l3_alert-run_id.
+    METHODS wait_for_stages
+      IMPORTING is_result TYPE zcl_l3_fleet2=>ty_result
+      RETURNING VALUE(rs_result) TYPE zcl_l3_fleet2=>ty_result.
 ENDCLASS.
 
 CLASS ltcl_proof IMPLEMENTATION.
@@ -106,8 +136,17 @@ CLASS ltcl_proof IMPLEMENTATION.
       DELETE FROM zosd_l3_alert WHERE set_name = zcl_l3_fleet=>c_set AND run_id = lv_run.
       DELETE FROM zosd_l3_pile WHERE set_name = zcl_l3_fleet=>c_set AND run_id = lv_run.
     ENDLOOP.
-    " the run lock of the proof's date, held or released
+    " the rows of the two-stage set's runs: log, plan, gates and worklists
+    LOOP AT mt_runs INTO lv_run.
+      DELETE FROM zosd_l3_alert WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = lv_run.
+      DELETE FROM zosd_l3_pile WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = lv_run.
+      DELETE FROM zosd_l3_stage WHERE run_id = lv_run.
+      DELETE FROM zosd_l3_work WHERE run_id = lv_run.
+    ENDLOOP.
+    " the run locks of the proof's date, held or released
     DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet=>c_set
+                              AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet2=>c_set
                               AND check_date = zcl_l3_fleet_proof=>c_check_date.
     CLEAR mt_runs.
     COMMIT WORK.
@@ -551,6 +590,288 @@ CLASS ltcl_proof IMPLEMENTATION.
       CONCATENATE lv_msg 'every rule' iv_status 'expected, got' lv_states INTO lv_msg SEPARATED BY space.
       cl_abap_unit_assert=>fail( msg = lv_msg ).
     ENDLOOP.
+  ENDMETHOD.
+
+  METHOD stages_mode_s.
+    " two stages in one step: the filter's worklist holds each busy ship once,
+    " and the log is what the check rules answer over those ships, called
+    " directly; the filter writes no alert, and the run lets its lock go
+    DATA lv_stage_status TYPE zosd_l3_stage-status.
+    DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
+    DATA lt_exp TYPE tt_row.
+    DATA lt_log TYPE tt_row.
+    DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
+    DATA lv_count TYPE i.
+    DATA lv_lines TYPE i.
+    DATA ls_lock TYPE zosd_l3_run.
+    lt_keys = zcl_l2_ship_busy=>keys( zcl_l3_fleet_proof=>c_check_date ).
+    lv_lines = lines( lt_keys ).
+    IF lv_lines < 2.
+      cl_abap_unit_assert=>fail( msg = 'the seed makes at least two busy ships' ).
+    ENDIF.
+    lt_exp = staged_expected( ).
+    ls_result = staged( zcl_l3_fleet2=>c_sequential ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'DONE' msg = 'the two-stage run ends DONE' ).
+    lv_stage_status = stage_status( is_result = ls_result iv_stage = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_stage_status exp = 'DONE'
+      msg = 'the filter stage is DONE' ).
+    lv_stage_status = stage_status( is_result = ls_result iv_stage = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_stage_status exp = 'DONE'
+      msg = 'the check stage is DONE' ).
+    SELECT COUNT(*) FROM zosd_l3_work WHERE run_id = ls_result-run_id AND worklist = 'busy'.
+    lv_count = sy-dbcnt.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = lv_lines
+      msg = 'the worklist holds each key keys( ) answers, once' ).
+    lt_log = staged_logged( ls_result-run_id ).
+    cl_abap_unit_assert=>assert_equals( act = lt_log exp = lt_exp
+      msg = 'the two-stage log is the check rules over the filtered ships' ).
+    SELECT COUNT(*) FROM zosd_l3_alert
+      WHERE set_name = zcl_l3_fleet2=>c_set
+        AND rule_name = zcl_l3_fleet2=>c_rule_1
+        AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    lv_count = sy-dbcnt.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'the filter stage writes no alert' ).
+    assert_cut( ls_result-run_id ).
+    SELECT SINGLE * FROM zosd_l3_run INTO ls_lock
+      WHERE set_name = zcl_l3_fleet2=>c_set AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    cl_abap_unit_assert=>assert_equals( act = ls_lock-status exp = 'RELEASED' msg = 'mode S releases the lock' ).
+  ENDMETHOD.
+
+  METHOD stages_mode_p.
+    " stage 1's piles as jobs; the job that ends stage 1 opens stage 2 through
+    " the gate, once, and submits its piles; the job that ends stage 2
+    " completes the run. The log equals mode S's
+    DATA lv_stage_status TYPE zosd_l3_stage-status.
+    DATA ls_seq TYPE zcl_l3_fleet2=>ty_result.
+    DATA ls_par TYPE zcl_l3_fleet2=>ty_result.
+    DATA lt_seq TYPE tt_row.
+    DATA lt_par TYPE tt_row.
+    DATA lv_count TYPE i.
+    DATA lv_piles TYPE i.
+    DATA ls_lock TYPE zosd_l3_run.
+    DATA lt_jobs TYPE STANDARD TABLE OF zosd_l3_pile WITH DEFAULT KEY.
+    ls_seq = staged( zcl_l3_fleet2=>c_sequential ).
+    lt_seq = staged_logged( ls_seq-run_id ).
+    ls_par = staged( zcl_l3_fleet2=>c_parallel ).
+    cl_abap_unit_assert=>assert_equals( act = ls_par-status exp = 'SUBMITTED' msg = 'mode P submits stage 1' ).
+    lv_stage_status = stage_status( is_result = ls_par iv_stage = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_stage_status exp = 'WAITING'
+      msg = 'stage 2 waits for stage 1' ).
+    lv_count = staged_piles( iv_run = ls_par-run_id iv_stage = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'stage 2 is not planned while stage 1 runs' ).
+    ls_par = wait_for_stages( ls_par ).
+    cl_abap_unit_assert=>assert_equals( act = ls_par-status exp = 'DONE' msg = 'the jobs of both stages end the run DONE' ).
+    lv_stage_status = stage_status( is_result = ls_par iv_stage = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_stage_status exp = 'DONE'
+      msg = 'the gate opened stage 2 and its jobs ran' ).
+    " opened once: one plan of stage 2, each pile with a job of its own
+    assert_cut( ls_par-run_id ).
+    " a job is the pair (name, count): a system's JOBCOUNT is the creation time
+    " plus a counter, unique per job name only, so jobs opened in one second
+    " under other names share it (A4H, 2026-10-02)
+    SELECT job_name job_count FROM zosd_l3_pile INTO CORRESPONDING FIELDS OF TABLE lt_jobs
+      WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = ls_par-run_id AND stage_no = 2.
+    DELETE lt_jobs WHERE job_count IS INITIAL.
+    SORT lt_jobs BY job_name job_count.
+    DELETE ADJACENT DUPLICATES FROM lt_jobs COMPARING job_name job_count.
+    lv_count = lines( lt_jobs ).
+    lv_piles = staged_piles( iv_run = ls_par-run_id iv_stage = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = lv_piles
+      msg = 'each pile of stage 2 was submitted once' ).
+    lt_par = staged_logged( ls_par-run_id ).
+    cl_abap_unit_assert=>assert_equals( act = lt_par exp = lt_seq msg = 'the jobs wrote the log mode S wrote' ).
+    SELECT SINGLE * FROM zosd_l3_run INTO ls_lock
+      WHERE set_name = zcl_l3_fleet2=>c_set AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    cl_abap_unit_assert=>assert_equals( act = ls_lock-run_id exp = ls_par-run_id msg = 'the lock names the parallel run' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_lock-status exp = 'RELEASED' msg = 'the run released its lock' ).
+  ENDMETHOD.
+
+  METHOD stages_partial.
+    " a run whose stage 1 has a pile that never ends DONE (planned, its job
+    " never made): the gate keeps stage 2 shut, and collect( ) makes the run
+    " final, stage 1 PARTIAL and stage 2 NOT-RUN, and releases the lock
+    DATA lv_stage_status TYPE zosd_l3_stage-status.
+    DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
+    DATA lt_piles TYPE zcl_l3_fleet2=>tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA ls_gate TYPE zosd_l3_stage.
+    DATA ls_lock TYPE zosd_l3_run.
+    DATA ls_rule TYPE zcl_l3_fleet2=>ty_rule.
+    DATA lv_last TYPE i.
+    DATA lv_opened TYPE abap_bool.
+    DATA lv_count TYPE i.
+    DATA lv_status TYPE zosd_l3_stage-status.
+    ls_result-set_name = zcl_l3_fleet2=>c_set.
+    ls_result-check_date = zcl_l3_fleet_proof=>c_check_date.
+    ls_result-mode = zcl_l3_fleet2=>c_parallel.
+    ls_result-rules = zcl_l3_fleet2=>rules( ).
+    ls_result-run_id = cl_system_uuid=>create_uuid_c32_static( ).
+    APPEND ls_result-run_id TO mt_runs.
+    " the run as run( ) leaves it: its lock held, stage 1 open, stage 2 waiting
+    ls_lock-set_name = zcl_l3_fleet2=>c_set.
+    ls_lock-check_date = zcl_l3_fleet_proof=>c_check_date.
+    ls_lock-run_id = ls_result-run_id.
+    ls_lock-status = 'HELD'.
+    MODIFY zosd_l3_run FROM ls_lock.
+    ls_gate-run_id = ls_result-run_id.
+    ls_gate-set_name = zcl_l3_fleet2=>c_set.
+    ls_gate-check_date = zcl_l3_fleet_proof=>c_check_date.
+    ls_gate-stage_no = 1.
+    ls_gate-stage_name = zcl_l3_fleet2=>c_stage_1.
+    ls_gate-status = 'OPEN'.
+    INSERT zosd_l3_stage FROM ls_gate.
+    ls_gate-stage_no = 2.
+    ls_gate-stage_name = zcl_l3_fleet2=>c_stage_2.
+    ls_gate-status = 'WAITING'.
+    INSERT zosd_l3_stage FROM ls_gate.
+    lt_piles = zcl_l3_fleet2=>plan( iv_run = ls_result-run_id
+                                    iv_date = zcl_l3_fleet_proof=>c_check_date
+                                    iv_stage = 1 ).
+    INSERT zosd_l3_pile FROM TABLE lt_piles.
+    lv_last = lines( lt_piles ).
+    IF lv_last < 2.
+      cl_abap_unit_assert=>fail( msg = 'stage 1 needs two piles, one to fail' ).
+    ENDIF.
+    LOOP AT lt_piles INTO ls_pile.
+      IF sy-tabix < lv_last.
+        ls_rule = zcl_l3_fleet2=>run_rule( iv_rule = ls_pile-rule_name
+                                           iv_date = zcl_l3_fleet_proof=>c_check_date
+                                           iv_run = ls_result-run_id
+                                           iv_pile = ls_pile-pile_no ).
+      ENDIF.
+    ENDLOOP.
+    COMMIT WORK.
+    lv_opened = zcl_l3_fleet2=>advance( iv_run = ls_result-run_id
+                                        iv_date = zcl_l3_fleet_proof=>c_check_date
+                                        iv_stage = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_opened exp = abap_false
+      msg = 'the gate stays shut while a pile of stage 1 is not DONE' ).
+    SELECT SINGLE status FROM zosd_l3_stage INTO lv_status WHERE run_id = ls_result-run_id AND stage_no = 2.
+    cl_abap_unit_assert=>assert_equals( act = lv_status exp = 'WAITING' msg = 'stage 2 is still WAITING' ).
+    ls_result = zcl_l3_fleet2=>collect( ls_result ).
+    COMMIT WORK.
+    lv_stage_status = stage_status( is_result = ls_result iv_stage = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_stage_status exp = 'PARTIAL'
+      msg = 'collect finds the pile without a job FAILED and stage 1 PARTIAL' ).
+    lv_stage_status = stage_status( is_result = ls_result iv_stage = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_stage_status exp = 'NOT-RUN'
+      msg = 'stage 2 never runs' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'PARTIAL' msg = 'the run is final, PARTIAL' ).
+    lv_count = staged_piles( iv_run = ls_result-run_id iv_stage = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'stage 2 was never planned' ).
+    SELECT SINGLE * FROM zosd_l3_run INTO ls_lock
+      WHERE set_name = zcl_l3_fleet2=>c_set AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    cl_abap_unit_assert=>assert_equals( act = ls_lock-status exp = 'RELEASED' msg = 'the final run released its lock' ).
+    lv_opened = zcl_l3_fleet2=>advance( iv_run = ls_result-run_id
+                                        iv_date = zcl_l3_fleet_proof=>c_check_date
+                                        iv_stage = 1 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_opened exp = abap_false msg = 'a late gate call opens nothing' ).
+  ENDMETHOD.
+
+  METHOD staged.
+    rs_result = zcl_l3_fleet2=>run( iv_date = zcl_l3_fleet_proof=>c_check_date
+                                    iv_mode = iv_mode ).
+    APPEND rs_result-run_id TO mt_runs.
+    COMMIT WORK.
+  ENDMETHOD.
+
+  METHOD staged_expected.
+    " the check rules of stage 2, called directly over the keys the filter
+    " rule answers
+    DATA lt_keys TYPE zcl_l2_ship_busy=>tt_range.
+    DATA lt_alerts TYPE string_table.
+    lt_keys = zcl_l2_ship_busy=>keys( zcl_l3_fleet_proof=>c_check_date ).
+    lt_alerts = zcl_l2_maintenance_ship=>check( iv_date = zcl_l3_fleet_proof=>c_check_date it_range = lt_keys ).
+    add_expected( EXPORTING iv_rule = zcl_l3_fleet2=>c_rule_2 iv_hash = zcl_l3_fleet2=>c_hash_2
+                            it_alerts = lt_alerts CHANGING ct_rows = rt_rows ).
+    lt_alerts = zcl_l2_grounded_ship_crew=>check( iv_date = zcl_l3_fleet_proof=>c_check_date it_range = lt_keys ).
+    add_expected( EXPORTING iv_rule = zcl_l3_fleet2=>c_rule_3 iv_hash = zcl_l3_fleet2=>c_hash_3
+                            it_alerts = lt_alerts CHANGING ct_rows = rt_rows ).
+    lt_alerts = zcl_l2_ship_captain=>check( iv_date = zcl_l3_fleet_proof=>c_check_date it_range = lt_keys ).
+    add_expected( EXPORTING iv_rule = zcl_l3_fleet2=>c_rule_4 iv_hash = zcl_l3_fleet2=>c_hash_4
+                            it_alerts = lt_alerts CHANGING ct_rows = rt_rows ).
+    lt_alerts = zcl_l2_ship_voyage_limit=>check( iv_date = zcl_l3_fleet_proof=>c_check_date it_range = lt_keys ).
+    add_expected( EXPORTING iv_rule = zcl_l3_fleet2=>c_rule_5 iv_hash = zcl_l3_fleet2=>c_hash_5
+                            it_alerts = lt_alerts CHANGING ct_rows = rt_rows ).
+    lt_alerts = zcl_l2_ship_min_crew=>check( iv_date = zcl_l3_fleet_proof=>c_check_date it_range = lt_keys ).
+    add_expected( EXPORTING iv_rule = zcl_l3_fleet2=>c_rule_6 iv_hash = zcl_l3_fleet2=>c_hash_6
+                            it_alerts = lt_alerts CHANGING ct_rows = rt_rows ).
+    lt_alerts = zcl_l2_ship_cargo_limit=>check( iv_date = zcl_l3_fleet_proof=>c_check_date it_range = lt_keys ).
+    add_expected( EXPORTING iv_rule = zcl_l3_fleet2=>c_rule_7 iv_hash = zcl_l3_fleet2=>c_hash_7
+                            it_alerts = lt_alerts CHANGING ct_rows = rt_rows ).
+    SORT rt_rows BY rule_name model_hash alert_text.
+  ENDMETHOD.
+
+  METHOD staged_logged.
+    SELECT rule_name model_hash alert_text FROM zosd_l3_alert
+      INTO CORRESPONDING FIELDS OF TABLE rt_rows
+      WHERE set_name = zcl_l3_fleet2=>c_set
+        AND check_date = zcl_l3_fleet_proof=>c_check_date
+        AND run_id = iv_run.
+    SORT rt_rows BY rule_name model_hash alert_text.
+  ENDMETHOD.
+
+  METHOD staged_piles.
+    SELECT COUNT(*) FROM zosd_l3_pile
+      WHERE set_name = zcl_l3_fleet2=>c_set
+        AND run_id = iv_run
+        AND stage_no = iv_stage.
+    rv_count = sy-dbcnt.
+  ENDMETHOD.
+
+  METHOD stage_status.
+    DATA ls_stage TYPE zcl_l3_fleet2=>ty_stage.
+    READ TABLE is_result-stages INTO ls_stage WITH KEY stage_no = iv_stage.
+    rv_status = ls_stage-status.
+  ENDMETHOD.
+
+  METHOD assert_cut.
+    " the filter cuts work: every check rule of stage 2 has one pile per two
+    " keys of the worklist, fewer than two keys per pile of every ship would give
+    DATA lv_keys TYPE i.
+    DATA lv_ships TYPE i.
+    DATA lv_per_rule TYPE i.
+    DATA lv_piles TYPE i.
+    SELECT COUNT(*) FROM zosd_l3_work WHERE run_id = iv_run AND worklist = 'busy'.
+    lv_keys = sy-dbcnt.
+    SELECT COUNT(*) FROM zosd_l2_ship.
+    lv_ships = sy-dbcnt.
+    IF lv_keys >= lv_ships.
+      cl_abap_unit_assert=>fail( msg = 'the filter keeps fewer ships than the fleet has' ).
+    ENDIF.
+    lv_per_rule = ( lv_keys + 1 ) DIV 2.
+    lv_per_rule = lv_per_rule * 6.
+    lv_piles = staged_piles( iv_run = iv_run iv_stage = 2 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_piles exp = lv_per_rule
+      msg = 'stage 2 has one pile per two worklist keys for each of its six rules' ).
+  ENDMETHOD.
+
+  METHOD wait_for_stages.
+    " collect( ) is one read; the waiting is the caller's, bounded
+    DATA lv_waited TYPE i.
+    DATA lv_limit TYPE string.
+    DATA lv_msg TYPE string.
+    DATA lv_one TYPE string.
+    DATA lv_two TYPE string.
+    DO.
+      rs_result = zcl_l3_fleet2=>collect( is_result ).
+      COMMIT WORK.
+      IF rs_result-status = 'DONE' OR rs_result-status = 'PARTIAL'.
+        RETURN.
+      ENDIF.
+      IF lv_waited >= c_wait_limit.
+        lv_limit = c_wait_limit.
+        CONDENSE lv_limit.
+        lv_one = stage_status( is_result = rs_result iv_stage = 1 ).
+        lv_two = stage_status( is_result = rs_result iv_stage = 2 ).
+        CONCATENATE 'the stages did not end within' lv_limit 'seconds: stage 1' lv_one 'stage 2' lv_two
+          INTO lv_msg SEPARATED BY space.
+        cl_abap_unit_assert=>fail( msg = lv_msg ).
+        RETURN.
+      ENDIF.
+      WAIT UP TO 1 SECONDS.
+      lv_waited = lv_waited + 1.
+    ENDDO.
   ENDMETHOD.
 
 ENDCLASS.

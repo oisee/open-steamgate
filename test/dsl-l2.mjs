@@ -13,6 +13,7 @@ import {basename, dirname, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, registryFor} from "../tools/dsl-ddic.mjs";
 import {buildRule, capWarning, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, rulePath, stepValue} from "../tools/dsl-l2.mjs";
+import {ruleKeys} from "../tools/dsl-l2-range.mjs";
 import {bump, caseDiscriminates, compareValues, conditionOf, defaultValue, shiftDate, staleDiscriminates, structureDiscriminates, thresholdDiscriminates, windowOffsetDiscriminates} from "../tools/dsl-l2-eval.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
@@ -33,7 +34,8 @@ const MIN_CAPTAINS = "src/l2demo/ship_min_captains.l2.yaml";
 const CARGO_LIMIT = "src/l2demo/ship_cargo_limit.l2.yaml";
 const MAX_CARGO = "src/l2demo/ship_max_cargo.l2.yaml";
 const RECENT = "src/l2demo/recent_voyage.l2.yaml";
-const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW, MIN_CAPTAINS, CARGO_LIMIT, MAX_CARGO, RECENT];
+const BUSY = "src/l2demo/ship_busy.l2.yaml";
+const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW, MIN_CAPTAINS, CARGO_LIMIT, MAX_CARGO, RECENT, BUSY];
 
 const escapePattern = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -197,6 +199,7 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
     // the template with every range section taken out: what it was before
     // the range existed (`{{#range}}`, `{{#outer.range}}` and their inline forms)
     const withoutRange = (template) => readFileSync(template, "utf8")
+      .replace(/^\{\{#(?:driving_keys|keys_check)\}\}\n[\s\S]*?^\{\{\/(?:driving_keys|keys_check)\}\}\n/gm, "")
       .replace(/^\{\{#(?:outer\.)?range\}\}\n[\s\S]*?^\{\{\/(?:outer\.)?range\}\}\n/gm, "")
       .replace(/\{\{#range\}\}[^\n]*?\{\{\/range\}\}/g, "");
     const at = (file, re) => readFileSync(file, "utf8").split("\n").findIndex((l) => re.test(l)) + 1;
@@ -282,6 +285,106 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
       const {results} = await runRule(file, "zcl_l2_range_mutant", {mutate: {"clas.abap": [["        AND ship~ship_id IN it_range\n", ""]]}});
       expect(results.the_range_keeps_the_inner_ship).to.equal("failed");
       expect(failed(results)).to.deep.equal(["the_range_keeps_the_inner_ship"]);
+    });
+  });
+
+  describe("keys: true, the driving keys a rule flags (L3 filter stages)", () => {
+    const BUSY_TEXT = readFileSync(BUSY, "utf8");
+    const BUSY_CLASS = "zcl_l2_ship_busy";
+    const at = (file, re) => readFileSync(file, "utf8").split("\n").findIndex((l) => re.test(l)) + 1;
+    const busyVariant = (name, from, to, text = BUSY_TEXT) => {
+      expect(text, `the rule has ${from}`).to.include(from);
+      const file = join(scratch, `${name}.l2.yaml`);
+      writeFileSync(file, text.replace(from, to));
+      return file;
+    };
+    // the templates with every keys section taken out: what they were before keys existed
+    const withoutKeys = (template) => readFileSync(template, "utf8")
+      .replace(/^\{\{#(?:driving_keys|keys_check)\}\}\n[\s\S]*?^\{\{\/(?:driving_keys|keys_check)\}\}\n/gm, "");
+
+    it("the interpreter answers each flagged key once, sorted; the ABAP is the check's query, DISTINCT, never a SELECT per row", () => {
+      const model = compileRule(BUSY, {registry});
+      expect(model.driving_keys).to.include({table: "zosd_l2_ship", field: "ship_id", source: "ship~ship_id", rule_line: at(BUSY, /^keys:/)});
+      const rows = {zosd_l2_ship: [["S004", "A"], ["S001", "A"], ["S002", "D"]].map(([ship_id, status]) => ({ship_id, name: ship_id, status})),
+        zosd_l2_voy: [["V1", "S004"], ["V2", "S004"], ["V3", "S001"], ["V4", "S002"], ["V5", "S004"]].map(([voyage_id, ship_id]) => ({voyage_id, ship_id, dep_date: "20261005"}))};
+      expect(evaluate(model, rows, {date: "20261001", $range: []})).to.have.length(4);
+      expect(ruleKeys(model, rows, {date: "20261001", $range: []}, evaluate, compareValues)).to.deep.equal(["S001", "S004"]);
+      expect(ruleKeys(model, rows, {date: "20261001", $range: [{sign: "I", option: "EQ", low: "S004"}]}, evaluate, compareValues)).to.deep.equal(["S004"]);
+      const check = readFileSync(join(OUT, `${BUSY_CLASS}.clas.abap`), "utf8");
+      const keys = check.slice(check.indexOf("  METHOD keys."));
+      expect(keys).to.include("    SELECT DISTINCT ship~ship_id\n      FROM zosd_l2_ship AS ship\n        INNER JOIN zosd_l2_voy AS voy\n");
+      expect(keys).to.include("        AND ship~ship_id IN it_range\n      ORDER BY ship~ship_id.\n    SORT lt_keys.\n    DELETE ADJACENT DUPLICATES FROM lt_keys.\n");
+      expect(keys.match(/^ +SELECT\b/gm), "one query").to.have.length(1);
+      expect(keys, "no SELECT inside a loop").to.not.match(/LOOP AT[\s\S]*SELECT/);
+    });
+
+    it("the keys method traces to the rule's keys: line, its query to the rule's own lines", () => {
+      const trace = JSON.parse(readFileSync(join(OUT, `${BUSY_CLASS}.clas.trace.json`), "utf8"));
+      const lines = readFileSync(join(OUT, `${BUSY_CLASS}.clas.abap`), "utf8").split("\n");
+      const of = (re) => trace.lines.find((e) => re.test(lines[e.line - 1]));
+      expect(of(/^  METHOD keys\.$/)).to.include({node: "rule/ship-busy/keys", rule_line: at(BUSY, /^keys:/)});
+      expect(of(/^    CLASS-METHODS keys$/)).to.include({node: "rule/ship-busy/keys", rule_line: at(BUSY, /^keys:/)});
+      expect(of(/SELECT DISTINCT/).rule_line).to.be.within(1, BUSY_TEXT.split("\n").length);
+      const tests = JSON.parse(readFileSync(join(OUT, `${BUSY_CLASS}.clas.testclasses.trace.json`), "utf8"));
+      const testLines = readFileSync(join(OUT, `${BUSY_CLASS}.clas.testclasses.abap`), "utf8").split("\n");
+      const given = tests.lines.filter((e) => /=>keys\(/.test(testLines[e.line - 1]));
+      expect(given.length, "every test asserts keys( )").to.be.greaterThan(5);
+      expect(given.find((e) => e.node === "rule/ship-busy/example/several voyages one key/keys"))
+        .to.include({rule_line: at(BUSY, /expect_keys: \[S001, S003\]/)});
+    });
+
+    it("a rule without keys: renders what the templates rendered before keys existed", async () => {
+      const {renderModel} = await import("../tools/dsl-l2.mjs");
+      const {renderRecipe} = await import("../tools/dsl-abap.mjs");
+      for (const rule of [RULE, REQUIRE, LIMIT, RECENT]) {
+        for (const [template, file] of [["recipes/l2-check/template.tpl", "clas.abap"], ["recipes/l2-check-test/template.tpl", "clas.testclasses.abap"]]) {
+          const model = renderModel(compileRule(rule, {registry}));
+          expect(model.driving_keys).to.equal(undefined);
+          const stripped = join(scratch, `no-keys-${basename(template)}`);
+          writeFileSync(stripped, withoutKeys(template));
+          expect(readFileSync(stripped, "utf8"), "every keys line sits in a keys section").to.not.match(/driving_keys|keys_check|=>keys|METHOD keys/);
+          const before = (await renderRecipe(model, stripped)).text;
+          expect((await renderRecipe(model, template)).text, `${rule} ${file}`).to.equal(before);
+          expect(readFileSync(join(OUT, `${model.class}.${file}`), "utf8")).to.equal(before);
+        }
+      }
+    });
+
+    it("the generated tests pass: every example and derived case asserts keys( ) beside check( )", async () => {
+      const file = busyVariant("keys-green", `class: ${BUSY_CLASS}`, "class: zcl_l2_keys_green");
+      const {results, messages, model} = await runRule(file, "zcl_l2_keys_green");
+      expect(failed(results), JSON.stringify(messages)).to.deep.equal([]);
+      expect(model.cases.length).to.be.greaterThan(2);
+      expect([...model.examples, ...model.cases].every((t) => t.keys_check)).to.equal(true);
+    });
+
+    it("mutant: keys( ) returning duplicates fails the example whose ship is flagged by three voyages", async () => {
+      const file = busyVariant("keys-dupes", `class: ${BUSY_CLASS}`, "class: zcl_l2_keys_dupes");
+      const {results} = await runRule(file, "zcl_l2_keys_dupes", {mutate: {"clas.abap": [
+        ["    SELECT DISTINCT ship~ship_id\n", "    SELECT ship~ship_id\n"], ["    DELETE ADJACENT DUPLICATES FROM lt_keys.\n", ""]]}});
+      expect(results.several_voyages_one_key).to.equal("failed");
+      expect(results.the_range_keeps_the_inner_ship).to.equal("failed");
+      expect(results.a_voyage_ahead).to.equal("passed");
+    });
+
+    for (const [what, from, to, message, line] of [
+      ["keys that are not true or false", "\nkeys: true\n", "\nkeys: yes\n", /keys is true or false, not "yes"/, /^keys:/],
+      ["keys without a range: line", "range: ship.ship_id\n", "", /keys: true needs a range: line/, /^keys:/],
+      ["expect_keys that the rule does not flag", "    expect_keys: [S001, S003]", "    expect_keys: [S003, S001]", /expect_keys \["S003","S001"\], but the rule flags \["S001","S003"\]/, /expect_keys: \[S003, S001\]/],
+      ["expect_keys in a rule without keys: true", "\nkeys: true\n", "\n", /expect_keys needs keys: true in the rule/, /expect_keys: \[S001\]$/],
+    ]) {
+      it(`refuses ${what} at its line`, () => {
+        const file = busyVariant(`keys-${what.replace(/\W+/g, "-")}`, from, to);
+        const want = at(file, line);
+        expect(want).to.be.greaterThan(0);
+        expect(() => compileRule(file, {registry})).to.throw(RuleError, new RegExp(`:${want}: ${message.source}`));
+      });
+    }
+    it("refuses keys: true on a limit: rule, whose threshold is decided over the ordered rows", () => {
+      const text = readFileSync(LIMIT, "utf8").replace("range: ship.ship_id\n", "range: ship.ship_id\nkeys: true\n");
+      const file = join(scratch, "keys-limit.l2.yaml");
+      writeFileSync(file, text);
+      expect(() => compileRule(file, {registry})).to.throw(RuleError, new RegExp(`:${at(file, /^keys:/)}: keys: true is for a forbid: or require: rule`));
     });
   });
 

@@ -22,6 +22,7 @@ import {lineOf} from "./dsl-yaml-lines.mjs";
 import {LENGTHLESS} from "./dsl-l2-params.mjs";
 import {compileRule, lineIndex, misfit, modelHash, renderModel, rulePath, RuleError} from "./dsl-l2.mjs";
 import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
+import {compileSchedule, compileStages, explainStage, readStages, worklistVariants} from "./dsl-l3-stages.mjs";
 
 export const SET_TEMPLATE = "recipes/l3-set/template.tpl";
 export const JOB_TEMPLATE = "recipes/l3-job/template.tpl";
@@ -31,7 +32,7 @@ export const PORT_TEMPLATES = {
   factory: "recipes/l3-ports/factory.tpl", exception: "recipes/l3-ports/exception.tpl",
   "source-table": "recipes/l3-ports/source-table.tpl", "source-mem": "recipes/l3-ports/source-mem.tpl",
   "sink-log": "recipes/l3-ports/sink-log.tpl", "sink-dummy": "recipes/l3-ports/sink-dummy.tpl",
-  "sink-capture": "recipes/l3-ports/sink-capture.tpl",
+  "sink-capture": "recipes/l3-ports/sink-capture.tpl", "source-worklist": "recipes/l3-ports/source-worklist.tpl",
 };
 // what a port of each kind may be served by without a class of its own
 export const GENERATED = {source: ["table", "dummy", "capture"], sink: ["log", "dummy", "capture"]};
@@ -48,7 +49,7 @@ export const WIDTH = {set: 16, rule: 60, hash: 71, file: 128, jobname: 32};
 // L3_<SET>_<nn> are made of it
 export const SET_NAME = /^[a-z][a-z0-9_]{0,12}$/;
 // the job report's own selection fields; a set parameter's field is another name
-export const REPORT_PARAMETERS = ["p_rule", "p_date", "p_run", "p_pile", "p_bind"];
+export const REPORT_PARAMETERS = ["p_rule", "p_date", "p_run", "p_pile", "p_bind", "p_mode"];
 // ---------------------------------------------------------------------------
 // static checks on ABAP source, read with abaplint (statements, not text)
 
@@ -119,7 +120,7 @@ export function classShape(text, name, className) {
   return shape.line === undefined ? undefined : shape;
 }
 
-const KEYS = ["set", "title", "class", "report", "date", "rules", "params", "piles", "ports", "bindings"];
+const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule"];
 const PORT_KEYS = ["kind", "table", "key", "group", "seq", "variants"];
 const PORT_NAME = /^[a-z][a-z0-9_]{0,11}$/;
 const RULE_KEYS = ["rule", "enabled"];
@@ -182,17 +183,24 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   const date = scalar("date", true);
   if (date !== "$date" && date !== "today") fail(line("date"), `date is $date (the caller passes the check date) or today ($date, the current date when the caller passes none); other parameters are params:`);
 
-  if (!Array.isArray(doc.rules)) fail(line("rules"), "rules is a list of {rule: <file.l2.yaml>, enabled: true|false}");
-  if (!doc.rules.length) fail(line("rules"), "a set needs at least one rule");
+  // stages: (docs/dsl-l3.md, "Stages, filters and a schedule") list the rules
+  // stage by stage; a set without them is one implicit stage, as before
+  const stageDocs = doc.stages === undefined ? undefined : readStages(doc, {line, fail});
+  if (!stageDocs) {
+    if (!Array.isArray(doc.rules)) fail(line("rules"), "rules is a list of {rule: <file.l2.yaml>, enabled: true|false}");
+    if (!doc.rules.length) fail(line("rules"), "a set needs at least one rule");
+  }
+  const listed = stageDocs ? stageDocs.flatMap((st) => st.entries.map((e) => ({...e, s: st.s})))
+    : doc.rules.map((entry, i) => ({entry, path: `rules/${i}`}));
   const seen = {file: new Map(), name: new Map(), class: new Map()};
-  const all = doc.rules.map((entry, i) => {
-    const at = line(`rules/${i}`);
+  const all = listed.map(({entry, path: base, s}) => {
+    const at = line(base);
     if (typeof entry === "string") entry = {rule: entry};
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) fail(at, "a rule entry is {rule: <file.l2.yaml>} with an optional enabled: true|false");
-    for (const key of Object.keys(entry)) if (!RULE_KEYS.includes(key)) fail(line(`rules/${i}/${key}`), `unknown key ${key} in a rule entry (${RULE_KEYS.join(", ")})`);
+    for (const key of Object.keys(entry)) if (!RULE_KEYS.includes(key)) fail(line(`${base}/${key}`), `unknown key ${key} in a rule entry (${RULE_KEYS.join(", ")})`);
     if (typeof entry.rule !== "string" || !entry.rule.endsWith(".l2.yaml")) fail(at, "rule names a .l2.yaml file, relative to the set");
     const enabled = entry.enabled ?? "true";
-    if (enabled !== "true" && enabled !== "false") fail(line(`rules/${i}/enabled`), `enabled is true or false, not ${JSON.stringify(enabled)}`);
+    if (enabled !== "true" && enabled !== "false") fail(line(`${base}/enabled`), `enabled is true or false, not ${JSON.stringify(enabled)}`);
     const ruleFile = resolvePath(dirname(file), entry.rule);
     if (!existsSync(ruleFile)) fail(at, `rule file ${entry.rule} does not exist (${path(ruleFile)})`);
     const twice = (kind, key, what) => {
@@ -226,11 +234,11 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     }
     const recorded = compiled.source;
     if (recorded.length > WIDTH.file) fail(at, `rule path ${recorded} is longer than ${WIDTH.file} characters, the width of ZOSD_L3_ALERT-RULE_FILE`);
-    return {at, enabled: enabled === "true", compiled, hash, recorded};
+    return {at, enabled: enabled === "true", compiled, hash, recorded, s};
   });
   const enabled = all.filter((r) => r.enabled);
-  if (!enabled.length) fail(line("rules"), "every rule of the set is disabled; a set runs at least one");
-  if (enabled.length > 99) fail(line("rules"), "a set runs at most 99 rules (the job name numbers them in two digits)");
+  if (!enabled.length) fail(line(stageDocs ? "stages" : "rules"), "every rule of the set is disabled; a set runs at least one");
+  if (enabled.length > 99) fail(line(stageDocs ? "stages" : "rules"), "a set runs at most 99 rules (the job name numbers them in two digits)");
 
   // set parameters (docs/dsl-l3.md, "Piles and set parameters"): one per
   // name an enabled rule declares as an L2 parameter, of the same type
@@ -407,11 +415,22 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     // the alert log's group gains the pile: a rerun of one pile replaces that pile's rows only
     sinks[0].group.push({name: "pile_no", lead: "AND", "@id": piles["@id"], set_line: piles.set_line});
   }
+  // the stages against the ports: worklists, pile sources, the worklist variant of a port
+  let staged;
+  if (stageDocs) {
+    staged = compileStages(stageDocs, all, {id, set, ports, line, fail, columnsOf, asMap});
+    worklistVariants(ports, staged.worklists, {id, set, fail, line});
+    // every rule of a staged set runs in piles (pile 0 when its stage is not piled)
+    sinks[0].group.push({name: "pile_no", lead: "AND", "@id": `${id}/stages`, set_line: line("stages")});
+  }
+  const schedule = compileSchedule(doc, {id, set, line, fail, staged: Boolean(staged)});
   const SET = set.toUpperCase();
+  const stageOf = (r) => staged?.stages[r.s];
   // a piled rule's range traces to its range: line in the rule file
   const pileOf = (r) => {
     const range = r.compiled.range;
-    if (!range || range.table !== piles.source.table || range.field !== piles.source.key) return {unpiled: true};
+    const source = staged ? stageOf(r).piles?.source : piles.source;
+    if (!source || !range || range.table !== source.table || range.field !== source.key) return {unpiled: true};
     return {piled: true, range: {"@id": `${id}/rule/${r.compiled.rule}/range`, set_line: r.at, rule_file: r.recorded, rule_line: range.rule_line}};
   };
   // the set parameters a rule's check receives; `fallback`: the rule's own
@@ -427,10 +446,11 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     // the alert line of the rule: what an alert row names; a rule whose
     // clauses carry their own alerts names its root line
     alert_line: String(r.compiled.alert?.rule_line ?? r.compiled.rule_line), "alert_line@type": {built_in: "INT4"},
-    ...(n ? {index: String(n), jobname: `L3_${SET}_${String(n).padStart(2, "0")}`, "jobname@type": CHAR(WIDTH.jobname)} : {}),
-    ...(piles ? pileOf(r) : {}),
+    ...(n ? {index: String(n), jobname: `L3_${SET}_${staged ? stageOf(r).no : ""}${String(n).padStart(2, "0")}`, "jobname@type": CHAR(WIDTH.jobname)} : {}),
+    ...(piles || staged ? pileOf(r) : {}),
     ...(argsOf(r).length ? {param_args: argsOf(r)} : {}),
-    ...((piles && pileOf(r).piled) || argsOf(r).length ? {has_args: true} : {}),
+    ...(((piles || staged) && pileOf(r).piled) || argsOf(r).length ? {has_args: true} : {}),
+    ...(staged ? {stage_no: stageOf(r).no, "stage_no@type": {built_in: "INT4"}, ...(stageOf(r).filter ? {filter: true, worklist: stageOf(r).worklist.name, "worklist@type": CHAR(16)} : {check: true})} : {}),
   });
   const model = {
     "@id": id, set_line: line("set"),
@@ -441,9 +461,16 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     ports, sources: ports.filter((p) => p.is_source).map((p, i) => ({...p, index: String(i + 1)})), sink: sinks[0],
     // with_params: the lines every set parameter shares (ty_params, is_params), traced to params:
     ...(params.length ? {params, with_params: {"@id": `${id}/params`, set_line: line("params")}} : {}), ...(piles ? {piles} : {}),
+    // planned: the plan machinery a piled and a staged set share (lock, finalise, the plan rows)
+    ...(piles ? {planned: piles} : {}), ...(staged ? {planned: {"@id": `${id}/stages`, set_line: line("stages")},
+      staged: {"@id": `${id}/stages`, set_line: line("stages"), count: String(staged.stages.length), "count@type": {built_in: "INT4"}},
+      stages: staged.stages} : {}), ...(schedule ? {schedule} : {}),
     rules: enabled.map((r, i) => node(r, i + 1)),
     disabled: all.filter((r) => !r.enabled).map((r) => node(r)),
   };
+  // each stage's rules, for the stage's plan; a worklist variant makes the factory refuse binding it
+  if (staged) for (const stage of staged.stages) stage.members = model.rules.filter((r) => r.stage_no === stage.no);
+  if (ports.some((p) => p.has_worklist)) model.with_worklist = {"@id": `${id}/stages`, set_line: line("stages")};
   Object.defineProperty(model, "where", {value: where});
   return model;
 }
@@ -580,7 +607,7 @@ async function renderPorts(model) {
       if (!variant.generated) continue;
       const root = {...portRoot, "@id": variant["@id"], set_line: variant.set_line, variant: variant.name, class: variant.class,
         capture: variant.is_capture, dummy: variant.is_dummy};
-      const template = port.is_source ? (variant.is_table ? "source-table" : "source-mem")
+      const template = port.is_source ? (variant.is_table ? "source-table" : variant.is_worklist ? "source-worklist" : "source-mem")
         : variant.is_log ? "sink-log" : variant.is_dummy ? "sink-dummy" : "sink-capture";
       await one(variant.class, "clas", root, template, `L3 port ${port.name}, variant ${variant.name}`);
     }
@@ -732,7 +759,7 @@ export async function explainAlert(key, {sets = setFiles(), db, row} = {}) {
     `line    ${entry.file}:${ruleLine}: ${(ruleLines[ruleLine - 1] ?? "").trim()}`,
     `check   ${entry.check_class}.clas.abap, ${generated.length} line(s) trace to rule line ${ruleLine}:`,
     ...generated.map((n) => `  ${String(n).padStart(5)}  ${checkLines[n - 1]}`),
-    pileLine(model, entry, k, found.file, alertRowFound?.pile),
+    ...(model.staged ? explainStage(model, entry, k, (n) => `${path(found.file)}:${n}`, alertRowFound?.pile) : [pileLine(model, entry, k, found.file, alertRowFound?.pile)]),
     `runner  ${model.class}.clas.abap lines ${compress(runnerLines)} trace to set line ${entry.set_line}`,
   ];
   return {text: out.join("\n"), set: found.file, rule: entry, ruleLine, generated, runnerLines, version: version.where};

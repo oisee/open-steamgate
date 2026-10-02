@@ -52,3 +52,49 @@ export function inRange(rows, type, value, compareValues) {
     return r.option === "EQ" ? low === 0 : low >= 0 && compareValues(type, value, type, r.high) <= 0;
   });
 }
+
+// ---------------------------------------------------------------------------
+// keys: true (docs/dsl-l2.md, "Keys"): a rule with a range: may also hand back
+// the driving keys it flags, `keys( iv_date, it_range, <params> ) RETURNING
+// rt_keys` (a RANGE OF the range field, I EQ, sorted, one row per key). It is
+// the check's own query with the key field only, DISTINCT; an L3 filter stage
+// fills a worklist with it (docs/dsl-l3.md, "Stages, filters and a schedule").
+
+const STRG = {built_in: "STRG"};
+
+// the rule's `keys:` line: undefined without one (or with keys: false)
+export function compileKeys({doc, range, kind, id, line, failAt}) {
+  if (doc.keys === undefined) return undefined;
+  if (doc.keys !== "true" && doc.keys !== "false") failAt(line("keys"))(`keys is true or false, not ${JSON.stringify(doc.keys)}`);
+  if (doc.keys === "false") return undefined;
+  if (!range) failAt(line("keys"))("keys: true needs a range: line; the keys are values of the range field");
+  if (kind === "limit") failAt(line("keys"))("keys: true is for a forbid: or require: rule; a limit: rule decides its threshold in ABAP over the ordered rows, so its keys are not one SELECT DISTINCT");
+  return {"@id": `${id}/keys`, rule_line: line("keys"), table: range.table, field: range.field, source: range.source};
+}
+
+// the interpreter's keys: the alert of every flagged row replaced by its
+// driving key, so every kind of rule answers through the one evaluator
+export function ruleKeys(model, rows, params, evaluate, compareValues) {
+  const part = {alias: model.for.alias, column: model.range.field};
+  const swap = (owner) => owner?.alert ? {...owner, alert: {...owner.alert, parts: [part]}} : owner;
+  const type = model.range.type ?? model.ddic[model.range.table].fields[model.range.field];
+  return [...new Set(evaluate({...swap(model), clauses: model.clauses.map(swap)}, rows, params))]
+    .sort((a, b) => compareValues(type, a, type, b));
+}
+
+// what a test of a keys rule asserts about keys( ): `given` (an example's
+// expect_keys, checked against the interpreter here) or the interpreter's own answer
+export function keysCheck({model, keys, rows, params, given, at, line, failAt, evaluate, compareValues, testId, label}) {
+  if (!keys) {
+    if (given !== undefined) failAt(line(at))("expect_keys needs keys: true in the rule");
+    return undefined;
+  }
+  const got = ruleKeys(model, rows, params, evaluate, compareValues);
+  if (given !== undefined) {
+    if (!Array.isArray(given) || given.some((k) => typeof k !== "string")) failAt(line(at))("expect_keys is a list of key values");
+    if (JSON.stringify(given) !== JSON.stringify(got)) failAt(line(at))(`expect_keys ${JSON.stringify(given)}, but the rule flags ${JSON.stringify(got)} (sorted, each once)`);
+  }
+  const ruleLine = given !== undefined ? line(at) : keys.rule_line;
+  return {"@id": `${testId}/keys`, rule_line: ruleLine, call: `${model.class}=>keys`, label: `${label} (keys)`, "label@type": STRG,
+    values: got.map((value, k) => ({"@id": `${testId}/keys/${k + 1}`, rule_line: ruleLine, value, "value@type": model.range.type}))};
+}

@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet.l3.yaml",
  "template": "recipes/l3-ports/exception.tpl",
- "model": "sha256:d8d3b467bfdca9bd4fbe71883d889f1836e03c6b7032575a849b27b4e04cef3c",
+ "model": "sha256:982ff9320b096c0fa7227276a9254c142f7dce0c1e3594ceacb680e10a5c2112",
  "rules": {
   "maintenance-ship-no-future-voyage": {
    "file": "src/l2demo/maintenance_ship.l2.yaml",
