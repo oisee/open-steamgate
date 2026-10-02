@@ -32,24 +32,32 @@ export function transpileIssues(text) {
   return [...byObject.values()];
 }
 
-/** text with every absolute path cut to what follows the tree's root, or to
- *  its last segment when it is not under it. The places a path of this
- *  machine starts with (the tree, the working directory, the home and temp
- *  folders) are cut as literals first, so a folder name with a space in it
- *  goes too; then any remaining absolute path, one segment or many */
+/** text with no absolute path of a machine in it. Known roots first, as
+ *  literals (so a space in them is no boundary): the tree's root and the
+ *  working directory become relative, the home folder `~`, the temp folder
+ *  `<tmp>`, the folders node_modules lives in `node_modules`. Any absolute
+ *  path left is not guessed at: everything from its start to the last
+ *  separator on that line becomes `<path>`, so a folder name with a space in
+ *  it is cut with the rest and only the file's own name stays. Over-cutting
+ *  a sentence that names two paths is the side to err on. */
 export function withoutHostPaths(text, root = undefined) {
   let out = String(text ?? "");
-  const prefixes = [root, process.cwd(), homedir(), tmpdir()]
-    .filter((p) => typeof p === "string" && p.length > 1)
-    .map((p) => p.replace(/[\\/]+$/, ""))
-    .sort((a, b) => b.length - a.length);
-  for (const prefix of prefixes) {
-    out = out.split(prefix + "/").join("").split(prefix + "\\").join("").split(prefix).join(".");
+  const known = [
+    [root, ""], [process.cwd(), ""], [homedir(), "~/"], [tmpdir(), "<tmp>/"],
+  ].filter(([p]) => typeof p === "string" && p.length > 1)
+    .map(([p, as]) => [p.replace(/[\\/]+$/, ""), as])
+    .sort((a, b) => b[0].length - a[0].length);
+  for (const [prefix, as] of known) {
+    for (const spelled of new Set([prefix, prefix.split("\\").join("/"), prefix.split("/").join("\\")])) {
+      out = out.split(spelled + "/").join(as).split(spelled + "\\").join(as.replace("/", "\\"));
+      out = out.split(spelled).join(as === "" ? "." : as.slice(0, -1));
+    }
   }
-  // a user's home on any machine, whose name may hold a space
-  out = out.replace(/(?:\/home|\/Users|[A-Za-z]:\\Users|[A-Za-z]:\/Users)[\\/][^\\/\n]+[\\/]/g, "");
-  // POSIX absolute paths, one segment or more, and Windows drive paths
-  out = out.replace(/(^|[\s"'(=:,;[])\/+(?:[^\s"'()/:,;\]]+\/+)*([^\s"'()/:,;\]]+)/g, (m, lead, last) => `${lead}${last}`);
-  out = out.replace(/(^|[\s"'(=:,;[])[A-Za-z]:[\\/](?:[^\s"'()\\/]+[\\/])*([^\s"'()\\/]+)/g, (m, lead, last) => `${lead}${last}`);
+  // wherever node_modules is, what is inside it is the package's own path
+  out = out.replace(/(^|[\s"'(=,;[]|file:\/\/)(?:[A-Za-z]:)?[\\/][^\n"'<>]*?[\\/]node_modules[\\/]/g, (m, lead) => `${lead}node_modules/`);
+  // anything absolute that is left, up to its last separator on the line
+  out = out.replace(/(^|[\s"'(=:,;[])(?:[A-Za-z]:[\\/]|[\\/])[^\n"'<>]*[\\/]/g, (m, lead) => `${lead}<path>/`);
+  // and a path of one segment (`/secret`) is a path too
+  out = out.replace(/(^|[\s"'(=:,;[])(?:[A-Za-z]:)?[\\/](?=[^\s\\/])/g, (m, lead) => `${lead}<path>/`);
   return out;
 }

@@ -19,8 +19,9 @@ import {ddlsIssues} from "./osd-store-ddls.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
-import {hashOf, inputsOf, loadConfig} from "./osd-build.mjs";
+import {hashOf, inputsOf, loadConfig, normalPath} from "./osd-build.mjs";
 import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
+import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
 
 import {basename, dirname, join, relative, resolve} from "node:path";
 import * as abaplint from "@abaplint/core";
@@ -223,15 +224,20 @@ export class ObjectStore {
     } catch (error) {
       if (error.code !== "ENOENT" && existsSync(file)) {
         // unreadable, and not by a crash of ours (the replace is atomic): kept
-        // aside, and every active copy kept, so nothing is lost by guessing
-        console.log(`inactive: ${file} is unreadable (${error.message}); kept aside, nothing removed`);
+        // aside, and every active copy kept
+        console.log(`inactive: ${file} is unreadable (${error.message}); kept aside, the set is read off the active copies`);
         try {
           renameSync(file, `${file}.unreadable-${Date.now()}`);
         } catch {
           // read-only
         }
-        this.#keepOrphans = true;
       }
+      // **Fail closed.** No set, or none that can be read, while active
+      // copies exist: every object with a copy is inactive -- a copy is made
+      // only for one -- and what its saved files should hold is unknown, so
+      // it is "changed outside, inactive until activated". An empty set here
+      // built the saved source of a broken class at the next publication.
+      this.#recoverFromCopies();
       return;
     }
     let changed = false;
@@ -251,6 +257,25 @@ export class ObjectStore {
     this.#dropOrphanCopies();
   }
 
+  // the set read off build/inactive/active: each copy names a file of the
+  // tree, the file names its object. A copy whose object is gone is kept
+  // (nothing is removed on a guess) and builds nothing (#overlay).
+  #recoverFromCopies() {
+    const folder = join(this.root, this.inactiveDir, "active");
+    if (!existsSync(folder)) return;
+    const copies = new Set(walkFiles(folder).map((f) => relative(folder, f).split("\\").join("/")));
+    if (copies.size === 0) return;
+    this.#keepOrphans = true;
+    for (const entry of this.#entries().values()) {
+      const files = this.#filesOfEntry(entry);
+      if (!files.some((f) => copies.has(f.split("\\").join("/")))) continue;
+      const key = `${entry.type} ${entry.name}`;
+      this.inactive.add(key);
+      this.#saved.set(key, {files, digest: this.#digestOf(files), outside: true});
+    }
+    if (this.inactive.size > 0) this.#saveInactive();
+  }
+
   #saved = new Map();
   #keepOrphans = false;
 
@@ -262,7 +287,7 @@ export class ObjectStore {
     if (!existsSync(folder)) return;
     const owned = new Set([...this.#saved.values()].flatMap((r) => r.files.map((f) => resolve(this.root, this.#snapshotOf(f)))));
     for (const file of walkFiles(folder)) {
-      if (!owned.has(resolve(file))) rmSync(file, {force: true});
+      if (!owned.has(resolve(file))) removeDurable(file);
     }
   }
 
@@ -283,19 +308,15 @@ export class ObjectStore {
       if (!this.inactive.has(key)) this.#saved.delete(key);
     }
     if (this.inactive.size === 0 && !existsSync(dir)) return;
-    mkdirSync(dir, {recursive: true});
+    mkdirDurable(dir);
     const inactive = Object.fromEntries([...this.#saved.entries()].sort(([a], [b]) => a.localeCompare(b)));
     const target = join(dir, "inactive.json");
     const temp = `${target}.${process.pid}.tmp`;
-    const fd = openSync(temp, "w");
-    try {
-      writeSync(fd, JSON.stringify({inactive}, null, 1) + "\n");
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
+    // the bytes, flushed; then the name, flushed: durable once this returns
+    writeDurable(temp, JSON.stringify({inactive}, null, 1) + "\n");
     this.#crash("save:before-rename");
-    renameSync(temp, target);
+    renameDurable(temp, target);
+    this.#crash("save:after-rename");
   }
 
   // every file of one object in the tree: the source, a class's includes,
@@ -328,14 +349,16 @@ export class ObjectStore {
     for (const file of this.#filesOfEntry(entry)) {
       if (!existsSync(join(this.root, file))) continue;
       const copy = join(this.root, this.#snapshotOf(file));
-      mkdirSync(dirname(copy), {recursive: true});
-      copyFileSync(join(this.root, file), copy);
+      mkdirDurable(dirname(copy));
+      copyDurable(join(this.root, file), copy);
+      this.#crash("keep:after-copy");
     }
   }
 
   #dropActiveCopy(entry) {
     for (const file of this.#filesOfEntry(entry)) {
-      rmSync(join(this.root, this.#snapshotOf(file)), {force: true});
+      const copy = join(this.root, this.#snapshotOf(file));
+      if (existsSync(copy)) removeDurable(copy);
     }
   }
 
@@ -354,6 +377,8 @@ export class ObjectStore {
     if (!this.inactive.has(key)) return;
     const entry = this.find(type, name);
     this.inactive.delete(key);
+    // the removal is durable (#saveInactive returns after the rename and
+    // its directory are flushed) before any copy goes
     this.#saveInactive();
     this.#crash("activate:before-copies");
     if (entry !== undefined) this.#dropActiveCopy(entry);
@@ -504,7 +529,7 @@ export class ObjectStore {
     const [type, ...rest] = key.split(" ");
     const entry = this.find(type, rest.join(" "));
     if (entry === undefined) return undefined;
-    return this.#revisionOf(entry, (file) => digests.get(join(this.root, file)) ?? digests.get(resolve(this.root, file)) ?? "");
+    return this.#revisionOf(entry, (file) => digests.get(normalPath(join(this.root, file))) ?? "");
   }
 
   // ---------------------------------------------------------------- index
@@ -1837,8 +1862,11 @@ export class ObjectStore {
       const overlay = this.overlay(activating);
       // what this build read of the objects it activates: the revision a
       // completion must match, not the bytes on disk when it completes
-      const built = (digests) => digests === undefined ? undefined
-        : Object.fromEntries([...activating].map((key) => [key, this.#builtRevision(key, digests)]));
+      const built = (read) => {
+        if (read === undefined) return undefined;
+        const digests = new Map([...read].map(([file, digest]) => [normalPath(file), digest]));
+        return Object.fromEntries([...activating].map((key) => [key, this.#builtRevision(key, digests)]));
+      };
       if (w.on === true && overlay !== undefined && w.compiler !== undefined) {
         // the warm registry holds the tree as saved, inactive objects
         // included; a build that must leave some out is a cold one

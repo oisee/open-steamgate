@@ -39,7 +39,7 @@ describe("tools/adt-facade: a failed activation stays inactive", function () {
     mkdirSync(join(root, "src"));
     writeFileSync(join(root, "abaplint.jsonc"), readFileSync("abaplint.jsonc", "utf8"));
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
-      input_folder: "src", input_filter: [], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
+      input_folder: "src", input_filter: [], exclude_filter: ["\\.ddls\\."], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
       options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
     }));
     writeFileSync(join(root, "package.json"), "{}");
@@ -278,6 +278,107 @@ ENDCLASS.
     expect(ok(answer), answer.xml).to.equal(true);
     expect(answer.build).to.match(/^cold; recycled after a warm build/);
     expect(answer.build).not.to.match(/\/home|some user/);
-    expect(withoutHostPaths("at /secret and C:\\Users\\Al Ice\\x\\y.abap", root)).to.equal("at secret and x\\y.abap");
+    expect(withoutHostPaths("at /secret", root)).to.equal("at <path>/secret");
+  });
+
+  describe("the set fails closed, and every step is durable before the next", () => {
+    const restart = () => new ObjectStore({root, libs: []});
+    const saveBroken = async () => {
+      store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+      expect(ok(await activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+      store.write("CLAS", "ZCL_OSD_ACT", CLASS("lv_not_declared"));
+    };
+
+    for (const [what, damage] of [
+      ["truncated", (file) => writeFileSync(file, "")],
+      ["missing", (file) => rmSync(file)],
+    ]) {
+      it(`a ${what} set is read back off the active copies, and the broken save is not built`, async () => {
+        await saveBroken();
+        damage(join(root, "build", "inactive", "inactive.json"));
+        const next = restart();
+        expect(next.inactiveObjects().map((o) => o.name)).to.deep.equal(["ZCL_OSD_ACT"]);
+        next.buildOptions = {generators: false};
+        next.write("PROG", "ZOSD_ACT_OK", TRIVIAL("ZOSD_ACT_OK"));
+        const published = await next.publish({activate: [{type: "PROG", name: "ZOSD_ACT_OK"}]});
+        expect(published.ok, published.transpile?.error).to.equal(true);
+        expect(live("zcl_osd_act.clas.mjs")).to.contain("hello");
+      });
+    }
+
+    it("a save is copy, then the set, then the source; an activation the set, then the copies -- each name flushed", async () => {
+      const {traceDurable} = await import("../tools/osd-durable.mjs");
+      store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+      expect(ok(await activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+      const steps = [];
+      traceDurable((step, path) => steps.push(`${step} ${path.replace(root + "/", "")}`));
+      try {
+        store.write("CLAS", "ZCL_OSD_ACT", CLASS("'newer'"));
+        const copy = steps.findIndex((s) => s.startsWith("copy build/inactive/active/"));
+        const renamed = steps.findIndex((s) => s === "rename build/inactive/inactive.json");
+        expect(copy, steps.join("\n")).to.be.at.least(0);
+        expect(steps[copy + 1], "the copy's name flushed").to.match(/^fsync-dir build\/inactive\/active\//);
+        expect(renamed, steps.join("\n")).to.be.greaterThan(copy);
+        expect(steps[renamed + 1]).to.equal("fsync-dir build/inactive");
+        steps.length = 0;
+        expect(store.completeActivation(store.activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+        const set = steps.indexOf("fsync-dir build/inactive");
+        const removed = steps.findIndex((s) => s.startsWith("remove build/inactive/active/"));
+        expect(set, steps.join("\n")).to.be.at.least(0);
+        expect(removed, "a copy went before the set was durable").to.be.greaterThan(set);
+      } finally {
+        traceDurable(undefined);
+      }
+    });
+
+    for (const [point, inactive, copy] of [
+      ["keep:after-copy", [], false],
+      ["save:after-rename", ["ZCL_OSD_ACT"], true],
+    ]) {
+      it(`a save killed at ${point} recovers`, async () => {
+        store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+        expect(ok(await activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+        const file = store.find("CLAS", "ZCL_OSD_ACT").file;
+        store.crashAt = point;
+        expect(() => store.write("CLAS", "ZCL_OSD_ACT", CLASS("'newer'"))).to.throw(/crashed at/);
+        const next = restart();
+        expect(next.inactiveObjects().map((o) => o.name)).to.deep.equal(inactive);
+        expect(existsSync(join(root, "build", "inactive", "active", file))).to.equal(copy);
+        expect(readFileSync(join(root, file), "utf8"), "the source was not written").to.contain("hello");
+      });
+    }
+  });
+
+  it("an input a generator reads, written during the build and put back, fails the build", async () => {
+    const {build} = await import("../tools/osd-build.mjs");
+    mkdirSync(join(root, "src", "cds"), {recursive: true});
+    const view = join(root, "src", "cds", "zosd_act_v.ddls.asddls");
+    writeFileSync(view, "define view ZOSD_ACT_V as select from t000 { mandt }\n");
+    store.write("PROG", "ZOSD_ACT_OK", TRIVIAL("ZOSD_ACT_OK"));
+    let refused;
+    try {
+      await build({root, generators: false, onStep: async (step) => {
+        if (step !== "generated") return;
+        writeFileSync(view, "define view ZOSD_ACT_V as select from t000 { mtext }\n");
+        await new Promise((r) => setTimeout(r, 20));
+        writeFileSync(view, "define view ZOSD_ACT_V as select from t000 { mandt }\n");
+      }});
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused?.code, `built under the name of bytes a generator did not read: ${refused?.message}`).to.equal("CHANGED");
+  });
+
+  it("no path of the machine survives, with spaces, on either platform", () => {
+    for (const [text, expected] of [
+      ["cannot load /opt/Build Space/private/foo.mjs: gone", "cannot load <path>/foo.mjs: gone"],
+      ["C:\\Program Files\\Build Space\\private\\foo.abap:3", "<path>/foo.abap:3"],
+      [`${root}/src/zx.prog.abap:2`, "src/zx.prog.abap:2"],
+      ["at /etc", "at <path>/etc"],
+    ]) {
+      const clean = withoutHostPaths(text, root);
+      expect(clean).to.equal(expected);
+      expect(clean).not.to.match(/Build Space|private|Program Files/);
+    }
   });
 });

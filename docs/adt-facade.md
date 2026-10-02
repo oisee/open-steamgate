@@ -209,7 +209,17 @@ activated. Every step is ordered to recover from a kill: a save writes the
 copy, then the set (with the digest it will have), then the source; an
 activation writes the set, then drops the copies; a delete removes the files,
 then the set, then the copies; the set is replaced atomically (temp, fsync,
-rename), and a copy no saved object owns is removed at start. Every build excludes the files of the inactive
+rename), and a copy no saved object owns is removed at start. Each step is
+durable before the next (`tools/osd-durable.mjs`: the file flushed, then its
+directory after a create, rename or remove; on Windows a directory cannot be
+flushed and NTFS journals the rename, so that step is skipped there). The
+tests inject a crash between steps; a power loss is not simulated, and a disk
+that acknowledges an fsync it has not done defeats all of it. A set that is
+missing or unreadable while active copies exist **fails closed**: every
+object with a copy is inactive, `outside`, until activated. A cold build
+also refuses when any non-library input -- generator inputs such as a CDS
+view included -- is written between the hash and the end of the build, even
+with the same bytes (its stamp changes). Every build excludes the files of the inactive
 objects and takes their active copy instead, or nothing for an object that
 was never active (`ObjectStore#overlay`, `activeOverlay` in
 `tools/osd-build.mjs`, both in the generation's hash). An activation names

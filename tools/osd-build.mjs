@@ -692,8 +692,24 @@ export async function build(options = {}) {
   // what each input held when the generation was named: the bytes it is
   // built from (checked as the transpiler reads them, below), and what an
   // activation's completion compares with (ObjectStore#completeActivations)
-  const digests = new Map();
-  const hash = hashOf(root, inputs, {overlay: options.overlay, digests});
+  const named = new Map();
+  const hash = hashOf(root, inputs, {overlay: options.overlay, digests: named});
+  // one spelling of a path for every comparison: a native one from the walk,
+  // a forward-slash one from the transpiler's reads on Windows
+  const digests = new Map([...named].map(([file, digest]) => [normalPath(file), digest]));
+  // **What the generators read is verified as well as what the transpiler
+  // reads.** A CDS view or a table is no transpiler input -- a generator
+  // reads it -- so a save between the hash and the generators' read, put
+  // back before the completion, built a generation of other bytes under
+  // this name. Every non-library input is stamped (size, times, inode) here,
+  // checked against the hash's digest once stamped (closing the gap between
+  // the hash's read and the stamp), and stamped again after the build: any
+  // write in between, even one that restores the bytes, changes the stamp.
+  const libraries = inputs.libs.map((dir) => normalPath(dir) + "/");
+  const watched = [...named.keys()].filter((file) => !libraries.some((lib) => normalPath(file).startsWith(lib)));
+  const stamps = new Map(watched.map((file) => [file, stampOf(file)]));
+  const moved = watched.filter((file) => (existsSync(file) ? digestOf(file) : undefined) !== named.get(file));
+  if (moved.length > 0) throw changedError(root, moved);
   const target = join(paths.byInput, hash);
 
   // a generation a warm build made (tools/osd-warm.mjs) is not a cache hit
@@ -746,6 +762,7 @@ export async function build(options = {}) {
     if (options.generators !== false) {
       output += runGenerators(root, log);
     }
+    await options.onStep?.("generated");
     // **The layers are read again once gen/ is written.** gen/ is a layer, and
     // an object it holds hides the one in src/ it was generated from (the AMDP
     // bridge: gen/amdp/zcl_osd_amdp_demo over src/amdp/). Reading the layers
@@ -779,14 +796,13 @@ export async function build(options = {}) {
     const changed = [];
     const made = await transpile({root, config: own, log: (m) => { output += m + "\n"; },
       onRead: (file, bytes) => {
-        const known = digests.get(file);
-        if (known !== undefined && createHash("sha256").update(bytes).digest("hex") !== known) changed.push(relative(root, file));
+        const known = digests.get(normalPath(file));
+        if (known !== undefined && createHash("sha256").update(bytes).digest("hex") !== known) changed.push(file);
       }});
-    if (changed.length > 0) {
-      const error = new Error(`the tree changed while it was built: ${changed.slice(0, 5).join(", ")}`);
-      error.code = "CHANGED";
-      throw error;
-    }
+    // and nothing the generators or the transpiler read was written since
+    // it was named
+    changed.push(...watched.filter((file) => stampOf(file) !== stamps.get(file)));
+    if (changed.length > 0) throw changedError(root, changed);
     const objects = made.objects;
 
     const manifest = {
@@ -963,4 +979,26 @@ export async function main(args) {
 
 if (runsAs("osd-build.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code));
+}
+
+// a path spelled one way: absolute, forward slashes
+export function normalPath(file) {
+  return resolve(file).split("\\").join("/");
+}
+
+// what changes with any write to a file, a write of the same bytes included
+function stampOf(file) {
+  try {
+    const st = statSync(file, {bigint: true});
+    return `${st.size}:${st.mtimeNs}:${st.ctimeNs}:${st.ino}`;
+  } catch {
+    return "absent";
+  }
+}
+
+function changedError(root, files) {
+  const names = [...new Set(files.map((f) => relative(root, f)))];
+  const error = new Error(`the tree changed while it was built: ${names.slice(0, 5).join(", ")}`);
+  error.code = "CHANGED";
+  return error;
 }
