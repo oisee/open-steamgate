@@ -88,6 +88,19 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/systeminformation`
                    iv_handler = `ZCL_OSD_ADT_SYSINFO`
          CHANGING ct_routes = rt_routes ).
+*   Static package rows must precede future GET packages/:name rows.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/repository/informationsystem/virtualfolders/facets`
+                   iv_handler = `ZCL_OSD_ADT_RIS_STATIC` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/repository/informationsystem/objecttypes`
+                   iv_handler = `ZCL_OSD_ADT_RIS_STATIC` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/repository/informationsystem/releasestates`
+                   iv_handler = `ZCL_OSD_ADT_RIS_STATIC` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/repository/informationsystem/objectproperties/values`
+                   iv_handler = `ZCL_OSD_ADT_RIS_STATIC` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/packages/settings`
+                   iv_handler = `ZCL_OSD_ADT_RIS_STATIC` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/packages/valuehelps/:what`
+                   iv_handler = `ZCL_OSD_ADT_RIS_STATIC` CHANGING ct_routes = rt_routes ).
 *   LOCK and UNLOCK, one row per lockable type, from the type table
     lt_types = zcl_osd_adt_types=>lockable( ).
     LOOP AT lt_types INTO ls_type.

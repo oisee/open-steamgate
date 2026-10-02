@@ -52,7 +52,6 @@ const DELEGATED = [
   // answers it, with the bytes of the Node middleware's refusal
   ["POST", SYSINFO, "ABAP"],
   ["GET", "/sap/bc/adt/debugger/listeners"],
-  ["GET", "/sap/bc/adt/packages/settings"],
   ["GET", "/sap/bc/adt/no/such/resource"],
   ["GET", `${SYSINFO}/extra`],
 ];
@@ -63,9 +62,23 @@ async function listen(app) {
   });
 }
 
-async function call(server, method, path, headers) {
+async function call(server, method, path, headers, complete = false) {
   const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {method, headers});
+  let sessionHeaders = {};
+  if (complete) {
+    const cookies = response.headers.getSetCookie();
+    expect(cookies).to.have.length(2);
+    const ids = cookies.map((line) => {
+      const id = /^[^=]+=([0-9a-f]{24});/.exec(line)?.[1];
+      expect(id, line).to.match(/^[0-9a-f]{24}$/);
+      return id;
+    });
+    expect(ids[0]).to.equal(ids[1]);
+    sessionHeaders = {location: response.headers.get("location"),
+      cookies: cookies.map((line) => line.replace(/=([0-9a-f]{24});/, "=<session>;"))};
+  }
   return {
+    ...sessionHeaders,
     status: response.status,
     type: response.headers.get("content-type"),
     length: response.headers.get("content-length"),
@@ -100,6 +113,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
 
   const mount = async (options, before = []) => {
     const app = express();
+    app.set("etag", false);
     for (const middleware of before) app.use(middleware);
     app.use(adtRouter({data: {}, logMisses: false, watch: false, ...options}).router);
     const server = await listen(app);
@@ -226,6 +240,47 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     rmSync(root, {recursive: true, force: true});
   });
 
+  for (const resource of [
+    "repository/informationsystem/virtualfolders/facets",
+    "repository/informationsystem/objecttypes",
+    "repository/informationsystem/releasestates",
+    "repository/informationsystem/objectproperties/values",
+    "packages/settings",
+    "packages/valuehelps/abaplanguageversions",
+  ]) {
+    const base = `/sap/bc/adt/${resource}`;
+    for (const method of ["GET", "HEAD"]) {
+      for (const path of [base, `${base}/`, base.toUpperCase(), `${base.toUpperCase()}/`]) {
+        it(`B1 static: ${method} ${path} is ABAP and byte-equal`, async () => {
+          const shared = store();
+          const node = await mount({store: shared});
+          const ported = await mount(withAbap({store: shared}));
+          const expected = await call(node, method, path, undefined, true);
+          const actual = await call(ported, method, path, undefined, true);
+          expect(actual).to.deep.equal(expected);
+          expect(actual.status).to.equal(200);
+          expect(actual.etag).to.equal(null);
+          expect(served).to.deep.equal([`ABAP ${method} ${path}`]);
+        });
+      }
+    }
+  }
+
+  for (const what of ["abaplanguageversions", "ABAPLANGUAGEVERSIONS", "%61baplanguageversions",
+    "applicationcomponents", "softwarecomponents", "transportlayers", "unknown", "Abaplanguageversions"]) {
+    it(`B1 valuehelp: decoded parameter ${what} keeps Node case sensitivity`, async () => {
+      const shared = store();
+      const node = await mount({store: shared});
+      const ported = await mount(withAbap({store: shared}));
+      const path = `/sap/bc/adt/packages/valuehelps/${what}?name=ignored&name=again`;
+      const expected = await call(node, "GET", path, undefined, true);
+      expect(await call(ported, "GET", path, undefined, true)).to.deep.equal(expected);
+      expect(served).to.deep.equal([`ABAP GET ${path}`]);
+      expect(expected.body.includes("Standard ABAP"))
+        .to.equal(["abaplanguageversions", "%61baplanguageversions"].includes(what));
+    });
+  }
+
   it("a ported route answers byte-equal, and ABAP is what answered it", async () => {
     const shared = store();
     const node = await mount({store: shared});
@@ -265,6 +320,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     }}));
     // the ABAP row: the Node façade's own refusal for the same failure
     const reference = express();
+    reference.set("etag", false);
     reference.get(SYSINFO, (req, res) => answered(res, () => {
       throw new Error("ZCL_OSD_ADT_HANDLER: the shim fell over");
     }));
@@ -291,6 +347,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       refused: {toJSON() { throw new Error("no identity on this host"); }},
     }}));
     const reference = express();
+    reference.set("etag", false);
     reference.get(SYSINFO, (req, res) => answered(res, () => {
       throw new Error("SYSTEM IDENTITY: no identity on this host");
     }));
