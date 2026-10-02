@@ -1,0 +1,16 @@
+<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core">
+  <VBox id="runCockpit" class="sapUiSmallMargin" width="100%">
+    <Title text="{cockpitI18n>cockpit}"/>
+    <HBox id="cockpitActions" wrap="Wrap"/>
+    <MessageStrip id="cockpitAnswer" visible="false" showIcon="true"/>
+    <core:HTML id="cockpitChart" sanitizeContent="false"/>
+    <Title text="{cockpitI18n>duration}"/>
+    <VBox id="cockpitDurations"/>
+    <Title text="{cockpitI18n>settings}"/>
+    <VBox id="cockpitSettings"/>
+    <Title text="{cockpitI18n>schedule}"/>
+    <Text id="cockpitSchedule"/>
+    <Title text="{cockpitI18n>changeLog}"/>
+    <VBox id="cockpitChanges"/>
+  </VBox>
+</core:FragmentDefinition>
