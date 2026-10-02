@@ -47,9 +47,16 @@ ports:
       log: generated
       dummy: generated
       capture: generated
+  close:
+    kind: autoclose
+    variants:
+      none: generated
+      capture: generated
+      maintenance: zcl_l3_fleet2_autoclose
 bindings:
   ships: table
   alerts: log
+  close: none
 resilience:
   retry: {max: 2, backoff: 60}
   stale: 900
@@ -58,7 +65,10 @@ resilience:
     kill: ZOSD_L3_KILL
   dry_run: false
   keep: {days: 30}
+governor:
+  budget: {glass: 10, counts: open, warn: 0.7, narrow_at: 0.8, per_pile: 50}
+  funnel: {group_by: object, autoclose: port:close}
 settings:
-  tunable: [retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, piles.checks.size]
+  tunable: [budget.glass, budget.warn, budget.narrow_at, budget.per_pile, retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, piles.checks.size]
   bounds:
     fuses.max_alerts: {min: 1, max: 100000}

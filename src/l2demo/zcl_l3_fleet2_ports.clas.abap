@@ -29,6 +29,9 @@ CLASS zcl_l3_fleet2_ports DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS get_alerts
       IMPORTING iv_variant TYPE csequence
       RETURNING VALUE(ri_port) TYPE REF TO zif_l3_fleet2_alerts.
+    CLASS-METHODS get_close
+      IMPORTING iv_variant TYPE csequence
+      RETURNING VALUE(ri_port) TYPE REF TO zif_l3_fleet2_close.
 ENDCLASS.
 
 CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
@@ -42,6 +45,8 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
         rv_variant = 'table'.
       WHEN 'alerts'.
         rv_variant = 'log'.
+      WHEN 'close'.
+        rv_variant = 'none'.
       WHEN OTHERS.
         RAISE EXCEPTION TYPE zcx_l3_fleet2_port
           EXPORTING iv_port = iv_port iv_reason = 'no such port in the set'.
@@ -93,6 +98,9 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
       IF lv_name = 'alerts'.
         lv_known = abap_true.
       ENDIF.
+      IF lv_name = 'close'.
+        lv_known = abap_true.
+      ENDIF.
       IF lv_known = abap_false.
         RAISE EXCEPTION TYPE zcx_l3_fleet2_port
           EXPORTING iv_port = lv_name iv_reason = 'no such port in the set'.
@@ -133,6 +141,24 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
     IF lv_known = abap_false.
       RAISE EXCEPTION TYPE zcx_l3_fleet2_port
         EXPORTING iv_port = 'alerts' iv_variant = lv_variant
+                  iv_reason = 'no such variant for the port'.
+    ENDIF.
+    lv_variant = variant( iv_port = 'close' iv_bind = iv_bind ).
+    lv_known = abap_false.
+    IF lv_variant = 'none'.
+      lv_known = abap_true.
+    ENDIF.
+    IF lv_variant = 'capture'.
+      lv_known = abap_true.
+      lv_volatile_port = 'close'.
+    ENDIF.
+    IF lv_variant = 'maintenance'.
+      lv_known = abap_true.
+      lv_hand_port = 'close'.
+    ENDIF.
+    IF lv_known = abap_false.
+      RAISE EXCEPTION TYPE zcx_l3_fleet2_port
+        EXPORTING iv_port = 'close' iv_variant = lv_variant
                   iv_reason = 'no such variant for the port'.
     ENDIF.
     IF lv_planner_port IS NOT INITIAL.
@@ -188,6 +214,21 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
       WHEN OTHERS.
         RAISE EXCEPTION TYPE zcx_l3_fleet2_port
           EXPORTING iv_port = 'alerts' iv_variant = iv_variant
+                    iv_reason = 'no such variant for the port'.
+    ENDCASE.
+  ENDMETHOD.
+
+  METHOD get_close.
+    CASE iv_variant.
+      WHEN 'none'.
+        CREATE OBJECT ri_port TYPE zcl_l3_fleet2_close_none.
+      WHEN 'capture'.
+        CREATE OBJECT ri_port TYPE zcl_l3_fleet2_close_capture.
+      WHEN 'maintenance'.
+        CREATE OBJECT ri_port TYPE zcl_l3_fleet2_autoclose.
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE zcx_l3_fleet2_port
+          EXPORTING iv_port = 'close' iv_variant = iv_variant
                     iv_reason = 'no such variant for the port'.
     ENDCASE.
   ENDMETHOD.

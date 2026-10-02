@@ -3,6 +3,10 @@
 CLASS zcl_l3_fleet2_conf DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_values,
+             budget_glass TYPE i,
+             budget_warn TYPE i,
+             budget_narrow_at TYPE i,
+             budget_per_pile TYPE i,
              retry_max TYPE i,
              retry_backoff TYPE i,
              stale TYPE i,
@@ -61,6 +65,26 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     ls_spec-set_name = 'fleet2'.
     CLEAR ls_spec.
     ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'budget.glass'.
+    ls_spec-dsl_value = '10'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'budget.warn'.
+    ls_spec-dsl_value = '7000'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'budget.narrow_at'.
+    ls_spec-dsl_value = '8000'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'budget.per_pile'.
+    ls_spec-dsl_value = '50'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
     ls_spec-param_name = 'retry.max'.
     ls_spec-dsl_value = '2'.
     APPEND ls_spec TO rt_specs.
@@ -92,6 +116,10 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD defaults.
+    rs_vals-budget_glass = '10'.
+    rs_vals-budget_warn = '7000'.
+    rs_vals-budget_narrow_at = '8000'.
+    rs_vals-budget_per_pile = '50'.
     rs_vals-retry_max = '2'.
     rs_vals-retry_backoff = '60'.
     rs_vals-stale = '900'.
@@ -106,6 +134,42 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     DATA lv_number TYPE p LENGTH 16 DECIMALS 0.
     ls_def = defaults( ).
     rs_vals = is_vals.
+    lv_number = is_vals-budget_glass.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'budget.glass' iv_value = lv_text ) = abap_false.
+      rs_vals-budget_glass = ls_def-budget_glass.
+    ENDIF.
+    lv_number = is_vals-budget_warn.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'budget.warn' iv_value = lv_text ) = abap_false.
+      rs_vals-budget_warn = ls_def-budget_warn.
+    ENDIF.
+    lv_number = is_vals-budget_narrow_at.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'budget.narrow_at' iv_value = lv_text ) = abap_false.
+      rs_vals-budget_narrow_at = ls_def-budget_narrow_at.
+    ENDIF.
+    lv_number = is_vals-budget_per_pile.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'budget.per_pile' iv_value = lv_text ) = abap_false.
+      rs_vals-budget_per_pile = ls_def-budget_per_pile.
+    ENDIF.
     lv_number = is_vals-retry_max.
     lv_text = abs( lv_number ).
     CONDENSE lv_text.
@@ -171,6 +235,38 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     ls_def = defaults( ).
     SELECT * FROM zosd_l3_run_conf INTO TABLE lt_rows
       WHERE run_id = iv_run AND set_name = 'fleet2'.
+    rs_vals-budget_glass = ls_def-budget_glass.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'budget.glass'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'budget.glass' iv_value = lv_value ) = abap_true.
+        rs_vals-budget_glass = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-budget_warn = ls_def-budget_warn.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'budget.warn'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'budget.warn' iv_value = lv_value ) = abap_true.
+        rs_vals-budget_warn = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-budget_narrow_at = ls_def-budget_narrow_at.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'budget.narrow_at'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'budget.narrow_at' iv_value = lv_value ) = abap_true.
+        rs_vals-budget_narrow_at = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-budget_per_pile = ls_def-budget_per_pile.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'budget.per_pile'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'budget.per_pile' iv_value = lv_value ) = abap_true.
+        rs_vals-budget_per_pile = lv_value.
+      ENDIF.
+    ENDIF.
     rs_vals-fuses_max_alerts = ls_def-fuses_max_alerts.
     READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'fuses.max_alerts'.
     IF sy-subrc = 0.
@@ -198,6 +294,58 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     lv_text = iv_value.
     rv_ok = abap_false.
     CASE iv_param.
+      WHEN 'budget.glass'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < 1 OR lv_number > 2147483647.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
+      WHEN 'budget.warn'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < 1 OR lv_number > 10000.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
+      WHEN 'budget.narrow_at'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < 1 OR lv_number > 10000.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
+      WHEN 'budget.per_pile'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < 0 OR lv_number > 2147483647.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
       WHEN 'retry.max'.
         IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
@@ -374,6 +522,14 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
       ls_row-param_val = lv_effective.
       APPEND ls_row TO rs_state-rows.
       CASE ls_row-param_name.
+        WHEN 'budget.glass'.
+          rs_state-vals-budget_glass = lv_effective.
+        WHEN 'budget.warn'.
+          rs_state-vals-budget_warn = lv_effective.
+        WHEN 'budget.narrow_at'.
+          rs_state-vals-budget_narrow_at = lv_effective.
+        WHEN 'budget.per_pile'.
+          rs_state-vals-budget_per_pile = lv_effective.
         WHEN 'retry.max'.
           rs_state-vals-retry_max = lv_effective.
         WHEN 'retry.backoff'.

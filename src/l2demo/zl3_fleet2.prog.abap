@@ -23,6 +23,10 @@ PARAMETERS s_3 TYPE c LENGTH 40 LOWER CASE.
 PARAMETERS s_4 TYPE c LENGTH 40 LOWER CASE.
 PARAMETERS s_5 TYPE c LENGTH 40 LOWER CASE.
 PARAMETERS s_6 TYPE c LENGTH 40 LOWER CASE.
+PARAMETERS s_7 TYPE c LENGTH 40 LOWER CASE.
+PARAMETERS s_8 TYPE c LENGTH 40 LOWER CASE.
+PARAMETERS s_9 TYPE c LENGTH 40 LOWER CASE.
+PARAMETERS s_10 TYPE c LENGTH 40 LOWER CASE.
 PARAMETERS p_active TYPE zosd_l2_ship-status.
 PARAMETERS p_mode TYPE c LENGTH 1 DEFAULT 'R'.
 
@@ -30,12 +34,16 @@ START-OF-SELECTION.
   DATA ls_rule TYPE zcl_l3_fleet2=>ty_rule.
   DATA lv_bind TYPE string.
   DATA ls_settings TYPE zcl_l3_fleet2_conf=>ty_values.
-  ls_settings-retry_max = s_1.
-  ls_settings-retry_backoff = s_2.
-  ls_settings-stale = s_3.
-  ls_settings-fuses_max_alerts = s_4.
-  ls_settings-keep_days = s_5.
-  ls_settings-piles_checks_size = s_6.
+  ls_settings-budget_glass = s_1.
+  ls_settings-budget_warn = s_2.
+  ls_settings-budget_narrow_at = s_3.
+  ls_settings-budget_per_pile = s_4.
+  ls_settings-retry_max = s_5.
+  ls_settings-retry_backoff = s_6.
+  ls_settings-stale = s_7.
+  ls_settings-fuses_max_alerts = s_8.
+  ls_settings-keep_days = s_9.
+  ls_settings-piles_checks_size = s_10.
   DATA ls_params TYPE zcl_l3_fleet2=>ty_params.
   DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
   IF p_mode = 'D'.
@@ -65,6 +73,11 @@ START-OF-SELECTION.
     is_params = ls_params
     iv_bind = lv_bind ).
   WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.
+  IF ls_rule-status = 'GLASS' OR ls_rule-status = 'HELD'.
+    " a human hold is a completed job, never an aborted retry
+    COMMIT WORK.
+    RETURN.
+  ENDIF.
   IF ls_rule-status = 'KILLED' OR ls_rule-status = 'FUSED'.
     " the pile row says so; it is committed and the job ends without abort
     COMMIT WORK.

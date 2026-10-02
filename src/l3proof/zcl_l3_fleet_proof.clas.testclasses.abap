@@ -52,6 +52,7 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS doctor_heals FOR TESTING.
     METHODS doctor_keeps_run_values FOR TESTING.
     METHODS fuse_stops FOR TESTING.
+    METHODS governor_glass FOR TESTING.
     METHODS mode_p FOR TESTING.
     METHODS mode_s FOR TESTING.
     METHODS partial_keeps_old FOR TESTING.
@@ -249,6 +250,9 @@ CLASS ltcl_proof IMPLEMENTATION.
       DELETE FROM zosd_l3_work WHERE run_id = lv_run.
       DELETE FROM zosd_l3_doctor WHERE run_id = lv_run.
       DELETE FROM zosd_l3_run_conf WHERE run_id = lv_run.
+      DELETE FROM zosd_l3_budget WHERE run_id = lv_run.
+      DELETE FROM zosd_l3_event WHERE run_id = lv_run.
+      DELETE FROM zosd_l3_object WHERE run_id = lv_run.
     ENDLOOP.
     " the run locks of the proof's date, held or released
     DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet=>c_set
@@ -368,6 +372,46 @@ CLASS ltcl_proof IMPLEMENTATION.
     lv_foreign = foreign( ls_second-run_id ).
     cl_abap_unit_assert=>assert_equals( act = lv_foreign exp = 0
       msg = 'finalise leaves exactly the rerun''s rows' ).
+  ENDMETHOD.
+
+  METHOD governor_glass.
+    " real pile jobs exhaust a run's capacity; only a reasoned human action
+    " resumes it. Settings start and end at DSL defaults like every proof.
+    DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
+    DATA ls_budget TYPE zosd_l3_budget.
+    DATA ls_event TYPE zosd_l3_event.
+    DATA lt_report TYPE zcl_l3_fleet2=>tt_doctor.
+    DATA ls_report LIKE LINE OF lt_report.
+    DATA lv_ok TYPE abap_bool.
+    DATA lv_waited TYPE i.
+    lv_ok = zcl_l3_fleet2=>set_setting( iv_param = 'budget.glass' iv_value = '1' iv_note = 'governor proof' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_ok exp = abap_true ).
+    ls_result = staged( zcl_l3_fleet2=>c_parallel ).
+    DO.
+      SELECT SINGLE * FROM zosd_l3_budget INTO ls_budget WHERE run_id = ls_result-run_id.
+      IF ls_budget-state = 'GLASS'.
+        EXIT.
+      ENDIF.
+      IF lv_waited >= c_wait_limit.
+        cl_abap_unit_assert=>fail( msg = 'real jobs did not break the glass' ).
+      ENDIF.
+      WAIT UP TO 1 SECONDS.
+      lv_waited = lv_waited + 1.
+    ENDDO.
+    cl_abap_unit_assert=>assert_true( act = xsdbool( ls_budget-reserved <= ls_budget-glass ) ).
+    lt_report = zcl_l3_fleet2=>resume( ls_result-run_id ).
+    READ TABLE lt_report INTO ls_report INDEX 1.
+    cl_abap_unit_assert=>assert_equals( act = ls_report-doc_action exp = 'GLASS' ).
+    lv_ok = zcl_l3_fleet2=>continue_glass( iv_run = ls_result-run_id iv_new_glass = 10 iv_reason = 'manual capacity approved' ).
+    cl_abap_unit_assert=>assert_equals( act = lv_ok exp = abap_true ).
+    COMMIT WORK.
+    ls_result = wait_for_stages( ls_result ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-status exp = 'DONE' ).
+    SELECT SINGLE * FROM zosd_l3_event INTO ls_event WHERE run_id = ls_result-run_id AND kind = 'CONTINUE'.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_event-reason exp = 'manual capacity approved' ).
+    cl_abap_unit_assert=>assert_not_initial( ls_event-actor ).
+    cl_abap_unit_assert=>assert_not_initial( ls_event-acted ).
   ENDMETHOD.
 
   METHOD mode_p.
@@ -775,9 +819,8 @@ CLASS ltcl_proof IMPLEMENTATION.
       msg = 'the gate opened stage 2 and its jobs ran' ).
     " opened once: one plan of stage 2, each pile with a job of its own
     assert_cut( ls_par-run_id ).
-    " a job is the pair (name, count): a system's JOBCOUNT is the creation time
-    " plus a counter, unique per job name only, so jobs opened in one second
-    " under other names share it (A4H, 2026-10-02)
+    " a job is the pair (name, count). JOBCOUNT is base-36 max+1, scoped
+    " by job name; a count alone does not identify a job
     SELECT job_name job_count FROM zosd_l3_pile INTO CORRESPONDING FIELDS OF TABLE lt_jobs
       WHERE set_name = zcl_l3_fleet2=>c_set AND run_id = ls_par-run_id AND stage_no = 2.
     DELETE lt_jobs WHERE job_count IS INITIAL.

@@ -1222,7 +1222,7 @@ ENDCLASS.
       // method was DOCTOR_HEALS, and the methods after it never ran). The
       // harness runs them in that order, read off the class, so a method that
       // leaves something behind for the next one fails here as it would there.
-      const PROOF_METHODS = ["collect_waits_for_submit", "doctor_heals", "doctor_keeps_run_values", "fuse_stops", "mode_p", "mode_s", "partial_keeps_old", "rerun",
+      const PROOF_METHODS = ["collect_waits_for_submit", "doctor_heals", "doctor_keeps_run_values", "fuse_stops", "governor_glass", "mode_p", "mode_s", "partial_keeps_old", "rerun",
         "rerun_fewer_piles", "settings_tune", "stages_mode_p", "stages_mode_s", "stages_partial"];
       const systemOrder = () => [...readFileSync(join(PROOF_DIR, `${PROOF}.clas.testclasses.abap`), "utf8")
         .matchAll(/^\s*METHODS (\w+) FOR TESTING\./gm)].map((m) => m[1].toLowerCase()).sort();
@@ -1248,7 +1248,13 @@ ENDCLASS.
         const before = new Set(store.list(200).map((r) => r.id));
         const failures = {};
         const methods = systemOrder();
-        for (const method of methods) failures[method] = await runMethod(local, method);
+        let glassJobs = new Set();
+        for (const method of methods) {
+          const beforeMethod = new Set(store.list(200).map((r) => r.id));
+          failures[method] = await runMethod(local, method);
+          if (method === "governor_glass") glassJobs = new Set(store.list(200).filter((r) => !beforeMethod.has(r.id)).map((r) => r.id));
+        }
+        expect(glassJobs.size, "governor proof ran real jobs").to.be.greaterThan(6);
         expect(failures).to.deep.equal(Object.fromEntries(methods.map((m) => [m, undefined])));
         const all = store.list(200).filter((r) => !before.has(r.id));
         // the two-stage set: the filter's four piles (eight ships, two per pile), then
@@ -1256,7 +1262,8 @@ ENDCLASS.
         // doctor_heals (slice 5a): the last filter pile once more, submitted by the doctor,
         // and stage 2's six again; doctor_keeps_run_values (slice 5b): the same pile, and
         // stage 2 over three busy ships cut by the run's own size 2, two piles a rule
-        const staged = all.filter((r) => r.jobName.startsWith("L3_FLEET2_"));
+        const staged = all.filter((r) => r.jobName.startsWith("L3_FLEET2_") && !glassJobs.has(r.id));
+        expect(all.filter((r) => glassJobs.has(r.id)).every((r) => r.state === "COMPLETED"), "governor jobs complete").to.equal(true);
         const stage2 = [2, 3, 4, 5, 6, 7].map((n) => `L3_FLEET2_20${n}_0001`);
         const stage2Cut = [2, 3, 4, 5, 6, 7].flatMap((n) => [`L3_FLEET2_20${n}_0001`, `L3_FLEET2_20${n}_0002`]);
         expect(staged.map((r) => r.jobName).sort(), "the two stages' jobs").to.deep.equal([1, 2, 3, 4].map((p) => `L3_FLEET2_101_000${p}`)
@@ -1283,7 +1290,7 @@ ENDCLASS.
         const index = readFileSync(join(root, "output", "index.mjs"), "utf8");
         const entry = index.split("ret.push(").find((e) => e.includes(`"${PROOF.toUpperCase()}"`));
         // declared in the order a system runs them, so `npm run unit` runs them in it too
-        const skipped = new Set(["mode_p", "stages_mode_p", "doctor_heals", "doctor_keeps_run_values"]);
+        const skipped = new Set(["governor_glass", "mode_p", "stages_mode_p", "doctor_heals", "doctor_keeps_run_values"]);
         expect(entry).to.include(`methods: ${JSON.stringify(PROOF_METHODS.map((name) => ({name, skip: skipped.has(name)})))}`);
         expect(entry).to.include('riskLevel: "DANGEROUS"');
       });
