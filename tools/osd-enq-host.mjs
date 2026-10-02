@@ -50,7 +50,8 @@ export class EnqSessionEnded extends Error {
 // insertion order, the oldest forgotten past ENDED_KEEP -- long after any
 // step queued behind its end has run. A key ended without ever being bound
 // (a host ends every session it had, stateful or not) counts too; harmless
-// A bound step keeps the session it first locked in (token.enqSid), so a
+// A bound step keeps the session of its key at the moment it bound
+// (token.enqSid, pinned by bindEnqSession, whether or not it locks), so a
 // dump in another step of its key can retire that session without taking
 // it from under the step: the retired session stays doomed until the last
 // step pinned to it is out, and the key's next step opens a new one
@@ -103,12 +104,15 @@ export function currentEnqSession() {
   if (isEnded(key)) throw new EnqSessionEnded(key);
   const t = token();
   if (t?.enqSession === undefined) return sessionOf(key, t?.enqUser ?? user());
-  if (t.enqSid !== undefined && (doomed.has(t.enqSid) || sessions.get(key) === t.enqSid)) return t.enqSid;
-  unpin(t);
+  if (t.enqSid === undefined) pin(t, key);
+  return t.enqSid;
+}
+
+/** the step belongs to key's session as it is now, opened if need be */
+function pin(t, key) {
   const sid = sessionOf(key, t.enqUser ?? user());
   t.enqSid = sid;
   pins.set(sid, (pins.get(sid) ?? 0) + 1);
-  return sid;
 }
 
 /** the step is no longer pinned to its session; a doomed one ends with the
@@ -140,8 +144,8 @@ function sessionOf(key, owner) {
 function existingEnqSession() {
   const key = sessionKey();
   if (isEnded(key)) return undefined;
-  const pinned = token()?.enqSid;
-  return pinned !== undefined && doomed.has(pinned) ? pinned : sessions.get(key);
+  const t = token();
+  return t?.enqSession !== undefined ? t.enqSid : sessions.get(key);
 }
 
 /** a host's longer session: the step running now belongs to key (any value
@@ -157,6 +161,7 @@ export function bindEnqSession(key, {user: owner} = {}) {
   if (t.enqSession === key) return;
   unpin(t);
   t.enqSession = key;
+  pin(t, key);
 }
 
 /** callback(key) when a bound session ends by a dump, not by its host: the
@@ -418,7 +423,7 @@ export function installEnq(abap, {updateModules = []} = {}) {
   onEveryStep({
     onEnd(stepToken, {dumped}) {
       const bound = stepToken.enqSession;
-      const sid = bound === undefined ? sessions.get(stepToken) : stepToken.enqSid ?? sessions.get(bound);
+      const sid = bound === undefined ? sessions.get(stepToken) : stepToken.enqSid;
       // a step's own session ends with it (its token is never seen again, so
       // it is not remembered as ended)
       if (bound === undefined) {
