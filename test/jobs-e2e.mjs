@@ -7,6 +7,7 @@ import {BatchRuns, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {JOB_INPUT_JSON_MAX, jobInputJson} from "../tools/osd-job-input.mjs";
+import {jobHeaderType} from "./fixtures/job-header.mjs";
 
 const root = resolve(".");
 const expectedRanges = [
@@ -45,10 +46,7 @@ describe("compiled ABAP jobs end to end", function () {
   const work = () => workQueuedBatch(root, store);
   const table = (row) => new abap.types.Table(row, {withHeader: false, keyType: "DEFAULT",
     primaryKey: {name: "primary_key", type: "STANDARD", keyFields: [], isUnique: false}, secondary: []});
-  const headerType = () => new abap.types.Structure({
-    jobname: new abap.types.Character(32), jobcount: new abap.types.Character(8),
-    status: new abap.types.Character(1), sdluname: new abap.types.Character(12),
-  });
+  const headerType = () => jobHeaderType(abap);
 
   const selectorType = () => new abap.types.Structure({
     jobname: new abap.types.Character(32), jobcount: new abap.types.Character(8),

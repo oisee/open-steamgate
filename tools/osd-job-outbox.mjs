@@ -6,6 +6,7 @@ import {resolve} from "node:path";
 import {exclusive, currentStepToken} from "./osd-dialog-step.mjs";
 import {identity} from "./osd-identity.mjs";
 import {jobInputJson} from "./osd-job-input.mjs";
+import {scheduleOfOutbox} from "./osd-job-schedule.mjs";
 
 const value = (row, field) => String(row[field] ?? row[field.toUpperCase()] ?? "").trim();
 const sql = (text) => `'${String(text).replaceAll("'", "''")}'`;
@@ -19,13 +20,15 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
     const sourceDb = resolve(client.path);
     const who = identity(env);
     const reader = new DatabaseSync(sourceDb, {readOnly: true});
-    let rows, sourceInstanceOnDisk, hasTail;
+    let rows, sourceInstanceOnDisk, hasTail, hasSchedule;
     try {
       reader.exec("BEGIN");
       const hasInput = reader.prepare("PRAGMA table_info(zosd_job_step)").all()
         .some((column) => column.name.toLowerCase() === "input_json");
       hasTail = reader.prepare("PRAGMA table_info(zosd_job_outbox)").all()
         .some((column) => column.name.toLowerCase() === "tail_event_id");
+      hasSchedule = reader.prepare("PRAGMA table_info(zosd_job_outbox)").all()
+        .some((column) => column.name.toLowerCase() === "sdlstrtdt");
       rows = reader.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? ORDER BY created_on, created_at, intent_id")
         .all(who.client).map((row) => ({...row, steps: reader.prepare(
           `SELECT step_no, program, ${hasInput ? "input_json" : "'' AS input_json"} FROM zosd_job_step WHERE mandt = ? AND intent_id = ? ORDER BY step_no`)
@@ -76,6 +79,13 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
         }
         intent.namedEvent = {id: eventId, param: eventParam, sourceInstance, seq: waitSeq};
       }
+      let schedule;
+      try { schedule = hasSchedule ? scheduleOfOutbox(row) : null; }
+      catch { throw new Error(`outbox ${intent.intentId} has an invalid start time or period`); }
+      if (schedule) {
+        if (intent.afterEvent || intent.namedEvent) throw new Error(`outbox ${intent.intentId} has a timed start and another condition`);
+        intent.schedule = schedule;
+      }
       if (tailId || tailParam) {
         if (!tailId || !sourceInstance) throw new Error(`outbox ${intent.intentId} has invalid tail event`);
         intent.tailEvent = {id: tailId, param: tailParam, sourceInstance};
@@ -123,7 +133,9 @@ export async function drainJobOutbox(store, {env = process.env, afterImport} = {
             AND COALESCE(event_id, '') = ${sql(eventId)}
             AND COALESCE(event_param, '') = ${sql(eventParam)}${hasTail ? `
             AND COALESCE(tail_event_id, '') = ${sql(tailId)}
-            AND COALESCE(tail_event_param, '') = ${sql(tailParam)}` : ""}`});
+            AND COALESCE(tail_event_param, '') = ${sql(tailParam)}` : ""}${hasSchedule ? ["sdlstrtdt", "sdlstrttm",
+              "laststrtdt", "laststrttm", "prdmins", "prdhours", "prddays", "prdweeks"].map((field) => `
+            AND COALESCE(${field}, '') = ${sql(value(row, field))}`).join("") : ""}`});
         if (changed.subrc === 0 && changed.dbcnt === 1) {
           await client.commit();
         } else if (changed.subrc === 4) {

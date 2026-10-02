@@ -148,6 +148,42 @@ export function migrateJobStepInputFile(native, found, wanted, ddl, fingerprintO
   return true;
 }
 
+// Start by date and time and periodic starts (2026-10-01): eight additive
+// outbox columns. A committed intent written before has none of them and
+// keeps its import digest: an empty column is a job that is not timed.
+const JOB_SCHEDULE_COLUMNS = [["sdlstrtdt", 8], ["sdlstrttm", 6], ["laststrtdt", 8], ["laststrttm", 6],
+  ["prdmins", 2], ["prdhours", 2], ["prddays", 3], ["prdweeks", 2]];
+
+export function beforeJobScheduleDDL(ddl) {
+  const parent = ddl.find((statement) => /^CREATE TABLE ['"]zosd_job_outbox['"] /i.test(statement));
+  if (!parent) return ddl;
+  let previousParent = parent;
+  for (const [column, width] of JOB_SCHEDULE_COLUMNS) {
+    previousParent = previousParent.replace(new RegExp(`,\\s*['"]${column}['"]\\s+NCHAR\\(${width}\\)\\s+COLLATE RTRIM`, "i"), "");
+  }
+  return ddl.map((statement) => statement === parent ? previousParent : statement);
+}
+
+export function migrateJobScheduleFile(native, found, wanted, ddl, fingerprintOf) {
+  if (fingerprintOf(ddl) !== wanted) return false;
+  const previous = beforeJobScheduleDDL(ddl);
+  if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
+  native.exec("BEGIN IMMEDIATE");
+  try {
+    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
+    if (current === wanted) { native.exec("COMMIT"); return true; }
+    if (current !== found) { native.exec("COMMIT"); return false; }
+    for (const [column, width] of JOB_SCHEDULE_COLUMNS) {
+      native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN ${column} NCHAR(${width}) COLLATE RTRIM`);
+    }
+    native.exec(`UPDATE zosd_job_outbox SET ${JOB_SCHEDULE_COLUMNS.map(([column]) => `${column} = ''`).join(", ")}`);
+    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
+      .run(wanted, new Date().toISOString());
+    native.exec("COMMIT");
+  } catch (error) { native.exec("ROLLBACK"); throw error; }
+  return true;
+}
+
 export function ensureJobEventMetadata(native) {
   native.exec("BEGIN IMMEDIATE");
   try {
@@ -517,7 +553,9 @@ async function setupDatabase(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     let found = await db.stampedSchema();
-    const beforeInput = beforeJobStepInputDDL(schemas.sqlite);
+    const beforeSchedule = beforeJobScheduleDDL(schemas.sqlite);
+    const schedulePriorWanted = fingerprintOf(beforeSchedule);
+    const beforeInput = beforeJobStepInputDDL(beforeSchedule);
     const inputPriorWanted = fingerprintOf(beforeInput);
     const beforeEvent = beforeJobEventDDL(beforeInput);
     const eventPriorWanted = fingerprintOf(beforeEvent);
@@ -526,7 +564,8 @@ async function setupDatabase(abap, schemas, insert) {
     if (migrateJobIdentityFile(db.db, found, priorWanted, beforePredecessor, fingerprintOf)) found = priorWanted;
     if (migrateJobPredecessorFile(db.db, found, eventPriorWanted, beforeEvent, fingerprintOf)) found = eventPriorWanted;
     if (migrateJobEventFile(db.db, found, inputPriorWanted, beforeInput, fingerprintOf)) found = inputPriorWanted;
-    if (migrateJobStepInputFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
+    if (migrateJobStepInputFile(db.db, found, schedulePriorWanted, beforeSchedule, fingerprintOf)) found = schedulePriorWanted;
+    if (migrateJobScheduleFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
     if (found === wanted) {
       // the rows are already there, made for this DDIC. The tables the
       // generation writes at start (wwwparams: which SMW0 objects exist and

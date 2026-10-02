@@ -13,6 +13,15 @@ FUNCTION bp_job_read.
   DATA lv_index TYPE i.
   DATA lv_index_text TYPE string.
   DATA ls_step TYPE tbtcstep.
+  DATA lv_sdlstrtdt TYPE string.
+  DATA lv_sdlstrttm TYPE string.
+  DATA lv_laststrtdt TYPE string.
+  DATA lv_laststrttm TYPE string.
+  DATA lv_periodic TYPE string.
+  DATA lv_prdmins TYPE string.
+  DATA lv_prdhours TYPE string.
+  DATA lv_prddays TYPE string.
+  DATA lv_prdweeks TYPE string.
   ret = 0.
   CLEAR: job_read_jobhead, joblog_attributes, epp_attributes,
          email_notification.
@@ -24,6 +33,11 @@ FUNCTION bp_job_read.
   CALL FUNCTION 'ZOSD_JOB_READ'
     EXPORTING iv_jobname = job_read_jobname iv_jobcount = job_read_jobcount
     IMPORTING ev_phase = lv_phase ev_state = lv_state ev_step_count = lv_count
+              ev_sdlstrtdt = lv_sdlstrtdt ev_sdlstrttm = lv_sdlstrttm
+              ev_laststrtdt = lv_laststrtdt ev_laststrttm = lv_laststrttm
+              ev_periodic = lv_periodic ev_prdmins = lv_prdmins
+              ev_prdhours = lv_prdhours ev_prddays = lv_prddays
+              ev_prdweeks = lv_prdweeks
     EXCEPTIONS OTHERS = 1.
   IF sy-subrc <> 0.
     RAISE job_doesnt_exist.
@@ -34,6 +48,15 @@ FUNCTION bp_job_read.
   job_read_jobhead-jobname = job_read_jobname.
   job_read_jobhead-jobcount = job_read_jobcount.
   job_read_jobhead-sdluname = sy-uname.
+  job_read_jobhead-sdlstrtdt = lv_sdlstrtdt.
+  job_read_jobhead-sdlstrttm = lv_sdlstrttm.
+  job_read_jobhead-laststrtdt = lv_laststrtdt.
+  job_read_jobhead-laststrttm = lv_laststrttm.
+  job_read_jobhead-periodic = lv_periodic.
+  job_read_jobhead-prdmins = lv_prdmins.
+  job_read_jobhead-prdhours = lv_prdhours.
+  job_read_jobhead-prddays = lv_prddays.
+  job_read_jobhead-prdweeks = lv_prdweeks.
   CASE lv_state.
     WHEN 'COMPLETED'.
       job_read_jobhead-status = 'F'.

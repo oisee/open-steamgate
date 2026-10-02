@@ -1981,7 +1981,7 @@ for `zosd_status_app`, which has been deployed for a day.
 - Discovery date: `2026-09-29`
 - Affected adapter: `ZOSD_JOBS` implementations of `JOB_OPEN`, `JOB_SUBMIT`, `JOB_CLOSE`, `BP_EVENT_RAISE`, `BP_JOB_READ`, and `BP_JOB_SELECT`
 - Expected SAP behaviour: scheduled and periodic starts, job class/group, external programs, targets, and selection options follow their documented FM semantics.
-- Actual local behaviour: nonempty unsupported options raise declared exceptions; local-owner selection supports `BTCSELECT` job name, count, username, the six status flags (`PRELIM`/`SCHEDUL` included), known step `ABAPNAME`, named-wait `EVENTID`/`EVENTPARM`, and `EQ`/`CP`/`BT` include/exclude ranges. Noninitial `JOBGROUP`, `FROM_DATE`, `FROM_TIME`, `TO_DATE`, `TO_TIME`, `NO_DATE`, and `WITH_PRED` raise `SELECTION_CANCELED` with the field named in the message. Sandbox measurement on 2026-09-29 closed the provisional opcode/status assumptions: `BP_JOB_READ` accepts 19/20/35/36/37 and rejects others; the observed immediate-job status sequence is `P`/`Y`/`R`/`F`, with `A` and `S` observed among other jobs. Opcodes 35/36 share local opcode 20 handling and 37 shares opcode 19 handling; their other field semantics remain unmeasured. Immediate `JOB_CLOSE` exports `JOB_WAS_RELEASED = 'X'`.
+- Actual local behaviour: date/time starts, once or periodic in minutes, hours, days or weeks, and `BP_JOB_DELETE` are supported since 2026-10-01 (docs/job-standard-fms.md, Periodic jobs); `PRDMONTHS`, `EVENT_PERIODIC` and the other remaining options still refuse. Nonempty unsupported options raise declared exceptions; local-owner selection supports `BTCSELECT` job name, count, username, the six status flags (`PRELIM`/`SCHEDUL` included), known step `ABAPNAME`, named-wait `EVENTID`/`EVENTPARM`, and `EQ`/`CP`/`BT` include/exclude ranges. Noninitial `JOBGROUP`, `FROM_DATE`, `FROM_TIME`, `TO_DATE`, `TO_TIME`, `NO_DATE`, and `WITH_PRED` raise `SELECTION_CANCELED` with the field named in the message. Sandbox measurement on 2026-09-29 closed the provisional opcode/status assumptions: `BP_JOB_READ` accepts 19/20/35/36/37 and rejects others; the observed immediate-job status sequence is `P`/`Y`/`R`/`F`, with `A` and `S` observed among other jobs. Opcodes 35/36 share local opcode 20 handling and 37 shares opcode 19 handling; their other field semantics remain unmeasured. Immediate `JOB_CLOSE` exports `JOB_WAS_RELEASED = 'X'`.
 - Impact: callers depending on unsupported options activate but receive a declared exception. The observed status letters and accepted opcodes now match the sandbox; the additional opcode fields remain an open measurement.
 - Smallest safe workaround: use immediate, predecessor, or named-event ABAP report jobs and the private `ZOSD_JOB_READ` bridge for exact local reads. The `TAIL_EVENT_ID`/`TAIL_EVENT_PARAM` extension on `JOB_CLOSE` does not exist on SAP and code using it will not activate there.
 - Measurement: sandbox behaviour probe, 2026-09-29, and active DD03L `BTCSELECT` shape on 2026-09-30; see `.local/probe-facts-2026-09-29-jobs-signatures.md` (private) and `docs/job-standard-fms.md` (public facts and remaining assumptions).
@@ -3159,3 +3159,27 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream issue: none yet
 - Regression-test location: `test/dsl-l3.mjs`, "a rule that raises in the middle of a replay" and its no-restore mutant
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-10-01-periodic-jobs-queue — overlapping instances of a periodic job queue instead of running side by side
+
+- Status: `open` (known difference until the multi-work-process dispatcher, 0.6)
+- Discovery date: `2026-10-01`
+- Affected adapter: `tools/osd-job-scheduler.mjs` and the one work process of `tools/osd-dialog-step.mjs`
+- Expected SAP behaviour (sandbox, 2026-10-01, throwaways deleted): a periodic job with `PRDMINS = 1` whose instances run 150 s has two or three instances `R` at once; none is skipped; the number is bounded only by free background work processes, and a due instance waits for one.
+- Actual local behaviour: this runtime has one work process (the FIFO lock every dialog step takes), so a due instance waits until the running one ends, and a chain that overruns its period falls further behind with every instance. No instance is skipped, each successor is still due at its predecessor's scheduled time plus the period, and the successor is made when the instance is released, which is when the sandbox would start it with a work process free.
+- Impact: a periodic job that overruns finishes its instances later than on a system, and a second job due meanwhile waits too. Which instances run, and the start times they were scheduled for, are the same.
+- Smallest safe workaround: none needed for correctness; keep periodic reports shorter than their period. The fixture `no-skip-on-overrun` gates "no instance skipped" and the successor timing, not concurrency.
+- Upstream: none; a local runtime difference, lifted by the OSGo dispatcher's several work processes (docs/backlog/gogen-osgo.md, 0.6).
+- Regression-test location: `test/job-periodic.mjs` (`no-skip-on-overrun`), fixture `test/fixtures/jobs-periodic/contract.json`.
+
+### ANOMALY-2026-10-01-job-start-tick — a due job starts when the scheduler looks, not at the system's minute tick
+
+- Status: `open` (known difference, by choice)
+- Discovery date: `2026-10-01`
+- Affected adapter: `tools/osd-job-scheduler.mjs`
+- Expected SAP behaviour (sandbox, 2026-10-01): a due job starts at the next run of the background scheduler, which on the sandbox ran at hh:mm:51 every minute, or at once when a background work process frees up for a job already due.
+- Actual local behaviour: the scheduler arms a timer for the earliest start time and starts a due job when it fires, or at the worker's next poll (250 ms), so a job usually starts at its time to the second. No tick is emulated.
+- Impact: `STRTDATE`/`STRTTIME` of an instance can be up to a minute earlier than on a system. The scheduled times, the chain and the successor times do not depend on it: a successor is the scheduled time plus the period, never the actual start plus the period.
+- Smallest safe workaround: do not assert an instance's actual start second against a system's; compare scheduled times (`SDLSTRTDT`/`SDLSTRTTM`).
+- Upstream: none; a local runtime choice.
+- Regression-test location: `test/job-periodic.mjs` (`successor-at-start` starts the instance 50 s late, as the sandbox's tick did, and checks the successor is still due at scheduled time + period).

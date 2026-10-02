@@ -11,6 +11,7 @@ import {BatchRuns, liveGeneration, operationsPath} from "./osd-batch-runs.mjs";
 import {identity} from "./osd-identity.mjs";
 import {readJobSnapshot} from "./osd-job-snapshot.mjs";
 import {jobInputJson} from "./osd-job-input.mjs";
+import {periodMinutes} from "./osd-job-schedule.mjs";
 
 const pending = new WeakMap();
 const keyOf = (name, count) => `${name}\0${count}`;
@@ -50,12 +51,26 @@ const readFill = (signature, fields) => fill(signature, {
   EV_WAIT_KIND: "", EV_WAIT_JOBNAME: "", EV_WAIT_JOBCOUNT: "",
   EV_WAIT_EVENT_ID: "", EV_WAIT_EVENT_PARAM: "", EV_STEP_NUMBER: "", EV_STEP_PROGRAM: "",
   EV_TAIL_EVENT_ID: "", EV_TAIL_EVENT_PARAM: "",
+  EV_SDLSTRTDT: "", EV_SDLSTRTTM: "", EV_LASTSTRTDT: "", EV_LASTSTRTTM: "", EV_PERIODIC: "",
+  EV_PRDMINS: "", EV_PRDHOURS: "", EV_PRDDAYS: "", EV_PRDWEEKS: "",
   EV_INPUT_JSON: "",
   EV_STEP_STATE: "", EV_STEP_STARTED_AT: "", EV_STEP_ENDED_AT: "",
   EV_STEP_RESULT_STATUS: "", EV_LOG_SEQUENCE: "", EV_LOG_STEP: "",
   EV_LOG_AT: "", EV_LOG_EVENT: "", EV_LOG_SEVERITY: "", EV_LOG_TEXT: "",
   EV_ERROR_CODE: "", ...fields,
 });
+// TBTCO's view of a timed job: start and latest start as DATS/TIMS, the
+// period fields as NUMC, PERIODIC = 'X' when one of them is not zero.
+function scheduleFields(schedule) {
+  if (!schedule) return {};
+  const pad = (number, width) => String(number).padStart(width, "0");
+  const periodic = periodMinutes(schedule.period) > 0;
+  return {EV_SDLSTRTDT: schedule.start.slice(0, 8), EV_SDLSTRTTM: schedule.start.slice(8),
+    EV_LASTSTRTDT: schedule.last.slice(0, 8), EV_LASTSTRTTM: schedule.last.slice(8),
+    EV_PERIODIC: periodic ? "X" : "", EV_PRDMINS: pad(schedule.period.mins, 2),
+    EV_PRDHOURS: pad(schedule.period.hours, 2), EV_PRDDAYS: pad(schedule.period.days, 3),
+    EV_PRDWEEKS: pad(schedule.period.weeks, 2)};
+}
 export const MAX_JOB_STEPS = 16;
 const MAX_COUNT = 100000000;
 
@@ -88,6 +103,35 @@ export class JobDestination {
     this.candidate = () => randomInt(MAX_COUNT);
   }
 
+  // BP_JOB_DELETE. Only a committed, imported job can be deleted: one
+  // still in this caller's LUW or in the outbox answers CANT_DELETE (drain
+  // first), so the business LUW and the operations store cannot disagree.
+  #delete(db, jobname, count) {
+    const who = identity(this.env);
+    const sourceDb = resolve(db.path);
+    const name = jobname.trim().toUpperCase();
+    if (!name || name.length > 32 || !/^\d{8}$/.test(count)) return "NOT_FOUND";
+    let snapshot;
+    try {
+      snapshot = readJobSnapshot({sourceDb, jobName: name, jobCount: count,
+        caller: {client: who.client, user: who.user, sid: who.sid}, root: this.root, env: this.env});
+    } catch (error) {
+      return error?.code === "JOB_READ_FORBIDDEN" ? "FORBIDDEN" : "UNAVAILABLE";
+    }
+    const local = db.db.prepare(`SELECT owner, intent_id FROM zosd_job_identity
+      WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(who.client, name, count);
+    if (!snapshot) return local ? "UNCOMMITTED" : "NOT_FOUND";
+    if (String(local?.intent_id ?? "").trim() !== (snapshot.intentId ?? "")) return "UNCOMMITTED";
+    if (snapshot.state === "DELETED") return "NOT_FOUND";
+    if (snapshot.phase !== "OPERATIONS") return snapshot.state === "RUNNING" ? "RUNNING" : "NOT_IMPORTED";
+    const id = snapshot.intentId.replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
+    const store = new BatchRuns(this.root, this.env);
+    try {
+      const kind = store.deleteJob(id);
+      return kind === "deleted" ? "" : kind === "running" ? "RUNNING" : "NOT_FOUND";
+    } finally { store.close(); }
+  }
+
   async call(_name, signature) {
     const token = currentStepToken();
     if (token === undefined) throw new Error("JOB_* requires a dialog step");
@@ -104,7 +148,12 @@ export class JobDestination {
     if (this.env.STG_DB !== "file" || !db?.path || db.path === ":memory:") {
       if (command === "STATUS") statusFill(signature, {EV_ERROR_CODE: "UNAVAILABLE"});
       else if (command === "READ_JOB") readFill(signature, {EV_ERROR_CODE: "UNAVAILABLE"});
+      else if (command === "DELETE") fill(signature, {EV_ERROR_CODE: "UNAVAILABLE"});
       else fill(signature, {EV_ERROR: "JOB_* requires a durable STG_DB=file business database"});
+      return;
+    }
+    if (command === "DELETE") {
+      fill(signature, {EV_ERROR_CODE: this.#delete(db, jobname, count)});
       return;
     }
     if (command === "STATUS" || command === "READ_JOB") {
@@ -148,7 +197,7 @@ export class JobDestination {
         } else if ((local && (!snapshot || String(local.intent_id ?? "").trim() !== (snapshot.intentId ?? ""))) ||
             (!local && snapshot)) {
           response(signature, {EV_ERROR_CODE: "UNCOMMITTED"});
-        } else if (!snapshot) {
+        } else if (!snapshot || snapshot.state === "DELETED") {
           response(signature, {EV_ERROR_CODE: "NOT_FOUND"});
         } else {
           const base = {EV_PHASE: snapshot.phase, EV_STATE: snapshot.state,
@@ -167,7 +216,7 @@ export class JobDestination {
               EV_QUEUED_AT: snapshot.queuedAt ?? "", EV_STARTED_AT: snapshot.startedAt ?? "",
               EV_ENDED_AT: snapshot.endedAt ?? "",
               EV_TAIL_EVENT_ID: snapshot.tailEvent?.id ?? "",
-              EV_TAIL_EVENT_PARAM: snapshot.tailEvent?.param ?? "", ...wait};
+              EV_TAIL_EVENT_PARAM: snapshot.tailEvent?.param ?? "", ...wait, ...scheduleFields(snapshot.schedule)};
             if (item === "STEP" && itemIndex > snapshot.steps.length ||
                 item === "LOG" && itemIndex > entries.length) {
               readFill(signature, {EV_ERROR_CODE: "BAD_KEY"});

@@ -2,17 +2,26 @@
 
 The local `ZOSD_JOBS` function group accepts the sandbox's measured parameter
 names and classic exceptions for `JOB_OPEN`, `JOB_SUBMIT`, `JOB_CLOSE`,
-`BP_EVENT_RAISE`, `SHOW_JOBSTATE`, `BP_JOB_READ`, and `BP_JOB_SELECT`. The
+`BP_EVENT_RAISE`, `SHOW_JOBSTATE`, `BP_JOB_READ`, `BP_JOB_SELECT` and
+`BP_JOB_DELETE`. The
 facade uses the retained job identity and `ZOSD_JOB_READ`/`ZOSD_JOB_STATUS`
 bridge. A read cannot create a job or import pending work.
 
 `JOB_OPEN` reserves a local job key. `JOB_SUBMIT` accepts supported static ABAP
 reports and returns step number 1. `JOB_CLOSE` accepts immediate, predecessor,
-and named event starts; it releases the intent. `BP_EVENT_RAISE` records a
-local named event. Unsupported scheduling, target, periodic and external
-program values raise the respective call's failure exception instead of being
-ignored. Empty optional parameters are accepted. Some optional types and
-nonempty values require further measurement before they can be supported.
+named event and date/time starts, the latter once or periodic (see
+[Periodic jobs](#periodic-jobs)); it releases the intent. `BP_EVENT_RAISE`
+records a local named event. `BP_JOB_DELETE` deletes a job that waits or has
+ended. Unsupported scheduling, target and external program values raise the
+respective call's failure exception instead of being ignored: `EVENT_PERIODIC`,
+`PRDMONTHS`, `CALENDAR_ID`, `AT_OPMODE`, `AT_OPMODE_PERIODIC`,
+`STARTDATE_RESTRICTION`, the `START_ON_WORKDAY_*` and `WORKDAY_COUNT_DIRECTION`
+fields, `RECIPIENT_OBJ`, `INHERIT_*`, `REGISTER_CHILD`, `EMAIL_NOTIFICATION`,
+`DONT_RELEASE` and `DIRECT_START` raise `JOB_CLOSE_FAILED`; `TARGETSYSTEM`,
+`TARGETSERVER` and `TARGETGROUP` raise `INVALID_TARGET`; `TIME_ZONE` raises
+`INVALID_TIME_ZONE`. Empty optional parameters are accepted. Some optional
+types and nonempty values require further measurement before they can be
+supported.
 
 `SHOW_JOBSTATE` returns one `X` flag from the live bridge snapshot. The sandbox
 reported `RUNNING` while the job table still held status `Y`; callers should
@@ -25,8 +34,9 @@ The one-character status sequence was measured on the sandbox on 2026-09-29:
 `P` after `JOB_OPEN` and submit, `Y` after immediate `JOB_CLOSE`, `R` while
 running, and `F` when finished. The system also had jobs with `A` (aborted),
 `S` (released, waiting for its start time), and `Z`; these were not seen in
-this run. Locally, `S` also represents a start condition, predecessor, or
-event wait. `Z` remains unmapped (see ANORMALIES).
+this run. A released date/time job was measured as `S` on 2026-10-01. Locally,
+`S` also represents a predecessor or event wait. `Z` remains unmapped (see
+ANORMALIES).
 
 | Bridge state | Status | SHOW_JOBSTATE flag |
 | --- | --- | --- |
@@ -51,3 +61,128 @@ A program that passes them will not activate against the real SAP FM.
 Closing a valid job with no submitted report step raises `JOB_NOSTEPS`.
 Immediate `JOB_CLOSE` (`STRTIMMED = 'X'`) exports `JOB_WAS_RELEASED = 'X'`,
 as measured on the sandbox on 2026-09-29.
+
+## Periodic jobs
+
+Measured on the sandbox on 2026-10-01 with a throwaway report that waits a
+given number of seconds; the cases are fixtures in
+`test/fixtures/jobs-periodic/contract.json` (`EXPECT = A4H`) and run in
+`test/job-periodic.mjs` against the real facade and the scheduler.
+
+**JOB_CLOSE.** `SDLSTRTDT`/`SDLSTRTTM` start a job at a date and time. The
+values are **system time**: `sy-datum`/`sy-uzeit`, UTC on the sandbox and in
+this runtime; the sandbox user's own time zone (GMTUK) played no part. The job
+is released (`JOB_WAS_RELEASED = 'X'`) and waits as `S`.
+- A start in the past is rewritten to the close time and released.
+- A past start whose `LASTSTRTDT`/`LASTSTRTTM` has passed too raises
+  `INVALID_STARTDATE` with message `BT` 386, and the job stays `P`, not
+  released.
+- A future latest start is accepted and stored; BP_JOB_READ and BP_JOB_SELECT
+  return it.
+- `PRDMINS`, `PRDHOURS`, `PRDDAYS` and `PRDWEEKS` make the job periodic
+  (`PERIODIC = 'X'`). They need a start date; with `STRTIMMED`, an event or a
+  predecessor they raise `JOB_CLOSE_FAILED`, as does a value that is not
+  digits or wider than TBTCO's field (2, 2, 3, 2).
+- `PRDMONTHS` keeps raising `JOB_CLOSE_FAILED`: calendar months need
+  end-of-month rules nobody has measured, and the other periods are exact.
+
+Chosen here, not measured: `SDLSTRTDT` without `SDLSTRTTM` means 000000;
+`LASTSTRT*` without a start date, a latest start before the start, or a date
+or time that does not exist raise `INVALID_STARTDATE`.
+
+**Status.** A released time job is `S` (bridge state `WAITING`) in
+`SHOW_JOBSTATE`, `BP_JOB_READ` and `BP_JOB_SELECT`, before and after the
+outbox is imported; the header carries `SDLSTRTDT`, `SDLSTRTTM`, `LASTSTRTDT`,
+`LASTSTRTTM`, `PERIODIC` and `PRDMINS`/`PRDHOURS`/`PRDDAYS`/`PRDWEEKS`
+(`PRDMONTHS` stays `00`). The local `TBTCJOB` gained these fields after the
+four it had.
+
+**The chain.** The sandbox makes the successor of a periodic job **when an
+instance starts**, as a new job of the same name and steps with status `S`
+and a count from the usual allocator (`JOBCOUNT` = creation time + two digits
+there, a random free count here). Its start time is the predecessor's
+**scheduled** time plus the period, not its actual start: an instance due at
+224501 started at 22:45:51 and its successor was due at 224701. A start in the
+past rewritten to the close time counts the chain from the rewritten time. No
+instance is ever skipped: with a period of one minute and a run of 150 s the
+sandbox ran two or three instances side by side. Deleting the waiting
+successor with `BP_JOB_DELETE` ends the chain; aborting a running instance
+does not, because its successor exists already.
+
+**The scheduler** (`tools/osd-job-scheduler.mjs`) runs one injectable clock:
+`now()`, `setTimer`, `clearTimer`. By default it reads the ABAP clock
+(`abap.statements.getTime`, the hook the frozen `@osd.clock` of the `.http`
+regression cases replaces) and arms a real timer; tests pass `manualClock()`
+and `installAbapClock()`, so `JOB_CLOSE`, the report and the scheduler read
+one time. A pass imports the committed outbox, releases every timed job whose
+time has come, and runs what is queued. The release decision is one
+conditional update in the operations store, WAITING to RELEASING: a job that
+`BP_JOB_DELETE` took first loses it and gets no successor, so a delete that
+commits while the scheduler is already looking still ends the chain. Only a
+job that won it gets its periodic successor, and then it goes RELEASING to
+QUEUED. RELEASING reads as `S` (bridge state `WAITING`) until it is queued;
+`BP_JOB_DELETE` refuses it with `JOB_IS_ALREADY_RUNNING`, as it refuses a
+queued or running job. A crash after the decision leaves the job RELEASING,
+and the next pass finishes it: the successor is found again, the job is
+queued once, and the decision is never taken twice.
+Every run is an entry into ABAP through `tools/osd-dialog-step.mjs`
+(`runConvertedBatch`): it takes the work process, commits when it ends and
+rolls back when it dumps. The successor is made when the instance is
+released, which is the moment the sandbox would start it with a background
+work process free; its jobcount is bound in `ZOSD_JOB_IDENTITY` to an intent
+ID derived from the predecessor's run, so a retry after a crash finds the
+successor it made instead of making a second one. The intent is a unique key
+there (a partial index, `zosd_job_identity_intent`, made on first use), and
+the reservation is one statement, insert or return the row already there, so
+two workers racing for one successor end with one count; duplicates an older
+build left are reduced first to the count an import used, else the lowest.
+A worker releases only its own source's jobs (its business database, client,
+system, user and source instance): several business databases may share one
+operations store, and another's job is skipped, never an error. The worker
+(`node tools/osd-batch-runs.mjs worker`) is the host: it runs a pass at start,
+on every poll and at each start time.
+
+Known differences, in `ANORMALIES.md`: a due job starts when the scheduler
+looks (its timer, or the worker's poll), not at the sandbox's minute tick
+(hh:mm:51 there); and this runtime has one work process, so overlapping
+instances queue instead of running side by side. Neither changes which
+instances run or when they were scheduled.
+
+**Durable.** Released time jobs are rows of the operations store
+(`batch_runs.sdl_at`, `last_at`, `prd_*`, `chain_pred`), imported through
+the business outbox like every other job, with an import payload of their own
+(version 7) that the read model checks. Jobs run only on `STG_DB=file`, as
+before; on the other databases `JOB_CLOSE` refuses as it did.
+
+**Downtime** (unmeasured: an assumption, marked so in the fixture). A system
+started after an outage does not replay the periodic runs it missed. At host
+start (the worker's first pass) every released job that is overdue starts
+once, and its successor goes to the first scheduled time + k * period that
+lies after that moment: the chain keeps its phase and stays aligned with the
+original schedule, and the slots in between are skipped. A one-minute job
+after a two-day stop therefore starts once, not about 2880 times. The slot is
+decided in the same update that takes the start decision (WAITING to
+RELEASING, `batch_runs.next_sdl_at`), so a crash and restart finish that
+decision with the same slot and never make a second successor elsewhere.
+This applies only to a start that was overdue at host start; while the
+scheduler is up, an overrun skips nothing and each successor is due at its
+predecessor's scheduled time + one period, as measured.
+
+**A latest start reached while waiting** (unmeasured: an assumption). The
+instance is not started; it ends `A` with result status `EXPIRED`, and its
+periodic successor is still made, with its latest start moved by the period.
+
+**BP_JOB_DELETE** deletes a job of the caller that waits (`S`) or has ended
+(`F`, `A`). A queued or running job, or one the scheduler is releasing,
+raises `JOB_IS_ALREADY_RUNNING`, an
+unknown one `JOB_DOES_NOT_EXIST`, another user's `NO_DELETE_AUTHORITY`, and a
+job still in the caller's LUW or in the outbox (not yet imported) or a
+nonempty `FORCEDMODE` raises `CANT_DELETE_JOB`. Like `BP_EVENT_RAISE` the
+delete reaches the operations store at once and is not undone by a later
+`ROLLBACK WORK`. A deleted job's row stays, as `DELETED`, for its ledger, log
+and chain link; every read answers as for an unknown job.
+
+**Not here:** `BP_JOB_ABORT`. A running instance holds the one work process,
+so nothing could call it while the instance runs; the abort fixture uses an
+instance that ends `A` by itself. It belongs with the multi-work-process
+dispatcher (0.6).

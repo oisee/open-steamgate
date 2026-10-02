@@ -9,7 +9,7 @@ import {BatchRuns, liveGeneration, runPersistedBatch, workQueuedBatch} from "../
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
 import {batchMonitorHandler} from "../tools/osd-batch-monitor.mjs";
 import {beforeJobPredecessorDDL, ensureJobEventMetadata, migrateJobEventFile,
-  migrateJobStepInputFile,
+  migrateJobStepInputFile, beforeJobScheduleDDL, migrateJobScheduleFile,
   migrateJobIdentityFile, migrateJobPredecessorFile} from "./setup.mjs";
 import {fingerprintOf} from "../tools/osd-persist.mjs";
 
@@ -198,6 +198,13 @@ describe("durable one-shot batch runs", function () {
       expect(migrateJobEventFile(db, fingerprintOf(wanted), fingerprintOf(eventWanted), eventWanted, fingerprintOf)).to.equal(true);
       expect(migrateJobStepInputFile(db, fingerprintOf(eventWanted), fingerprintOf(inputWanted), inputWanted, fingerprintOf)).to.equal(true);
       expect(db.prepare("SELECT input_json FROM zosd_job_step").get().input_json).to.equal("[]");
+      const scheduleParent = eventParent.replace(/\)$/, `, ${[["sdlstrtdt", 8], ["sdlstrttm", 6],
+        ["laststrtdt", 8], ["laststrttm", 6], ["prdmins", 2], ["prdhours", 2], ["prddays", 3], ["prdweeks", 2]]
+        .map(([column, width]) => `'${column}' NCHAR(${width}) COLLATE RTRIM`).join(", ")})`);
+      const scheduleWanted = [scheduleParent, inputStep];
+      expect(beforeJobScheduleDDL(scheduleWanted)).to.deep.equal(inputWanted);
+      expect(migrateJobScheduleFile(db, fingerprintOf(inputWanted), fingerprintOf(scheduleWanted), scheduleWanted, fingerprintOf)).to.equal(true);
+      expect(db.prepare("SELECT sdlstrtdt, prdmins FROM zosd_job_outbox").get()).to.deep.equal({sdlstrtdt: "", prdmins: ""});
       ensureJobEventMetadata(db);
       const client = {path: sourceDb,
         async delete({table, where}) {

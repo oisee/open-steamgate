@@ -7,6 +7,7 @@ import {spawn, spawnSync} from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {BatchRuns, liveGeneration, runConvertedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
+import {jobHeaderType} from "./fixtures/job-header.mjs";
 import {dialogStep, exclusive} from "../tools/osd-dialog-step.mjs";
 import {applyRuntimeHotSwap} from "../tools/osd-hot.mjs";
 import {JobDestination} from "../tools/osd-job-port.mjs";
@@ -1694,10 +1695,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       await workQueuedBatch(root, store, async () => ({status: "COMPLETED"}));
     }
     expect(await finished()).to.equal("X");
-    const header = new abap.types.Structure({
-      jobname: new abap.types.Character(32), jobcount: new abap.types.Character(8),
-      status: new abap.types.Character(1), sdluname: new abap.types.Character(12),
-    });
+    const header = jobHeaderType(abap);
     const ret = new abap.types.Integer().set(77);
     await dialogStep(() => abap.FunctionModules.BP_JOB_READ({
       exporting: {job_read_jobname: box(name), job_read_jobcount: box(count),

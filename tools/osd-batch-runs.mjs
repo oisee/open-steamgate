@@ -10,6 +10,9 @@ import {dialogStep} from "./osd-dialog-step.mjs";
 import {drainJobOutbox} from "./osd-job-outbox.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {jobInput} from "./osd-job-input.mjs";
+import {scheduledPayload} from "./osd-job-schedule.mjs";
+import {installTimedJobs, migrateTimedColumns, timedColumns, timedIntent, workerSource} from "./osd-batch-runs-timed.mjs";
+export {workerSource};
 
 const MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 const runIdOf = (id) => `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
@@ -59,6 +62,8 @@ function publicStep(row, {revealInput = false} = {}) {
 }
 
 export class BatchRuns {
+  static { installTimedJobs(BatchRuns, (store, ...args) => store.#appendJobLog(...args)); }
+
   constructor(root = process.cwd(), env = process.env) {
     this.path = operationsPath(root, env);
     mkdirSync(dirname(this.path), {recursive: true, mode: 0o700});
@@ -134,6 +139,7 @@ export class BatchRuns {
           this.db.exec(`ALTER TABLE batch_runs ADD COLUMN ${column} TEXT`);
         }
       }
+      migrateTimedColumns(this.db);
       this.db.exec(`CREATE TABLE IF NOT EXISTS batch_named_events (
         intent_id TEXT PRIMARY KEY, payload_sha256 TEXT NOT NULL,
         source_db TEXT NOT NULL, source_instance TEXT NOT NULL,
@@ -314,10 +320,11 @@ export class BatchRuns {
         (after.jobname === intent.jobname && after.jobcount === intent.jobcount))) {
       throw new TypeError("invalid predecessor job event");
     }
+    const {schedule, chainPred} = timedIntent(intent, steps, after, named);
     const base = {sourceDb, client: intent.client, sysid: intent.sysid,
       jobname: intent.jobname, jobcount: intent.jobcount, owner: intent.owner,
       program, generation: intent.generation};
-    const payload = tail ? JSON.stringify({version: 6, ...base, steps, afterEvent: after, namedEvent: named, tailEvent: tail}) :
+    const payload = schedule ? scheduledPayload(base, steps, schedule, chainPred, tail) : tail ? JSON.stringify({version: 6, ...base, steps, afterEvent: after, namedEvent: named, tailEvent: tail}) :
       named ? JSON.stringify({version: 5, ...base, steps, namedEvent: named}) :
       after ? JSON.stringify({version: after.intentId ? 4 : 3, ...base, steps, afterEvent: after}) :
       steps ? JSON.stringify({version: 2, ...base, steps}) : JSON.stringify(base);
@@ -344,19 +351,22 @@ export class BatchRuns {
           AND (? = '' OR event_param = ?) LIMIT 1`).get(sourceDb, named.sourceInstance,
           String(intent.client), String(intent.sysid), String(intent.owner), named.id,
           named.seq, named.param, named.param);
-      const released = named ? namedReleased : !after || matching.length === 1;
+      // a timed job waits; the scheduler alone decides its start
+      const released = schedule ? false : named ? namedReleased : !after || matching.length === 1;
       this.db.prepare(`INSERT INTO batch_runs
         (id, program, generation, started_at, queued_at, state, input_json,
          source_db, source_client, source_sysid, source_owner, job_name, job_count, step_count,
          after_job_name, after_job_count, after_intent_id,
-         source_instance, wait_seq, after_named_id, after_named_param, tail_event_id, tail_event_param)
-        VALUES (?, ?, ?, '', ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
+         source_instance, wait_seq, after_named_id, after_named_param, tail_event_id, tail_event_param,
+         sdl_at, last_at, prd_mins, prd_hours, prd_days, prd_weeks, chain_pred)
+        VALUES (?, ?, ?, '', ?, ?, '[]', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(runId, program, String(intent.generation), queuedAt,
           released ? "QUEUED" : "WAITING",
           sourceDb, String(intent.client), String(intent.sysid), String(intent.owner),
           String(intent.jobname), String(intent.jobcount), steps?.length ?? 0,
           after?.jobname ?? null, after?.jobcount ?? null, after?.intentId ? runIdOf(after.intentId) : null,
           named?.sourceInstance ?? tail?.sourceInstance ?? null, named?.seq ?? null,
-          named?.id ?? null, named?.param ?? null, tail?.id ?? null, tail?.param ?? null);
+          named?.id ?? null, named?.param ?? null, tail?.id ?? null, tail?.param ?? null,
+          ...timedColumns(schedule, chainPred));
       this.db.prepare("INSERT INTO batch_imports (intent_id, payload_sha256, run_id) VALUES (?, ?, ?)")
         .run(id, digest, runId);
       if (steps) {
@@ -793,18 +803,7 @@ function resultRecordingError(runId, stepNumber, cause, executionError) {
 }
 
 export async function workQueuedBatch(root, store, execute = runConvertedBatch) {
-  const businessClient = globalThis.abap?.context?.databaseConnections?.DEFAULT;
-  const businessDb = businessClient?.path;
-  const sy = globalThis.abap?.builtin?.sy?.get?.();
-  let instance;
-  try {
-    if (businessClient?.db?.prepare("SELECT 1 FROM sqlite_master WHERE name = 'zosd_job_source_instance'").get()) {
-      instance = businessClient.db.prepare("SELECT id FROM zosd_job_source_instance LIMIT 1").get()?.id;
-    }
-  } catch { instance = undefined; }
-  const source = businessDb && businessDb !== ":memory:" && sy ?
-    {db: resolve(businessDb), client: String(sy.mandt.get()).trim(), sysid: String(sy.sysid.get()).trim(),
-      owner: String(sy.uname.get()).trim(), instance} : undefined;
+  const source = workerSource();
   const next = store.claimNext(source ?? {legacyOnly: true});
   if (next.kind !== "claimed") return next;
   const {run} = next;
@@ -886,24 +885,25 @@ async function main(args) {
       console.log(JSON.stringify(await drainJobOutbox(store), null, 2));
       return 0;
     }
+    const {JobScheduler} = await import("./osd-job-scheduler.mjs"); // not at the top: it imports this module
+    const scheduler = new JobScheduler({root, store});
     if (command === "work") {
       if (process.env.STG_DB === "file") await drainJobOutbox(store);
+      await scheduler.releaseDue();
       const result = await workQueuedBatch(root, store);
       console.log(JSON.stringify(result, null, 2));
       return result.kind === "failed" ? 1 : 0;
     }
     let stopping = false;
-    process.on("SIGINT", () => { stopping = true; });
-    process.on("SIGTERM", () => { stopping = true; });
-    while (!stopping) {
-      if (process.env.STG_DB === "file") await drainJobOutbox(store);
-      const result = await workQueuedBatch(root, store);
-      if (result.kind === "completed" || result.kind === "failed" || result.kind === "advanced") {
-        console.log(JSON.stringify(result));
-      } else {
-        await delay(250);
+    for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { stopping = true; });
+    // a worker start is a host start (overdue time jobs start once); later passes poll
+    try {
+      for (let first = true; !stopping; first = false) {
+        const outcomes = await (first ? scheduler.start() : scheduler.tick());
+        for (const result of outcomes) console.log(JSON.stringify(result));
+        if (outcomes.length === 0) await delay(250);
       }
-    }
+    } finally { scheduler.stop(); }
     return 0;
   } catch (error) {
     console.error(`osd-batch-runs: ${error.message}${error.runId ? ` (run ${error.runId})` : ""}`);

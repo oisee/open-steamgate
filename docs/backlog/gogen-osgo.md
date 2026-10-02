@@ -1455,6 +1455,15 @@ something already shipped (then it is a must of the current release, like the ro
 - generous: IR-JS on the database seam, so DB tests run too.
 - generous: one DB IR for both runtimes (`docs/pamdp-ir-portability.md`, a proposal; pAMDP parked).
 - generous: the lazy-table status group (needs the pooled snapshot design first).
+- should (added 2026-10-01): **jobs facade, start by date/time and periodic starts.** `JOB_CLOSE` takes
+  `SDLSTRTDT`/`SDLSTRTTM`, `LASTSTRTDT`/`LASTSTRTTM` and `PRDMINS`/`PRDHOURS`/`PRDDAYS`/`PRDWEEKS` (system time;
+  a past start rewritten to the close time; past start + past latest start = `INVALID_STARTDATE`, BT 386, stays P);
+  a released time job is S with its TBTCO fields; the scheduler (`tools/osd-job-scheduler.mjs`) runs on one
+  injectable clock, every start through the dialog step; the successor is made at an instance's start, due at the
+  scheduled time + period, no instance skipped; `BP_JOB_DELETE` of the waiting successor ends the chain. Gated by
+  the sandbox fixtures in `test/fixtures/jobs-periodic/` (docs/job-standard-fms.md, Periodic jobs). Owner:
+  osg-research; reviewer: dell (the jobs facade). Follow-ups, nice: `PRDMONTHS` once month-end rules are measured;
+  `BP_JOB_ABORT` and side-by-side instances with the multi-work-process dispatcher (ANOMALY-2026-10-01-periodic-jobs-queue).
 - nice (added 2026-10-01): pAMDP `XMLTABLE` / `XMLEXTRACT(VALUE)` / `SELECT ... FOR XML` over the streaming sXML
   parser. Measured on A4H HANA 2.00.075: `XMLTABLE` reads ~5.8 MB/s at ~23 bytes of HANA memory per XML byte (166 MB:
   28.6 s, 3.9 GB); over the streaming parser the memory is the window. Owner: osg-research.
