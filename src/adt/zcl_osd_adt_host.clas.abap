@@ -49,6 +49,9 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
              source TYPE string,
            END OF ty_answer.
 
+    "! Refuse commands absent from the host COMMANDS capability list.
+    CLASS-METHODS require IMPORTING iv_command TYPE string RAISING zcx_osd_adt.
+
     "! All host calls share the typed error envelope. SOURCE is a raw body.
     CLASS-METHODS store
       IMPORTING iv_command TYPE string
@@ -116,6 +119,26 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 
 CLASS zcl_osd_adt_host IMPLEMENTATION.
+
+  METHOD require.
+    DATA ls_answer TYPE ty_answer.
+    DATA lo_json TYPE REF TO zcl_ajson.
+    DATA lt_commands TYPE string_table.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+    ls_answer = store( `COMMANDS` ).
+    TRY.
+        lo_json = zcl_ajson=>parse( ls_answer-json ).
+        lt_commands = lo_json->array_to_string_table( `/commands` ).
+      CATCH zcx_ajson_error.
+        lx_error = zcx_osd_adt=>internal( `invalid COMMANDS answer` ).
+        RAISE EXCEPTION lx_error.
+    ENDTRY.
+    READ TABLE lt_commands WITH KEY table_line = iv_command TRANSPORTING NO FIELDS.
+    IF sy-subrc <> 0.
+      lx_error = zcx_osd_adt=>not_supported( |unknown store command { iv_command }| ).
+      RAISE EXCEPTION lx_error.
+    ENDIF.
+  ENDMETHOD.
 
   METHOD store.
     DATA lv_error TYPE string.

@@ -110,6 +110,16 @@ describe("ADT B5: package and repository tree Node diff", function () {
         const res = await diff("/sap/bc/adt/packages/"+name,method,{accept});
         expect(res.status).to.equal(name === "ZNope" ? 404 : 200);
       });
+  it("malformed package parameter compares status only", async () => {
+    // Express rejects :param decoding before dispatch; its error body is
+    // deliberately outside byte parity (see the port plan).
+    const path = "/sap/bc/adt/packages/%zz";
+    const expected = await fetch(at(node) + path, {headers: node.auth});
+    const actual = await fetch(at(ported) + path, {headers: ported.auth});
+    await Promise.all([expected.arrayBuffer(), actual.arrayBuffer()]);
+    expect(expected.status).to.equal(400);
+    expect(actual.status).to.equal(expected.status);
+  });
   for (const user of ["BUILDER_A", "BUILDER_B"]) for (const name of ["%24tmp", "%24tmp_kid"])
     it(`local package ${name} ${user}`, async () => { await diff("/sap/bc/adt/packages/"+name,"GET",{},undefined,user); });
   it("literal settings shadows the package parameter, encoded SETTINGS remains a package name", async () => {

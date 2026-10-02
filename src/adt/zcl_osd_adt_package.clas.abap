@@ -6,7 +6,6 @@ CLASS zcl_osd_adt_package DEFINITION PUBLIC FINAL CREATE PUBLIC.
       EXPORTING ev_value TYPE string ev_found TYPE abap_bool.
     CLASS-METHODS get IMPORTING iv_name TYPE string iv_user TYPE string
       RETURNING VALUE(ro_json) TYPE REF TO zcl_ajson RAISING zcx_osd_adt.
-    CLASS-METHODS require_command IMPORTING iv_command TYPE string RAISING zcx_osd_adt.
     CLASS-METHODS document IMPORTING io_json TYPE REF TO zcl_ajson RETURNING VALUE(rv_body) TYPE string RAISING zcx_ajson_error.
 ENDCLASS.
 CLASS zcl_osd_adt_package IMPLEMENTATION.
@@ -19,30 +18,11 @@ CLASS zcl_osd_adt_package IMPLEMENTATION.
       ev_value = ls_field-value.
     ENDIF.
   ENDMETHOD.
-  METHOD require_command.
-    DATA ls_answer TYPE zcl_osd_adt_host=>ty_answer.
-    DATA lo_json TYPE REF TO zcl_ajson.
-    DATA lt_commands TYPE string_table.
-    DATA lx_error TYPE REF TO zcx_osd_adt.
-    ls_answer = zcl_osd_adt_host=>store( `COMMANDS` ).
-    TRY.
-        lo_json = zcl_ajson=>parse( ls_answer-json ).
-        lt_commands = lo_json->array_to_string_table( `/commands` ).
-      CATCH zcx_ajson_error.
-        lx_error = zcx_osd_adt=>internal( `invalid COMMANDS answer` ).
-        RAISE EXCEPTION lx_error.
-    ENDTRY.
-    READ TABLE lt_commands WITH KEY table_line = iv_command TRANSPORTING NO FIELDS.
-    IF sy-subrc <> 0.
-      lx_error = zcx_osd_adt=>not_supported( |unknown store command { iv_command }| ).
-      RAISE EXCEPTION lx_error.
-    ENDIF.
-  ENDMETHOD.
   METHOD get.
     DATA lo_input TYPE REF TO zcl_osd_adt_json.
     DATA ls_answer TYPE zcl_osd_adt_host=>ty_answer.
     DATA lx_error TYPE REF TO zcx_osd_adt.
-    require_command( `PACKAGE` ).
+    zcl_osd_adt_host=>require( `PACKAGE` ).
     CREATE OBJECT lo_input.
     lo_input->add( iv_name = `name` iv_value = iv_name ).
     lo_input->add( iv_name = `mode` iv_value = `local` ).
