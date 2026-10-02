@@ -1,4 +1,4 @@
-* Unmeasured fixture: expected bytes follow fixed-x fitting and signed i moves.
+* replace_fit: ABAPiti oracle 009, A4H 2026-10-02; signed i moves unmeasured.
 CLASS zcl_gogen_t_singlebytes DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES byte TYPE x LENGTH 1.

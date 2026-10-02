@@ -7,6 +7,7 @@ import {compileProgram} from "./frontend.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {emitGo} from "./emit-go.mjs";
+import {libraryPath} from "../osd-lib-path.mjs";
 
 mkdirSync(join(import.meta.dirname, ".out"), {recursive: true});
 
@@ -209,7 +210,7 @@ test("private statics qualify in static/instance methods and the class construct
   const go = emitGo(p);
   assert.match(go, /ZCL_OWNED__MV_MEM hXbuf.Buffer/);
   assert.match(go, /ZCL_OWNED__MV_MEM.Sub/);
-  assert.match(go, /ZCL_OWNED__MV_MEM.Replace/);
+  assert.match(go, /ZCL_OWNED__MV_MEM.StoreByte/);
   assert.match(go, /ZCL_OWNED__MV_MEM.Append/);
   assert.doesNotMatch(go, /func\(\) \*string \{ Ensure_ZCL_OWNED/);
 });
@@ -303,4 +304,20 @@ func TestChecksum(t *testing.T) {
   const escaped = compile("mv_mem = '00'.", "METHOD checksum. DATA ptr TYPE REF TO packed. GET REFERENCE OF r INTO ptr. r = r + n. ENDMETHOD.",
     "TYPES packed TYPE p LENGTH 16 DECIMALS 0. METHODS checksum IMPORTING VALUE(n) TYPE i RETURNING VALUE(r) TYPE packed.");
   assert.doesNotMatch(emitGo(escaped), /hPackedint.Add/);
+});
+
+// A4H 2026-10-02, ABAPiti oracle 009: keep each measured case visible.
+test("oracle 009 byte replacement expectations on IR-as-JS", async (t) => {
+  const root = join(import.meta.dirname, "../..");
+  const program = compileProgram({folders: [join(import.meta.dirname, "testdata"),
+    join(libraryPath(root, "open-abap-core"), "src")], objects: ["ZCL_GOGEN_T_REPL009"]});
+  assert.deepEqual(program.partial, []);
+  assert.deepEqual(program.broken, []);
+  const js = emitJs(program, new URL("./js/abap.mjs", import.meta.url).href);
+  const m = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
+  const expected = ["[12FF rc=2]", "[AB00 rc=0]", "[11A1A2A3 rc=2]", "[11AB4400 rc=0]",
+    "[12FFFF rc=0]", "[12AB rc=0]", "[1234 rc=2]", "[A1A2 rc=2]"];
+  for (const [index, want] of expected.entries()) await t.test(`case ${index + 1}`, () => {
+    assert.equal(m.ZCL_GOGEN_T_REPL009.PROBE({sy: {index: 0, subrc: 0}}, index + 1), want);
+  });
 });

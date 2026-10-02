@@ -29,6 +29,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-02-repl009-subrc-text -- Oracle return-code text carries an extra sign blank
+
+- Status: `workaround`
+- Discovery date: `2026-10-02`
+- Affected versions: gogen Go and IR-as-JS on origin/main `45d8f8af`.
+- Affected ABAP statement: `lv_rc = sy-subrc` into a string, followed by `CONCATENATE ... RESPECTING BLANKS`.
+- Minimal ABAP reproducer: ABAPiti oracle 009; tracked byte-contract adaptation in `tools/gogen/testdata/zcl_gogen_t_repl009.clas.abap`.
+- Exact command used to run it: `node tools/gogen/unit.mjs --fixture tools/gogen/testdata --class ZCL_GOGEN_T_REPL009 --jobs 2 --no-cache` (before the formatting adaptation).
+- Expected SAP behaviour: the supplied A4H expectations (ABAPiti, 2026-10-02) contain `[12FF rc=2]`, with no blank before `]`, and likewise for all eight cases.
+- Actual gogen behaviour: Go returns `[12FF rc=2 ]`; the shared Go and JS `IToString` helpers append a sign blank to a nonnegative integer. All expected byte values and numeric return codes match. This conflicts with the oracle's presentation, not its byte-section rules; standalone positive integer assignment needs re-measurement before changing the shared conversion.
+- Impact on open-steamgate: copying oracle 009 verbatim makes all eight byte-contract assertions fail on formatting.
+- Smallest safe workaround: render `sy-subrc` with a string template in the tracked fixture; retain all eight expected strings and every byte operation. Leave shared integer assignment unchanged.
+- Upstream issue: none; local validation only, no issue or PR actions authorized.
+- Regression-test location: the fixture's eight ABAP Unit methods and its Go/JS row in `tools/gogen/semantics.mjs`.
+- Upstream version containing a fix: unknown.
+
 ### ANOMALY-2026-10-02-boolx-logical-argument -- BOOLX's logical argument does not parse as a method parameter
 
 - Status: `workaround`
