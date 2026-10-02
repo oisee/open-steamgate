@@ -11,6 +11,11 @@ import {jobHeaderType} from "./fixtures/job-header.mjs";
 import {dialogStep, exclusive} from "../tools/osd-dialog-step.mjs";
 import {applyRuntimeHotSwap} from "../tools/osd-hot.mjs";
 import {JobDestination} from "../tools/osd-job-port.mjs";
+import {identity} from "../tools/osd-identity.mjs";
+
+// the system id the job port checks an outbox row against: the one
+// identity of this process (OSD_SID, its alias, else OSD), never a literal
+const SID = identity().sid;
 
 const root = resolve(".");
 
@@ -209,7 +214,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const legacyStore = new BatchRuns(root, legacyEnv);
     try {
       legacyStore.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-        client: "123", sysid: "OSG", jobname: "  identity_legacy ", jobcount: legacyCount,
+        client: "123", sysid: SID, jobname: "  identity_legacy ", jobcount: legacyCount,
         owner: "DEVELOPER", program: "ZGG_EX_012", generation: liveGeneration(root)});
     } finally { legacyStore.close(); }
     const writer = new DatabaseSync(dbPath);
@@ -368,7 +373,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       expect(rows()).to.have.length(before);
       expect(scoped.list()).to.have.length(0);
       const run = scoped.importIntent({intentId: outbox.intent_id.trim(), sourceDb: dbPath,
-        client: "123", sysid: "OSG", owner: "DEVELOPER", jobname: name, jobcount: count,
+        client: "123", sysid: SID, owner: "DEVELOPER", jobname: name, jobcount: count,
         program: "ZGG_EX_012", generation: outbox.generation.trim(),
         steps: [{number: 1, program: "ZGG_EX_012"}]}).run;
       const imported = await dialogStep(() => status(name, count));
@@ -427,7 +432,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       const scoped = new BatchRuns(root, process.env);
       try {
         const run = scoped.importIntent({intentId: outbox.intent_id.trim(), sourceDb: dbPath,
-          client: "123", sysid: "OSG", owner: "DEVELOPER", jobname: name, jobcount: count,
+          client: "123", sysid: SID, owner: "DEVELOPER", jobname: name, jobcount: count,
           program: "ZGG_EX_012", generation: outbox.generation.trim(),
           steps: [{number: 1, program: "ZGG_EX_012"}]}).run;
         const log = await dialogStep(() => readJob(name, count, "LOG", "1"));
@@ -485,7 +490,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
       const scoped = new BatchRuns(root, process.env);
       try {
         const run = scoped.importIntent({intentId: outbox.intent_id.trim(), sourceDb: dbPath,
-          client: "123", sysid: "OSG", owner: "DEVELOPER", jobname: name, jobcount: count,
+          client: "123", sysid: SID, owner: "DEVELOPER", jobname: name, jobcount: count,
           program: "ZGG_EX_012", generation: outbox.generation.trim(),
           steps: [{number: 1, program: "ZGG_EX_012"}]}).run;
         scoped.claimNext();
@@ -614,7 +619,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const legacy = new BatchRuns(root, process.env);
     try {
       legacy.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-        client: "123", sysid: "OSG", owner: "DEVELOPER", jobname: "STATUS_LEGACY",
+        client: "123", sysid: SID, owner: "DEVELOPER", jobname: "STATUS_LEGACY",
         jobcount: "00000089", program: "ZGG_EX_012", generation: liveGeneration(root)});
       await dialogStep(() => classic(() => status("STATUS_LEGACY", "00000089"), "legacy"));
     } finally {
@@ -856,7 +861,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
   it("an operations failure after run insertion rolls back run and import ledger together", () => {
     const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "atomic.sqlite")});
     const intent = {intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-      client: "123", sysid: "OSG", jobname: "ATOMIC", jobcount: "00000001",
+      client: "123", sysid: SID, jobname: "ATOMIC", jobcount: "00000001",
       owner: "DEVELOPER", program: "ZGG_EX_012", generation: liveGeneration(root)};
     try {
       scoped.db.exec(`CREATE TRIGGER refuse_import_ledger BEFORE INSERT ON batch_imports
@@ -909,7 +914,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
 
   it("a worker only claims rows for its business database, client and system", async () => {
     const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "scope.sqlite")});
-    const base = {client: "123", sysid: "OSG", jobname: "SCOPE", jobcount: "00000001",
+    const base = {client: "123", sysid: SID, jobname: "SCOPE", jobcount: "00000001",
       owner: "DEVELOPER", program: "ZGG_EX_012", generation: liveGeneration(root)};
     try {
       const foreignDb = scoped.importIntent({...base, intentId: randomUUID().replaceAll("-", ""),
@@ -978,11 +983,35 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     try {
       writer.prepare(`INSERT INTO zosd_job_outbox
         (mandt, intent_id, sysid, source_db, jobname, jobcount, owner, program, generation, created_on, created_at)
-        VALUES ('124', ?, 'OSG', ?, 'FOREIGN', '00000001', 'DEVELOPER', 'ZGG_EX_012', ?, '20260929', '000000')`)
+        VALUES ('124', ?, '${SID}', ?, 'FOREIGN', '00000001', 'DEVELOPER', 'ZGG_EX_012', ?, '20260929', '000000')`)
         .run(intent, dbPath, liveGeneration(root));
     } finally { writer.close(); }
     expect((await drainJobOutbox(store)).imported).to.equal(0);
     expect(rows().some((row) => row.intent_id.trim() === intent)).to.equal(true);
+  });
+
+  // a row written under another system id is refused with both ways out:
+  // the old OSD_SID, or a reset of the business database
+  it("refuses an outbox row of another system id and says how to recover", async () => {
+    const other = SID === "ZZZ" ? "ZZY" : "ZZZ";
+    const writer = new DatabaseSync(dbPath);
+    const intent = randomUUID().replaceAll("-", "");
+    try {
+      writer.prepare(`INSERT INTO zosd_job_outbox
+        (mandt, intent_id, sysid, source_db, jobname, jobcount, owner, program, generation, created_on, created_at)
+        VALUES ('123', ?, '${other}', ?, 'OTHERSID', '00000001', 'DEVELOPER', 'ZGG_EX_012', ?, '20260929', '000000')`)
+        .run(intent, dbPath, liveGeneration(root));
+    } finally { writer.close(); }
+    try {
+      let refused;
+      try { await drainJobOutbox(store); } catch (error) { refused = error; }
+      expect(refused?.message).to.contain(`written by system ${other}, this system is ${SID}`);
+      expect(refused.message).to.contain(`OSD_SID=${other}`);
+      expect(refused.message).to.contain("reset the business database");
+    } finally {
+      const cleaner = new DatabaseSync(dbPath);
+      try { cleaner.prepare("DELETE FROM zosd_job_outbox WHERE intent_id = ?").run(intent); } finally { cleaner.close(); }
+    }
   });
 
   it("rejects variants, unsupported reports, too many steps, and non-immediate close", async () => {
@@ -1320,7 +1349,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "multi-fail.sqlite")});
     try {
       const base = {intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-        client: "123", sysid: "OSG", jobname: "MULTI", jobcount: "00000001",
+        client: "123", sysid: SID, jobname: "MULTI", jobcount: "00000001",
         owner: "DEVELOPER", program: "ZGG_EX_001", generation: liveGeneration(root),
         steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"},
           {number: 3, program: "ZGG_EX_043"}]};
@@ -1344,7 +1373,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
   it("leaves a crashed active step RUNNING and requires explicit interrupt", async () => {
     const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "multi-crash.sqlite")});
     const base = {intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-      client: "123", sysid: "OSG", jobname: "MULTI", jobcount: "00000002",
+      client: "123", sysid: SID, jobname: "MULTI", jobcount: "00000002",
       owner: "DEVELOPER", program: "ZGG_EX_001", generation: liveGeneration(root),
       steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]};
     try {
@@ -1373,7 +1402,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "multi-corrupt.sqlite")});
     try {
       const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-        client: "123", sysid: "OSG", jobname: "MULTI", jobcount: "00000003", owner: "DEVELOPER",
+        client: "123", sysid: SID, jobname: "MULTI", jobcount: "00000003", owner: "DEVELOPER",
         program: "ZGG_EX_001", generation: liveGeneration(root),
         steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
       scoped.db.prepare("UPDATE batch_run_steps SET state = 'PENDING' WHERE run_id = ?").run(run.id);
@@ -1387,7 +1416,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: path});
     try {
       const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-        client: "123", sysid: "OSG", jobname: "MULTI", jobcount: "00000004", owner: "DEVELOPER",
+        client: "123", sysid: SID, jobname: "MULTI", jobcount: "00000004", owner: "DEVELOPER",
         program: "ZGG_EX_001", generation: liveGeneration(root),
         steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
       const fixture = join(root, "test", "fixtures", "job-step-claim.mjs");
@@ -1412,7 +1441,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const other = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: path});
     try {
       const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-        client: "123", sysid: "OSG", jobname: "RACE", jobcount: "00000005", owner: "DEVELOPER",
+        client: "123", sysid: SID, jobname: "RACE", jobcount: "00000005", owner: "DEVELOPER",
         program: "ZGG_EX_001", generation: liveGeneration(root),
         steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
       const originalExec = scoped.db.exec.bind(scoped.db);
@@ -1440,7 +1469,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const scoped = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: join(dir, "older-node.sqlite")});
     try {
       const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-        client: "123", sysid: "OSG", jobname: "OLDER_NODE", jobcount: "00000007", owner: "DEVELOPER",
+        client: "123", sysid: SID, jobname: "OLDER_NODE", jobcount: "00000007", owner: "DEVELOPER",
         program: "ZGG_EX_001", generation: liveGeneration(root),
         steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
       scoped.claimNext();
@@ -1464,7 +1493,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     const other = new BatchRuns(root, {...process.env, OSD_OPERATIONS_DB: path});
     try {
       const run = scoped.importIntent({intentId: randomUUID().replaceAll("-", ""), sourceDb: dbPath,
-        client: "123", sysid: "OSG", jobname: "SNAPSHOT", jobcount: "00000006", owner: "DEVELOPER",
+        client: "123", sysid: SID, jobname: "SNAPSHOT", jobcount: "00000006", owner: "DEVELOPER",
         program: "ZGG_EX_001", generation: liveGeneration(root),
         steps: [{number: 1, program: "ZGG_EX_001"}, {number: 2, program: "ZGG_EX_012"}]}).run;
       scoped.claimNext();
