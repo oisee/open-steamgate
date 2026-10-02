@@ -592,15 +592,6 @@ ${children}
 // fields the editor expects to find. An empty list says "this system has no
 // application components" and the editor shows an empty dropdown, which is
 // exactly right.
-export function namedItemsDocument(items = []) {
-  return `<?xml version="1.0" encoding="utf-8"?>
-<nameditem:namedItemList xmlns:nameditem="http://www.sap.com/adt/nameditem">
-  <nameditem:totalItemCount>${items.length}</nameditem:totalItemCount>
-${items.map((item) => `  <nameditem:namedItem><nameditem:name>${xmlEscape(item.name)}</nameditem:name><nameditem:description>${xmlEscape(item.description ?? "")}</nameditem:description>${item.data === undefined ? "" : `<nameditem:data>${xmlEscape(item.data)}</nameditem:data>`}</nameditem:namedItem>`).join("\n")}
-</nameditem:namedItemList>
-`;
-}
-
 // The contents of one node of the repository tree. A client walks this: it
 // asks for a package and gets its subpackages and its objects, each with the
 // URI to ask about next.
@@ -1512,25 +1503,6 @@ ${(run.testClasses ?? []).map(testClass).join("\n")}
 // The answer to a repository search: a flat list of references into the
 // resource tree. A client shows the list and follows a URI when one is
 // picked, so the URI matters more than the description.
-export function objectReferencesDocument(objects) {
-  const reference = (o) => {
-    const attributes = [
-      o.uri === undefined ? undefined : `adtcore:uri="${xmlEscape(o.uri)}"`,
-      `adtcore:type="${xmlEscape(o.type)}"`,
-      `adtcore:name="${xmlEscape(o.name)}"`,
-      o.packageName === undefined ? undefined : `adtcore:packageName="${xmlEscape(o.packageName)}"`,
-      o.description === undefined ? undefined : `adtcore:description="${xmlEscape(o.description)}"`,
-    ].filter((a) => a !== undefined).join(" ");
-    return `  <adtcore:objectReference ${attributes}/>`;
-  };
-
-  return `<?xml version="1.0" encoding="utf-8"?>
-<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">
-${objects.map(reference).join("\n")}
-</adtcore:objectReferences>
-`;
-}
-
 // The repository path which lets a client turn an ADT URI back into the
 // corresponding object in its package tree.  Includes are deliberately not
 // separate steps: abap-fs resolves the class and then selects the requested
@@ -1610,3 +1582,5 @@ function searchNonPackages(store, pattern, regex, anchored, options = {}) {
   }
   return out;
 }
+
+export {namedItemsDocument, objectReferencesDocument, emptyFeedDocument} from "./adt-document-common.mjs";

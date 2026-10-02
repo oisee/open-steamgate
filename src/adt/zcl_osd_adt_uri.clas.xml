@@ -5,11 +5,12 @@
    <VSEOCLASS>
     <CLSNAME>ZCL_OSD_ADT_URI</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>ADT facade: path segment decoding</DESCRIPT>
+    <DESCRIPT>ADT facade: URI components and query</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>
     <UNICODE>X</UNICODE>
+    <WITH_UNIT_TESTS>X</WITH_UNIT_TESTS>
    </VSEOCLASS>
   </asx:values>
  </asx:abap>

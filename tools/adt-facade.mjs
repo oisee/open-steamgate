@@ -32,7 +32,7 @@ import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-prope
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict, InvalidName} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {portabilityWarnings} from "./amdp-gen.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
@@ -1705,16 +1705,10 @@ export function adtRouter(options = {}) {
   // An empty feed is not a stub. It is the correct answer, and it stays the
   // correct answer for as long as nothing here dumps.
   const emptyFeed = (res, title, self) => {
-    res.type("application/atom+xml;type=feed").send(
-      '<?xml version="1.0" encoding="utf-8"?>' +
-      '<atom:feed xmlns:atom="http://www.w3.org/2005/Atom">' +
-      `<atom:author><atom:name>${identity.userFullName}</atom:name></atom:author>` +
-      `<atom:contributor><atom:name>${identity.systemID}</atom:name></atom:contributor>` +
-      `<atom:link href="${self}" rel="self" type="application/atom+xml;type=feed"/>` +
-      `<atom:title type="text">${title}</atom:title>` +
-      `<atom:updated>${new Date().toISOString()}</atom:updated>` +
-      "</atom:feed>",
-    );
+    res.type("application/atom+xml;type=feed").send(emptyFeedDocument({
+      userFullName: identity.userFullName, systemID: identity.systemID, title, self,
+      updated: new Date().toISOString(),
+    }));
   };
 
   router.get(`${BASE}/runtime/dumps`, (req, res) => {

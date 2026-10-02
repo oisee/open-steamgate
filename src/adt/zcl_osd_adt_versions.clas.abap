@@ -17,9 +17,6 @@ CLASS zcl_osd_adt_versions DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS stamp
       IMPORTING iv_date TYPE d iv_time TYPE t
       RETURNING VALUE(rv_stamp) TYPE string.
-    CLASS-METHODS uri_name
-      IMPORTING iv_name TYPE string
-      RETURNING VALUE(rv_name) TYPE string.
     "! one version's source, as versionSource reads it (not 00000)
     CLASS-METHODS content
       IMPORTING is_request         TYPE zif_osd_adt_route=>ty_request
@@ -79,68 +76,12 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
     rv_stamp = iv_date && iv_time.
   ENDMETHOD.
 
-  METHOD uri_name.
-*   encodeURIComponent after lowercasing, including UTF-8 bytes and upper
-*   case hex. CL_HTTP_UTILITY=>ESCAPE_URL emits lower case hex instead.
-    DATA lv_char TYPE string.
-    DATA lv_bytes TYPE xstring.
-    DATA lv_hex TYPE c LENGTH 2.
-    DATA lv_index TYPE i.
-    DATA lv_byte TYPE i.
-    DO strlen( iv_name ) TIMES.
-      lv_index = sy-index - 1.
-      lv_char = iv_name+lv_index(1).
-      IF to_upper( lv_char ) CA sy-abcde OR lv_char CA `0123456789-_.!~*'()`.
-        rv_name = rv_name && lv_char.
-      ELSE.
-        lv_bytes = cl_abap_codepage=>convert_to( lv_char ).
-        DO xstrlen( lv_bytes ) TIMES.
-          lv_byte = sy-index - 1.
-          lv_hex = lv_bytes+lv_byte(1).
-          rv_name = rv_name && `%` && to_upper( lv_hex ).
-        ENDDO.
-      ENDIF.
-    ENDDO.
-  ENDMETHOD.
-
   METHOD entity.
-    DATA lv_hash TYPE string.
-    DATA lv_candidates TYPE string_table.
-    DATA lv_candidate TYPE string.
-    DATA ls_header TYPE ihttpnvp.
-    DATA lv_none TYPE string.
-    cl_abap_message_digest=>calculate_hash_for_char(
-      EXPORTING if_algorithm = 'SHA256' if_data = iv_body
-      IMPORTING ef_hashstring = lv_hash ).
-    lv_hash = to_lower( lv_hash(32) ).
-    rs_response-status = 200.
-    rs_response-content_type = iv_type.
-    rs_response-body = iv_body.
-    ls_header-name = `ETag`.
-    ls_header-value = lv_hash.
-    APPEND ls_header TO rs_response-headers.
-    IF iv_note IS NOT INITIAL.
-      ls_header-name = `X-OSD-History`.
-      ls_header-value = `none: ` && iv_note.
-      APPEND ls_header TO rs_response-headers.
-    ENDIF.
-    lv_none = field( it_fields = is_request-headers iv_name = `if-none-match` ).
-    SPLIT lv_none AT `,` INTO TABLE lv_candidates.
-    LOOP AT lv_candidates INTO lv_candidate.
-      CONDENSE lv_candidate NO-GAPS.
-*     a candidate shorter than the prefix (If-None-Match: *) is no tag
-      IF strlen( lv_candidate ) >= 2.
-        IF lv_candidate(2) = `W/`.
-          lv_candidate = substring( val = lv_candidate off = 2 ).
-        ENDIF.
-      ENDIF.
-      REPLACE ALL OCCURRENCES OF `"` IN lv_candidate WITH ``.
-      IF lv_candidate = lv_hash.
-        rs_response-status = 304.
-        CLEAR rs_response-body.
-        RETURN.
-      ENDIF.
-    ENDLOOP.
+    DATA lv_charset TYPE abap_bool.
+*   The Node feed is sent as a Buffer, so Express adds no charset.
+    lv_charset = boolc( iv_type = `text/plain` ).
+    rs_response = zcl_osd_adt_entity=>send( is_request = is_request iv_body = iv_body
+      iv_type = iv_type iv_note = iv_note iv_charset = lv_charset ).
   ENDMETHOD.
 
   METHOD zif_osd_adt_route~handle.
@@ -217,7 +158,7 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
 *   the Node facade's versionSource
     IF lv_content = abap_true AND lv_version = `00000`.
       rs_response = entity( is_request = is_request iv_body = lv_source
-                            iv_type = `text/plain; charset=utf-8` ).
+                            iv_type = `text/plain` ).
       RETURN.
     ENDIF.
     CLEAR lv_error.
@@ -290,7 +231,7 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
       RAISE EXCEPTION lx_error.
     ENDIF.
     rs_response = entity( is_request = is_request iv_body = lv_source
-                          iv_type = `text/plain; charset=utf-8` ).
+                          iv_type = `text/plain` ).
   ENDMETHOD.
 
   METHOD feed.
@@ -307,7 +248,7 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
     DATA ls_revision TYPE zosd_revision_s.
     ls_identity = zcl_osd_adt_host=>identity( ).
     lv_base = zcl_osd_adt_router=>c_base && `/` && iv_collection
-      && `/` && uri_name( to_lower( iv_name ) ).
+      && `/` && zcl_osd_adt_uri=>encode_component( to_lower( iv_name ) ).
     IF iv_include IS INITIAL.
       lv_base = lv_base && `/source/main/versions`.
     ELSE.

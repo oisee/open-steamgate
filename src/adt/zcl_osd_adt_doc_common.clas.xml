@@ -3,9 +3,9 @@
  <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
   <asx:values>
    <VSEOCLASS>
-    <CLSNAME>ZCL_OSD_ADT_TYPES</CLSNAME>
+    <CLSNAME>ZCL_OSD_ADT_DOC_COMMON</CLSNAME>
     <LANGU>E</LANGU>
-    <DESCRIPT>ADT facade: complete object type catalog</DESCRIPT>
+    <DESCRIPT>ADT facade: common documents</DESCRIPT>
     <STATE>1</STATE>
     <CLSCCINCL>X</CLSCCINCL>
     <FIXPT>X</FIXPT>

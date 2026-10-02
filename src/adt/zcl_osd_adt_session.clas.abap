@@ -165,18 +165,9 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
     DATA ls_identity TYPE zcl_osd_adt_host=>ty_identity.
     DATA lv_auth TYPE string.
     DATA lv_user TYPE string.
-    DATA lv_password TYPE string.
     ls_identity = zcl_osd_adt_host=>identity( ).
     lv_auth = field( it_fields = it_headers iv_name = `authorization` iv_header = abap_true ).
-    IF strlen( lv_auth ) >= 6 AND to_lower( lv_auth(6) ) = `basic `.
-      lv_auth = lv_auth+6.
-      lv_user = cl_http_utility=>decode_base64( lv_auth ).
-      SPLIT lv_user AT `:` INTO lv_user lv_password.
-      lv_user = to_upper( lv_user ).
-    ENDIF.
-    IF lv_user IS INITIAL.
-      lv_user = ls_identity-user_name.
-    ENDIF.
+    lv_user = zcl_osd_adt_user=>from_basic( iv_header = lv_auth iv_default = ls_identity-user_name ).
     rs_row-mandt = sy-mandt.
     rs_row-id = random( `ID` ).
     rs_row-token = random( `TOKEN` ).
