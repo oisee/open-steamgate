@@ -59,6 +59,25 @@ worker says what it knows about itself and leaves the rest visibly empty.
 substrate for drawing them is `open-abap-gui`, wired in as a library at
 `ed96e89` (`docs/webgui.md`).*
 
+**Where a new service app goes (Alice, 2026-10-02).** A new service or
+monitoring app -- a lock table, a job monitor, a trace -- is a Fiori app
+over an OData service with a launchpad tile, not a webgui screen. It is
+built the way the rest of the product is built (`stg-compile`, SEGW, the
+launchpad), and on a system it deploys as a BSP plus an OData service.
+webgui stays for what a SAP GUI user expects to see as SAP GUI: Easy Access,
+the command field, dynpros and selection screens of programs that bring
+their own, and the classic transactions as they are.
+
+What is there now, sorted by that rule: SE16 (`ZCL_OSD_SE16`, G.9) and ST05
+(`ZCL_OSD_ST05`, G.10) are built in the shape of their transactions, and
+ZOSD_NOTE (G.3) proves the webgui loop itself -- they stay. *Tech debt, not
+now:* the versions screen (`ZCL_OSD_VERSIONS`, an object's history out of
+git) is a service app drawn as webgui HTML. It stays until it needs more
+than a fix; then it is rebuilt as a Fiori app over the same ABAP, and the
+webgui entry becomes a link to the tile. A rewrite that turns out cheaper
+than the fix may be done at once. A Fiori twin of SE16 or ST05 is a new app
+under this rule, not a replacement.
+
 ```
 G.1  SAP Easy Access, served by ABAP                     [S] DONE 2026-09-18
      ├─ /sap/bc/gui/sap/its/webgui/, the path the real ITS webgui answers
