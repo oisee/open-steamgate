@@ -54,7 +54,14 @@ export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HIST
 // a call nobody bound is refused: a plausible identity from the
 // environment would be a wrong answer that looks right.
 // SYSTEM needs no store and does not open one: opening it parses the tree.
-const SYSTEM_KINDS = ["IDENTITY"];
+//
+// Slice 2 adds two kinds that are the ADT session's rather than the
+// system's, answered by the same per-call binding because only the facade
+// instance knows which session a request belongs to: LOCK_HANDLE (IV_NAME
+// "TYPE NAME": the session's handle for an object its ABAP LOCK has just
+// enqueued) and LOCK_RELEASE (IV_NAME the handle: forget it, answer the
+// object). They go when the session moves into ABAP.
+const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE"];
 let systemCalls;
 try {
   if (typeof process !== "undefined" && process.versions?.node !== undefined) {
@@ -65,11 +72,12 @@ try {
   systemCalls = undefined;
 }
 
-/** Run work with `answers` ((kind) => value; throw to refuse) bound as the
- *  SYSTEM answers of every STORE call it makes. */
-export function withSystem(answers, work) {
+/** Run work with `answers` ((kind, name) => value; throw to refuse) bound
+ *  as the SYSTEM answers of every STORE call it makes, and `store` (the
+ *  facade instance's ObjectStore, port-map risk 12) as the one OBJECT reads. */
+export function withSystem(answers, work, {store} = {}) {
   if (systemCalls === undefined) throw new Error("SYSTEM needs an async context (Node or Bun)");
-  return systemCalls.run({answers}, work);
+  return systemCalls.run({answers, store}, work);
 }
 
 export class StoreDestination {
@@ -120,7 +128,10 @@ export class StoreDestination {
 
   async #answer(command, signature) {
     if (command === "SYSTEM") {
-      return this.#system(givenText(signature, "IV_TYPE").toUpperCase());
+      return this.#system(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));
+    }
+    if (command === "OBJECT") {
+      return this.#object(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));
     }
     if (await this.#open() === undefined) {
       // Named, and with the reason. "No store" answered as an empty list is
@@ -155,7 +166,24 @@ export class StoreDestination {
     }
   }
 
-  #system(kind) {
+  // OBJECT: does the object exist, under which name, and may it be changed
+  // (port-map section 3; slice 2 asks only these three). From the store the
+  // call is bound to when a facade instance bound one, else this one's.
+  async #object(type, name) {
+    const store = systemCalls?.getStore()?.store ?? await this.#open();
+    if (store === undefined) {
+      return {EV_ERROR: `no object store here: ${this.reason}`};
+    }
+    try {
+      const entry = store.find(type, name);
+      return {EV_JSON: JSON.stringify(entry === undefined ? {found: false}
+        : {found: true, type: entry.type, name: entry.name, writable: entry.writable !== false})};
+    } catch (error) {
+      return {EV_ERROR: String(error?.message ?? error)};
+    }
+  }
+
+  #system(kind, name) {
     if (SYSTEM_KINDS.includes(kind) === false) {
       return {EV_ERROR: `unknown SYSTEM kind ${kind || "(none)"}`};
     }
@@ -164,7 +192,7 @@ export class StoreDestination {
       return {EV_ERROR: `nothing answers SYSTEM ${kind} for this call: it is bound per ADT facade instance (withSystem)`};
     }
     try {
-      const value = bound.answers(kind);
+      const value = bound.answers(kind, name);
       if (value === undefined) return {EV_ERROR: `SYSTEM ${kind} has no answer here`};
       return {EV_JSON: JSON.stringify(value)};
     } catch (error) {

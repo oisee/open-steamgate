@@ -93,7 +93,12 @@ export async function bodyOf(req) {
  *  both mount, said once. */
 export function abapRunner({shim, router, step}) {
   return {
-    run: (args) => step(() => shim.run({...args, base: new globalThis.abap.types.String().set(args.base)}),
+    // enter runs first inside the step, where a binding to the step (the
+    // ENQ session) takes hold
+    run: (args) => step(() => {
+      args.enter?.();
+      return shim.run({...args, base: new globalThis.abap.types.String().set(args.base)});
+    },
       `ADT ${args.req.method} ${args.req.path}`),
     routes: () => step(async () => routeRows(await router.routes()), "ADT route table"),
   };
@@ -113,7 +118,10 @@ function recorder() {
  * @param {Function} options.run the ICF runner: ({req, res, class, base}) => Promise
  * @param {Function} options.routes () => Promise of the route rows (routeRows)
  * @param {Function} options.refuse the façade's refusal: (res, status, type, message, options)
- * @param {Function} [options.system] (kind) => value: this façade's SYSTEM answers
+ * @param {Function} [options.system] (kind, name, req) => value: this façade's SYSTEM answers
+ * @param {object} [options.store] this façade's ObjectStore, what OBJECT reads
+ * @param {Function} [options.enter] (req) => void, run first inside the step:
+ *   where the façade binds the step to the request's ENQ session
  * @param {Function} [options.served] (servedBy, req) => void, for a test or a log
  * @param {number} [options.retryMs] how long a failed route-table read waits before the next try (5000)
  */
@@ -154,9 +162,11 @@ export function abapFront(options) {
     }
     const view = {method: req.method, headers: req.headers, url, path, body};
     const answer = recorder();
+    const system = options.system ?? (() => undefined);
     try {
-      await withSystem(options.system ?? (() => undefined),
-        () => options.run({req: view, res: answer, class: HANDLER, base: BASE}));
+      await withSystem((kind, name) => system(kind, name, req),
+        () => options.run({req: view, res: answer, class: HANDLER, base: BASE, enter: () => options.enter?.(req)}),
+        {store: options.store});
     } catch (e) {
       if (res.headersSent === false) refuse(`${HANDLER}: ${String(e?.message?.get?.() ?? e?.message ?? e)}`);
       return;
@@ -171,9 +181,12 @@ export function abapFront(options) {
       if (name.toLowerCase() === "content-type") res.set(name, value);
       else res.append(name, value);
     }
-    // an empty answer is ended, as the Node façade ends one; a body is sent,
-    // and on a HEAD express drops it and keeps its Content-Length
-    if (answer.body.length === 0) res.end();
+    // a body is sent, and on a HEAD express drops it and keeps its
+    // Content-Length. An empty answer is ended, as the Node façade ends one
+    // (`.end()`), unless it is typed and not a HEAD: the Node façade answers
+    // that with `.type(t).send("")`, and express gives it an ETag (UNLOCK)
+    const typed = answer.headers.some(([name]) => name.toLowerCase() === "content-type");
+    if (answer.body.length === 0 && (typed === false || req.method === "HEAD")) res.end();
     else res.send(answer.body);
   };
 }

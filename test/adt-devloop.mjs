@@ -8,6 +8,7 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {undoOnExit} from "./helpers/undo-on-exit.mjs";
+import {adtAbap} from "./helpers/adt-abap.mjs";
 
 // The state-changing half of the façade: lock, write, unlock, activate.
 //
@@ -93,7 +94,8 @@ describe("tools/adt-facade: the development loop", () => {
     const app = express();
     app.disable("x-powered-by");
     app.use(express.raw({type: "*/*", limit: "16mb"}));
-    const facade = adtRouter({transpileOnActivate: false, data: new Data({client})});
+    // LOCK and UNLOCK are ABAP's unless OSD_ADT=js (ADR 0007, slice 2)
+    const facade = adtRouter({transpileOnActivate: false, data: new Data({client}), abap: await adtAbap()});
     store = facade.store;
     // registered here, not at load, so a run that filters this suite out
     // installs no signal listener on its behalf
@@ -1137,7 +1139,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     const app = express();
     app.disable("x-powered-by");
     app.use(express.raw({type: "*/*", limit: "16mb"}));
-    app.use(adtRouter({store, transpileOnActivate: false}).router);
+    app.use(adtRouter({store, transpileOnActivate: false, abap: await adtAbap()}).router);
     await new Promise((resolve) => {
       server = app.listen(0, resolve);
       server.keepAliveTimeout = 120000;
@@ -1382,7 +1384,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
         }
         next();
       });
-      bare.use(adtRouter({store, transpileOnActivate: false}).router);
+      bare.use(adtRouter({store, transpileOnActivate: false, abap: await adtAbap()}).router);
       const server2 = await new Promise((resolve) => {
         const s = bare.listen(0, () => resolve(s));
       });

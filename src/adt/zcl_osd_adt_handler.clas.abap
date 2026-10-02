@@ -14,9 +14,11 @@
 "! facade serve the request; on a system there is no host behind it, and
 "! the 404 with its document is the honest answer.
 "!
-"! Slice 1 serves only reads and writes no rows, so there is no COMMIT here.
-"! Slice 2 brings the session, whose rows must survive a 4xx (port-map.md,
-"! risk 1): the commit then goes here, whatever the status.
+"! No route writes rows yet, so there is no COMMIT here: slice 2's LOCK and
+"! UNLOCK write to the lock server, which no COMMIT or ROLLBACK touches at
+"! _SCOPE 1. When the session itself moves into tables, its rows must
+"! survive a 4xx (port-map.md, risk 1): the commit then goes here, whatever
+"! the status.
 CLASS zcl_osd_adt_handler DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
     INTERFACES if_http_extension.

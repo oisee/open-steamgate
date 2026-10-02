@@ -9,7 +9,8 @@
 "!
 "! The factories are the Node facade's answered( ) mapping, said once:
 "! NotFound 404, ReadOnly 405, NotSupported 501, Conflict 409, anything
-"! else 500 in our own namespace.
+"! else 500 in our own namespace. Two more for the lock route: InvalidRequest
+"! 400, and the refusal of a lock another session holds (403, EU 510).
 CLASS zcx_osd_adt DEFINITION PUBLIC INHERITING FROM cx_static_check CREATE PUBLIC.
   PUBLIC SECTION.
     CONSTANTS c_namespace_adt TYPE string VALUE `com.sap.adt`.
@@ -49,6 +50,15 @@ CLASS zcx_osd_adt DEFINITION PUBLIC INHERITING FROM cx_static_check CREATE PUBLI
       RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
     CLASS-METHODS internal
       IMPORTING iv_message      TYPE string
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS invalid_request
+      IMPORTING iv_message      TYPE string
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    "! another editing session holds the object: 403, T100 EU 510 with the
+    "! holder's user in V1 and the object in V2, as a system refuses
+    CLASS-METHODS locked_by_other
+      IMPORTING iv_user         TYPE string
+                iv_object       TYPE string
       RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
 ENDCLASS.
 
@@ -132,6 +142,42 @@ CLASS zcx_osd_adt IMPLEMENTATION.
                 iv_type      = `ExceptionInternalError`
                 iv_message   = iv_message
                 iv_namespace = c_namespace_osd.
+  ENDMETHOD.
+
+  METHOD invalid_request.
+    CREATE OBJECT ro_error
+      EXPORTING iv_status  = 400
+                iv_type    = `ExceptionInvalidRequest`
+                iv_message = iv_message.
+  ENDMETHOD.
+
+  METHOD locked_by_other.
+    DATA lt_properties TYPE tihttpnvp.
+    DATA ls_property TYPE ihttpnvp.
+    DATA lv_message TYPE string.
+
+    lv_message = |User { iv_user } is currently editing { iv_object }|.
+    ls_property-name = `LONGTEXT`.
+    ls_property-value = |{ iv_object } is locked by another editing session of user { iv_user }. |
+      && `It can be changed once that session saves and unlocks it, logs off, or expires.`.
+    APPEND ls_property TO lt_properties.
+    ls_property-name = `T100KEY-ID`.
+    ls_property-value = `EU`.
+    APPEND ls_property TO lt_properties.
+    ls_property-name = `T100KEY-NO`.
+    ls_property-value = `510`.
+    APPEND ls_property TO lt_properties.
+    ls_property-name = `T100KEY-V1`.
+    ls_property-value = iv_user.
+    APPEND ls_property TO lt_properties.
+    ls_property-name = `T100KEY-V2`.
+    ls_property-value = iv_object.
+    APPEND ls_property TO lt_properties.
+    CREATE OBJECT ro_error
+      EXPORTING iv_status     = 403
+                iv_type       = `ExceptionResourceNoAccess`
+                iv_message    = lv_message
+                it_properties = lt_properties.
   ENDMETHOD.
 
 ENDCLASS.

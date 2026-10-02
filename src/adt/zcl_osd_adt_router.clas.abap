@@ -21,7 +21,8 @@
 "!     this table itself, before any ABAP runs (tools/adt-abap-front.mjs,
 "!     matchRoute), and test/adt-abap-diff.mjs holds the two matchers equal.
 "! Slice 1 lists the rows ABAP serves and one catch-all for the host. The
-"! per-type rows are generated from the type table when their group moves.
+"! per-type rows are generated from the type table (ZCL_OSD_ADT_TYPES) when
+"! their group moves; slice 2 moves POST <collection>/:name, LOCK and UNLOCK.
 CLASS zcl_osd_adt_router DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     CONSTANTS c_base TYPE string VALUE `/sap/bc/adt`.
@@ -76,6 +77,10 @@ ENDCLASS.
 CLASS zcl_osd_adt_router IMPLEMENTATION.
 
   METHOD routes.
+    DATA lt_types TYPE zcl_osd_adt_types=>tt_type.
+    DATA ls_type TYPE zcl_osd_adt_types=>ty_type.
+    DATA lv_pattern TYPE string.
+
     add( EXPORTING iv_method = `HEAD` iv_pattern = `/sap/bc/adt/compatibility/graph` iv_handler = `ZCL_OSD_ADT_GRAPH`
          CHANGING ct_routes = rt_routes ).
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/compatibility/graph` iv_handler = `ZCL_OSD_ADT_GRAPH`
@@ -83,6 +88,13 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/systeminformation`
                    iv_handler = `ZCL_OSD_ADT_SYSINFO`
          CHANGING ct_routes = rt_routes ).
+*   LOCK and UNLOCK, one row per lockable type, from the type table
+    lt_types = zcl_osd_adt_types=>lockable( ).
+    LOOP AT lt_types INTO ls_type.
+      lv_pattern = c_base && `/` && ls_type-collection && `/:name`.
+      add( EXPORTING iv_method = `POST` iv_pattern = lv_pattern iv_handler = `ZCL_OSD_ADT_LOCK`
+           CHANGING ct_routes = rt_routes ).
+    ENDLOOP.
 *   everything else is still the Node facade's, until its group moves
     add( EXPORTING iv_method = `*` iv_pattern = `/sap/bc/adt/*` iv_served_by = c_host
          CHANGING ct_routes = rt_routes ).

@@ -1,4 +1,4 @@
-// Migration gate 1 for the ADT façade in ABAP (ADR 0007, slice 1): every
+// Migration gate 1 for the ADT façade in ABAP (ADR 0007, slices 1 and 2): every
 // route ZCL_OSD_ADT_ROUTER serves answers what the Node façade answers --
 // status, content type, length, entity tag and body, byte for byte -- and
 // every route it does not serve still reaches the Node façade unchanged,
@@ -12,6 +12,7 @@
 import {expect} from "chai";
 import express from "express";
 import {request as httpRequest} from "node:http";
+import {createHash} from "node:crypto";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -355,5 +356,268 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       });
       expect(await documentOf(status, type, message, namespace, properties), type).to.equal(expected);
     }
+  });
+
+  // Slice 2: LOCK and UNLOCK in ABAP over the lock server, the ADT session
+  // bound to its ENQ session, the Node write routes asking the same table.
+  // The sequences are test/adt-devloop.mjs's "locks across requests and
+  // sessions", run once against the Node façade and once against the ABAP
+  // front, each over its own copy of the same tree, and every answer of the
+  // one compared with the other's (a handle is random on both sides, so it
+  // is compared by shape and replaced before the bodies are).
+  describe("slice 2: the session and its locks, against the Node façade", () => {
+    const LOCKED = "ZCL_OSD_LK";
+    const DOOMED = "ZCL_OSD_LK_DOOMED";
+    const PACKAGE = "$STG_DEMO";
+    const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+    const roots = [];
+
+    const tree = () => {
+      const at = mkdtempSync(join(tmpdir(), "osd-adt-lock-"));
+      roots.push(at);
+      mkdirSync(join(at, "src", "demo"), {recursive: true});
+      writeFileSync(join(at, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
+      writeFileSync(join(at, "src", "demo", "package.devc.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_DEVC" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values><DEVC><CTEXT>demo</CTEXT></DEVC></asx:values></asx:abap>
+</abapGit>
+`);
+      const made = new ObjectStore({root: at, libs: []});
+      for (const name of [LOCKED, DOOMED]) made.create("CLAS", name, {description: "locked", package: PACKAGE});
+      return made;
+    };
+
+    after(() => {
+      for (const at of roots) rmSync(at, {recursive: true, force: true});
+    });
+
+    // one client of one server: its own logon, cookie and token
+    const logon = async (server, user) => {
+      const res = await fetch(`http://127.0.0.1:${server.address().port}/sap/bc/adt/core/discovery`, {method: "HEAD",
+        headers: {"x-csrf-token": "fetch", ...(user === undefined ? {} : {authorization: "Basic " + Buffer.from(`${user}:x`).toString("base64")})}});
+      const id = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+      return {server, id, token: res.headers.get("x-csrf-token")};
+    };
+    const send = async (client, method, path, {headers = {}, body} = {}) => {
+      const response = await fetch(`http://127.0.0.1:${client.server.address().port}${path}`, {method, body,
+        headers: {cookie: `sap-contextid=${client.id}`, "x-csrf-token": client.token, "x-sap-adt-sessiontype": "stateful", ...headers}});
+      const text = Buffer.from(await response.arrayBuffer()).toString("utf8");
+      return {status: response.status, type: response.headers.get("content-type"), length: response.headers.get("content-length"),
+        etag: response.headers.get("etag"), body: text, handle: /<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/.exec(text)?.[1]};
+    };
+    const at = (name) => `/sap/bc/adt/oo/classes/${name}`;
+    const lock = (client, name = LOCKED, headers = {}) => send(client, "POST", `${at(name)}?_action=LOCK&accessMode=MODIFY`, {headers});
+    const unlock = (client, handle, name = LOCKED) => send(client, "POST", `${at(name)}?_action=UNLOCK&lockHandle=${handle}`);
+    const logoff = (client) => fetch(`http://127.0.0.1:${client.server.address().port}/sap/public/bc/icf/logoff`,
+      {headers: {cookie: `SAP_SESSIONID_OSD_001=${client.id}`}}).then((r) => r.status);
+
+    // the sequences: each takes a server and answers what it saw, in order
+    const SEQUENCES = {
+      "lock, a stateless read, the PUT, UNLOCK, and a PUT after it": async (server) => {
+        const one = await logon(server);
+        const locked = await lock(one);
+        const read = await send(one, "GET", `${at(LOCKED)}/source/main`, {headers: {"x-sap-adt-sessiontype": "stateless"}});
+        const written = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${locked.handle}`,
+          {headers: {"content-type": "text/plain"}, body: read.body + "* saved under the lock\n"});
+        const unlocked = await unlock(one, locked.handle);
+        const late = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${locked.handle}`,
+          {headers: {"content-type": "text/plain"}, body: "* too late\n"});
+        await logoff(one);
+        return [locked, read, written, unlocked, late];
+      },
+      "a second session is refused with EU 510, the holder relocks, UNLOCK hands it over": async (server) => {
+        const one = await logon(server, "DEVONE");
+        const two = await logon(server, "DEVTWO");
+        const first = await lock(one);
+        const refused = await lock(two);
+        const again = await lock(one);
+        expect(again.handle, "the holder locking again gets its handle").to.equal(first.handle);
+        const unlocked = await unlock(one, first.handle);
+        const taken = await lock(two);
+        const back = await lock(one);
+        await unlock(two, taken.handle);
+        await logoff(one);
+        await logoff(two);
+        return [first, refused, again, unlocked, taken, back];
+      },
+      "a logoff releases the session's locks": async (server) => {
+        const one = await logon(server);
+        const two = await logon(server, "DEVTWO");
+        const held = await lock(two);
+        const refused = await lock(one);
+        const off = await logoff(two);
+        const after = await lock(one);
+        await logoff(one);
+        return [held, refused, {off}, after];
+      },
+      "the session DELETE releases them too, a stateless request does not": async (server) => {
+        const one = await logon(server);
+        const two = await logon(server, "DEVTWO");
+        const held = await lock(two);
+        const poll = await send(two, "GET", "/sap/bc/adt/core/http/sessions", {headers: {"x-sap-adt-sessiontype": "stateless"}});
+        const refused = await lock(one);
+        const url = /href="([^"]*\/core\/http\/sessions\/[0-9A-F]+)"/.exec(poll.body)?.[1];
+        const ended = await send(two, "DELETE", url);
+        const after = await lock(one);
+        await logoff(one);
+        return [held, refused, {ended: ended.status}, after];
+      },
+      "DELETE respects the holder, and the holder's DELETE takes the lock with it": async (server) => {
+        const one = await logon(server);
+        const two = await logon(server, "DEVTWO");
+        const held = await lock(two, DOOMED);
+        const refused = await send(one, "DELETE", at(DOOMED.toLowerCase()));
+        const gone = await send(two, "DELETE", at(DOOMED.toLowerCase()));
+        const missing = await lock(two, DOOMED);
+        await logoff(one);
+        await logoff(two);
+        return [held, refused, gone, missing];
+      },
+      "the same user in another session is refused, because the lock is the session's": async (server) => {
+        const one = await logon(server);
+        const three = await logon(server);
+        const held = await lock(one);
+        const refused = await lock(three);
+        await logoff(one);
+        const after = await lock(three);
+        await logoff(three);
+        return [held, refused, after];
+      },
+      "a package locks like a source object": async (server) => {
+        const one = await logon(server);
+        const two = await logon(server, "DEVTWO");
+        const path = `/sap/bc/adt/packages/${encodeURIComponent(PACKAGE.toLowerCase())}`;
+        const held = await send(one, "POST", `${path}?_action=LOCK&accessMode=MODIFY`);
+        const refused = await send(two, "POST", `${path}?_action=LOCK&accessMode=MODIFY`);
+        const unlocked = await send(one, "POST", `${path}?_action=UNLOCK&lockHandle=${held.handle}`);
+        await logoff(one);
+        await logoff(two);
+        return [held, refused, unlocked];
+      },
+      "the refusals: no object, no action, another action; the dataname a client asks for": async (server) => {
+        const one = await logon(server);
+        const answers = [
+          await lock(one, "ZCL_OSD_LK_NONE"),
+          await send(one, "POST", at(LOCKED)),
+          await send(one, "POST", `${at(LOCKED)}?_action=stamp`),
+          await lock(one, LOCKED, {accept: "application/vnd.sap.as+xml;charset=UTF-8;dataname=com.sap.adt.lock.result"}),
+          await unlock(one, "not-a-handle"),
+        ];
+        await logoff(one);
+        return answers;
+      },
+    };
+
+    // express's weak entity tag, which covers the handle: checked against the
+    // body it came with, then compared as a placeholder like the handle
+    const weakTag = (body) => `W/"${Buffer.byteLength(body).toString(16)}-${
+      createHash("sha1").update(body, "utf8").digest("base64").slice(0, 27)}"`;
+    const STATUSES = {
+      "lock, a stateless read, the PUT, UNLOCK, and a PUT after it": [200, 200, 200, 200, 409],
+      "a second session is refused with EU 510, the holder relocks, UNLOCK hands it over": [200, 403, 200, 200, 200, 403],
+      "a logoff releases the session's locks": [200, 403, 200, 200],
+      "the session DELETE releases them too, a stateless request does not": [200, 403, 200, 200],
+      "DELETE respects the holder, and the holder's DELETE takes the lock with it": [200, 403, 200, 404],
+      "the same user in another session is refused, because the lock is the session's": [200, 403, 200],
+      "a package locks like a source object": [200, 403, 200],
+      "the refusals: no object, no action, another action; the dataname a client asks for": [404, 400, 400, 200, 200],
+    };
+
+    const answered = (answers) => answers.map(({handle, ...rest}) => {
+      if (rest.etag !== null && rest.body !== undefined && new RegExp(UUID.source).test(rest.body)) {
+        expect(rest.etag, "the tag of the body that carries a handle").to.equal(weakTag(rest.body));
+        rest.etag = "<tag>";
+      }
+      if (rest.body !== undefined) rest.body = rest.body.replace(UUID, "<handle>");
+      return {...rest, handle: handle === undefined ? undefined : handle.replace(UUID, "<handle>")};
+    });
+
+    for (const [title, sequence] of Object.entries(SEQUENCES)) {
+      it(`byte-equal to the Node façade: ${title}`, async () => {
+        const node = await mount({store: tree()});
+        const ported = await mount(withAbap({store: tree()}));
+        const expected = answered(await sequence(node));
+        // the reference says what the sequence is about, so two sides failing
+        // alike cannot pass as equal
+        expect(expected.map((a) => a.status ?? a.off ?? a.ended)).to.deep.equal(STATUSES[title]);
+        served.length = 0;
+        const actual = answered(await sequence(ported));
+        expect(actual).to.deep.equal(expected);
+        // ABAP answered every LOCK and UNLOCK, and nothing the Node façade serves
+        const posts = served.filter((s) => s.includes("_action="));
+        expect(posts.length, "LOCK and UNLOCK reached the front").to.be.greaterThan(0);
+        expect(posts.every((s) => s.startsWith("ABAP ")), posts.join("\n")).to.equal(true);
+        const byAbap = served.filter((s) => s.startsWith("ABAP "));
+        expect(byAbap.every((s) => s.startsWith("ABAP POST ") && s.includes("/source/") === false), byAbap.join("\n")).to.equal(true);
+        // a handle is a UUID on both sides
+        for (const answer of [...expected, ...actual]) {
+          if (answer.handle !== undefined && answer.handle !== "") expect(answer.handle).to.equal("<handle>");
+        }
+        // and every sequence ends its sessions, so it leaves no lock behind
+        const {locks} = await import("../tools/osd-enq.mjs");
+        expect(locks().read({table: "ZOSD_ADT_LOCK"}).map((r) => `${r.user} ${r.arg}`), "rows left in the lock table").to.deep.equal([]);
+      });
+    }
+
+    it("a write without the token is refused by the session middleware before the front, as before", async () => {
+      const node = await mount({store: tree()});
+      const ported = await mount(withAbap({store: tree()}));
+      const answers = [];
+      for (const server of [node, ported]) {
+        const one = await logon(server);
+        answers.push(await send({...one, token: "not-the-token"}, "POST", `${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`));
+        const none = await fetch(`http://127.0.0.1:${server.address().port}${at(LOCKED)}?_action=LOCK`, {method: "POST",
+          headers: {cookie: `sap-contextid=${one.id}`}});
+        answers.push({status: none.status, token: none.headers.get("x-csrf-token"), body: await none.text()});
+        await logoff(one);
+      }
+      expect(answers[2]).to.deep.equal(answers[0]);
+      expect(answers[3]).to.deep.equal(answers[1]);
+      expect(answers[2].status).to.equal(403);
+      expect(answers[2].type).to.equal("text/plain; charset=utf-8");
+      expect(answers[2].body).to.equal("CSRF token validation failed");
+      expect(answers[3].token).to.equal("Required");
+      expect(steps.filter((s) => s.startsWith("POST")), "no ABAP step for a refused write").to.deep.equal([]);
+    });
+
+    it("the ENQ row names the ADT session's user, and goes with the session", async () => {
+      const {locks} = await import("../tools/osd-enq.mjs");
+      const ported = await mount(withAbap({store: tree()}));
+      const one = await logon(ported, "DEVONE");
+      const rows = () => locks().read({table: "ZOSD_ADT_LOCK"});
+      expect((await lock(one)).status).to.equal(200);
+      const held = rows().filter((r) => r.arg.includes(LOCKED));
+      expect(held).to.have.length(1);
+      expect(held[0].user).to.equal("DEVONE");
+      expect(held[0].mode).to.equal("X");
+      expect(held[0].dialogs).to.equal(1);
+      expect((await lock(one)).status, "locked again: still one count, so one UNLOCK releases it").to.equal(200);
+      expect(rows().filter((r) => r.arg.includes(LOCKED))[0].dialogs).to.equal(1);
+      await logoff(one);
+      expect(rows().filter((r) => r.arg.includes(LOCKED))).to.deep.equal([]);
+    });
+
+    it("a lock taken in a session that never asked for state lives as long as its request", async () => {
+      // A4H: a stateless request is its own session, so what it enqueues goes
+      // when it ends; the ENQ session is the step's, nothing is bound
+      const ported = await mount(withAbap({store: tree()}));
+      const res = await fetch(`http://127.0.0.1:${ported.address().port}/sap/bc/adt/core/discovery`, {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
+      const id = (res.headers.getSetCookie?.() ?? []).join("; ").match(/sap-contextid=([^;]+)/)?.[1];
+      const plain = {cookie: `sap-contextid=${id}`, "x-csrf-token": res.headers.get("x-csrf-token")};
+      const url = `http://127.0.0.1:${ported.address().port}${at(LOCKED)}`;
+      const locked = await fetch(`${url}?_action=LOCK&accessMode=MODIFY`, {method: "POST", headers: plain});
+      expect(locked.status).to.equal(200);
+      const handle = /<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
+      const other = await logon(ported, "DEVTWO");
+      expect((await lock(other)).status, "nobody holds it once the request is over").to.equal(200);
+      const put = await fetch(`${url}/source/main?lockHandle=${handle}`, {method: "PUT", headers: plain, body: "* no\n"});
+      expect(put.status).to.equal(409);
+      // the handle is still in the session's map, and a write route that
+      // checked only the map would take it (holds( ) asks the lock server)
+      const include = await fetch(`${url}/includes?lockHandle=${handle}`, {method: "POST", headers: plain,
+        body: `<class:abapClassInclude adtcore:name="${LOCKED}" class:includeType="testclasses"/>`});
+      expect(include.status).to.equal(409);
+      await logoff(other);
+    });
   });
 });
