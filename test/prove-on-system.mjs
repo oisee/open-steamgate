@@ -776,6 +776,15 @@ describe("osd-prove-on-system", () => {
       assert.throws(() => residueAbap(PKG, ZIP_OBJECTS, "1' OR '1"), /not a repository key/);
     });
 
+    it("users are deleted before what they use: code, tables, data elements, domains (A4H: a table whose data element went first came back changed)", async () => {
+      const items = ["DOMA ZOSD_D", "DTEL ZOSD_E", "TABL ZOSD_T", "CLAS ZCL_A", "DDLS ZOSD_V", "PROG ZP", "TABL ZOSD_S", "INTF ZIF_A"];
+      const sent = [];
+      const mcp = {call: async (action, target, params) => { sent.push(params); return JSON.stringify({package: PKG, objects: []}); }};
+      await cleanup(mcp, PKG, items.map((item) => ({item, sha256: "a".repeat(64)})), {});
+      assert.deepEqual(sent[0].objects.map((o) => `${o.type} ${o.name}`),
+        ["CLAS ZCL_A", "PROG ZP", "INTF ZIF_A", "DDLS ZOSD_V", "TABL ZOSD_T", "TABL ZOSD_S", "DTEL ZOSD_E", "DOMA ZOSD_D"]);
+    });
+
     it("the residue read and vsp's inventory must agree; an inventory that could not check repositories fails", async () => {
       const a = await run(base(), fakeSystem({inventoryEdit: (i) => ({...i, objects: [{type: "PROG", name: "ZGHOST"}]})}), undefined, {disagree: true});
       assert.equal(a.code, 1, a.text);
