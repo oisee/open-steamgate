@@ -3183,3 +3183,31 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Smallest safe workaround: do not assert an instance's actual start second against a system's; compare scheduled times (`SDLSTRTDT`/`SDLSTRTTM`).
 - Upstream: none; a local runtime choice.
 - Regression-test location: `test/job-periodic.mjs` (`successor-at-start` starts the instance 50 s late, as the sandbox's tick did, and checks the successor is still due at scheduled time + period).
+
+### ANOMALY-2026-10-02-update-task-synchronous — IN UPDATE TASK runs at the call, so there is no update window
+
+- Status: `open` (known difference; backlog: an asynchronous update task, 0.6 should)
+- Discovery date: `2026-10-02`
+- Affected versions: `@abaplint/transpiler-cli 2.13.89`, `@abaplint/runtime 2.13.89`
+- Affected ABAP statement: `CALL FUNCTION ... IN UPDATE TASK`, `COMMIT WORK`, `COMMIT WORK AND WAIT`
+- Minimal reproducer: the `update-window-*` cases of `test/fixtures/enq/contract.json` (measured on the sandbox,
+  docs/enq-contract.md)
+- Exact command used to run it: `npx mocha test/osd-enq-abap.mjs`
+- Expected SAP behaviour: an update module called `IN UPDATE TASK` is queued and runs after `COMMIT WORK` (V1),
+  so between the COMMIT and the end of the update the committed `_SCOPE 2` locks belong to the update task: the
+  session itself gets FOREIGN_LOCK (MC 601) on the same key, and DEQUEUE_ALL, ROLLBACK and the end of the session
+  leave those locks to the update.
+- Actual open-abap behaviour: the transpiler emits a plain call, so the module runs when it is called and
+  `COMMIT WORK` finds it done. The lock server (`tools/osd-enq-host.mjs`) marks the LUW as updated when an update
+  module (UPDATE_TASK in its `*.fugr.xml`) runs and releases the update owner's locks at the COMMIT: there is no
+  window, so the 601 of that window never happens locally. A direct call of an update module (not IN UPDATE
+  TASK) marks the LUW too.
+- Impact on open-steamgate: code that relies on the update task's lock window (or on an update running after the
+  COMMIT, in another LUW) behaves differently; the lock cores (Go `tools/gogen/go/enq`, Node `tools/osd-enq.mjs`)
+  do model the window and pass those cases.
+- Smallest safe workaround: none needed for ordinary lock use; do not assert the window's 601 against the runtime.
+- Upstream issue: not reported yet -- the runtime has no update task to report against; the fix is a feature
+  (the transpiler marking `IN UPDATE TASK` calls, or a runtime hook), tracked in docs/backlog/gogen-osgo.md.
+- Regression-test location: `test/osd-enq-abap.mjs` (the 4 `update-window-*` cases are skipped by name, with
+  this reason in their title)
+- Upstream version containing a fix: `unknown`
