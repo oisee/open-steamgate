@@ -224,7 +224,7 @@ CLASS zcl_osd_adt_vfs IMPLEMENTATION.
     DATA ls_object TYPE ty_object.
     LOOP AT mt_objects INTO ls_object.
       IF zcl_osd_adt_js=>glob( iv_pattern = iv_pattern iv_text = to_upper( ls_object-name ) ) = abap_false.
-        DELETE mt_objects INDEX sy-tabix.
+        DELETE mt_objects.
       ENDIF.
     ENDLOOP.
     LOOP AT mt_selection INTO ls_selection.
