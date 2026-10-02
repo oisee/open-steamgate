@@ -32,14 +32,14 @@ import {basename, join} from "node:path";
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
-export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN"];
+export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN", "PARSE"];
 
 /** What this host can do, as the screen asks it (CAPABILITIES, EV_NOTE):
  *  the editor draws a button only for a command named here. Node holds the
  *  compiler and the build, so it offers all five; a host that cannot check
  *  or activate (OSGo, a built binary) leaves them out and the screen shows
  *  no button that would only be refused (host-tools review 2026-09-25, D2). */
-export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION", "CHECKRUN"];
+export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
 
 // SYSTEM answers facts about this system rather than about the tree, one
 // kind per call, as JSON in EV_JSON (docs/adt-abap-port/port-map.md,
@@ -145,6 +145,12 @@ export class StoreDestination {
     if (command === "OBJECT") {
       return this.#object(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));
     }
+    // Kind refusals require no tree and must not open the default store.
+    let parseInput;
+    if (command === "PARSE") {
+      parseInput = JSON.parse(givenText(signature, "IV_JSON"));
+      if (parseInput.kind !== "UNIT_PLAN") return refusal(`unknown PARSE kind ${parseInput.kind ?? "(none)"}`, "NOT_SUPPORTED");
+    }
     const store = systemCalls?.getStore()?.store ?? await this.#open();
     if (store === undefined) {
       // Named, and with the reason. "No store" answered as an empty list is
@@ -159,6 +165,12 @@ export class StoreDestination {
     const started = Date.now();
     try {
       switch (command) {
+        case "PARSE": {
+          const input = parseInput;
+          const {unitPlan} = await import("./osd-unit.mjs");
+          return {EV_JSON: JSON.stringify(await unitPlan(store, String(input.type ?? "").toUpperCase(),
+            String(input.name ?? "").toUpperCase(), {risk: input.risk === true}))};
+        }
         case "CHECKRUN": {
           const {checkRunReport} = await import("./adt-checkrun.mjs");
           return {EV_JSON: JSON.stringify(checkRunReport(store, {type, name,

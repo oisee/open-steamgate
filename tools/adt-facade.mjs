@@ -33,6 +33,7 @@ import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotS
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
 import {emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {unitPlan} from "./osd-unit.mjs";
 import {checkRunReport} from "./adt-checkrun.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
@@ -1325,11 +1326,7 @@ export function adtRouter(options = {}) {
       return;
     }
     try {
-      const runner = await store.unit();
-      // the declarations and what they are checked against
-      // (tools/osd-unit-risk.mjs): a scheduler reads `schedule`, an editor
-      // shows `writes` on a HARMLESS class that reaches one
-      const plan = await runner.withRisk(runner.classes(type, name));
+      const plan = await unitPlan(store, type, name, {risk: true});
       res.type("application/json; charset=utf-8").send(JSON.stringify({
         object: {type: plan.object.type, name: plan.object.name},
         writes: plan.writes,

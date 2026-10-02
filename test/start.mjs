@@ -14,6 +14,7 @@ import {adtRouter} from "../tools/adt-facade.mjs";
 import {abapRunner} from "../tools/adt-abap-front.mjs";
 import {kernelFreshness} from "../tools/adt-abap-kernel.mjs";
 import {liveHash} from "../tools/osd-build.mjs";
+import {warmUnitPlan} from "../tools/osd-unit.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
@@ -316,14 +317,14 @@ export function startServer(quiet) {
   // startup so the first client does not buy it for the second; it is
   // seconds of a blocked loop over a big system, which is why a test
   // harness, where nothing waits on it, does not.
-  if (quiet !== true) {
-    setImmediate(() => {
-      const started = Date.now();
-      const objects = facade.store.list().length;
-      facade.store.registry();
-      console.log(`parsed ${objects} objects in ${Date.now() - started} ms`);
-    });
-  }
+  const unitReady = quiet === true ? undefined : warmUnitPlan(facade.store).then((warmed) => {
+    console.log(`unit plan: pre-warmed ${warmed.objects} objects and xref graph in ${Math.round(warmed.ms)} ms`);
+  });
+  const listenReady = (listener, port) => {
+    if (unitReady === undefined) listenBound(listener, port);
+    else void unitReady.then(() => listenBound(listener, port));
+    return listener;
+  };
 
   // SICF: every other ICF service this tree carries.
   //
@@ -585,7 +586,7 @@ export function startServer(quiet) {
   // The host is OSD_BIND, loopback unless said otherwise (tools/osd-bind.mjs):
   // the ADT facade takes any credentials, which is only fine while nothing
   // but this machine reaches it. A container sets OSD_BIND=0.0.0.0.
-  const server = listenBound(createHttpServer(app), PORT);
+  const server = listenReady(createHttpServer(app), PORT);
   server.on("error", (error) => {
     if (error?.code !== "EADDRINUSE" || closing === undefined) throw error;
     void closing.then(() => relisten(server, PORT));
@@ -630,7 +631,7 @@ export function startServer(quiet) {
   const tls = process.env.STG_TLS === "0" ? undefined : tlsCredentials();
   let secure;
   if (tls !== undefined) {
-    secure = listenBound(createHttpsServer(tls, app), TLS_PORT);
+    secure = listenReady(createHttpsServer(tls, app), TLS_PORT);
   }
 
   // what the snapshot reports as this instance's ports: what was opened here
