@@ -59,8 +59,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:cmd/osabap": {
-      "lines": 1119,
-      "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02"
+      "lines": 1120,
+      "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02; rebased over #453"
     },
     "go:cmd/osgo": {
       "lines": 1178,
