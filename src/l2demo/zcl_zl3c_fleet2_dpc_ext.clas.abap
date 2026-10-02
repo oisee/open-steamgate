@@ -36,6 +36,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
   METHOD runset_get_entityset.
     DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
     DATA lt_stages TYPE STANDARD TABLE OF zosd_l3_stage WITH DEFAULT KEY.
@@ -49,17 +50,21 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lt_run_id TYPE RANGE OF zosd_l3_run-run_id.
     DATA lt_status TYPE RANGE OF zosd_l3_run-status.
     DATA lt_started TYPE RANGE OF zosd_l3_run-started.
-    lv_where = io_tech_request_context->get_osql_where_clause( ).
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
     ENDIF.
     IF it_navigation_path IS NOT INITIAL.
       lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
       REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
-      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+      lv_where = |{ lv_where } AND RUN_ID = '{ lv_run }'|.
     ENDIF.
     SELECT * FROM zosd_l3_run INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE set_name = 'fleet2' AND (lv_where).
+      WHERE (lv_where).
     SELECT * FROM zosd_l3_stage INTO TABLE lt_stages WHERE set_name = 'fleet2' AND stage_no = 1.
     LOOP AT lt_stages INTO ls_stage.
       READ TABLE et_entityset TRANSPORTING NO FIELDS WITH KEY run_id = ls_stage-run_id.
@@ -147,19 +152,24 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
   METHOD stageset_get_entityset.
     DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
-    lv_where = io_tech_request_context->get_osql_where_clause( ).
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
     ENDIF.
     IF it_navigation_path IS NOT INITIAL.
       lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
       REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
-      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+      lv_where = |{ lv_where } AND RUN_ID = '{ lv_run }'|.
     ENDIF.
     SELECT * FROM zosd_l3_stage INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE set_name = 'fleet2' AND (lv_where).
+      WHERE (lv_where).
     SORT et_entityset BY stage_no.
     es_response_context-inlinecount = lines( et_entityset ).
     IF is_paging-skip > 0.
@@ -182,19 +192,24 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
   METHOD pileset_get_entityset.
     DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
-    lv_where = io_tech_request_context->get_osql_where_clause( ).
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
     ENDIF.
     IF it_navigation_path IS NOT INITIAL.
       lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
       REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
-      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+      lv_where = |{ lv_where } AND RUN_ID = '{ lv_run }'|.
     ENDIF.
     SELECT * FROM zosd_l3_pile INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE set_name = 'fleet2' AND (lv_where).
+      WHERE (lv_where).
     SORT et_entityset BY stage_no rule_name pile_no.
     es_response_context-inlinecount = lines( et_entityset ).
     IF is_paging-skip > 0.
@@ -220,19 +235,24 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
   METHOD budgetset_get_entityset.
     DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
-    lv_where = io_tech_request_context->get_osql_where_clause( ).
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
     ENDIF.
     IF it_navigation_path IS NOT INITIAL.
       lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
       REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
-      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+      lv_where = |{ lv_where } AND RUN_ID = '{ lv_run }'|.
     ENDIF.
     SELECT * FROM zosd_l3_budget INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE set_name = 'fleet2' AND (lv_where).
+      WHERE (lv_where).
     es_response_context-inlinecount = lines( et_entityset ).
     IF is_paging-skip > 0.
       DELETE et_entityset FROM 1 TO is_paging-skip.
@@ -251,19 +271,24 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
   METHOD eventset_get_entityset.
     DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
-    lv_where = io_tech_request_context->get_osql_where_clause( ).
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
     ENDIF.
     IF it_navigation_path IS NOT INITIAL.
       lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
       REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
-      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+      lv_where = |{ lv_where } AND RUN_ID = '{ lv_run }'|.
     ENDIF.
     SELECT * FROM zosd_l3_event INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE set_name = 'fleet2' AND (lv_where).
+      WHERE (lv_where).
     SORT et_entityset BY seq.
     es_response_context-inlinecount = lines( et_entityset ).
     IF is_paging-skip > 0.
@@ -286,19 +311,24 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
   METHOD doctorset_get_entityset.
     DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
-    lv_where = io_tech_request_context->get_osql_where_clause( ).
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
     ENDIF.
     IF it_navigation_path IS NOT INITIAL.
       lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
       REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
-      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+      lv_where = |{ lv_where } AND RUN_ID = '{ lv_run }'|.
     ENDIF.
     SELECT * FROM zosd_l3_doctor INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE set_name = 'fleet2' AND (lv_where).
+      WHERE (lv_where).
     SORT et_entityset BY acted seq.
     es_response_context-inlinecount = lines( et_entityset ).
     IF is_paging-skip > 0.
@@ -321,15 +351,20 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
   METHOD settingset_get_entityset.
     DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
     zcl_l3_fleet2=>settings_seed( ).
-    lv_where = io_tech_request_context->get_osql_where_clause( ).
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
     ENDIF.
     SELECT * FROM zosd_l3_conf INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE set_name = 'fleet2' AND (lv_where).
+      WHERE (lv_where).
     SORT et_entityset BY param_name.
     es_response_context-inlinecount = lines( et_entityset ).
     IF is_paging-skip > 0.
@@ -352,14 +387,19 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
   METHOD changeset_get_entityset.
     DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
-    lv_where = io_tech_request_context->get_osql_where_clause( ).
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
     ENDIF.
     SELECT * FROM zosd_l3_conf_log INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE set_name = 'fleet2' AND (lv_where).
+      WHERE (lv_where).
     SORT et_entityset BY changed_at DESCENDING.
     es_response_context-inlinecount = lines( et_entityset ).
     IF is_paging-skip > 0.
@@ -379,19 +419,24 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
   ENDMETHOD.
   METHOD snapshotset_get_entityset.
     DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
-    lv_where = io_tech_request_context->get_osql_where_clause( ).
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
     ENDIF.
     IF it_navigation_path IS NOT INITIAL.
       lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
       REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
-      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+      lv_where = |{ lv_where } AND RUN_ID = '{ lv_run }'|.
     ENDIF.
     SELECT * FROM zosd_l3_run_conf INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE set_name = 'fleet2' AND (lv_where).
+      WHERE (lv_where).
     SORT et_entityset BY param_name.
     es_response_context-inlinecount = lines( et_entityset ).
     IF is_paging-skip > 0.
@@ -430,6 +475,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lv_cap TYPE i.
     DATA lv_glass TYPE i.
     DATA lv_ok TYPE abap_bool.
+    DATA ls_unschedule TYPE zcl_l3_fleet2=>ty_unschedule.
     DATA lt_report TYPE zcl_l3_fleet2=>tt_doctor.
     DATA ls_report TYPE zcl_l3_fleet2=>ty_doctor.
     lv_run = parameter( it_params = it_parameter iv_name = 'RunId' ).
@@ -446,82 +492,83 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     lv_glass = parameter( it_params = it_parameter iv_name = 'NewGlass' ).
     ls_answer-run_id = lv_run.
     TRY.
-    CASE iv_action_name.
-      WHEN 'StartRun'.
-        IF lv_work IS NOT INITIAL.
-          lv_work = |work={ lv_work }|.
-        ENDIF.
-        ls_run = zcl_l3_fleet2=>run( iv_date = lv_date iv_mode = lv_mode iv_bind = lv_work ).
-        ls_answer-run_id = ls_run-run_id.
-        ls_answer-answer = ls_run-status.
-        IF ls_run-status = 'SUBMITTED'.
-          ls_answer-answer = ls_answer-answer && '; jobs require a worker: start node tools/osd-batch-runs.mjs worker if none is running'.
-        ENDIF.
-      WHEN 'ReleasePile'.
-        lv_ok = zcl_l3_fleet2=>release_pile( iv_run = lv_run iv_rule = lv_rule iv_pile = lv_pile iv_per_pile = lv_cap iv_reason = lv_reason ).
-        IF lv_ok = abap_true.
-          ls_answer-answer = 'OK'.
-        ELSE.
-          ls_answer-answer = 'REFUSED: ReleasePile: the pile is not HELD, the run or its budget does not allow a release (GLASS, not open), the per-pile cap is lowered, the pile is locked, or the reason is empty or over 80 characters'.
-        ENDIF.
-      WHEN 'ContinueGlass'.
-        lv_ok = zcl_l3_fleet2=>continue_glass( iv_run = lv_run iv_new_glass = lv_glass iv_reason = lv_reason ).
-        IF lv_ok = abap_true.
-          ls_answer-answer = 'OK'.
-        ELSE.
-          ls_answer-answer = 'REFUSED: ContinueGlass: the run is not at GLASS, the new glass is not above the current one, or the reason is empty or over 80 characters'.
-        ENDIF.
-      WHEN 'Resume'.
-        lt_report = zcl_l3_fleet2=>resume( iv_run = lv_run ).
-        LOOP AT lt_report INTO ls_report.
-          ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.
-        ENDLOOP.
-      WHEN 'Doctor'.
-        lt_report = zcl_l3_fleet2=>doctor(  ).
-        LOOP AT lt_report INTO ls_report.
-          ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.
-        ENDLOOP.
-      WHEN 'SetKill'.
-        lv_ok = zcl_l3_fleet2=>set_kill( iv_reason = lv_reason ).
-        IF lv_ok = abap_true.
-          ls_answer-answer = 'OK'.
-        ELSE.
-          ls_answer-answer = 'REFUSED: SetKill: the reason is empty or over 80 characters'.
-        ENDIF.
-      WHEN 'ClearKill'.
-        lv_ok = zcl_l3_fleet2=>clear_kill( iv_reason = lv_reason ).
-        IF lv_ok = abap_true.
-          ls_answer-answer = 'OK'.
-        ELSE.
-          ls_answer-answer = 'REFUSED: ClearKill: the reason is empty or over 80 characters'.
-        ENDIF.
-      WHEN 'SetSetting'.
-        lv_ok = zcl_l3_fleet2=>set_setting( iv_param = lv_param iv_value = lv_value iv_note = lv_note ).
-        IF lv_ok = abap_true.
-          ls_answer-answer = 'OK'.
-        ELSE.
-          ls_answer-answer = 'REFUSED: SetSetting: unknown setting, a value outside its range, budget.warn above budget.narrow_at, or the note is empty or over 80 characters'.
-        ENDIF.
-      WHEN 'ResetSetting'.
-        lv_ok = zcl_l3_fleet2=>cockpit_reset_setting( iv_param = lv_param iv_note = lv_note ).
-        IF lv_ok = abap_true.
-          ls_answer-answer = 'OK'.
-        ELSE.
-          ls_answer-answer = 'REFUSED: ResetSetting: unknown setting, or the note is empty or over 80 characters'.
-        ENDIF.
-      WHEN 'Schedule'.
-        ls_answer-answer = zcl_l3_fleet2=>schedule( ).
-      WHEN 'Unschedule'.
-        ls_answer-answer = zcl_l3_fleet2=>unschedule( ).
-      WHEN 'ScheduleStatus'.
-        ls_answer-answer = zcl_l3_fleet2=>cockpit_schedule_status( ).
-      WHEN OTHERS.
-        RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
-          EXPORTING method = iv_action_name.
-    ENDCASE.
-    CATCH cx_root INTO lx_error.
-      lv_text = lx_error->get_text( ).
-      ls_answer-answer = |REFUSED: { lv_text }|.
+        CASE iv_action_name.
+          WHEN 'StartRun'.
+            IF lv_work IS NOT INITIAL.
+              lv_work = |work={ lv_work }|.
+            ENDIF.
+            ls_run = zcl_l3_fleet2=>run( iv_date = lv_date iv_mode = lv_mode iv_bind = lv_work ).
+            ls_answer-run_id = ls_run-run_id.
+            ls_answer-answer = ls_run-status.
+            IF ls_run-status = 'SUBMITTED'.
+              ls_answer-answer = ls_answer-answer && ': background jobs carry the piles (on open-steamgate they need node tools/osd-batch-runs.mjs worker)'.
+            ENDIF.
+          WHEN 'ReleasePile'.
+            lv_ok = zcl_l3_fleet2=>release_pile( iv_run = lv_run iv_rule = lv_rule iv_pile = lv_pile iv_per_pile = lv_cap iv_reason = lv_reason ).
+            IF lv_ok = abap_true.
+              ls_answer-answer = 'OK'.
+            ELSE.
+              ls_answer-answer = 'REFUSED: ReleasePile: the pile is not HELD, the run or its budget does not allow a release (GLASS, not open), the per-pile cap is lowered, the pile is locked, or the reason is empty or over 80 characters'.
+            ENDIF.
+          WHEN 'ContinueGlass'.
+            lv_ok = zcl_l3_fleet2=>continue_glass( iv_run = lv_run iv_new_glass = lv_glass iv_reason = lv_reason ).
+            IF lv_ok = abap_true.
+              ls_answer-answer = 'OK'.
+            ELSE.
+              ls_answer-answer = 'REFUSED: ContinueGlass: the run is not at GLASS, the new glass is not above the current one, or the reason is empty or over 80 characters'.
+            ENDIF.
+          WHEN 'Resume'.
+            lt_report = zcl_l3_fleet2=>resume( iv_run = lv_run ).
+            LOOP AT lt_report INTO ls_report.
+              ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.
+            ENDLOOP.
+          WHEN 'Doctor'.
+            lt_report = zcl_l3_fleet2=>doctor(  ).
+            LOOP AT lt_report INTO ls_report.
+              ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.
+            ENDLOOP.
+          WHEN 'SetKill'.
+            lv_ok = zcl_l3_fleet2=>set_kill( iv_reason = lv_reason ).
+            IF lv_ok = abap_true.
+              ls_answer-answer = 'OK'.
+            ELSE.
+              ls_answer-answer = 'REFUSED: SetKill: the reason is empty or over 80 characters'.
+            ENDIF.
+          WHEN 'ClearKill'.
+            lv_ok = zcl_l3_fleet2=>clear_kill( iv_reason = lv_reason ).
+            IF lv_ok = abap_true.
+              ls_answer-answer = 'OK'.
+            ELSE.
+              ls_answer-answer = 'REFUSED: ClearKill: the reason is empty or over 80 characters'.
+            ENDIF.
+          WHEN 'SetSetting'.
+            lv_ok = zcl_l3_fleet2=>set_setting( iv_param = lv_param iv_value = lv_value iv_note = lv_note ).
+            IF lv_ok = abap_true.
+              ls_answer-answer = 'OK'.
+            ELSE.
+              ls_answer-answer = 'REFUSED: SetSetting: unknown setting, a value outside its range, budget.warn above budget.narrow_at, or the note is empty or over 80 characters'.
+            ENDIF.
+          WHEN 'ResetSetting'.
+            lv_ok = zcl_l3_fleet2=>cockpit_reset_setting( iv_param = lv_param iv_note = lv_note ).
+            IF lv_ok = abap_true.
+              ls_answer-answer = 'OK'.
+            ELSE.
+              ls_answer-answer = 'REFUSED: ResetSetting: unknown setting, or the note is empty or over 80 characters'.
+            ENDIF.
+          WHEN 'Schedule'.
+            ls_answer-answer = zcl_l3_fleet2=>schedule( ).
+          WHEN 'Unschedule'.
+            ls_unschedule = zcl_l3_fleet2=>unschedule( ).
+            ls_answer-answer = |deleted { ls_unschedule-deleted }, refused { ls_unschedule-refused }|.
+          WHEN 'ScheduleStatus'.
+            ls_answer-answer = zcl_l3_fleet2=>cockpit_schedule_status( ).
+          WHEN OTHERS.
+            RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+              EXPORTING method = iv_action_name.
+        ENDCASE.
+      CATCH cx_root INTO lx_error.
+        lv_text = lx_error->get_text( ).
+        ls_answer-answer = |REFUSED: { lv_text }|.
     ENDTRY.
     copy_data_to_ref( EXPORTING is_data = ls_answer CHANGING cr_data = er_data ).
   ENDMETHOD.

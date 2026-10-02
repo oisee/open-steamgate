@@ -3440,3 +3440,36 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream issue: none; a local scanner defect, not an open-abap or transpiler discrepancy
 - Regression-test location: `test/adt-abap-c1.mjs`, "7 empty overlay differs from absent"
 - Upstream version containing a fix: not applicable
+
+
+### ANOMALY-2026-10-02-struct-to-string — a structure assigned to a string field is accepted
+
+- Status: `open`
+- Discovery date: `2026-10-02`
+- Affected versions: OSD main at the run cockpit (JS runtime); abaplint (open-abap profile) does not flag it either
+- Affected ABAP statement, runtime API or adapter: `lv_string = zcl_x=>method( ).` where the method returns a flat structure of two `i` components
+- Minimal ABAP reproducer: `TYPES: BEGIN OF ty, a TYPE i, b TYPE i, END OF ty. CLASS-METHODS m RETURNING VALUE(rs) TYPE ty.` and in a caller `DATA lv TYPE string. lv = zcl_x=>m( ).`
+- Exact command used to run it: the generated `ZCL_ZL3C_FLEET2_DPC_EXT` (`Unschedule` answered `zcl_l3_fleet2=>unschedule( )` into `ls_answer-answer`), `npx mocha test/dsl-l3-cockpit.mjs` on OSD; on a system (release 758, 2026-10-02) the same class imported through abapGit, `SYNTAX-CHECK` of its class pool and an OData call of the service
+- Expected SAP behaviour: syntax error "The result type of the functional method cannot be converted into the type of LS_ANSWER-ANSWER"; the class does not load, and every request of the service dumps with `SYNTAX_ERROR` in the DPC factory
+- Actual open-abap behaviour: the assignment runs; the test read the answer as a number (`> 0`)
+- Impact on open-steamgate: generated code that is green here does not load on a system; one bad line takes the whole service down
+- Smallest safe workaround: the generator words the structure (`deleted N, refused M`); prove a generated class on a system (`SYNTAX-CHECK` of the class pool) before calling it done
+- Upstream issue: none yet
+- Regression-test location: `test/dsl-l3-cockpit.mjs` (the Unschedule answer)
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-10-02-dynamic-where-literal — a dynamic WHERE of `1 = 1` is accepted
+
+- Status: `open`
+- Discovery date: `2026-10-02`
+- Affected versions: OSD main at the run cockpit (JS runtime, SQLite)
+- Affected ABAP statement, runtime API or adapter: `SELECT * FROM t INTO TABLE lt WHERE col = 'x' AND (lv_where).` with `lv_where = '1 = 1'`
+- Minimal ABAP reproducer: `DATA lv_where TYPE string VALUE '1 = 1'. SELECT * FROM zosd_l3_run INTO TABLE lt WHERE (lv_where).`
+- Exact command used to run it: the generated cockpit DPC_EXT's entity sets with no `$filter`, `npx mocha test/dsl-l3-cockpit.mjs` on OSD; on a system (release 758, 2026-10-02) `GET RunSet` through the Gateway
+- Expected SAP behaviour: the dynamic condition is parsed by the kernel and refused: the Gateway error log says "The parser produced the error: SELECT 484" and the request answers 500; a condition starts with a column
+- Actual open-abap behaviour: the condition is passed to SQLite, which evaluates `1 = 1` as true
+- Impact on open-steamgate: a generated or hand-written default of `'1 = 1'` works here and fails every unfiltered read on a system
+- Smallest safe workaround: put a real column condition first (the cockpit now starts `lv_where` with `SET_NAME = '<set>'` and adds the OData filter only when there is one)
+- Upstream issue: none yet
+- Regression-test location: `test/dsl-l3-cockpit.mjs` (the set-filter mutant now edits the dynamic condition)
+- Upstream version containing a fix: `unknown`

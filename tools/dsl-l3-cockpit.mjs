@@ -34,7 +34,9 @@ export async function renderCockpit(model) {
   const result = compile(source, {file: `${c.project.toLowerCase()}.stg.yaml`});
   const root = {...c, set: model.set, "set@type": {built_in: "CHAR", length: 16}, runner: model.class, base: result.model.classes.dpc.toLowerCase(),
     class: result.model.classes.dpcExt.toLowerCase(), mpc: result.model.classes.mpc.toLowerCase(),
-    settings_class: model.settings?.class, stage_count: String(model.stages.length), resilience: Boolean(model.resilience), governed: Boolean(model.governor), entities: service.entities, actions: cockpitActions(model)};
+    settings_class: model.settings?.class, stage_count: String(model.stages.length), resilience: Boolean(model.resilience), governed: Boolean(model.governor), scheduled: Boolean(model.schedule), entities: service.entities,
+    // the calls sit inside TRY ... CASE: four more spaces per continuation line
+    actions: cockpitActions(model).map((a) => ({...a, call: a.call.replaceAll("\n", "\n    ")}))};
   const ext = await renderRecipe(root, "recipes/l3-cockpit/dpc.tpl", {profile: "abap"});
   const error = ext.findings.find((f) => f.severity === "E");
   if (error) throw new Error(`cockpit DPC line ${error.line}: ${error.text}`);

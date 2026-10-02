@@ -23,6 +23,7 @@ CLASS {{class}} IMPLEMENTATION.
 {{#entities}}
   METHOD {{method}}_get_entityset.
     DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
 {{#run}}
@@ -39,19 +40,23 @@ CLASS {{class}} IMPLEMENTATION.
 {{#setting}}
     {{runner}}=>settings_seed( ).
 {{/setting}}
-    lv_where = io_tech_request_context->get_osql_where_clause( ).
-    IF lv_where IS INITIAL.
-      lv_where = '1 = 1'.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = '{{set}}'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
     ENDIF.
 {{#has_run}}
     IF it_navigation_path IS NOT INITIAL.
       lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
       REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
-      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+      lv_where = |{ lv_where } AND RUN_ID = '{ lv_run }'|.
     ENDIF.
 {{/has_run}}
     SELECT * FROM {{table}} INTO CORRESPONDING FIELDS OF TABLE et_entityset
-      WHERE set_name = {{set | literal}} AND (lv_where).
+      WHERE (lv_where).
 {{#run}}
     SELECT * FROM zosd_l3_stage INTO TABLE lt_stages WHERE set_name = {{set | literal}} AND stage_no = 1.
     LOOP AT lt_stages INTO ls_stage.
@@ -161,6 +166,9 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_cap TYPE i.
     DATA lv_glass TYPE i.
     DATA lv_ok TYPE abap_bool.
+{{#scheduled}}
+    DATA ls_unschedule TYPE {{runner}}=>ty_unschedule.
+{{/scheduled}}
 {{#resilience}}
     DATA lt_report TYPE {{runner}}=>tt_doctor.
     DATA ls_report TYPE {{runner}}=>ty_doctor.
@@ -179,18 +187,18 @@ CLASS {{class}} IMPLEMENTATION.
     lv_glass = parameter( it_params = it_parameter iv_name = 'NewGlass' ).
     ls_answer-run_id = lv_run.
     TRY.
-    CASE iv_action_name.
+        CASE iv_action_name.
 {{#actions}}
-      WHEN '{{name}}'.
-        {{call}}
+          WHEN '{{name}}'.
+            {{call}}
 {{/actions}}
-      WHEN OTHERS.
-        RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
-          EXPORTING method = iv_action_name.
-    ENDCASE.
-    CATCH cx_root INTO lx_error.
-      lv_text = lx_error->get_text( ).
-      ls_answer-answer = |REFUSED: { lv_text }|.
+          WHEN OTHERS.
+            RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+              EXPORTING method = iv_action_name.
+        ENDCASE.
+      CATCH cx_root INTO lx_error.
+        lv_text = lx_error->get_text( ).
+        ls_answer-answer = |REFUSED: { lv_text }|.
     ENDTRY.
     copy_data_to_ref( EXPORTING is_data = ls_answer CHANGING cr_data = er_data ).
   ENDMETHOD.

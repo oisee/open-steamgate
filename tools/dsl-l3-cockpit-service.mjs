@@ -13,7 +13,7 @@ const visible = {
 export function cockpitActions(m) {
   const actions = [
     {name: "StartRun", method: "run", params: {CheckDate: "String(8)", Mode: "String(1)"}, run: true,
-      call: `ls_run = ${m.class}=>run( iv_date = lv_date iv_mode = lv_mode ).\n        ls_answer-run_id = ls_run-run_id.\n        ls_answer-answer = ls_run-status.\n        IF ls_run-status = 'SUBMITTED'.\n          ls_answer-answer = ls_answer-answer && '; jobs require a worker: start node tools/osd-batch-runs.mjs worker if none is running'.\n        ENDIF.`},
+      call: `ls_run = ${m.class}=>run( iv_date = lv_date iv_mode = lv_mode ).\n        ls_answer-run_id = ls_run-run_id.\n        ls_answer-answer = ls_run-status.\n        IF ls_run-status = 'SUBMITTED'.\n          ls_answer-answer = ls_answer-answer && ': background jobs carry the piles (on open-steamgate they need node tools/osd-batch-runs.mjs worker)'.\n        ENDIF.`},
   ];
   if (m.simulate) {
     actions[0].params.Work = "String(4)";
@@ -42,7 +42,9 @@ export function cockpitActions(m) {
   }
   if (m.schedule) {
     actions.push({name: "Schedule", method: "schedule", params: {}, call: `ls_answer-answer = ${m.class}=>schedule( ).`});
-    actions.push({name: "Unschedule", method: "unschedule", params: {}, call: `ls_answer-answer = ${m.class}=>unschedule( ).`});
+    // unschedule( ) answers a structure; a system refuses it as the answer string
+    // (this runtime converted it silently), so the cockpit words it
+    actions.push({name: "Unschedule", method: "unschedule", params: {}, call: `ls_unschedule = ${m.class}=>unschedule( ).\n        ls_answer-answer = |deleted { ls_unschedule-deleted }, refused { ls_unschedule-refused }|.`});
     actions.push({name: "ScheduleStatus", method: "cockpit_schedule_status", params: {}, get: true,
       call: `ls_answer-answer = ${m.class}=>cockpit_schedule_status( ).`});
   }

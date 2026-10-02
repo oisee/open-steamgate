@@ -189,8 +189,8 @@ describe("DSL L3 run cockpit", function () {
     it("mutant: removing the dispatch catch makes both refusal oracles red", async () => {
       const real = abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT;
       const original = readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8");
-      const source = original.replace("    TRY.\n    CASE iv_action_name.", "    CASE iv_action_name.")
-        .replace(/    CATCH cx_root INTO lx_error\.[\s\S]*?    ENDTRY\.\n/, "");
+      const source = original.replace("    TRY.\n        CASE iv_action_name.", "        CASE iv_action_name.")
+        .replace(/      CATCH cx_root INTO lx_error\.[\s\S]*?    ENDTRY\.\n/, "");
       expect(source).not.equal(original);
       const mutant = await loadCockpitMutant("zcl_cockpit_catch_mut", source.replaceAll("zcl_zl3c_fleet2_dpc_ext", "zcl_cockpit_catch_mut"), join(dir, "catch-mutant"));
       abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT = mutant;
@@ -257,14 +257,14 @@ describe("DSL L3 run cockpit", function () {
       await drainJobOutbox(store);
       const waiting = (await action("ScheduleStatus")).Answer;
       expect(waiting.split(" / ").every((s) => s.startsWith("SCHEDULED ")), waiting).equal(true);
-      expect(+(await action("Unschedule")).Answer).above(0);
+      expect((await action("Unschedule")).Answer).match(/^deleted [1-9][0-9]*, refused 0$/);
       expect((await action("ScheduleStatus")).Answer).equal("UNSCHEDULED / UNSCHEDULED");
     });
     it("mutants: removed set filter, direct table action and accepted missing audited reason each turn red", async () => {
       const real = abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT, original = readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8");
       await exec(["INSERT INTO zosd_l3_pile (mandt,run_id,rule_name,pile_no,set_name,status) VALUES ('','OTHER','x',1,'other','DONE')"]);
       const variants = [
-        ["zcl_cockpit_filter_mut", original.replace("WHERE set_name = 'fleet2' AND (lv_where).", "WHERE (lv_where)."), async () => expect((await get("RunSet")).results.every((r) => r.SetName === "fleet2")).equal(true)],
+        ["zcl_cockpit_filter_mut", original.replaceAll("lv_where = |SET_NAME = 'fleet2'|.", "lv_where = |SET_NAME <> ' '|."), async () => expect((await get("RunSet")).results.every((r) => r.SetName === "fleet2")).equal(true)],
         ["zcl_cockpit_write_mut", original.replace("lv_ok = zcl_l3_fleet2=>set_setting( iv_param = lv_param iv_value = lv_value iv_note = lv_note ).", "UPDATE zosd_l3_conf SET param_val = lv_value WHERE set_name = 'fleet2' AND param_name = lv_param.\n        lv_ok = abap_true."), async () => {await action("SetSetting", {Param: "budget.glass", Value: "20", Note: "mutant audit"}); expect(read("SELECT * FROM zosd_l3_conf_log WHERE note_text='mutant audit'")).length(1);}],
         ["zcl_cockpit_reason_mut", original.replace("iv_per_pile = lv_cap iv_reason = lv_reason", "iv_per_pile = lv_cap iv_reason = 'invented reason'"), async () => expect((await action("ReleasePile", {RunId: "HELD", RuleName: "x", PileNo: 1, PerPile: 0, Reason: ""})).Answer).match(/^REFUSED: ReleasePile: /)],
       ];
