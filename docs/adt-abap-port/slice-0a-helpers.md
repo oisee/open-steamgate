@@ -11,7 +11,9 @@ The STORE contract and front changes belong to slice 0b and F1/F2.
   absence from an empty value. The front's query record remains F2's work.
 - ENTITY hashes the UTF-8 representation. NORMALIZED is the single If-Match
   rule; SEND splits If-None-Match into candidates. Callers supply the bare
-  content type: SEND adds the charset on 200 and keeps the bare type on 304.
+  content type: SEND adds the charset, and a 304 keeps the type the 200 would
+  have had (Node's `sendEntity` sets the type before `status(304).end()`,
+  which keeps it; only Express's `send()` strips it on a 304).
   VERSIONS feeds explicitly disable the 200 charset: Node sends their bodies
   as Buffers, so their existing wire type is bare on both 200 and 304.
 - TYPES contains the 15 Node TYPES rows in insertion order. SOURCES and
@@ -40,3 +42,8 @@ both `test/fixtures/adt-helpers/documents.json` and the two ABAP Unit includes.
 `--check` rejects stale output. The mocha helper suite checks the complete type
 catalog and other helpers directly against Node, including V8 localeCompare
 on the local repository names. Every helper also has ABAP Unit coverage.
+- SCAN's REFERENCES appends a row with `found = abap_true` and `ok = abap_false`
+  (empty name) where Node's decode throws a URIError. Every caller checks `ok`
+  before using the name.
+- URI's QUERY matches qs for scalar keys only; `a[]=x` and `a[0]=x` are not
+  parsed as arrays.

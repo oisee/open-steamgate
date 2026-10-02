@@ -54,7 +54,6 @@ CLASS zcl_osd_adt_entity IMPLEMENTATION.
     LOOP AT lt_candidates INTO lv_candidate.
       IF normalized( lv_candidate ) = lv_tag.
         rs_response-status = 304.
-        rs_response-content_type = iv_type.
         CLEAR rs_response-body.
         RETURN.
       ENDIF.

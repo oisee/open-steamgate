@@ -25,6 +25,6 @@ CLASS ltcl_helper IMPLEMENTATION.
     ls_response = zcl_osd_adt_entity=>send( is_request = ls_request iv_body = `abc` iv_type = `text/plain` ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 304 ).
     cl_abap_unit_assert=>assert_initial( ls_response-body ).
-    cl_abap_unit_assert=>assert_equals( act = ls_response-content_type exp = `text/plain` ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-content_type exp = `text/plain; charset=utf-8` ).
   ENDMETHOD.
 ENDCLASS.
