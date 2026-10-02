@@ -3212,18 +3212,18 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
   this reason in their title)
 - Upstream version containing a fix: `unknown`
 
-### ANOMALY-2026-10-02-jobcount-unique-per-name — JOBCOUNT was a random eight-digit number unique across names, a system's is hhmmss plus a counter per name
+### ANOMALY-2026-10-02-jobcount-unique-per-name — JOBCOUNT is hhmmss plus two base-36 digits per name
 
 - Status: `fixed` (in this repository's JOB_* facade; no upstream involved)
 - Discovery date: `2026-10-02`
 - Affected versions: `tools/osd-job-port.mjs` and `tools/osd-job-scheduler.mjs` before this change
 - Affected ABAP statement, runtime API or adapter: `JOB_OPEN` (`JOBCOUNT`), the periodic successor's count
-- Minimal reproducer: `JOB_OPEN` three times for one name and once each for two others inside one second
+- Minimal reproducer: `JOB_OPEN` 103 times for one name inside one second; then probe deletion of a middle and a top suffix
 - Exact command used to run it: `npx mocha test/job-count.mjs`; measured on the sandbox on 2026-10-02
-- Expected SAP behaviour: `JOBCOUNT` = creation time `hhmmss` in system time + `NN`, counted per (job name, second): the same name three times in 03:47:32 gives 03473200, 03473201, 03473202; two other names in that second give 03473200 each; the first name again gives 03473203; six jobs of different names in one second all share 03440000. (Jobname, jobcount) is the key; the count alone collides. Past NN = 99 is not measured.
+- Expected SAP behaviour: `JOBCOUNT` = creation time `hhmmss` in system time + two base-36 digits (0-9 then A-Z), counted per (job name, second): the same name three times in 03:47:32 gives 03473200, 03473201, 03473202; two other names in that second give 03473200 each; the first name again gives 03473203; six jobs of different names in one second all share 03440000. In 103 opens of one name in one second, the suffixes were 00 ... 09, 0A, ... , 2P (#98), 2Q (#99), 2R (#100), 2S, 2T, 2U, with no refusal. The suffix is max+1 over the existing rows: open 00, 01, 02, delete 01, next open 03; open 00, 01, 02, delete 02, next open 02 again. (Jobname, jobcount) is the key; the count alone collides. Past ZZ is not measured.
 - Actual open-abap behaviour: a random eight-digit number, retried until no name had it; so no two jobs ever shared a count, and code that identifies a job by its count alone worked here and not on a system
 - Impact on open-steamgate: count-only lookups were invisible locally; a program that sorts or parses JOBCOUNT saw numbers a system never makes. Found by the L3 proof (`stages_mode_p`, #431): `COUNT( DISTINCT job_count )` over six stage 2 piles was 6 here and 1 on the sandbox (`L3_FLEET2_202_0001` to `207_0001` all 03440000); the proof now counts pairs
-- Smallest safe workaround: none needed; `tools/osd-job-count.mjs` is the one allocator (JOB_OPEN and the periodic successor), per-name counter across days (the key has no date: the next NN no existing row of (name, hhmmss) holds), refusal (`CANT_CREATE_JOB`) past 99 rather than a wrap, and a job reorganisation (`tools/osd-job-reorg.mjs`, retention 14 days) so a fixed-second daily job does not use up its 100 counts; counts of earlier builds stay valid and are skipped on a clash
+- Smallest safe workaround: none needed; `tools/osd-job-count.mjs` is the one allocator (JOB_OPEN and the periodic successor), per-name max+1 across days (the key has no date), refusal (`CANT_CREATE_JOB`) past ZZ rather than a wrap, and a job reorganisation (`tools/osd-job-reorg.mjs`, retention 14 days). Our exact clock makes a fixed-second daily chain climb by one every day while its latest instance is kept; it can reach ZZ after about 1296 days despite retention. The scheduler retries a refused successor in a new second. Counts of earlier builds stay valid and are skipped on a clash.
 - Upstream issue: none; the facade is this repository's
-- Regression-test location: `test/job-count.mjs` (the A4H sequences of `test/fixtures/job-count/contract.json`; each of four mutants -- counter per second, no hhmmss, wrap past 99, a lookup by count alone -- turns it red)
+- Regression-test location: `test/job-count.mjs` (the A4H sequences of `test/fixtures/job-count/contract.json`; mutants: decimal suffix, lowest free, refusal past 99, numeric predecessor parsing)
 - Upstream version containing a fix: not applicable

@@ -91,7 +91,7 @@ export class JobDestination {
     const who = identity(this.env);
     const sourceDb = resolve(db.path);
     const name = jobname.trim().toUpperCase();
-    if (!name || name.length > 32 || !/^\d{8}$/.test(count)) return "NOT_FOUND";
+    if (!name || name.length > 32 || !/^[0-9]{6}[0-9A-Z]{2}$/.test(count)) return "NOT_FOUND";
     let snapshot;
     try {
       snapshot = readJobSnapshot({sourceDb, jobName: name, jobCount: count,
@@ -109,6 +109,14 @@ export class JobDestination {
     const store = new BatchRuns(this.root, this.env);
     try {
       const kind = store.deleteJob(id);
+      if (kind === "deleted") {
+        // A deleted system job no longer holds its (name, count) row. Keep
+        // the operations run as a tombstone for the scheduler and reorg.
+        db.db.prepare(`DELETE FROM zosd_job_identity WHERE mandt = ? AND jobname = ?
+          AND jobcount = ? AND intent_id = ?`).run(who.client, name, count, snapshot.intentId);
+        db.db.prepare("DELETE FROM zosd_job_step WHERE mandt = ? AND intent_id = ?")
+          .run(who.client, snapshot.intentId);
+      }
       return kind === "deleted" ? "" : kind === "running" ? "RUNNING" : "NOT_FOUND";
     } finally { store.close(); }
   }
@@ -154,7 +162,7 @@ export class JobDestination {
       const who = identity(this.env);
       const sourceDb = resolve(db.path);
       const name = jobname.trim().toUpperCase();
-      if (!name || name.length > 32 || !/^\d{8}$/.test(count)) {
+      if (!name || name.length > 32 || !/^[0-9]{6}[0-9A-Z]{2}$/.test(count)) {
         response(signature, {EV_ERROR_CODE: "BAD_KEY"});
         return;
       }

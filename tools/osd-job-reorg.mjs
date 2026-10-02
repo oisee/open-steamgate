@@ -1,8 +1,9 @@
 // The job reorganisation of this runtime: what the system's reorganisation
 // of TBTCO does for it. A job key is (JOBNAME, JOBCOUNT) with no date in it
-// and the count has two digits per (name, second), so a job that starts at a
-// fixed second every day would use up its 100 counts in 100 days if nothing
-// ever left. Finished jobs leave here, after a retention period (default 14
+// and the count has two base-36 digits per (name, second), so a job that starts
+// at a fixed second every day can reach ZZ after about 1296 days even with
+// retention: the latest periodic instance is kept. Finished jobs leave here,
+// after a retention period (default 14
 // days, OSD_JOB_RETENTION_DAYS, "off" for never): their identity row, outbox
 // and step rows in the business database, and their run, steps, log, import
 // ledger entry and completion event in the operations store.

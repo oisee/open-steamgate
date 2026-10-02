@@ -66,7 +66,7 @@ function outboxSnapshot(db, identity, sourceDb, caller, currentSourceInstance) {
   const sourceInstance = value(parent, "source_instance");
   const waitSeqText = value(parent, "wait_seq");
   if ((afterName || afterCount || afterIntent) &&
-      (!afterName || !/^\d{8}$/.test(afterCount) || !/^[0-9a-f]{32}$/.test(afterIntent))) {
+      (!afterName || !/^[0-9]{6}[0-9A-Z]{2}$/.test(afterCount) || !/^[0-9a-f]{32}$/.test(afterIntent))) {
     fail("outbox has an incomplete predecessor key");
   }
   if (namedId && (afterName || !/^[A-Z][A-Z0-9_]{0,31}$/.test(namedId) ||
@@ -220,7 +220,7 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
   const waitSeq = run.wait_seq ?? null;
   if ((afterName === null) !== (afterCount === null)) fail("incomplete predecessor event key");
   if (afterName !== null && (!afterName || afterName.length > 32 || afterName !== afterName.trim() ||
-      afterName !== afterName.toUpperCase() || !/^\d{8}$/.test(afterCount) || legacy)) {
+      afterName !== afterName.toUpperCase() || !/^[0-9]{6}[0-9A-Z]{2}$/.test(afterCount) || legacy)) {
     fail("invalid predecessor event key");
   }
   if (afterIntent !== null && (afterName === null || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(afterIntent))) {
@@ -386,7 +386,7 @@ function checkPreIdentityJob(business, sourceDb, name, count, caller, root, env)
     if (!["source_db", "source_client", "source_sysid", "source_owner", "job_name", "job_count"]
       .every((column) => columns.has(column))) return;
     const old = db.prepare(`SELECT source_owner, job_name FROM batch_runs WHERE source_db = ?
-      AND source_client = ? AND source_sysid = ? AND TRIM(job_count) = ?`)
+      AND source_client = ? AND source_sysid = ? AND TRIM(job_count) = ? AND state <> 'DELETED'`)
       .all(sourceDb, caller.client, caller.sid, count);
     if (old.some((row) => value(row, "job_name").toUpperCase() === name &&
         value(row, "source_owner") === caller.user)) {
@@ -402,7 +402,7 @@ export function readJobSnapshot({sourceDb, jobName, jobCount, caller, root = pro
   env = process.env, includeTechnicalLog = false} = {}) {
   const name = String(jobName ?? "").trim().toUpperCase();
   const count = String(jobCount ?? "").trim();
-  if (!sourceDb || !caller || !name || name.length > 32 || !/^\d{8}$/.test(count) ||
+  if (!sourceDb || !caller || !name || name.length > 32 || !/^[0-9]{6}[0-9A-Z]{2}$/.test(count) ||
       !caller.client || caller.client.length > 3 || !caller.user || caller.user.length > 12 ||
       !caller.sid || caller.sid.length > 3) {
     throw new JobSnapshotError("JOB_READ_BAD_KEY", "invalid job key or trusted caller identity");

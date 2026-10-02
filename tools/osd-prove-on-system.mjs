@@ -900,7 +900,7 @@ export async function importZip(mcp, pkg, bytes, {poll = IMPORT_POLL, log = () =
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let {json} = jsonAnswer(await mcp.call("system", undefined, {type: "git_import_zip", zip_base64: Buffer.from(bytes).toString("base64"),
     package: pkg, repo_name: ownRepoName(pkg), overwrite: false, wait_seconds: IMPORT_WAIT_SECONDS}), "import");
-  for (let i = 0; i < poll.tries && (json.status === "pending" || json.status === "unknown") && /^[0-9]{8}$/.test(String(json.jobCount ?? "")); i += 1) {
+  for (let i = 0; i < poll.tries && (json.status === "pending" || json.status === "unknown") && /^[0-9]{6}[0-9A-Z]{2}$/.test(String(json.jobCount ?? "")); i += 1) {
     log(`import: job ${json.job ?? ""} ${json.jobCount} is ${json.status}; asking again`);
     await sleep(poll.delayMs);
     try {

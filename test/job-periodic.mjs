@@ -204,7 +204,7 @@ describe("periodic and time-scheduled background jobs", function () {
         } else if (kind === "successorCount") {
           // jobs, not values: the successor of the first instance
           const [first, next] = w.runs(job);
-          expect(next.job_count, `${what.id}: a successor of its own`).to.match(/^\d{8}$/).and.not.equal(first.job_count);
+          expect(next.job_count, `${what.id}: a successor of its own`).to.match(/^[0-9]{6}[0-9A-Z]{2}$/).and.not.equal(first.job_count);
           expect(next.chain_pred).to.equal(first.id);
         }
       }
