@@ -191,9 +191,49 @@ it in front of the table with `ZCL_OSD_ADT_HANDLER=>USE_ROUTES`.
   row of `ZOSD_ADT_SESS`, a foreign-token write is not refused by ABAP, and `an_ended_session` fails (an
   exception document instead of the refusal).
 - **Green:** the `adt` suite group (`test/suites.d/adt.json`) together with `osd-enq` and `osd-enq-abap` gives
-  542 passing and 4 pending, with `osd-child` in the run, on main after #471: 11 cases in `test/adt-abap-front.mjs`, including #471's acceptance test (old handle 409, GET 200, relock a new handle), which now runs. The adapter's parity suite, `adt-abap-diff` (rewritten for option B), `adt-abap-csrf`,
+  542 passing and 4 pending, with `osd-child` in the run, on main after #471: 11 cases in `test/adt-abap-front.mjs`, including #471's acceptance test (old handle 409, GET 200, relock a new handle), which now runs, and the logoff-first order of the #432 race (a LOCK queued behind its own logoff is refused and takes no lock; red with the existence check of `RESOLVE` disabled). The adapter's parity suite, `adt-abap-diff` (rewritten for option B), `adt-abap-csrf`,
   `adt-abap-session`, `adt-devloop`, `adt-activation` and `tmp-package` are all part of that run.
 - **ABAP-FS conformance** (`--start`, own port): 30 PASS, 1 FAIL, 16 MISSING, no regressions.
+
+### Known limitation: two lock tables
+
+In child mode there are two lock servers, one per process. `locks()` keeps one table per process on
+`globalThis.__osdLocks` (`tools/osd-enq.mjs:303-306`). The serving child installs its own through
+`test/setup.mjs:384-398` (`installEnq`), and the parent's ADT kernel installs a second one at
+`tools/adt-abap-kernel.mjs:97,106`. An ENQUEUE, DEQUEUE or ENQUEUE_READ from a program in the child therefore goes
+to the child's table and does not see the ADT locks held in the parent.
+
+Measured with a throwaway classrun class in the child that calls ENQUEUE_READ for `ZOSD_ADT_LOCK`, before and
+after an ADT LOCK through the front:
+
+| mode | before the LOCK | LOCK | after the LOCK |
+|---|---|---|---|
+| child (`test/run.mjs`) | 0 rows | 200, served by ABAP | 0 rows |
+| inline | 0 rows | 200, served by ABAP | 1 row |
+
+This is not a regression against main. Under the mixed front, child mode kept ADT locks in Node's `Sessions` and
+in no lock table at all. No ABAP in the tree reads or takes `ZOSD_ADT_LOCK` from the child today; the lock object
+is used only under `src/adt`.
+
+What it forces: `ZCL_OSD_DEVELOPMENT` (0.8, must, "lock through ENQ") and an SM12 view need one lock table for
+the whole system. A lock server shared across processes, E2 or an equivalent, is therefore a prerequisite of that
+phase. E2 is parked for 0.7. The two ways to one table, with no choice made here:
+
+- one lock server shared across the two processes (the E2 socket `tools/osd-enq.mjs` mentions, not built yet);
+- the ADT front moved into the child, which then needs sessions and locks that survive a recycle (a file
+  database for `ZOSD_ADT_SESS` and `ZOSD_ADT_SHDL`, and a lock table that outlives the process).
+
+### Group C and the child's runtime
+
+The parent's ADT kernel has a database holding only the ADT tables, and reaches the source tree through the
+STORE destination. That is enough for 4a writes (the store's files) and for 4b activation: the route decides in
+ABAP and ends with a HOST verdict whose continuation (`publish`) runs in the parent after the step, where the
+store and the supervisor live. Group C (data preview, ABAP Unit) needs the child's database and runtime, which
+parent ABAP cannot reach. A group C route has three ways to get there: stay a HOST route, with Node proxying to
+the child as today; end in a continuation that calls the child's door; or call the child through a new
+destination from parent ABAP. If the front ever moves into the child (for C, or for the one lock table above),
+the kernel in the parent is undone: `tools/adt-abap-kernel.mjs` and the child branch of `test/start.mjs`. The
+handler, the continuation registry, `AbapSessions` and the tests stay.
 
 ### Measured overhead, with the real session
 

@@ -248,6 +248,31 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     expect(existsSync(join(root, "src", "zcl_osd_doomed.clas.abap")), "the object is still there").to.equal(true);
   });
 
+  it("a LOCK queued behind its own session's logoff is refused and takes no lock (#432)", async () => {
+    // the other order of the race above: the logoff has the work process
+    // first, ends the session and its ENQ key, and the LOCK that waited
+    // behind it must not bring the session back. RESOLVE finds no row for
+    // the old cookie, opens a fresh session, and the old token is not its.
+    const one = await logon();
+    let free;
+    let started;
+    const running = new Promise((resolve) => { started = resolve; });
+    const held = dialogStep(() => new Promise((resolve) => { free = resolve; started(); }), "test: the work process is busy");
+    await running;
+    const off = fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const queued = as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    free();
+    await held;
+    expect((await off).status).to.equal(200);
+    const answer = await queued;
+    expect([answer.status, answer.headers.get("x-csrf-token")], "the LOCK found its session gone").to.deep.equal([403, "Required"]);
+    expect(await sessionRow(one.id), "the old session stays gone").to.equal(undefined);
+    const {locks} = await import("../tools/osd-enq.mjs");
+    expect(locks().read({table: "ZOSD_ADT_LOCK"}).filter((r) => r.arg.includes(LOCKED)), "no lock taken").to.deep.equal([]);
+  });
+
   it("a probe and a refused write keep no session row; a fetch does", async () => {
     const probe = await fetch(`${url}${BASE}/core/discovery`);
     expect(probe.status).to.equal(200);
