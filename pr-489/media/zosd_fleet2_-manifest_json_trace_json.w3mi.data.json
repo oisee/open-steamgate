@@ -1,7 +1,7 @@
 {
  "generator": "dsl-l3-cockpit",
  "set": "src/l2demo/fleet2.l3.yaml",
- "model": "sha256:df1b180adbd932eeaecdefc2be296b47a97a8d9b39020d06a23be0494359455d",
+ "model": "sha256:1413c757646ec376f6ccf2f902926db0c47477b4f66cf8279d092814951f29ce",
  "template": "recipes/l3-cockpit/manifest.json",
  "lines": [
   {
