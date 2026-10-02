@@ -137,6 +137,34 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
       writeFileSync(file, readFileSync(file, "utf8").replace("XTOO", "busy_too.l2.yaml"));
       refusedAt(file, /worklist busy is filled twice: by stage candidates and by stage again/, /^    worklist: busy$/, 1);
     });
+    it("a worklist whose key does not sort as text (an INT4), at the worklist line", async () => {
+      // a fleet keyed by an INT4 number: the worklist compares KEY_VALUE as text, where 10 sorts before 5
+      const dir = join(scratch, "intkey");
+      mkdirSync(dir, {recursive: true});
+      const tabl = (name, fields) => readFileSync("src/dsl/zosd_l3_stage.tabl.xml", "utf8").replaceAll("ZOSD_L3_STAGE", name)
+        .replace(/<DD03P_TABLE>[\s\S]*<\/DD03P_TABLE>/, `<DD03P_TABLE>\n${fields.join("")}   </DD03P_TABLE>`);
+      const f = (name, type, leng, key = false) => `    <DD03P><FIELDNAME>${name}</FIELDNAME>${key ? "<KEYFLAG>X</KEYFLAG>" : ""}`
+        + (type === "MANDT" ? "<ROLLNAME>MANDT</ROLLNAME><COMPTYPE>E</COMPTYPE>" : `<INTTYPE>${type === "INT4" ? "X" : "C"}</INTTYPE><DATATYPE>${type}</DATATYPE><LENG>${String(leng).padStart(6, "0")}</LENG>`)
+        + "<ADMINFIELD>0</ADMINFIELD></DD03P>\n";
+      writeFileSync(join(dir, "zt_intship.tabl.xml"), tabl("ZT_INTSHIP", [f("MANDT", "MANDT", 3, true), f("SHIP_NO", "INT4", 10, true), f("STATUS", "CHAR", 1)]));
+      writeFileSync(join(dir, "zt_intvoy.tabl.xml"), tabl("ZT_INTVOY", [f("MANDT", "MANDT", 3, true), f("VOY_ID", "CHAR", 6, true), f("SHIP_NO", "INT4", 10)]));
+      writeFileSync(join(dir, "int_busy.l2.yaml"), ["rule: int-busy", "class: zcl_l2_int_busy", "title: A ship with a voyage", "for: ZT_INTSHIP as ship",
+        "range: ship.ship_no", "keys: true", "when: ship.status = 'A'", "forbid:", "  exists: ZT_INTVOY as voy", "  where: voy.ship_no = ship.ship_no",
+        'alert: "{ship.ship_no}"', "examples:", "  - name: one", "    date: 20261001", "    rows:", "      ZT_INTSHIP: [{ship_no: '5', status: A}]",
+        "      ZT_INTVOY: [{voy_id: V1, ship_no: '5'}]", "    expect: ['5']", ""].join("\n"));
+      const ddic = [...(await import("../tools/dsl-ddic.mjs")).DEFAULT_DDIC, dir];
+      const {buildRule} = await import("../tools/dsl-l2.mjs");
+      await buildRule(join(dir, "int_busy.l2.yaml"), dir, {ddic});
+      const file = join(dir, "ints.l3.yaml");
+      writeFileSync(file, ["set: ints", "title: An INT4 worklist", "date: $date", "stages:", "  - stage: pick", "    filter: true", "    worklist: picked",
+        "    rules:", "      - rule: int_busy.l2.yaml", "ports:", "  ships:", "    kind: source", "    table: ZT_INTSHIP", "    key: ship_no",
+        "    variants:", "      table: generated", "  alerts:", "    kind: sink", "    table: ZOSD_L3_ALERT", "    group: [set_name, rule_name, model_hash, check_date]",
+        "    seq: alert_seq", "    variants:", "      log: generated", "bindings:", "  ships: table", "  alerts: log", ""].join("\n"));
+      let error;
+      try { compileSet(file, {ddic}); } catch (e) { error = e; }
+      expect(error, "refused").to.be.instanceOf(SetError);
+      expect(error.message).to.match(new RegExp(`:${setLine(/worklist: picked/, readFileSync(file, "utf8"))}: the worklist picked would hold keys of ZT_INTSHIP-SHIP_NO, a INT4; a worklist key is compared as text, so it is CHAR, NUMC or DATS`));
+    });
     it("a stage over a worklist with a rule whose range: is another field", async () => {
       const dir = join(scratch, "otherkey");
       mkdirSync(dir, {recursive: true});
@@ -467,6 +495,10 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
         try {
           const count = String(await call("schedule", scheduler)).trim();
           if (!count) problems.push("schedule( ) gave no job count");
+          // a second call while the instance waits: that instance's count, no second chain
+          const again = String(await call("schedule", scheduler)).trim();
+          if (again !== count) problems.push(`a second schedule( ) answered ${again}, the waiting instance is ${count}`);
+          if (String(await call("scheduled")).trim() !== count) problems.push("scheduled( ) does not name the waiting instance");
           await w.scheduler.tick();
           // the first start: 02:00 system time on the next day, not the user's time
           const first = drivers();

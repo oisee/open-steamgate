@@ -693,7 +693,9 @@ Refused, each at its line (`file:line: message`): a filter stage whose rule has 
 (at the rule's line); filter rules over different keys; a filter stage without `worklist:` and a
 worklist on a stage that is not a filter; a worklist used before it is filled, or filled twice; a
 worklist whose key has no source port of that table and key (it is read through that port); a key
-wider than 40; `piles.source: worklist:<w>` with a rule whose `range:` is not the worklist's key
+wider than 40; a worklist key that does not sort as text (any type but CHAR, NUMC and DATS: an INT4
+or DEC key would sort `10` before `5` in `KEY_VALUE`, and a pile's `BETWEEN` would miss keys the plan
+put inside it); `piles.source: worklist:<w>` with a rule whose `range:` is not the worklist's key
 field (over a worklist every rule is piled: one that is not would run over every row and pass the
 filter by); an empty stage (no rule, or every rule disabled); more than 9 stages (the stage is one
 digit of the job names `L3_<SET>_<s><nn>_<pppp>`); a stage name that does not fit; a schedule in
@@ -796,11 +798,16 @@ keys did before stages.
 unit (`PRDMINS`, `PRDHOURS`, `PRDDAYS`, `PRDWEEKS`). The first start is `at` today in **system
 time**, `sy-datum` and `sy-uzeit` (UTC on the sandbox and here; the facade and a system both read
 `SDLSTRTDT`/`SDLSTRTTM` as system time, `docs/job-standard-fms.md`, "Periodic jobs"), or tomorrow
-when `at` has passed; without `at`, now. Months are refused: the facade refuses `PRDMONTHS`.
+when `at` has passed; without `at`, now. Months are refused: the facade refuses `PRDMONTHS`. A
+second `schedule( )` while an instance waits answers that instance's count and opens nothing (two
+chains would run the set twice); `scheduled( )` returns the waiting instance's count, or initial. A
+`JOB_CLOSE` that fails or does not release deletes the job it opened (`BP_JOB_DELETE`) and answers
+an initial count.
 `unschedule( ) RETURNING rv_deleted` selects the set's driver jobs with `BP_JOB_SELECT` (`SCHEDUL`)
 and deletes the one waiting for its start (status `S`) with `BP_JOB_DELETE`: a periodic job's
 successor is made when an instance starts, so deleting the waiting instance ends the chain, as
-measured on A4H. The driver, `P_MODE = 'D'`, does `GET TIME` (the date of the moment the instance
+measured on A4H. `scheduled( )` and `unschedule( )` select by `sy-uname`: a schedule is the
+user's who made it, and another user's `unschedule( )` finds nothing to delete. The driver, `P_MODE = 'D'`, does `GET TIME` (the date of the moment the instance
 starts) and calls `run( iv_date = sy-datum iv_mode = 'P' )`, passing nothing else: no rule, pile,
 run, binding or parameter applies to it (the set parameters take their defaults).
 
@@ -901,6 +908,15 @@ objects.
 - a driver instance whose date is still held by the previous instance's run (a run slower than the
   period) answers `BUSY` and plans nothing; that run is not retried;
 - `unschedule( )` deletes the waiting instance only: an instance running at that moment completes;
+  it is scoped to `sy-uname`, so only the user who scheduled can unschedule;
+- the gate's crash window: `advance( )` opens a stage (the `UPDATE` to `OPEN`), then plans and
+  inserts its piles. Both are in the job's one LUW, so a dump rolls both back; but should a stage end
+  `OPEN` with no pile row (a dump in a system that had committed between them, or a row deleted by
+  hand), `collect( )` finds no open pile and takes the stage as `DONE`. The doctor of slice 5 owns
+  telling an empty plan from a lost one;
+- a note for slice 5's retention: a worklist must not be deleted while its run is open. `range_<n>`
+  of a pile over it reads the worklist's keys between the pile's bounds, and with the rows gone falls
+  back to the two bounds alone, so the keys between them would go unchecked;
 - mode S leaves the gates of the stages after a `PARTIAL` one `WAITING` (as the slice's design says);
   `collect( )`, if called, closes them as `NOT-RUN`.
 

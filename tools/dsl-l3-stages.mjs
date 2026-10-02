@@ -68,6 +68,10 @@ export function compileStages(stages, rules, {id, set, ports, line, fail, column
       if (other) fail(other.at, `rule ${other.compiled.rule} hands back keys of ${other.compiled.range.table.toUpperCase()}-${other.compiled.range.field.toUpperCase()}, the other rules of stage ${name} keys of ${key.table.toUpperCase()}-${key.field.toUpperCase()}; a worklist holds one key`);
       if (typeof stage.worklist !== "string" || !STAGE_NAME.test(stage.worklist)) fail(line(stage.worklist === undefined ? base : `${base}/worklist`), `filter stage ${name} names the worklist it fills (worklist: <name>, a lower-case name of 1 to 13 characters)`);
       if (worklists.has(stage.worklist)) fail(line(`${base}/worklist`), `worklist ${stage.worklist} is filled twice: by stage ${worklists.get(stage.worklist).stage} and by stage ${name}`);
+      // a worklist key is compared as text (KEY_VALUE BETWEEN a pile's bounds), and the plan
+      // sorts it in its own type: the two agree only for a key that sorts as text
+      const kind = key.type?.built_in;
+      if (!["CHAR", "NUMC", "DATS"].includes(kind)) fail(line(stage.worklist === undefined ? base : `${base}/worklist`), `the worklist ${stage.worklist ?? ""} would hold keys of ${key.table.toUpperCase()}-${key.field.toUpperCase()}, a ${kind ?? "type not known"}; a worklist key is compared as text, so it is CHAR, NUMC or DATS, which sort as text`);
       const port = ports.find((p) => p.is_source && p.table === key.table && p.key === key.field);
       if (!port) fail(line(`${base}/worklist`), `worklist ${stage.worklist} holds keys of ${key.table.toUpperCase()}-${key.field.toUpperCase()}; a later stage reads it through a source port of that table and key, and the set has none`);
       const field = columnsOf(key.table, `ports/${port.name}`).fields.find((f) => f.FIELDNAME.toLowerCase() === key.field);

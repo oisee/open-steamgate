@@ -112,7 +112,13 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " the set as a periodic background job: ZL3_<SET> with p_mode = 'D' (one
     " run in jobs for the current date) every 1d, first at the time
     " schedule: names, in system time (sy-datum, sy-uzeit), never the user's
+    " a second call while an instance waits answers that instance's count and
+    " opens no second chain
     CLASS-METHODS schedule
+      RETURNING VALUE(rv_jobcount) TYPE tbtcjob-jobcount.
+    " the count of the driver's instance waiting for its start (status S) for
+    " this user, or initial when the set is not scheduled
+    CLASS-METHODS scheduled
       RETURNING VALUE(rv_jobcount) TYPE tbtcjob-jobcount.
     " deletes the waiting instance of the driver, which ends the chain
     CLASS-METHODS unschedule
@@ -971,6 +977,11 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lv_time TYPE t.
     DATA lv_period TYPE tbtcjob-prddays.
     DATA lv_released TYPE btch0000-char1.
+    " already scheduled: the waiting instance is the chain, a second would run the set twice
+    rv_jobcount = scheduled( ).
+    IF rv_jobcount IS NOT INITIAL.
+      RETURN.
+    ENDIF.
     lv_jobname = c_driver.
     lv_period = 1.
     GET TIME.
@@ -1007,8 +1018,39 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       EXCEPTIONS
         OTHERS = 1.
     IF sy-subrc <> 0 OR lv_released <> 'X'.
+      " not released: the opened job goes, it would only wait unreleased
+      CALL FUNCTION 'BP_JOB_DELETE'
+        EXPORTING
+          jobname = lv_jobname
+          jobcount = rv_jobcount
+        EXCEPTIONS
+          OTHERS = 1.
       CLEAR rv_jobcount.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD scheduled.
+    DATA ls_select TYPE btcselect.
+    DATA lt_jobs TYPE STANDARD TABLE OF tbtcjob WITH DEFAULT KEY.
+    DATA ls_job TYPE tbtcjob.
+    ls_select-jobname = c_driver.
+    ls_select-username = sy-uname.
+    ls_select-schedul = 'X'.
+    CALL FUNCTION 'BP_JOB_SELECT'
+      EXPORTING
+        jobselect_dialog = 'N'
+        jobsel_param_in = ls_select
+      TABLES
+        jobselect_joblist = lt_jobs
+      EXCEPTIONS
+        OTHERS = 1.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    LOOP AT lt_jobs INTO ls_job WHERE status = 'S'.
+      rv_jobcount = ls_job-jobcount.
+      RETURN.
+    ENDLOOP.
   ENDMETHOD.
 
   METHOD unschedule.
