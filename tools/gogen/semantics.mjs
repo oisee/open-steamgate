@@ -15,8 +15,8 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
-  // A4H negative x16 padding plus documentation-backed widths (fixture NOTES.md).
-  ZCL_GOGEN_T_INT8X: "0000000000000000FFFFFFFFFFFFFFFE/-2/0708/65535/-9223372036854775808/8000000000000000/0/00000000FFFFFFFE/-2/FFFFFFFE",
+  // Supplied byte oracles plus documentation, unmeasured extensions (fixture NOTES.md).
+  ZCL_GOGEN_T_INT8X: "0000000000000000FFFFFFFFFFFFFFFE/-2/0708/65535/-9223372036854775808/8000000000000000/0/00000000FFFFFFFE/-2/FFFFFFFE/documented",
   // Unmeasured regression: character bases, int8 concat and shared i formatting.
   ZCL_GOGEN_T_IPOWTEXT: "a42/42a/a42a/a5-/c:10/n:10/5-/2147483648-",
   // Unmeasured: documented integer power and packed assignment rounding.

@@ -42,15 +42,24 @@ test("short sources are unsigned; long sources discard leading bytes", () => {
   assert.equal(XToI("\x01\0\0\0\x02"), 2);
 });
 
-test("xstring integer sources and ambiguous target lengths", () => {
+test("supplied oracle and documentation: xstring integer lengths", () => {
   for (const width of [4, 8]) {
     assert.equal(XToHex(IToX(-2n, undefined, width)), "FF".repeat(width - 1) + "FE");
     assert.equal(XToHex(IToX(255n, undefined, width)), "FF");
-    assert.throws(() => IToX(0n, undefined, width), /NOT_COMPILED.*needs an oracle row/);
+    assert.equal(XToHex(IToX(0n, undefined, width)), "00");
+    assert.equal(XToHex(IToX(-1n, undefined, width)), "FF".repeat(width));
   }
-  for (const v of [1n << 32n, 1n << 40n, 1n << 48n])
-    assert.throws(() => IToX(v, undefined, 8), /NOT_COMPILED.*needs an oracle row/);
+  for (const [v, want] of [[1n << 32n, "0100000000"], [1n << 40n, "010000000000"], [1n << 48n, "01000000000000"]])
+    assert.equal(XToHex(IToX(v, undefined, 8)), want);
   assert.equal(XToHex(IToX(9223372036854775807n, undefined, 8)), "7FFFFFFFFFFFFFFF");
+});
+
+test("A4H ABAPiti 008: top-bit xstrings use minimal positive bytes", () => {
+  for (const [v, width, want] of [
+    [128n, 4, "80"], [32768n, 4, "8000"],
+    [1n << 31n, 8, "80000000"], [1n << 56n, 8, "0100000000000000"],
+    [-128n, 4, "FFFFFF80"],
+  ]) assert.equal(XToHex(IToX(v, undefined, width)), want);
 });
 
 test("both emitters lower byte conversions and isolate helper imports", async () => {
@@ -64,5 +73,5 @@ test("both emitters lower byte conversions and isolate helper imports", async ()
   const js = emitJs(program, new URL("./js/abap.mjs", import.meta.url).href);
   const m = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
   assert.equal(m.ZCL_GOGEN_T_INT8X.RUN({sy: {index: 0, tabix: 0, subrc: 0, dbcnt: 0}}),
-    "0000000000000000FFFFFFFFFFFFFFFE/-2/0708/65535/-9223372036854775808/8000000000000000/0/00000000FFFFFFFE/-2/FFFFFFFE");
+    "0000000000000000FFFFFFFFFFFFFFFE/-2/0708/65535/-9223372036854775808/8000000000000000/0/00000000FFFFFFFE/-2/FFFFFFFE/documented");
 });

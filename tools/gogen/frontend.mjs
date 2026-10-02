@@ -6686,9 +6686,13 @@ function lineExists(chain, ctx) {
  * - against c or string (literal or not): the byte operand becomes its hex
  *   digits in upper case, then it is a character comparison (x'FF' <> 'ff',
  *   x'FF' < 'ff', x'00' <> '0', an empty xstring = ' ');
- * - against i or n: the last four bytes, 00 on the left, read as a signed
- *   int32 (x'FF' = 255, x'FFFFFFFF' = -1, x'0100000002' = 2, empty = 0).
- * Anything else with a byte operand (p, f, int8, d, t, ...) is refused.
+ * - against i/int8: convert bytes to that integer. ABAPiti 007 measured
+ *   x4 FFFFFFFF = i -1 / int8 4294967295, x4 00000005 = i 5 (NE 6),
+ *   x4 80000000 = INT_MIN, x8 FFFFFFFFFFFFFFFF = int8 -1, and
+ *   xstring FFFFFFFF = i -1. Xstring vs int8, x1 vs int8, x9 and other
+ *   extensions remain documentation, unmeasured. Short inputs zero-extend;
+ *   n retains the measured i rule.
+ * Anything else with a byte operand (p, f, d, t, ...) is refused.
  * null when neither side is byte-like. */
 function compareBytes(op, l, r, node) {
   const isB = (t) => t.k === "x" || t.k === "xstring";
@@ -6710,11 +6714,11 @@ function compareBytes(op, l, r, node) {
     const ch = convert(o, S);
     return {c: "cmp", op, l: side(l) ? ch : hex, r: side(r) ? ch : hex, type: S};
   }
-  if (o.type.k === "i" || o.type.k === "n") {
-    const n = conv(b, "x2i", I);
+  if (["i", "int8", "n"].includes(o.type.k)) {
+    const n = convert(b, o.type.k === "int8" ? INT8 : I);
     // n: its digits as a number, as the c2n of a comparison with i reads them
     const other = o.type.k === "n" ? conv(o, "c2n", I) : o;
-    return {c: "cmp", op, l: side(l) ? other : n, r: side(r) ? other : n, type: I};
+    return {c: "cmp", op, l: side(l) ? other : n, r: side(r) ? other : n, type: n.type};
   }
   throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}: not measured: ${node.concatTokens()}`);
 }
