@@ -6,8 +6,9 @@
 "! until the last group has moved:
 "!   - the first row that matches wins, so order is part of the contract;
 "!   - a pattern segment :name matches one non-empty segment and is handed
-"!     to the route percent-decoded, after the split; a last segment *
-"!     matches whatever follows;
+"!     to the route percent-decoded, after the split and after the match
+"!     (ZCL_OSD_ADT_URI: a segment that does not decode is a 400, as in
+"!     Express); a last segment * matches whatever follows;
 "!   - literal segments compare without case, and one trailing slash on the
 "!     request is ignored (Express routes are case-insensitive, non-strict);
 "!   - HEAD matches a HEAD row or, failing that, a GET row. The GET answer is
@@ -16,7 +17,9 @@
 "!     differently (the graph does);
 "!   - a row served by HOST, or no row at all, is not answered here: the
 "!     handler says so and the Node front hands the request to the Node
-"!     facade (docs/adt-abap-port/abap-skeleton.md).
+"!     facade (docs/adt-abap-port/abap-skeleton.md). The Node front matches
+"!     this table itself, before any ABAP runs (tools/adt-abap-front.mjs,
+"!     matchRoute), and test/adt-abap-diff.mjs holds the two matchers equal.
 "! Slice 1 lists the rows ABAP serves and one catch-all for the host. The
 "! per-type rows are generated from the type table when their group moves.
 CLASS zcl_osd_adt_router DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -49,8 +52,10 @@ CLASS zcl_osd_adt_router DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 es_route  TYPE ty_route
                 et_params TYPE zif_osd_adt_route=>tt_param.
 
+    "! it_routes replaces the table, for a test
     CLASS-METHODS dispatch
       IMPORTING is_request       TYPE zif_osd_adt_route=>ty_request
+                it_routes        TYPE tt_route OPTIONAL
       RETURNING VALUE(rs_result) TYPE ty_result
       RAISING   zcx_osd_adt.
 
@@ -144,7 +149,8 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
           RETURN.
         ENDIF.
         ls_param-name = substring( val = lv_part off = 1 ).
-        ls_param-value = cl_http_utility=>unescape_url( lv_segment ).
+*       raw: decoded by dispatch after the match, where a refusal is a 400
+        ls_param-value = lv_segment.
         APPEND ls_param TO et_params.
       ELSEIF to_lower( lv_part ) <> to_lower( lv_segment ).
         CLEAR et_params.
@@ -164,9 +170,15 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     DATA lv_found TYPE abap_bool.
     DATA ls_request TYPE zif_osd_adt_route=>ty_request.
     DATA li_route TYPE REF TO zif_osd_adt_route.
+    DATA lt_routes TYPE tt_route.
+    FIELD-SYMBOLS <ls_param> LIKE LINE OF ls_request-params.
 
+    lt_routes = it_routes.
+    IF lt_routes IS INITIAL.
+      lt_routes = routes( ).
+    ENDIF.
     ls_request = is_request.
-    match( EXPORTING it_routes = routes( )
+    match( EXPORTING it_routes = lt_routes
                      iv_method = is_request-method
                      iv_path   = is_request-path
            IMPORTING ev_found  = lv_found
@@ -176,6 +188,10 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
       rs_result-served_by = c_host.
       RETURN.
     ENDIF.
+
+    LOOP AT ls_request-params ASSIGNING <ls_param>.
+      <ls_param>-value = zcl_osd_adt_uri=>decode_segment( <ls_param>-value ).
+    ENDLOOP.
 
     CREATE OBJECT li_route TYPE (ls_route-handler).
     rs_result-served_by = c_abap.

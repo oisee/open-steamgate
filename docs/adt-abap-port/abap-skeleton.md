@@ -19,25 +19,35 @@ So in the mixed phase a route served by ABAP still gets the same cookies, token 
 route, and a capture still records both sides. Those three move to ABAP in slice 2, and then the front moves up to the
 top of the router.
 
-`options.abap` is the host's ICF runner: `cl_express_icf_shim.run` under `dialogStep`, the same function
-`mountServices` takes (`tools/osd-icf.mjs`). It is passed in, not imported, because `adt-facade.mjs` is also loaded by
-the child-mode parent, which runs no ABAP. `test/start.mjs` passes it in inline mode. `OSD_ADT=js` turns it off.
+`options.abap` is `{run, routes}`, made by `abapRunner()` from the transpiled shim and router and the host's
+`dialogStep`. `run` is `cl_express_icf_shim.run` under `dialogStep`, the same function `mountServices` takes
+(`tools/osd-icf.mjs`). `routes` reads `ZCL_OSD_ADT_ROUTER=>ROUTES` in a step of its own. Both are passed in, not
+imported, because `adt-facade.mjs` is also loaded by the child-mode parent, which runs no ABAP. `test/start.mjs` passes
+them in inline mode. `OSD_ADT=js` turns the front off.
 
 ## What crosses it
 
-For each request under `/sap/bc/adt` the front:
+**Who serves a request is decided in JavaScript, before any ABAP runs.** The front reads the route table once (the
+`routes` callback) and matches it with `matchRoute`, which follows the ABAP matcher's rules. A test holds the two
+matchers equal over the real table and a synthetic one. So for each request under `/sap/bc/adt` the front:
 
-1. builds the request the shim reads: method, headers, the full undecoded path (`req.originalUrl`, because Express has
-   stripped the router prefix by then), and a body only when the host already buffered one (`express.raw`). The stream
-   is not touched, so a Node route that reads it later still can.
-2. runs `ZCL_OSD_ADT_HANDLER` through the runner, with a recorder in place of the express response;
-3. if the recorded answer carries `X-OSD-Served-By: HOST`, drops it and calls `next()`: the Node façade answers exactly
-   as before;
-4. otherwise replays status, headers and body onto the real response. An empty body is ended, as the Node façade ends
-   one. A body is sent, so on a HEAD Express drops it and keeps the GET's `Content-Length`.
+1. matches the full undecoded path (`req.originalUrl`, because Express has stripped the router prefix by then). A HOST
+   row, or no row, goes to `next()` at once: no step, no work-process lock, no ABAP. Nothing that goes wrong on the
+   ABAP side (a dump, a shim fault, a nested step) can stand between a client and a route Node still serves. If the
+   table cannot be read, every route stays Node's, and the front says so once on the console;
+2. for an ABAP row, reads the body as bytes: a Buffer from `express.raw`, a string from `express.text`, or the unread
+   stream. A body that a parser has already turned into something else (`express.json`) is refused with a 500 exception
+   document that names the cause, rather than reaching ABAP as nothing. A parser that skipped a request without a body
+   leaves `{}`, and that is an empty body;
+3. runs `ZCL_OSD_ADT_HANDLER` through the runner, with a recorder in place of the express response. A throw there is
+   answered through the façade's own `refuse()`: 500, `ExceptionInternalError` in `org.open-steamgate.osd`, the same
+   document and content type the Node façade's `answered()` sends for a failure, never `text/plain`;
+4. replays status, headers and body onto the real response. An empty body is ended, as the Node façade ends one. A body
+   is sent, so on a HEAD Express drops it and keeps the GET's `Content-Length`. If the handler marked the answer
+   `X-OSD-Served-By: HOST`, the two tables disagree; the front believes the handler and calls `next()`.
 
-On a system there is no host behind the handler. There the same request is a 404 with an exception document and the
-marker header, which is the honest answer.
+On a system there is no host behind the handler. There a request no ABAP row serves is a 404 with an exception
+document and the marker header, which is the honest answer.
 
 What the ABAP needs from the host goes through the one host seam that exists, `ZOSD_STORE DESTINATION 'STORE'`
 (`tools/osd-store-destination.mjs`), as port-map section 3 plans. Slice 1 adds the command `SYSTEM` with `IV_TYPE` =
@@ -45,10 +55,12 @@ the kind and the answer in a new exporting parameter `EV_JSON`. The only kind so
 `CAPABILITIES` is unchanged: SYSTEM draws no button on any screen.
 
 The identity belongs to the façade instance, not to the process: a test mounts several `adtRouter`s with different
-options. So the front runs the handler inside an `AsyncLocalStorage` binding that carries that instance's answers. The
-binding follows the call through the work-process queue of `dialogStep` to the destination, which asks it through
-`provideSystem()` and falls back to `osdIdentity().adt` when nothing is bound. The same binding is how slice 2 gives
-each façade instance its own `ObjectStore` (port-map risk 12).
+options. So the front runs each call inside `withSystem(answers, work)` (`tools/osd-store-destination.mjs`). That is an
+`AsyncLocalStorage` binding, made per call, which follows the call through the work-process queue of `dialogStep` to
+the destination. Nothing is set process-wide. A `SYSTEM` call that no façade instance bound is refused with `EV_ERROR`
+instead of answered from the environment, because a plausible identity would be a wrong answer that looks right. A
+host that cannot answer (an exception in the answers) is `EV_ERROR` too, and the route then answers 500. The same
+binding is how slice 2 gives each façade instance its own `ObjectStore` (port-map risk 12).
 
 ## The ABAP
 
@@ -61,6 +73,7 @@ Package `src/adt/` (`ZOSD_ADT`, SICF node `zosd_adt.sicf.xml` on `/sap/bc/adt/`)
 | `ZIF_OSD_ADT_ROUTE` | `handle( request ) RETURNING response`. A route class is created by name. |
 | `ZCX_OSD_ADT` | Status, type id, namespace, message, properties. `document( )` is byte-equal to `exceptionDocument`. Factories `not_found` 404, `read_only` 405, `not_supported` 501, `conflict` 409, `internal` 500: the Node façade's `answered()` mapping. |
 | `ZCL_OSD_ADT_XML` | `esc( )`: `& < > "`, as the Node façade escapes. |
+| `ZCL_OSD_ADT_URI` | `decode_segment( )`: a `:param` decoded as Express decodes one. |
 | `ZCL_OSD_ADT_HOST` | `SYSTEM` through the STORE destination; `identity( )`. |
 | `ZCL_OSD_ADT_SYSINFO` | `GET core/http/systeminformation`. |
 | `ZCL_OSD_ADT_GRAPH` | `GET` and `HEAD compatibility/graph`. |
@@ -68,7 +81,11 @@ Package `src/adt/` (`ZOSD_ADT`, SICF node `zosd_adt.sicf.xml` on `/sap/bc/adt/`)
 The router's rules are Express's, because the Node façade is the reference:
 
 - the first row that matches wins;
-- `:name` matches one non-empty segment and is percent-decoded after the split;
+- `:name` matches one non-empty segment and is percent-decoded after the split and after the match, by
+  `ZCL_OSD_ADT_URI`. Every `%XX` is a byte, the bytes must be UTF-8, and `+` stays `+`. A segment that does not decode
+  (`%zz`, a lone `%FF`) is a 400 `ExceptionInvalidRequest`, "Failed to decode param '<segment>'": Express's status and
+  message. `cl_http_utility=>unescape_url` is not used, because in open-abap it is `decodeURIComponent` in a kernel
+  line, and its `URIError` is a JavaScript error that no `CATCH` reaches;
 - a last segment `*` matches the rest;
 - literal segments compare without case, and one trailing slash is ignored;
 - HEAD matches a HEAD row, else a GET row. A HEAD row of its own is how a HEAD answers differently: the graph has one,
@@ -100,26 +117,39 @@ any.
 status, content type, content length, entity tag and body:
 
 - for every ported row, including HEAD, a trailing slash and an upper-case path. It also asserts that ABAP answered;
-- for routes ABAP does not serve. It asserts that they reached the Node façade. A POST is refused by the Node CSRF gate
-  before the front is asked;
-- for two façade instances with different identities, with requests interleaved;
+- for routes ABAP does not serve. It asserts that they reached the Node façade and that no ABAP step ran for them. A
+  POST is refused by the Node CSRF gate before the front is reached;
+- with the ABAP side broken (a runner that throws): the ABAP row answers what the Node façade's `answered()` answers for
+  the same failure, and every HOST row answers as before;
+- for a ported row that raises (the host refuses `SYSTEM IDENTITY`, `ZCX_OSD_ADT=>INTERNAL`), over HTTP for GET and HEAD,
+  against `answered()` for the same message;
+- for two façade instances with different identities, with requests interleaved, and for a `SYSTEM` call nobody bound;
+- for the two matchers, JS and ABAP, over the real table and a synthetic one, four methods and 17 paths;
+- for the body: streamed, `express.raw` and `express.text` reach ABAP as the same bytes; `express.json` with a body is
+  refused;
 - for the exception document, for four cases (no properties, our namespace, five escaped properties, non-ASCII), against
   `exceptionDocument`.
 
-A mutated graph node fails it. The existing `test/adt-*.mjs` suites stay green. `test/adt-facade.mjs` starts the inline
+Each of these fails when its fix is taken out (a mutated graph node, HOST rows entering the step, a text/plain refusal,
+a different refusal content type, an unbound fallback, a Buffer-only body, a case-sensitive or slash-strict JS
+matcher). ABAP Unit in `zcl_osd_adt_router.clas.testclasses.abap` covers the decoding; with `unescape_url` back in
+place, three of its cases die with `URI malformed`. The existing `test/adt-*.mjs` suites stay green. `test/adt-facade.mjs` starts the inline
 server, so its systeminformation and graph cases now run through the ABAP front.
 
 Measured on one inline server, 20 requests each, medians, same script both ways:
 
 | request | Node only | with the ABAP front |
 |---|---|---|
-| systeminformation (ABAP) | 0.90 ms | 3.27 ms |
-| compatibility/graph (ABAP) | 0.64 ms | 1.75 ms |
-| discovery (delegated) | 0.55 ms | 1.09 ms |
+| systeminformation (ABAP) | 0.94 ms | 2.92 ms |
+| compatibility/graph (ABAP) | 0.69 ms | 1.19 ms |
+| discovery (delegated) | 0.59 ms | 0.67 ms |
 
-A delegated request pays about half a millisecond for asking ABAP first. It also waits for the work process when an
-OData step holds it, which a Node-only route did not. That is the end state anyway: every ADT request runs ABAP once
-the session moves.
+A delegated request pays only the JS match: it takes no work-process lock, so it never waits for an OData step. Once the
+session moves (slice 2) every ADT request runs ABAP, and the question comes back then.
+
+The route table is read once per front. A warm swap that changes `ZCL_OSD_ADT_ROUTER` (`OSD_WARM=1`) is not seen
+until the process is recycled. The table is not something a person edits while working, so this is noted and not
+built.
 
 ## Not in slice 1
 

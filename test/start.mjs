@@ -11,6 +11,7 @@ import {createServer as createHttpsServer} from "node:https";
 import {join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {adtRouter} from "../tools/adt-facade.mjs";
+import {abapRunner} from "../tools/adt-abap-front.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
@@ -54,6 +55,7 @@ async function loadInline() {
   const from = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
   const {initializeABAP} = await from("init.mjs");
   const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
+  const {zcl_osd_adt_router} = await from("zcl_osd_adt_router.clas.mjs");
   const {zcl_stg_segw_registry} = await from("zcl_stg_segw_registry.clas.mjs");
   const {zcl_stg_shlp_registry} = await from("zcl_stg_shlp_registry.clas.mjs");
   const {zcl_apc_host} = await from("zcl_apc_host.clas.mjs");
@@ -81,7 +83,7 @@ async function loadInline() {
   // the synthetic taxi facts, made by ZCL_OSD_DEMO_DATA (tools/osd-demo-data.mjs)
   const {zcl_osd_demo_data} = await from("zcl_osd_demo_data.clas.mjs");
   await ensureDemoData(zcl_osd_demo_data);
-  return {cl_express_icf_shim, zcl_apc_host, zcl_osd_status, icf};
+  return {cl_express_icf_shim, zcl_osd_adt_router, zcl_apc_host, zcl_osd_status, icf};
 }
 const inline = MODE === "inline" ? await loadInline() : undefined;
 
@@ -194,10 +196,7 @@ export function startServer(quiet) {
   // it did before (docs/adt-abap-port/abap-skeleton.md). OSD_ADT=js turns
   // the front off here too.
   const adtAbap = MODE === "inline" && process.env.OSD_ADT !== "js"
-    ? (args) => dialogStep(() => inline.cl_express_icf_shim.run({
-      ...args,
-      base: new abap.types.String().set(args.base),
-    }), `ADT ${args.req.method} ${args.req.path}`)
+    ? abapRunner({shim: inline.cl_express_icf_shim, router: inline.zcl_osd_adt_router, step: dialogStep})
     : undefined;
   const facade = adtRouter({
     store,

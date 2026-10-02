@@ -9,7 +9,7 @@ CLASS ltcl_match DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL
       IMPORTING iv_method       TYPE string
                 iv_path         TYPE string
       RETURNING VALUE(rs_route) TYPE zcl_osd_adt_router=>ty_route.
-    METHODS a_param_is_decoded FOR TESTING RAISING cx_static_check.
+    METHODS a_param_is_captured FOR TESTING RAISING cx_static_check.
     METHODS the_first_row_wins FOR TESTING RAISING cx_static_check.
     METHODS head_falls_back_to_get FOR TESTING RAISING cx_static_check.
     METHODS head_row_wins_over_get FOR TESTING RAISING cx_static_check.
@@ -52,7 +52,7 @@ CLASS ltcl_match IMPLEMENTATION.
                                          es_route  = rs_route ).
   ENDMETHOD.
 
-  METHOD a_param_is_decoded.
+  METHOD a_param_is_captured.
     DATA lv_found TYPE abap_bool.
     DATA ls_route TYPE zcl_osd_adt_router=>ty_route.
     DATA lt_params TYPE zif_osd_adt_route=>tt_param.
@@ -66,7 +66,8 @@ CLASS ltcl_match IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_route-handler exp = `PACKAGE` ).
     READ TABLE lt_params INDEX 1 INTO ls_param.
     cl_abap_unit_assert=>assert_equals( act = ls_param-name exp = `name` ).
-    cl_abap_unit_assert=>assert_equals( act = ls_param-value exp = `/demo/zpkg` ).
+*   raw from the match; dispatch decodes it (ltcl_decode)
+    cl_abap_unit_assert=>assert_equals( act = ls_param-value exp = `%2Fdemo%2Fzpkg` ).
   ENDMETHOD.
 
   METHOD the_first_row_wins.
@@ -197,6 +198,80 @@ CLASS ltcl_document IMPLEMENTATION.
     ls_response = lo_graph->handle( ls_request ).
     cl_abap_unit_assert=>assert_equals( act = ls_response-content_type exp = `application/xml` ).
     cl_abap_unit_assert=>assert_initial( ls_response-body ).
+  ENDMETHOD.
+
+ENDCLASS.
+
+CLASS ltcl_decode DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
+* A :param is decoded as Express decodes it: %XX bytes as UTF-8, a plus
+* sign kept, and anything else a 400 "Failed to decode param" rather than
+* a JavaScript URIError no CATCH reaches.
+  PRIVATE SECTION.
+    METHODS refused
+      IMPORTING iv_segment TYPE string.
+    METHODS a_plus_stays_a_plus FOR TESTING RAISING cx_static_check.
+    METHODS bytes_are_decoded FOR TESTING RAISING cx_static_check.
+    METHODS malformed_is_400 FOR TESTING RAISING cx_static_check.
+    METHODS not_utf8_is_400 FOR TESTING RAISING cx_static_check.
+    METHODS dispatch_answers_400 FOR TESTING RAISING cx_static_check.
+ENDCLASS.
+
+CLASS ltcl_decode IMPLEMENTATION.
+
+  METHOD refused.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+    TRY.
+        zcl_osd_adt_uri=>decode_segment( iv_segment ).
+        cl_abap_unit_assert=>fail( |{ iv_segment } decoded| ).
+      CATCH zcx_osd_adt INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 400 ).
+        cl_abap_unit_assert=>assert_equals( act = lx_error->message_text
+                                            exp = |Failed to decode param '{ iv_segment }'| ).
+    ENDTRY.
+  ENDMETHOD.
+
+  METHOD a_plus_stays_a_plus.
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_adt_uri=>decode_segment( `a+b` ) exp = `a+b` ).
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_adt_uri=>decode_segment( `a%2Bb+c` ) exp = `a+b+c` ).
+  ENDMETHOD.
+
+  METHOD bytes_are_decoded.
+    DATA lv_text TYPE string.
+    cl_abap_unit_assert=>assert_equals( act = zcl_osd_adt_uri=>decode_segment( `%2Fdemo%2fzpkg` ) exp = `/demo/zpkg` ).
+*   two bytes, one character (a-umlaut)
+    lv_text = zcl_osd_adt_uri=>decode_segment( `%C3%A4x` ).
+    cl_abap_unit_assert=>assert_equals( act = strlen( lv_text ) exp = 2 ).
+  ENDMETHOD.
+
+  METHOD malformed_is_400.
+    refused( `%zz` ).
+    refused( `abc%4` ).
+    refused( `%` ).
+  ENDMETHOD.
+
+  METHOD not_utf8_is_400.
+    refused( `%FF` ).
+    refused( `%C3` ).
+  ENDMETHOD.
+
+  METHOD dispatch_answers_400.
+    DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
+    DATA ls_route TYPE zcl_osd_adt_router=>ty_route.
+    DATA ls_request TYPE zif_osd_adt_route=>ty_request.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+    ls_route-method = `GET`.
+    ls_route-pattern = `/sap/bc/adt/probe/:name`.
+    ls_route-handler = `ZCL_OSD_ADT_GRAPH`.
+    ls_route-served_by = zcl_osd_adt_router=>c_abap.
+    APPEND ls_route TO lt_routes.
+    ls_request-method = `GET`.
+    ls_request-path = `/sap/bc/adt/probe/%zz`.
+    TRY.
+        zcl_osd_adt_router=>dispatch( is_request = ls_request it_routes = lt_routes ).
+        cl_abap_unit_assert=>fail( `dispatched` ).
+      CATCH zcx_osd_adt INTO lx_error.
+        cl_abap_unit_assert=>assert_equals( act = lx_error->status exp = 400 ).
+    ENDTRY.
   ENDMETHOD.
 
 ENDCLASS.

@@ -28,7 +28,6 @@ import {given, givenText, fill} from "./osd-destination.mjs";
 import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
 import {objectOf} from "./osd-inputs.mjs";
 import {basename, join} from "node:path";
-import {identity as osdIdentity} from "./osd-identity.mjs";
 
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
@@ -45,22 +44,32 @@ export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HIST
 // SYSTEM answers facts about this system rather than about the tree, one
 // kind per call, as JSON in EV_JSON (docs/adt-abap-port/port-map.md,
 // section 3). Slice 1 of the ADT facade in ABAP asks IDENTITY: who this
-// system says it is to an ADT client. The answer belongs to the facade
-// instance that is running the ABAP, not to the process -- a test mounts
-// several -- so the ADT front binds a provider for the length of its call
-// (tools/adt-abap-front.mjs) and this default answers when none is bound.
+// system says it is to an ADT client.
+//
+// The answer belongs to the facade instance whose request is running the
+// ABAP, not to the process -- a test mounts several -- so the caller binds
+// its answers for the length of one call (withSystem, used by
+// tools/adt-abap-front.mjs) and the binding rides the call's async context
+// through the work-process queue to here. Nothing is set process-wide, and
+// a call nobody bound is refused: a plausible identity from the
+// environment would be a wrong answer that looks right.
 // SYSTEM needs no store and does not open one: opening it parses the tree.
-const SYSTEM_KINDS = {
-  IDENTITY: () => osdIdentity().adt,
-};
-let systemProvider;
+const SYSTEM_KINDS = ["IDENTITY"];
+let systemCalls;
+try {
+  if (typeof process !== "undefined" && process.versions?.node !== undefined) {
+    const {AsyncLocalStorage} = await import(/* webpackIgnore: true */ "node:async_hooks");
+    systemCalls = new AsyncLocalStorage();
+  }
+} catch {
+  systemCalls = undefined;
+}
 
-/** Bind who answers SYSTEM; returns the previous provider. The provider
- *  gets the kind and returns a value, or undefined to fall back. */
-export function provideSystem(provider) {
-  const before = systemProvider;
-  systemProvider = provider;
-  return before;
+/** Run work with `answers` ((kind) => value; throw to refuse) bound as the
+ *  SYSTEM answers of every STORE call it makes. */
+export function withSystem(answers, work) {
+  if (systemCalls === undefined) throw new Error("SYSTEM needs an async context (Node or Bun)");
+  return systemCalls.run({answers}, work);
 }
 
 export class StoreDestination {
@@ -147,11 +156,20 @@ export class StoreDestination {
   }
 
   #system(kind) {
-    if (SYSTEM_KINDS[kind] === undefined) {
+    if (SYSTEM_KINDS.includes(kind) === false) {
       return {EV_ERROR: `unknown SYSTEM kind ${kind || "(none)"}`};
     }
-    const value = systemProvider?.(kind) ?? SYSTEM_KINDS[kind]();
-    return {EV_JSON: JSON.stringify(value)};
+    const bound = systemCalls?.getStore();
+    if (bound?.answers === undefined) {
+      return {EV_ERROR: `nothing answers SYSTEM ${kind} for this call: it is bound per ADT facade instance (withSystem)`};
+    }
+    try {
+      const value = bound.answers(kind);
+      if (value === undefined) return {EV_ERROR: `SYSTEM ${kind} has no answer here`};
+      return {EV_JSON: JSON.stringify(value)};
+    } catch (error) {
+      return {EV_ERROR: String(error?.message ?? error)};
+    }
   }
 
   #list(signature) {

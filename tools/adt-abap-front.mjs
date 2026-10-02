@@ -1,44 +1,107 @@
 // The ABAP front of the ADT façade (ADR 0007, slice 1): where the Node host
-// hands a request under /sap/bc/adt to ZCL_OSD_ADT_HANDLER first, and gives
-// it to the Node façade when ABAP says the route is not its own.
+// hands a request under /sap/bc/adt to ZCL_OSD_ADT_HANDLER, if ABAP serves
+// its route, and leaves it to the Node façade otherwise.
 //
 // The seam is one middleware inside adtRouter (tools/adt-facade.mjs), after
 // the session middleware, the X-OSD-Generation stamp and the STG_ADT_DUMP
-// capture, before the first route. So in the mixed phase a ported route gets
-// the same session cookies, CSRF token and generation header as every other
-// route -- those move to ABAP in slice 2 -- and a capture still sees both
-// sides. docs/adt-abap-port/abap-skeleton.md is the design note.
+// capture, before the first route. docs/adt-abap-port/abap-skeleton.md is
+// the design note.
 //
-// `run` is the host's ICF runner -- cl_express_icf_shim.run under
-// dialogStep, the same function mountServices takes -- passed in rather than
-// imported, because adt-facade.mjs is loaded by processes with no ABAP in
-// them (the child-mode parent) and the transpiled runtime belongs to whoever
-// serves it.
+// **Who serves a request is decided here, in JavaScript, before any ABAP
+// runs.** The route table is ZCL_OSD_ADT_ROUTER=>ROUTES, read once through
+// the host and matched by matchRoute below, which follows the same rules as
+// the ABAP matcher (test/adt-abap-diff.mjs holds the two equal). A HOST row
+// goes to next() at once: no work-process lock, no ABAP, so nothing that
+// goes wrong in the ABAP -- a dump, a shim fault, a nested step -- can stand
+// between a client and a route Node still serves. Only an ABAP row enters
+// the step, and a failure there is answered as the Node façade answers one:
+// the ADT exception document, 500, ExceptionInternalError in our namespace.
 //
-// The shim writes its answer straight onto an express response. Here it
-// writes onto a recorder instead, and the recorder is replayed onto the real
-// response only when ABAP served the route. The handler marks a request it
-// does not serve with `X-OSD-Served-By: HOST` (a 404 on a system, where no
-// host stands behind it); that answer is dropped and `next()` runs the Node
-// façade exactly as it ran before the front existed.
-import {AsyncLocalStorage} from "node:async_hooks";
-import {provideSystem} from "./osd-store-destination.mjs";
+// The shim writes its answer straight onto an express response; here it
+// writes onto a recorder, which is replayed onto the real response. The
+// handler still marks what it does not serve with `X-OSD-Served-By: HOST`
+// (on a system that is a 404); if the two tables ever disagree the front
+// believes the handler and calls next().
+import {withSystem} from "./osd-store-destination.mjs";
 
 export const HANDLER = "ZCL_OSD_ADT_HANDLER";
 export const SERVED_BY = "x-osd-served-by";
 const BASE = "/sap/bc/adt";
+const NAMESPACE = "org.open-steamgate.osd";
 
-// What the ABAP asks the host (ZOSD_STORE DESTINATION 'STORE', SYSTEM) is
-// the answer of the façade instance whose request is running, not of the
-// process: a test mounts several adtRouters with different options. The
-// binding rides the async context of the call, through the work-process
-// queue of dialogStep, to the destination.
-const bound = new AsyncLocalStorage();
-provideSystem((kind) => bound.getStore()?.system?.(kind));
+/** ZCL_OSD_ADT_ROUTER=>TT_ROUTE (or rows already in JS) as plain rows */
+export function routeRows(table) {
+  const rows = Array.isArray(table) ? table : table.array().map((row) => row.get());
+  return rows.map((r) => Object.fromEntries(["method", "pattern", "handler", "served_by"]
+    .map((k) => [k, typeof r[k]?.get === "function" ? String(r[k].get()) : String(r[k] ?? "")])));
+}
+
+const split = (path) => {
+  // ABAP's SPLIT drops trailing empty fields, which is what makes one
+  // trailing slash not matter; the same here
+  const parts = String(path).split("/");
+  while (parts.length > 0 && parts[parts.length - 1] === "") parts.pop();
+  return parts;
+};
+
+/** The first row that matches, or undefined: ZCL_OSD_ADT_ROUTER=>MATCH in
+ *  JavaScript. Literal segments without case, `:name` one non-empty
+ *  segment, a last `*` the rest, HEAD falls back to a GET row. */
+export function matchRoute(rows, method, path) {
+  const segments = split(path);
+  for (const row of rows) {
+    if (row.method !== "*" && row.method !== method && !(method === "HEAD" && row.method === "GET")) continue;
+    const pattern = split(row.pattern);
+    let match = true;
+    for (let i = 0; i < pattern.length; i++) {
+      if (i === pattern.length - 1 && pattern[i] === "*") break;
+      const segment = segments[i];
+      if (segment === undefined) { match = false; break; }
+      if (pattern[i].length > 1 && pattern[i].startsWith(":")) {
+        if (segment === "") { match = false; break; }
+      } else if (pattern[i].toLowerCase() !== segment.toLowerCase()) {
+        match = false;
+        break;
+      }
+    }
+    const rest = pattern[pattern.length - 1] === "*";
+    if (match && (rest || segments.length === pattern.length)) return row;
+  }
+  return undefined;
+}
+
+/** The request body as bytes, or undefined when a parser has already turned
+ *  it into something else: an ABAP route reads bytes, and a body that was
+ *  parsed and thrown away would reach it as nothing. */
+export async function bodyOf(req) {
+  if (Buffer.isBuffer(req.body)) return req.body;
+  if (typeof req.body === "string") return Buffer.from(req.body, "utf8");
+  const length = req.headers["content-length"];
+  const has = req.headers["transfer-encoding"] !== undefined || (length !== undefined && Number(length) > 0);
+  // a body-parser that skipped leaves {} behind, with no body to lose
+  if (has === false) return Buffer.alloc(0);
+  if (req.readableEnded !== true && req.complete !== true) {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    return Buffer.concat(chunks);
+  }
+  return undefined;
+}
+
+/** {run, routes} for adtRouter's `abap` option, from the transpiled shim and
+ *  router and the host's dialogStep: what test/start.mjs and the gate test
+ *  both mount, said once. */
+export function abapRunner({shim, router, step}) {
+  return {
+    run: (args) => step(() => shim.run({...args, base: new globalThis.abap.types.String().set(args.base)}),
+      `ADT ${args.req.method} ${args.req.path}`),
+    routes: () => step(async () => routeRows(await router.routes()), "ADT route table"),
+  };
+}
 
 /** an express response as far as cl_express_icf_shim uses one */
 function recorder() {
-  const answer = {status: 200, headers: [], body: Buffer.alloc(0)};
+  const answer = {headers: [], body: Buffer.alloc(0)};
   answer.append = (name, value) => { answer.headers.push([String(name), String(value)]); return answer; };
   answer.status = (code) => { answer.code = code; return answer; };
   answer.send = (body) => { answer.body = Buffer.isBuffer(body) ? body : Buffer.from(String(body ?? "")); return answer; };
@@ -48,36 +111,45 @@ function recorder() {
 /**
  * @param {object} options
  * @param {Function} options.run the ICF runner: ({req, res, class, base}) => Promise
- * @param {Function} [options.system] (kind) => value: the SYSTEM answers of this façade
+ * @param {Function} options.routes () => Promise of the route rows (routeRows)
+ * @param {Function} options.refuse the façade's refusal: (res, status, type, message, options)
+ * @param {Function} [options.system] (kind) => value: this façade's SYSTEM answers
  * @param {Function} [options.served] (servedBy, req) => void, for a test or a log
  */
 export function abapFront(options) {
+  let table;
+  const rows = () => (table ??= Promise.resolve().then(options.routes).catch((e) => {
+    // no table, no ABAP rows: everything stays the Node façade's, said once
+    console.error(`ADT front: the ABAP route table could not be read, Node serves every route: ${String(e?.message?.get?.() ?? e?.message ?? e)}`);
+    return [];
+  }));
   return async (req, res, next) => {
-    // the request as the shim reads it: the full path, undecoded, whatever
-    // router prefix express has stripped by now
+    // the full path, undecoded, whatever router prefix express has stripped
     const url = req.originalUrl ?? req.url;
-    const view = {
-      method: req.method,
-      headers: req.headers,
-      url,
-      path: url.split("?")[0],
-      // a body only when the host already buffered one (express.raw); the
-      // stream is left alone, so a route that reads it still can
-      body: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0),
-    };
-    const answer = recorder();
-    try {
-      await bound.run({system: options.system},
-        () => options.run({req: view, res: answer, class: HANDLER, base: BASE}));
-    } catch (e) {
-      if (res.headersSent === false) {
-        res.status(500).type("text/plain").send(`${HANDLER}: ${String(e?.message?.get?.() ?? e?.message ?? e)}`);
-      }
+    const path = url.split("?")[0];
+    const row = matchRoute(await rows(), req.method, path);
+    if (row?.served_by !== "ABAP") {
+      options.served?.("HOST", req);
+      next();
       return;
     }
-    const host = answer.headers.some(([name, value]) => name.toLowerCase() === SERVED_BY && value === "HOST");
-    options.served?.(host ? "HOST" : "ABAP", req);
-    if (host) {
+    options.served?.("ABAP", req);
+    const refuse = (message) => options.refuse(res, 500, "ExceptionInternalError", message, {namespace: NAMESPACE});
+    const body = await bodyOf(req);
+    if (body === undefined) {
+      refuse(`${req.method} ${path}: the request body was parsed before the ADT facade; mount it behind express.raw`);
+      return;
+    }
+    const view = {method: req.method, headers: req.headers, url, path, body};
+    const answer = recorder();
+    try {
+      await withSystem(options.system ?? (() => undefined),
+        () => options.run({req: view, res: answer, class: HANDLER, base: BASE}));
+    } catch (e) {
+      if (res.headersSent === false) refuse(`${HANDLER}: ${String(e?.message?.get?.() ?? e?.message ?? e)}`);
+      return;
+    }
+    if (answer.headers.some(([name, value]) => name.toLowerCase() === SERVED_BY && value === "HOST")) {
       next();
       return;
     }
