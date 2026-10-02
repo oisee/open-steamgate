@@ -522,7 +522,7 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
           await w.scheduler.tick();
           if (drivers().filter((d) => d.started).length !== 1) problems.push("a second tick ran the driver again");
           // unschedule: the waiting instance goes, and the next day nothing runs
-          const deleted = await call("unschedule", unscheduler);
+          const deleted = (await call("unschedule", unscheduler)).deleted.get();
           // the driver's waiting instance, and with resilience: (slice 5a) the doctor's
           const scheduled = model.resilience ? 2 : 1;
           if (deleted !== scheduled) problems.push(`unschedule( ) deleted ${deleted}`);
@@ -710,8 +710,8 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
 
     describe("mutants of slice 3b", () => {
       it("the gate without status = 'WAITING' (a double submit): the second gate call opens stage 2 again", async () => {
-        await loadClass(RUNNER, "zcl_l3_fleet2_m_gate", mutate("        WHERE run_id = iv_run\n          AND stage_no = lv_stage\n          AND status = 'WAITING'.\n",
-          "        WHERE run_id = iv_run\n          AND stage_no = lv_stage.\n"));
+        await loadClass(RUNNER, "zcl_l3_fleet2_m_gate", mutate("        WHERE set_name = c_set AND run_id = iv_run\n          AND stage_no = lv_stage\n          AND status = 'WAITING'.\n",
+          "        WHERE set_name = c_set AND run_id = iv_run\n          AND stage_no = lv_stage.\n"));
         const {problems} = await gateProblems({second: "zcl_l3_fleet2_m_gate"});
         expect(problems.join("\n")).to.match(/the second call answered (X|raised)/);
       });

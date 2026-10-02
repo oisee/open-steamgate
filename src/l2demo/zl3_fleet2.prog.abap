@@ -50,6 +50,12 @@ START-OF-SELECTION.
   ls_settings-piles_checks_size = s_12.
   DATA ls_params TYPE zcl_l3_fleet2=>ty_params.
   DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
+  DATA ls_deleted TYPE zcl_l3_fleet2=>ty_unschedule.
+  IF p_mode = 'U'.
+    ls_deleted = zcl_l3_fleet2=>unschedule( ).
+    WRITE: / 'deleted', ls_deleted-deleted, 'refused', ls_deleted-refused.
+    RETURN.
+  ENDIF.
   IF p_mode = 'D'.
     " the date of the moment the instance starts, not of when it was planned
     GET TIME.

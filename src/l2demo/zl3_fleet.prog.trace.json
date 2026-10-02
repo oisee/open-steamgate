@@ -164,91 +164,91 @@
   },
   {
    "line": 19,
-   "template_line": 76,
+   "template_line": 82,
    "path": "/params/1/name",
    "node": "set/fleet/param/active_status",
    "set_line": 10
   },
   {
    "line": 20,
-   "template_line": 78,
+   "template_line": 84,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 21,
-   "template_line": 79,
+   "template_line": 85,
    "path": "/class",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 22,
-   "template_line": 80,
+   "template_line": 86,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 23,
-   "template_line": 81,
+   "template_line": 87,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 24,
-   "template_line": 82,
+   "template_line": 88,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 25,
-   "template_line": 87,
+   "template_line": 93,
    "path": "/planned",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
    "line": 26,
-   "template_line": 90,
+   "template_line": 96,
    "path": "/with_params",
    "node": "set/fleet/params",
    "set_line": 9
   },
   {
    "line": 27,
-   "template_line": 92,
+   "template_line": 98,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 28,
-   "template_line": 93,
+   "template_line": 99,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 29,
-   "template_line": 114,
+   "template_line": 120,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 30,
-   "template_line": 115,
+   "template_line": 121,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 31,
-   "template_line": 116,
+   "template_line": 122,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6

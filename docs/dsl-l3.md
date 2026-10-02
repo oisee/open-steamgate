@@ -1898,3 +1898,42 @@ that its dumps aborted their jobs and the rest completed.
   one key reserve once" is not exercised by the twin;
 - `time_scale` rounds each wait to whole seconds: at 0.01 on a system most simulated piles wait 0 s;
 - outcome draws do not depend on the keys, so a pile's outcome is the same whatever data it covers.
+
+### Generator hardening: pile claims, write scope and unschedule refusals
+
+Every runner with a pile plan, including a set without `resilience:`, reads the
+pile `FOR UPDATE` and works only `PLANNED` piles. A duplicate job of a `DONE`
+pile answers `NOT-PLANNED` without calling a rule or changing any L3 row. Before
+working a planned pile it also reads the set/date lock: the lock
+must still name this run and be `HELD`. A released or superseded run answers
+`STALE-RUN` and writes nothing. These claims stay in the caller's LUW.
+
+Every generated runner `UPDATE` and `DELETE` of an L3 table that has `SET_NAME`
+now has `set_name = c_set` in its condition, including stage gates, collect's
+conditional failure update, doctor cleanup and purge. Whole-row pile updates
+are replaced by `save_pile( )`, one scoped update of the mutable execution
+fields under the pile key; the plan's identity and bounds stay in its plan row.
+
+`unschedule( )` returns `ty_unschedule` with `deleted` and `refused` counts.
+The doctor's waiting instance contributes to both counts. A selection error
+also counts as a refusal, so failure to inspect jobs cannot look like an empty
+schedule. The generated job report accepts `p_mode = 'U'` and prints both
+counts. Callers that previously read the integer result now read `deleted`.
+
+`test/dsl-l3-harden.mjs`, registered in `test/suites.d/infra-misc.json`, parses
+both committed runners' ABAP statements against the tables' DDIC fields and
+checks every relevant SQL write. On a file database it calls the job's
+`run_rule( )` entry point for completed, released and superseded piles of both
+sets, counts rule calls and compares all L3 rows before and after. It also
+checks a staged model without resilience, and injects the jobs facade's
+`FORBIDDEN` delete response (the selected job can start before deletion),
+checking that both the driver's and doctor's refusals reach the result.
+Mutants are compiled as renamed copies in scratch; committed generated files
+are never changed by a mutant.
+
+| mutant | oracle that turns red |
+|---|---|
+| accept a DONE pile (fleet and fleet2) | duplicate job calls a rule instead of doing nothing |
+| omit the run refusal (fleet and fleet2) | superseded job calls a rule instead of doing nothing |
+| drop collect's set condition | parsed UPDATE has no set condition |
+| swallow delete refusals | unschedule reports zero refusals after two FORBIDDEN responses |

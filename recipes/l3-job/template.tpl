@@ -53,6 +53,12 @@ START-OF-SELECTION.
 {{/with_params}}
 {{#schedule}}
   DATA ls_result TYPE {{class}}=>ty_result.
+  DATA ls_deleted TYPE {{class}}=>ty_unschedule.
+  IF p_mode = 'U'.
+    ls_deleted = {{class}}=>unschedule( ).
+    WRITE: / 'deleted', ls_deleted-deleted, 'refused', ls_deleted-refused.
+    RETURN.
+  ENDIF.
   IF p_mode = 'D'.
     " the date of the moment the instance starts, not of when it was planned
     GET TIME.

@@ -836,8 +836,8 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
     });
 
     it("mutant: purge( ) deleting alerts", async () => {
-      await loadClass(RUNNER, "zcl_l3_fleet2_m_purge_log", mutate("      DELETE FROM zosd_l3_work WHERE run_id = ls_run-run_id.\n",
-        "      DELETE FROM zosd_l3_work WHERE run_id = ls_run-run_id.\n      DELETE FROM zosd_l3_alert WHERE run_id = ls_run-run_id.\n"));
+      await loadClass(RUNNER, "zcl_l3_fleet2_m_purge_log", mutate("      DELETE FROM zosd_l3_work WHERE set_name = c_set AND run_id = ls_run-run_id.\n",
+        "      DELETE FROM zosd_l3_work WHERE set_name = c_set AND run_id = ls_run-run_id.\n      DELETE FROM zosd_l3_alert WHERE run_id = ls_run-run_id.\n"));
       const {problems} = await purgeProblems("zcl_l3_fleet2_m_purge_log");
       expect(problems.join("\n")).to.match(/the log has \d+ rows, had \d+/);
     });
@@ -858,7 +858,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
         await clock.advance(15 * 60 * 1000 + 1000);
         for (let i = 0; i < 4; i++) await scheduler.tick();
         expect(jobs("L3_FLEET2_DOC").filter((j) => j.started).length, "the doctor ran as its job").to.be.greaterThan(0);
-        expect(await call("unschedule")).to.equal(2);
+        expect((await call("unschedule")).deleted.get()).to.equal(2);
         const started = jobs("L3_FLEET2_DOC").filter((j) => j.started).length;
         await clock.advance(86400 * 1000);
         for (let i = 0; i < 4; i++) await scheduler.tick();

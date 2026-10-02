@@ -393,6 +393,9 @@ describe("DSL L3 slice 5b: settings", function () {
       expect(await reset("fuses.max_alerts")).to.equal(true);
       // the doctor loads the live values (500); heal( ) is not called for R, its lock is released
       await dialogStep(() => cls().doctor({}));
+      // Reopen R's latest lock with the extra pile: a released run now refuses
+      // all work. The scope oracle still runs after the doctor's live load.
+      await exec([`UPDATE zosd_l3_run SET status = 'HELD' WHERE set_name = 'fleet2' AND run_id = '${r.run}'`]);
       // one more pile of the minimum-crew rule for R, over every ship: two alerts, past R's fuse
       await exec([`INSERT INTO zosd_l3_pile (mandt, run_id, rule_name, pile_no, set_name, stage_no, model_hash, check_date, range_low, range_high, status, job_name, job_count, alerts, started, ended, attempt, reason)
         VALUES ('', '${r.run}', 'ship-min-crew', 99, 'fleet2', 2, '', '${DATE}', 'S000', 'S999', 'PLANNED', '', '', 0, 0, 0, 1, '')`]);

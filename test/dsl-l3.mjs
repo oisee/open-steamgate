@@ -1072,7 +1072,11 @@ ENDCLASS.
       it("a lock that is always taken: the run while another holds it is not BUSY", async () => {
         await runnerMutant("zcl_l3_fleet_lock_always", "    IF sy-dbcnt = 1.\n      rv_locked = abap_true.\n    ENDIF.\n", "    rv_locked = abap_true.\n");
         const {problems} = await lockProblems("zcl_l3_fleet_lock_always");
-        expect(problems).to.include("a run while another holds the lock is DONE");
+        // The corrupted lock still plans a run instead of answering BUSY;
+        // the pile's own run guard now prevents that run from doing work.
+        expect(problems).to.include("a run while another holds the lock is PARTIAL");
+        expect(problems).to.include("a BUSY run planned");
+        expect(problems).to.not.include("a BUSY run wrote alerts");
       });
 
       it("mode S that never releases: the lock stays HELD after the run", async () => {
