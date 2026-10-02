@@ -25,6 +25,7 @@
 // generation is 44 MB; keeping the last few is cheap. docs/generations.md
 // is the design this implements.
 import {createHash} from "node:crypto";
+import {libraryPath} from "./osd-lib-path.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
@@ -148,7 +149,8 @@ function walk(dir, out = [], seen = new Set()) {
 // what a generation is made of, and the hash that names it
 export function inputsOf(root, config = loadConfig(root)) {
   const folders = inputFoldersOf(root, config).map((f) => join(root, f)).filter(existsSync);
-  const libs = (config.libs ?? []).map((l) => l.folder).filter((f) => f !== undefined && f !== "").map((f) => join(root, f));
+  const libs = (config.libs ?? []).map((l) => l.folder).filter((f) => f !== undefined && f !== "")
+    .map((f) => existsSync(join(root, "libs.lock.json")) ? libraryPath(root, basename(f)) : join(root, f));
   // BSP pages are generator inputs too. In particular, Component.js lives
   // outside the ABAP input folders and the ABAP-only filter below excludes
   // JavaScript. Omitting it reused a generation whose registry named a page
@@ -181,7 +183,7 @@ export function inputsOf(root, config = loadConfig(root)) {
 export function missingLibraries(root, config = loadConfig(root)) {
   return (config.libs ?? [])
     .filter((lib) => typeof lib.folder === "string" && lib.folder !== "")
-    .map((lib) => ({...lib, path: join(root, lib.folder)}))
+    .map((lib) => ({...lib, path: process.env[`OSD_LIB_${basename(lib.folder).toUpperCase().replace(/[^A-Z0-9]/g, "_")}`] || join(root, lib.folder)}))
     .filter((lib) => !existsSync(lib.path) || readdirSync(lib.path).length === 0)
     .map(({url, folder, ref}) => ({url, folder, ...(ref === undefined ? {} : {ref})}));
 }
@@ -605,6 +607,9 @@ export function prepare(root, log = () => {}) {
     e.code = "MISSING_LIBRARIES";
     e.missing = missingLibs;
     throw e;
+  }
+  if (existsSync(join(root, "libs.lock.json"))) {
+    for (const lib of config.libs ?? []) libraryPath(root, basename(lib.folder));
   }
   // the layers, resolved before anything else (tools/osd-inputs.mjs): the
   // same file name twice inside one folder is a refusal naming both files,

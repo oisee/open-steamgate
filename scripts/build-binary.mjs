@@ -10,7 +10,8 @@ import {execFileSync} from "node:child_process";
 import {mkdirSync, rmSync} from "node:fs";
 import {resolve} from "node:path";
 import {stageSystemSeed} from "./build-vsix.mjs";
-import {describeVsixPreflight, vsixPreflightMissing} from "../tools/osd-lock.mjs";
+import {describeVsixPreflight} from "../tools/osd-lock.mjs";
+import {vsixPreflightMissing} from "../tools/osd-lib-path.mjs";
 
 const require = createRequire(import.meta.url);
 const root = resolve(import.meta.dir, "..");

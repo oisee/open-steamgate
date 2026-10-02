@@ -9,6 +9,7 @@ import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 import {checkLibPins} from "./lib-pins.mjs";
+import {libraryPath} from "../osd-lib-path.mjs";
 import {prepareF4} from "./osabap-f4.mjs";
 
 const here = import.meta.dirname;
@@ -42,7 +43,7 @@ rmSync(generated, {recursive: true, force: true});
 mkdirSync(generated, {recursive: true});
 mkdirSync(dir, {recursive: true});
 
-const gui = join(home, ".local", "lars", "open-abap-gui");
+const gui = libraryPath(home, "open-abap-gui");
 const {convertProgram} = await import(join(gui, "converter", "src", "api.mjs"));
 const {parseSource} = await import(join(gui, "converter", "src", "parser.mjs"));
 const source = readFileSync(report, "utf8");
@@ -124,7 +125,7 @@ const ownObjects = [...new Set([...objectsIn(dirname(report)), ...libs.flatMap(o
 // by name, and whatever those name in turn, local classes included, until
 // nothing new turns up: a static call is not followed into the core the way a
 // class of the program is, and a CLI should not need a list of them
-const core = join(home, ".local", "lars", "open-abap-core", "src");
+const core = join(libraryPath(home, "open-abap-core"), "src");
 const coreFiles = new Map();
 const walk = (folder) => {
   for (const entry of readdirSync(folder, {withFileTypes: true})) {

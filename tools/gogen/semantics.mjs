@@ -774,8 +774,9 @@ const EXPECT = {
     JS: "ERROR NOT_COMPILED in SELECT COUNT(*) FROM ZOSD_TAXIFACT: the JS backend has no database (the Go host has SQLite)"},
   ZCL_GOGEN_T_BOOM: {Go: "ERROR CX_SY_ZERODIVIDE in / at zcl_gogen_t_boom.clas.abap:9", JS: "ERROR CX_SY_ZERODIVIDE in /"},
 };
-const core = `${home}/.local/lars/open-abap-core/src`;
-const ajson = `${home}/.local/lars/ajson/src/core`;
+const {libraryPath} = await import("../osd-lib-path.mjs");
+const core = `${libraryPath(home, "open-abap-core")}/src`;
+const ajson = `${libraryPath(home, "ajson")}/src/core`;
 // the demo-data classes in testdata/ are copies of src/demo_data: when the
 // checkout has them (OSG_HOME), a copy that drifted is a failure
 const demoCopies = readdirSync(join(here, "testdata")).filter((f) => /^zcl_osd_demo_\w+\.clas\.abap$/.test(f)).sort();

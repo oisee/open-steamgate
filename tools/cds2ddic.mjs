@@ -20,6 +20,7 @@ import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {basename, join} from "node:path";
+import {libraryPath} from "./osd-lib-path.mjs";
 
 const OUT = "gen/cds";
 // **The libraries this generator resolves types against, and they have to be
@@ -34,7 +35,7 @@ const OUT = "gen/cds";
 // Measured before changing it: the two clones are identical here, 119 files
 // each, `diff -rq` empty -- so this is the same content read from the place
 // the rest of the system reads it (2026-09-19).
-const LIBS = [".local/lars/open-abap-core/src", ".local/lars/open-abap-odata/src"];
+const LIBRARIES = ["open-abap-core", "open-abap-odata"];
 
 function walk(dir, out = []) {
   // sorted: the registry this writes lists entities in this order, and a
@@ -993,12 +994,14 @@ function main() {
   // and a library that is not there is SAID, not skipped: the output
   // changes without it, and a generator that shrugs at a missing dependency
   // produces a different system and calls it the same one
-  const absent = LIBS.filter((l) => !existsSync(l));
+  const root = process.env.OSD_ROOT ?? process.cwd();
+  const libs = LIBRARIES.map((name) => join(libraryPath(root, name), "src"));
+  const absent = libs.filter((l) => !existsSync(l));
   if (absent.length > 0) {
     console.log(`cds2ddic: WARNING ${absent.join(", ")} missing -- types from ${absent.length === 1 ? "it" : "them"} ` +
       "will not resolve, and what this writes is not what a complete tree writes");
   }
-  reg.addDependencies(mem(LIBS.filter(existsSync).flatMap((l) => walk(l))));
+  reg.addDependencies(mem(libs.filter(existsSync).flatMap((l) => walk(l))));
   reg.parse();
 
   mkdirSync(OUT, {recursive: true});

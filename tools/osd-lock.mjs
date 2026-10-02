@@ -1,4 +1,4 @@
-import {readFileSync, readdirSync, statSync} from "node:fs";
+import {readFileSync} from "node:fs";
 import {basename, join} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 
@@ -56,24 +56,6 @@ export function librariesFromLock(root = ".") {
   const extra = lock.libraries.find((lib) => !seen.has(lib.folder));
   if (extra !== undefined) throw new Error(`libs.lock.json has an unused library pin for ${extra.folder}`);
   return {libraries: configured, lock};
-}
-
-function isUsableDirectory(path) {
-  try {
-    return statSync(path).isDirectory() && readdirSync(path).length > 0;
-  } catch {
-    return false;
-  }
-}
-
-export function vsixPreflightMissing(root = ".") {
-  const missing = [];
-  if (!isUsableDirectory(join(root, "node_modules"))) missing.push("node_modules/");
-  const {libraries} = librariesFromLock(root);
-  for (const lib of libraries) {
-    if (!isUsableDirectory(lib.path)) missing.push(`${lib.folder}/`);
-  }
-  return missing;
 }
 
 export function describeVsixPreflight(missing) {

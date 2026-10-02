@@ -4,6 +4,7 @@ import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync} 
 import {dirname, join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {home} from "./home.mjs";
+import {libraryPath} from "../osd-lib-path.mjs";
 
 const walk = (d) => readdirSync(d, {withFileTypes: true}).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
 
@@ -27,7 +28,7 @@ if (resolved.duplicates.length > 0) throw new Error(`the same object twice in on
 export const hidden = new Set(resolved.hidden.map((f) => `${home}/${f}`));
 export const overridden = resolved.overridden;
 export const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
-  .map((d) => `${home}/.local/lars/${d}`).filter(existsSync);
+  .map((d) => join(libraryPath(home, d.split("/")[0]), d.slice(d.indexOf("/") + 1))).filter(existsSync);
 
 /*
  * abapGit is a library of the Node build with a file list (the "files"
@@ -40,7 +41,7 @@ export const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-ap
 function filteredLib(name) {
   let spec;
   try { spec = JSON.parse(readFileSync(`${home}/abap_transpile.json`, "utf8")).libs?.find((l) => String(l.folder).toLowerCase().endsWith(`/${name}`)); } catch { return null; }
-  const root = spec ? `${home}${spec.folder}` : null;
+  const root = spec ? libraryPath(home, name) : null;
   if (!root || !existsSync(root) || !Array.isArray(spec.files)) return null;
   const out = join(import.meta.dirname, ".out", "libs", name);
   rmSync(out, {recursive: true, force: true});

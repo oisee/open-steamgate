@@ -39,11 +39,11 @@ import {readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, statSync} f
 import {basename, join, resolve} from "node:path";
 import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {hostModules} from "./osd-host.mjs";
+import {libraryPath} from "./osd-lib-path.mjs";
 import {stripLiterals} from "./abap-additions.mjs";
 
 const DEFAULT_OUT = "gen/gui";
 const CONVERTER = "converter/src/api.mjs";
-const LIB = ".local/lars/open-abap-gui";
 
 /** A closed dispatch table for one-shot batch execution. The host owns the
  * report lifecycle; this registry only chooses a converter-proven report and
@@ -621,7 +621,7 @@ export function tranXml({wrapperClassName, tcode, title}) {
 
 export async function generate(folders, out = DEFAULT_OUT, options = {}) {
   const root = options.root ?? process.cwd();
-  const {convertProgram} = hostModules()?.guiConverter ?? await import(resolve(root, LIB, CONVERTER));
+  const {convertProgram} = hostModules()?.guiConverter ?? await import(resolve(libraryPath(root, "open-abap-gui"), CONVERTER));
   const reports = [];
   const files = winningByLayer(folders, (folder) => reportFiles([folder]),
     (file) => basename(file).replace(/\.prog\.abap$/i, "").toUpperCase());
