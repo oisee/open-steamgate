@@ -55,7 +55,9 @@
     }).join("");
     var axes = [0, maximum / 2, maximum].map(function (v) {return '<text x="3" y="' + y(v) + '">' + +v.toFixed(2) + '</text><path stroke="#ddd" d="M55,' + y(v) + 'H705"/>';}).join("");
     return '<svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 ' + width + ' ' + height + '">' + axes + paths +
-      '<text x="55" y="208" font-size="11">' + new Date(series.start).toISOString().slice(0, 19).replace("T", " ") + '</text><text x="705" y="208" text-anchor="end" font-size="11">' + new Date(series.end).toISOString().slice(0, 19).replace("T", " ") + '</text></svg>';
+      '<text x="55" y="208" font-size="11">' + new Date(series.start).toISOString().slice(0, 19).replace("T", " ") + '</text>' +
+      '<text x="705" y="208" text-anchor="end" font-size="11">' + new Date(series.end).toISOString().slice(0, 19).replace("T", " ") +
+      '</text></svg>';
   }
   return {compute: compute, time: time, svg: svg};
 }));
