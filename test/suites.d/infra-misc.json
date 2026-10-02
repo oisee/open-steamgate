@@ -19,6 +19,7 @@
     "test/protocol-diag.mjs",
     "test/protocol-ni.mjs",
     "test/protocol-rfc.mjs",
+    "test/osd-bind.mjs",
     "test/protocol-sap-compress.mjs",
     "test/shadowed-objects.mjs",
     "test/undo-on-exit.mjs",

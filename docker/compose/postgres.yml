@@ -17,6 +17,9 @@ services:
     image: ghcr.io/oisee/open-steamgate:${OSD_TAG:-showcase-draft}
     init: true
     environment:
+      # the container listens on every interface (the default is loopback,
+      # which a published port never reaches); secure the published port
+      OSD_BIND: "0.0.0.0"
       STG_DB: postgres
       PGHOST: postgres
       PGPORT: "5432"

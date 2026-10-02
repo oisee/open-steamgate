@@ -1,7 +1,7 @@
 // OSGo: open-steamgate's launchpad, apps and services answered by one Go
 // binary compiled from OSG's own ABAP (tools/gogen/osgo.mjs builds it).
 //
-//	.out/osgo [-port 3095] [-addr 127.0.0.1] [-db file.sqlite] [-root <checkout>]
+//	.out/osgo [-port 3095] [-addr 127.0.0.1 (default OSD_BIND, else loopback)] [-db file.sqlite] [-root <checkout>]
 //
 // What the Node hosts (test/start.mjs, tools/osd-serve.mjs) do, in Go:
 // every ICF request goes through express-icf-shim's CL_EXPRESS_ICF_SHIM=>RUN,
@@ -40,6 +40,7 @@ import (
 
 	"osg/gogen/abap"
 	"osg/gogen/apc"
+	"osg/gogen/osdbind"
 )
 
 //go:embed zz_db.json
@@ -402,7 +403,7 @@ func selectedDB(db, home string, explicit bool, getenv func(string) string) stri
 
 func main() {
 	portFlag := flag.String("port", "", "port to listen on (OSD_PORT or STG_PORT)")
-	addr := flag.String("addr", "127.0.0.1", "address to listen on")
+	addr := flag.String("addr", "", "address to listen on (default OSD_BIND, else loopback: 127.0.0.1 and ::1)")
 	dbFile := flag.String("db", "", "an SQLite file (WAL) instead of the in-memory database; seeded once, when it has no tables, and refused when another build seeded it")
 	homeDir := flag.String("home", "", "data directory; defaults -db to <home>/osgo.sqlite and makes a fresh directory a full database reset")
 	version := flag.Bool("version", false, "print release tag and commit")
@@ -419,9 +420,11 @@ func main() {
 		fmt.Printf("osgo %s (%s)\n", releaseTag, releaseCommit)
 		return
 	}
-	portExplicit, dbExplicit := false, false
+	portExplicit, dbExplicit, addrExplicit := false, false, false
 	flag.Visit(func(f *flag.Flag) {
 		switch f.Name {
+		case "addr":
+			addrExplicit = true
 		case "port":
 			portExplicit = true
 		case "db":
@@ -433,6 +436,7 @@ func main() {
 		log.Fatal(err)
 	}
 	port := &portValue
+	binds := osdbind.Selected(*addr, addrExplicit, os.Getenv)
 	abap.SysID = selectedSID(os.LookupEnv)
 	*dbFile = selectedDB(*dbFile, *homeDir, dbExplicit, os.Getenv)
 	if *homeDir != "" {
@@ -443,7 +447,7 @@ func main() {
 	started := time.Now()
 	// OSGO_PPROF=127.0.0.1:<port>: Go's profiler on a listener of its own,
 	// never on the service's port (go tool pprof http://<addr>/debug/pprof/profile)
-	if a := os.Getenv("OSGO_PPROF"); a != "" {
+	if a := osdbind.PprofAddr(os.Getenv("OSGO_PPROF"), binds[0]); a != "" {
 		pm := http.NewServeMux()
 		pm.HandleFunc("/debug/pprof/", pprof.Index)
 		pm.HandleFunc("/debug/pprof/profile", pprof.Profile)
@@ -637,12 +641,16 @@ func main() {
 	for _, n := range apcLeftOut {
 		log.Printf("not served   %s: %s (an upgrade answers 501)", n.Path, n.Why)
 	}
-	server := &http.Server{Addr: fmt.Sprintf("%s:%d", *addr, *port), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
-	ln, err := net.Listen("tcp", server.Addr)
+	server := &http.Server{Addr: net.JoinHostPort(binds[0], strconv.Itoa(*port)), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
+	lns, err := osdbind.ListenAll(binds, *port)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Listening on http://localhost:%d/  (launchpad /app/flp.html, OData %s/)", *port, odataBase)
+	for _, extra := range lns[1:] {
+		go func(ln net.Listener) { log.Printf("listener %s: %v", ln.Addr(), server.Serve(ln)) }(extra)
+	}
+	ln := lns[0]
+	log.Printf("Listening on http://localhost:%d/  (launchpad /app/flp.html, OData %s/; bound to %s)", *port, odataBase, osdbind.Describe(lns))
 	// the status tables have this process in them before anybody asks, with
 	// the listener already open (its state is read off /proc/net/tcp)
 	if rows, err := refreshStatus(status); err != nil {
@@ -654,9 +662,15 @@ func main() {
 		if *tlsCert == "" || *tlsKey == "" {
 			log.Fatal("-tls-port needs -tls-cert and -tls-key")
 		}
-		secure := &http.Server{Addr: fmt.Sprintf("%s:%d", *addr, *tlsPort), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
-		go func() { log.Fatal(secure.ListenAndServeTLS(*tlsCert, *tlsKey)) }()
-		log.Printf("Listening on https://localhost:%d/", *tlsPort)
+		secure := &http.Server{Addr: net.JoinHostPort(binds[0], strconv.Itoa(*tlsPort)), Handler: mux, ReadHeaderTimeout: 30 * time.Second}
+		tlns, err := osdbind.ListenAll(binds, *tlsPort)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, tln := range tlns {
+			go func(ln net.Listener) { log.Fatal(secure.ServeTLS(ln, *tlsCert, *tlsKey)) }(tln)
+		}
+		log.Printf("Listening on https://localhost:%d/  (bound to %s)", *tlsPort, osdbind.Describe(tlns))
 	}
 	log.Fatal(server.Serve(ln))
 }

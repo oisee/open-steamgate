@@ -3,6 +3,7 @@
 import {pathToFileURL} from "node:url";
 import {listenDiagTape} from "./diag-server.mjs";
 import {createRfcAdtServer} from "./rfc-server.mjs";
+import {bindHost} from "../osd-bind.mjs";
 
 const connections = new WeakMap();
 
@@ -27,7 +28,7 @@ export async function listenProtocols(env = process.env) {
   const backend = env.STG_ADT_BACKEND ?? `http://127.0.0.1:${env.STG_PORT ?? 3030}`;
   const diag = await listenDiagTape({
     port: diagPort,
-    host: env.STG_DIAG_HOST ?? "0.0.0.0",
+    host: env.STG_DIAG_HOST ?? bindHost(env),
     logger: (event, peer, error) => {
       if (error) console.error(`diag ${event} ${peer}: ${error.message}`);
     },
@@ -45,7 +46,7 @@ export async function listenProtocols(env = process.env) {
     rfcClient: env.STG_RFC_CLIENT,
     systemID: env.STG_SYSTEM_ID ?? env.OSD_SID ?? "OSD",
     systemHost: env.STG_HOST_NAME ?? "osd-bridge",
-    host: env.STG_RFC_HOST ?? "0.0.0.0",
+    host: env.STG_RFC_HOST ?? bindHost(env),
     port: rfcPort,
     log: (event) => console.error(JSON.stringify(event)),
   });
@@ -56,7 +57,7 @@ export async function listenProtocols(env = process.env) {
     await closeProtocols({diag});
     throw error;
   }
-  console.error(`OSD JS protocols: DIAG ${diag.address().port}; RFC ${rfcBridge.server.address().port} -> ${backend}`);
+  console.error(`OSD JS protocols: DIAG ${diag.address().address}:${diag.address().port}; RFC ${rfcBridge.server.address().address}:${rfcBridge.server.address().port} -> ${backend}`);
   return {diag, rfc: rfcBridge.server};
 }
 

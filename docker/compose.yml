@@ -22,6 +22,10 @@ services:
     # usually already runs -- and a health check that reads THAT is a green
     # light for a container which never started. Found exactly that way.
     ports: ["3130:3030"]
+    environment:
+      # the container listens on every interface (the default is loopback,
+      # which a published port never reaches); secure the published port
+      OSD_BIND: "0.0.0.0"
     volumes: ["osd-data:/osd/data-run"]
     healthcheck:
       # By content, not by "the port is open" -- and by the RIGHT field, which
@@ -120,6 +124,9 @@ services:
       hxe: {condition: service_healthy}
     ports: ["3130:3030"]
     environment:
+      # the container listens on every interface (the default is loopback,
+      # which a published port never reaches); secure the published port
+      OSD_BIND: "0.0.0.0"
       STG_DB: hana
       HANA_HOST: hxe
       HANA_PORT: "39041"
