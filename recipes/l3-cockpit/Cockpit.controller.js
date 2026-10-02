@@ -1,5 +1,6 @@
-sap.ui.define(["sap/m/Button", "sap/m/Dialog", "sap/m/Input", "sap/m/Label", "sap/m/VBox", "sap/m/Text", "l3/{{set}}/Series"],
-function (Button, Dialog, Input, Label, VBox, Text, Series) {
+sap.ui.define(["sap/m/Button", "sap/m/Dialog", "sap/m/Input", "sap/m/Label", "sap/m/VBox", "sap/m/Text",
+  "sap/ui/model/json/JSONModel", "l3/{{set}}/Series"],
+function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series) {
   "use strict";
   var config = {{config}};
   return {
@@ -26,19 +27,41 @@ function (Button, Dialog, Input, Label, VBox, Text, Series) {
     refresh: function () {
       var self = this, context = this.getView().getBindingContext(), dom = this.getView().getDomRef();
       clearTimeout(this.timer);
-      // one polling chain per page, and none once the object page is no longer shown
-      if (!context || !dom || !dom.isConnected || !dom.getClientRects().length) return;
+      // one polling chain per page; a page that is gone stops it, a hidden one (another tab, the
+      // list in front) only looks again in two seconds without reading anything
+      if (!context || !dom || !dom.isConnected) return;
+      // the view's root may have no box of its own (display: contents); the table's is what shows
+      var shown = self.byId("cockpitProgress").getDomRef();
+      if (!shown || !shown.getClientRects().length) {
+        this.timer = setTimeout(function () {self.refresh();}, 2000);
+        return;
+      }
       var run = context.getObject(), filter = "RunId eq '" + run.RunId + "'";
       var names = ["Pile", "Stage"].concat(config.governor ? ["Event", "Budget"] : []);
       Promise.all(names.map(function (n) {return self.read(n + "Set", filter);})).then(function (rows) {
-        var plotted = Series.compute(rows[0], rows[2] || [], rows[1], rows[3] && rows[3][0], Date.now());
-        var html = Series.svg(plotted, plotted.plan, ["planned", "done"], [self.text("planned"), self.text("done")]);
-        if (plotted.capacity.length) html += Series.svg(plotted, plotted.capacity, ["reserved", "glass", "warn", "narrow"], [self.text("reserved"), self.text("glass"), self.text("warn"), self.text("narrow")]);
-        self.byId("cockpitChart").setContent(html);
-        var durations = self.byId("cockpitDurations"); durations.destroyItems();
-        rows[0].forEach(function (p) {var started = Series.time(p.Started), ended = Series.time(p.Ended);
-          durations.addItem(new Text({text: p.RuleName + " #" + p.PileNo + ": " + (started ? Math.max(0, (ended || Date.now()) - started) / 1000 : 0) + " s"}));
-        });
+        // a plain table for now (the chart multiplied on a system); the canvas comes in 6b
+        var progress = self.byId("cockpitProgress"), counts = {}, lines = [];
+        rows[0].forEach(function (p) {counts[p.Status] = (counts[p.Status] || 0) + 1;});
+        var line = function (what, value) {lines.push({what: what, value: String(value)});};
+        line(self.text("planned"), rows[0].length);
+        Object.keys(counts).sort().forEach(function (k) {line(k, counts[k]);});
+        var budget = rows[3] && rows[3][0];
+        if (budget) {
+          line(self.text("reserved"), budget.Reserved); line(self.text("glass"), budget.Glass); line("State", budget.State);
+        }
+        if (!progress.getModel("prog")) progress.setModel(new JSONModel({rows: []}), "prog");
+        progress.getModel("prog").setData({rows: lines});
+        // every pile, the open ones first (running, or left RUNNING by a job that is gone: the doctor's case);
+        // a pile without an end counts up to now
+        var states = {DONE: "Success", FAILED: "Error", HELD: "Warning", RUNNING: "Information"};
+        var list = rows[0].map(function (p) {
+          var started = Series.time(p.Started), ended = Series.time(p.Ended);
+          return {rule: p.RuleName, no: +p.PileNo, pile: p.RuleName + " #" + p.PileNo, status: p.Status, state: states[p.Status] || "None", attempt: p.Attempt, open: !ended,
+            seconds: started ? Math.round(((ended || Date.now()) - started) / 1000) + (ended ? "" : " (open)") : ""};
+        }).sort(function (a, b) {return (b.open - a.open) || (a.rule < b.rule ? -1 : a.rule > b.rule ? 1 : a.no - b.no);});
+        var table = self.byId("cockpitDurations");
+        if (!table.getModel("dur")) table.setModel(new JSONModel({rows: []}), "dur");
+        table.getModel("dur").setData({rows: list});
         if (rows[1].some(function (s) {return ["OPEN", "WAITING", "SUBMITTED"].indexOf(s.Status) >= 0;})) self.timer = setTimeout(function () {self.refresh();}, 5000);
       }).catch(function (e) {self.answer(e.message || e.responseText);});
       if (config.settings.length) {

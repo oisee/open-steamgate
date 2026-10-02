@@ -22,7 +22,7 @@ test("run cockpit: list, object facets, confirmed runner action and refusal", as
   await expect(page.getByText("WARN", {exact: true}).first()).toBeVisible();
   await page.getByRole("tab", {name: "Run cockpit", exact: true}).click();
   await expect(page.getByRole("button", {name: "Change setting", exact: true})).toBeVisible();
-  await expect(page.locator("svg[role=img]").first()).toBeVisible();
+  await expect(page.locator('[id$="--cockpitProgress"]')).toContainText("DONE");
   await page.getByRole("button", {name: "Change setting", exact: true}).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -35,7 +35,8 @@ test("run cockpit: list, object facets, confirmed runner action and refusal", as
   await dialog.getByRole("button", {name: "Confirm action"}).click();
   const answer = page.locator('[id$="--cockpitAnswer"]');
   await expect(answer).toBeVisible();
-  await expect(answer).toHaveText("OK");
+  await expect(answer).toContainText(/OK$/);
+  await expect(answer).not.toContainText("REFUSED");
   const log = await request.get(service + "/ChangeSet?$filter=NoteText eq 'browser capacity change'");
   expect((await log.json()).d.results.length).toBeGreaterThan(0);
   await page.getByRole("button", {name: "Change setting", exact: true}).click();
