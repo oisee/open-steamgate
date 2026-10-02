@@ -275,3 +275,38 @@ smoke for runtime changes; never publish Pages before its browser check passes.
 Document which file classes trigger each gate and test the filters with sample
 docs-only, UI, ABAP, database and image changes. Recheck billing/runner policy
 if the repository becomes private or uses larger runners.
+
+## Release lines 0.7 and 0.8 (2026-10-02)
+
+Agreed with Alice on 2026-10-02. As for every line, only a **must** blocks a tag; a should or nice that is not done
+rolls into the next line. No LTS line is promised.
+
+**0.7: the ADT façade 100% on ABAP** ([port map](../adt-abap-port/port-map.md),
+[ADR 0007](../adr/0007-adt-facade-in-abap.md)). The slices are the order the port is built in: 1 and 2 are merged
+(#427 handler and router, #432 LOCK/UNLOCK), 3 is the session and the front, 4a writes and 4b activation; 4a and 4b
+are stoker's and not yet in a tracked design file.
+
+- must: slice 3: every `/sap/bc/adt` request enters `ZCL_OSD_ADT_HANDLER` first (verdict, then delegate;
+  `AbapSessions` on in every host). dell.
+- must: 4a: writes in ABAP, byte-identical with the Node path. It includes the refusal a system gives a source line
+  longer than 255 characters (400 `ExceptionResourceBadRequest`), which OSG does not give yet; ABAPiti found it on
+  the sandbox on 2026-10-02. stoker.
+- must: 4b: activation with the verdict in ABAP and the publish after the step. stoker.
+- must: port-map group A (versions, write path, activation, 15 rows). stoker.
+- must: port-map group B (repository reads, 22 rows). osg-research.
+- must: port-map group C (check, ABAP Unit, data preview, run, 15 rows). dell.
+- should (placement proposed, not decided): port-map group D (OSD-private endpoints, 9 rows, unassigned).
+- should, rolls to 0.8 if not done: the E2 socket and the asynchronous update task.
+
+**0.8: a system you can develop and generate in** ([design note](../abap-development-api.md)).
+
+- must: `ZCL_OSD_DEVELOPMENT`, the development API under the ADT write routes (phase P2 in
+  [adt.md](adt.md#an-abap-development-api-and-generate-subroutine-pool-2026-10-02)).
+- must: the fast path for a new object (phase P4).
+- must: ABAPiti M2 compatibility and speed. The known pieces: byte work on xstring in osgo (#473), x to i
+  without a hex round trip, and the type i overflow check in the transpiler runtime (an upstream PR to
+  abaplint/transpiler, waiting on open-abap-core#1282).
+- should: real GENERATE SUBROUTINE POOL (P5), publish after the step for non-ADT entries (P3, placement
+  proposed; for ADT it is part of 4b), the asynchronous
+  update task, the E2 socket, the ABAP-FS gaps, links from the VS Code extension.
+- nice: checked credentials on logon (opt-in), SM12; FUGR and FUNC creation (P6, placement proposed).

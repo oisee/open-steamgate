@@ -450,16 +450,17 @@ FUGR and FUNC) and its self-hosted compiler (GENERATE from M2). Labels follow "o
 
 - in progress elsewhere, labelled there (ABAPiti M1): GENERATE SUBROUTINE POOL refused the kernel's way: sy-subrc 8,
   MESSAGE "not supported", no exception, on JS and Go (`feat/gogen-generate-refusal`).
-- should (0.7+): P0, the A4H probes: the dev-system signal (T000 CCCATEGORY / CCCORACTIV / CCNOCLIIND, the system
-  change option; UNMEASURED), the pool name and per-session limit, LINE/WORD for more error kinds, PERFORM USING. [S]
-- should (0.7+): P2, `ZCL_OSD_DEVELOPMENT` as the layer under the ADT write routes (create, write, activate verdict,
+- should (0.8, prep for P2 and P5): P0, the A4H probes: the dev-system signal (T000 CCCATEGORY / CCCORACTIV / CCNOCLIIND, the system
+  change option; UNMEASURED), LINE/WORD for more error kinds, PERFORM USING. The pool name and per-session limit
+  are measured (#469). [S]
+- must (0.8): P2, `ZCL_OSD_DEVELOPMENT` as the layer under the ADT write routes (create, write, activate verdict,
   delete, lock through ENQ), `ZCX_OSD_DEVELOPMENT` with per-line messages, writes only in a development system.
   After slice 3's adapter and group A's host commands. [M]
-- should (0.7+): P3, publish after the step: a `publish` continuation (front-up's registry, stoker's 4b) and an
+- should (0.8): P3, publish after the step: a `publish` continuation (front-up's registry, stoker's 4b) and an
   after-step queue in `tools/osd-dialog-step.mjs` for non-ADT entries. After #466. [M]
-- should (0.7+): P4, the fast path: a new object with no dependents and no generator reading it is transpiled alone
+- must (0.8): P4, the fast path: a new object with no dependents and no generator reading it is transpiled alone
   against the warm registry and loaded without a swap or a recycle, with its own cold-transpile check. [M]
-- should (0.7+): P5, GENERATE SUBROUTINE POOL on P4: transient pools outside `$TMP` and the layer list, `%_Txxxxx`
+- should (0.8): P5, GENERATE SUBROUTINE POOL on P4: transient pools outside `$TMP` and the layer list, `%_Txxxxx`
   names, subrc 4 / LINE / WORD from the check, lifetime of the internal session, PERFORM USING fixed. The preview
   and OSGo keep the refusal. [M]
 - nice: P6, FUGR and FUNC creation (always cold, live after the step). [M]
