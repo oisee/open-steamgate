@@ -2,6 +2,11 @@
 # and a schedule"). A filter stage selects the ships with a voyage ahead into
 # the worklist busy; the check stage piles over that worklist only and runs
 # the deep rules there; a schedule runs the set every day at 02:00 system time.
+# Slice 5a (docs/dsl-l3.md, "Resilience"): a failed or vanished pile is
+# retried twice, a minute after it failed and doubled per attempt; the doctor
+# takes over a lock, a pile or a gate left for 15 minutes and runs as a job of
+# the schedule; a rule stops writing past 500 alerts in a run; a row of
+# ZOSD_L3_KILL stops the set; final runs' plans go after 30 days.
 # `node tools/dsl-l3.mjs build src/l2demo/fleet2.l3.yaml --out src/l2demo`
 set: fleet2
 title: The fleet in two stages, busy ships first, then the deep checks
@@ -45,3 +50,11 @@ ports:
 bindings:
   ships: table
   alerts: log
+resilience:
+  retry: {max: 2, backoff: 60}
+  stale: 900
+  fuses:
+    max_alerts: 500
+    kill: ZOSD_L3_KILL
+  dry_run: false
+  keep: {days: 30}

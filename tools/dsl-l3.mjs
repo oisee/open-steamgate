@@ -23,6 +23,7 @@ import {LENGTHLESS} from "./dsl-l2-params.mjs";
 import {compileRule, lineIndex, misfit, modelHash, renderModel, rulePath, RuleError} from "./dsl-l2.mjs";
 import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
 import {compileSchedule, compileStages, explainStage, readStages, worklistVariants} from "./dsl-l3-stages.mjs";
+import {compileResilience, resilienceNodes} from "./dsl-l3-resilience.mjs";
 
 export const SET_TEMPLATE = "recipes/l3-set/template.tpl";
 export const JOB_TEMPLATE = "recipes/l3-job/template.tpl";
@@ -120,7 +121,7 @@ export function classShape(text, name, className) {
   return shape.line === undefined ? undefined : shape;
 }
 
-const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule"];
+const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience"];
 const PORT_KEYS = ["kind", "table", "key", "group", "seq", "variants"];
 const PORT_NAME = /^[a-z][a-z0-9_]{0,11}$/;
 const RULE_KEYS = ["rule", "enabled"];
@@ -424,6 +425,8 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     sinks[0].group.push({name: "pile_no", lead: "AND", "@id": `${id}/stages`, set_line: line("stages")});
   }
   const schedule = compileSchedule(doc, {id, set, line, fail, staged: Boolean(staged)});
+  // resilience: (docs/dsl-l3.md, "Resilience"): retries, the doctor, fuses, dry run, retention
+  const resilience = compileResilience(doc, {id, set, line, fail, staged: Boolean(staged), sink: sinks[0], schedule});
   const SET = set.toUpperCase();
   const stageOf = (r) => staged?.stages[r.s];
   // a piled rule's range traces to its range: line in the rule file
@@ -464,7 +467,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     // planned: the plan machinery a piled and a staged set share (lock, finalise, the plan rows)
     ...(piles ? {planned: piles} : {}), ...(staged ? {planned: {"@id": `${id}/stages`, set_line: line("stages")},
       staged: {"@id": `${id}/stages`, set_line: line("stages"), count: String(staged.stages.length), "count@type": {built_in: "INT4"}},
-      stages: staged.stages} : {}), ...(schedule ? {schedule} : {}),
+      stages: staged.stages} : {}), ...(schedule ? {schedule} : {}), ...resilienceNodes(resilience),
     rules: enabled.map((r, i) => node(r, i + 1)),
     disabled: all.filter((r) => !r.enabled).map((r) => node(r)),
   };

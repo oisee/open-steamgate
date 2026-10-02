@@ -151,6 +151,15 @@ describe("DDIC reserved field names (tools/osd-ddic-reserved.mjs)", () => {
       const wide = [field("MANDT", undefined, true, "MANDT"), field("RUN_ID", 32), field("WORKLIST", 46), field("KEY_VALUE", 40)];
       expect(keyFindings(table("ZT_WORK", wide))).to.have.length(1);
     });
+    it("the slice 5a tables as committed: the doctor's audit 45, the kill switch 19; the plan keeps 105 with ATTEMPT and REASON fields", () => {
+      const committed = (name) => keyLength(readFileSync(join("src/dsl", `${name}.tabl.xml`), "utf8"));
+      // MANDT 3 + RUN_ID 32 + SEQ (INT4) 10; MANDT 3 + SET_NAME 16
+      expect(committed("zosd_l3_doctor")).to.deep.equal({table: "ZOSD_L3_DOCTOR", length: 45, unmeasured: []});
+      expect(committed("zosd_l3_kill")).to.deep.equal({table: "ZOSD_L3_KILL", length: 19, unmeasured: []});
+      expect(committed("zosd_l3_pile")).to.deep.equal({table: "ZOSD_L3_PILE", length: 105, unmeasured: []});
+      // the doctor's action column is DOC_ACTION: ACTION is a reserved word of the public list
+      expect(readFileSync(join("src/dsl", "zosd_l3_doctor.tabl.xml"), "utf8")).to.include("<FIELDNAME>DOC_ACTION</FIELDNAME>");
+    });
     it("the command fails on such a table under a path", () => {
       const dir = mkdtempSync(join(tmpdir(), "ddic-key-"));
       try {

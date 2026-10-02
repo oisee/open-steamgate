@@ -13,7 +13,14 @@ REPORT {{report}}.
 {{#schedule}}
 * p_mode = 'D' is the driver of the schedule: one run of the set in jobs
 * for the current date; 'R' (the default) runs one rule's pile.
+{{#resilience}}
+* p_mode = 'H' is the doctor's job: one pass of the doctor over the set.
+{{/resilience}}
 {{/schedule}}
+{{#resilience}}
+* A pile the kill switch sent back, or one past the fuse, commits its row
+* and ends the job without aborting it.
+{{/resilience}}
 
 PARAMETERS p_rule TYPE c LENGTH 60 LOWER CASE.
 PARAMETERS p_date TYPE d.
@@ -44,6 +51,17 @@ START-OF-SELECTION.
     WRITE: / ls_result-run_id, ls_result-status.
     RETURN.
   ENDIF.
+{{#resilience}}
+  DATA lt_report TYPE {{class}}=>tt_doctor.
+  DATA lv_actions TYPE i.
+  IF p_mode = 'H'.
+    " the doctor: one pass over the set's open runs, then purge
+    lt_report = {{class}}=>doctor( ).
+    lv_actions = lines( lt_report ).
+    WRITE: / 'doctor', lv_actions.
+    RETURN.
+  ENDIF.
+{{/resilience}}
 {{/schedule}}
 {{#params}}
   ls_params-{{name}} = {{screen}}.
@@ -61,6 +79,13 @@ START-OF-SELECTION.
 {{/with_params}}
     iv_bind = lv_bind ).
   WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.
+{{#resilience}}
+  IF ls_rule-status = 'KILLED' OR ls_rule-status = 'FUSED'.
+    " the pile row says so; it is committed and the job ends without abort
+    COMMIT WORK.
+    RETURN.
+  ENDIF.
+{{/resilience}}
 {{#staged}}
   IF ls_rule-status = 'DONE'.
     " the pile's DONE is committed first, so the gate sees it
