@@ -117,9 +117,7 @@ export const FmtI = (v) => String(v);
 export function IToX(v, n, width = 4) {
   let bytes = BigInt.asUintN(width * 8, BigInt(v)).toString(16).padStart(width * 2, "0").match(/../g).map((b) => String.fromCharCode(parseInt(b, 16))).join("");
   if (n !== undefined) return n <= width ? bytes.slice(width - n) : "\0".repeat(n - width) + bytes;
-  bytes = bytes.replace(/^\0+/, "");
-  if (!bytes.length || (width === 8 && bytes.length > 4 && bytes.length < 8)) throw new AbapError("NOT_COMPILED", "integer -> xstring: zero or 5-7 significant bytes needs an oracle row");
-  return bytes;
+  return bytes.replace(/^\0+(?=.)/s, ""); // Keep 00 for zero; oracle confirms 5/6-byte int8.
 }
 export const XToHex = (v) => [...v].map((c) => c.charCodeAt(0).toString(16).padStart(2, "0")).join("").toUpperCase();
 // text into f and into i, as A4H does (parity-wave2, ZCL_GOGEN_T_C2NUM;

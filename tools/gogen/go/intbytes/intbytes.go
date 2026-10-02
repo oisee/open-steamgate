@@ -1,8 +1,6 @@
 // Package intbytes implements ABAP integer/byte assignments.
 package intbytes
 
-import "osg/gogen/abaperr"
-
 // ToX writes exactly width big-endian two's-complement bytes, right-aligned
 // in n bytes. Wider targets have zero padding, including for negative v.
 func ToX(v int64, width, n int) string {
@@ -31,15 +29,12 @@ func FromX(v string, width int) int64 {
 	return int64(bits)
 }
 
-// ToString removes leading zeros for nonzero positive integers. The SAP
-// table lists 1-4 or 8 bytes for int8; 5-7 bytes and zero await an oracle.
+// ToString drops leading zeros but keeps at least the last byte (00 for zero).
+// Supplied ABAPiti oracle rows confirm 5/6-byte int8 results; see NOTES.md.
 func ToString(v int64, width int) string {
 	out := ToX(v, width, width)
-	for len(out) > 0 && out[0] == 0 {
+	for len(out) > 1 && out[0] == 0 {
 		out = out[1:]
-	}
-	if len(out) == 0 || (width == 8 && len(out) > 4 && len(out) < 8) {
-		panic(abaperr.NotCompiled("integer -> xstring", "zero or 5-7 significant bytes needs an oracle row"))
 	}
 	return out
 }

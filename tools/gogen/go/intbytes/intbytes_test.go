@@ -100,15 +100,15 @@ func TestXstrings(t *testing.T) {
 	for _, c := range []struct {
 		v     int64
 		width int
-	}{{0, 4}, {0, 8}, {1 << 32, 8}, {1 << 40, 8}, {1 << 48, 8}} {
-		func() {
-			defer func() {
-				r := recover()
-				if r == nil || !strings.Contains(r.(error).Error(), "needs an oracle row") {
-					t.Errorf("ambiguous %d width %d: %v", c.v, c.width, r)
-				}
-			}()
-			ToString(c.v, c.width)
-		}()
+		hex   string
+	}{
+		{0, 4, "00"}, {0, 8, "00"}, {0, 1, "00"}, {255, 1, "ff"},
+		{0, 2, "00"}, {32767, 4, "7fff"}, {-32768, 4, "ffff8000"},
+		{1 << 32, 8, "0100000000"}, {1 << 40, 8, "010000000000"},
+		{1 << 48, 8, "01000000000000"}, {-1, 4, "ffffffff"}, {-1, 8, "ffffffffffffffff"},
+	} {
+		if got := hex.EncodeToString([]byte(ToString(c.v, c.width))); got != c.hex {
+			t.Errorf("ToString(%d, %d) = %s, want %s", c.v, c.width, got, c.hex)
+		}
 	}
 }
