@@ -10,7 +10,7 @@ PARAMETERS p_date TYPE d.
 PARAMETERS p_run TYPE c LENGTH 32.
 PARAMETERS p_pile TYPE i.
 PARAMETERS p_bind TYPE c LENGTH 255 LOWER CASE.
-PARAMETERS p_active TYPE c.
+PARAMETERS p_active TYPE zosd_l2_ship-status.
 
 START-OF-SELECTION.
   DATA ls_rule TYPE zcl_l3_fleet=>ty_rule.

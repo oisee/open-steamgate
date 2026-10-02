@@ -7,7 +7,7 @@ set: fleet
 title: Every fleet rule, checked for one date
 date: $date
 params:
-  active_status: {type: C, default: A}
+  active_status: {type: ZOSD_L2_SHIP-STATUS, default: A}
 piles:
   source: ships
   size: 2

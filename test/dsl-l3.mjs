@@ -128,10 +128,10 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       expect(model.rules.map((r) => Boolean(r.piled))).to.deep.equal(Array(6).fill(true));
       expect(model.rules.find((r) => r.name === "ship-in-service-has-a-captain").range).to.include({rule_file: "src/l2demo/ship_captain.l2.yaml",
         rule_line: readFileSync(join(OUT, "ship_captain.l2.yaml"), "utf8").split("\n").findIndex((l) => /^range:/.test(l)) + 1});
-      expect(model.params.map((p) => [p.name, p.screen, p.type_name, p.default])).to.deep.equal([["active_status", "p_active", "c", "A"]]);
+      expect(model.params.map((p) => [p.name, p.screen, p.type_name, p.default])).to.deep.equal([["active_status", "p_active", "zosd_l2_ship-status", "A"]]);
       expect(model.rules.filter((r) => r.param_args).map((r) => [r.name, r.param_args.map((a) => a.ref)])).to.deep.equal([["ship-in-service-has-a-captain", ["iv_active_status"]]]);
       const report = readFileSync(join(OUT, `${REPORT}.prog.abap`), "utf8");
-      expect(report).to.include("PARAMETERS p_pile TYPE i.\nPARAMETERS p_bind TYPE c LENGTH 255 LOWER CASE.\nPARAMETERS p_active TYPE c.\n");
+      expect(report).to.include("PARAMETERS p_pile TYPE i.\nPARAMETERS p_bind TYPE c LENGTH 255 LOWER CASE.\nPARAMETERS p_active TYPE zosd_l2_ship-status.\n");
       expect(report).to.include("    iv_pile = p_pile\n    is_params = ls_params\n");
     });
 
@@ -235,25 +235,27 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       expect(error.message.slice(`${where}:${line}: `.length)).to.match(message);
     };
     const CAPTAIN = readFileSync(join(OUT, "ship_captain.l2.yaml"), "utf8");
-    const PARAM = "  active_status: {type: C, default: A}\n";
+    const PARAM = "  active_status: {type: ZOSD_L2_SHIP-STATUS, default: A}\n";
 
-    it("a set parameter no enabled rule declares", async () => refusedAt(await manifest([[PARAM, "  idle: {type: C, default: A}\n"]]),
+    it("a set parameter no enabled rule declares", async () => refusedAt(await manifest([[PARAM, "  idle: {type: ZOSD_L2_SHIP-STATUS, default: A}\n"]]),
       /^set parameter idle is not used: no enabled rule declares \$idle/, /^  idle:/));
     it("a set parameter whose rule is disabled", async () => refusedAt(await manifest([["  - rule: ship_captain.l2.yaml\n", "  - rule: ship_captain.l2.yaml\n    enabled: false\n"]]),
       /^set parameter active_status is not used/, /^  active_status:/));
-    it("a set parameter of another type than the rule's", async () => refusedAt(await manifest([[PARAM, "  active_status: {type: N, default: '1'}\n"]]),
-      /^set parameter active_status is N; rule ship-in-service-has-a-captain declares \$active_status as C/, /^  active_status:/));
-    it("a default that does not fit", async () => refusedAt(await manifest([[PARAM, "  active_status: {type: C, default: AB}\n"]]),
-      /^the default of set parameter active_status does not fit C/, /^  active_status:/));
+    it("a set parameter of another type than the rule's", async () => refusedAt(await manifest([[PARAM, "  active_status: {type: ZOSD_L2_SHIP-NAME, default: A}\n"]]),
+      /^set parameter active_status is ZOSD_L2_SHIP-NAME; rule ship-in-service-has-a-captain declares \$active_status as ZOSD_L2_SHIP-STATUS/, /^  active_status:/));
+    it("a set parameter typed with a bare C, which has no length", async () => refusedAt(await manifest([[PARAM, "  active_status: {type: C, default: A}\n"]]),
+      /^set parameter active_status is C, which has no length and which a class or report refuses/, /^  active_status:/));
+    it("a default that does not fit", async () => refusedAt(await manifest([[PARAM, "  active_status: {type: ZOSD_L2_SHIP-STATUS, default: AB}\n"]]),
+      /^the default of set parameter active_status does not fit ZOSD_L2_SHIP-STATUS/, /^  active_status:/));
     it("a rule parameter without a default and no set parameter, at the rule's line", async () => refusedAt(
       await manifest([[PARAM, ""], ["params:\n", ""], ["rule: ship_captain.l2.yaml", "rule: captain.l2.yaml"]],
-        {"captain.l2.yaml": CAPTAIN.replace("active_status: {type: C, default: A}", "active_status: {type: C}").replace(/^class: .*$/m, "class: zcl_l2_captain_nodefault")
+        {"captain.l2.yaml": CAPTAIN.replace("active_status: {type: ZOSD_L2_SHIP-STATUS, default: A}", "active_status: {type: ZOSD_L2_SHIP-STATUS}").replace(/^class: .*$/m, "class: zcl_l2_captain_nodefault")
           .replace(/^( {4}date: \d+\n)/gm, "$1    params: {active_status: A}\n")}),
       /^rule ship-in-service-has-a-captain needs \$active_status, which has no default in the rule: declare a set parameter active_status/, /rule: captain\.l2\.yaml/));
     it("a set parameter's selection field is P_ and six characters, made unique with digits, never a field of the report", async () => {
       const rules = {"crew.l2.yaml": readFileSync(join(OUT, "ship_min_crew.l2.yaml"), "utf8").replace(/^class: .*$/m, "class: zcl_l2_crew_param")
-        .replace("when: ship.status = 'A'", "params:\n  active_state: {type: C, default: A}\nwhen: ship.status = $active_state")};
-      const file = await manifest([[PARAM, `${PARAM}  active_state: {type: C, default: A}\n`], ["rule: ship_min_crew.l2.yaml", "rule: crew.l2.yaml"]], rules);
+        .replace("when: ship.status = 'A'", "params:\n  active_state: {type: ZOSD_L2_SHIP-STATUS, default: A}\nwhen: ship.status = $active_state")};
+      const file = await manifest([[PARAM, `${PARAM}  active_state: {type: ZOSD_L2_SHIP-STATUS, default: A}\n`], ["rule: ship_min_crew.l2.yaml", "rule: crew.l2.yaml"]], rules);
       expect(compileSet(file).params.map((p) => p.screen)).to.deep.equal(["p_active", "p_activ1"]);
     });
     it("a pile size that is not a positive INT4", async () => {
@@ -564,6 +566,7 @@ ENDCLASS.
     const plain = (result) => {
       const r = result.get();
       return {run: r.run_id.get().trim(), mode: r.mode.get(), alerts: r.alerts.get(), date: r.check_date.get(),
+        ...(r.status ? {status: r.status.get().trim()} : {}),
         rules: r.rules.array().map((x) => Object.fromEntries(["rule", "model_hash", "jobname", "jobcount", "status", "alerts", "failed", "piles", "piles_done"]
           .map((k) => [k, typeof x.get()[k].get() === "string" ? x.get()[k].get().trim() : x.get()[k].get()])))};
     };
@@ -584,7 +587,10 @@ ENDCLASS.
       ...(status === undefined ? {} : {is_params: paramsOf(status)}),
       ...(bind === undefined ? {} : {iv_bind: new abap.types.String().set(bind)}),
       ...(allow ? {iv_allow_replay: new abap.types.Character(1).set("X")} : {})})).then(plain);
-    const clearLog = () => exec(["DELETE FROM zosd_l3_alert", "DELETE FROM zosd_l3_pile"]);
+    const clearLog = () => exec(["DELETE FROM zosd_l3_alert", "DELETE FROM zosd_l3_pile", "DELETE FROM zosd_l3_run"]);
+    // the run lock of the set and date: {run, status}, or undefined
+    const lockRow = () => read("SELECT run_id, status FROM zosd_l3_run WHERE set_name = 'fleet' AND check_date = ?", DATE)
+      .map((r) => ({run: r.run_id.trim(), status: r.status.trim()}))[0];
 
     before(async () => {
       // the renderer and the other suites boot the in-memory system first;
@@ -625,7 +631,7 @@ ENDCLASS.
       Object.assign(classes, classesBefore);
     });
     after(async () => {
-      if (client) await exec([...Object.keys(FLEET).map((t) => `DELETE FROM ${t}`), "DELETE FROM zosd_l3_alert", "DELETE FROM zosd_l3_pile"]).catch(() => {});
+      if (client) await exec([...Object.keys(FLEET).map((t) => `DELETE FROM ${t}`), "DELETE FROM zosd_l3_alert", "DELETE FROM zosd_l3_pile", "DELETE FROM zosd_l3_run"]).catch(() => {});
       store?.close();
       await client?.disconnect?.();
       if (priorAbap === abap && priorContext) {
@@ -780,6 +786,39 @@ ENDCLASS.
       expect(log()).to.deep.equal(before);
     });
 
+    // one run of the set per date at a time (docs/dsl-l3.md, "One run at a time"): what must hold, as a list of what is wrong
+    const collectOf = (className, result) => dialogStep(() => abap.Classes[className.toUpperCase()].collect({is_result: result.raw})).then(plain);
+    const runRaw = (className) => dialogStep(async () => {
+      const raw = await abap.Classes[className.toUpperCase()].run({iv_date: date(), iv_mode: new abap.types.Character(1).set("S")});
+      return {...plain(raw), raw};
+    });
+    async function lockProblems(className) {
+      const problems = [];
+      await clearLog();
+      const first = await runRaw(className);
+      if (JSON.stringify(lockRow()) !== JSON.stringify({run: first.run, status: "RELEASED"})) problems.push(`after mode S the lock is ${JSON.stringify(lockRow())}`);
+      // another run holding the lock (a mode P run not yet collected, or one in another process)
+      await exec([`UPDATE zosd_l3_run SET run_id = 'OTHER', status = 'HELD' WHERE set_name = 'fleet' AND check_date = '${DATE}'`]);
+      const busy = await runRaw(className);
+      if (busy.status !== "BUSY") problems.push(`a run while another holds the lock is ${busy.status}`);
+      if (read("SELECT COUNT(*) AS n FROM zosd_l3_pile WHERE run_id = ?", busy.run)[0].n) problems.push("a BUSY run planned");
+      if (log().some((r) => r.run === busy.run)) problems.push("a BUSY run wrote alerts");
+      await exec([`UPDATE zosd_l3_run SET status = 'RELEASED' WHERE set_name = 'fleet' AND check_date = '${DATE}'`]);
+      // input (a): a newer run B completes; then a late collect( ) of the older run A must not finalise B's rows away
+      const second = await runRaw(className);
+      const late = await collectOf(className, first);
+      const rows = log();
+      if (rows.length !== 7 || rows.some((r) => r.run !== second.run)) problems.push(`after a late collect of the older run the log holds ${rows.length} row(s) of ${[...new Set(rows.map((r) => r.run === second.run ? "the newer run" : r.run))]}`);
+      if (lockRow()?.run !== second.run) problems.push(`the late collect took the lock: ${JSON.stringify(lockRow())}`);
+      return {problems, first, busy, second, late};
+    }
+
+    it("one run per set and date: mode S takes the lock and releases it; a run while another holds it answers BUSY; a late collect of an older run does not finalise", async () => {
+      const {problems, busy} = await lockProblems(RUNNER);
+      expect(problems).to.deep.equal([]);
+      expect(busy.rules).to.deep.equal([]);
+    });
+
     // a log variant whose pile 2 writes do not land: the rules alerting there fail that pile
     const failingPile2 = async () => {
       if (!abap.Classes.ZCL_L3_FLEET_ALERTS_LOG_PILE2) {
@@ -874,6 +913,22 @@ ENDCLASS.
         expect(new Set(rows.map((r) => r.run))).to.deep.equal(new Set([submitted.run]));
       });
 
+      it("a submitted run holds the lock: collect before the jobs ran keeps it, a run meanwhile is BUSY, the final collect releases it", async () => {
+        await clearLog();
+        const submitted = await runParallel();
+        expect(lockRow()).to.deep.equal({run: submitted.run, status: "HELD"});
+        const early = await collect(submitted);
+        expect(early.status).to.equal("RUNNING");
+        expect(lockRow()).to.deep.equal({run: submitted.run, status: "HELD"});
+        const busy = await runSet(RUNNER);
+        expect(busy.status).to.equal("BUSY");
+        await drainAndWork();
+        const done = await collect(submitted);
+        expect(done.status).to.equal("DONE");
+        expect(lockRow()).to.deep.equal({run: submitted.run, status: "RELEASED"});
+        expect((await runSet(RUNNER)).status).to.equal("DONE");
+      });
+
       it("a second parallel run (a retry) leaves the same log, under its own run id", async () => {
         const submitted = await runParallel();
         const {outcomes} = await drainAndWork();
@@ -906,7 +961,7 @@ ENDCLASS.
       const files = {[`${name}.clas.abap`]: abapSource, [`${name}.clas.xml`]: readFileSync(join(OUT, `${RUNNER}.clas.xml`), "utf8")
         .replace(RUNNER.toUpperCase(), name.toUpperCase()), ...extra};
       for (const [f, text] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(text, f, core)));
-      const deps = ["src/dsl/zosd_l3_alert.tabl.xml", "src/dsl/zosd_l3_pile.tabl.xml", "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
+      const deps = ["src/dsl/zosd_l3_alert.tabl.xml", "src/dsl/zosd_l3_pile.tabl.xml", "src/dsl/zosd_l3_run.tabl.xml", "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
         "gen/gui/zcl_osd_batch_report.clas.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),
         // the ports the runner binds: their interfaces, variants, factory and exception
@@ -1008,6 +1063,43 @@ ENDCLASS.
         expect(log()).to.have.length(7);
         await runSet("zcl_l3_fleet_finalise_any", "S", "alerts=dummy");
         expect(log()).to.deep.equal([]);
+      });
+
+      it("a lock that is always taken: the run while another holds it is not BUSY", async () => {
+        await runnerMutant("zcl_l3_fleet_lock_always", "    IF sy-dbcnt = 1.\n      rv_locked = abap_true.\n    ENDIF.\n", "    rv_locked = abap_true.\n");
+        const {problems} = await lockProblems("zcl_l3_fleet_lock_always");
+        expect(problems).to.include("a run while another holds the lock is DONE");
+      });
+
+      it("mode S that never releases: the lock stays HELD after the run", async () => {
+        await runnerMutant("zcl_l3_fleet_no_release", "          release( iv_run = rs_result-run_id iv_date = rs_result-check_date ).\n", "");
+        const {problems} = await lockProblems("zcl_l3_fleet_no_release");
+        expect(problems[0]).to.match(/^after mode S the lock is \{"run":"\w+","status":"HELD"\}/);
+      });
+
+      it("finalise for a run that is not the latest (input a): a late collect of the older run deletes the newer run's rows", async () => {
+        await runnerMutant("zcl_l3_fleet_not_latest", "    IF lv_latest <> iv_run.\n      RETURN.\n    ENDIF.\n", "");
+        const {problems} = await lockProblems("zcl_l3_fleet_not_latest");
+        expect(problems).to.include("after a late collect of the older run the log holds 0 row(s) of ");
+      });
+
+      it("collect releasing before every pile is final: the lock is gone while the jobs have not run", async () => {
+        await runnerMutant("zcl_l3_fleet_release_early", "    IF lv_final = abap_true.\n", "    IF abap_true = abap_true.\n");
+        await clearLog();
+        // the generated runner submits (a runner transpiled alone cannot: SUBMIT needs the jobs layer); the mutant collects
+        const submitted = await dialogStep(async () => {
+          const raw = await abap.Classes.ZCL_L3_FLEET.run({iv_date: date(), iv_mode: new abap.types.Character(1).set("P")});
+          return {...plain(raw), raw};
+        });
+        expect(lockRow()).to.deep.equal({run: submitted.run, status: "HELD"});
+        expect((await collectOf(RUNNER, submitted)).status, "control: the generated collect keeps the lock").to.equal("RUNNING");
+        expect(lockRow()).to.deep.equal({run: submitted.run, status: "HELD"});
+        await collectOf("zcl_l3_fleet_release_early", submitted);
+        expect(lockRow(), "red: released before the jobs ran").to.deep.equal({run: submitted.run, status: "RELEASED"});
+        // the released jobs (they run ZCL_L3_FLEET by name) are worked off before the next test
+        await drainJobOutbox(store);
+        for (let i = 0; i < 40; i++) if (!["completed", "failed", "step", "running"].includes((await workQueuedBatch(root, store)).kind)) break;
+        await clearLog();
       });
 
       it("a pile reading the range of another pile (pile 1 for every pile): the union check turns red", async () => {
@@ -1412,7 +1504,8 @@ ENDCLASS.
         it("a runner that does not restore on an exception leaves the table replaced when a rule raises: caught", async () => {
           const name = "zcl_l3_fleet_nc";
           const text = renamed(name);
-          await loadRunner(name, mutate(text, "      CATCH cx_root INTO lx_error.\n        IF lv_swap_1 = abap_true.\n          restore_1( lt_keep_1 ).\n        ENDIF.\n        RAISE EXCEPTION lx_error.\n", ""));
+          await loadRunner(name, mutate(text, "      CATCH cx_root INTO lx_error.\n        release( iv_run = rs_result-run_id iv_date = rs_result-check_date ).\n"
+            + "        IF lv_swap_1 = abap_true.\n          restore_1( lt_keep_1 ).\n        ENDIF.\n        RAISE EXCEPTION lx_error.\n", ""));
           const problems = await boomProblems(name);
           expect(problems.join("\n")).to.match(/the ships table was left replaced/);
           await exec([...Object.keys({zosd_l2_ship: 1}).map((t) => `DELETE FROM ${t}`),

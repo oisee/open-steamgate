@@ -38,6 +38,7 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
              rules TYPE tt_rule,
 {{#piles}}
              bind TYPE string,
+             status TYPE c LENGTH 12,
 {{/piles}}
            END OF ty_result.
     CONSTANTS c_set TYPE zosd_l3_alert-set_name VALUE {{set | literal}}.
@@ -110,6 +111,14 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
 {{#piles}}
+    " one run of the set per check date at a time: ZOSD_L3_RUN
+    CLASS-METHODS lock
+      IMPORTING iv_run TYPE csequence
+                iv_date TYPE d
+      RETURNING VALUE(rv_locked) TYPE abap_bool.
+    CLASS-METHODS release
+      IMPORTING iv_run TYPE csequence
+                iv_date TYPE d.
     CLASS-METHODS finalise
       IMPORTING iv_rule TYPE csequence
                 iv_hash TYPE csequence
@@ -192,6 +201,14 @@ CLASS {{class}} IMPLEMENTATION.
         GET TIME STAMP FIELD lv_stamp.
         rs_result-run_id = lv_stamp.
     ENDTRY.
+{{#piles}}
+    " one run of the set per check date at a time: a run that finds the lock
+    " held by another answers BUSY and plans nothing
+    IF lock( iv_run = rs_result-run_id iv_date = rs_result-check_date ) = abap_false.
+      rs_result-status = 'BUSY'.
+      RETURN.
+    ENDIF.
+{{/piles}}
     lt_rules = rules( ).
     " a source that is not live replaces table content for this run, and the
     " table is put back whatever happens: after the loop, or when an exception
@@ -288,8 +305,21 @@ CLASS {{class}} IMPLEMENTATION.
           rs_result-alerts = rs_result-alerts + ls_rule-alerts.
           APPEND ls_rule TO rs_result-rules.
         ENDLOOP.
+        " mode P holds the lock until collect( ) finds every pile final
+        IF iv_mode = c_parallel.
+          rs_result-status = 'SUBMITTED'.
+        ELSE.
+          rs_result-status = 'DONE'.
+          LOOP AT rs_result-rules INTO ls_rule WHERE status <> 'DONE'.
+            rs_result-status = 'PARTIAL'.
+          ENDLOOP.
+          release( iv_run = rs_result-run_id iv_date = rs_result-check_date ).
+        ENDIF.
 {{/piles}}
       CATCH cx_root INTO lx_error.
+{{#piles}}
+        release( iv_run = rs_result-run_id iv_date = rs_result-check_date ).
+{{/piles}}
 {{#sources}}
         IF lv_swap_{{index}} = abap_true.
           restore_{{index}}( lt_keep_{{index}} ).
@@ -521,11 +551,51 @@ CLASS {{class}} IMPLEMENTATION.
   ENDMETHOD.
 
 {{#piles}}
+  METHOD lock.
+    " INSERT takes a set and date never run, UPDATE one whose last run
+    " released it; each is one statement, so of two runs at once one wins.
+    " The row stays after the release and names the latest run
+    DATA ls_run TYPE zosd_l3_run.
+    ls_run-set_name = c_set.
+    ls_run-check_date = iv_date.
+    ls_run-run_id = iv_run.
+    ls_run-status = 'HELD'.
+    GET TIME STAMP FIELD ls_run-started.
+    INSERT zosd_l3_run FROM ls_run.
+    IF sy-subrc = 0.
+      rv_locked = abap_true.
+      RETURN.
+    ENDIF.
+    UPDATE zosd_l3_run SET run_id = ls_run-run_id status = ls_run-status started = ls_run-started
+      WHERE set_name = c_set
+        AND check_date = iv_date
+        AND status = 'RELEASED'.
+    IF sy-dbcnt = 1.
+      rv_locked = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD release.
+    UPDATE zosd_l3_run SET status = 'RELEASED'
+      WHERE set_name = c_set
+        AND check_date = iv_date
+        AND run_id = iv_run.
+  ENDMETHOD.
+
   METHOD finalise.
     " every pile of the rule is DONE in this run: the rows of the same set,
     " rule, model hash and date that an older run wrote, under piles cut
-    " elsewhere, go. Only the log keeps older runs; a run bound to another
-    " variant of {{sink.name}} leaves the log as it is
+    " elsewhere, go. The alert key has no run, so only the latest run of the
+    " set and date may finalise: a late collect( ) of an older run would
+    " delete the slots a newer run rewrote. Only the log keeps older runs; a
+    " run bound to another variant of {{sink.name}} leaves the log as it is
+    DATA lv_latest TYPE zosd_l3_run-run_id.
+    SELECT SINGLE run_id FROM zosd_l3_run INTO lv_latest
+      WHERE set_name = c_set
+        AND check_date = iv_date.
+    IF lv_latest <> iv_run.
+      RETURN.
+    ENDIF.
     IF {{ports_class}}=>variant( iv_port = {{sink.name | literal}} iv_bind = iv_bind ) <> 'log'.
       RETURN.
     ENDIF.
@@ -640,6 +710,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_open TYPE c LENGTH 12.
     DATA lv_state TYPE c LENGTH 12.
     DATA lv_lost TYPE abap_bool.
+    DATA lv_final TYPE abap_bool VALUE abap_true.
 {{/piles}}
     DATA ls_rule TYPE ty_rule.
     DATA lv_aborted TYPE btch0000-char1.
@@ -773,8 +844,11 @@ CLASS {{class}} IMPLEMENTATION.
               GET TIME STAMP FIELD ls_pile-ended.
               UPDATE zosd_l3_pile FROM ls_pile.
             ENDIF.
-          ELSEIF lv_open IS INITIAL.
-            lv_open = lv_state.
+          ELSE.
+            lv_final = abap_false.
+            IF lv_open IS INITIAL.
+              lv_open = lv_state.
+            ENDIF.
           ENDIF.
         ENDIF.
         IF ls_pile-status = 'DONE'.
@@ -799,6 +873,16 @@ CLASS {{class}} IMPLEMENTATION.
       rs_result-alerts = rs_result-alerts + ls_rule-alerts.
       APPEND ls_rule TO rs_result-rules.
     ENDLOOP.
+    " every pile final (DONE or FAILED): the run lets the next one in
+    IF lv_final = abap_true.
+      rs_result-status = 'DONE'.
+      LOOP AT rs_result-rules INTO ls_rule WHERE status <> 'DONE'.
+        rs_result-status = 'PARTIAL'.
+      ENDLOOP.
+      release( iv_run = is_result-run_id iv_date = is_result-check_date ).
+    ELSE.
+      rs_result-status = 'RUNNING'.
+    ENDIF.
 {{/piles}}
   ENDMETHOD.
 ENDCLASS.

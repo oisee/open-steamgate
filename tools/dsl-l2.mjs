@@ -17,14 +17,12 @@ import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSyn
 import {tmpdir} from "node:os";
 import {dirname, join, relative, resolve as resolvePath, sep} from "node:path";
 import {pathToFileURL} from "node:url";
-import {createRequire} from "node:module";
 import yaml from "js-yaml";
 import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor, unresolvedDeep} from "./dsl-ddic.mjs";
+import {compileParams} from "./dsl-l2-params.mjs";
 import {compileRange, exampleRange} from "./dsl-l2-range.mjs";
 import {lineIndex, lineOf} from "./dsl-yaml-lines.mjs";
 import {INT_RANGE, PACKED, allReferences, canonical, compareValues, deriveCases, evaluate, kindOf, shiftDate} from "./dsl-l2-eval.mjs";
-
-const {DDIC} = createRequire(import.meta.url)("@abaplint/core/build/src/ddic.js");
 
 export {evaluate, stepValue} from "./dsl-l2-eval.mjs";
 export {lineIndex} from "./dsl-yaml-lines.mjs";
@@ -516,30 +514,13 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   if (/[\r\n]/.test(title)) failAt(line("title"))("title must be one line");
 
   registry ??= registryFor(ddic, []);
-  const parameterTypes = new DDIC(registry);
-  const params = new Map();
-  if (doc.params !== undefined) {
-    need(doc.params, "params", "a mapping of parameter names to types", "map");
-    for (const [rawName, spec] of Object.entries(doc.params)) {
-      const path = `params/${rawName}`;
-      const name = rawName.toLowerCase();
-      if (!/^[a-z][a-z0-9_]*$/.test(rawName) || rawName !== name || name.length > 27) failAt(line(path))(`parameter ${rawName} must be a lower-case ABAP name of at most 27 characters`);
-      if (name === "date") failAt(line(path))("parameter date clashes with the built-in $date");
-      need(spec, path, "a mapping with type and optional default", "map");
-      for (const key of Object.keys(spec)) if (!["type", "default"].includes(key)) failAt(line(`${path}/${key}`))(`unknown key params.${rawName}.${key}`);
-      const typeName = need(spec.type, `${path}/type`, "a DDIC element or built-in type").toUpperCase();
-      const resolved = parameterTypes.lookupBuiltinType(typeName) ?? parameterTypes.lookup(typeName)?.type;
-      const type = DDIC_PROVIDER.literalType(registry, resolved, typeName);
-      if (type.resolved === false) failAt(line(`${path}/type`))(`parameter $${name} type ${typeName} cannot resolve: ${type.reason}`);
-      if (spec.default !== undefined) {
-        const value = need(spec.default, `${path}/default`, "a scalar default");
-        const why = misfit(value, type);
-        if (why) failAt(line(`${path}/default`))(`default for $${name} is ${typeText(type)}; ${why}`);
-      }
-      params.set(name, {"@id": `${id}/param/${name}`, rule_line: line(path), name, type_name: typeName.toLowerCase(), type,
-        ref: `iv_${name}`, ...(spec.default !== undefined ? {default: spec.default, "default@type": type} : {})});
-    }
-  }
+  // <TABLE>-<field>: the field's type; undefined for a table or field the DDIC does not have
+  const fieldType = (table, column) => {
+    let info;
+    try { info = tableInfo(registry, table, () => { throw fieldType; }); } catch (e) { if (e === fieldType) return undefined; throw e; }
+    return info.fields.get(column)?.literal;
+  };
+  const params = compileParams({doc, registry, id, line, failAt, need, misfit, typeText, fieldType});
   const usedParams = new Set();
   const windows = new Map();
   const tables = new Map();

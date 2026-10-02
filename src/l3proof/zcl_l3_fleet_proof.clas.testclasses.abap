@@ -5,7 +5,8 @@
 * rerun with one pile per rule finalises away the older run's piles, a
 * plan whose pile fails stays PARTIAL and keeps the older rows, and mode P
 * (one background job per rule and pile) ends with every pile DONE and the
-* same log as mode S.
+* same log as mode S, a run started meanwhile answers BUSY, and the final
+* collect releases the set's lock for the date.
 * RISK LEVEL DANGEROUS: setup commits rows into the rule tables, every run
 * commits its alerts, and teardown deletes both again and commits. The
 * keys all start with L30, which no generated L2 test uses.
@@ -105,6 +106,9 @@ CLASS ltcl_proof IMPLEMENTATION.
       DELETE FROM zosd_l3_alert WHERE set_name = zcl_l3_fleet=>c_set AND run_id = lv_run.
       DELETE FROM zosd_l3_pile WHERE set_name = zcl_l3_fleet=>c_set AND run_id = lv_run.
     ENDLOOP.
+    " the run lock of the proof's date, held or released
+    DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet=>c_set
+                              AND check_date = zcl_l3_fleet_proof=>c_check_date.
     CLEAR mt_runs.
     COMMIT WORK.
   ENDMETHOD.
@@ -221,6 +225,8 @@ CLASS ltcl_proof IMPLEMENTATION.
   METHOD mode_p.
     DATA ls_seq TYPE zcl_l3_fleet=>ty_result.
     DATA ls_par TYPE zcl_l3_fleet=>ty_result.
+    DATA ls_busy TYPE zcl_l3_fleet=>ty_result.
+    DATA ls_lock TYPE zosd_l3_run.
     DATA ls_rule TYPE zcl_l3_fleet=>ty_rule.
     DATA ls_same TYPE zcl_l3_fleet=>ty_rule.
     DATA lt_seq TYPE tt_row.
@@ -241,9 +247,24 @@ CLASS ltcl_proof IMPLEMENTATION.
         cl_abap_unit_assert=>fail( msg = 'each fleet rule needs more than one pile and job' ).
       ENDIF.
     ENDLOOP.
+    " the submitted run holds the set's lock for the date until collect( )
+    " finds every pile final: a second run answers BUSY and plans nothing
+    ls_busy = zcl_l3_fleet=>run( iv_date = zcl_l3_fleet_proof=>c_check_date
+                                 iv_mode = zcl_l3_fleet=>c_sequential ).
+    cl_abap_unit_assert=>assert_equals( act = ls_busy-status exp = 'BUSY'
+      msg = 'a run while another of the same set and date is open answers BUSY' ).
+    SELECT COUNT(*) FROM zosd_l3_pile WHERE set_name = zcl_l3_fleet=>c_set AND run_id = ls_busy-run_id.
+    lv_count = sy-dbcnt.
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 0 msg = 'a BUSY run plans nothing' ).
 
     ls_par = wait_for_jobs( ls_par ).
     assert_all( is_result = ls_par iv_status = 'DONE' iv_when = 'the jobs' ).
+    SELECT SINGLE * FROM zosd_l3_run INTO ls_lock
+      WHERE set_name = zcl_l3_fleet=>c_set AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    cl_abap_unit_assert=>assert_equals( act = ls_lock-run_id exp = ls_par-run_id
+      msg = 'the lock row names the latest run' ).
+    cl_abap_unit_assert=>assert_equals( act = ls_lock-status exp = 'RELEASED'
+      msg = 'collect releases the lock once every pile is final' ).
     LOOP AT ls_par-rules INTO ls_rule.
       READ TABLE ls_seq-rules INTO ls_same WITH KEY rule = ls_rule-rule.
       CONCATENATE ls_rule-rule ': the job wrote as many alerts as mode S' INTO lv_msg.
@@ -277,6 +298,7 @@ CLASS ltcl_proof IMPLEMENTATION.
     DATA lv_left TYPE i.
     DATA lv_failed TYPE abap_bool.
     DATA lv_status TYPE zosd_l3_pile-status.
+    DATA ls_lock TYPE zosd_l3_run.
     ls_old = run_set( zcl_l3_fleet=>c_sequential ).
     ls_new-set_name = zcl_l3_fleet=>c_set.
     ls_new-check_date = zcl_l3_fleet_proof=>c_check_date.
@@ -284,6 +306,13 @@ CLASS ltcl_proof IMPLEMENTATION.
     ls_new-rules = zcl_l3_fleet=>rules( ).
     ls_new-run_id = cl_system_uuid=>create_uuid_c32_static( ).
     APPEND ls_new-run_id TO mt_runs.
+    " the second run holds the set's lock for the date, as run( ) takes it:
+    " it is the latest run, the one collect( ) may finalise for
+    ls_lock-set_name = zcl_l3_fleet=>c_set.
+    ls_lock-check_date = zcl_l3_fleet_proof=>c_check_date.
+    ls_lock-run_id = ls_new-run_id.
+    ls_lock-status = 'HELD'.
+    MODIFY zosd_l3_run FROM ls_lock.
     lt_piles = zcl_l3_fleet=>plan( iv_run = ls_new-run_id
                                    iv_date = zcl_l3_fleet_proof=>c_check_date ).
     INSERT zosd_l3_pile FROM TABLE lt_piles.

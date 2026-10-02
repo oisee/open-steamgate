@@ -6,7 +6,7 @@ CLASS zcl_l2_ship_captain DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS check
       IMPORTING iv_date TYPE d
                 it_range TYPE tt_range OPTIONAL
-                iv_active_status TYPE c DEFAULT 'A'
+                iv_active_status TYPE zosd_l2_ship-status DEFAULT 'A'
       RETURNING VALUE(rt_alerts) TYPE string_table.
 ENDCLASS.
 

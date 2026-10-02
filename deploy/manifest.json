@@ -4,7 +4,7 @@
   "customerNamespaces": [],
   "units": {
     "l3demo": {
-      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner with its ports (two interfaces, five generated variants, the factory and its exception), its job report, the alert log, the pile plan table and the proof class. Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
+      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner with its ports (two interfaces, five generated variants, the factory and its exception), its job report, the alert log, the pile plan table, the run lock and the proof class. Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
       "sources": ["src/l3proof"],
       "objects": [
         "TABL ZOSD_L2_SHIP",
@@ -14,6 +14,7 @@
         "DTEL ZOSD_L2_WEIGHT",
         "TABL ZOSD_L3_ALERT",
         "TABL ZOSD_L3_PILE",
+        "TABL ZOSD_L3_RUN",
         "CLAS ZCL_L2_MAINTENANCE_SHIP",
         "CLAS ZCL_L2_GROUNDED_SHIP_CREW",
         "CLAS ZCL_L2_SHIP_CAPTAIN",

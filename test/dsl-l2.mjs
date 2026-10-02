@@ -285,6 +285,33 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
     });
   });
 
+  describe("parameter types a class and a report accept (A4H 2026-10-02: ZL3_FLEET, \"Lengths must be specified explicitly\")", () => {
+    const CAPTAIN = readFileSync(REQUIRE, "utf8");
+    const at = (file) => readFileSync(file, "utf8").split("\n").findIndex((l) => /^  active_status:/.test(l)) + 1;
+    const captain = (name, type) => {
+      const file = join(scratch, `${name}.l2.yaml`);
+      writeFileSync(file, CAPTAIN.replace("active_status: {type: ZOSD_L2_SHIP-STATUS, default: A}", `active_status: {type: ${type}, default: A}`));
+      return file;
+    };
+    for (const bare of ["C", "c", "N", "P", "X"]) {
+      it(`refuses a bare ${bare} at its line`, () => {
+        const file = captain(`bare-${bare}`, bare);
+        expect(() => compileRule(file, {registry})).to.throw(RuleError,
+          new RegExp(`:${at(file)}: parameter \\$active_status type ${bare.toUpperCase()} has no length, which a class or report refuses`));
+      });
+    }
+    it("a table field types the parameter as the field is typed, and the ABAP names it as written", () => {
+      const model = compileRule(REQUIRE, {registry});
+      expect(model.params.map((p) => [p.type_name, p.type])).to.deep.equal([["zosd_l2_ship-status", {built_in: "CHAR", length: 1}]]);
+      expect(readFileSync(join(OUT, "zcl_l2_ship_captain.clas.abap"), "utf8")).to.include("iv_active_status TYPE zosd_l2_ship-status DEFAULT 'A'");
+      expect(readFileSync(join(OUT, "zcl_l2_ship_captain.clas.testclasses.abap"), "utf8")).to.include("iv_active_status TYPE zosd_l2_ship-status DEFAULT 'A'");
+    });
+    it("refuses a field the table does not have", () => {
+      const file = captain("no-field", "ZOSD_L2_SHIP-COLOUR");
+      expect(() => compileRule(file, {registry})).to.throw(RuleError, new RegExp(`:${at(file)}: parameter \\$active_status type ZOSD_L2_SHIP-COLOUR cannot resolve`));
+    });
+  });
+
   describe("type errors name the rule file and line", () => {
     const cases = [
       ["a date compared with a CHAR literal", "voy.dep_date > $date", "voy.dep_date > 'M'",

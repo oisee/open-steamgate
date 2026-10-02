@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet.l3.yaml",
  "template": "recipes/l3-ports/factory.tpl",
- "model": "sha256:7209cca408ddb12140d1f5d8283b2a9e1696cba41bda6c11cbb1f0daea79398d",
+ "model": "sha256:d8d3b467bfdca9bd4fbe71883d889f1836e03c6b7032575a849b27b4e04cef3c",
  "rules": {
   "maintenance-ship-no-future-voyage": {
    "file": "src/l2demo/maintenance_ship.l2.yaml",
@@ -17,7 +17,7 @@
   "ship-in-service-has-a-captain": {
    "file": "src/l2demo/ship_captain.l2.yaml",
    "class": "zcl_l2_ship_captain",
-   "model": "sha256:1320a814f73cd18107c8e629c40a6818ec7c587f376c6fbf4ad63a749f5c2ab5"
+   "model": "sha256:c354a2df3f0f895d4132bc9e3f3fadd07b2f7b04066360d8ba6c7fcabd981d99"
   },
   "ship-too-many-future-voyages": {
    "file": "src/l2demo/ship_voyage_limit.l2.yaml",

@@ -14,7 +14,7 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
     METHODS check_reference
       IMPORTING iv_date TYPE d
                 it_range TYPE tt_range OPTIONAL
-                iv_active_status TYPE c DEFAULT 'A'
+                iv_active_status TYPE zosd_l2_ship-status DEFAULT 'A'
       RETURNING VALUE(rt_alerts) TYPE string_table.
     METHODS assert_alerts
       IMPORTING it_act TYPE string_table it_exp TYPE string_table iv_example TYPE string.

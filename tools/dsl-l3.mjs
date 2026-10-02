@@ -19,6 +19,7 @@ import {pathToFileURL} from "node:url";
 import yaml from "js-yaml";
 const abaplint = createRequire(import.meta.url)("@abaplint/core");
 import {lineOf} from "./dsl-yaml-lines.mjs";
+import {LENGTHLESS} from "./dsl-l2-params.mjs";
 import {compileRule, lineIndex, misfit, modelHash, renderModel, rulePath, RuleError} from "./dsl-l2.mjs";
 import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
 
@@ -241,6 +242,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     if (!/^[a-z][a-z0-9_]{0,26}$/.test(name)) fail(at, `set parameter ${name} is a lower-case ABAP name of at most 27 characters`);
     if (!spec || typeof spec !== "object" || Array.isArray(spec) || typeof spec.type !== "string") fail(at, `set parameter ${name} is {type: <type>, default: <value>}, with a type`);
     for (const key of Object.keys(spec)) if (!["type", "default"].includes(key)) fail(line(`params/${name}/${key}`), `unknown key ${key} of set parameter ${name} (type, default)`);
+    if (LENGTHLESS.has(spec.type.toUpperCase())) fail(line(`params/${name}/type`), `set parameter ${name} is ${spec.type.toUpperCase()}, which has no length and which a class or report refuses; name a data element or <TABLE>-<field>, as the rule does`);
     const uses = enabled.flatMap((r) => (r.compiled.params ?? []).filter((p) => p.name === name).map((p) => ({...p, rule: r.compiled.rule})));
     if (!uses.length) fail(at, `set parameter ${name} is not used: no enabled rule declares $${name}`);
     const other = uses.find((p) => p.type_name !== spec.type.toLowerCase() || JSON.stringify(p.type) !== JSON.stringify(uses[0].type));

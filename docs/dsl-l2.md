@@ -636,8 +636,11 @@ each mutation is caught.
 
 ## Slice 7: typed parameters and date windows
 
-`params:` declares names for `$name` operands. Each name has a DDIC element or
-provider-resolved built-in `type`, and may have a `default`. For example,
+`params:` declares names for `$name` operands. Each name has a DDIC element,
+a table field (`<TABLE>-<field>`, typed as the field is and named so in the
+ABAP) or a provider-resolved built-in `type`, and may have a `default`. A bare
+`C`, `N`, `P` or `X` is refused at its line: it has no length, and a system
+refuses it in a class or a report (A4H, 2026-10-02; `tools/dsl-l2-params.mjs`). For example,
 `max_days: {type: ZOSD_L2_DAYS, default: 30}` declares `$max_days`. A default
 makes the ABAP IMPORTING parameter optional; without it, every example must
 supply a value. An example's `params:` mapping overrides defaults. The test

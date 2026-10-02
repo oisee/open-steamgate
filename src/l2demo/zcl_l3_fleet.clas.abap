@@ -17,7 +17,7 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES tt_pile TYPE STANDARD TABLE OF zosd_l3_pile WITH DEFAULT KEY.
     " the set parameters; run( ) gives a component that is initial its default
     TYPES: BEGIN OF ty_params,
-             active_status TYPE c,
+             active_status TYPE zosd_l2_ship-status,
            END OF ty_params.
     TYPES: BEGIN OF ty_result,
              set_name TYPE zosd_l3_alert-set_name,
@@ -27,6 +27,7 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
              alerts TYPE i,
              rules TYPE tt_rule,
              bind TYPE string,
+             status TYPE c LENGTH 12,
            END OF ty_result.
     CONSTANTS c_set TYPE zosd_l3_alert-set_name VALUE 'fleet'.
     CONSTANTS c_sequential TYPE c LENGTH 1 VALUE 'S'.
@@ -38,7 +39,7 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_rule_2 TYPE zosd_l3_alert-rule_name VALUE 'grounded-ship-keeps-only-keepers'.
     CONSTANTS c_hash_2 TYPE zosd_l3_alert-model_hash VALUE 'sha256:b394b7c481c2078cec32dd098774403af021f9b5992e10060c4df66f30a2ec63'.
     CONSTANTS c_rule_3 TYPE zosd_l3_alert-rule_name VALUE 'ship-in-service-has-a-captain'.
-    CONSTANTS c_hash_3 TYPE zosd_l3_alert-model_hash VALUE 'sha256:1320a814f73cd18107c8e629c40a6818ec7c587f376c6fbf4ad63a749f5c2ab5'.
+    CONSTANTS c_hash_3 TYPE zosd_l3_alert-model_hash VALUE 'sha256:c354a2df3f0f895d4132bc9e3f3fadd07b2f7b04066360d8ba6c7fcabd981d99'.
     CONSTANTS c_rule_4 TYPE zosd_l3_alert-rule_name VALUE 'ship-too-many-future-voyages'.
     CONSTANTS c_hash_4 TYPE zosd_l3_alert-model_hash VALUE 'sha256:d5ba08cb38257a35fa27e16091cb1325fe0b3ad00dce9d5b1dfcb24d4e103596'.
     CONSTANTS c_rule_5 TYPE zosd_l3_alert-rule_name VALUE 'ship-min-crew'.
@@ -89,6 +90,14 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 it_alerts TYPE string_table
                 iv_bind TYPE string OPTIONAL
       CHANGING cs_rule TYPE ty_rule.
+    " one run of the set per check date at a time: ZOSD_L3_RUN
+    CLASS-METHODS lock
+      IMPORTING iv_run TYPE csequence
+                iv_date TYPE d
+      RETURNING VALUE(rv_locked) TYPE abap_bool.
+    CLASS-METHODS release
+      IMPORTING iv_run TYPE csequence
+                iv_date TYPE d.
     CLASS-METHODS finalise
       IMPORTING iv_rule TYPE csequence
                 iv_hash TYPE csequence
@@ -142,6 +151,12 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
         GET TIME STAMP FIELD lv_stamp.
         rs_result-run_id = lv_stamp.
     ENDTRY.
+    " one run of the set per check date at a time: a run that finds the lock
+    " held by another answers BUSY and plans nothing
+    IF lock( iv_run = rs_result-run_id iv_date = rs_result-check_date ) = abap_false.
+      rs_result-status = 'BUSY'.
+      RETURN.
+    ENDIF.
     lt_rules = rules( ).
     " a source that is not live replaces table content for this run, and the
     " table is put back whatever happens: after the loop, or when an exception
@@ -211,7 +226,18 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
           rs_result-alerts = rs_result-alerts + ls_rule-alerts.
           APPEND ls_rule TO rs_result-rules.
         ENDLOOP.
+        " mode P holds the lock until collect( ) finds every pile final
+        IF iv_mode = c_parallel.
+          rs_result-status = 'SUBMITTED'.
+        ELSE.
+          rs_result-status = 'DONE'.
+          LOOP AT rs_result-rules INTO ls_rule WHERE status <> 'DONE'.
+            rs_result-status = 'PARTIAL'.
+          ENDLOOP.
+          release( iv_run = rs_result-run_id iv_date = rs_result-check_date ).
+        ENDIF.
       CATCH cx_root INTO lx_error.
+        release( iv_run = rs_result-run_id iv_date = rs_result-check_date ).
         IF lv_swap_1 = abap_true.
           restore_1( lt_keep_1 ).
         ENDIF.
@@ -507,11 +533,51 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD lock.
+    " INSERT takes a set and date never run, UPDATE one whose last run
+    " released it; each is one statement, so of two runs at once one wins.
+    " The row stays after the release and names the latest run
+    DATA ls_run TYPE zosd_l3_run.
+    ls_run-set_name = c_set.
+    ls_run-check_date = iv_date.
+    ls_run-run_id = iv_run.
+    ls_run-status = 'HELD'.
+    GET TIME STAMP FIELD ls_run-started.
+    INSERT zosd_l3_run FROM ls_run.
+    IF sy-subrc = 0.
+      rv_locked = abap_true.
+      RETURN.
+    ENDIF.
+    UPDATE zosd_l3_run SET run_id = ls_run-run_id status = ls_run-status started = ls_run-started
+      WHERE set_name = c_set
+        AND check_date = iv_date
+        AND status = 'RELEASED'.
+    IF sy-dbcnt = 1.
+      rv_locked = abap_true.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD release.
+    UPDATE zosd_l3_run SET status = 'RELEASED'
+      WHERE set_name = c_set
+        AND check_date = iv_date
+        AND run_id = iv_run.
+  ENDMETHOD.
+
   METHOD finalise.
     " every pile of the rule is DONE in this run: the rows of the same set,
     " rule, model hash and date that an older run wrote, under piles cut
-    " elsewhere, go. Only the log keeps older runs; a run bound to another
-    " variant of alerts leaves the log as it is
+    " elsewhere, go. The alert key has no run, so only the latest run of the
+    " set and date may finalise: a late collect( ) of an older run would
+    " delete the slots a newer run rewrote. Only the log keeps older runs; a
+    " run bound to another variant of alerts leaves the log as it is
+    DATA lv_latest TYPE zosd_l3_run-run_id.
+    SELECT SINGLE run_id FROM zosd_l3_run INTO lv_latest
+      WHERE set_name = c_set
+        AND check_date = iv_date.
+    IF lv_latest <> iv_run.
+      RETURN.
+    ENDIF.
     IF zcl_l3_fleet_ports=>variant( iv_port = 'alerts' iv_bind = iv_bind ) <> 'log'.
       RETURN.
     ENDIF.
@@ -582,6 +648,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     DATA lv_open TYPE c LENGTH 12.
     DATA lv_state TYPE c LENGTH 12.
     DATA lv_lost TYPE abap_bool.
+    DATA lv_final TYPE abap_bool VALUE abap_true.
     DATA ls_rule TYPE ty_rule.
     DATA lv_aborted TYPE btch0000-char1.
     DATA lv_finished TYPE btch0000-char1.
@@ -646,8 +713,11 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
               GET TIME STAMP FIELD ls_pile-ended.
               UPDATE zosd_l3_pile FROM ls_pile.
             ENDIF.
-          ELSEIF lv_open IS INITIAL.
-            lv_open = lv_state.
+          ELSE.
+            lv_final = abap_false.
+            IF lv_open IS INITIAL.
+              lv_open = lv_state.
+            ENDIF.
           ENDIF.
         ENDIF.
         IF ls_pile-status = 'DONE'.
@@ -672,5 +742,15 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
       rs_result-alerts = rs_result-alerts + ls_rule-alerts.
       APPEND ls_rule TO rs_result-rules.
     ENDLOOP.
+    " every pile final (DONE or FAILED): the run lets the next one in
+    IF lv_final = abap_true.
+      rs_result-status = 'DONE'.
+      LOOP AT rs_result-rules INTO ls_rule WHERE status <> 'DONE'.
+        rs_result-status = 'PARTIAL'.
+      ENDLOOP.
+      release( iv_run = is_result-run_id iv_date = is_result-check_date ).
+    ELSE.
+      rs_result-status = 'RUNNING'.
+    ENDIF.
   ENDMETHOD.
 ENDCLASS.
