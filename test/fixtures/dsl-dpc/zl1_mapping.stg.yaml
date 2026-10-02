@@ -19,16 +19,22 @@ entities:
         log: ET_RETURN
         in: {Id: IV_ID, Text: "IS_INPUT\\TEXT"}
         out: {Id: "ET_ITEMS\\ID", Text: "ES_ITEM\\TEXT", Scalar: EV_SCALAR}
-        constants: {"IT_CONTROL\\VALUE": "'O''Brien'", IV_LONG_PARAMETER_NAME_123: "'X'", IV_COUNT: "7"}
-      create: *mapped
-      update: *mapped
-      delete: *mapped
+        constants: {"IT_CONTROL\\VALUE": "'O''Brien'", IV_LONG_PARAMETER_NAME_123: "'X'", IV_COUNT: "abap_true"}
+      create:
+        <<: *mapped
+        constants: {"IT_CONTROL\\VALUE": "'O''Brien'", IV_LONG_PARAMETER_NAME_123: "'X'", IV_COUNT: "007"}
+      update:
+        <<: *mapped
+        constants: {"IT_CONTROL\\VALUE": "'O''Brien'", IV_LONG_PARAMETER_NAME_123: "'X'", IV_COUNT: "1.5"}
+      delete:
+        <<: *mapped
+        constants: {"IT_CONTROL\\VALUE": "'O''Brien'", IV_LONG_PARAMETER_NAME_123: "'X'", IV_COUNT: "-7"}
       query:
         function: Z_L1_MAP
         in: {Id: IV_ID, Text: "IS_INPUT\\TEXT"}
         out: {Id: "ET_ITEMS\\ID", Text: "ET_ITEMS\\TEXT"}
         ranges: {Fallback: IT_RANGE}
-        constants: {"IT_CONTROL\\VALUE": "'X'"}
+        constants: {"IT_CONTROL\\VALUE": "'X'", IV_COUNT: "'O''Brien'"}
   Empty:
     keys: [Id]
     properties: {Id: String(8)}

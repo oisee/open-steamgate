@@ -1084,14 +1084,15 @@ CLASS zcl_osd_dsl_dpc_templates IMPLEMENTATION.
       && cl_abap_char_utilities=>newline.
       WHEN 'rfc-constant_lines'.
         rv_text = ``
-      && `{{! Constants keep their lexical type; literal adds quotes and doubles embedded apostrophes. }}`
+      && `{{! Canonical integers and strings use literal; validated raw tokens retain oracle spelling. }}`
       && cl_abap_char_utilities=>newline
       && `{{#has_constants}}`
       && cl_abap_char_utilities=>newline
       && cl_abap_char_utilities=>newline
       && `* Maps constant value to function module parameters`
       && cl_abap_char_utilities=>newline
-      && `{{#constants}} {{#via_line}}ls_{{/via_line}}{{parameter}}{{#component}}-{{component}}{{/component}} = {{value | literal}}.`
+      && `{{#constants}} {{#via_line}}ls_{{/via_line}}{{parameter}}{{#component}}-{{component}}{{/component}} = {{#raw_token}}{{raw_token}}{{/raw_token}}{{^raw_token}}{{value | lit`
+      && `eral}}{{/raw_token}}.`
       && cl_abap_char_utilities=>newline
       && `{{/constants}}`
       && cl_abap_char_utilities=>newline

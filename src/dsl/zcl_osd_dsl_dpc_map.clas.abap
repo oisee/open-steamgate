@@ -12,6 +12,9 @@ CLASS zcl_osd_dsl_dpc_map DEFINITION PUBLIC FINAL CREATE PRIVATE.
     CLASS-METHODS f IMPORTING iv_name TYPE string iv_value TYPE string RETURNING VALUE(rv_json) TYPE string.
     CLASS-METHODS node IMPORTING iv_id TYPE string RETURNING VALUE(rv_json) TYPE string.
     CLASS-METHODS add IMPORTING iv_item TYPE string CHANGING cv_array TYPE string.
+    CLASS-METHODS constant_value
+      IMPORTING iv_value TYPE string iv_id TYPE string
+      RETURNING VALUE(rv_json) TYPE string.
     CLASS-METHODS parameter
       IMPORTING is_param TYPE zcl_osd_dsl_mapping=>ty_param iv_id TYPE string iv_intf TYPE string iv_local TYPE i DEFAULT 14 iv_remote TYPE i DEFAULT 21
       RETURNING VALUE(rv_json) TYPE string.
@@ -46,6 +49,43 @@ CLASS zcl_osd_dsl_dpc_map IMPLEMENTATION.
         rv_path = `ls_` && rv_path.
       ENDIF.
       rv_path = rv_path && `-` && to_lower( iv_component ).
+    ENDIF.
+  ENDMETHOD.
+  METHOD constant_value.
+    DATA lv_value TYPE string.
+    DATA lv_builtin TYPE string.
+    DATA lv_number TYPE p LENGTH 16 DECIMALS 0.
+* Both mapping oracles emit the original token, without numeric conversion.
+* Use literal only when it preserves that spelling; everything else is one
+* validated identifier/number token, never an expression or source fragment.
+    lv_value = iv_value.
+    FIND REGEX `[\r\n]` IN lv_value.
+    ASSERT sy-subrc <> 0.
+    FIND REGEX `^'([^'\r\n]|'')*'$` IN lv_value.
+    IF sy-subrc = 0.
+      lv_value = substring( val = lv_value off = 1 len = strlen( lv_value ) - 2 ).
+      lv_value = replace( val = lv_value sub = `''` with = `'` occ = 0 ).
+      lv_builtin = 'CHAR'.
+    ELSE.
+      FIND REGEX `^(0|-?[1-9][0-9]*)$` IN lv_value.
+      IF sy-subrc = 0 AND strlen( lv_value ) <= 11.
+        lv_number = lv_value.
+        IF lv_number >= -2147483648 AND lv_number <= 2147483647.
+          lv_builtin = 'INT4'.
+        ENDIF.
+      ENDIF.
+    ENDIF.
+    IF lv_builtin IS INITIAL.
+      FIND REGEX `^([A-Za-z_][A-Za-z0-9_]*|/[A-Za-z0-9_]+/[A-Za-z_][A-Za-z0-9_]*|-?[0-9]+(\.[0-9]+)?)$` IN lv_value.
+      ASSERT sy-subrc = 0.
+      rv_json = f( iv_name = 'kind' iv_value = 'raw_token' )
+        && f( iv_name = 'raw_token' iv_value = lv_value ).
+    ELSE.
+      rv_json = f( iv_name = 'kind' iv_value = 'literal' )
+        && f( iv_name = 'value' iv_value = lv_value )
+        && `,"value@type":` && node( iv_id && `/type` )
+        && f( iv_name = 'built_in' iv_value = lv_builtin )
+        && f( iv_name = 'length' iv_value = '255' ) && `}`.
     ENDIF.
   ENDMETHOD.
   METHOD parameter.
@@ -140,7 +180,6 @@ CLASS zcl_osd_dsl_dpc_map IMPLEMENTATION.
     DATA lv_out TYPE string.
     DATA lv_var TYPE string.
     DATA lv_value TYPE string.
-    DATA lv_builtin TYPE string.
     DATA lv_found TYPE abap_bool.
     DATA lv_w1 TYPE i VALUE 14.
     DATA lv_width TYPE i VALUE 21.
@@ -203,22 +242,14 @@ CLASS zcl_osd_dsl_dpc_map IMPLEMENTATION.
         APPEND ls_param TO lt_const.
       ENDIF.
       LOOP AT ls_param-constants INTO ls_constant.
-        lv_value = ls_constant-value.
-        lv_builtin = 'INT4'.
-        IF strlen( lv_value ) >= 2 AND lv_value(1) = `'`.
-          lv_value = substring( val = lv_value off = 1 len = strlen( lv_value ) - 2 ).
-          lv_value = replace( val = lv_value sub = `''` with = `'` occ = 0 ).
-          lv_builtin = 'CHAR'.
-        ENDIF.
         add( EXPORTING iv_item = node( iv_id && `/parameter/` && ls_param-name && `/constant/` && ls_constant-uuid )
           && f( iv_name = 'parameter' iv_value = to_lower( ls_param-name ) )
           && f( iv_name = 'component' iv_value = to_lower( ls_constant-component ) )
           && f( iv_name = 'via_line' iv_value = |{ xsdbool( ls_param-shape = 'table' AND ls_constant-component IS NOT INITIAL ) }| )
           && f( iv_name = 'parameter_type' iv_value = ls_param-type )
-          && f( iv_name = 'value' iv_value = lv_value )
-          && `,"value@type":` && node( iv_id && `/parameter/` && ls_param-name && `/constant/` && ls_constant-uuid && `/type` )
-          && f( iv_name = 'built_in' iv_value = lv_builtin )
-          && f( iv_name = 'length' iv_value = '255' ) && `}}` CHANGING cv_array = lv_constants ).
+          && constant_value( iv_value = ls_constant-value
+            iv_id = iv_id && `/parameter/` && ls_param-name && `/constant/` && ls_constant-uuid )
+          && `}` CHANGING cv_array = lv_constants ).
       ENDLOOP.
       IF ls_param-shape = 'table' AND ls_param-constants IS NOT INITIAL.
         add( EXPORTING iv_item = parameter( is_param = ls_param iv_id = iv_id iv_intf = lv_intf ) CHANGING cv_array = lv_tables ).

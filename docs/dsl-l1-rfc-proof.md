@@ -4,7 +4,7 @@ Measured by `test/dsl-dpc.mjs` on 2026-10-02. No SAP, MCP, network publishing,
 or private corpus was used. Both existing mapping oracles are unchanged.
 
 The bridge covers **15 distinct projects, 17 whole-class cases, 14 distinct
-mapped operations / 24 operation instances, 29,691 class lines and 3,533
+mapped operations / 24 operation instances, 29,699 class lines and 3,541
 mapped-body lines**. The duplicated cases are the IWPR/STG forms of
 `ZOSD_TEST` and the synthetic mapping project's BOP variant. Four class cases
 also render the 18-line search-help interface method (72 interface lines).
@@ -31,8 +31,8 @@ The projects and whole-class line counts are:
 | `src/zosd_test/segw/zosd_test.stg.yaml` | 645 |
 | `gen/cds/zc_stg_travel_cds.stg.yaml` | 887 |
 | `packs/zvdb/src/zvdb_100.stg.yaml` | 789 |
-| `test/fixtures/dsl-dpc/zl1_mapping.stg.yaml` | 2,346 |
-| `compiled mapping with BOP artifact and custom range semantics` | 2,346 |
+| `test/fixtures/dsl-dpc/zl1_mapping.stg.yaml` | 2,350 |
+| `compiled mapping with BOP artifact and custom range semantics` | 2,350 |
 
 The mapped operations are:
 
@@ -50,7 +50,7 @@ The mapped operations are:
 | `test/fixtures/dsl-dpc/zl1_mapping.stg.yaml` | `ITEMSET_CREATE_ENTITY` | 192 |
 | `test/fixtures/dsl-dpc/zl1_mapping.stg.yaml` | `ITEMSET_DELETE_ENTITY` | 140 |
 | `test/fixtures/dsl-dpc/zl1_mapping.stg.yaml` | `ITEMSET_GET_ENTITY` | 151 |
-| `test/fixtures/dsl-dpc/zl1_mapping.stg.yaml` | `ITEMSET_GET_ENTITYSET` | 264 |
+| `test/fixtures/dsl-dpc/zl1_mapping.stg.yaml` | `ITEMSET_GET_ENTITYSET` | 268 |
 | `test/fixtures/dsl-dpc/zl1_mapping.stg.yaml` | `ITEMSET_UPDATE_ENTITY` | 145 |
 | `compiled mapping with BOP artifact and custom range semantics` | `EMPTYHELPSET_GET_ENTITY` | 66 |
 | `compiled mapping with BOP artifact and custom range semantics` | `EMPTYHELPSET_GET_ENTITYSET` | 111 |
@@ -60,7 +60,7 @@ The mapped operations are:
 | `compiled mapping with BOP artifact and custom range semantics` | `ITEMSET_CREATE_ENTITY` | 192 |
 | `compiled mapping with BOP artifact and custom range semantics` | `ITEMSET_DELETE_ENTITY` | 140 |
 | `compiled mapping with BOP artifact and custom range semantics` | `ITEMSET_GET_ENTITY` | 151 |
-| `compiled mapping with BOP artifact and custom range semantics` | `ITEMSET_GET_ENTITYSET` | 264 |
+| `compiled mapping with BOP artifact and custom range semantics` | `ITEMSET_GET_ENTITYSET` | 268 |
 | `compiled mapping with BOP artifact and custom range semantics` | `ITEMSET_UPDATE_ENTITY` | 145 |
 
 Every IWPR fixture with mappings and every compiled STG project with
@@ -112,11 +112,14 @@ remain in the suite.
 | Drop the first OUT mapping | RED | whole-class byte equality |
 | Reverse IN mapping order | RED | whole-class byte equality |
 | Omit the constant's literal filter | RED | quotes/escaping differ byte for byte |
+| Route every constant through `literal` | RED | raw tokens lack literal descriptors; old INT4 classification throws for identifiers/decimals and changes `007` to `7` |
 | Keep an opaque search-help body | RED | data-only model and selection-node trace; bytes deliberately remain equal |
 
-Mutants override a partial in memory for one render. No source file is
-modified, so no file restoration is needed. Each mutant immediately rerenders
-the original model/templates and requires the named bridge green.
+Mutants override a partial in memory for one render. The all-constant mutant
+first copies the template aside; the original source file remains intact.
+Each mutant immediately rerenders the original model/templates and requires
+the named bridge green. The embed CLI is also checked against a dirty copy:
+`--check` fails on drift and passes after the original bytes are restored.
 
 ## Copied oracle quirks
 
@@ -144,15 +147,20 @@ The corresponding partial's template comment records these choices:
   Result components use the final path segment, while input selection names
   retain the full upper-case path. The interface forwarding alignment is
   deliberately uneven.
-- Constants use single quotes, not string backticks. Lexical CHAR/INT4
-  descriptors preserve this through the literal filter; module type metadata
-  remains on each constant node.
+- Both mapping oracles emit constants verbatim. Quoted strings and canonical
+  INT4 integers use lexical CHAR/INT4 descriptors and the literal filter.
+  Identifiers, decimals and integers with leading zeros use a separate
+  `kind: raw_token` field validated as one identifier or number token. Spaces,
+  quotes, expressions and line breaks are refused; module type metadata and
+  each constant's trace node remain on the model.
 
 ## Deviations and repository checks
 
 - The STG compiler does not declare BOP artifacts or arbitrary range semantics.
   A second case decorates the compiled synthetic IWPR with one BOP artifact
   and one custom semantic before import; both oracles consume that same tree.
+  This is a test shim for IWPR shapes, not STG declaration support: STG cannot
+  emit these declarations yet.
 - One final STG generator-order test exceeded Mocha's two-second default
   under load. The acceptance suites are rerun with `--timeout 60000`; all
   assertions remain enabled. Earlier runs passed with the default.

@@ -1,7 +1,9 @@
 // The L1 DPC class is byte-identical with the string generator on every
 // project admitted by the MPC bridge, with trace and profile checks.
 import {expect} from "chai";
-import {readFileSync, readdirSync, mkdtempSync, rmSync} from "node:fs";
+import {readFileSync, readdirSync, mkdtempSync, rmSync, mkdirSync, cpSync, writeFileSync} from "node:fs";
+import {spawnSync} from "node:child_process";
+import {resolve} from "node:path";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {embeddedSource} from "../tools/dsl-dpc-embed.mjs";
@@ -35,6 +37,11 @@ function assertData(value, path = "") {
   if (typeof value === "string") {
     if (!path.endsWith("/separator")) expect(value, `${path} contains line breaks`).not.to.match(/[\r\n]/);
     expect(value, `${path} contains ABAP code`).not.to.match(/\b(?:types?|data|constants?|methods?|class|endclass|endmethod)\b.*[.,]|->/i);
+  } else if (value?.kind === "raw_token") {
+    expect(value.raw_token, `${path} raw token`).to.match(/^(?:[A-Za-z_][A-Za-z0-9_]*|\/[A-Za-z0-9_]+\/[A-Za-z_][A-Za-z0-9_]*|-?[0-9]+(?:\.[0-9]+)?)$/);
+    expect(value.raw_token).not.to.match(/[\r\n]/);
+    expect(value).not.to.have.property("value");
+    for (const [key, child] of Object.entries(value)) assertData(child, `${path}/${key}`);
   } else if (value && typeof value === "object") for (const [key, child] of Object.entries(value)) {
     expect(key, `${path} opaque field`).not.to.equal("opaque");
     assertData(child, `${path}/${key}`);
@@ -95,6 +102,27 @@ describe("DSL L1: full DPC class from typed model", function () {
 
   it("keeps the ABAP embedded templates in sync with their sources", () => {
     expect(readFileSync("src/dsl/zcl_osd_dsl_dpc_templates.clas.abap", "utf8")).to.equal(embeddedSource());
+  });
+
+  it("the embed --check command detects a dirty embed and passes after restoration", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dsl-dpc-embed-"));
+    const target = "src/dsl/zcl_osd_dsl_dpc_templates.clas.abap";
+    const clean = readFileSync(target, "utf8");
+    const check = () => spawnSync(process.execPath, [resolve("tools/dsl-dpc-embed.mjs"), "--check"], {cwd: dir, encoding: "utf8"});
+    try {
+      mkdirSync(join(dir, "src/dsl"), {recursive: true});
+      cpSync("src/dsl/dpc-templates", join(dir, "src/dsl/dpc-templates"), {recursive: true});
+      writeFileSync(join(dir, target), clean);
+      expect(check().status).to.equal(0);
+      writeFileSync(join(dir, target), clean + "* dirty embed\n");
+      const dirty = check();
+      expect(dirty.status).not.to.equal(0);
+      expect(dirty.stderr).to.include("differs from templates");
+      writeFileSync(join(dir, target), clean);
+      expect(check().status).to.equal(0);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
   });
 
   const complexXml = compile(`
@@ -190,6 +218,80 @@ functions:
       console.log(`${path}: ${lines.length} DPC lines${operations.length ? `; ${operations.map((op) => `${op.method}=${op.lines}`).join(", ")}` : ""}`);
     });
   }
+
+  it("constant spellings match both oracles and each assignment owns its trace node", async () => {
+    const json = JSON.parse((await abap.Classes.ZCL_OSD_DSL_DPC.project_model_json({is_model: mappingProject})).get());
+    assertData(json);
+    const output = await rendered(json);
+    const spellings = {R: "abap_true", C: "007", U: "1.5", D: "-7", Q: "'O''Brien'"};
+    const ids = new Set();
+    for (const [op, token] of Object.entries(spellings)) {
+      const mapping = json.impls.find((impl) => impl.rfc_mapped && impl.mapping[`is_${op.toLowerCase()}`] && impl.mapping.constants.some((item) => item.parameter === "iv_count")).mapping;
+      const constant = mapping.constants.find((item) => item.parameter === "iv_count");
+      const raw = ["R", "C", "U"].includes(op);
+      expect(constant.kind).to.equal(raw ? "raw_token" : "literal");
+      if (raw) {
+        expect(constant.raw_token).to.equal(token);
+        expect(constant).not.to.have.property("value");
+      } else expect(constant["value@type"].built_in).to.equal(op === "D" ? "INT4" : "CHAR");
+      const owned = output.lines.filter((_, i) => output.trace[i].node === constant["@id"]);
+      expect(owned).to.deep.equal([` iv_count = ${token}.`]);
+      ids.add(constant["@id"]);
+    }
+    expect(ids.size).to.equal(5);
+    const expected = (await abap.Classes.ZCL_STG_SEGW_GEN_DPC.dpc_source({is_model: mappingProject})).get();
+    expect(output.text).to.equal(expected);
+  });
+
+  it("refuses constants containing source fragments instead of one token", async () => {
+    const source = readFileSync("test/fixtures/dsl-dpc/zl1_mapping.stg.yaml", "utf8");
+    for (const token of ["abap true", "abap_true + 1", "abap_true. WRITE x", "'broken", "a\nb", "abap_true\n", "abap_true\r"]) {
+      const xml = compile(source.replace('IV_COUNT: "abap_true"', `IV_COUNT: ${JSON.stringify(token)}`)).iwpr;
+      const model = await imported(`unsafe constant ${JSON.stringify(token)}`, xml);
+      let error;
+      try { await abap.Classes.ZCL_OSD_DSL_DPC.project_model_json({is_model: model}); }
+      catch (caught) { error = caught; }
+      expect(error, `reject ${JSON.stringify(token)}`).to.exist;
+    }
+  });
+
+  it("rejects routing every constant through literal, then restores green", async () => {
+    const json = JSON.parse((await abap.Classes.ZCL_OSD_DSL_DPC.project_model_json({is_model: mappingProject})).get());
+    const path = "src/dsl/dpc-templates/rfc-constant_lines.tpl";
+    const dir = mkdtempSync(join(tmpdir(), "dsl-dpc-mutant-"));
+    try {
+      cpSync(path, join(dir, "original.tpl"));
+      const original = readFileSync(join(dir, "original.tpl"), "utf8");
+      const mutant = original.replace("{{#raw_token}}{{raw_token}}{{/raw_token}}{{^raw_token}}{{value | literal}}{{/raw_token}}", "{{value | literal}}");
+      expect(mutant).not.to.equal(original);
+      let error;
+      try { await rendered(json, {"rfc-constant_lines": mutant}); }
+      catch (caught) { error = caught; }
+      expect(error, "all constants through literal must go red").to.exist;
+      // Also reproduce the old INT4 classification: identifiers/decimals
+      // throw, while leading zeroes silently change the oracle's bytes.
+      for (const op of ["r", "c", "u"]) {
+        const changed = structuredClone(json);
+        const constant = changed.impls.find((impl) => impl.rfc_mapped && impl.mapping[`is_${op}`]).mapping.constants.find((item) => item.parameter === "iv_count");
+        const token = constant.raw_token;
+        delete constant.raw_token;
+        constant.kind = "literal";
+        constant.value = token;
+        constant["value@type"] = {"@id": constant["@id"] + "/type", built_in: "INT4", length: "255"};
+        let failed;
+        let result;
+        try { result = await rendered(changed); } catch (caught) { failed = caught; }
+        if (op === "c") {
+          expect(failed).not.to.exist;
+          expect(result.text).to.include(" iv_count = 7.");
+          expect(result.text).not.to.include(" iv_count = 007.");
+        } else expect(failed, `${token} through INT4 literal goes red`).to.exist;
+      }
+      const expected = (await abap.Classes.ZCL_STG_SEGW_GEN_DPC.dpc_source({is_model: mappingProject})).get();
+      expect((await rendered(json)).text, "original restored green").to.equal(expected);
+      console.log("mutant every constant through literal: RED; original restored GREEN");
+    } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
 
   it("the corpus reaches mapped, SADL and ODC branches", () => {
     expect(seen.mapped).to.be.greaterThan(0);
