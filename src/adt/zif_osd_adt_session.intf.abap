@@ -16,6 +16,19 @@
 "! client, the default user) is never a constant here: it is the host's
 "! identity (ZCL_OSD_ADT_HOST=>IDENTITY), one configurable id per system.
 "!
+"! Sessions expire after an idle time (Node: 30 minutes). RESOLVE first
+"! ends every expired session, as the Node middleware sweeps before each
+"! request, so an abandoned session's locks do not outlive it. Looking at a
+"! session without being its request (TOKEN_VALID, ALIVE) never touches it
+"! and never revives an expired one.
+"!
+"! A dump ends a bound context's ENQ session (tools/osd-enq-host.mjs) and
+"! with it the session's locks; its handles must go too (ENQ_CONTEXT_ENDED),
+"! while the logon session and its token stay, as in Node.
+"!
+"! Header names, the value stateful and object types and names compare
+"! without case.
+"!
 "! Two things an implementation must keep in mind:
 "!   - RESOLVE writes inside the request's step. If the step dumps, a session
 "!     it opened is rolled back with it: the client holds the cookie of a
@@ -33,7 +46,8 @@ INTERFACE zif_osd_adt_session PUBLIC.
   TYPES: BEGIN OF ty_session,
            "! 24 lower-case hex characters
            id       TYPE string,
-           "! the Basic header's user, upper case, else the identity's user
+           "! the Basic header's user, upper case, else the identity's user; taken
+  "! when the session opens, never replaced by a later request's header
            user     TYPE string,
            "! the CSRF token: never the word fetch
            token    TYPE string,
@@ -42,8 +56,10 @@ INTERFACE zif_osd_adt_session PUBLIC.
            fresh    TYPE abap_bool,
          END OF ty_session.
 
-  "! The request's session. The context cookie wins over the session cookie;
-  "! an unknown, expired or empty id opens a new session; the header
+  "! The request's session. A non-empty context cookie wins; an empty or
+  "! missing one falls back to the session cookie, as Node's sessionIdOf
+  "! (context || session); when neither names a live session, a new one
+  "! opens; the header
   "! x-sap-adt-sessiontype = stateful marks it stateful (nothing unmarks it).
   "! The session is touched. A stateful session's step is bound to its ENQ
   "! session with the session's user, so its locks outlive the request.
@@ -54,13 +70,15 @@ INTERFACE zif_osd_adt_session PUBLIC.
     RAISING   zcx_osd_adt.
 
   "! the Set-Cookie values to send: both cookies when the session is fresh
-  "! or stateful, none otherwise
+  "! or stateful, none otherwise; the context cookie with Path=/sap/bc/adt,
+  "! the session cookie with Path=/, both HttpOnly; SameSite=Strict
   METHODS cookies
     IMPORTING is_session        TYPE ty_session
     RETURNING VALUE(rt_cookies) TYPE string_table
     RAISING   zcx_osd_adt.
 
-  "! whether iv_token is the CSRF token of session iv_id
+  "! whether iv_token is the CSRF token of session iv_id; false for a
+  "! missing or expired session, which this does not revive
   METHODS token_valid
     IMPORTING iv_id           TYPE string
               iv_token        TYPE string
@@ -69,6 +87,22 @@ INTERFACE zif_osd_adt_session PUBLIC.
   "! Logoff, the session DELETE or expiry: the session, its handles and its
   "! ENQ session go, and with the ENQ session every lock it held.
   METHODS end
+    IMPORTING iv_id TYPE string.
+
+  "! The lock route's question about a holder (Node: Sessions.holderOf): is
+  "! the session iv_id, which the lock server names as holding an object,
+  "! still alive? Looked at without touching it. A session this system issued
+  "! that is gone or expired is ended on the way (its locks go) and answers
+  "! false; an id this system did not issue (another facade's session, ABAP
+  "! outside any ADT session) is not ours to end and answers true.
+  METHODS alive
+    IMPORTING iv_id           TYPE string
+    RETURNING VALUE(rv_alive) TYPE abap_bool.
+
+  "! A dump ended the bound context of session iv_id: its handles go, the
+  "! session and its token stay (the host calls this through
+  "! onEnqContextEnded)
+  METHODS enq_context_ended
     IMPORTING iv_id TYPE string.
 
   "! the session's handle for an object it has just locked: the one it has,
