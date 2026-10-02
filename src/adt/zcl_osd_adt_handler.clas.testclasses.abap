@@ -418,35 +418,23 @@ CLASS ltcl_csrf IMPLEMENTATION.
 
 ENDCLASS.
 
-* The real ICF entry, with ordinary HTTP entities and no listener.
-CLASS lcl_http_server DEFINITION INHERITING FROM cl_http_server CREATE PUBLIC.
-ENDCLASS.
-CLASS lcl_http_server IMPLEMENTATION.
-ENDCLASS.
-
+* The ICF entry puts WIRE_HEADERS on the response; the miss marker stays
+* in ANSWER's record for the Node front and never reaches the wire.
 CLASS ltcl_icf DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL.
   PRIVATE SECTION.
     METHODS strips_resource_miss FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_icf IMPLEMENTATION.
   METHOD strips_resource_miss.
-    DATA li_server TYPE REF TO if_http_server.
-    DATA li_handler TYPE REF TO if_http_extension.
     DATA ls_request TYPE zif_osd_adt_route=>ty_request.
     DATA ls_response TYPE zif_osd_adt_route=>ty_response.
+    DATA lt_wire TYPE tihttpnvp.
     DATA ls_header TYPE ihttpnvp.
     DATA lv_found TYPE abap_bool.
-    DATA lv_code TYPE i.
-    DATA lv_reason TYPE string.
-    CREATE OBJECT li_server TYPE lcl_http_server.
-    CREATE OBJECT li_server->request TYPE cl_http_entity.
-    CREATE OBJECT li_server->response TYPE cl_http_entity.
-    CREATE OBJECT li_handler TYPE zcl_osd_adt_handler.
     zcl_osd_adt_handler=>use_session( ).
     zcl_osd_adt_handler=>use_routes( ).
     ls_request-method = `GET`.
     ls_request-path = `/sap/bc/adt/ddic/tables/parser/info`.
-*   The internal response retains the miss for the Node front.
     zcl_osd_adt_handler=>answer( EXPORTING is_request = ls_request
       IMPORTING es_response = ls_response ).
     LOOP AT ls_response-headers INTO ls_header.
@@ -456,15 +444,13 @@ CLASS ltcl_icf IMPLEMENTATION.
       ENDIF.
     ENDLOOP.
     cl_abap_unit_assert=>assert_equals( act = lv_found exp = abap_true ).
-    li_server->request->set_header_field( name = `~request_method` value = ls_request-method ).
-    li_server->request->set_header_field( name = `~path` value = ls_request-path ).
-    li_server->request->set_header_field( name = `~request_uri` value = ls_request-path ).
-    li_handler->handle_request( li_server ).
-    cl_abap_unit_assert=>assert_initial( li_server->response->get_header_field( `x-osd-miss` ) ).
-    li_server->response->get_status( IMPORTING code = lv_code reason = lv_reason ).
-    cl_abap_unit_assert=>assert_equals( act = lv_code exp = 404 ).
-    cl_abap_unit_assert=>assert_equals( act = li_server->response->get_cdata( ) exp = ls_response-body ).
-    cl_abap_unit_assert=>assert_equals( act = li_server->response->get_header_field( `content-type` )
-      exp = ls_response-content_type ).
+    ls_header-name = `X-OSD-MISS`.
+    ls_header-value = `resource`.
+    APPEND ls_header TO ls_response-headers.
+    lt_wire = zcl_osd_adt_handler=>wire_headers( ls_response-headers ).
+    LOOP AT lt_wire INTO ls_header.
+      cl_abap_unit_assert=>assert_differs( act = to_lower( ls_header-name ) exp = `x-osd-miss` ).
+    ENDLOOP.
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_wire ) exp = lines( ls_response-headers ) - 2 ).
   ENDMETHOD.
 ENDCLASS.

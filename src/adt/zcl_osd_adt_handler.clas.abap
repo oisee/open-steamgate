@@ -59,6 +59,12 @@ CLASS zcl_osd_adt_handler DEFINITION PUBLIC CREATE PUBLIC.
     "! initial table is the real one again
     CLASS-METHODS use_routes
       IMPORTING it_routes TYPE zcl_osd_adt_router=>tt_route OPTIONAL.
+
+    "! the headers of an answer as they go on the wire at the ICF entry:
+    "! the internal X-OSD-Miss marker is the Node front's, never a client's
+    CLASS-METHODS wire_headers
+      IMPORTING it_headers        TYPE tihttpnvp
+      RETURNING VALUE(rt_headers) TYPE tihttpnvp.
   PRIVATE SECTION.
     CLASS-DATA go_session TYPE REF TO zif_osd_adt_session.
     CLASS-DATA gt_routes TYPE zcl_osd_adt_router=>tt_route.
@@ -97,10 +103,8 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
             IMPORTING es_response  = ls_response
                       ev_served_by = lv_served_by ).
 
-    LOOP AT ls_response-headers INTO ls_header.
-      IF to_lower( ls_header-name ) = `x-osd-miss`.
-        CONTINUE.
-      ENDIF.
+    lt_headers = wire_headers( ls_response-headers ).
+    LOOP AT lt_headers INTO ls_header.
       server->response->set_header_field( name  = ls_header-name
                                           value = ls_header-value ).
     ENDLOOP.
@@ -248,6 +252,16 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
       ls_header-value = ix_error->miss.
       APPEND ls_header TO rs_response-headers.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD wire_headers.
+    DATA ls_header TYPE ihttpnvp.
+    LOOP AT it_headers INTO ls_header.
+      IF to_lower( ls_header-name ) = `x-osd-miss`.
+        CONTINUE.
+      ENDIF.
+      APPEND ls_header TO rt_headers.
+    ENDLOOP.
   ENDMETHOD.
 
 ENDCLASS.
