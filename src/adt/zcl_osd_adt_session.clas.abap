@@ -25,6 +25,9 @@ CLASS zcl_osd_adt_session DEFINITION PUBLIC FINAL CREATE PUBLIC.
     "! Test clock; initial means the real UTC clock.
     METHODS set_clock IMPORTING iv_now TYPE timestamp.
   PRIVATE SECTION.
+    "! when this process last swept (the sweep is a scan of the session table:
+    "! once per interval, not per request)
+    CLASS-DATA gv_last_sweep TYPE timestamp.
     DATA mv_ttl TYPE i.
     DATA mv_now TYPE timestamp.
     METHODS now RETURNING VALUE(rv_now) TYPE timestamp.
@@ -50,6 +53,10 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
   METHOD constructor.
     mv_ttl = iv_ttl_seconds.
     mv_now = iv_now.
+*   a test clock starts its own sweep schedule
+    IF iv_now IS NOT INITIAL.
+      CLEAR gv_last_sweep.
+    ENDIF.
   ENDMETHOD.
 
   METHOD peek.
@@ -89,6 +96,8 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
 
   METHOD set_clock.
     mv_now = iv_now.
+*   a test moving the clock asks for a sweep at that time
+    CLEAR gv_last_sweep.
   ENDMETHOD.
 
   METHOD now.
@@ -107,6 +116,27 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
     DATA ls_row TYPE zosd_adt_sess.
     DATA lv_cutoff TYPE timestamp.
     DATA lv_id TYPE string.
+    DATA lv_now TYPE timestamp.
+    DATA lv_interval TYPE i.
+    DATA lv_since TYPE tzntstmpl.
+*   An expired session is refused on sight (RESOLVE, TOKEN_VALID, ALIVE
+*   check the cutoff themselves); the sweep only frees the rows and the ENQ
+*   sessions of the ones nobody asks about again, so it runs once per
+*   interval: a tenth of the TTL, at least 1 s, at most 30 s.
+    lv_now = now( ).
+    lv_interval = mv_ttl / 10.
+    IF lv_interval < 1.
+      lv_interval = 1.
+    ELSEIF lv_interval > 30.
+      lv_interval = 30.
+    ENDIF.
+    IF gv_last_sweep IS NOT INITIAL AND lv_now >= gv_last_sweep.
+      lv_since = cl_abap_tstmp=>subtract( tstmp1 = lv_now tstmp2 = gv_last_sweep ).
+      IF lv_since < lv_interval.
+        RETURN.
+      ENDIF.
+    ENDIF.
+    gv_last_sweep = lv_now.
     lv_cutoff = cutoff( ).
     SELECT * FROM zosd_adt_sess INTO TABLE lt_rows
       WHERE mandt = sy-mandt AND touched < lv_cutoff.
@@ -188,6 +218,11 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
       lv_id = field( it_fields = it_cookies iv_name = lv_cookie ).
     ENDIF.
     SELECT SINGLE * FROM zosd_adt_sess INTO ls_row WHERE mandt = sy-mandt AND id = lv_id.
+*   expired but not swept yet: it is gone all the same
+    IF sy-subrc = 0 AND ls_row-touched < cutoff( ).
+      zif_osd_adt_session~end( lv_id ).
+      sy-subrc = 4.
+    ENDIF.
     IF sy-subrc <> 0.
       ls_row = open( it_headers ).
       rs_session-fresh = abap_true.

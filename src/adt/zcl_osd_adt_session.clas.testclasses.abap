@@ -25,6 +25,7 @@ CLASS ltcl_session DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FI
     METHODS context_end FOR TESTING RAISING cx_static_check.
     METHODS holders FOR TESTING RAISING cx_static_check.
     METHODS ended_context_keeps_session FOR TESTING RAISING cx_static_check.
+    METHODS throttled_sweep_still_expires FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_session IMPLEMENTATION.
@@ -222,5 +223,28 @@ CLASS ltcl_session IMPLEMENTATION.
     cl_abap_unit_assert=>assert_false( mo_api->alive( ms_one-id ) ).
     cl_abap_unit_assert=>assert_true( mo_api->alive( `adt:foreign:unknown` ) ).
     cl_abap_unit_assert=>assert_true( mo_api->alive( `foreign` ) ).
+  ENDMETHOD.
+  METHOD throttled_sweep_still_expires.
+    DATA ls_stale TYPE zosd_adt_sess.
+    DATA ls_other TYPE zif_osd_adt_session=>ty_session.
+    DATA ls_again TYPE zif_osd_adt_session=>ty_session.
+    DATA lv_stale TYPE string VALUE `aaaaaaaaaaaaaaaaaaaaaaaa`.
+*   setup's resolve swept at the clock's time; a row that expired meanwhile
+*   is not swept by the next resolve in the same interval ...
+    ls_stale-mandt = sy-mandt.
+    ls_stale-id = lv_stale.
+    ls_stale-token = `stale`.
+    ls_stale-username = `OSD`.
+    ls_stale-created = '20261001000000'.
+    ls_stale-touched = '20261001000000'.
+    INSERT zosd_adt_sess FROM ls_stale.
+    ls_other = by_cookie( iv_context = ms_one-id ).
+    cl_abap_unit_assert=>assert_equals( act = mo_session->peek( lv_stale )-id exp = lv_stale ).
+*   ... but it is gone to the one who asks for it: a fresh session opens
+    ls_again = by_cookie( iv_context = lv_stale ).
+    cl_abap_unit_assert=>assert_true( ls_again-fresh ).
+    cl_abap_unit_assert=>assert_differs( act = ls_again-id exp = lv_stale ).
+    cl_abap_unit_assert=>assert_initial( mo_session->peek( lv_stale ) ).
+    cl_abap_unit_assert=>assert_false( mo_api->token_valid( iv_id = lv_stale iv_token = `stale` ) ).
   ENDMETHOD.
 ENDCLASS.
