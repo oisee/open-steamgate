@@ -24,7 +24,7 @@ import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {hostModules} from "./osd-host.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
-import {libraryPath} from "./osd-lock.mjs";
+import {libraryPath} from "./osd-lib-path.mjs";
 
 // the transpiler package in use by this tree, and the core it was built
 // against. A tree with the library installed resolves it directly; a tree

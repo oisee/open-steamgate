@@ -4,7 +4,7 @@ import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync} 
 import {dirname, join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {home} from "./home.mjs";
-import {libraryPath} from "../osd-lock.mjs";
+import {libraryPath} from "../osd-lib-path.mjs";
 
 const walk = (d) => readdirSync(d, {withFileTypes: true}).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
 

@@ -90,7 +90,8 @@ import {
 } from "node:fs";
 import {basename, dirname, isAbsolute, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
-import {describeVsixPreflight, vsixPreflightMissing, libraryPath} from "../tools/osd-lock.mjs";
+import {describeVsixPreflight} from "../tools/osd-lock.mjs";
+import {libraryPath, vsixPreflightMissing} from "../tools/osd-lib-path.mjs";
 import {requireSupportedNode} from "../tools/osd-node-version.mjs";
 import {packAt} from "../tools/osd-packs.mjs";
 import {readLock} from "../tools/osd-lock.mjs";

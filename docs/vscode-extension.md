@@ -1281,7 +1281,14 @@ read-only by convention: edit the development clone and use
 when used. On Windows, sync creates junctions; if the OS refuses a link,
 enable Developer Mode or run an elevated terminal. CI keeps real clones under
 `.local/lars` so its build artefact and restore paths stay the same. A pin moves
-only in a pin PR that also carries its licence approval.
+only in a pin PR that also carries its licence approval; `node tools/osd-libs.mjs`
+and `test/bootstrap.mjs` check that approval against
+`docker/image/license-assumptions.mjs`, which nothing on the runtime path imports.
+
+The pin gate (`tools/osd-lib-path.mjs`: each library a clean checkout at its
+locked commit) applies only to a tree with its own `.git`. The VSIX seed, the
+binary's install and the Docker image have none: their libraries are plain
+copies made from the verified pins at packaging time, and are read as they are.
 
 `npm run vsix` checks for
 installed dependencies and every library before packaging; `gen/` is generated

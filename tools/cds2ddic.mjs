@@ -20,7 +20,7 @@ import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {readFileSync, readdirSync, writeFileSync, mkdirSync, existsSync, rmSync, statSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {basename, join} from "node:path";
-import {libraryPath} from "./osd-lock.mjs";
+import {libraryPath} from "./osd-lib-path.mjs";
 
 const OUT = "gen/cds";
 // **The libraries this generator resolves types against, and they have to be

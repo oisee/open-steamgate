@@ -1,3 +1,6 @@
+import {readFileSync} from "node:fs";
+import {join} from "node:path";
+
 // These approvals apply to the reviewed commits, not to every later commit
 // in the same forks. A changed lock ref needs its own license review.
 const approved = new Map([
@@ -12,4 +15,20 @@ const approved = new Map([
 export function approvedLicenseAssumption(source) {
   return approved.has(source.repo) && approved.get(source.repo) === source.ref
     && source.licenseAssumption?.license === "MIT";
+}
+
+/** Every library sources.json marks with a placeholder licence must be
+ *  pinned in libs.lock.json at the commit that was reviewed. Repo tooling
+ *  and CI only (tools/osd-libs.mjs, test/bootstrap.mjs, the image build):
+ *  a shipped tree carries neither this file nor sources.json, so nothing on
+ *  the runtime path imports it. */
+export function checkLockLicences(root = ".") {
+  const sources = JSON.parse(readFileSync(join(root, "docker", "image", "sources.json"), "utf8"));
+  const lock = JSON.parse(readFileSync(join(root, "libs.lock.json"), "utf8"));
+  for (const source of sources.libraries.filter((entry) => entry.licenseAssumption)) {
+    const pin = lock.libraries.find((entry) => entry.folder === source.folder);
+    if (!pin || !approvedLicenseAssumption({...pin, ...source})) {
+      throw new Error(`libs.lock.json: ${source.folder} needs licence approval for its pinned ref`);
+    }
+  }
 }

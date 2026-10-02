@@ -25,7 +25,7 @@
 // generation is 44 MB; keeping the last few is cheap. docs/generations.md
 // is the design this implements.
 import {createHash} from "node:crypto";
-import {libraryPath} from "./osd-lock.mjs";
+import {libraryPath} from "./osd-lib-path.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";

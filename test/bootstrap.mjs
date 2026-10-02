@@ -1,11 +1,13 @@
 import {expect} from "chai";
+import {execFileSync} from "node:child_process";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {describeVsixPreflight, githubWorkflowEnv, librariesFromLock, readLock, vsixPreflightMissing} from "../tools/osd-lock.mjs";
+import {describeVsixPreflight, githubWorkflowEnv, librariesFromLock, readLock} from "../tools/osd-lock.mjs";
+import {vsixPreflightMissing} from "../tools/osd-lib-path.mjs";
 import {nodeVersionProblem, requireSupportedNode} from "../tools/osd-node-version.mjs";
 import {packsOf} from "../tools/osd-packs.mjs";
-import {approvedLicenseAssumption} from "../docker/image/license-assumptions.mjs";
+import {approvedLicenseAssumption, checkLockLicences} from "../docker/image/license-assumptions.mjs";
 
 const ROOT = process.cwd();
 
@@ -92,6 +94,8 @@ describe("fresh checkout bootstrap", () => {
   it("refuses an unpinned VSIX library even when its folder is populated", () => {
     const scratch = mkdtempSync(join(tmpdir(), "osd-vsix-preflight-"));
     try {
+      // a checkout: that is where the pin gate applies (tools/osd-lib-path.mjs)
+      execFileSync("git", ["init", "-q"], {cwd: scratch});
       writeFileSync(join(scratch, "libs.lock.json"), readFileSync(join(ROOT, "libs.lock.json")));
       writeFileSync(join(scratch, "abap_transpile.json"), readFileSync(join(ROOT, "abap_transpile.json")));
       mkdirSync(join(scratch, "node_modules"));
@@ -128,7 +132,11 @@ describe("fresh checkout bootstrap", () => {
       const lock = readLock(ROOT);
       lock.libraries.find((lib) => lib.folder === "open-abap-gui").ref = "0".repeat(40);
       writeFileSync(join(scratch, "libs.lock.json"), JSON.stringify(lock));
-      expect(() => readLock(scratch)).to.throw("needs licence approval");
+      expect(() => checkLockLicences(scratch)).to.throw("needs licence approval");
     } finally { rmSync(scratch, {recursive: true, force: true}); }
+  });
+
+  it("the committed lock pins placeholder-licence libraries at approved refs", () => {
+    expect(() => checkLockLicences(ROOT)).not.to.throw();
   });
 });

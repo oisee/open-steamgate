@@ -1,5 +1,6 @@
 // Go compilers read the same locked library path as the Node builder.
-import {readLock, libraryPath} from "../osd-lock.mjs";
+import {readLock} from "../osd-lock.mjs";
+import {libraryPath} from "../osd-lib-path.mjs";
 
 export function libDrift(home, folders = ["open-abap-core", "open-abap-gui"]) {
   const lock = readLock(home);

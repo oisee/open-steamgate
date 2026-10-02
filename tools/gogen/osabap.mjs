@@ -9,7 +9,7 @@ import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 import {checkLibPins} from "./lib-pins.mjs";
-import {libraryPath} from "../osd-lock.mjs";
+import {libraryPath} from "../osd-lib-path.mjs";
 import {prepareF4} from "./osabap-f4.mjs";
 
 const here = import.meta.dirname;

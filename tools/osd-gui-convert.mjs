@@ -39,7 +39,7 @@ import {readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, statSync} f
 import {basename, join, resolve} from "node:path";
 import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {hostModules} from "./osd-host.mjs";
-import {libraryPath} from "./osd-lock.mjs";
+import {libraryPath} from "./osd-lib-path.mjs";
 import {stripLiterals} from "./abap-additions.mjs";
 
 const DEFAULT_OUT = "gen/gui";

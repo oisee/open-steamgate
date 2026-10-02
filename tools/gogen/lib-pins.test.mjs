@@ -11,6 +11,7 @@ const git = (dir, ...args) => execFileSync("git", ["-C", dir, ...args], {encodin
 test("osabap refuses drift and names the sync command", () => {
   const home = mkdtempSync(join(tmpdir(), "lib-pins-"));
   try {
+    git(home, "init", "-q"); // a checkout: the pin gate applies only there (tools/osd-lib-path.mjs)
     const dir = join(home, ".local/lars/open-abap-core");
     mkdirSync(dir, {recursive: true});
     git(dir, "init", "-q");

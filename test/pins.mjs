@@ -1,10 +1,10 @@
 import {strict as assert} from "node:assert";
 import {execFileSync, spawn} from "node:child_process";
-import {copyFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, lstatSync, realpathSync, readFileSync, readlinkSync} from "node:fs";
+import {copyFileSync, cpSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, lstatSync, realpathSync, readFileSync, readlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join, dirname} from "node:path";
+import {join, dirname, relative} from "node:path";
 import {materialise} from "../tools/osd-libs.mjs";
-import {libraryPath} from "../tools/osd-lock.mjs";
+import {libraryPath} from "../tools/osd-lib-path.mjs";
 import {generate as generateGui} from "../tools/osd-gui-convert.mjs";
 
 const git = (dir, ...args) => execFileSync("git", args, {cwd: dir, encoding: "utf8"}).trim();
@@ -24,6 +24,8 @@ function fixture() {
   git(root, "clone", "-q", "--bare", source, bare);
   const home = join(root, "home");
   mkdirSync(home);
+  // a development checkout: the pin gate applies only to one (osd-lib-path)
+  git(home, "init", "-q");
   writeFileSync(join(home, "libs.lock.json"), JSON.stringify({
     transpiler: {repo: "test/transpiler", ref: "0".repeat(40)},
     libraries: [{folder: "example", repo: "test/example", ref}],
@@ -193,5 +195,53 @@ describe("locked library paths", () => {
       assert(!lstatSync(join(f.home, ".local/lars/example")).isSymbolicLink());
       assert.equal(libraryPath(f.home, "example"), join(f.home, ".local/lars/example"));
     } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  // **A shipped tree is not a checkout.** The VSIX seed, the binary's install
+  // and the Docker image carry tools/, libs.lock.json and plain copies of the
+  // libraries under .local/lars -- no .git anywhere, and no docker/ folder.
+  // PR #419 broke all three: tools/osd-lock.mjs imported
+  // ../docker/image/license-assumptions.mjs (ERR_MODULE_NOT_FOUND in the
+  // seed stage), and libraryPath demanded a git checkout of each library
+  // ("open-abap-core is at missing" on every request in the image). This
+  // loads the real build module from such a tree and asks it for its inputs.
+  it("a shipped tree (no .git, no docker/, copied libraries) loads the build and resolves the libraries", () => {
+    const ROOT = process.cwd();
+    mkdirSync(join(ROOT, "build"), {recursive: true});
+    // under the checkout, so node_modules resolves the way it does in a seed
+    const seed = mkdtempSync(join(ROOT, "build", "pins-shipped-"));
+    try {
+      cpSync(join(ROOT, "tools"), join(seed, "tools"), {recursive: true});
+      for (const file of ["abap_transpile.json", "libs.lock.json", "package.json"]) cpSync(join(ROOT, file), join(seed, file));
+      const config = JSON.parse(readFileSync(join(ROOT, "abap_transpile.json"), "utf8"));
+      for (const lib of config.libs) {
+        mkdirSync(join(seed, lib.folder, "src"), {recursive: true});
+        writeFileSync(join(seed, lib.folder, "src", "copied.txt"), "a plain copy, no .git");
+      }
+      assert(!existsSync(join(seed, ".git")) && !existsSync(join(seed, "docker")));
+      const code = `
+        const {inputsOf} = await import("./tools/osd-build.mjs");
+        const {libraryPath, vsixPreflightMissing} = await import("./tools/osd-lib-path.mjs");
+        const {readLock} = await import("./tools/osd-lock.mjs");
+        for (const lib of readLock(".").libraries) libraryPath(process.cwd(), lib.folder);
+        vsixPreflightMissing(process.cwd());
+        console.log(JSON.stringify(inputsOf(process.cwd()).libs));`;
+      const env = {...process.env};
+      for (const key of Object.keys(env)) if (key.startsWith("OSD_LIB_")) delete env[key];
+      const out = execFileSync(process.execPath, ["--input-type=module", "-e", code], {cwd: seed, env, encoding: "utf8", stdio: "pipe"});
+      const libs = JSON.parse(out.trim().split("\n").pop());
+      assert.deepEqual(libs.map((dir) => relative(seed, dir)), config.libs.map((lib) => lib.folder.replace(/^\//, "")), out);
+    } finally { rmSync(seed, {recursive: true, force: true}); }
+  });
+
+  // tools/osd-packs.mjs -> tools/osd-lock.mjs is in the preview's webpack
+  // bundle, which has no child_process ("Can't resolve 'child_process'" broke
+  // the gh-pages deploy of #419), and tools/ is copied into shipped trees
+  // without docker/. So osd-lock stays free of both; the git gate lives in
+  // tools/osd-lib-path.mjs.
+  it("tools/osd-lock.mjs imports nothing a browser bundle or a shipped tree lacks", () => {
+    const source = readFileSync(new URL("../tools/osd-lock.mjs", import.meta.url), "utf8");
+    const specifiers = [...source.matchAll(/^import .* from "([^"]+)";$/gm)].map((m) => m[1]);
+    assert.deepEqual(specifiers.filter((s) => s === "node:child_process" || s.startsWith("../")), [], specifiers.join(", "));
   });
 });

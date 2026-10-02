@@ -3,8 +3,10 @@
 import {execFileSync} from "node:child_process";
 import {closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync} from "node:fs";
 import {dirname, isAbsolute, join, relative, resolve, sep} from "node:path";
+import {pathToFileURL} from "node:url";
 import {runsAs} from "./osd-main.mjs";
-import {librariesFromLock, libraryPath} from "./osd-lock.mjs";
+import {librariesFromLock} from "./osd-lock.mjs";
+import {libraryPath} from "./osd-lib-path.mjs";
 
 const git = (cwd, ...args) => execFileSync("git", args, {cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"]}).trim();
 const exists = (path) => { try { lstatSync(path); return true; } catch { return false; } };
@@ -136,8 +138,20 @@ export function status(root = ".", say = console.log) {
   }
 }
 
+// The licence approval of a pinned ref lives with the image's approval list
+// (docker/image/license-assumptions.mjs), which only the repository has. A
+// shipped tree was checked when it was packaged and has nothing to check.
+export async function checkLicences(root = ".") {
+  const module = join(resolve(root), "docker", "image", "license-assumptions.mjs");
+  if (!exists(module)) return false;
+  const {checkLockLicences} = await import(pathToFileURL(module).href);
+  checkLockLicences(root);
+  return true;
+}
+
 if (runsAs("osd-libs.mjs")) {
   const root = process.cwd();
+  if (!process.argv.includes("--status")) await checkLicences(root);
   if (process.argv.includes("--status")) status(root);
   else if (process.argv.includes("--check")) {
     for (const lib of libraries(root)) libraryPath(root, lib.name);

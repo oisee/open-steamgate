@@ -11,7 +11,7 @@ import {emitGo, referencedClasses} from "./emit-go.mjs";
 import {reconcile} from "./unit-results.mjs";
 import {home} from "./home.mjs";
 import {inputFoldersOf} from "../osd-packs.mjs";
-import {libraryPath} from "../osd-lock.mjs";
+import {libraryPath} from "../osd-lib-path.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const commandStarted = performance.now();
