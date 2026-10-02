@@ -6,6 +6,7 @@ import {tmpdir} from "node:os";
 import {fileURLToPath} from "node:url";
 import {dirname, join} from "node:path";
 import {reconcile} from "./unit-results.mjs";
+import {runUnit} from "./unit-process.mjs";
 import {compileProgram, columnRegistry} from "./frontend.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -184,6 +185,90 @@ test("a live timing lock times out without hiding the JSON report", {timeout: 12
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
+test("signals, nonzero exits and incomplete JSON isolate pending classes and keep completed failures", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-incomplete-"));
+  const wrapper = join(dir, "runner.mjs");
+  const method = (owner) => ({class: owner, testclass: "LOCAL", method: "CHECK", status: "READY", message: ""});
+  const ready = [method("DONE"), method("DEAD"), method("PASS")];
+  const groups = ready.map((row) => ({key: `${row.class}:LOCAL`, methods: [row]}));
+  writeFileSync(wrapper, `#!/usr/bin/env node
+import {readFileSync, writeFileSync} from "node:fs";
+const args = process.argv.slice(2);
+const row = (owner, status, message = "") => ({class: owner, testclass: "LOCAL", method: "CHECK", status, message});
+if (!/retry-/.test(process.cwd())) {
+  writeFileSync(args[args.indexOf("--results-out") + 1], JSON.stringify({rows: [null, row("DONE", "FAILED", "class_teardown: expected failure")]}));
+  if (process.env.GOGEN_UNIT_TEST_FAULT === "incomplete") { console.log("[]"); process.exit(0); }
+} else if (JSON.parse(readFileSync(args[args.indexOf("--classes-file") + 1], "utf8"))[0] === "PASS:LOCAL") {
+  console.log(JSON.stringify([row("PASS", "SUCCESS")])); process.exit(0);
+}
+if (process.env.GOGEN_UNIT_TEST_FAULT === "signal") process.kill(process.pid, "SIGTERM");
+else { process.stderr.write("own fatal reason\\nmore stderr\\n"); process.exit(7); }
+`);
+  chmodSync(wrapper, 0o755);
+  const oldRunner = process.env.GOGEN_UNIT_RUNNER, oldFault = process.env.GOGEN_UNIT_TEST_FAULT;
+  try {
+    process.env.GOGEN_UNIT_RUNNER = wrapper;
+    for (const fault of ["signal", "nonzero", "incomplete"]) {
+      process.env.GOGEN_UNIT_TEST_FAULT = fault;
+      const out = join(dir, fault); mkdirSync(out);
+      const result = await runUnit({bin: wrapper, groups, ready, jobs: 1, out, runDir: out});
+      assert.deepEqual(reconcile(ready, result.actual).map((row) => [row.status, row.message]), [
+        ["FAILED", "class_teardown: expected failure"],
+        ["FAILED", `runner died: ${fault === "signal" ? "terminated by SIGTERM" : "own fatal reason"}`],
+        ["SUCCESS", ""],
+      ]);
+      assert.equal(result.runDetail.retries, 2);
+    }
+  } finally {
+    if (oldRunner === undefined) delete process.env.GOGEN_UNIT_RUNNER; else process.env.GOGEN_UNIT_RUNNER = oldRunner;
+    if (oldFault === undefined) delete process.env.GOGEN_UNIT_TEST_FAULT; else process.env.GOGEN_UNIT_TEST_FAULT = oldFault;
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
+
+test("fatal recursion retries only unfinished classes once, in single and sharded runs", {timeout: 120000}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-unit-crash-"));
+  const wrapper = join(dir, "runner.mjs");
+  // Log actual processes, rather than trusting the scheduling counters.
+  writeFileSync(wrapper, `#!/usr/bin/env node
+import {spawnSync} from "node:child_process";
+import {appendFileSync, readFileSync} from "node:fs";
+const args = process.argv.slice(2);
+if (!args.includes("--seed-image-out")) {
+  const selected = args.includes("--classes-file") ? JSON.parse(readFileSync(args[args.indexOf("--classes-file") + 1], "utf8")) : null;
+  appendFileSync(process.env.GOGEN_UNIT_TEST_LOG, JSON.stringify({selected, retry: /retry-/.test(process.cwd())}) + "\\n");
+}
+const run = spawnSync(process.env.GOGEN_UNIT_BINARY, args, {stdio: "inherit"});
+process.exit(run.status ?? 1);
+`);
+  chmodSync(wrapper, 0o755);
+  try {
+    for (const jobs of [1, 2]) {
+      const log = join(dir, `processes-${jobs}.ndjson`);
+      const run = await unitRun([join(here, "unit.mjs"), "--fixture", join(here, "testdata-unit-crash"),
+        "--jobs", String(jobs), "--no-cache", "--out", join(dir, `out-${jobs}`)],
+      {GOGEN_UNIT_MAX_STACK: "65536", GOGEN_UNIT_RUNNER: wrapper, GOGEN_UNIT_TEST_LOG: log});
+      assert.equal(run.status, 1, run.stderr || run.stdout);
+      assert.deepEqual(run.result.rows.map((r) => r.status), ["SUCCESS", "FAILED", "SUCCESS", "SUCCESS"]);
+      assert.match(run.result.rows[1].message, /^runner died: runtime: goroutine stack exceeds 65536-byte limit/);
+      assert.equal(run.result.rows[1].message.includes("\n"), false, "only the first stderr line");
+      const processes = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      const retries = processes.filter((p) => p.retry);
+      assert.equal(processes.length, 4, "test processes (excluding the seed image process)");
+      assert.equal(retries.length, jobs === 1 ? 3 : 2);
+      assert.equal(run.result.timingMs.runDetail.retries, retries.length);
+      assert.ok(retries.every((p) => p.selected.length === 1), "each retry has its own process");
+      assert.equal(retries.filter((p) => p.selected[0] === "ZCL_GOGEN_CRASH_B_RECUR:LTCL_TEST").length, 1);
+      assert.ok(retries.every((p) => !p.selected[0].includes("A_PASS")), "completed class was not re-run");
+      if (jobs === 2) assert.ok(retries.every((p) => !p.selected[0].includes("C_PASS")), "completed shard was not re-run");
+      assert.equal(existsSync(join(dirname(run.result.buildDir), "single")), false);
+      assert.equal(existsSync(join(dirname(run.result.buildDir), "shards")), false);
+      assert.ok(!Object.keys(JSON.parse(readFileSync(join(dir, `out-${jobs}`, "class-timings.json"), "utf8")))
+        .some((key) => key.includes("B_RECUR")), "dead classes have no completed timing");
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
 test("a missing or corrupt seed image and a killed shard fail every assigned method", {timeout: 120000}, async () => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-unit-faults-"));
   const wrapper = join(dir, "runner.mjs");
@@ -235,7 +320,7 @@ process.exit(run.status ?? 1);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
-test("runner errors and signals take precedence over earlier stderr", {timeout: 120000}, async () => {
+test("runner deaths keep the first stderr line and spawn errors remain actionable", {timeout: 120000}, async () => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-unit-run-errors-"));
   const wrapper = join(dir, "runner.mjs");
   writeFileSync(wrapper, `#!/usr/bin/env node
@@ -245,14 +330,14 @@ process.kill(process.pid, "SIGTERM");
   chmodSync(wrapper, 0o755);
   try {
     for (const [label, jobs, runner, expected] of [
-      ["single-signal", "1", wrapper, "runner: terminated by SIGTERM"],
+      ["single-signal", "1", wrapper, "runner died: earlier stderr"],
       ["seed-error", "2", join(dir, "absent"), "seed image: spawnSync"],
-      ["single-error", "1", join(dir, "absent"), "runner: spawnSync"],
+      ["single-error", "1", join(dir, "absent"), "runner died: spawn"],
     ]) {
       const run = await unitRun([...staticsArgs.slice(0, -2), "--jobs", jobs, "--out", join(dir, label)], {GOGEN_UNIT_RUNNER: runner});
       assert.equal(run.status, 1, run.stderr || run.stdout);
       assert.ok(run.result.rows.every((row) => row.message.includes(expected)), JSON.stringify(run.result.rows));
-      assert.ok(run.result.rows.every((row) => !row.message.includes("earlier stderr")));
+      if (label !== "single-signal") assert.ok(run.result.rows.every((row) => !row.message.includes("earlier stderr")));
     }
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });

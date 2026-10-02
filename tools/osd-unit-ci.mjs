@@ -20,7 +20,7 @@ export function summarize(result) {
   const rows = result.rows.map((row) => {
     let status = row.status === "FAILED" ? "FAILURE" : row.status;
     // A process failure is infrastructure, not a failed ABAP assertion.
-    if (status === "FAILURE" && /^(runner:|seed image:)/.test(row.message ?? "")) status = "ERROR";
+    if (status === "FAILURE" && /^(runner:|runner died:|seed image:)/.test(row.message ?? "")) status = "ERROR";
     if (!["SUCCESS", "FAILURE", "NOT_COMPILED", "ERROR"].includes(status)) status = "ERROR";
     totals[status.toLowerCase()]++;
     if (row.method) totals.tests++;

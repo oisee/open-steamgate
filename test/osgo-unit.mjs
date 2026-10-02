@@ -46,6 +46,18 @@ describe("osgo unit CI entry point", function () {
     assert.deepEqual(snapshot(input), before);
     assert.equal(existsSync(resolve(result.buildDir)), false, "generated Go tree cleaned");
   });
+  for (const jobs of [1, 2]) it(`attributes fatal recursion to its own class with jobs=${jobs}`, () => {
+    const fixtureDir = join(root, "tools/gogen/testdata-unit-crash");
+    const before = snapshot(fixtureDir);
+    const run = invoke(fixtureDir, ["--json", "--jobs", String(jobs)], "tools/osgo-unit.mjs",
+      {env: {...process.env, GOGEN_UNIT_MAX_STACK: "65536"}});
+    assert.equal(run.status, 2, run.stdout + run.stderr);
+    const result = JSON.parse(run.stdout);
+    assert.deepEqual(result.totals, {success: 3, failure: 0, not_compiled: 0, error: 1, tests: 4});
+    assert.deepEqual(result.rows.map((row) => row.status), ["SUCCESS", "ERROR", "SUCCESS", "SUCCESS"]);
+    assert.match(result.rows[1].message, /^runner died: runtime: goroutine stack exceeds 65536-byte limit/);
+    assert.deepEqual(snapshot(fixtureDir), before);
+  });
   it("returns 1 and a human method line on a failing assertion", () => {
     fixture(input, "zcl_osgo_ci", "cl_abap_unit_assert=>assert_equals( act = 1 exp = 2 ).");
     const run = invoke(input);
@@ -172,7 +184,7 @@ describe("osgo unit CI entry point", function () {
     assert.equal(JSON.parse(run.stdout).totals.success, 1);
   });
   it("classifies infrastructure, skipped methods, and mixed outcomes conservatively", () => {
-    for (const row of [{status: "FAILED", message: "runner: crashed", method: "CHECK"}, {status: "SKIPPED", method: "CHECK"}]) {
+    for (const row of [{status: "FAILED", message: "runner: crashed", method: "CHECK"}, {status: "FAILED", message: "runner died: crashed", method: "CHECK"}, {status: "SKIPPED", method: "CHECK"}]) {
       const result = summarize({rows: [row]}); assert.equal(result.code, 2); assert.equal(result.result.totals.error, 1);
     }
     assert.equal(summarize({rows: [{status: "FAILED", method: "ONE"}, {status: "NOT_COMPILED", method: "TWO"}]}).code, 2);

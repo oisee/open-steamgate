@@ -1561,8 +1561,11 @@ scratch and the seed image are removed after the run. `--out` holds
 `class-timings.json`, which balances the next run; without timings, classes
 are assigned in name order round robin. The report's `buildDir` points to
 the run's Go tree for follow-on builds.
-The JSON report keeps the single-process row order and schema. A crashed
-shard marks its assigned methods failed with the process reason.
+The JSON report keeps the single-process row order and schema. Completed
+test classes are checkpointed after teardown. If a process dies, unfinished
+classes each retry once in their own process; completed results stay intact.
+An isolated death reports `runner died: <first stderr line>` and is ERROR
+with exit code 2 through `osgo:unit`.
 
 Run `npm run transpile` first for the Node oracle, then
 `node tools/gogen/unit-compare.mjs --class ZCL_OSD_FORM_TEST --class ZCL_OSD_TIMER_TEST`.

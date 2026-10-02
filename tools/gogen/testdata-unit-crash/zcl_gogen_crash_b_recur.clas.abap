@@ -1,0 +1,4 @@
+CLASS zcl_gogen_crash_b_recur DEFINITION PUBLIC FINAL CREATE PUBLIC.
+ENDCLASS.
+CLASS zcl_gogen_crash_b_recur IMPLEMENTATION.
+ENDCLASS.
