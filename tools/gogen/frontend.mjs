@@ -11,6 +11,7 @@
 // Everything outside the subset is a named refusal (Unsupported), never a
 // guess. A method whose body or signature is outside it is skipped and says
 // why; a method that calls a skipped one is refused in turn.
+import {replaceStatement, lowerByteFind} from "./frontend-bytes.mjs";
 import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
@@ -82,6 +83,7 @@ export const composite = (t) => t?.k === "table" || t?.k === "struct";
 export const byRef = (p) => p.dir === "importing" && composite(p.type) && !p.byValue;
 const numeric = (t) => t.k === "i" || t.k === "f" || t.k === "int8";
 const charlike = (t) => t.k === "c" || t.k === "string";
+const byteStatementHelpers = {Nodes, Expressions, upper, isExpr, source, lvalue, convert, charlike, Unsupported, I, S, XS, findResults};
 const cdsViewsByRegistry = new WeakMap();
 
 /* ------------------------------------------------------------------- program */
@@ -2740,7 +2742,7 @@ function statement(node, ctx) {
     refuseSorted(table, "INSERT ... INDEX into");
     return {s: "insert_index", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), index: convert(source(idxNode, ctx, I), I)};
   }
-  if (isStmt(node, Statements.Replace)) return replaceStatement(node, ctx, text);
+  if (isStmt(node, Statements.Replace)) return replaceStatement(node, ctx, text, byteStatementHelpers);
   if (isStmt(node, Statements.Translate)) {
     const m = /\bTO\s+(UPPER|LOWER)\s+CASE\b/i.exec(text);
     if (m === null) throw new Unsupported(`TRANSLATE form: ${text}`);
@@ -2762,6 +2764,12 @@ function statement(node, ctx) {
   if ([Statements.OpenDataset, Statements.CloseDataset, Statements.DeleteDataset, Statements.Transfer,
     Statements.ReadDataset, Statements.GetDataset, Statements.SetDataset].some((k) => isStmt(node, k))) {
     return datasetStatement(node, ctx, text);
+  }
+  // GET RUN TIME FIELD: monotonic microseconds since the first call (FIX.md).
+  if (isStmt(node, Statements.GetRunTime)) {
+    const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+    if (target.type.k !== "i") throw new Unsupported(`GET RUN TIME FIELD into a ${target.type.k}`);
+    return {s: "get_runtime", target};
   }
   // ultra/events: GET TIME STAMP FIELD ts into a TIMESTAMP p(8,0) or a
   // TIMESTAMPL p(11,7): UTC, as sy-datum and sy-uzeit are here
@@ -2874,23 +2882,8 @@ function statement(node, ctx) {
     // 2026-09-25 (ZCL_GOGEN_T_FINDRES, _FINDPCRE): see abap.FindResults
     if (/^FIND (FIRST OCCURRENCE OF |ALL OCCURRENCES OF )?IN ((IGNORING|RESPECTING) CASE )?RESULTS$/.test(tw)
       && node.findDirectExpressions(Expressions.Source).length === 2) return findResults(node, ctx, text, tw);
-    // FIND [FIRST OCCURRENCE OF] p IN [SECTION OFFSET o OF] xs IN BYTE MODE
-    // [MATCH OFFSET m]: a byte sequence in an xstring (the sXML reader crosses
-    // a UTF-8 document with it); offsets in bytes, sy-subrc 4 and m left
-    // alone when it is not there
-    if (/^FIND (FIRST OCCURRENCE OF )?IN (SECTION OFFSET OF )?IN BYTE MODE( MATCH OFFSET)?$/.test(tw)
-      && !/\b(REGEX|PCRE)\b/i.test(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? "")) {
-      const srcs = node.findDirectExpressions(Expressions.Source);
-      const section = words.includes("SECTION");
-      if (srcs.length !== (section ? 3 : 2)) throw new Unsupported(`FIND form: ${text}`);
-      const pat = source(srcs[0], ctx);
-      const subject = source(srcs[srcs.length - 1], ctx);
-      for (const x of [pat, subject]) if (x.type.k !== "x" && x.type.k !== "xstring") throw new Unsupported(`FIND IN BYTE MODE of a ${x.type.k}`);
-      const target = node.findDirectExpression(Expressions.Target);
-      const off = target ? lvalue(target, ctx) : null;
-      if (off && off.type.k !== "i") throw new Unsupported(`MATCH OFFSET into a ${off.type.k}`);
-      return {s: "find_bytes", pattern: convert(pat, XS), subject: convert(subject, XS), secOff: section ? convert(source(srcs[1], ctx, I), I) : null, off};
-    }
+    const byteFind = lowerByteFind(node, ctx, text, kids, words, tw, byteStatementHelpers);
+    if (byteFind) return byteFind;
     if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|IN\s+BYTE\s+MODE|RESPECTING)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
@@ -3018,42 +3011,6 @@ function splitStatement(node, ctx, text) {
     targets: places.map((t, i) => ({target: t, value: convert({e: "temp", name: `spl[${i}]`, type: S}, t.type)}))};
 }
 
-function replaceStatement(node, ctx, text) {
-  // REPLACE [FIRST OCCURRENCE OF | ALL OCCURRENCES OF] [REGEX] p IN
-  // [SECTION [OFFSET o] [LENGTH l] OF] v WITH w [IGNORING CASE]; every rule
-  // measured on A4H 2026-09-23, see abap.ReplaceStmt
-  if (/\b(PCRE|RESPECTING|IN\s+BYTE\s+MODE|REPLACEMENT|RESULTS|INTO)\b/i.test(text)) throw new Unsupported(`REPLACE form: ${text}`);
-  const kids = node.getChildren();
-  const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
-  if (words.includes("SECTION") && !words.includes("OCCURRENCE") && !words.includes("OCCURRENCES")) throw new Unsupported(`REPLACE SECTION form: ${text}`);
-  const ft = node.findDirectExpression(Expressions.FindType);
-  const kind = ft ? upper(ft.concatTokens()) : "";
-  if (kind && kind !== "REGEX" && kind !== "SUBSTRING") throw new Unsupported(`REPLACE ${kind}`);
-  const regex = kind === "REGEX";
-  let pat = null, off = null, len = null, wth = null, mode = "pat";
-  for (let i = 0; i < kids.length; i += 1) {
-    const w = words[i];
-    if (w === "OFFSET") { mode = "off"; continue; }
-    if (w === "LENGTH") { mode = "len"; continue; }
-    if (w === "WITH") { mode = "with"; continue; }
-    if (!isExpr(kids[i], Expressions.Source)) continue;
-    if (mode === "pat" && pat === null) pat = kids[i];
-    else if (mode === "off") off = kids[i];
-    else if (mode === "len") len = kids[i];
-    else if (mode === "with") wth = kids[i];
-  }
-  if (pat === null || wth === null) throw new Unsupported(`REPLACE operands: ${text}`);
-  if (regex && (off || len)) throw new Unsupported(`REPLACE REGEX IN SECTION: what an anchor sees there is not measured: ${text}`);
-  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
-  if (target.type.k !== "string" && target.type.k !== "c") throw new Unsupported(`REPLACE in a ${target.type.k}`);
-  const p = source(pat, ctx);
-  const w = source(wth, ctx);
-  if (!charlike(p.type) || !charlike(w.type)) throw new Unsupported(`REPLACE operands of ${p.type.k} / ${w.type.k}`);
-  return {s: "replace", target, pattern: convert(p, S), with: convert(w, S), regex, all: words.includes("ALL"),
-    icase: /\bIGNORING\s+CASE\b/i.test(text), off: off ? convert(source(off, ctx, I), I) : null, len: len ? convert(source(len, ctx, I), I) : null,
-    cLen: target.type.k === "c" ? target.type.len : -1};
-}
-
 // MOVE-CORRESPONDING a TO b between structures: every component of b whose
 // name a has too gets a's value by the conversion rules, the others are
 // left alone, sy-subrc too (measured on A4H). A component that is itself a
@@ -3153,19 +3110,19 @@ function stringFn(name, direct, named, ctx, text) {
  * OFFSET and LENGTH (i) and nothing else -- match_result -- for FIRST, or a
  * standard table of such rows -- match_result_tab -- for ALL. The subject is
  * a string or a c (not a table, not a section); the pattern a string or a
- * c, not a CL_ABAP_REGEX object.
+ * c, not a CL_ABAP_REGEX object. Byte ALL shares the result shape (P2 oracle).
  */
-function findResults(node, ctx, text, tw) {
+function findResults(node, ctx, text, tw, bytes = false, resultNode = null) {
   const all = tw.startsWith("FIND ALL");
   const ft = node.findDirectExpression(Expressions.FindType);
   const kind = ft ? upper(ft.concatTokens()) : "";
   if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind} ... RESULTS`);
   const [pat, subj] = node.findDirectExpressions(Expressions.Source);
   const patX = source(pat, ctx);
-  if (!charlike(patX.type)) throw new Unsupported(`FIND ... RESULTS with a ${patX.type.k} pattern`);
+  if (!(bytes ? ["x", "xstring"].includes(patX.type.k) : charlike(patX.type))) throw new Unsupported(`FIND ... RESULTS with a ${patX.type.k} pattern`);
   const subjX = source(subj, ctx);
-  if (!charlike(subjX.type)) throw new Unsupported(`FIND ... RESULTS in a ${subjX.type.k}`);
-  const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
+  if (!(bytes ? ["x", "xstring"].includes(subjX.type.k) : charlike(subjX.type))) throw new Unsupported(`FIND ... RESULTS in a ${subjX.type.k}`);
+  const target = lvalue(resultNode ?? node.findDirectExpression(Expressions.Target), ctx);
   const where = `FIND ... RESULTS ${target.type.k}`;
   let row = target.type;
   if (all) {
@@ -3190,7 +3147,7 @@ function findResults(node, ctx, text, tw) {
   }
   const nFields = (t) => ctx.program.structs.get(t.go)?.fields?.length ?? 0;
   if (nFields(row) !== 4 || nFields(sub) !== 2) throw new Unsupported(`${where}: a result structure with more components than match_result`);
-  return {s: "find_results", all, mode: kind === "PCRE" ? "P" : kind === "REGEX" ? "R" : "", pattern: convert(patX, S), subject: convert(subjX, S),
+  return {s: "find_results", all, bytes, mode: kind === "PCRE" ? "P" : kind === "REGEX" ? "R" : "", pattern: convert(patX, bytes ? XS : S), subject: convert(subjX, bytes ? XS : S),
     icase: /\bIGNORING\s+CASE\b/i.test(text), target, table: all, row, sub, f};
 }
 

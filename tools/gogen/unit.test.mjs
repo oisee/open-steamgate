@@ -290,3 +290,15 @@ test("ABAP fixture runs pass, fail, exception, and teardown after failures", {ti
   assert.match(rows[9].message, /stopped after teardown failure/);
   assert.equal(rows[10].message, "teardown: teardown continue");
 });
+
+test("byte section replacement, bounded FIND and memory spans run through ABAP Unit", async () => {
+  const run = await unitRun([join(here, "unit.mjs"), "--fixture", "tools/gogen/testdata",
+    "--class", "ZCL_GOGEN_T_BYTESECTION", "--class", "ZCL_GOGEN_T_BYTEMEM",
+    "--class", "ZCL_ABAPITI_REPRO_BYTES", "--class", "ZCL_ABAPITI_REPRO_MEM",
+    "--class", "ZCL_GOGEN_T_BYTEORACLE", "--jobs", "2"]);
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  assert.equal(run.result.classes, 5);
+  assert.equal(run.result.compiled, 5);
+  assert.equal(run.result.rows.length, 57);
+  assert.ok(run.result.rows.every((row) => row.status === "SUCCESS"), run.stdout);
+});

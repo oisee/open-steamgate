@@ -30,6 +30,14 @@
       "lines": 436,
       "reason": "baseline 2026-10-01"
     },
+    "go:byteops": {
+      "lines": 37,
+      "reason": "P1 fixed-byte fitting and P2 ALL search carved out to keep abap and bytesection within their existing budgets."
+    },
+    "go:bytesection": {
+      "lines": 40,
+      "reason": "byte REPLACE/FIND section spans; independent of go/abap"
+    },
     "go:charsearch": {
       "lines": 58,
       "reason": "baseline 2026-10-01"
@@ -117,6 +125,10 @@
     "go:reportargs": {
       "lines": 209,
       "reason": "baseline 2026-10-01"
+    },
+    "go:runtimeclock": {
+      "lines": 25,
+      "reason": "GET RUN TIME FIELD monotonic clock in its own package; no abap growth."
     },
     "go:sandbox": {
       "lines": 533,

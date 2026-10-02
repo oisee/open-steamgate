@@ -1,3 +1,4 @@
+import {emitByteStatement} from "./emit-bytes.mjs";
 // IR -> Go source, for the Go backend spike.
 //
 // Nothing here decides semantics: the IR already says which calculation type
@@ -1274,6 +1275,7 @@ function stmtLines(st, ctx, d) {
     }
     // ultra/events: SET HANDLER, one registration per handler (the names
     // Ev* are mixed case, so no ABAP name, all upper or all lower, meets them)
+    case "get_runtime": return [`${t}${place(st.target, ctx)} = ${helperFn("runtimeclock.Microseconds")}()`];
     case "get_timestamp": return [`${t}${place(st.target, ctx)} = abap.TimeStamp(${st.dec})`];
     // AMC on the Go host (go/amc; the bodies frontend.mjs AMC_HOST gives)
     case "amc": {
@@ -1860,14 +1862,9 @@ ${t}	}`));
         ...(bind ? [`${t}\t\t\t${bind}`] : []), `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\ts.Sy.Tabix = ${st.hashed ? "0" : `int32(i${n} + 1)`}`,
         `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
-    // FIND ... IN BYTE MODE: see abap.FindBytes
-    case "find_bytes": {
-      const lines = [`${t}if fb, ok := abap.FindBytes(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.secOff ? expr(st.secOff, ctx) : "0"}); ok {`, `${t}\ts.Sy.Subrc = 0`];
-      if (st.off) lines.push(`${t}\t${place(st.off, ctx)} = fb`);
-      else lines.push(`${t}\t_ = fb`);
-      lines.push(`${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`);
-      return lines;
-    }
+    case "find_bytes":
+    case "replace_bytes":
+    case "find_bytes_all": return emitByteStatement(st, ctx, t, {expr, place});
     case "find": {
       // IN TABLE and IN SECTION (ultra/sadl): see abap.FindTable / abap.FindSection
       const call = st.table ? `fok, fline, foff, flen, fsub := abap.FindTable(${expr(st.table, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length})`
@@ -1897,9 +1894,9 @@ ${t}	}`));
         `${t}\t\t\t${r}.${ident(f.SUBMATCHES)} = append(${r}.${ident(f.SUBMATCHES)}, ${subGo}{${ident(f.SOFFSET)}: fm${n}[g], ${ident(f.SLENGTH)}: fm${n}[g+1]})`,
         `${t}\t\t}`];
       const tgt = place(st.target, ctx);
-      const call = `abap.FindResults(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.mode ? `'${st.mode}'` : "0"}, ${st.icase}, ${st.all})`;
+      const call = st.bytes ? `abap.FindBytesAll(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)})` : `abap.FindResults(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.mode ? `'${st.mode}'` : "0"}, ${st.icase}, ${st.all})`;
       if (st.table) {
-        return [`${t}{`, `${t}\tfms${n} := ${call}`, `${t}\t${tgt} = nil`, `${t}\ts.Sy.Subrc = 4`, `${t}\tfor _, fm${n} := range fms${n} {`,
+        return [`${t}{`, `${t}\tfms${n} := ${call}`, `${t}\t${tgt} = nil`, ...(st.count ? [`${t}\t${place(st.count, ctx)} = int32(len(fms${n}))`] : []), `${t}\ts.Sy.Subrc = 4`, `${t}\tfor _, fm${n} := range fms${n} {`,
           `${t}\t\ts.Sy.Subrc = 0`, `${t}\t\tvar fr${n} ${rowGo}`, ...fill(`fr${n}`), `${t}\t\t${tgt} = append(${tgt}, fr${n})`, `${t}\t}`, `${t}}`];
       }
       return [`${t}{`, `${t}\tfms${n} := ${call}`, `${t}\ts.Sy.Subrc = 4`, `${t}\tif len(fms${n}) > 0 {`, `${t}\t\ts.Sy.Subrc = 0`,

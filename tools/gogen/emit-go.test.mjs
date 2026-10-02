@@ -336,3 +336,25 @@ ENDCLASS.
     rmSync(goDir, {recursive: true, force: true});
   }
 });
+
+test("GET RUN TIME FIELD lowers an i target to monotonic microseconds", () => {
+  const sourceDir = mkdtempSync(join(here, ".out", "gogen-runtime-"));
+  try {
+    const file = join(sourceDir, "zcl_runtime.clas.abap");
+    const source = (type) => `CLASS zcl_runtime DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION. CLASS-METHODS run.
+ENDCLASS.
+CLASS zcl_runtime IMPLEMENTATION.
+METHOD run. DATA elapsed TYPE ${type}. GET RUN TIME FIELD elapsed. ENDMETHOD.
+ENDCLASS.`;
+    writeFileSync(file, source("i"));
+    const program = compileProgram({folders: [sourceDir], objects: ["ZCL_RUNTIME"]});
+    assert.equal(program.classes[0].methods[0].body[0].s, "get_runtime");
+    const go = emitGo(program);
+    assert.match(go, /hRuntimeclock \"osg\/gogen\/runtimeclock\"/);
+    assert.match(go, /elapsed = hRuntimeclock\.Microseconds\(\)/);
+    writeFileSync(file, source("string"));
+    const refused = compileProgram({folders: [sourceDir], objects: ["ZCL_RUNTIME"], tolerant: true});
+    assert.match(refused.partial.join("\n"), /GET RUN TIME FIELD into a string/);
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});
