@@ -74,116 +74,100 @@ describe("tools/osd-dev: a save is a check, a build and a recycle", function () 
     expect(published.length).to.equal(before + 1);
   });
 
-  // vsp-i7 on 0.6.1511 (OSD_WARM=1 STG_DEV=1): every create, every PUT and
-  // every delete through the ADT façade was a cold build and a recycle of
-  // the dev loop's own, besides the activation's -- 21 recycles, 1.52x the
-  // wall time, and an activation that timed out behind them. A save is not
-  // an activation; the façade's activation is the one that loads.
-  describe("the store's own writes are left to the activation that owns them", () => {
-    it("a create, a save and a delete through the store build nothing", async () => {
-      const before = published.length;
+  // vsp-i7 on 0.6.1511 (OSD_WARM=1 STG_DEV=1): every create and every PUT
+  // through the ADT façade was a cold build and a recycle of the dev loop's
+  // own, besides the activation's -- 21 recycles, 1.52x the wall time, and
+  // an activation that timed out behind them. A save is not an activation:
+  // a file still holding its saved-inactive version is never built here,
+  // and this is the store's persistent inactive set, not a record of the
+  // write that a time, an event or a publish could end.
+  describe("a saved, not activated version is never built by the dev loop", () => {
+    const touched = async (file) => {
+      store.index = undefined;
+      store.parsed = undefined;
+      return loop.touch(file);
+    };
+    const external = (file, text) => writeFileSync(join(root, file), text);
+
+    before(() => {
       // a package the store can create into: a folder with its devc file
       mkdirSync(join(root, "src", "own"), {recursive: true});
       writeFileSync(join(root, "src/own/package.devc.xml"), "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<abapGit version=\"v1.0.0\" serializer=\"LCL_OBJECT_DEVC\" serializer_version=\"v1.0.0\">\n <asx:abap xmlns:asx=\"http://www.sap.com/abapxml\" version=\"1.0\">\n  <asx:values>\n   <DEVC>\n    <CTEXT>own</CTEXT>\n   </DEVC>\n  </asx:values>\n </asx:abap>\n</abapGit>\n");
       store.index = undefined;
-      const home = store.packages().find((p) => p.file === "src/own/package.devc.xml" || /OWN$/.test(p.name));
-      const made = store.create("CLAS", "ZCL_DEV_OWN", {package: home.name});
-      const r1 = await loop.touch(made.file);
-      expect(r1).to.include({ok: true, stage: "own"});
-      const saved = store.write("CLAS", "ZCL_DEV_OWN", CLEAN("zcl_dev_own"));
-      const r2 = await loop.touch(saved.file);
-      expect(r2).to.include({ok: true, stage: "own"});
-      store.delete("CLAS", "ZCL_DEV_OWN");
-      const r3 = await loop.touch(made.file);
-      expect(r3).to.include({ok: true, stage: "own"});
-      expect(published.length, "no build for the store's own writes").to.equal(before);
-      expect(lines.join("\n")).to.match(/changed by the store's own write; left to its activation/);
     });
 
-    it("another editor's bytes over the store's write are a change, and so is its next save of the same bytes", async () => {
-      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a"));
-      writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a").replace("METHOD run.", "METHOD run.\n    \"edited"));
-      store.index = undefined;
-      store.parsed = undefined;
+    it("a create and a save through the store build nothing", async () => {
       const before = published.length;
-      const r = await loop.touch(saved.file);
-      expect(r).to.include({ok: true, stage: "live"});
-      // the editor puts back exactly what the store had written: its save,
-      // not the store's, since the store's write was overwritten meanwhile
-      writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a"));
-      store.index = undefined;
-      store.parsed = undefined;
-      const again = await loop.touch(saved.file);
-      expect(again).to.include({ok: true, stage: "live"});
+      const home = store.packages().find((p) => p.file === "src/own/package.devc.xml" || /OWN$/.test(p.name));
+      const made = store.create("CLAS", "ZCL_DEV_OWN", {package: home.name});
+      expect(await touched(made.file)).to.include({ok: true, stage: "inactive"});
+      const saved = store.write("CLAS", "ZCL_DEV_OWN", CLEAN("zcl_dev_own"));
+      expect(await touched(saved.file)).to.include({ok: true, stage: "inactive"});
+      expect(published.length, "no build for a save").to.equal(before);
+      expect(store.stateOf(store.find("CLAS", "ZCL_DEV_OWN")).version).to.equal("inactive");
+      expect(lines.join("\n")).to.match(/saved and not activated; left to its activation/);
+    });
+
+    it("an identical external save of an inactive B is skipped, and B stays inactive", async () => {
+      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* b\n");
+      external(saved.file, CLEAN("zcl_dev_a") + "* b\n");
+      const before = published.length;
+      expect(await touched(saved.file)).to.include({stage: "inactive"});
+      expect(published.length).to.equal(before);
+      expect(store.stateOf(store.find("CLAS", "ZCL_DEV_A")).version).to.equal("inactive");
+    });
+
+    it("a checkout to the same bytes is skipped", async () => {
+      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* co\n");
+      // a checkout: away and back, both by somebody else, seen only at the end
+      external(saved.file, CLEAN("zcl_dev_a") + "* elsewhere\n");
+      external(saved.file, CLEAN("zcl_dev_a") + "* co\n");
+      const before = published.length;
+      expect(await touched(saved.file)).to.include({stage: "inactive"});
+      expect(published.length).to.equal(before);
+    });
+
+    it("B, C, B: C is another editor's change and is built (and activated); B after it is a change too", async () => {
+      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* B\n");
+      external(saved.file, CLEAN("zcl_dev_a") + "* C\n");
+      const before = published.length;
+      expect(await touched(saved.file)).to.include({ok: true, stage: "live"});
+      expect(store.stateOf(store.find("CLAS", "ZCL_DEV_A")).version, "C activated").to.equal("active");
+      external(saved.file, CLEAN("zcl_dev_a") + "* B\n");
+      expect(await touched(saved.file)).to.include({ok: true, stage: "live"});
       expect(published.length).to.equal(before + 2);
     });
 
-    // critic on 0e7ec1c2: a standing record suppressed identical bytes for
-    // ever. PUT B, its activation fails, and the same B from another editor
-    // or a checkout never reached the dev loop.
-    it("PUT B, the activation fails, an identical save of B is built", async () => {
-      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* b\n");
+    it("a watcher event that comes late never activates a saved-only file", async () => {
+      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* late\n");
+      await new Promise((r) => setTimeout(r, 2500));
+      const before = published.length;
+      expect(await touched(saved.file)).to.include({stage: "inactive"});
+      expect(published.length).to.equal(before);
+      expect(store.stateOf(store.find("CLAS", "ZCL_DEV_A")).version).to.equal("inactive");
+    });
+
+    it("a failed activation, then an identical save: still inactive, and the dev loop does not activate it", async () => {
+      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* failed\n");
       const transpile = store.transpile;
       store.transpile = async () => ({ok: false, error: "the activation failed"});
       try {
-        expect(await store.publish()).to.include({ok: false});
+        expect(await store.publish({activate: [{type: "CLAS", name: "ZCL_DEV_A"}]})).to.include({ok: false});
       } finally {
         store.transpile = transpile;
       }
-      writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a") + "* b\n");
-      store.index = undefined;
-      store.parsed = undefined;
+      external(saved.file, CLEAN("zcl_dev_a") + "* failed\n");
       const before = published.length;
-      expect(await loop.touch(saved.file)).to.include({ok: true, stage: "live"});
-      expect(published.length).to.equal(before + 1);
+      expect(await touched(saved.file)).to.include({stage: "inactive"});
+      expect(published.length).to.equal(before);
+      expect(store.stateOf(store.find("CLAS", "ZCL_DEV_A")).version).to.equal("inactive");
     });
 
-    it("the record is one-shot: the write's event is left alone, a later identical save is built", async () => {
-      const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* c\n");
-      expect(await loop.touch(saved.file)).to.include({stage: "own"});
-      // a checkout or another editor writes the same bytes afterwards
-      writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a") + "* c\n");
-      store.index = undefined;
-      store.parsed = undefined;
-      expect(await loop.touch(saved.file)).to.include({ok: true, stage: "live"});
-    });
-
-    it("a record whose event never came expires", async () => {
-      store.ownWriteMs = 50;
-      try {
-        const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* d\n");
-        await new Promise((r) => setTimeout(r, 120));
-        expect(await loop.touch(saved.file)).to.include({ok: true, stage: "live"});
-      } finally {
-        store.ownWriteMs = 2000;
-      }
-    });
-
-    it("B, C, B again in one burst is another editor's change (the watcher sees C)", async () => {
-      store.watch();
-      try {
-        const saved = store.write("CLAS", "ZCL_DEV_A", CLEAN("zcl_dev_a") + "* e\n");
-        await new Promise((r) => setTimeout(r, 100));
-        writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a") + "* other\n");
-        await new Promise((r) => setTimeout(r, 100));
-        writeFileSync(join(root, saved.file), CLEAN("zcl_dev_a") + "* e\n");
-        await new Promise((r) => setTimeout(r, 100));
-        const before = published.length;
-        expect(await loop.touch(saved.file)).to.include({ok: true, stage: "live"});
-        expect(published.length).to.equal(before + 1);
-      } finally {
-        store.unwatch();
-      }
-    });
-
-    it("a burst with the store's write and another file is a pass for the other file", async () => {
+    it("a burst with a saved file and another editor's file is a pass for the other file", async () => {
       const saved = store.write("CLAS", "ZCL_DEV_B", CALLER("zcl_dev_b", "zcl_dev_a"));
-      writeFileSync(join(root, "src/osd/zcl_dev_a.clas.abap"), CLEAN("zcl_dev_a"));
-      store.index = undefined;
-      store.parsed = undefined;
+      external("src/osd/zcl_dev_a.clas.abap", CLEAN("zcl_dev_a"));
       const before = published.length;
-      const both = Promise.all([loop.touch(saved.file), loop.touch("src/osd/zcl_dev_a.clas.abap")]);
-      const [, r] = await both;
+      const [, r] = await Promise.all([loop.touch(saved.file), touched("src/osd/zcl_dev_a.clas.abap")]);
       expect(r).to.include({ok: true, stage: "live"});
       expect(published.length).to.equal(before + 1);
       expect(lines.slice(-3).join("\n")).to.match(/^1 file changed: CLAS ZCL_DEV_A\n/);

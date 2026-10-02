@@ -125,18 +125,21 @@ registry is primed again.
   runtime's own boot limit already was. A fixed 60 s had turned a boot
   that was slow and correct into a failed activation (vsp-i7, 0.6.1511: a
   boot past 60 s under load, the cross-reference alone 21.6 s).
-- **A save is not an activation.** The dev loop (`STG_DEV=1`) leaves the
-  change a store write makes alone (`ObjectStore#ownWrite`): an ADT
-  create, save or delete, whose activation is the façade's. Without this
-  every create, PUT and delete through the façade was a cold build and a
-  recycle of its own -- 21 recycles in vsp-i7's suite, 1.52x the cold
-  run's wall time, and the activation behind them timed out. The record is
-  one-shot and bound to the write's own event: consumed by the first
-  matching change the dev loop sees, dropped by a watcher event with other
-  bytes, cleared by any publish (success or failure), expired after
-  `OSD_OWN_WRITE_MS` (2 s). A standing record would suppress the same bytes
-  for ever -- a PUT whose activation failed, then that source from a
-  checkout -- so after any of these an identical save is an ordinary change.
+- **A save is not an activation.** The dev loop (`STG_DEV=1`) never builds
+  a file of an object that is inactive and still holds the version saved
+  through the store (`ObjectStore#savedInactive`): an ADT create or save,
+  whose activation is the façade's. Without this every create and PUT
+  through the façade was a cold build and a recycle of its own -- 21
+  recycles in vsp-i7's suite, 1.52x the cold run's wall time, and the
+  activation behind them timed out -- and the build made a saved-only
+  version live. The rule reads the store's persistent inactive set, not a
+  record of the write: it ends with the activation, the delete, or bytes
+  that differ from the saved version (`outside`, which the dev loop builds
+  and activates like any other editor's change). So the same bytes again
+  -- another editor, a checkout, a watcher event that comes late, a retry
+  after a failed activation -- stay that inactive source until somebody
+  activates it. A delete is not covered: it takes effect at once, as on a
+  system, and the dev loop builds the tree without the object.
   Measured on a create, two edits and a delete, twice
   (`OSD_WARM=1 STG_DEV=1`): 290 s and 10 recycles before, 83-90 s and 2
   recycles after, both edits warm (1.3-1.5 s).
