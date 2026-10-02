@@ -168,7 +168,7 @@ functions:
       if (path === "test/fixtures/dsl-dpc/zl1_mapping.stg.yaml") mappingProject = model;
       const oracleXml = (xml ?? readFileSync(path, "utf8")).replace(/<PROJECT>[^<]+<\/PROJECT>/g, `<PROJECT>${model.get().project.get()}</PROJECT>`);
       const twin = generate(oracleXml, {functionModules: loadFunctionGroups(["test/fixtures/segw", "test/fixtures/dsl-dpc"])});
-      const expected = (await abap.Classes.ZCL_STG_SEGW_GEN_DPC.dpc_source({is_model: model})).get();
+      const expected = (await abap.Classes.ZCL_STG_SEGW_GEN_DPC.dpc_source_legacy({is_model: model})).get();
       expect(expected, `${path} ABAP versus JS oracle`).to.equal(twin.files[`${model.get().dpc.get().toLowerCase()}.clas.abap`]);
       const shape = JSON.parse((await abap.Classes.ZCL_OSD_DSL_DPC.project_model_json({is_model: model})).get());
       seen.mapped += shape.impls.filter((impl) => impl.mapping).length;
@@ -181,6 +181,20 @@ functions:
       const actual = (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: result})).get();
       const mismatch = [...actual].findIndex((ch, i) => ch !== expected[i]);
       expect(actual, `${path} at byte ${mismatch}: ${JSON.stringify(actual.slice(mismatch - 50, mismatch + 100))} versus ${JSON.stringify(expected.slice(mismatch - 50, mismatch + 100))}`).to.equal(expected);
+      // The production path: generate() ships the DSL class, its trace sidecar
+      // (one node per line) and no legacy bytes.
+      if (model.get().mpc.get() && model.get().dpc.get()) {
+        const files = new Map();
+        for (const file of (await abap.Classes.ZCL_STG_SEGW_GEN.generate({iv_project: box(model.get().project.get())})).array()) {
+          files.set(file.get().name.get(), file.get().content.get());
+        }
+        const dpcName = model.get().dpc.get().toLowerCase();
+        expect(files.get(`${dpcName}.clas.abap`), `${path} generate() DPC equals dpc_source_legacy`).to.equal(expected);
+        const shipped = JSON.parse(files.get(`${dpcName}.clas.trace.json`) ?? "{}");
+        expect(shipped.generator, `${path} DPC sidecar shipped`).to.equal("dsl-dpc");
+        expect(shipped.lines?.length, `${path} one trace node per DPC line`).to.equal(expected.trimEnd().split("\n").length);
+        expect(shipped.lines.every((line) => line.node), `${path} shipped trace nodes`).to.equal(true);
+      }
       const traces = result.get().trace.array();
       const lines = result.get().lines.array();
       expect(traces.length, `${path} trace count`).to.equal(lines.length);
@@ -219,6 +233,36 @@ functions:
     });
   }
 
+  it("refuses a planted DPC profile error with the same message shape as MPC", async () => {
+    const model = await imported("profile error", readFileSync(FIXTURES[2], "utf8"));
+    // Plant an actual rendered line error, keeping its original trace position.
+    // Checking both consumers holds the DPC error contract to the MPC's.
+    for (const consumer of ["MPC", "DPC"]) {
+      const klass = abap.Classes[`ZCL_OSD_DSL_${consumer}`];
+      const renderer = klass.render_model;
+      klass.render_model = async (...args) => {
+        const result = await renderer.call(klass, ...args);
+        result.get().lines.array()[0].set("X".repeat(256));
+        return result;
+      };
+      try {
+        let error;
+        try {
+          await abap.Classes.ZCL_STG_SEGW_GEN.generate({iv_project: box(model.get().project.get())});
+        } catch (caught) { error = caught; }
+        expect(error, `${consumer}: GenerateSet must report the planted error`)
+          .to.be.instanceOf(abap.Classes["/IWBEP/CX_MGW_BUSI_EXCEPTION"]);
+        const className = model.get()[consumer.toLowerCase()].get();
+        expect(error.message.get()).to.match(new RegExp(
+          `^${className}: line_length at line 1, template line \\d+, node [^:]+: Line exceeds 255 characters$`));
+      } finally {
+        klass.render_model = renderer;
+      }
+    }
+    // The real renderer is restored and the same project generates cleanly.
+    await abap.Classes.ZCL_STG_SEGW_GEN.generate({iv_project: box(model.get().project.get())});
+  });
+
   it("constant spellings match both oracles and each assignment owns its trace node", async () => {
     const json = JSON.parse((await abap.Classes.ZCL_OSD_DSL_DPC.project_model_json({is_model: mappingProject})).get());
     assertData(json);
@@ -239,7 +283,7 @@ functions:
       ids.add(constant["@id"]);
     }
     expect(ids.size).to.equal(5);
-    const expected = (await abap.Classes.ZCL_STG_SEGW_GEN_DPC.dpc_source({is_model: mappingProject})).get();
+    const expected = (await abap.Classes.ZCL_STG_SEGW_GEN_DPC.dpc_source_legacy({is_model: mappingProject})).get();
     expect(output.text).to.equal(expected);
   });
 
@@ -287,7 +331,7 @@ functions:
           expect(result.text).not.to.include(" iv_count = 007.");
         } else expect(failed, `${token} through INT4 literal goes red`).to.exist;
       }
-      const expected = (await abap.Classes.ZCL_STG_SEGW_GEN_DPC.dpc_source({is_model: mappingProject})).get();
+      const expected = (await abap.Classes.ZCL_STG_SEGW_GEN_DPC.dpc_source_legacy({is_model: mappingProject})).get();
       expect((await rendered(json)).text, "original restored green").to.equal(expected);
       console.log("mutant every constant through literal: RED; original restored GREEN");
     } finally { rmSync(dir, {recursive: true, force: true}); }
@@ -405,7 +449,7 @@ functions:
   for (const {name, partial, edit, opaque} of mutants) {
     it(`rejects template mutant: ${name}`, async () => {
       const json = JSON.parse((await abap.Classes.ZCL_OSD_DSL_DPC.project_model_json({is_model: mappingProject})).get());
-      const expected = (await abap.Classes.ZCL_STG_SEGW_GEN_DPC.dpc_source({is_model: mappingProject})).get();
+      const expected = (await abap.Classes.ZCL_STG_SEGW_GEN_DPC.dpc_source_legacy({is_model: mappingProject})).get();
       const text = readFileSync(`src/dsl/dpc-templates/${partial}.tpl`, "utf8");
       const changed = structuredClone(json);
       if (opaque) {

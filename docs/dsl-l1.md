@@ -1,6 +1,6 @@
 # DSL L1: the typed generation model
 
-Status: MPC and DPC class rendering implemented, with recipes as build units (`dsl build`) from slice 11, 2026-10-01. Built on the template engine of `docs/abap-templates.md` (L0, PR #266).
+Status: MPC and DPC production generation use L1, including profiles and trace sidecars (2026-10-02); recipes are build units (`dsl build`) from slice 11. Built on the template engine of `docs/abap-templates.md` (L0, PR #266).
 
 ## Where it sits
 
@@ -118,7 +118,7 @@ profile findings, and exits nonzero for an error finding.
 ## Second consumer: whole DPC class
 
 `zcl_osd_dsl_dpc=>render_class` builds the generated `_DPC` class from the
-same project tree as `zcl_stg_segw_gen_dpc=>dpc_source`. Its JSON model has
+same project tree as `zcl_stg_segw_gen_dpc=>dpc_source_legacy`. Its JSON model has
 stable project, operation, entity-set and property nodes. It decides which
 runtime methods exist, the Q/R/U/C/D redefinition order, sorted declarations
 and implementations, SADL edit modes, forward data-source order and reverse
@@ -174,6 +174,56 @@ the original is then rendered again and required to be green.
 The coverage and copied quirks are recorded in
 [`dsl-l1-rfc-proof.md`](dsl-l1-rfc-proof.md). XML, the EXT pair and direct writes
 to project folders remain outside this consumer.
+
+## DPC switch
+
+`zcl_stg_segw_gen=>generate` now writes the `_DPC` through
+`zcl_osd_dsl_dpc`: build the model once, render it, check it and trace it.
+GenerateSet and the editor's Generate dialog use this production path, as
+already happens for the MPC. The string renderer is retained as
+`dpc_source_legacy`, an independent oracle alongside `tools/segw-gen.mjs`.
+The byte bridge compares all three on the 17 whole-class cases admitted by
+the MPC bridge (29,699 DPC lines, including the RFC and search-help bodies).
+
+The DPC's `.clas.trace.json` ships beside its source with one model node per
+line. GenerateSet and `segw:tree repo` expose it; RepoSet skips trace and
+warning sidecars when assembling the system zip. Host-side deployment also
+excludes sidecars through the existing non-object classification.
+
+The `abap` profile checks the rendered DPC before it is returned. An error
+raises `/iwbep/cx_mgw_busi_exception` with the class, rule, output line,
+template line, model node and finding text, matching the MPC contract.
+Warnings travel in `.clas.warnings.json`. A planted 256-character line tests
+both consumers' exception shape; bypassing the DPC profile makes that test
+fail. A one-line template change makes the byte bridge fail. The editor test
+opens the generated DPC and checks its class and a newly created operation.
+
+Timing uses the largest checked-in project, `src/segw/zstg_segw.stg.yaml`
+(61 entity types, 15,434 DPC lines), and the median of seven complete
+`generate` calls after one warm-up. `tools/bench-dsl-dpc.mjs` replaces the
+scratch timing suite: run it with `flock /tmp/osd-heavy.lock
+node_modules/.bin/mocha tools/bench-dsl-dpc.mjs` after transpiling each path,
+setting `DSL_BENCH_LABEL=before` or `after`. The benchmark reports load and
+refuses a one-minute load above 4 on this 16-CPU host. The baseline temporarily uses
+`dpc_source_legacy` in `generate`; it is measured directly, not estimated by
+subtracting separately timed components. Restore from a saved file and
+transpile again before measuring the DSL path.
+
+Measured on 2026-10-02: **2.041 s before, 3.576 s after** (1.75 times,
++1.536 s), including MPC rendering in both paths. The pre-run load averages
+were **3.51 / 25.49 / 36.93 before** and **3.53 / 22.77 / 35.53 after** on
+16 CPUs. The one-minute load had fallen below 4; the five- and fifteen-minute
+averages still reflected the earlier busy period. Runs ranged from
+1.994 to 3.621 s before and 3.363 to 6.582 s after, so the median is reported
+rather than an individual run. This is below the specification's approximately
+two-times threshold.
+The earlier MPC baseline in the slice specification was 0.94 s to 3.6 s,
+later 2.1 s; these are historical MPC numbers, not this DPC measurement.
+
+Verification: 97 tests pass across `dsl-dpc`, `segw*` and `stg-compile`;
+two corpus-dependent cases remain pending without the optional local corpus.
+All three SEGW Playwright tests pass, including opening the generated DPC.
+Lint, suite registration, size budgets, OO comments and leak scanning pass.
 
 ## Generated regions
 
@@ -352,6 +402,10 @@ these sources would omit real calls.
 3. Trace sidecar: `node` per line; mutation test (acceptance 4).
 4. `abap` profile check on the rendered text, with trace positions.
 5. Type-aware filter `literal` with its tests, used where the template writes a literal.
+6. Whole MPC rendering and production generator switch, retaining the string oracle.
+7. Whole DPC rendering, including typed RFC and search-help bodies, with byte and trace proofs.
+8. Production DPC switch: GenerateSet, sidecars, profile refusals, editor assertion and timing.
+9. Generated regions and recipes as checked build units; daemon and report consumers above.
 
 Each step: a critic on the diff, fixes with tests that fail without them, then the next.
 
@@ -360,8 +414,8 @@ Each step: a critic on the diff, fixes with tests that fail without them, then t
 - The provider interface is JavaScript in `tools/lift.mjs` today and would be ABAP here. One
   contract, two implementations (as `tools/segw-gen.mjs` and `zcl_stg_segw_gen` are), or the model
   built only in ABAP?
-- Where a sidecar lives for an object deployed through abapGit: beside the source in the repo, or
-  only in the generator's output.
+- Sidecars travel in generator output beside source; RepoSet and the host deployment zip
+  exclude them from system objects. Retaining them in project repositories is a caller choice.
 
 ## Report selection screen (osabap)
 

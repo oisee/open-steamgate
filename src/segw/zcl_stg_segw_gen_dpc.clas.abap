@@ -5,7 +5,7 @@ CLASS zcl_stg_segw_gen_dpc DEFINITION PUBLIC CREATE PUBLIC.
 * module or a search help (stage 3) are stubs here, as segw-gen writes them
 * when no function group is given.
   PUBLIC SECTION.
-    CLASS-METHODS dpc_source
+    CLASS-METHODS dpc_source_legacy
       IMPORTING
         is_model         TYPE zcl_stg_segw_gen=>ty_model
       RETURNING
@@ -926,7 +926,7 @@ CLASS zcl_stg_segw_gen_dpc IMPLEMENTATION.
     APPEND ls_impl TO rt_impls.
   ENDMETHOD.
 
-  METHOD dpc_source.
+  METHOD dpc_source_legacy.
     DATA lt_ops     TYPE tt_op.
     DATA lt_sorted  TYPE tt_op.
     DATA ls_op      TYPE ty_op.
