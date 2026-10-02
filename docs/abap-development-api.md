@@ -210,16 +210,18 @@ activate through ADT, so the API gives such a client nothing new. The new risks 
 - `PERFORM ... USING` into a pool;
 - whether a pool is visible after `SUBMIT ... AND RETURN` or in a new internal session.
 
-## 8. Open questions for Alice
+## 8. Questions, decided by Alice (2026-10-02)
 
 1. ~~Pools outside `$TMP` or in `$TMP`?~~ **Decided (Alice, 2026-10-02): a transient area outside `$TMP`.**
    On a system the generated pools are believed to be transient and not repository objects at all (no TADIR
    row); UNMEASURED, to be confirmed by a sandbox probe (TADIR / TRDIR after GENERATE).
-2. Must a CLAS or PROG that ABAPiti creates be callable in the same step, or is "live after this step" enough
-   for M2?
-3. Which signal means development: `CCCATEGORY`, `CCNOCLIIND`, or both? And what should OSG's own client say
-   by default?
-4. Refuse `@KERNEL` in generated code always, or allow it in development?
-5. Without a primed registry, should GENERATE refuse (subrc 8) or wait for a prime (about 8 s)?
-6. Are RFC-enabled function modules needed now, or does ADT cover callers outside ABAP?
-7. Is a MESSAGE text that differs from the kernel's acceptable, if subrc, LINE and WORD match?
+2. **Decided (Alice, 2026-10-02, accepting the recommendations):** a CLAS or PROG already loaded becomes live
+   after the step (option c); a NEW object nobody has loaded may be built during a WAIT-style roll-out and called
+   in the same step (option a).
+3. **Decided:** both signals, as on a system (`CCCATEGORY` development and `CCNOCLIIND` changes allowed); OSG's own
+   client row says "development" by default. Which signal is authoritative stays UNMEASURED until probed.
+4. **Decided:** `@KERNEL` in generated code is always refused.
+5. **Decided:** without a primed registry GENERATE waits for a prime up to a bound (about 10 s), then refuses
+   with subrc 8; the browser preview and OSGo refuse at once.
+6. **Decided:** not now; ADT covers callers outside ABAP. RFC-enabled modules when a caller needs them.
+7. **Decided:** yes; subrc, LINE and WORD follow the kernel, the MESSAGE text is abaplint's.
