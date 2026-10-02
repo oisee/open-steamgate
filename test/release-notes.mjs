@@ -18,6 +18,20 @@ describe("release notes and version checks", () => {
     assert.equal(expectedVersion("0.1.6", "1095"), "0.1.1095");
   });
 
+  it("reads squash merges by the (#N) at the end of the subject", () => {
+    const log = [
+      "Allocate JOBCOUNT suffixes as base-36 max plus one (#441)\n\n* first commit\n* second",
+      "Merge pull request #185 from example/branch\n\nAn older merge commit",
+      "Fix a typo in the README",
+      "Mention #12 in passing but not as a PR",
+      "Allocate JOBCOUNT suffixes as base-36 max plus one (#441)",
+    ].join("\0");
+    assert.deepEqual(mergedPullRequests(log), [
+      "- Allocate JOBCOUNT suffixes as base-36 max plus one (#441)",
+      "- An older merge commit (#185)",
+    ]);
+  });
+
   it("parses --allow-untagged separately from an optional VSIX in both orders", () => {
     const tag = "vscode-v0.1.42";
     const vsix = "build/vsix/open-steamgate-0.1.42.vsix";
@@ -63,9 +77,12 @@ describe("release notes and version checks", () => {
       assert.doesNotMatch(notes, /First improvement/);
       assert.match(notes, /since vscode-v0\.1\.2/);
       git("commit", "-q", "--allow-empty", "-m", "Unreleased change");
+      git("commit", "-q", "--allow-empty", "-m", "Squashed improvement (#3)\n\n* one\n* two");
       const draftNotes = generateNotes({cwd, tag: "vscode-v0.1.4", to: "HEAD"});
       assert.match(draftNotes, /since vscode-v0\.1\.3/);
       assert.doesNotMatch(draftNotes, /Second improvement/);
+      assert.doesNotMatch(draftNotes, /Unreleased change/);
+      assert.match(draftNotes, /^- Squashed improvement \(#3\)$/m);
       const cli = execFileSync(process.execPath, ["scripts/release-notes.mjs", "--from", "vscode-v0.1.2", "--to", "vscode-v0.1.3"], {
         cwd: process.cwd(), encoding: "utf8",
         env: {...process.env, GIT_DIR: join(cwd, ".git"), GIT_WORK_TREE: cwd},
