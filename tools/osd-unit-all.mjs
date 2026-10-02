@@ -20,6 +20,7 @@
 import {readFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
+import {inspect} from "node:util";
 
 const RISK_LEVELS = new Set(["HARMLESS", "DANGEROUS", "CRITICAL",
   // a test class without a RISK LEVEL clause: the transpiler writes
@@ -75,6 +76,37 @@ function describe(err) {
   return message ? `${name}: ${message}` : name;
 }
 
+/**
+ * What a failure says beyond its class name, as lines. An ABAP assertion is
+ * a kernel_cx_assert with an empty .message: its text is in msg, actual and
+ * expected (ABAP strings, read with get() or .value) and where it was raised
+ * in EXTRA_CX. The old harness printed all of it with console.log(err);
+ * the one-line FAILED summary alone would lose it.
+ */
+export function detail(err) {
+  if (err === null || typeof err !== "object") return [];
+  const text = (v) => {
+    if (v === undefined || v === null) return undefined;
+    if (typeof v.get === "function") return v.get();
+    if (typeof v === "object" && "value" in v) return v.value;
+    return v;
+  };
+  const lines = [];
+  for (const key of ["msg", "actual", "expected"]) {
+    const value = text(err[key]);
+    if (value !== undefined && value !== "") lines.push(`${key}: ${typeof value === "string" ? value : inspect(value, {depth: 2})}`);
+  }
+  const at = err.EXTRA_CX;
+  if (at && typeof at === "object") {
+    lines.push(at.INTERNAL_FILENAME !== undefined
+      ? `at: ${at.INTERNAL_FILENAME}:${at.INTERNAL_LINE}`
+      : `at: ${inspect(at, {depth: 2})}`);
+  }
+  if (typeof err.stack === "string" && err.stack.length > 0) lines.push(...err.stack.split("\n"));
+  if (lines.length === 0 && !err.message) lines.push(...inspect(err, {depth: 2}).split("\n"));
+  return lines;
+}
+
 /** calls each hook that exists, every one of them even if an earlier throws */
 async function each(hooks, phase, errors) {
   for (const hook of hooks) {
@@ -89,7 +121,8 @@ async function each(hooks, phase, errors) {
 
 /**
  * Runs every entry; `load(filename)` returns the imported test module. Never
- * throws for a failing test: returns {ran, failed: [{name, errors, error}]},
+ * throws for a failing test: returns {ran, failed: [{name, errors, error}]}
+ * (ran: the methods whose own phase was reached),
  * where `errors` are phase-labelled (import, class_setup, setup, method, teardown,
  * class_teardown) and `error` is the first of them, the original failure.
  *
@@ -101,7 +134,10 @@ export async function runAll(entries, load, {mode, log = console.log} = {}) {
   const failed = [];
   let ran = 0;
   const fail = (name, errors, where) => {
-    for (const {phase, error} of errors) log(`${where} [${phase}]: ${describe(error)}`);
+    for (const {phase, error} of errors) {
+      log(`${where} [${phase}]: ${describe(error)}`);
+      for (const line of detail(error)) log(`    ${line}`);
+    }
     failed.push({name, errors, error: errors[0].error});
   };
   for (const st of entries) {
@@ -140,7 +176,6 @@ export async function runAll(entries, load, {mode, log = console.log} = {}) {
         log(prefix + ", skipped due to risk level " + st.riskLevel);
         continue;
       }
-      ran++;
       log(prefix);
       const errors = [];
       let test;
@@ -164,6 +199,8 @@ export async function runAll(entries, load, {mode, log = console.log} = {}) {
           }
         }
         if (errors.length === 0) {
+          // counted only when the method itself is reached
+          ran++;
           try {
             await own[m.name]();
           } catch (error) {

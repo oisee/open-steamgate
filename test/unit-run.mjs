@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {spawnSync} from "node:child_process";
@@ -172,8 +172,9 @@ describe("a unit run goes on past a failure", () => {
       async constructor_() { this.FRIENDS_ACCESS_INSTANCE = methods; return this; }
     };
     const entries = [{objectName: "ZCL_A", localClass: "ltcl_a", methods: [{name: "green", skip: false}], riskLevel: "HARMLESS", filename: "./a.mjs"}];
-    const {failed} = await runAll(entries, async () => ({ltcl_a: Local}), {log: () => {}});
+    const {ran, failed} = await runAll(entries, async () => ({ltcl_a: Local}), {log: () => {}});
     expect(calls).to.deep.equal(["setup", "teardown"]);
+    expect(ran, "a method whose setup failed was not executed").to.equal(0);
     expect(failed[0].errors.map((e) => e.phase)).to.deep.equal(["setup"]);
   });
 
@@ -211,6 +212,82 @@ describe("a unit run killed by a signal is not a pass", () => {
   });
 });
 
+/** a generated harness of one entry, and its modules, under <root>/output */
+function writeHarness(root, entry, files) {
+  mkdirSync(join(root, "output"), {recursive: true});
+  writeFileSync(join(root, "output", "index.mjs"), [
+    "function getData() {",
+    "  const ret = [];",
+    `  ret.push(${JSON.stringify(entry)});`,
+    "  return ret;",
+    "}",
+    "",
+  ].join("\n"));
+  for (const [name, text] of Object.entries(files)) writeFileSync(join(root, "output", name), text);
+}
+
+// what an ABAP assertion throws: not an Error, an empty message, its text in
+// ABAP strings and where it was raised in EXTRA_CX
+const ASSERTION_MODULE = [
+  "class kernel_cx_assert extends Error {",
+  "  constructor() {",
+  "    super('');",
+  "    this.msg = {value: \"Expected '3000', got '2999'\"};",
+  "    this.actual = {value: '2999'};",
+  "    this.expected = {value: '3000'};",
+  "    this.EXTRA_CX = {INTERNAL_FILENAME: 'cl_abap_unit_assert.clas.abap', INTERNAL_LINE: 195};",
+  "  }",
+  "}",
+  "export class ltcl_a {",
+  "  async constructor_() { this.FRIENDS_ACCESS_INSTANCE = {red: async () => { throw new kernel_cx_assert(); }}; return this; }",
+  "}",
+  "",
+].join("\n");
+
+describe("a FAILED line keeps what the assertion said", () => {
+  it("prints msg, actual, expected and file:line under the one-liner", async () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-unit-detail-"));
+    try {
+      writeHarness(root, {objectName: "ZCL_A", localClass: "ltcl_a", methods: [{name: "red", skip: false}], riskLevel: "HARMLESS", filename: "./a.mjs"}, {"a.mjs": ASSERTION_MODULE});
+      const run = spawnSync("node", [resolve("tools/osd-unit-all.mjs")], {cwd: root, encoding: "utf8"});
+      expect(run.status, run.stdout + run.stderr).to.equal(1);
+      expect(run.stdout).to.match(/FAILED ltcl_a->red \[method\]: kernel_cx_assert/);
+      expect(run.stdout).to.include("msg: Expected '3000', got '2999'");
+      expect(run.stdout).to.include("actual: 2999");
+      expect(run.stdout).to.include("expected: 3000");
+      expect(run.stdout).to.include("at: cl_abap_unit_assert.clas.abap:195");
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+});
+
+describe("osd-unit-run itself, over a failing harness", () => {
+  it("exits 1 with the failure list and the inventory line", function () {
+    this.timeout(20000);
+    const root = mkdtempSync(join(tmpdir(), "osd-unit-run-"));
+    try {
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: "src"}));
+      mkdirSync(join(root, "src"));
+      writeFileSync(join(root, "src", "zcl_a.clas.abap"), "class source");
+      writeFileSync(join(root, "src", "zcl_a.clas.testclasses.abap"), "test source");
+      writeHarness(root, {objectName: "ZCL_A", localClass: "ltcl_a", methods: [{name: "red", skip: false}], riskLevel: "HARMLESS", filename: "./a.mjs"}, {"a.mjs": ASSERTION_MODULE});
+      // osd-unit-run starts ./tools/osd-unit-all.mjs with ./tools/osd-unit-bootstrap.mjs
+      // from its working directory; the stub harness needs no kernel
+      mkdirSync(join(root, "tools"));
+      writeFileSync(join(root, "tools", "osd-unit-all.mjs"), readFileSync(resolve("tools/osd-unit-all.mjs")));
+      writeFileSync(join(root, "tools", "osd-unit-bootstrap.mjs"), "");
+      const run = spawnSync("node", [resolve("tools/osd-unit-run.mjs")], {cwd: root, encoding: "utf8"});
+      expect(run.status, run.stdout + run.stderr).to.equal(1);
+      expect(run.stdout).to.match(/unit: FAILED --\n  ZCL_A: ltcl_a->red/);
+      expect(run.stdout).to.include("unit: 1 test classes ran; 1 are in this tree, all of them among them");
+      expect(run.stdout).to.not.match(/^OK$/m);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+});
+
 // A test class of hooks only is generated with methods: [], so a class-level
 // failure recorded per method recorded nothing and the run passed.
 describe("a class that fails before its methods fails the run, even with no methods", () => {
@@ -218,16 +295,7 @@ describe("a class that fails before its methods fails the run, even with no meth
   const runDriver = (entry, files) => {
     const root = mkdtempSync(join(tmpdir(), "osd-unit-all-"));
     try {
-      mkdirSync(join(root, "output"));
-      writeFileSync(join(root, "output", "index.mjs"), [
-        "function getData() {",
-        "  const ret = [];",
-        `  ret.push(${JSON.stringify(entry)});`,
-        "  return ret;",
-        "}",
-        "",
-      ].join("\n"));
-      for (const [name, text] of Object.entries(files)) writeFileSync(join(root, "output", name), text);
+      writeHarness(root, entry, files);
       return spawnSync("node", [driver], {cwd: root, encoding: "utf8"});
     } finally {
       rmSync(root, {recursive: true, force: true});
