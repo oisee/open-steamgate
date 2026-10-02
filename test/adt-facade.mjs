@@ -5,7 +5,7 @@ import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {delimiter, join} from "node:path";
 import {startServer} from "./start.mjs";
-import {nodeStructureDocument} from "../tools/adt-documents.mjs";
+import {exceptionDocument, nodeStructureDocument} from "../tools/adt-documents.mjs";
 import {adtRouter, unitRunDbEnv, unitRunOptions, UNIT_RUN_DB_ENV_KEYS} from "../tools/adt-facade.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {layerList} from "../tools/osd-host.mjs";
@@ -19,6 +19,111 @@ const {pickInspectorPort} = createRequire(import.meta.url)("../editors/vscode/la
 const PORT = process.env.STG_PORT ?? 3030;
 const ADT = `http://localhost:${PORT}/sap/bc/adt`;
 const BASE_URL = `http://localhost:${PORT}`;
+
+describe("tools/adt-facade: async tree errors", () => {
+  let server;
+  let store;
+  let facade;
+  let call;
+  let root;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), "osd-adt-async-"));
+    store = {
+      root,
+      packages: () => [{name: "ZASYNC", subpackages: []}],
+      package: () => ({objects: [{type: "CLAS", name: "ZCL_ASYNC"}]}),
+      rootPackages: () => [{name: "ZASYNC"}],
+      find: (type, name) => type === "CLAS" && name === "ZCL_ASYNC"
+        ? {type, name, packages: ["ZASYNC"]} : undefined,
+    };
+    const app = express();
+    facade = adtRouter({store, data: {}, watch: false, logMisses: false});
+    app.use(facade.router);
+    server = await new Promise((resolve) => {
+      const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+    });
+    const base = `http://127.0.0.1:${server.address().port}/sap/bc/adt`;
+    const handshake = await fetch(base + "/core/discovery", {
+      method: "HEAD", headers: {"x-csrf-token": "fetch"}, signal: AbortSignal.timeout(1000),
+    });
+    const cookie = handshake.headers.getSetCookie().map((value) => value.split(";")[0]).join("; ");
+    call = (path, body = "") => fetch(base + path, {
+      method: "POST", body, signal: AbortSignal.timeout(1000),
+      headers: {cookie, "x-csrf-token": handshake.headers.get("x-csrf-token")},
+    });
+  });
+
+  afterEach(async () => {
+    server?.closeAllConnections();
+    if (server) await new Promise((resolve) => server.close(resolve));
+    rmSync(root, {recursive: true, force: true});
+  });
+
+  for (const name of ["zcl_bad%", "zcl_bad%GG", "zcl_bad%C3%28"]) {
+    it(`answers malformed nodepath object name ${name} with 400`, async () => {
+      const uri = `/sap/bc/adt/oo/classes/${name}`;
+      const res = await call(`/repository/nodepath?uri=${encodeURIComponent(uri)}`);
+      expect(res.status).to.equal(400);
+      expect(res.headers.get("content-type")).to.equal("application/xml; charset=utf-8");
+      expect(await res.text()).to.equal(exceptionDocument("ExceptionInvalidRequest", "an object uri is required"));
+    });
+  }
+
+  it("keeps the existing bad object URI answer", async () => {
+    const res = await call("/repository/nodepath?uri=invalid");
+    expect(res.status).to.equal(400);
+    expect(await res.text()).to.equal(exceptionDocument("ExceptionInvalidRequest", "an object uri is required"));
+  });
+
+  it("keeps nodepath's 404 answer without recording an object miss", async () => {
+    const res = await call("/repository/nodepath?uri=/sap/bc/adt/oo/classes/zcl_missing");
+    expect(res.status).to.equal(404);
+    expect(await res.text()).to.equal(exceptionDocument("ExceptionResourceNotFound", "CLAS ZCL_MISSING does not exist"));
+    expect(facade.missed.size).to.equal(0);
+  });
+
+  it("keeps nodepath success bytes, including include and source URI normalization", async () => {
+    for (const suffix of ["", "/source/main", "/includes/definitions?version=active#fragment"]) {
+      const uri = `/sap/bc/adt/oo/classes/zcl_async${suffix}`;
+      const res = await call(`/repository/nodepath?uri=${encodeURIComponent(uri)}`);
+      expect(res.status).to.equal(200);
+      expect(res.headers.get("content-type")).to.equal("application/xml; charset=utf-8");
+      expect(await res.text()).to.equal(`<?xml version="1.0" encoding="utf-8"?>
+<projectexplorer:nodepath xmlns:projectexplorer="http://www.sap.com/adt/projectexplorer" xmlns:adtcore="http://www.sap.com/adt/core">
+  <projectexplorer:objectLinkReferences>
+    <objectLinkReference adtcore:uri="/sap/bc/adt/packages/zasync" adtcore:type="DEVC/K" adtcore:name="ZASYNC" projectexplorer:category=""/>
+    <objectLinkReference adtcore:uri="/sap/bc/adt/oo/classes/zcl_async" adtcore:type="CLAS/OC" adtcore:name="ZCL_ASYNC" projectexplorer:category=""/>
+  </projectexplorer:objectLinkReferences>
+</projectexplorer:nodepath>
+`);
+    }
+  });
+
+  it("keeps virtualfolders object success bytes", async () => {
+    const res = await call("/repository/informationsystem/virtualfolders/contents");
+    expect(res.status).to.equal(200);
+    expect(res.headers.get("content-type")).to.equal("application/vnd.sap.adt.repository.virtualfolders.result.v1+xml; charset=utf-8");
+    expect(await res.text()).to.equal('<?xml version="1.0" encoding="utf-8"?>' +
+      '<vfs:virtualFoldersResult objectCount="1" xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders">' +
+      '<atom:link href="/sap/bc/adt/repository/informationsystem/virtualfolders?selection=" rel="http://www.sap.com/adt/relations/informationsystem/virtualfolders/selection" title="Virtual Folder Selection" xmlns:atom="http://www.w3.org/2005/Atom"/>' +
+      '<vfs:object uri="/sap/bc/adt/oo/classes/zcl_async" text="ZCL_ASYNC" name="ZCL_ASYNC" package="ZASYNC" type="CLAS/OC" expandable="true">' +
+      '<atom:link href="/sap/bc/adt/oo/classes/zcl_async" rel="http://www.sap.com/adt/relations/objects" title="ADT Object Reference" xmlns:atom="http://www.w3.org/2005/Atom"/>' +
+      '</vfs:object></vfs:virtualFoldersResult>');
+  });
+
+  for (const method of ["packages", "package", "rootPackages"]) {
+    it(`answers virtualfolders store.${method} throw with 500`, async () => {
+      store[method] = () => { throw new Error("synthetic store failure <&>"); };
+      const res = await call("/repository/informationsystem/virtualfolders/contents",
+        '<vfs:facetorder><vfs:facet>package</vfs:facet></vfs:facetorder>');
+      expect(res.status).to.equal(500);
+      expect(res.headers.get("content-type")).to.equal("application/xml; charset=utf-8");
+      expect(await res.text()).to.equal(exceptionDocument("ExceptionInternalError", "synthetic store failure <&>",
+        {namespace: "org.open-steamgate.osd"}));
+    });
+  }
+});
 
 describe("tools/adt-facade: user layer", () => {
   it("reads the later --layer class through ADT", async () => {
