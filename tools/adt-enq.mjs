@@ -16,13 +16,13 @@
 // lock server (alive, its user quoted). The argument is built by
 // tools/osd-enq-host.mjs from the dictionary, as an ENQUEUE_ from ABAP builds
 // it, so the two sides cannot disagree on it.
-import {randomBytes, randomUUID} from "node:crypto";
+import {randomUUID} from "node:crypto";
 import {bindEnqSession, endEnqSession, enqDrop, enqHolder, enqTake, onEnqContextEnded} from "./osd-enq-host.mjs";
 import {refuseToken} from "./adt-session.mjs";
 
 export const LOCK_TABLE = "ZOSD_ADT_LOCK";
 export const LOCK_OBJECT = "EZOSD_ADT_OBJ";
-const PREFIX = "adt:";
+import {adtEnqKey, adtEnqPrefix} from "./adt-enq-key.mjs";
 
 /** the exporting parameters ZCL_OSD_ADT_LOCK passes, said for the host */
 const argument = (type, name) => ({
@@ -32,12 +32,12 @@ const argument = (type, name) => ({
 
 export class EnqOwners {
   constructor() {
-    this.prefix = `${PREFIX}${randomBytes(6).toString("hex")}:`;
+    this.prefix = adtEnqPrefix();
   }
 
   /** the ENQ session key of an ADT session of this table */
   key(id) {
-    return `${this.prefix}${id}`;
+    return adtEnqKey(this.prefix, id);
   }
 
   // {id, user, mine}: mine when the key is this table's, so that an id the

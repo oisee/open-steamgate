@@ -28,6 +28,7 @@
 //   have nothing to touch and do nothing.
 // - _WAIT sleeps through WAIT UP TO, which gives the work process up inside
 //   a step (tools/osd-dialog-step.mjs) -- and, as WAIT does, commits.
+import {installEnqSession} from "./osd-enq-session.mjs";
 import {collide, garg, locks} from "./osd-enq.mjs";
 import {currentStepToken, holderToken, onEveryStep, stepContextTracked} from "./osd-dialog-step.mjs";
 
@@ -315,6 +316,10 @@ export function installEnq(abap, {updateModules = []} = {}) {
       || typeof abap.statements?.commit !== "function") return;
   if (abap.__osdEnq === true) return;
   abap.__osdEnq = true;
+  installEnqSession(abap, {
+    bind: bindEnqSession, end: endEnqSession, Ended: EnqSessionEnded,
+    contextAlive: (key) => !isEnded(key) && sessions.has(key),
+  });
 
   // setup runs before the class modules load, and open-abap-core's
   // KERNEL_LOCK (which locks nothing) assigns itself afterwards: the slot
