@@ -42,6 +42,7 @@ import {entitySetMapFor} from "./segw-entityset-map.mjs";
 import {testClassesIn} from "./osd-unit-run.mjs";
 import {serviceTree} from "./osd-status.mjs";
 import {transactions} from "./osd-tran-registry.mjs";
+import {entityTag, normalizedTag, sendEntity} from "./adt-entity.mjs";
 
 export const BASE = "/sap/bc/adt";
 
@@ -52,27 +53,6 @@ const xmlEscape = (s) => String(s)
   .replaceAll("<", "&lt;")
   .replaceAll(">", "&gt;")
   .replaceAll('"', "&quot;");
-
-// ADT persists the entity tag from a properties/source response alongside
-// the workspace file. Without it the filesystem synchronizer refuses to
-// create the editor part. The tag describes the representation, so properties
-// and source intentionally get different values and change with their body.
-const entityTag = (body) => createHash("sha256")
-  .update(Buffer.from(String(body))).digest("hex").slice(0, 32);
-const normalizedTag = (value) => String(value ?? "").trim()
-  .replace(/^W\//, "").replace(/^"|"$/g, "");
-
-const sendEntity = (req, res, body) => {
-  const tag = entityTag(body);
-  res.set("ETag", tag);
-  const candidates = String(req.headers["if-none-match"] ?? "")
-    .split(",").map((value) => value.trim().replace(/^W\//, "").replace(/^"|"$/g, ""));
-  if (candidates.includes(tag)) {
-    res.status(304).end();
-    return;
-  }
-  res.send(body);
-};
 
 // ------------------------------------------------------------- discovery
 
