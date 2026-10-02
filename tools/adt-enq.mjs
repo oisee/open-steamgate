@@ -83,10 +83,11 @@ export class EnqOwners {
  * the same step set (AbapSessions#sessionFor).
  *
  * The ENQ binding of a stateful session (its locks outlive the request) is
- * RESOLVE's (ZCL_OSD_ADT_SESSION, KERNEL_ENQ_SESSION), and so is a session
- * that ended while its step waited: the handler answers it as the CSRF
- * refusal. A dump ends the bound ENQ context (#433) and the session's next
- * RESOLVE clears the handles that context gave out.
+ * RESOLVE's (ZCL_OSD_ADT_SESSION, KERNEL_ENQ_SESSION). An ENQ context that
+ * ended (a dump, #433, or the lock server) is not a session that ended: the
+ * next RESOLVE clears the handles that context gave out and binds again
+ * (#471). A step whose ENQ session ended while it waited (its logoff) is
+ * answered by the front as the CSRF refusal.
  */
 export function abapSession(sessions, other) {
   return {
