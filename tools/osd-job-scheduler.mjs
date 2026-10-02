@@ -103,17 +103,30 @@ export const systemClock = Object.freeze({
 });
 
 /** a clock a test moves: advance() fires the timers that come due, in
- *  order, and waits for each one's promise */
+ *  order, and waits for each one's promise -- but not for a callback that
+ *  is itself waiting on a later timer of this clock (a job the scheduler
+ *  started that sits in WAIT UP TO on it): awaiting that one would stop the
+ *  advance before the timer it waits for, and the advance would end with
+ *  the clock short of where it was asked to go (the scheduler's tick awaits
+ *  the job, the job awaits the clock). So a callback runs until it settles
+ *  or goes quiet with a timer of its own pending; the timers due by then
+ *  fire in time order, and the advance ends when no timer is due by its
+ *  end and every callback still running waits on a timer past it. */
 export function manualClock(start) {
   let now = typeof start === "number" ? start : Date.parse(start);
   if (!Number.isFinite(now)) throw new TypeError("manualClock needs a start time");
   let next = 1;
+  let registered = 0; // setTimer calls so far: how a callback is seen to wait on the clock
+  let arm; // resolves the promise an advance waits on for the next setTimer
   const timers = new Map();
+  const real = (ms) => new Promise((r) => setTimeout(r, ms));
   return {
     now: () => now,
     setTimer(fn, ms) {
       const handle = next++;
       timers.set(handle, {at: now + Math.max(0, ms), fn});
+      registered++;
+      arm?.();
       return handle;
     },
     clearTimer(handle) { timers.delete(handle); },
@@ -121,15 +134,45 @@ export function manualClock(start) {
     set(ms) { now = ms; },
     async advance(ms) {
       const until = now + ms;
+      const running = new Set();
+      const failures = [];
+      const dueBy = () => [...timers.entries()].filter(([, timer]) => timer.at <= until)
+        .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+      // nothing changes for two real milliseconds: the callbacks have run as
+      // far as they can without the clock
+      const quiet = async () => {
+        let last;
+        for (;;) {
+          const seen = `${registered}/${timers.size}/${running.size}`;
+          if (seen === last) return;
+          last = seen;
+          await real(1);
+        }
+      };
       for (;;) {
-        const due = [...timers.entries()].filter(([, timer]) => timer.at <= until)
-          .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
-        if (due === undefined) break;
-        timers.delete(due[0]);
-        now = Math.max(now, due[1].at);
-        await due[1].fn();
+        const due = dueBy();
+        if (due !== undefined) {
+          timers.delete(due[0]);
+          now = Math.max(now, due[1].at);
+          const entry = {mark: next};
+          entry.done = Promise.resolve().then(due[1].fn).then(() => {}, (error) => { failures.push(error); })
+            .finally(() => running.delete(entry));
+          running.add(entry);
+          await Promise.race([entry.done, quiet()]);
+          continue;
+        }
+        // nothing due by the end: a callback with a timer pending that was
+        // set since it started waits past the end and is left running; any
+        // other is awaited, until it settles or sets a timer
+        const busy = [...running].filter((entry) => ![...timers.keys()].some((handle) => handle >= entry.mark));
+        if (!busy.length) break;
+        const armed = new Promise((r) => { arm = r; });
+        await Promise.race([...busy.map((entry) => entry.done), armed]);
+        arm = undefined;
+        await quiet();
       }
       now = Math.max(now, until);
+      if (failures.length) throw failures[0];
     },
   };
 }

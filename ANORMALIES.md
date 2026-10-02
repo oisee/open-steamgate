@@ -3341,7 +3341,7 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Expected SAP behaviour: a system has one clock: after `WAIT UP TO 10 SECONDS`, `sy-uzeit` and `GET TIME STAMP` are ten seconds on
 - Actual open-abap behaviour (before the fix): sy-datum, sy-uzeit and GET TIME STAMP followed the injected clock, WAIT the wall clock, so the two disagreed whenever a test injected a clock
 - Impact on open-steamgate: a simulated pile job waits for its simulated duration; a twin of a night on a manual clock would have waited the night
-- Smallest safe workaround: none needed; the fix: `installAbapClock` also installs the clock as the WAIT clock (`setWaitClock`), a step's WAIT sleeps on that clock's own timer (which a manual clock fires when a test advances it), and without an injected clock WAIT is the wall clock as before
+- Smallest safe workaround: none needed; the fix: `installAbapClock` also installs the clock as the WAIT clock (`setWaitClock`), a step's WAIT sleeps on that clock's own timer (which a manual clock fires when a test advances it), and without an injected clock WAIT is the wall clock as before. Two follow-ups (2026-10-02, round 2): `manualClock.advance` no longer awaits a callback that waits on a later timer of its own clock (it stalled when the scheduler's pass awaited a job in WAIT), and a WAIT on an injected clock nobody moves ends at a wall-clock ceiling (`OSD_WAIT_CLOCK_CEILING_MS`, default 120000) with a loud line on stderr
 - Upstream issue: none, the step's WAIT and the clock seam are this repository's
 - Regression-test location: `test/dsl-l3-sim.mjs` ("WAIT UP TO inside a step waits on the injected clock", and the long twin)
 - Upstream version containing a fix: `n/a`

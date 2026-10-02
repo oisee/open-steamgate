@@ -118,6 +118,12 @@ export async function migrateDuckdbFile(access, statements) {
       await access.execute('ALTER TABLE "zosd_job_step" ADD COLUMN "input_json" TEXT');
       await access.execute("UPDATE zosd_job_step SET input_json = '[]'");
     }
+    // the outbox's release order (DSL L3 slice 5d): a file from before it has
+    // no RELEASE_SEQ; its pending rows keep an empty one and drain first
+    const outbox = await access.query("SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'main' AND table_name = 'zosd_job_outbox'");
+    if (outbox.length && !outbox.some((row) => String(row.column_name).toLowerCase() === "release_seq")) {
+      await access.execute('ALTER TABLE "zosd_job_outbox" ADD COLUMN "release_seq" TEXT');
+    }
     const views = await refreshDuckdbViews(access, statements);
     await access.execute("COMMIT");
     return {renamed, ...views};

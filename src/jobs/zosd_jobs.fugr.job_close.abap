@@ -21,6 +21,7 @@ FUNCTION job_close.
   DATA lv_signal_seq TYPE string.
   DATA lv_step_index TYPE i.
   DATA ls_intent TYPE zosd_job_outbox.
+  DATA lv_release TYPE zosd_job_outbox-release_seq.
   DATA ls_step TYPE zosd_job_step.
   DATA lv_timed TYPE abap_bool.
   DATA lv_periodic TYPE abap_bool.
@@ -288,6 +289,13 @@ FUNCTION job_close.
   ENDIF.
   ls_intent-created_on = sy-datum.
   ls_intent-created_at = sy-uzeit.
+  " the release order: one more than any intent still in the outbox, on any
+  " engine; the drain imports a second's jobs in this order (a deleted row
+  " leaves a gap, never a reordering)
+  SELECT MAX( release_seq ) FROM zosd_job_outbox INTO lv_release
+    WHERE mandt = sy-mandt.
+  lv_release = lv_release + 1.
+  ls_intent-release_seq = lv_release.
   IF lv_timed = abap_true.
     ls_intent-sdlstrtdt = lv_sdl+0(8).
     ls_intent-sdlstrttm = lv_sdl+8(6).

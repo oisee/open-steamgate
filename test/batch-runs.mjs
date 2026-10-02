@@ -9,7 +9,7 @@ import {BatchRuns, liveGeneration, runPersistedBatch, workQueuedBatch} from "../
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
 import {batchMonitorHandler} from "../tools/osd-batch-monitor.mjs";
 import {beforeJobPredecessorDDL, ensureJobEventMetadata, migrateJobEventFile,
-  migrateJobStepInputFile, beforeJobScheduleDDL, migrateJobScheduleFile,
+  migrateJobStepInputFile, beforeJobScheduleDDL, migrateJobScheduleFile, beforeJobReleaseDDL, migrateJobReleaseFile,
   migrateJobIdentityFile, migrateJobPredecessorFile} from "./setup.mjs";
 import {fingerprintOf} from "../tools/osd-persist.mjs";
 import {identity} from "../tools/osd-identity.mjs";
@@ -210,6 +210,11 @@ describe("durable one-shot batch runs", function () {
       expect(beforeJobScheduleDDL(scheduleWanted)).to.deep.equal(inputWanted);
       expect(migrateJobScheduleFile(db, fingerprintOf(inputWanted), fingerprintOf(scheduleWanted), scheduleWanted, fingerprintOf)).to.equal(true);
       expect(db.prepare("SELECT sdlstrtdt, prdmins FROM zosd_job_outbox").get()).to.deep.equal({sdlstrtdt: "", prdmins: ""});
+      // the release order (DSL L3 slice 5d): a pending row keeps an empty RELEASE_SEQ
+      const releaseWanted = [scheduleParent.replace(/\)$/, ", 'release_seq' NCHAR(16))"), inputStep];
+      expect(beforeJobReleaseDDL(releaseWanted)).to.deep.equal(scheduleWanted);
+      expect(migrateJobReleaseFile(db, fingerprintOf(scheduleWanted), fingerprintOf(releaseWanted), releaseWanted, fingerprintOf)).to.equal(true);
+      expect(db.prepare("SELECT release_seq FROM zosd_job_outbox").get()).to.deep.equal({release_seq: ""});
       ensureJobEventMetadata(db);
       const client = {path: sourceDb,
         async delete({table, where}) {
