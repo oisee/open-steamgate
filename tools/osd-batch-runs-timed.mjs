@@ -181,7 +181,9 @@ class TimedJobs {
       if (!run || run.state === "DELETED") kind = "missing";
       else if (run.state === "QUEUED" || run.state === "RUNNING" || run.state === "RELEASING") kind = "running";
       else {
-        this.db.prepare("UPDATE batch_runs SET state = 'DELETED' WHERE id = ?").run(id);
+        // ended_at gives the job reorganisation (osd-job-reorg.mjs) an age
+        this.db.prepare("UPDATE batch_runs SET state = 'DELETED', ended_at = COALESCE(NULLIF(ended_at, ''), ?) WHERE id = ?")
+          .run(new Date().toISOString(), id);
         kind = "deleted";
       }
       this.db.exec("COMMIT");

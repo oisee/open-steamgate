@@ -2,17 +2,16 @@
 // destination uses the current dialog-step token; no definition is process
 // global or allowed to survive COMMIT, ROLLBACK, WAIT, dump, or step exit.
 import {randomUUID} from "node:crypto";
-import {existsSync} from "node:fs";
 import {DatabaseSync} from "node:sqlite";
 import {resolve} from "node:path";
 import {currentStepToken, onStepLuwEnd} from "./osd-dialog-step.mjs";
 import {givenText, fill} from "./osd-destination.mjs";
-import {BatchRuns, liveGeneration, operationsPath} from "./osd-batch-runs.mjs";
+import {BatchRuns, liveGeneration} from "./osd-batch-runs.mjs";
 import {identity} from "./osd-identity.mjs";
 import {readJobSnapshot} from "./osd-job-snapshot.mjs";
 import {jobInputJson} from "./osd-job-input.mjs";
 import {periodMinutes} from "./osd-job-schedule.mjs";
-import {nextJobCount, JobCountExhausted, JOB_COUNT_EXHAUSTED} from "./osd-job-count.mjs";
+import {nextJobCount, legacyCountUsed, JobCountExhausted, JOB_COUNT_EXHAUSTED} from "./osd-job-count.mjs";
 import {abapNow} from "./osd-job-scheduler.mjs";
 
 const pending = new WeakMap();
@@ -74,27 +73,6 @@ function scheduleFields(schedule) {
     EV_PRDWEEKS: pad(schedule.period.weeks, 2)};
 }
 export const MAX_JOB_STEPS = 16;
-
-// Older outbox rows can have been acknowledged before the identity table was
-// introduced. The operations run row currently has no retention policy and
-// must be kept for these pre-upgrade counts. A future run retention change
-// must first move those keys into the permanent business identity table.
-function legacyCountUsed(root, env, sourceDb, client, name, count) {
-  const path = operationsPath(root, env);
-  if (!existsSync(path)) return false;
-  const reader = new DatabaseSync(path, {readOnly: true});
-  try {
-    const table = reader.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_runs'").get();
-    if (!table) return false;
-    const columns = new Set(reader.prepare("PRAGMA table_info(batch_runs)").all().map((row) => row.name));
-    if (!["source_db", "source_client", "source_sysid", "job_name", "job_count"]
-      .every((column) => columns.has(column))) return false;
-    return reader.prepare(`SELECT job_name FROM batch_runs WHERE source_db = ? AND source_client = ?
-      AND source_sysid = ? AND job_count = ?`)
-      .all(sourceDb, client, identity(env).sid, count)
-      .some((row) => String(row.job_name ?? "").trim().toUpperCase() === name);
-  } finally { reader.close(); }
-}
 
 export class JobDestination {
   constructor(root = process.cwd(), env = process.env) {

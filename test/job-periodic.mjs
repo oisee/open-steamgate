@@ -512,9 +512,12 @@ describe("periodic and time-scheduled background jobs", function () {
     w.scheduler.stop();
     w.clock.set(w.clock.now() + 60 * 1000);
     // the host dies after the decision, before the successor is made
+    // (a failed reservation is caught per run and left RELEASING, so the
+    // crash is seen as the recorded failure instead of a throw)
     w.scheduler.ensureSuccessor = async () => { throw new Error("host stopped"); };
-    try { await w.scheduler.releaseDue(); throw new Error("release did not fail"); }
-    catch (error) { expect(error.message).to.equal("host stopped"); }
+    w.scheduler.onFailure = () => {};
+    await w.scheduler.releaseDue();
+    expect(w.scheduler.failures.map((item) => item.error)).to.deep.equal(["host stopped"]);
     expect(w.runs("RELCRASH").map((run) => run.state)).to.deep.equal(["RELEASING"]);
     // it reads as S, and a delete is refused like a running job's
     expect(await status(w.name("RELCRASH"), closed.count)).to.equal("S");
@@ -554,8 +557,9 @@ describe("periodic and time-scheduled background jobs", function () {
     // host start, the decision is taken, and the host dies before the successor
     const crashing = new JobScheduler({root, store: w.store, env: process.env, clock: w.clock, execute: done});
     crashing.ensureSuccessor = async () => { throw new Error("host stopped"); };
-    try { await crashing.start(); throw new Error("start did not fail"); }
-    catch (error) { expect(error.message).to.equal("host stopped"); }
+    crashing.onFailure = () => {};
+    await crashing.start();
+    expect(crashing.failures.map((item) => item.error)).to.deep.equal(["host stopped"]);
     crashing.stop();
     expect(w.runs("GAPCRASH").map((run) => run.state)).to.deep.equal(["RELEASING"]);
     w.clock.set(w.clock.now() + 300 * 1000); // restarted five minutes later

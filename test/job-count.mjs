@@ -12,7 +12,7 @@ import {DatabaseSync} from "node:sqlite";
 import {BatchRuns} from "../tools/osd-batch-runs.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {JobScheduler, installAbapClock, manualClock} from "../tools/osd-job-scheduler.mjs";
-import {msStamp, successorIntentId} from "../tools/osd-job-schedule.mjs";
+import {msStamp, stampMs, successorIntentId} from "../tools/osd-job-schedule.mjs";
 import {identity as runtimeIdentity} from "../tools/osd-identity.mjs";
 import {readJobSnapshot} from "../tools/osd-job-snapshot.mjs";
 import {nextJobCount, JobCountExhausted} from "../tools/osd-job-count.mjs";
@@ -67,7 +67,7 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
   });
 
   // one frozen clock per case, its own operations store, a name prefix
-  function world(start) {
+  function world(start, {retention = null, execute = async () => ({status: "COMPLETED"})} = {}) {
     worlds += 1;
     const clock = manualClock(start);
     restoreClock?.();
@@ -75,8 +75,8 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
     process.env.OSD_OPERATIONS_DB = join(dir, `operations-${worlds}.sqlite`);
     const w = {clock, t0: clock.now(), prefix: `C${worlds}_`};
     w.store = new BatchRuns(root, process.env);
-    w.scheduler = new JobScheduler({root, store: w.store, env: process.env, clock,
-      execute: async () => ({status: "COMPLETED"})});
+    // retention null: no job reorganisation unless a case asks for one
+    w.scheduler = new JobScheduler({root, store: w.store, env: process.env, clock, execute, retention});
     w.name = (job) => w.prefix + job;
     w.at = (seconds) => msStamp(w.t0 + seconds * 1000);
     return w;
@@ -88,14 +88,14 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
   };
   const open = (name) => dialogStep(() => openIn(name));
   // open, submit and close in one dialog step (a definition lives in its LUW)
-  const schedule = (name, start, period) => dialogStep(async () => {
+  const schedule = (name, start, period = {}) => dialogStep(async () => {
     const count = await openIn(name);
     await abap.FunctionModules.JOB_SUBMIT({exporting: {jobname: box(name), jobcount: box(count),
       report: box("ZGG_EX_012"), authcknam: box(user())}});
     const exporting = {jobname: box(name), jobcount: box(count)};
     if (start) { exporting.sdlstrtdt = box(start.slice(0, 8)); exporting.sdlstrttm = box(start.slice(8)); }
     else exporting.strtimmed = box("X");
-    if (period) exporting.prdmins = box(String(period));
+    for (const [key, value] of Object.entries(period)) exporting[key] = box(String(value));
     await abap.FunctionModules.JOB_CLOSE({exporting, importing: {job_was_released: new abap.types.String()}});
     return count;
   });
@@ -122,6 +122,14 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
   for (const fixture of contract.cases) {
     it(`${fixture.id} (EXPECT ${fixture.EXPECT})`, async () => {
       const w = world(fixture.clock);
+      // rows of earlier days at this second: the key has no date in it
+      for (const [job, numbers] of Object.entries(fixture.held ?? {})) {
+        const writer = new DatabaseSync(dbPath);
+        try {
+          for (const nn of numbers) writer.prepare(`INSERT INTO zosd_job_identity (mandt, jobname, jobcount, owner, intent_id)
+            VALUES ('123', ?, ?, ?, '')`).run(w.name(job), msStamp(w.t0).slice(8) + nn, user());
+        } finally { writer.close(); }
+      }
       const got = [];
       for (const call of fixture.opens) {
         if (call.startsWith("+")) { w.clock.set(w.clock.now() + Number(call.slice(1)) * 1000); got.push(null); continue; }
@@ -188,13 +196,16 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
     expect(await open(name)).to.equal("05060800");
   });
 
-  it("the allocator itself refuses past 99 and does not wrap", () => {
+  it("the allocator itself takes the lowest free NN, refuses past 99 and does not wrap", () => {
     const db = new DatabaseSync(":memory:");
     db.exec("CREATE TABLE zosd_job_identity (mandt TEXT, jobname TEXT, jobcount TEXT)");
     const put = db.prepare("INSERT INTO zosd_job_identity VALUES ('123', 'N', ?)");
-    put.run("01200099");
     const ms = Date.parse("2026-10-02T01:20:00Z");
+    for (let nn = 0; nn < 100; nn++) put.run(`012000${String(nn).padStart(2, "0")}`);
     expect(() => nextJobCount(db, {client: "123", jobname: "N", ms})).to.throw(JobCountExhausted);
+    // a pair that left (the reorganisation, a delete) is the next one used
+    db.exec("DELETE FROM zosd_job_identity WHERE jobcount = '01200037'");
+    expect(nextJobCount(db, {client: "123", jobname: "N", ms}).count).to.equal("01200037");
     expect(nextJobCount(db, {client: "123", jobname: "M", ms}).count).to.equal("01200000");
     // a count held elsewhere (a definition in this LUW) is skipped, not reused
     expect(nextJobCount(db, {client: "123", jobname: "M", ms, taken: (c) => c === "01200000"}).count).to.equal("01200001");
@@ -225,7 +236,7 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
   it("the periodic successor takes its creation second from the allocator, and stays unique against an open of its name", async () => {
     const w = world("2026-10-02T09:00:00Z");
     const name = w.name("PERIODIC");
-    const count = await schedule(name, w.at(60), 2);
+    const count = await schedule(name, w.at(60), {prdmins: 2});
     expect(count).to.equal("09000000");
     w.clock.set(w.clock.now() + 60 * 1000); // the predecessor starts at 09:01:00
     const opened = await open(name); // an open of the same name in that same second
@@ -241,5 +252,80 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
     // and an open after it carries on
     expect(await open(name)).to.equal("09010002");
     w.scheduler.stop();
+  });
+  describe("the job reorganisation keeps a fixed-second daily job from using up its counts", () => {
+    const DAY = 24 * 3600;
+    const now = () => Math.floor(Date.now() / 1000) * 1000;
+    const daily = (w, job) => schedule(w.name(job), w.at(60), {prddays: 1});
+
+    it("a daily chain over 120 days with the reorganisation on never exhausts and keeps every pair unique", async function () {
+      this.timeout(600000);
+      const w = world(now(), {retention: 14});
+      const first = await daily(w, "DAILY");
+      await w.scheduler.start();
+      await w.clock.advance(120 * DAY * 1000);
+      expect(w.scheduler.failures).to.deep.equal([]);
+      const name = w.name("DAILY");
+      const runs = w.store.db.prepare("SELECT job_count, state FROM batch_runs WHERE job_name = ?").all(name);
+      // the chain is alive: one waiting successor, 120 days on, and (name, count) is unique in both stores
+      // (the runs' own ended_at is the wall clock, so what stays of the history here is not asserted)
+      const waiting = w.store.db.prepare("SELECT sdl_at FROM batch_runs WHERE job_name = ? AND state = 'WAITING'").all(name);
+      expect(waiting.map((run) => stampMs(run.sdl_at) - w.t0)).to.deep.equal([(120 * DAY + 60) * 1000]);
+      const rows = identity(name);
+      expect(new Set(rows).size).to.equal(rows.length);
+      expect(rows.length).to.be.below(100); // not one row of every day
+      expect(first).to.match(/^\d{8}$/);
+      w.scheduler.stop();
+    });
+
+    it("with the reorganisation off the 101st start is refused cleanly and retried, the other timed jobs run and the scheduler re-arms", async function () {
+      this.timeout(600000);
+      const w = world(now(), {retention: null});
+      await daily(w, "DAILY");
+      await w.scheduler.start();
+      w.scheduler.onFailure = () => {};
+      await w.clock.advance((100 * DAY + 600) * 1000);
+      expect(w.scheduler.failures.length).to.be.at.least(1);
+      expect(w.scheduler.failures[0].error).to.match(/No free JOBCOUNT/);
+      expect(w.scheduler.failures[0].name).to.equal(w.name("DAILY"));
+      // the failed run stays RELEASING, to be retried; nothing else is lost
+      // the run stays RELEASING for the retry a minute on, and that retry is a new second:
+      // the successor takes the count of the moment it is made
+      const retried = w.store.db.prepare("SELECT job_count, state FROM batch_runs WHERE job_name = ? ORDER BY sdl_at DESC LIMIT 2")
+        .all(w.name("DAILY"));
+      expect(retried.map((row) => row.state)).to.deep.equal(["WAITING", "COMPLETED"]);
+      expect(retried[1].job_count.slice(6)).to.equal("99");
+      expect(retried[0].job_count.slice(0, 6)).to.not.equal(retried[1].job_count.slice(0, 6));
+      await schedule(w.name("OTHER"), w.at(100 * DAY + 700));
+      await w.scheduler.tick(); // imports it
+      await w.clock.advance(1000 * 1000);
+      expect(w.store.db.prepare("SELECT state FROM batch_runs WHERE job_name = ?").all(w.name("OTHER")).map((r) => r.state))
+        .to.deep.equal(["COMPLETED"]);
+      expect(w.scheduler.timer).to.not.equal(undefined);
+      w.scheduler.stop();
+    });
+
+    it("the reorganisation keeps what is not final, what a waiting job is chained behind and the latest periodic instance", async () => {
+      const w = world(now(), {retention: 14});
+      const age = (state, name) => w.store.db.prepare(`UPDATE batch_runs SET state = ?,
+        ended_at = '2020-01-01T00:00:00.000Z' WHERE job_name = ?`).run(state, name);
+      const a = await schedule(w.name("GONE"), w.at(3600));
+      const b = await schedule(w.name("WAITING"), w.at(3600));
+      const c = await schedule(w.name("LATEST"), w.at(3600), {prddays: 1});
+      await w.scheduler.tick(); // imports the three
+      age("COMPLETED", w.name("GONE"));
+      age("WAITING", w.name("WAITING"));
+      age("COMPLETED", w.name("LATEST"));
+      w.clock.set(w.clock.now() + 1000);
+      w.scheduler.nextReorg = undefined;
+      await w.scheduler.tick();
+      const left = (name) => w.store.db.prepare("SELECT 1 FROM batch_runs WHERE job_name = ?").all(w.name(name)).length;
+      expect([left("GONE"), left("WAITING"), left("LATEST")]).to.deep.equal([0, 1, 1]);
+      expect(identity(w.name("GONE"))).to.deep.equal([]);
+      expect(identity(w.name("WAITING"))).to.deep.equal([b]);
+      expect(identity(w.name("LATEST"))).to.deep.equal([c]);
+      expect(a).to.match(/^\d{8}$/);
+      w.scheduler.stop();
+    });
   });
 });

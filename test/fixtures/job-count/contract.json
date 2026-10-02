@@ -10,7 +10,9 @@
   "EXPECT": "where the expected values come from: A4H = measured on the sandbox; 'unmeasured: assumption' = chosen here",
   "clock": "the injectable clock, system time (UTC); frozen: nothing advances it inside a case",
   "opens": "JOB_OPEN calls in order, each with the job name it was given",
-  "counts": "the JOBCOUNT each call answered: hhmmss of the clock, then NN"
+  "counts": "the JOBCOUNT each call answered: hhmmss of the clock, then NN",
+  "held": "per job name, the NN values rows of earlier days already hold at the clock's second; the key has no date in it",
+  "+N": "move the clock by N seconds (86400 = the next day, the same second)"
  },
  "cases": [
   {
@@ -26,6 +28,15 @@
    "clock": "2026-10-02T03:44:00Z",
    "opens": ["L3_ONE", "L3_TWO", "L3_THREE", "L3_FOUR", "L3_FIVE", "L3_SIX"],
    "counts": ["03440000", "03440000", "03440000", "03440000", "03440000", "03440000"]
+  },
+  {
+   "id": "counter-continues-across-days",
+   "EXPECT": "A4H",
+   "measured": "TBTCO, two standard daily jobs that start at a fixed time: on consecutive days whose start landed on the same second, the counts went NN 06 then 07 for one job and 07 then 08 for the other. The next count is the next one no existing row of (name, hhmmss) holds, across days; old rows leave only by job deletion and the job reorganisation. The hh:mm of the measured rows is not recorded here: 04:15:48 is synthetic, and the history rows are what makes the counter start at 06 and 07.",
+   "clock": "2026-10-02T04:15:48Z",
+   "held": {"DAILY_ONE": ["00", "01", "02", "03", "04", "05"], "DAILY_TWO": ["00", "01", "02", "03", "04", "05", "06"]},
+   "opens": ["DAILY_ONE", "DAILY_TWO", "+86400", "DAILY_ONE", "DAILY_TWO"],
+   "counts": ["04154806", "04154807", null, "04154807", "04154808"]
   },
   {
    "id": "next-second-starts-again",

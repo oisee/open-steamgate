@@ -20,9 +20,11 @@ import {resolve} from "node:path";
 import {exclusive, outsideStepContext} from "./osd-dialog-step.mjs";
 import {runConvertedBatch, workQueuedBatch, workerSource} from "./osd-batch-runs.mjs";
 import {drainJobOutbox} from "./osd-job-outbox.mjs";
-import {nextJobCount} from "./osd-job-count.mjs";
+import {nextJobCount, legacyCountUsed} from "./osd-job-count.mjs";
+import {reorgJobs, retentionDays, DAY_MS} from "./osd-job-reorg.mjs";
 import {msStamp, nextSchedule, periodMinutes, stampMs, successorIntentId} from "./osd-job-schedule.mjs";
 
+const RETRY_MS = 60 * 1000;
 const INTENT_INDEX = "zosd_job_identity_intent";
 
 /** The successor's count, reserved atomically on its intent: the intent is
@@ -35,7 +37,7 @@ const INTENT_INDEX = "zosd_job_identity_intent";
  *  transaction; `beforeInsert` is a test seam between the read and the
  *  write. */
 export function reserveSuccessorCount(db, {client, jobname, owner, intentId},
-  {candidate = (proposal) => proposal.count, winnerOf = () => undefined, beforeInsert, ms} = {}) {
+  {candidate = (proposal) => proposal.count, winnerOf = () => undefined, beforeInsert, ms, taken} = {}) {
   const transaction = (work) => {
     db.exec("BEGIN IMMEDIATE");
     try { const answer = work(); db.exec("COMMIT"); return answer; }
@@ -66,7 +68,7 @@ export function reserveSuccessorCount(db, {client, jobname, owner, intentId},
     const answer = transaction(() => {
       // the proposal is read inside the write transaction, so two workers
       // never propose the same pair from one reading
-      const proposal = nextJobCount(db, {client, jobname, ms: ms ?? abapNow()});
+      const proposal = nextJobCount(db, {client, jobname, ms: ms ?? abapNow(), taken});
       const count = String(candidate(proposal) ?? proposal.count).padStart(8, "0");
       db.prepare(`INSERT INTO zosd_job_identity (mandt, jobname, jobcount, owner, intent_id)
         VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`).run(client, jobname, count, owner, intentId);
@@ -157,7 +159,7 @@ export function installAbapClock(abap, clock) {
 
 export class JobScheduler {
   constructor({root = process.cwd(), store, env = process.env, clock = systemClock,
-    execute = runConvertedBatch, candidate = (proposal) => proposal.count} = {}) {
+    execute = runConvertedBatch, candidate = (proposal) => proposal.count, retention} = {}) {
     if (!store) throw new TypeError("JobScheduler needs the operations store");
     this.root = root;
     this.store = store;
@@ -165,6 +167,11 @@ export class JobScheduler {
     this.clock = clock;
     this.execute = execute;
     this.candidate = candidate;
+    this.retentionDays = retentionDays(env, retention); // null: no reorganisation
+    this.nextReorg = undefined; // the clock's ms of the next one; host start makes it due
+    this.failures = []; // per-run release failures of the last passes, newest last
+    this.onFailure = (run, error) => console.error(`osd-job-scheduler: release of ${run.job_name}/${run.job_count} failed, retried later: ${error?.message ?? error}`);
+    this.failedPass = false;
     this.timer = undefined;
     this.stopped = false;
     this.running = undefined;
@@ -198,15 +205,34 @@ export class JobScheduler {
 
   async #pass() {
     const outcomes = [];
-    if (this.env.STG_DB === "file") await drainJobOutbox(this.store, {env: this.env});
-    for (;;) {
-      await this.releaseDue();
-      const outcome = await workQueuedBatch(this.root, this.store, this.execute);
-      if (outcome.kind === "empty" || outcome.kind === "busy") break;
-      outcomes.push(outcome);
+    this.failedPass = false;
+    try {
+      if (this.env.STG_DB === "file") await drainJobOutbox(this.store, {env: this.env});
+      await this.#reorganise();
+      for (;;) {
+        await this.releaseDue();
+        const outcome = await workQueuedBatch(this.root, this.store, this.execute);
+        if (outcome.kind === "empty" || outcome.kind === "busy") break;
+        outcomes.push(outcome);
+      }
+    } finally {
+      this.#arm(); // always: one job's failure never leaves the others unarmed
     }
-    this.#arm();
     return outcomes;
+  }
+
+  /** the job reorganisation (tools/osd-job-reorg.mjs): at host start and
+   *  then once a day of the scheduler's clock. A failure is said and does
+   *  not stop the pass. */
+  async #reorganise() {
+    if (this.retentionDays === null) return;
+    const now = this.clock.now();
+    if (this.nextReorg !== undefined && now < this.nextReorg) return;
+    this.nextReorg = now + DAY_MS;
+    try {
+      await reorgJobs({store: this.store, client: globalThis.abap?.context?.databaseConnections?.DEFAULT,
+        ms: now, days: this.retentionDays});
+    } catch (error) { console.error(`osd-job-scheduler: job reorganisation failed: ${error?.message ?? error}`); }
   }
 
   /** release every timed job whose start time has come. The decision is the
@@ -225,7 +251,20 @@ export class JobScheduler {
       const overdue = this.startedAt !== undefined && stampMs(run.sdl_at) < this.startedAt;
       const decided = this.store.beginRelease(run.id, stamp, overdue ? stamp : undefined);
       if (!decided) continue; // deleted (or taken) meanwhile: no successor
-      if (periodMinutes(periodOf(run)) > 0) await this.ensureSuccessor(run, decided.next);
+      // A reservation that fails (no free count for the name and second, say)
+      // leaves this run RELEASING, which a later pass finishes -- after the
+      // reorganisation freed a count, or whatever else was wrong has passed --
+      // and the other due runs go on. The successor it makes then takes that
+      // later pass's second.
+      try {
+        if (periodMinutes(periodOf(run)) > 0) await this.ensureSuccessor(run, decided.next);
+      } catch (error) {
+        this.failedPass = true;
+        this.failures.push({id: run.id, name: run.job_name, count: run.job_count, error: String(error?.message ?? error)});
+        if (this.failures.length > 50) this.failures.shift();
+        this.onFailure(run, error);
+        continue;
+      }
       const result = this.store.releaseTimed(run.id, stamp, new Date(this.clock.now()).toISOString());
       if (result.kind !== "unchanged") released.push({id: run.id, kind: result.kind});
     }
@@ -263,8 +302,10 @@ export class JobScheduler {
         throw new Error("periodic successor needs its own durable business database");
       }
       if (client.inTransaction) await client.commit();
+      const name = String(run.job_name ?? "").trim().toUpperCase();
       return reserveSuccessorCount(client.db, {client: run.source_client, jobname: run.job_name,
         owner: run.source_owner, intentId}, {candidate: this.candidate, ms: this.clock.now(),
+        taken: (count) => legacyCountUsed(this.root, this.env, run.source_db, run.source_client, name, count),
         winnerOf: (intent) => this.store.importedCount(intent), beforeInsert: this.beforeReserve});
     }, "periodic job successor");
   }
@@ -273,10 +314,17 @@ export class JobScheduler {
     if (this.timer !== undefined) this.clock.clearTimer(this.timer);
     this.timer = undefined;
     if (this.stopped) return;
+    const now = this.clock.now();
+    const waits = [];
     const next = this.store.nextTimed(workerSource());
-    if (next === undefined) return;
-    const wait = Math.max(0, stampMs(next) - this.clock.now());
-    this.timer = this.clock.setTimer(() => this.tick(), wait);
+    if (next !== undefined) {
+      const wait = Math.max(0, stampMs(next) - now);
+      // a run that failed to release is due already: retry it later, not in a spin
+      waits.push(this.failedPass ? Math.max(wait, RETRY_MS) : wait);
+    }
+    if (this.retentionDays !== null && this.nextReorg !== undefined) waits.push(Math.max(0, this.nextReorg - now));
+    if (waits.length === 0) return;
+    this.timer = this.clock.setTimer(() => this.tick(), Math.min(...waits));
   }
 }
 

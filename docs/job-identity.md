@@ -6,6 +6,7 @@ reservation in the caller's LUW (rule below). A duplicate key proposes the
 next count, up to 64 attempts. Rollback removes the reservation; a committed open without a
 close keeps its count permanently. The private port's `CANCEL` discards only
 the failed candidate in the current dialog step.
+
 **The allocator** (`tools/osd-job-count.mjs`, one for `JOB_OPEN` and for the
 periodic successor): `JOBCOUNT` is the creation time `hhmmss` in system time
 (the ABAP clock, so a frozen clock freezes it) followed by a two-digit counter
@@ -16,18 +17,40 @@ name opened once more got 03473203; six jobs of different names opened in one
 second all got 03440000. So the count alone is **not** a key and two names
 share one in every busy second: every lookup uses (client, jobname, jobcount),
 which is the identity table's key (`test/job-count.mjs` checks the DDIC and the
-SQLite table). The proposal is the next free `NN` over the identity rows of
-that name and second (the caller's own uncommitted rows included) and is only
-final when the INSERT lands, so two concurrent openers never keep one pair.
+SQLite table). The key has no date in it, so the counter is **across days**: the proposal is
+the lowest `NN` that no identity row of that name and second holds (the
+caller's own uncommitted rows included), and only final when the INSERT lands,
+so two concurrent openers never keep one pair. Measured on the sandbox the
+same day (TBTCO, two standard daily jobs that start at a fixed second): on
+consecutive days the counts went NN 06 then 07 for one job and 07 then 08 for
+the other (`test/fixtures/job-count`, "counter-continues-across-days").
 Past `NN` = 99 for one name in one second is **not measured**: the open is
 refused (`CANT_CREATE_JOB`, message "No free JOBCOUNT for this job name this
 second"); the counter does not wrap and does not borrow the next second.
 Counts of earlier builds are random eight digits; they stay valid, and a new
-count that equals one of them (identity row, definition in this LUW or the
-operations ledger) is skipped. The periodic successor takes its count in the
-second it is created, which is when its predecessor starts, as measured.
+count that equals one of them (an identity row, a definition in this LUW or
+the operations ledger) is passed over: the allocator goes on to the next free
+`NN`. The periodic successor takes its count in the second it is created,
+which is when its predecessor starts, as measured; one made late (a retry
+after a refusal, crash recovery) takes the second of the retry or the
+recovery, not the scheduled second. JOB_OPEN and the successor pass the same
+legacy-ledger check (`legacyCountUsed`).
 `JobDestination.candidate` / `JobScheduler.candidate` still let a test answer
 another count for the proposal `{second, nn, count}`.
+
+**The job reorganisation** (`tools/osd-job-reorg.mjs`) is this runtime's
+equivalent of the system's reorganisation of TBTCO, and the only way a pair
+leaves besides a delete: a job that starts at one fixed second every day would
+otherwise use up its 100 counts in 100 days. It runs at host start and then
+daily on the scheduler's clock, in a dialog step. Retention is
+`OSD_JOB_RETENTION_DAYS` (default 14; `off` keeps everything). A job in a final
+state (COMPLETED, FAILED, INTERRUPTED, DELETED) that ended before the cutoff
+goes: identity, outbox and step rows in the business database (first), then
+run, steps, log, import ledger and completion event in the operations store.
+Never a job that is not final, never one a waiting job is chained behind, never
+the latest instance of a periodic chain. When a reservation still fails, the
+scheduler leaves that run RELEASING, says so, retries it a minute later and
+carries on with the other due runs; it always re-arms.
 
 The private port returns the canonical name (trimmed and upper case) to both
 `JOB_OPEN` and `JOB_CLOSE`, so the reservation and outbox use the same key.
@@ -46,6 +69,5 @@ the new table. A duplicate old key aborts the migration and retains the old
 rows and stamp. For jobs already acknowledged before this table existed, count
 selection also checks `batch_runs` in the operations database for the same
 business database, client, system, name and count. Those historical run rows
-currently have no retention policy. Any future deletion of them must first
-transfer their keys to durable identity storage; the import ledger alone does
-not contain the job name and count.
+are removed by the job reorganisation above, together with their identity row,
+after the retention period; a pre-identity run holds its count until then.
