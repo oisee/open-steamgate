@@ -57,6 +57,59 @@ remote-enabled function modules with a typed contract.
 - `IN BACKGROUND TASK` and `STARTING NEW TASK` with a destination are not handled yet. Check the
   transpiler before SL.2's exactly-once variant.
 
+## SL.0 — a real connection to itself, before any network (must)
+
+Alice, 2026-10-02: OSG needs a destination to **itself** that is not `NONE` and behaves like a real
+one. It is the intermediate step to a network destination: only the target changes after it.
+
+On a system, an SM59 type 3 entry pointing at its own system is exactly that. The call goes out
+and comes back into **another work process**, under a fresh logon, with its own session and LUW.
+OSG already has the parts: the work-process pool (`tools/osd-pool.mjs`, `OSD_WORKERS`, children on
+one SQLite file in WAL mode) and the JSON RFC channel with its generated, typed dispatcher.
+
+A kind `loopback` (or `osd` with the target `self`) calls a **different work process of the same
+system** over the RFC channel. What makes it real, each point with a test that fails under `NONE`:
+
+1. **Another internal session.** Static attributes, `EXPORT TO MEMORY`, buffers and singletons of the
+   caller are not visible on the other side. ABAP that relied on shared global state breaks here,
+   as it would on a system.
+2. **Its own connection and LUW.** A `COMMIT WORK` on the far side does not commit the caller's
+   pending rows, and a caller's `ROLLBACK WORK` does not undo what the far side committed. The
+   session stays alive across calls on the same destination until `RFC_CONNECTION_CLOSE` or the
+   end of the caller's step, so `BAPI_TRANSACTION_COMMIT` works.
+3. **By value, RFC types only.** Parameters are serialised through the channel. A reference, an
+   object or a generic type is refused at compile time where possible, otherwise at the call. A
+   module without `REMOTE_CALL = R` raises the call's exception (the channel already answers 403).
+4. **The destination's logon.** User and client come from the destination: the far side's
+   `sy-uname` and `sy-mandt` are the logon's, not the caller's. A loopback into **another client**
+   is the cheapest two-"system" test there is.
+5. **Failures like RFC.**
+   - A dump on the far side is `SYSTEM_FAILURE` with its text.
+   - No free work process, a timeout or a refused logon is `COMMUNICATION_FAILURE`.
+   - Classic exceptions of the module pass through by name.
+6. **The same wire as the network.** Loopback is the HTTP JSON call to the pool's other process, so
+   a destination to another OSG later changes the address and adds authentication, and nothing
+   else.
+
+**The constraint to measure first: SQLite has one writer.** Suppose the caller holds uncommitted
+writes and the far side wants to write too:
+- on HANA or PostgreSQL this works for different rows, as on a system;
+- on SQLite the far side waits for the caller, which waits for the far side.
+
+The loopback detects this through the busy timeout and answers `SYSTEM_FAILURE` ("lock wait:
+SQLite allows one writer"), recorded in ANORMALIES. It must not hang.
+- For the DSL cut this is mostly moot. A write across the cut goes **after** the commit
+  (`IN BACKGROUND TASK`, SL.2's exactly-once variant), and a synchronous call stays read-only or
+  goes to the far side's own ledger before the caller writes.
+- Full fidelity is the PostgreSQL or HANA profile.
+
+**With a single work process** (`OSD_WORKERS=1`) the loopback answers `COMMUNICATION_FAILURE` ("no
+free work process"). That is also what a system with no free dialog work process does after its
+wait, so the test is honest rather than a special case.
+
+**A4H twin.** The same set, proved through an SM59 type 3 entry to the sandbox itself, gives the
+oracle for every point above.
+
 ## SL.1 — consistent identity per instance (must)
 
 - **The client is part of the data.** The seed rows in `data/` are in client 123. An instance
@@ -158,6 +211,6 @@ every object is in that namespace?
 
 ## Order
 
-SL.5 (names) and SL.1 (identity) first: they are small and everything else stands on them. Then
+SL.0 (loopback) with SL.5 (names) and SL.1 (identity) first: they are small and everything else stands on them. Then
 SL.2 (`osd` kind plus the exactly-once variant), SL.4 with the outbox and synchronous transports,
 SL.3, then the lease and the other cuts.
