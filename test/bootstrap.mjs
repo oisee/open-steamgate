@@ -91,7 +91,9 @@ describe("fresh checkout bootstrap", () => {
     expect(describeVsixPreflight([])).to.equal(undefined);
   });
 
-  it("refuses an unpinned VSIX library even when its folder is populated", () => {
+  it("refuses an unpinned VSIX library even when its folder is populated", function () {
+    // git init plus a commit per library in a temp root: seconds on a busy runner, not mocha's 2 s
+    this.timeout(30000);
     const scratch = mkdtempSync(join(tmpdir(), "osd-vsix-preflight-"));
     try {
       // a checkout: that is where the pin gate applies (tools/osd-lib-path.mjs)
