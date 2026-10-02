@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Materialise locked library commits and keep .local/lars as the public path.
 import {execFileSync} from "node:child_process";
-import {closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync} from "node:fs";
-import {dirname, isAbsolute, join, relative, resolve, sep} from "node:path";
+import {chmodSync, closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync} from "node:fs";
+import {basename, dirname, isAbsolute, join, relative, resolve, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {runsAs} from "./osd-main.mjs";
 import {librariesFromLock} from "./osd-lock.mjs";
@@ -13,6 +13,54 @@ const exists = (path) => { try { lstatSync(path); return true; } catch { return 
 const head = (path) => { try { return git(path, "rev-parse", "HEAD"); } catch { return "missing"; } };
 const SHARED_CMD = "node tools/osd-libs.mjs --sync --shared";
 const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+/** A folder is a clone only when git's own top level is the folder itself.
+ *  In a plain directory `git status` climbs to the enclosing repository, which
+ *  is how a folder holding only a `src` symlink reported the main checkout's
+ *  edits as its own "uncommitted changes". */
+export function isClone(path) {
+  try { return realpathSync(git(path, "rev-parse", "--show-toplevel")) === realpathSync(path); }
+  catch { return false; }
+}
+
+/** Pins are not read-only on disk. fs.cpSync recreates a 555 directory as a
+ *  555 directory and then cannot write into it (EACCES in a local
+ *  build-vsix). What keeps a pin unchanged is the gate (a clean checkout at
+ *  the locked commit, tools/osd-lib-path.mjs), so sync gives the owner write
+ *  access to every directory of a pin. Git records no directory modes: the
+ *  pin stays clean. */
+export function makeWritable(path) {
+  const visit = (dir) => {
+    const mode = lstatSync(dir).mode;
+    if (!(mode & 0o200)) chmodSync(dir, (mode & 0o7777) | 0o200);
+    for (const entry of readdirSync(dir, {withFileTypes: true})) if (entry.isDirectory()) visit(join(dir, entry.name));
+  };
+  visit(path);
+}
+
+/** A pin made earlier as a `git worktree` of a clone names that clone's
+ *  `.git/worktrees/<id>` in its `.git` file. When --shared moves the clone to
+ *  .local/dev the pin loses it and reads as "missing". Re-attach it from
+ *  wherever the clone is now; this is also what makes a re-run after such a
+ *  half-finished sync complete. Pins made by cloneInto are standalone and
+ *  never need it. */
+function repairWorktreePin(lib) {
+  let link;
+  try {
+    if (!lstatSync(join(lib.pin, ".git")).isFile()) return;
+    link = readFileSync(join(lib.pin, ".git"), "utf8");
+  } catch { return; }
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(link);
+  if (!match || exists(match[1])) return;
+  const id = basename(match[1]);
+  chmodSync(join(lib.pin, ".git"), (lstatSync(join(lib.pin, ".git")).mode & 0o7777) | 0o200); // repair rewrites it
+  for (const clone of [lib.dev, lib.at]) {
+    if (exists(join(clone, ".git", "worktrees", id)) && isClone(clone)) {
+      git(clone, "worktree", "repair", resolve(lib.pin));
+      return;
+    }
+  }
+}
 
 export function libraries(root = ".") {
   const lars = resolve(root, ".local", "lars");
@@ -61,13 +109,15 @@ function ensurePin(lib) {
       try { cloneInto(temp, lib); renameSync(temp, lib.pin); }
       finally { if (exists(temp)) rmSync(temp, {recursive: true, force: true}); }
     }
+    makeWritable(lib.pin);
+    if (head(lib.pin) !== lib.ref) repairWorktreePin(lib);
     if (head(lib.pin) !== lib.ref) throw new Error(`${lib.name}: pin ${lib.pin} has drifted; leave it untouched and inspect it manually`);
   } finally {
     if (fd !== undefined) { closeSync(fd); rmSync(lock, {force: true}); }
   }
 }
 
-function pointAtPin(lib, shared = false) {
+function pointAtPin(lib, shared = false, say = () => {}) {
   mkdirSync(dirname(lib.at), {recursive: true});
   const lock = `${lib.at}.lock`;
   let fd;
@@ -82,10 +132,17 @@ function pointAtPin(lib, shared = false) {
   try {
     if (exists(lib.at) && !lstatSync(lib.at).isSymbolicLink()) {
       if (lib.external && !shared) throw new Error(`${lib.name}: ${lib.at} is shared by worktrees; run ${SHARED_CMD} to migrate it (from any checkout)`);
-      if (shared && git(lib.at, "status", "--porcelain")) throw new Error(`${lib.name}: ${lib.at} has uncommitted changes; commit or stash them before migrating`);
+      const clone = isClone(lib.at);
+      if (shared && clone && git(lib.at, "status", "--porcelain")) throw new Error(`${lib.name}: ${lib.at} has uncommitted changes; commit or stash them before migrating`);
       if (exists(lib.dev)) throw new Error(`${lib.name}: cannot move ${lib.at} to ${lib.dev}: destination exists; move it aside manually`);
       mkdirSync(dirname(lib.dev), {recursive: true});
       renameSync(lib.at, lib.dev);
+      // its worktrees (an earlier pin among them) follow the clone
+      if (clone) {
+        if (exists(lib.pin)) repairWorktreePin(lib);
+        try { git(lib.dev, "worktree", "repair"); }
+        catch (error) { say(`osd-libs: ${lib.name}: git worktree repair in ${lib.dev}: ${error.stderr?.toString().trim() || error.message}`); }
+      } else say(`osd-libs: ${lib.name}: ${lib.at} is not a git clone; moved as is to ${lib.dev}`);
     }
     const target = resolve(lib.pin);
     if (exists(lib.at)) {
@@ -120,7 +177,7 @@ export function materialise(root = ".", say = () => {}, {ci = process.env.CI ===
       }
     } else {
       ensurePin(lib);
-      pointAtPin(lib, shared);
+      pointAtPin(lib, shared, say);
       made.push(lib.name);
     }
     libraryPath(root, lib.name);

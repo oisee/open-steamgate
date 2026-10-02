@@ -13,7 +13,7 @@
 // is repo tooling too (docker/image/license-assumptions.mjs,
 // checkLockLicences), never imported from here.
 import {execFileSync} from "node:child_process";
-import {existsSync, readdirSync, realpathSync, statSync} from "node:fs";
+import {existsSync, readdirSync, readFileSync, realpathSync, statSync} from "node:fs";
 import {join} from "node:path";
 import {librariesFromLock, readLock} from "./osd-lock.mjs";
 
@@ -44,6 +44,13 @@ export function libraryPath(root, folder, env = process.env) {
       actual = execFileSync("git", ["rev-parse", "HEAD"], {cwd: path, encoding: "utf8", stdio: "pipe"}).trim();
     }
   } catch { /* absent or not a standalone checkout */ }
+  if (actual === "missing") {
+    // a worktree whose clone has moved: its `.git` file names a gitdir that is gone
+    try {
+      const link = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(join(path, ".git"), "utf8"));
+      if (link && !existsSync(link[1])) actual = `missing (a worktree of a moved clone: ${link[1]} is gone)`;
+    } catch { /* no .git file */ }
+  }
   if (actual !== pin.ref) throw new Error(`${folder} is at ${actual}, libs.lock.json says ${pin.ref}; run node tools/osd-libs.mjs --sync`);
   let dirty;
   try { dirty = execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {cwd: path, encoding: "utf8", stdio: "pipe"}).length > 0; }

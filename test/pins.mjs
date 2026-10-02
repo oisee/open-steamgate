@@ -139,6 +139,86 @@ describe("locked library paths", () => {
     } finally { rmSync(f.root, {recursive: true, force: true}); }
   });
 
+  // The real migration of 2026-10-01: pins had been made by hand as `git
+  // worktree`s of the lars clones and set to 555. --shared moved the clone to
+  // .local/dev, every such pin lost its gitdir, the gate said "is at missing"
+  // and the sync stopped halfway.
+  const sharedLayout = (f) => {
+    const shared = join(f.root, "shared", ".local");
+    mkdirSync(join(shared, "lars"), {recursive: true});
+    mkdirSync(join(f.home, ".local"), {recursive: true});
+    symlinkSync(join(shared, "lars"), join(f.home, ".local/lars"), "dir");
+    return {shared, at: join(shared, "lars/example"), pin: join(shared, `pins/example@${f.ref}`), dev: join(shared, "dev/example")};
+  };
+  const worktreePin = (f, s) => {
+    git(f.home, "clone", "-q", f.bare, s.at);
+    mkdirSync(dirname(s.pin), {recursive: true});
+    git(s.at, "worktree", "add", "-q", "--detach", s.pin, f.ref);
+    execFileSync("chmod", ["-R", "a-w", s.pin]);
+  };
+
+  it("--shared moves a clone that has a worktree pin, and the pin follows it", () => {
+    const f = fixture();
+    try {
+      const s = sharedLayout(f);
+      worktreePin(f, s);
+      materialise(f.home, () => {}, {ci: false, shared: true, remote: {example: f.bare}});
+      assert.equal(readlinkSync(s.at), s.pin);
+      assert.equal(readFileSync(join(s.dev, "file.txt"), "utf8"), "two");
+      assert.equal(libraryPath(f.home, "example"), join(f.home, ".local/lars/example"));
+      assert.equal(readFileSync(join(f.home, ".local/lars/example/file.txt"), "utf8"), "one");
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("a re-run after the clone moved without its worktree pin completes", () => {
+    const f = fixture();
+    try {
+      const s = sharedLayout(f);
+      worktreePin(f, s);
+      // the state the aborted sync left: clone in dev, lars link at the pin, pin detached
+      mkdirSync(dirname(s.dev), {recursive: true});
+      execFileSync("mv", [s.at, s.dev]);
+      symlinkSync(s.pin, s.at, "dir");
+      assert.throws(() => libraryPath(f.home, "example"), /worktree of a moved clone/);
+      materialise(f.home, () => {}, {ci: false, shared: true, remote: {example: f.bare}});
+      assert.equal(libraryPath(f.home, "example"), join(f.home, ".local/lars/example"));
+      materialise(f.home, () => {}, {ci: false, shared: true, remote: {example: f.bare}});
+      assert.equal(libraryPath(f.home, "example"), join(f.home, ".local/lars/example"));
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("--shared moves a folder that is not a git clone as is, without reading the enclosing repo's status", () => {
+    const f = fixture();
+    try {
+      // inside the checkout, so `git status` there would climb to f.home
+      const at = join(f.home, ".local/lars/example");
+      mkdirSync(at, {recursive: true});
+      symlinkSync(f.source, join(at, "src"), "dir");
+      writeFileSync(join(f.home, "dirty.txt"), "an edit of the main checkout");
+      const said = [];
+      materialise(f.home, (line) => said.push(line), {ci: false, shared: true, remote: {example: f.bare}});
+      const dev = join(f.home, ".local/dev/example");
+      assert(lstatSync(join(dev, "src")).isSymbolicLink());
+      assert(said.some((line) => line.includes("not a git clone") && line.includes(dev)), said.join("\n"));
+      assert.equal(libraryPath(f.home, "example"), at);
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("a pin can be copied with fs.cpSync (sync leaves no read-only directories)", () => {
+    const f = fixture();
+    try {
+      run(f.home, f.bare);
+      const pin = join(f.home, `.local/pins/example@${f.ref}`);
+      execFileSync("chmod", ["-R", "a-w", pin]); // as the hand-made pins were
+      run(f.home, f.bare);
+      const copy = join(f.root, "copy");
+      cpSync(join(f.home, ".local/lars/example"), copy, {recursive: true, dereference: true});
+      assert.equal(readFileSync(join(copy, "file.txt"), "utf8"), "one");
+      writeFileSync(join(copy, "added.txt"), "the copy is writable");
+      assert.equal(libraryPath(f.home, "example"), join(f.home, ".local/lars/example"));
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
   it("refuses modified and untracked files at the pinned commit", () => {
     const f = fixture();
     try {
