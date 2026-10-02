@@ -4,6 +4,7 @@
     "test/adt-abap-diff.mjs",
     "test/adt-abap-f1.mjs",
     "test/adt-abap-front.mjs",
+    "test/adt-abap-helpers.mjs",
     "test/adt-abap-kernel.mjs",
     "test/adt-abap-session.mjs",
     "test/adt-abap-sessions.mjs",

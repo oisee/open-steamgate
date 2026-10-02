@@ -22,6 +22,10 @@ CLASS zcx_osd_adt DEFINITION PUBLIC INHERITING FROM cx_static_check CREATE PUBLI
     CLASS-METHODS session_ended RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
     CLASS-METHODS system_not_supported RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
 
+    CONSTANTS c_miss_none TYPE string VALUE `none`.
+    CONSTANTS c_miss_object TYPE string VALUE `object`.
+    CONSTANTS c_miss_resource TYPE string VALUE `resource`.
+    DATA miss TYPE string READ-ONLY.
     DATA status TYPE i READ-ONLY.
     DATA type_id TYPE string READ-ONLY.
     DATA namespace TYPE string READ-ONLY.
@@ -34,6 +38,7 @@ CLASS zcx_osd_adt DEFINITION PUBLIC INHERITING FROM cx_static_check CREATE PUBLI
                 iv_message    TYPE string OPTIONAL
                 iv_namespace  TYPE string DEFAULT c_namespace_adt
                 it_properties TYPE tihttpnvp OPTIONAL
+                iv_miss       TYPE string DEFAULT c_miss_none
                 previous      TYPE REF TO cx_root OPTIONAL.
 
     METHODS get_text REDEFINITION.
@@ -44,21 +49,57 @@ CLASS zcx_osd_adt DEFINITION PUBLIC INHERITING FROM cx_static_check CREATE PUBLI
 
     CLASS-METHODS not_found
       IMPORTING iv_message      TYPE string
+                iv_namespace TYPE string DEFAULT c_namespace_adt
+                iv_miss TYPE string DEFAULT c_miss_none
       RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
     CLASS-METHODS read_only
       IMPORTING iv_message      TYPE string
+                iv_namespace TYPE string DEFAULT c_namespace_adt
+                iv_miss TYPE string DEFAULT c_miss_none
       RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
     CLASS-METHODS not_supported
       IMPORTING iv_message      TYPE string
+                iv_namespace TYPE string DEFAULT c_namespace_adt
+                iv_miss TYPE string DEFAULT c_miss_none
       RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
     CLASS-METHODS conflict
       IMPORTING iv_message      TYPE string
+                iv_namespace TYPE string DEFAULT c_namespace_adt
+                iv_miss TYPE string DEFAULT c_miss_none
       RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
     CLASS-METHODS internal
       IMPORTING iv_message      TYPE string
+                iv_namespace TYPE string DEFAULT c_namespace_osd
+                iv_miss TYPE string DEFAULT c_miss_none
       RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
     CLASS-METHODS invalid_request
       IMPORTING iv_message      TYPE string
+                iv_namespace TYPE string DEFAULT c_namespace_adt
+                iv_miss TYPE string DEFAULT c_miss_none
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS modified
+      IMPORTING iv_message TYPE string
+        iv_namespace TYPE string DEFAULT c_namespace_adt iv_miss TYPE string DEFAULT c_miss_none
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS not_locked
+      IMPORTING iv_message TYPE string
+        iv_namespace TYPE string DEFAULT c_namespace_adt iv_miss TYPE string DEFAULT c_miss_none
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS wrong_data
+      IMPORTING iv_message TYPE string
+        iv_namespace TYPE string DEFAULT c_namespace_adt iv_miss TYPE string DEFAULT c_miss_none
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS no_access
+      IMPORTING iv_message TYPE string iv_status TYPE i DEFAULT 403
+        iv_namespace TYPE string DEFAULT c_namespace_adt iv_miss TYPE string DEFAULT c_miss_none
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS not_built
+      IMPORTING iv_message TYPE string
+        iv_namespace TYPE string DEFAULT c_namespace_adt iv_miss TYPE string DEFAULT c_miss_none
+      RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
+    CLASS-METHODS transport_check_failed
+      IMPORTING iv_message TYPE string
+        iv_namespace TYPE string DEFAULT c_namespace_adt iv_miss TYPE string DEFAULT c_miss_none
       RETURNING VALUE(ro_error) TYPE REF TO zcx_osd_adt.
     "! another editing session holds the object: 403, T100 EU 510 with the
     "! holder's user in V1 and the object in V2, as a system refuses
@@ -82,6 +123,31 @@ CLASS zcx_osd_adt IMPLEMENTATION.
                 iv_namespace = c_namespace_osd iv_message = `not supported on this system`.
   ENDMETHOD.
 
+  METHOD modified.
+    CREATE OBJECT ro_error EXPORTING iv_status = 412
+      iv_type = `ExceptionResourceIsModified` iv_message = iv_message iv_namespace = iv_namespace iv_miss = iv_miss.
+  ENDMETHOD.
+  METHOD not_locked.
+    CREATE OBJECT ro_error EXPORTING iv_status = 409
+      iv_type = `ExceptionResourceNotLocked` iv_message = iv_message iv_namespace = iv_namespace iv_miss = iv_miss.
+  ENDMETHOD.
+  METHOD wrong_data.
+    CREATE OBJECT ro_error EXPORTING iv_status = 400
+      iv_type = `ExceptionResourceWrongData` iv_message = iv_message iv_namespace = iv_namespace iv_miss = iv_miss.
+  ENDMETHOD.
+  METHOD no_access.
+    CREATE OBJECT ro_error EXPORTING iv_status = iv_status
+      iv_type = `ExceptionResourceNoAccess` iv_message = iv_message iv_namespace = iv_namespace iv_miss = iv_miss.
+  ENDMETHOD.
+  METHOD not_built.
+    CREATE OBJECT ro_error EXPORTING iv_status = 503
+      iv_type = `ExceptionResourceNoAccess` iv_message = iv_message iv_namespace = iv_namespace iv_miss = iv_miss.
+  ENDMETHOD.
+  METHOD transport_check_failed.
+    CREATE OBJECT ro_error EXPORTING iv_status = 500
+      iv_type = `ExceptionTransportCheckFailed` iv_message = iv_message iv_namespace = iv_namespace iv_miss = iv_miss.
+  ENDMETHOD.
+
   METHOD constructor.
     super->constructor( previous = previous ).
     status = iv_status.
@@ -89,6 +155,7 @@ CLASS zcx_osd_adt IMPLEMENTATION.
     message_text = iv_message.
     namespace = iv_namespace.
     properties = it_properties.
+    miss = iv_miss.
   ENDMETHOD.
 
   METHOD get_text.
@@ -128,21 +195,24 @@ CLASS zcx_osd_adt IMPLEMENTATION.
     CREATE OBJECT ro_error
       EXPORTING iv_status  = 404
                 iv_type    = `ExceptionResourceNotFound`
-                iv_message = iv_message.
+                iv_message = iv_message
+                iv_namespace = iv_namespace iv_miss = iv_miss.
   ENDMETHOD.
 
   METHOD read_only.
     CREATE OBJECT ro_error
       EXPORTING iv_status  = 405
                 iv_type    = `ExceptionResourceNoAccess`
-                iv_message = iv_message.
+                iv_message = iv_message
+                iv_namespace = iv_namespace iv_miss = iv_miss.
   ENDMETHOD.
 
   METHOD not_supported.
     CREATE OBJECT ro_error
       EXPORTING iv_status  = 501
                 iv_type    = `ExceptionResourceNoAccess`
-                iv_message = iv_message.
+                iv_message = iv_message
+                iv_namespace = iv_namespace iv_miss = iv_miss.
   ENDMETHOD.
 
   METHOD conflict.
@@ -151,7 +221,8 @@ CLASS zcx_osd_adt IMPLEMENTATION.
     CREATE OBJECT ro_error
       EXPORTING iv_status  = 409
                 iv_type    = `ExceptionResourceIsModified`
-                iv_message = iv_message.
+                iv_message = iv_message
+                iv_namespace = iv_namespace iv_miss = iv_miss.
   ENDMETHOD.
 
   METHOD internal.
@@ -159,14 +230,15 @@ CLASS zcx_osd_adt IMPLEMENTATION.
       EXPORTING iv_status    = 500
                 iv_type      = `ExceptionInternalError`
                 iv_message   = iv_message
-                iv_namespace = c_namespace_osd.
+                iv_namespace = iv_namespace iv_miss = iv_miss.
   ENDMETHOD.
 
   METHOD invalid_request.
     CREATE OBJECT ro_error
       EXPORTING iv_status  = 400
                 iv_type    = `ExceptionInvalidRequest`
-                iv_message = iv_message.
+                iv_message = iv_message
+                iv_namespace = iv_namespace iv_miss = iv_miss.
   ENDMETHOD.
 
   METHOD locked_by_other.
