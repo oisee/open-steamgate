@@ -48,6 +48,7 @@ CLASS zcl_l3_fleet2_conf DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rv_ok) TYPE abap_bool.
     CLASS-METHODS reset_setting
       IMPORTING iv_param TYPE csequence
+                iv_note TYPE csequence OPTIONAL
       RETURNING VALUE(rv_ok) TYPE abap_bool.
     " every setting of the set back to its DSL default
     CLASS-METHODS reset_all
@@ -649,6 +650,7 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD set_setting.
+    DATA lv_note TYPE string.
     DATA lt_specs TYPE tt_conf.
     DATA ls_spec TYPE zosd_l3_conf.
     DATA ls_row TYPE zosd_l3_conf.
@@ -657,6 +659,11 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     DATA lv_warn TYPE i.
     DATA lv_narrow TYPE i.
     rv_ok = abap_false.
+    lv_note = iv_note.
+    CONDENSE lv_note.
+    IF lv_note IS INITIAL OR strlen( iv_note ) > 80.
+      RETURN.
+    ENDIF.
     IF authorised( ) = abap_false OR valid( iv_param = iv_param iv_value = iv_value ) = abap_false.
       RETURN.
     ENDIF.
@@ -703,11 +710,18 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD reset_setting.
+    DATA lv_note TYPE string.
     DATA lt_specs TYPE tt_conf.
     DATA ls_spec TYPE zosd_l3_conf.
     DATA ls_row TYPE zosd_l3_conf.
     DATA ls_old TYPE zosd_l3_conf.
     rv_ok = abap_false.
+    lv_note = iv_note.
+    CONDENSE lv_note.
+    IF ( iv_note IS NOT INITIAL AND lv_note IS INITIAL ) OR strlen( iv_note ) > 80.
+      RETURN.
+    ENDIF.
+
     IF authorised( ) = abap_false.
       RETURN.
     ENDIF.
@@ -731,10 +745,13 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     ls_row-param_val = ls_spec-dsl_value.
     ls_row-origin = 'DSL'.
     ls_row-note_text = 'reset to DSL default'.
+    IF iv_note IS NOT INITIAL.
+      ls_row-note_text = iv_note.
+    ENDIF.
     ls_row-changed_by = sy-uname.
     GET TIME STAMP FIELD ls_row-changed_at.
     UPDATE zosd_l3_conf FROM ls_row.
-    audit( is_old = ls_old is_new = ls_row iv_note = 'reset to DSL default' ).
+    audit( is_old = ls_old is_new = ls_row iv_note = ls_row-note_text ).
   ENDMETHOD.
 
   METHOD reset_all.

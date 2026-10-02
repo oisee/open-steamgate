@@ -27,6 +27,7 @@ import {compileResilience, resilienceNodes} from "./dsl-l3-resilience.mjs";
 import {compileGovernor, governorTemplate} from "./dsl-l3-governor.mjs";
 import {replayOverlay} from "./dsl-l3-replay-overlay.mjs";
 import {compileReplay} from "./dsl-l3-replay.mjs";
+import {compileCockpit, renderCockpit, cockpitRunnerTemplate} from "./dsl-l3-cockpit.mjs";
 import {compileSettings} from "./dsl-l3-settings.mjs";
 import {compileSimulate, simPorts, simVariant, WORK_PORT} from "./dsl-l3-sim.mjs";
 import {docDrift, graphJson, graphMermaid, graphOf} from "./dsl-l3-graph.mjs";
@@ -44,7 +45,7 @@ export const PORT_TEMPLATES = {
   "iface-work": "recipes/l3-ports/iface-work.tpl", "work-sim": "recipes/l3-ports/work-sim.tpl", "autoclose-sim": "recipes/l3-ports/autoclose-sim.tpl",
 };
 // the opt-in recipe overlays of a set (docs/dsl-l3.md, "Governor" and "Simulated twin")
-const OVERLAY = {governor: "recipes/l3-governor", simulate: "recipes/l3-sim"};
+const OVERLAY = {governor: "recipes/l3-governor", simulate: "recipes/l3-sim", cockpit: "recipes/l3-cockpit"};
 // what a port of each kind may be served by without a class of its own
 export const GENERATED = {source: ["table", "dummy", "capture"], sink: ["log", "dummy", "capture"], autoclose: ["none", "capture", "sim", "replay"], work: ["real", "sim", "replay"]};
 // the methods a hand-written variant class must implement through the port's interface
@@ -132,7 +133,7 @@ export function classShape(text, name, className) {
   return shape.line === undefined ? undefined : shape;
 }
 
-const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience", "settings", "governor", "simulate"];
+const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience", "settings", "governor", "simulate", "cockpit"];
 const PORT_KEYS = ["kind", "table", "key", "group", "seq", "variants"];
 const PORT_NAME = /^[a-z][a-z0-9_]{0,11}$/;
 const RULE_KEYS = ["rule", "enabled"];
@@ -496,6 +497,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   // a tunable seed is the run's: the chance autoclose reads it from the run's snapshot
   if (model.simulate && model.settings?.simulate_seed) model.simulate.seed_conf = {"@id": model.simulate["@id"], set_line: model.simulate.set_line, conf: model.settings.class};
   if (model.replay) model.replay.seed_conf = model.simulate.seed_conf;
+  if (doc.cockpit !== undefined) model.cockpit = compileCockpit(doc, model, {line, fail});
   Object.defineProperty(model, "where", {value: where});
   return model;
 }
@@ -573,6 +575,8 @@ function overlaid(model, template, patches) {
   if (model.governor && patches.governor) files.push(`${OVERLAY.governor}/${patches.governor}`);
   if (model.simulate && patches.simulate) files.push(`${OVERLAY.simulate}/${patches.simulate}`);
   if (model.simulate && model.governor && patches.governed) files.push(`${OVERLAY.simulate}/${patches.governed}`);
+  // the cockpit's audited entry points go on last, over whatever the set already has
+  if (model.cockpit && patches.cockpit) files.push(`${OVERLAY.cockpit}/${patches.cockpit}`);
   if (!files.length) return undefined;
   let text = readFileSync(template, "utf8");
   for (const file of files) text = governorTemplate(text, JSON.parse(readFileSync(file, "utf8")));
@@ -596,7 +600,7 @@ export async function renderSet(model) {
   let runner, job;
   try {
     console.log = (...items) => console.error(...items); // runtime bootstrap diagnostics
-    runner = await renderWith(model, SET_TEMPLATE, {governor: "runner.patch.json", simulate: "runner.patch.json", governed: "runner-governed.patch.json"});
+    runner = await renderWith(model, SET_TEMPLATE, {governor: "runner.patch.json", simulate: "runner.patch.json", governed: "runner-governed.patch.json", cockpit: "runner.patch.json"});
     job = await renderWith(model, JOB_TEMPLATE, {governor: "job.patch.json"});
   } finally {
     console.log = quiet;
@@ -613,8 +617,8 @@ export async function renderSet(model) {
   if (model.settings) {
     for (const [name, template, kind] of [[model.settings.class, "recipes/l3-settings/class.tpl", "clas"],
       [model.settings.report, "recipes/l3-settings/report.tpl", "prog"]]) {
-      const rendered = await renderRecipe(model, template, {profile: "abap", ...(model.governor && kind === "clas" ? {templateText:
-        governorTemplate(readFileSync(template, "utf8"), JSON.parse(readFileSync("recipes/l3-governor/settings.patch.json", "utf8")))} : {})});
+      const rendered = await renderRecipe(model, template, {profile: "abap", ...((model.governor || model.cockpit) && kind === "clas" ? {templateText:
+        cockpitRunnerTemplate(model, model.governor ? governorTemplate(readFileSync(template, "utf8"), JSON.parse(readFileSync("recipes/l3-governor/settings.patch.json", "utf8"))) : readFileSync(template, "utf8"), "settings")} : model.cockpit && kind === "prog" ? {templateText: cockpitRunnerTemplate(model, readFileSync(template, "utf8"), "settings-report")} : {})});
       results.push([`${name}.${kind}.abap`, rendered]);
     }
   }
@@ -625,6 +629,7 @@ export async function renderSet(model) {
   return {
     files: {
       ...extra.files,
+      ...(model.cockpit ? await renderCockpit(model) : {}),
       ...(model.settings ? Object.fromEntries(results.slice(-2).flatMap(([name, result]) => [
         [name, result.text], [name.replace(/\.(clas|prog)\.abap$/, ".$1.xml"), name.endsWith(".clas.abap")
           ? classXml(model, model.settings.class, `L3 settings of ${model.set}`) : progXml({...model, report: model.settings.report})],
@@ -691,7 +696,10 @@ export async function buildSet(file, out, options = {}) {
   const model = compileSet(file, {out, ...options});
   const rendered = await renderSet(model);
   mkdirSync(out, {recursive: true});
-  for (const [name, content] of Object.entries(rendered.files)) writeFileSync(join(out, name), content);
+  for (const [name, content] of Object.entries(rendered.files)) {
+    mkdirSync(dirname(join(out, name)), {recursive: true});
+    writeFileSync(join(out, name), content);
+  }
   return {model, ...rendered};
 }
 

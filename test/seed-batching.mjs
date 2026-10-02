@@ -75,6 +75,14 @@ describe("pack table ownership on fresh and existing databases", () => {
     expect((await db.select({select: 'SELECT value FROM zshared'})).rows).to.deep.equal([{value: "later"}]);
   });
 
+  it("converts ISO dates and pads keys when DDIC lives beside a generated set", () => {
+    mkdirSync(join(root, "src", "sets"), {recursive: true});
+    mkdirSync(join(root, "data"));
+    writeFileSync(join(root, "src", "sets", "zset.tabl.xml"), '<DD03P><FIELDNAME>ID</FIELDNAME><DATATYPE>CHAR</DATATYPE><LENG>000004</LENG></DD03P><DD03P><FIELDNAME>ON_DATE</FIELDNAME><DATATYPE>DATS</DATATYPE></DD03P>');
+    writeFileSync(join(root, "data", "zset.tabu.json"), JSON.stringify([{id: "A", on_date: "2026-10-05"}]));
+    expect(seedStatements().find((s) => s.includes('"zset"'))).equal('INSERT INTO "zset" ("id", "on_date") VALUES (\'A   \', \'20261005\');');
+  });
+
   it("commits HANA's reseed transaction so a second session can see its rows", async () => {
     const pending = [];
     const visible = [];

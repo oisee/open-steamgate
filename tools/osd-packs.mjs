@@ -1,3 +1,4 @@
+import {cockpitAppsOf} from "./osd-cockpit-apps.mjs";
 // A pack is a directory, not a rebuild (backlog E.2).
 //
 // The split document's promise: content packs are directories the binary
@@ -275,17 +276,28 @@ export function dataDirsOf(root, env = process.env) {
 /** every folder holding table definitions a seed row may need */
 export function ddicDirsOf(root, env = process.env) {
   const own = ["src/ddic", "src/segw/ddic", "src/zosd_test/ddic"].map((d) => join(root, d));
-  return [...own, ...packsOf(root, env).map((p) => p.ddic).filter((d) => d !== undefined)];
+  const folders = new Set([...own, ...packsOf(root, env).map((p) => p.ddic).filter((d) => d !== undefined)]);
+  // Definitions can live beside a generated set or an imported layer, not
+  // just in ddic/. The seed reader needs them to convert DATS and pad CHAR.
+  const walk = (at) => {
+    if (!isDir(at)) return;
+    const entries = readdirSync(at, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name));
+    if (entries.some((e) => e.name.endsWith(".tabl.xml"))) folders.add(at);
+    for (const e of entries) if (e.isDirectory() && !e.name.startsWith(".")) walk(join(at, e.name));
+  };
+  for (const folder of contentFoldersOf(root, env)) walk(resolve(root, folder));
+  return [...folders];
 }
 
 /** every tile the packs ask the launchpad for, in pack order */
 export function tilesOf(root, env = process.env) {
-  return packsOf(root, env).flatMap((p) => p.tiles.map((t) => ({...t, pack: p.name, description: p.description})));
+  return [...packsOf(root, env).flatMap((p) => p.tiles.map((t) => ({...t, pack: p.name, description: p.description}))),
+    ...cockpitAppsOf(root, contentFoldersOf(root, env)).map((c) => ({id: c.app, title: c.title, pack: c.app, type: "static", icon: "sap-icon://process", url: `/app/${c.app}/index.html`}))];
 }
 
 /** the static folders a pack brings, each served under /app/<name> */
 export function webappsOf(root, env = process.env) {
-  return packsOf(root, env).filter((p) => p.webapp !== undefined).map((p) => ({name: p.name, dir: p.webapp}));
+  return [...packsOf(root, env).filter((p) => p.webapp !== undefined).map((p) => ({name: p.name, dir: p.webapp})), ...cockpitAppsOf(root, contentFoldersOf(root, env))];
 }
 
 export class BadPack extends Error {

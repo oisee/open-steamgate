@@ -40,6 +40,7 @@
 //     application travels as a BSP application (WAPA, `docs/a4h-deploy.md`)
 //     and `/UI5/CL_UI5_HTTP_HANDLER` serves it out of `O2PAGELINE`. W3MI is
 //     the local carrier, not a claim about SAP.
+import {cockpitAppsOf} from "./osd-cockpit-apps.mjs";
 import {existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve} from "node:path";
 import {checkAppName, manifestFor, manifestRebased} from "./osd-bsp-app.mjs";
@@ -97,7 +98,9 @@ export function declared(file = "src/bsp/apps.json") {
   if (existsSync(file) === false) {
     return [];
   }
-  const decl = JSON.parse(readFileSync(file, "utf8"));
+  const root = dirname(dirname(dirname(resolve(file))));
+  const decl = {...JSON.parse(readFileSync(file, "utf8")),
+    ...Object.fromEntries(cockpitAppsOf(root, generatorFoldersOf(root)).map((c) => [c.app.toUpperCase(), {folder: c.dir, text: c.title, service: c.service}]))};
   return Object.entries(decl).map(([app, d]) => {
     // **The name limit is checked here too, and that gap was real.** A BSP
     // application name is at most 15 characters because it becomes an

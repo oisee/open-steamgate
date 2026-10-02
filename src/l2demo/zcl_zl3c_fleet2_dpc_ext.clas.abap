@@ -1,0 +1,528 @@
+* Generated run cockpit of fleet2; do not edit.
+CLASS zcl_zl3c_fleet2_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zl3c_fleet2_dpc CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS /iwbep/if_mgw_appl_srv_runtime~execute_action REDEFINITION.
+  PROTECTED SECTION.
+    METHODS runset_get_entityset REDEFINITION.
+    METHODS runset_get_entity REDEFINITION.
+    METHODS stageset_get_entityset REDEFINITION.
+    METHODS stageset_get_entity REDEFINITION.
+    METHODS pileset_get_entityset REDEFINITION.
+    METHODS pileset_get_entity REDEFINITION.
+    METHODS budgetset_get_entityset REDEFINITION.
+    METHODS budgetset_get_entity REDEFINITION.
+    METHODS eventset_get_entityset REDEFINITION.
+    METHODS eventset_get_entity REDEFINITION.
+    METHODS doctorset_get_entityset REDEFINITION.
+    METHODS doctorset_get_entity REDEFINITION.
+    METHODS settingset_get_entityset REDEFINITION.
+    METHODS settingset_get_entity REDEFINITION.
+    METHODS changeset_get_entityset REDEFINITION.
+    METHODS changeset_get_entity REDEFINITION.
+    METHODS snapshotset_get_entityset REDEFINITION.
+    METHODS snapshotset_get_entity REDEFINITION.
+  PRIVATE SECTION.
+    METHODS parameter
+      IMPORTING it_params TYPE /iwbep/t_mgw_name_value_pair iv_name TYPE string
+      RETURNING VALUE(rv_value) TYPE string.
+ENDCLASS.
+CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
+  METHOD parameter.
+    DATA ls_param TYPE /iwbep/s_mgw_name_value_pair.
+    READ TABLE it_params INTO ls_param WITH KEY name = iv_name.
+    IF sy-subrc = 0.
+      rv_value = ls_param-value.
+    ENDIF.
+  ENDMETHOD.
+  METHOD runset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    DATA lt_stages TYPE STANDARD TABLE OF zosd_l3_stage WITH DEFAULT KEY.
+    DATA ls_stage TYPE zosd_l3_stage.
+    DATA ls_run TYPE zosd_l3_run.
+    DATA ls_filter TYPE /iwbep/s_mgw_select_option.
+    DATA lv_status TYPE zosd_l3_stage-status.
+    FIELD-SYMBOLS <ls_run> TYPE zosd_l3_run.
+    DATA lt_set_name TYPE RANGE OF zosd_l3_run-set_name.
+    DATA lt_check_date TYPE RANGE OF zosd_l3_run-check_date.
+    DATA lt_run_id TYPE RANGE OF zosd_l3_run-run_id.
+    DATA lt_status TYPE RANGE OF zosd_l3_run-status.
+    DATA lt_started TYPE RANGE OF zosd_l3_run-started.
+    lv_where = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_where IS INITIAL.
+      lv_where = '1 = 1'.
+    ENDIF.
+    IF it_navigation_path IS NOT INITIAL.
+      lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+      REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
+      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+    ENDIF.
+    SELECT * FROM zosd_l3_run INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE set_name = 'fleet2' AND (lv_where).
+    SELECT * FROM zosd_l3_stage INTO TABLE lt_stages WHERE set_name = 'fleet2' AND stage_no = 1.
+    LOOP AT lt_stages INTO ls_stage.
+      READ TABLE et_entityset TRANSPORTING NO FIELDS WITH KEY run_id = ls_stage-run_id.
+      IF sy-subrc = 0.
+        CONTINUE.
+      ENDIF.
+      CLEAR ls_run.
+      ls_run-set_name = ls_stage-set_name.
+      ls_run-check_date = ls_stage-check_date.
+      ls_run-run_id = ls_stage-run_id.
+      ls_run-started = ls_stage-opened.
+      SELECT SINGLE status FROM zosd_l3_stage INTO ls_run-status
+        WHERE set_name = 'fleet2' AND run_id = ls_stage-run_id AND stage_no = 2.
+      APPEND ls_run TO et_entityset.
+    ENDLOOP.
+    LOOP AT et_entityset ASSIGNING <ls_run>.
+      SELECT SINGLE status FROM zosd_l3_stage INTO lv_status
+        WHERE set_name = 'fleet2' AND run_id = <ls_run>-run_id AND stage_no = 2.
+      IF sy-subrc = 0.
+        <ls_run>-status = lv_status.
+      ENDIF.
+      SELECT SINGLE state FROM zosd_l3_budget INTO lv_status
+        WHERE set_name = 'fleet2' AND run_id = <ls_run>-run_id AND state = 'GLASS'.
+      IF sy-subrc = 0.
+        <ls_run>-status = lv_status.
+      ENDIF.
+    ENDLOOP.
+    LOOP AT it_filter_select_options INTO ls_filter.
+      CASE ls_filter-property.
+        WHEN 'SetName'.
+          io_tech_request_context->get_filter( )->convert_select_option(
+            EXPORTING is_select_option = ls_filter IMPORTING et_select_option = lt_set_name ).
+          DELETE et_entityset WHERE set_name NOT IN lt_set_name.
+        WHEN 'CheckDate'.
+          io_tech_request_context->get_filter( )->convert_select_option(
+            EXPORTING is_select_option = ls_filter IMPORTING et_select_option = lt_check_date ).
+          DELETE et_entityset WHERE check_date NOT IN lt_check_date.
+        WHEN 'RunId'.
+          io_tech_request_context->get_filter( )->convert_select_option(
+            EXPORTING is_select_option = ls_filter IMPORTING et_select_option = lt_run_id ).
+          DELETE et_entityset WHERE run_id NOT IN lt_run_id.
+        WHEN 'Status'.
+          io_tech_request_context->get_filter( )->convert_select_option(
+            EXPORTING is_select_option = ls_filter IMPORTING et_select_option = lt_status ).
+          DELETE et_entityset WHERE status NOT IN lt_status.
+        WHEN 'Started'.
+          io_tech_request_context->get_filter( )->convert_select_option(
+            EXPORTING is_select_option = ls_filter IMPORTING et_select_option = lt_started ).
+          DELETE et_entityset WHERE started NOT IN lt_started.
+      ENDCASE.
+    ENDLOOP.
+    SORT et_entityset BY started DESCENDING run_id DESCENDING.
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD runset_get_entity.
+    DATA lv_run_id TYPE zosd_l3_run-run_id.
+    DATA ls_stage TYPE zosd_l3_stage.
+    lv_run_id = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+    SELECT SINGLE * FROM zosd_l3_run INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND run_id = lv_run_id.
+    IF sy-subrc <> 0.
+      SELECT SINGLE * FROM zosd_l3_stage INTO ls_stage
+        WHERE set_name = 'fleet2' AND run_id = lv_run_id AND stage_no = 1.
+      IF sy-subrc = 0.
+        er_entity-run_id = ls_stage-run_id.
+        er_entity-check_date = ls_stage-check_date.
+        er_entity-set_name = ls_stage-set_name.
+        er_entity-started = ls_stage-opened.
+        SELECT SINGLE status FROM zosd_l3_stage INTO er_entity-status
+          WHERE set_name = 'fleet2' AND run_id = lv_run_id AND stage_no = 2.
+      ENDIF.
+    ENDIF.
+    SELECT SINGLE status FROM zosd_l3_stage INTO er_entity-status
+      WHERE set_name = 'fleet2' AND run_id = lv_run_id AND stage_no = 2.
+    SELECT SINGLE state FROM zosd_l3_budget INTO er_entity-status
+      WHERE set_name = 'fleet2' AND run_id = lv_run_id AND state = 'GLASS'.
+  ENDMETHOD.
+  METHOD stageset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    lv_where = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_where IS INITIAL.
+      lv_where = '1 = 1'.
+    ENDIF.
+    IF it_navigation_path IS NOT INITIAL.
+      lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+      REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
+      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+    ENDIF.
+    SELECT * FROM zosd_l3_stage INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE set_name = 'fleet2' AND (lv_where).
+    SORT et_entityset BY stage_no.
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD stageset_get_entity.
+    DATA lv_run_id TYPE zosd_l3_stage-run_id.
+    DATA lv_stage_no TYPE zosd_l3_stage-stage_no.
+    lv_run_id = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+    lv_stage_no = parameter( it_params = it_key_tab iv_name = 'StageNo' ).
+    SELECT SINGLE * FROM zosd_l3_stage INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND run_id = lv_run_id
+        AND stage_no = lv_stage_no.
+  ENDMETHOD.
+  METHOD pileset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    lv_where = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_where IS INITIAL.
+      lv_where = '1 = 1'.
+    ENDIF.
+    IF it_navigation_path IS NOT INITIAL.
+      lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+      REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
+      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+    ENDIF.
+    SELECT * FROM zosd_l3_pile INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE set_name = 'fleet2' AND (lv_where).
+    SORT et_entityset BY stage_no rule_name pile_no.
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD pileset_get_entity.
+    DATA lv_run_id TYPE zosd_l3_pile-run_id.
+    DATA lv_rule_name TYPE zosd_l3_pile-rule_name.
+    DATA lv_pile_no TYPE zosd_l3_pile-pile_no.
+    lv_run_id = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+    lv_rule_name = parameter( it_params = it_key_tab iv_name = 'RuleName' ).
+    lv_pile_no = parameter( it_params = it_key_tab iv_name = 'PileNo' ).
+    SELECT SINGLE * FROM zosd_l3_pile INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND run_id = lv_run_id
+        AND rule_name = lv_rule_name
+        AND pile_no = lv_pile_no.
+  ENDMETHOD.
+  METHOD budgetset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    lv_where = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_where IS INITIAL.
+      lv_where = '1 = 1'.
+    ENDIF.
+    IF it_navigation_path IS NOT INITIAL.
+      lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+      REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
+      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+    ENDIF.
+    SELECT * FROM zosd_l3_budget INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE set_name = 'fleet2' AND (lv_where).
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD budgetset_get_entity.
+    DATA lv_run_id TYPE zosd_l3_budget-run_id.
+    lv_run_id = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+    SELECT SINGLE * FROM zosd_l3_budget INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND run_id = lv_run_id.
+  ENDMETHOD.
+  METHOD eventset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    lv_where = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_where IS INITIAL.
+      lv_where = '1 = 1'.
+    ENDIF.
+    IF it_navigation_path IS NOT INITIAL.
+      lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+      REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
+      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+    ENDIF.
+    SELECT * FROM zosd_l3_event INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE set_name = 'fleet2' AND (lv_where).
+    SORT et_entityset BY seq.
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD eventset_get_entity.
+    DATA lv_run_id TYPE zosd_l3_event-run_id.
+    DATA lv_seq TYPE zosd_l3_event-seq.
+    lv_run_id = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+    lv_seq = parameter( it_params = it_key_tab iv_name = 'Seq' ).
+    SELECT SINGLE * FROM zosd_l3_event INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND run_id = lv_run_id
+        AND seq = lv_seq.
+  ENDMETHOD.
+  METHOD doctorset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    lv_where = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_where IS INITIAL.
+      lv_where = '1 = 1'.
+    ENDIF.
+    IF it_navigation_path IS NOT INITIAL.
+      lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+      REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
+      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+    ENDIF.
+    SELECT * FROM zosd_l3_doctor INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE set_name = 'fleet2' AND (lv_where).
+    SORT et_entityset BY acted seq.
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD doctorset_get_entity.
+    DATA lv_run_id TYPE zosd_l3_doctor-run_id.
+    DATA lv_seq TYPE zosd_l3_doctor-seq.
+    lv_run_id = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+    lv_seq = parameter( it_params = it_key_tab iv_name = 'Seq' ).
+    SELECT SINGLE * FROM zosd_l3_doctor INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND run_id = lv_run_id
+        AND seq = lv_seq.
+  ENDMETHOD.
+  METHOD settingset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    zcl_l3_fleet2=>settings_seed( ).
+    lv_where = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_where IS INITIAL.
+      lv_where = '1 = 1'.
+    ENDIF.
+    SELECT * FROM zosd_l3_conf INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE set_name = 'fleet2' AND (lv_where).
+    SORT et_entityset BY param_name.
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD settingset_get_entity.
+    DATA lv_set_name TYPE zosd_l3_conf-set_name.
+    DATA lv_param_name TYPE zosd_l3_conf-param_name.
+    lv_set_name = parameter( it_params = it_key_tab iv_name = 'SetName' ).
+    lv_param_name = parameter( it_params = it_key_tab iv_name = 'ParamName' ).
+    SELECT SINGLE * FROM zosd_l3_conf INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND set_name = lv_set_name
+        AND param_name = lv_param_name.
+  ENDMETHOD.
+  METHOD changeset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    lv_where = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_where IS INITIAL.
+      lv_where = '1 = 1'.
+    ENDIF.
+    SELECT * FROM zosd_l3_conf_log INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE set_name = 'fleet2' AND (lv_where).
+    SORT et_entityset BY changed_at DESCENDING.
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD changeset_get_entity.
+    DATA lv_change_id TYPE zosd_l3_conf_log-change_id.
+    lv_change_id = parameter( it_params = it_key_tab iv_name = 'ChangeId' ).
+    SELECT SINGLE * FROM zosd_l3_conf_log INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND change_id = lv_change_id.
+  ENDMETHOD.
+  METHOD snapshotset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    lv_where = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_where IS INITIAL.
+      lv_where = '1 = 1'.
+    ENDIF.
+    IF it_navigation_path IS NOT INITIAL.
+      lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+      REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
+      lv_where = |( { lv_where } ) AND RUN_ID = '{ lv_run }'|.
+    ENDIF.
+    SELECT * FROM zosd_l3_run_conf INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE set_name = 'fleet2' AND (lv_where).
+    SORT et_entityset BY param_name.
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD snapshotset_get_entity.
+    DATA lv_run_id TYPE zosd_l3_run_conf-run_id.
+    DATA lv_param_name TYPE zosd_l3_run_conf-param_name.
+    lv_run_id = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+    lv_param_name = parameter( it_params = it_key_tab iv_name = 'ParamName' ).
+    SELECT SINGLE * FROM zosd_l3_run_conf INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND run_id = lv_run_id
+        AND param_name = lv_param_name.
+  ENDMETHOD.
+  METHOD /iwbep/if_mgw_appl_srv_runtime~execute_action.
+    DATA lx_error TYPE REF TO cx_root.
+    DATA lv_text TYPE string.
+    DATA ls_answer TYPE zcl_zl3c_fleet2_mpc=>ts_answer.
+    DATA ls_run TYPE zcl_l3_fleet2=>ty_result.
+    DATA lv_date TYPE d.
+    DATA lv_mode TYPE c LENGTH 1.
+    DATA lv_work TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_rule TYPE string.
+    DATA lv_reason TYPE string.
+    DATA lv_param TYPE string.
+    DATA lv_value TYPE string.
+    DATA lv_note TYPE string.
+    DATA lv_pile TYPE i.
+    DATA lv_cap TYPE i.
+    DATA lv_glass TYPE i.
+    DATA lv_ok TYPE abap_bool.
+    DATA lt_report TYPE zcl_l3_fleet2=>tt_doctor.
+    DATA ls_report TYPE zcl_l3_fleet2=>ty_doctor.
+    lv_run = parameter( it_params = it_parameter iv_name = 'RunId' ).
+    lv_date = parameter( it_params = it_parameter iv_name = 'CheckDate' ).
+    lv_mode = parameter( it_params = it_parameter iv_name = 'Mode' ).
+    lv_work = parameter( it_params = it_parameter iv_name = 'Work' ).
+    lv_rule = parameter( it_params = it_parameter iv_name = 'RuleName' ).
+    lv_reason = parameter( it_params = it_parameter iv_name = 'Reason' ).
+    lv_param = parameter( it_params = it_parameter iv_name = 'Param' ).
+    lv_value = parameter( it_params = it_parameter iv_name = 'Value' ).
+    lv_note = parameter( it_params = it_parameter iv_name = 'Note' ).
+    lv_pile = parameter( it_params = it_parameter iv_name = 'PileNo' ).
+    lv_cap = parameter( it_params = it_parameter iv_name = 'PerPile' ).
+    lv_glass = parameter( it_params = it_parameter iv_name = 'NewGlass' ).
+    ls_answer-run_id = lv_run.
+    TRY.
+    CASE iv_action_name.
+      WHEN 'StartRun'.
+        IF lv_work IS NOT INITIAL.
+          lv_work = |work={ lv_work }|.
+        ENDIF.
+        ls_run = zcl_l3_fleet2=>run( iv_date = lv_date iv_mode = lv_mode iv_bind = lv_work ).
+        ls_answer-run_id = ls_run-run_id.
+        ls_answer-answer = ls_run-status.
+        IF ls_run-status = 'SUBMITTED'.
+          ls_answer-answer = ls_answer-answer && '; jobs require a worker: start node tools/osd-batch-runs.mjs worker if none is running'.
+        ENDIF.
+      WHEN 'ReleasePile'.
+        lv_ok = zcl_l3_fleet2=>release_pile( iv_run = lv_run iv_rule = lv_rule iv_pile = lv_pile iv_per_pile = lv_cap iv_reason = lv_reason ).
+        IF lv_ok = abap_true.
+          ls_answer-answer = 'OK'.
+        ELSE.
+          ls_answer-answer = 'REFUSED: ReleasePile: the pile is not HELD, the run or its budget does not allow a release (GLASS, not open), the per-pile cap is lowered, the pile is locked, or the reason is empty or over 80 characters'.
+        ENDIF.
+      WHEN 'ContinueGlass'.
+        lv_ok = zcl_l3_fleet2=>continue_glass( iv_run = lv_run iv_new_glass = lv_glass iv_reason = lv_reason ).
+        IF lv_ok = abap_true.
+          ls_answer-answer = 'OK'.
+        ELSE.
+          ls_answer-answer = 'REFUSED: ContinueGlass: the run is not at GLASS, the new glass is not above the current one, or the reason is empty or over 80 characters'.
+        ENDIF.
+      WHEN 'Resume'.
+        lt_report = zcl_l3_fleet2=>resume( iv_run = lv_run ).
+        LOOP AT lt_report INTO ls_report.
+          ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.
+        ENDLOOP.
+      WHEN 'Doctor'.
+        lt_report = zcl_l3_fleet2=>doctor(  ).
+        LOOP AT lt_report INTO ls_report.
+          ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.
+        ENDLOOP.
+      WHEN 'SetKill'.
+        lv_ok = zcl_l3_fleet2=>set_kill( iv_reason = lv_reason ).
+        IF lv_ok = abap_true.
+          ls_answer-answer = 'OK'.
+        ELSE.
+          ls_answer-answer = 'REFUSED: SetKill: the reason is empty or over 80 characters'.
+        ENDIF.
+      WHEN 'ClearKill'.
+        lv_ok = zcl_l3_fleet2=>clear_kill( iv_reason = lv_reason ).
+        IF lv_ok = abap_true.
+          ls_answer-answer = 'OK'.
+        ELSE.
+          ls_answer-answer = 'REFUSED: ClearKill: the reason is empty or over 80 characters'.
+        ENDIF.
+      WHEN 'SetSetting'.
+        lv_ok = zcl_l3_fleet2=>set_setting( iv_param = lv_param iv_value = lv_value iv_note = lv_note ).
+        IF lv_ok = abap_true.
+          ls_answer-answer = 'OK'.
+        ELSE.
+          ls_answer-answer = 'REFUSED: SetSetting: unknown setting, a value outside its range, budget.warn above budget.narrow_at, or the note is empty or over 80 characters'.
+        ENDIF.
+      WHEN 'ResetSetting'.
+        lv_ok = zcl_l3_fleet2=>cockpit_reset_setting( iv_param = lv_param iv_note = lv_note ).
+        IF lv_ok = abap_true.
+          ls_answer-answer = 'OK'.
+        ELSE.
+          ls_answer-answer = 'REFUSED: ResetSetting: unknown setting, or the note is empty or over 80 characters'.
+        ENDIF.
+      WHEN 'Schedule'.
+        ls_answer-answer = zcl_l3_fleet2=>schedule( ).
+      WHEN 'Unschedule'.
+        ls_answer-answer = zcl_l3_fleet2=>unschedule( ).
+      WHEN 'ScheduleStatus'.
+        ls_answer-answer = zcl_l3_fleet2=>cockpit_schedule_status( ).
+      WHEN OTHERS.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
+          EXPORTING method = iv_action_name.
+    ENDCASE.
+    CATCH cx_root INTO lx_error.
+      lv_text = lx_error->get_text( ).
+      ls_answer-answer = |REFUSED: { lv_text }|.
+    ENDTRY.
+    copy_data_to_ref( EXPORTING is_data = ls_answer CHANGING cr_data = er_data ).
+  ENDMETHOD.
+ENDCLASS.

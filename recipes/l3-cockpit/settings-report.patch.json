@@ -1,0 +1,10 @@
+[
+  {
+    "before": [
+      "    IF p_reset = abap_true.\n"
+    ],
+    "after": [
+      "    IF p_reset = abap_false AND p_note IS INITIAL.\n      MESSAGE 'Provide P_NOTE: cockpit setting changes require an audit note' TYPE 'E'.\n    ENDIF.\n    IF p_reset = abap_true.\n"
+    ]
+  }
+]

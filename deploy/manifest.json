@@ -4,7 +4,7 @@
   "customerNamespaces": [],
   "units": {
     "l3demo": {
-      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner with its ports (two interfaces, five generated variants, the factory and its exception), its job report, the alert log, the pile plan table, the run lock and the proof class; and the two-stage set ZCL_L3_FLEET2 (slice 3b): the keys rule ZCL_L2_SHIP_BUSY, its runner, report, ports (with the worklist variant), the worklist ZOSD_L3_WORK and the stage gate ZOSD_L3_STAGE; and since slice 5a the doctor's audit ZOSD_L3_DOCTOR and the kill switch ZOSD_L3_KILL; since slice 5b the settings ZOSD_L3_CONF, ZOSD_L3_CONF_LOG, ZOSD_L3_RUN_CONF, ZCL_L3_FLEET2_CONF and its report ZL3_FLEET2_CONF; since slice 5d the simulated twin, the work port ZIF_L3_FLEET2_WORK with its sim variant ZCL_L3_FLEET2_WORK_SIM and the chance autoclose ZCL_L3_FLEET2_CLOSE_SIM (ZOSD_L3_STAGE gains RUN_BIND). Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
+      "description": "The DSL L3 fleet set and its ABAP Unit proof (docs/dsl-l3.md, Proof): the four L2 tables and their data element, the six enabled rule classes, the runner with its ports (two interfaces, five generated variants, the factory and its exception), its job report, the alert log, the pile plan table, the run lock and the proof class; and the two-stage set ZCL_L3_FLEET2 (slice 3b): the keys rule ZCL_L2_SHIP_BUSY, its runner, report, ports (with the worklist variant), the worklist ZOSD_L3_WORK and the stage gate ZOSD_L3_STAGE; and since slice 5a the doctor's audit ZOSD_L3_DOCTOR and the kill switch ZOSD_L3_KILL; since slice 5b the settings ZOSD_L3_CONF, ZOSD_L3_CONF_LOG, ZOSD_L3_RUN_CONF, ZCL_L3_FLEET2_CONF and its report ZL3_FLEET2_CONF; since slice 5d the simulated twin, the work port ZIF_L3_FLEET2_WORK with its sim variant ZCL_L3_FLEET2_WORK_SIM and the chance autoclose ZCL_L3_FLEET2_CLOSE_SIM (ZOSD_L3_STAGE gains RUN_BIND). Slice 6: the generated run cockpit service and its BSP application with the ICF node. Staged into one flat folder from src/l2demo, src/dsl and src/l3proof.",
       "sources": ["src/l3proof"],
       "objects": [
         "TABL ZOSD_L2_SHIP",
@@ -64,7 +64,17 @@
         "PROG ZL3_FLEET2",
         "CLAS ZCL_L3_FLEET2_CONF",
         "PROG ZL3_FLEET2_CONF",
-        "CLAS ZCL_L3_FLEET_PROOF"
+        "CLAS ZCL_L3_FLEET_PROOF",
+        "IWPR ZL3C_FLEET2",
+        "IWSV ZL3C_FLEET2_SRV 0001",
+        "IWMO ZL3C_FLEET2_MDL 0001",
+        "CLAS ZCL_ZL3C_FLEET2_MPC",
+        "CLAS ZCL_ZL3C_FLEET2_MPC_EXT",
+        "CLAS ZCL_ZL3C_FLEET2_MPC_ANN",
+        "CLAS ZCL_ZL3C_FLEET2_DPC",
+        "CLAS ZCL_ZL3C_FLEET2_DPC_EXT",
+        "WAPA ZOSD_FLEET2",
+        "SICF /sap/bc/ui5_ui5/sap/zosd_fleet2"
       ]
     },
     "lift-r3-probe": {

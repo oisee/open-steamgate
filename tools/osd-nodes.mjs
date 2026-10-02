@@ -29,6 +29,7 @@
 //   PROXY    a destination: another system answers. Server and binary only.
 //   CONTENT  bytes out of the object store. Everywhere. (Not yet used: the
 //            BSP pages are ABAP today and become CONTENT in step A.)
+import {cockpitAppsOf} from "./osd-cockpit-apps.mjs";
 import {existsSync, readFileSync, readdirSync} from "node:fs";
 import {join} from "node:path";
 import {channels, services} from "./osd-icf.mjs";
@@ -146,7 +147,7 @@ export function declaredNodes(root = ".") {
  *  a webapp/, and asking it to repeat that in a second file is the extra
  *  registry this whole track is removing. */
 export function packNodes(root = ".", env = process.env) {
-  return packsOf(root, env).filter((pack) => pack.webapp !== undefined).map((pack) => ({
+  return [...packsOf(root, env).filter((pack) => pack.webapp !== undefined).map((pack) => ({
     path: `/app/${pack.name}`,
     type: "HOST",
     handler: "pack-static",
@@ -155,7 +156,8 @@ export function packNodes(root = ".", env = process.env) {
     text: `express.static over the pack ${pack.name}'s webapp/`,
     travels: false,
     source: join(pack.dir, "osd-pack.json"),
-  }));
+  })), ...cockpitAppsOf(root, generatorFoldersOf(root, env)).map((c) => ({path: `/app/${c.app}`, type: "HOST", handler: "pack-static",
+    implementedIn: "test/start.mjs", needs: "fs", text: c.title, travels: false, source: join(c.dir, "cockpit.json")}))];
 }
 
 /** A binding: a service this registry lacks, answered by another system.

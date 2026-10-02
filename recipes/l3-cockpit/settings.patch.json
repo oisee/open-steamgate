@@ -1,0 +1,34 @@
+[
+  {
+    "before": [
+      "    CLASS-METHODS reset_setting\n      IMPORTING iv_param TYPE csequence\n      RETURNING VALUE(rv_ok) TYPE abap_bool.\n"
+    ],
+    "after": [
+      "    CLASS-METHODS reset_setting\n      IMPORTING iv_param TYPE csequence\n{{#cockpit}}\n                iv_note TYPE csequence OPTIONAL\n{{/cockpit}}\n      RETURNING VALUE(rv_ok) TYPE abap_bool.\n"
+    ]
+  },
+  {
+    "before": [
+      "  METHOD set_setting.\n"
+    ],
+    "after": [
+      "  METHOD set_setting.\n    DATA lv_note TYPE string.\n"
+    ]
+  },
+  {
+    "before": [
+      "    rv_ok = abap_false.\n    IF authorised( ) = abap_false OR valid("
+    ],
+    "after": [
+      "    rv_ok = abap_false.\n    lv_note = iv_note.\n    CONDENSE lv_note.\n    IF lv_note IS INITIAL OR strlen( iv_note ) > 80.\n      RETURN.\n    ENDIF.\n    IF authorised( ) = abap_false OR valid("
+    ]
+  },
+  {
+    "before": [
+      "  METHOD reset_setting.\n    DATA lt_specs TYPE tt_conf.\n    DATA ls_spec TYPE zosd_l3_conf.\n    DATA ls_row TYPE zosd_l3_conf.\n    DATA ls_old TYPE zosd_l3_conf.\n    rv_ok = abap_false.\n    IF authorised( ) = abap_false.\n      RETURN.\n    ENDIF.\n    lt_specs = specs( ).\n    READ TABLE lt_specs INTO ls_spec WITH KEY param_name = iv_param.\n    IF sy-subrc <> 0.\n      RETURN.\n    ENDIF.\n    settings_seed( ).\n    SELECT SINGLE * FROM zosd_l3_conf INTO ls_row\n      WHERE set_name = {{set | literal}} AND param_name = iv_param.\n    IF sy-subrc <> 0.\n      RETURN.\n    ENDIF.\n    rv_ok = abap_true.\n    \" already the DSL default: nothing changes and nothing is logged\n    IF ls_row-origin = 'DSL' AND ls_row-param_val = ls_spec-dsl_value.\n      RETURN.\n    ENDIF.\n    ls_old = ls_row.\n    ls_row-param_val = ls_spec-dsl_value.\n    ls_row-origin = 'DSL'.\n    ls_row-note_text = 'reset to DSL default'.\n    ls_row-changed_by = sy-uname.\n    GET TIME STAMP FIELD ls_row-changed_at.\n    UPDATE zosd_l3_conf FROM ls_row.\n    audit( is_old = ls_old is_new = ls_row iv_note = 'reset to DSL default' ).\n  ENDMETHOD.\n\n"
+    ],
+    "after": [
+      "  METHOD reset_setting.\n{{#cockpit}}\n    DATA lv_note TYPE string.\n    DATA lt_specs TYPE tt_conf.\n    DATA ls_spec TYPE zosd_l3_conf.\n    DATA ls_row TYPE zosd_l3_conf.\n    DATA ls_old TYPE zosd_l3_conf.\n    rv_ok = abap_false.\n    lv_note = iv_note.\n    CONDENSE lv_note.\n    IF ( iv_note IS NOT INITIAL AND lv_note IS INITIAL ) OR strlen( iv_note ) > 80.\n      RETURN.\n    ENDIF.\n{{/cockpit}}\n\n    IF authorised( ) = abap_false.\n      RETURN.\n    ENDIF.\n    lt_specs = specs( ).\n    READ TABLE lt_specs INTO ls_spec WITH KEY param_name = iv_param.\n    IF sy-subrc <> 0.\n      RETURN.\n    ENDIF.\n    settings_seed( ).\n    SELECT SINGLE * FROM zosd_l3_conf INTO ls_row\n      WHERE set_name = {{set | literal}} AND param_name = iv_param.\n    IF sy-subrc <> 0.\n      RETURN.\n    ENDIF.\n    rv_ok = abap_true.\n    \" already the DSL default: nothing changes and nothing is logged\n    IF ls_row-origin = 'DSL' AND ls_row-param_val = ls_spec-dsl_value.\n      RETURN.\n    ENDIF.\n    ls_old = ls_row.\n    ls_row-param_val = ls_spec-dsl_value.\n    ls_row-origin = 'DSL'.\n    ls_row-note_text = 'reset to DSL default'.\n{{#cockpit}}\n    IF iv_note IS NOT INITIAL.\n      ls_row-note_text = iv_note.\n    ENDIF.\n{{/cockpit}}\n    ls_row-changed_by = sy-uname.\n    GET TIME STAMP FIELD ls_row-changed_at.\n    UPDATE zosd_l3_conf FROM ls_row.\n    audit( is_old = ls_old is_new = ls_row iv_note = ls_row-note_text ).\n  ENDMETHOD.\n\n"
+    ]
+  }
+]

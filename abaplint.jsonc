@@ -2,7 +2,7 @@
   "global": {
     "files": "/{src,packs/zvdb/src,test,gen/bsp,gen/cds,gen/segw,gen/rfc,gen/tran}/**/*.*",
     "errorOnDuplicateFilenames": true,
-    "exclude": ["/test/e2e/", "/test/fixtures/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$", "\\.l2\\.yaml$", "\\.l3\\.yaml$", "\\.samc\\.model\\.json$", "\\.samc\\.decl\\.json$", "\\.trace\\.json$"]
+    "exclude": ["/test/e2e/", "/src/.*/cockpit/", "/test/fixtures/", "\\.mjs$", "\\.cjs$", "\\.stg\\.yaml$", "\\.l2\\.yaml$", "\\.l3\\.yaml$", "\\.samc\\.model\\.json$", "\\.samc\\.decl\\.json$", "\\.trace\\.json$"]
   },
   "dependencies": [
     {
@@ -40,7 +40,7 @@
     {
       "url": "https://github.com/open-abap/open-abap-odata",
       "folder": "/.local/lars/open-abap-odata",
-      "files": "/src/{oo,ddic,exceptions,internal}/**/*.*"
+      "files": "/src/{oo,ddic,exceptions,internal}/**/!(#iwbep#if_mgw_odata_action.intf.*|#iwbep#if_mgw_odata_parameter.intf.*|zcl_oao_action.clas.*)"
     },
     {
       // Portable, untyped JSON tree used behind OSG's own regression
