@@ -86,6 +86,27 @@ export function registerWaitPump(callback) {
   waitPump = callback;
 }
 
+// The clock WAIT UP TO waits on inside a step. A system has one clock: after
+// WAIT UP TO 10 SECONDS, sy-uzeit is ten seconds on. Here sy-datum, sy-uzeit
+// and GET TIME STAMP follow the jobs facade's injectable clock once a test
+// installs it (installAbapClock in tools/osd-job-scheduler.mjs), and WAIT
+// followed the wall clock regardless, so a manual clock that moved hours left
+// a WAIT of a minute waiting a minute (ANORMALIES
+// ANOMALY-2026-10-02-wait-off-the-injected-clock). installAbapClock installs
+// the same clock here: a deadline is that clock's now plus the seconds, and
+// the step sleeps through the clock's own timer, which a manual clock fires
+// when a test advances it. Without one, the wall clock, as before.
+const WALL = {now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)), chunk: 100};
+let waitClock = WALL;
+/** WAIT inside a step waits on `clock` ({now(), setTimer(fn, ms)}) until the
+ *  returned function restores the one before */
+export function setWaitClock(clock) {
+  const before = waitClock;
+  waitClock = clock === undefined ? WALL : {now: () => clock.now(),
+    sleep: (ms) => new Promise((r) => clock.setTimer(r, ms)), chunk: Infinity};
+  return () => { waitClock = before; };
+}
+
 // Host services with pending ABAP definitions may keep data only for the
 // current execution. The browser has no AsyncLocalStorage: fail closed there
 // rather than treating every request as one caller.
@@ -298,8 +319,9 @@ function installWait() {
     if (!mine()) return original(options);
     const token = holder;
     const subrc = (value) => globalThis.abap.builtin.sy.get().subrc.set(value);
+    const clock = waitClock;
     const timeout = options.seconds === undefined ? undefined : options.seconds.get() * 1000;
-    const deadline = timeout === undefined ? undefined : Date.now() + timeout;
+    const deadline = timeout === undefined ? undefined : clock.now() + timeout;
     if (options.cond === undefined) {
       // committed while still holding it: a failed commit ends the step
       // here, and the step's own bracket releases
@@ -307,9 +329,8 @@ function installWait() {
       rollOut(token);
       release();
       try {
-        const until = Date.now() + timeout;
-        while (Date.now() < until) {
-          await new Promise((r) => setTimeout(r, Math.min(100, until - Date.now())));
+        while (clock.now() < deadline) {
+          await clock.sleep(Math.min(clock.chunk, deadline - clock.now()));
           await waitPump?.(token);
         }
       } finally {
@@ -326,13 +347,13 @@ function installWait() {
     try {
       for (;;) {
         if (options.cond() === true) { subrc(0); return; }
-        const remaining = deadline === undefined ? 500 : deadline - Date.now();
+        const remaining = deadline === undefined ? 500 : deadline - clock.now();
         if (remaining <= 0) { subrc(8); return; }
         await commitAll();
         rollOut(token);
         release();
         held = false;
-        await new Promise((r) => setTimeout(r, Math.min(500, remaining)));
+        await clock.sleep(Math.min(500, remaining));
         await waitPump?.(token);
         await acquire(token);
         held = true;

@@ -17,7 +17,7 @@
 // ANORMALIES.md (one work process: overlapping instances queue; no minute
 // tick: a due job starts when the scheduler looks, not at hh:mm:51).
 import {resolve} from "node:path";
-import {exclusive, outsideStepContext} from "./osd-dialog-step.mjs";
+import {exclusive, outsideStepContext, setWaitClock} from "./osd-dialog-step.mjs";
 import {runConvertedBatch, workQueuedBatch, workerSource} from "./osd-batch-runs.mjs";
 import {drainJobOutbox} from "./osd-job-outbox.mjs";
 import {nextJobCount, legacyCountUsed} from "./osd-job-count.mjs";
@@ -135,9 +135,12 @@ export function manualClock(start) {
 }
 
 /** sy-datum, sy-uzeit and GET TIME STAMP read `clock` until the returned
- *  restore() is called; the same hook tools/osd-case-determinism.mjs uses */
+ *  restore() is called; the same hook tools/osd-case-determinism.mjs uses.
+ *  WAIT UP TO inside a step waits on it too (setWaitClock): one clock, as
+ *  on a system, so a manual clock moves a WAIT's end with it */
 export function installAbapClock(abap, clock) {
   const original = abap.statements.getTime;
+  const restoreWait = setWaitClock(clock);
   abap.statements.getTime = (options = {}) => {
     const sy = options.sy ?? abap.builtin.sy;
     const stamp = msStamp(clock.now());
@@ -152,6 +155,7 @@ export function installAbapClock(abap, clock) {
   };
   abap.statements.getTime({sy: abap.builtin.sy});
   return () => {
+    restoreWait();
     abap.statements.getTime = original;
     original({sy: abap.builtin.sy});
   };

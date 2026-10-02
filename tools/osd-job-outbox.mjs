@@ -31,7 +31,11 @@ export async function drainJobOutbox(store, {env = process.env, afterRead, after
         .some((column) => column.name.toLowerCase() === "tail_event_id");
       hasSchedule = reader.prepare("PRAGMA table_info(zosd_job_outbox)").all()
         .some((column) => column.name.toLowerCase() === "sdlstrtdt");
-      rows = reader.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? ORDER BY created_on, created_at, intent_id")
+      // the jobs one second released, in the order they were released (the
+      // table's rowid), so a run on a manual clock replays in one order; the
+      // random intent id alone made it a new order each time (docs/dsl-l3.md,
+      // "Simulated twin", determinism)
+      rows = reader.prepare("SELECT * FROM zosd_job_outbox WHERE mandt = ? ORDER BY created_on, created_at, rowid, intent_id")
         .all(who.client).map((row) => ({...row, steps: reader.prepare(
           `SELECT step_no, program, ${hasInput ? "input_json" : "'' AS input_json"} FROM zosd_job_step WHERE mandt = ? AND intent_id = ? ORDER BY step_no`)
           .all(who.client, value(row, "intent_id"))}));

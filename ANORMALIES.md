@@ -3329,3 +3329,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream issue: none, a local facade
 - Regression-test location: none yet (`test/fixtures/job-delete/contract.json` records the observation)
 - Upstream version containing a fix: `n/a`
+
+### ANOMALY-2026-10-02-wait-off-the-injected-clock — WAIT UP TO waited on the wall clock while sy-uzeit read the injected one
+
+- Status: `fixed` (in `tools/osd-dialog-step.mjs` and `tools/osd-job-scheduler.mjs`)
+- Discovery date: `2026-10-02` (DSL L3 slice 5d, the simulated twin)
+- Affected versions: this runtime's WAIT inside a dialog step (`installWait` in `tools/osd-dialog-step.mjs`) with the jobs facade's injectable clock (`manualClock`, `installAbapClock` in `tools/osd-job-scheduler.mjs`)
+- Affected ABAP statement, runtime API or adapter: `WAIT UP TO n SECONDS` (and `WAIT FOR ... UP TO`) inside a step
+- Minimal reproducer: a step that does `WAIT UP TO 3600 SECONDS` after `installAbapClock(abap, manualClock(...))`: the step waited an hour of wall time, and a test that moved the manual clock by an hour did not end it; `sy-uzeit` after it read the manual clock, not one hour on
+- Exact command used to run it: `npx mocha test/dsl-l3-sim.mjs --grep "WAIT UP TO"`
+- Expected SAP behaviour: a system has one clock: after `WAIT UP TO 10 SECONDS`, `sy-uzeit` and `GET TIME STAMP` are ten seconds on
+- Actual open-abap behaviour (before the fix): sy-datum, sy-uzeit and GET TIME STAMP followed the injected clock, WAIT the wall clock, so the two disagreed whenever a test injected a clock
+- Impact on open-steamgate: a simulated pile job waits for its simulated duration; a twin of a night on a manual clock would have waited the night
+- Smallest safe workaround: none needed; the fix: `installAbapClock` also installs the clock as the WAIT clock (`setWaitClock`), a step's WAIT sleeps on that clock's own timer (which a manual clock fires when a test advances it), and without an injected clock WAIT is the wall clock as before
+- Upstream issue: none, the step's WAIT and the clock seam are this repository's
+- Regression-test location: `test/dsl-l3-sim.mjs` ("WAIT UP TO inside a step waits on the injected clock", and the long twin)
+- Upstream version containing a fix: `n/a`
