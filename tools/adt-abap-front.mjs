@@ -47,6 +47,14 @@ const NAMESPACE = "org.open-steamgate.osd";
 // replaces the ABAP answer), calls replay() after its work (it extends it),
 // or calls next() (the Node route serves). Cookies and the token are already
 // on res when it runs.
+//
+// What a continuation holds is a snapshot: the step has ended, no work-process
+// lock is held, and between the verdict and the continuation another step may
+// run -- a logoff, an UNLOCK, an expiry. The session it is handed may have
+// ended since. A continuation (or a Node route) that changes something under
+// a session's lock asks again inside a step of its own, right where it acts:
+// sessions.whileHeld(session, handle, type, name, work) for a write under a
+// handle, sessions.deleteObject for a delete (tools/adt-abap-sessions.mjs).
 const continuations = new Map();
 
 /** register a continuation handler for one kind; answers a function that
@@ -97,6 +105,21 @@ export async function bodyOf(req) {
 
 const text = (value) => String(value?.get?.() ?? value ?? "");
 
+/** whether the router's own table gives the request an ABAP row; its table
+ *  is read once per router class (a warm load is a new one) */
+let table = {router: undefined, rows: undefined};
+export async function abapServes(method, path) {
+  const a = globalThis.abap;
+  const router = a.Classes.ZCL_OSD_ADT_ROUTER;
+  if (router === undefined) return true;
+  if (table.router !== router) table = {router, rows: await router.routes()};
+  const found = new a.types.Character(1);
+  const route = router.METHODS.MATCH.parameters.ES_ROUTE.type();
+  await router.match({it_routes: table.rows, iv_method: new a.types.String().set(String(method).toUpperCase()),
+    iv_path: new a.types.String().set(path), ev_found: found, es_route: route});
+  return found.get() === "X" && text(route.get().served_by) !== "HOST";
+}
+
 /** ZCL_OSD_ADT_HANDLER=>ANSWER from JavaScript: the request record in, the
  *  answer record out. Runs inside the caller's step. */
 export async function answerOf(handler, view, session) {
@@ -119,7 +142,13 @@ export async function answerOf(handler, view, session) {
       row.value.set(String(one));
     }
   }
-  r.body.set(view.body.toString("hex").toUpperCase());
+  // The body goes to ABAP only for a row ABAP serves, asked of the router
+  // itself (ZCL_OSD_ADT_ROUTER=>MATCH over its own table): a big PUT that a
+  // Node route serves is not turned into hex, three times its size, for
+  // nothing. A route ending in a continuation is an ABAP row here.
+  if (view.body.length > 0 && await abapServes(view.method, view.path)) {
+    r.body.set(view.body.toString("hex").toUpperCase());
+  }
   const response = params.ES_RESPONSE.type();
   const servedBy = new a.types.String();
   const input = {is_request: request, es_response: response, ev_served_by: servedBy};
@@ -174,6 +203,18 @@ export function replay(res, record, method, {sessionSent = false} = {}) {
   else res.send(record.body);
 }
 
+// A step of the front that dumps is said once per generation, with the way
+// out: OSD_ADT=js runs the Node façade and Node's sessions without the ABAP
+// front, which is the emergency exit when ZCL_OSD_ADT_* itself is broken.
+const said = new Set();
+function dumped(generation, message) {
+  const key = String(generation ?? "");
+  if (said.has(key)) return;
+  said.add(key);
+  console.error(`ADT front: a step of ZCL_OSD_ADT_HANDLER dumped (${message}) in generation ${key || "?"}; ` +
+    "every ADT request answers 500 while it does. OSD_ADT=js turns the ABAP front off (Node sessions and routes).");
+}
+
 /**
  * @param {object} options
  * @param {Function} options.step the dialog step: (work, label) => Promise
@@ -184,6 +225,7 @@ export function replay(res, record, method, {sessionSent = false} = {}) {
  * @param {Function} [options.system] (kind, name, req) => value: this façade's SYSTEM answers
  * @param {object} [options.store] this façade's ObjectStore, what OBJECT reads
  * @param {Function} [options.served] (servedBy, req, record) => void, for a test or a log
+ * @param {Function} [options.generation] () => the live generation, for the one log line of a dump
  */
 export function abapFront(options) {
   return async (req, res, next) => {
@@ -209,10 +251,22 @@ export function abapFront(options) {
           `ADT ${req.method} ${path}`),
         {store: options.store});
     } catch (e) {
-      if (res.headersSent !== true) refuse(`${HANDLER}: ${String(e?.message?.get?.() ?? e?.message ?? e)}`);
+      if (res.headersSent === true) return;
+      // the ENQ session of the step ended while it waited for the work
+      // process or in a WAIT (a logoff): the session is gone, and the answer
+      // is the refusal a client logs on again after, not a dump
+      if (e?.code === "ENQ_SESSION_ENDED") {
+        res.status(403).set("x-csrf-token", "Required").type("text/plain; charset=utf-8").send("CSRF token validation failed");
+        return;
+      }
+      const message = String(e?.message?.get?.() ?? e?.message ?? e);
+      dumped(options.generation?.(), message);
+      refuse(`${HANDLER}: ${message}`);
       return;
     }
-    options.served?.(record.servedBy === "HOST" ? "HOST" : "ABAP", req, record);
+    const by = record.servedBy === "HOST" ? "HOST" : "ABAP";
+    res.set(SERVED_BY, by);
+    options.served?.(by, req, record);
     if (record.servedBy !== "HOST") {
       replay(res, record, req.method);
       return;
@@ -240,6 +294,7 @@ export function abapFront(options) {
       await handler({req, res, next, kind, payload, session: req.adt?.session, answer: record,
         replay: () => replay(res, record, req.method, {sessionSent: true})});
     } catch (e) {
+      console.error(`ADT continuation ${JSON.stringify(kind)} failed on ${req.method} ${path}: ${e?.stack ?? e?.message ?? e}`);
       if (res.headersSent !== true) refuse(`continuation ${JSON.stringify(kind)}: ${String(e?.message ?? e)}`);
     }
   };

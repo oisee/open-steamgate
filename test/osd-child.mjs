@@ -171,6 +171,49 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     }
   });
 
+  it("the ADT front runs in this process, and a lock outlives the serving child", async () => {
+    // slice 3, option B in the workbench shape: the parent loads the ADT
+    // kernel (tools/adt-abap-kernel.mjs), so every ADT request enters
+    // ZCL_OSD_ADT_HANDLER here, and the sessions and their locks live here,
+    // where a recycle of the child does not reach them
+    const logon = async (user) => {
+      const res = await fetch(`${ADT}/core/discovery`, {method: "HEAD", headers: {"x-csrf-token": "fetch",
+        "x-sap-adt-sessiontype": "stateful", authorization: "Basic " + Buffer.from(`${user}:x`).toString("base64")}});
+      expect(res.headers.get("x-osd-served-by"), "the front answered").to.equal("HOST");
+      return {cookie: res.headers.getSetCookie().join("; ").match(/sap-contextid=[^;]+/)?.[0], token: res.headers.get("x-csrf-token")};
+    };
+    const as = (client, method, path) => fetch(ADT + path, {method,
+      headers: {cookie: client.cookie, "x-csrf-token": client.token, "x-sap-adt-sessiontype": "stateful"}});
+    const sysinfo = await call("/core/http/systeminformation");
+    expect(sysinfo.headers.get("x-osd-served-by"), "an ABAP row is ABAP's").to.equal("ABAP");
+    const one = await logon("CHILDONE");
+    const two = await logon("CHILDTWO");
+    const object = "/oo/classes/ZCL_OSD_ADT_HANDLER";
+    const locked = await as(one, "POST", `${object}?_action=LOCK&accessMode=MODIFY`);
+    expect(locked.status, await locked.clone().text()).to.equal(200);
+    expect(locked.headers.get("x-osd-served-by")).to.equal("ABAP");
+    const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
+    // the serving child goes away and comes back
+    const before = await (await fetch(`${BASE}/osd/serving`)).json();
+    process.kill(before.pid, "SIGKILL");
+    let after;
+    for (let i = 0; i < 120 && (after === undefined || after.pid === before.pid); i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        const res = await fetch(`${BASE}/osd/serving`);
+        if (res.status === 200) after = await res.json();
+      } catch {
+        // not back yet
+      }
+    }
+    expect(after?.pid, "a new serving child").to.not.equal(before.pid);
+    const refused = await as(two, "POST", `${object}?_action=LOCK&accessMode=MODIFY`);
+    expect(refused.status, "the lock outlived the child").to.equal(403);
+    expect(await refused.text()).to.contain("CHILDONE");
+    expect((await as(one, "POST", `${object}?_action=UNLOCK&lockHandle=${handle}`)).status).to.equal(200);
+    for (const client of [one, two]) await fetch(`${BASE}/sap/public/bc/icf/logoff`, {headers: {cookie: client.cookie}});
+  });
+
   it("the child's own doors (/osd/serving, /osd/dumps, /osd/sql) answer through the parent", async () => {
     const serving = await fetch(`${BASE}/osd/serving`);
     expect(serving.status, "/osd/serving").to.equal(200);

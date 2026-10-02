@@ -135,15 +135,11 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
         lt_cookies = io_session->cookies( ls_session ).
         zcl_osd_adt_csrf=>check_token( ls_session-token ).
       CATCH zcx_osd_adt INTO lx_adt.
+*       the session's own refusal, SESSION_ENDED included: an ENQ context
+*       that ended is not a session that ended (the session binds the next
+*       context and keeps its token), so it is never the CSRF refusal here
         ev_served_by = zcl_osd_adt_router=>c_abap.
-*       a session gone while the request waited: the refusal a client logs
-*       on again after, as the Node middleware answers it; the session's
-*       rows are already deleted, and the step commits that
-        IF lx_adt->type_id = zcx_osd_adt=>c_session_ended.
-          es_response = zcl_osd_adt_csrf=>refusal( ).
-        ELSE.
-          es_response = refusal( lx_adt ).
-        ENDIF.
+        es_response = refusal( lx_adt ).
         RETURN.
     ENDTRY.
 
@@ -156,6 +152,10 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
       zcl_osd_adt_csrf=>stamp( EXPORTING it_cookies  = lt_cookies
                                          iv_token    = zcl_osd_adt_csrf=>c_required
                                CHANGING  cs_response = es_response ).
+*     a refused write keeps no session it opened
+      IF ls_session-fresh = abap_true.
+        io_session->end( ls_session-id ).
+      ENDIF.
       RETURN.
     ENDIF.
 
@@ -165,6 +165,15 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
     zcl_osd_adt_csrf=>stamp( EXPORTING it_cookies  = lt_cookies
                                        iv_token    = ls_session-token
                              CHANGING  cs_response = es_response ).
+*   A request that opened its session and asks nothing of it (no token, no
+*   state, no write: a readiness probe, a plain GET) is answered with the
+*   session as usual but keeps no row: the step ends it. The next request
+*   that fetches a token or asks for state opens the one that stays.
+    IF ls_session-fresh = abap_true AND ls_session-stateful = abap_false
+        AND zcl_osd_adt_csrf=>fetching( is_request-headers ) = abap_false
+        AND zcl_osd_adt_csrf=>unsafe( is_request-method ) = abap_false.
+      io_session->end( ls_session-id ).
+    ENDIF.
   ENDMETHOD.
 
   METHOD route.

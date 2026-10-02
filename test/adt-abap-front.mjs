@@ -7,12 +7,12 @@
 import {expect} from "chai";
 import express from "express";
 import {createHash} from "node:crypto";
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import "./start.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
-import {abapRunner, registerContinuation, continuationKinds} from "../tools/adt-abap-front.mjs";
+import {abapRunner, abapServes, registerContinuation, continuationKinds} from "../tools/adt-abap-front.mjs";
 import {dialogStep, workProcess} from "../tools/osd-dialog-step.mjs";
 import {adtEnqOwner} from "../tools/adt-enq-key.mjs";
 import {endEnqSession} from "../tools/osd-enq-host.mjs";
@@ -64,6 +64,10 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
       abap: {...runner, answer: async (view, session) => {
         entered.push(`${view.method} ${view.path}`);
         const record = await runner.answer(view, session);
+        if (dumpNext === "enq") {
+          dumpNext = false;
+          throw Object.assign(new Error("the ENQ session ended while the step waited"), {code: "ENQ_SESSION_ENDED"});
+        }
         if (dumpNext) {
           dumpNext = false;
           throw new Error("a dump after the handler answered");
@@ -159,7 +163,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     for (const client of [one, two]) await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${client.id}`}});
   });
 
-  it("logoff, a dump, an ended ENQ session: each next request gets a fresh session", async () => {
+  it("logoff and a dump: each next request gets a fresh session", async () => {
     // logoff: the row goes, and the old cookie names nothing
     const one = await logon();
     expect((await as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`)).status).to.equal(200);
@@ -168,7 +172,8 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     // a dump: the step that would open a new session for the old cookie rolls
     // back, so no row is left and the client got no cookie
     dumpNext = true;
-    const dumped = await fetch(`${url}${BASE}/core/discovery`, {headers: {cookie: `sap-contextid=${one.id}`}});
+    const dumped = await fetch(`${url}${BASE}/core/discovery`, {headers: {cookie: `sap-contextid=${one.id}`,
+      "x-sap-adt-sessiontype": "stateful"}});
     expect(dumped.status).to.equal(500);
     expect(dumped.headers.getSetCookie()).to.deep.equal([]);
     // the next request with the old cookie opens a fresh session
@@ -182,20 +187,88 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     // the lock went with the logoff: the fresh session takes it
     const client = {id, token: fresh.headers.get("x-csrf-token")};
     expect((await as(client, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`)).status).to.equal(200);
-    // its ENQ session ended behind its back (the lock server): the next
-    // request is the refusal a client logs on after, committed inside the
-    // step, and the one after it a fresh session
-    endEnqSession(adtEnqOwner.key(id));
-    const ended = await as(client, "GET", "/core/discovery");
-    expect([ended.status, ended.headers.get("x-csrf-token"), await ended.text()])
+    await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${id}`}});
+  });
+
+  // The acceptance test of this branch and of #471 together: an ENQ context
+  // the lock server ended is not a session that ended. The session and its
+  // token stay; the dead handle writes nothing (409, as on main), and a read
+  // just works. It needs #471 (BIND revives an ended key, ZCL_OSD_ENQ_KERNEL=>REVIVE)
+  // and is pending until that is in the tree.
+  it("an ENQ context ended behind the session: the PUT with the old handle is 409, a GET is 200", async function () {
+    if (readFileSync(new URL("../output/zcl_osd_enq_kernel.clas.mjs", import.meta.url), "utf8").includes("async revive(") === false) {
+      this.skip();
+    }
+    const one = await logon();
+    const locked = await as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`);
+    const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
+    expect(handle).to.match(/^[0-9a-f-]{36}$/);
+    endEnqSession(adtEnqOwner.key(one.id));
+    const put = await as(one, "PUT", `/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`,
+      {headers: {"content-type": "text/plain"}, body: SOURCE + "* not written\n"});
+    expect(put.status).to.equal(409);
+    expect(await put.text()).to.contain("ExceptionResourceNotLocked");
+    const get = await as(one, "GET", `/oo/classes/${LOCKED}/source/main`);
+    expect(get.status).to.equal(200);
+    expect(await get.text()).to.not.contain("not written");
+    expect(get.headers.get("x-csrf-token"), "the same session and token").to.equal(one.token);
+    expect((await sessionRow(one.id))?.token).to.equal(one.token);
+    await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
+  });
+
+  it("a DELETE whose session logs off behind the verdict deletes nothing", async () => {
+    // codex's interleaving: the DELETE's step answers HOST, its own logoff
+    // runs before the Node route, and a session that is gone may not delete
+    writeFileSync(join(root, "src", "zcl_osd_doomed.clas.abap"), SOURCE.replaceAll("zcl_osd_front", "zcl_osd_doomed"));
+    const one = await logon();
+    let free;
+    let started;
+    const running = new Promise((resolve) => { started = resolve; });
+    const held = dialogStep(() => new Promise((resolve) => { free = resolve; started(); }), "test: the work process is busy");
+    await running;
+    const deleted = as(one, "DELETE", "/oo/classes/zcl_osd_doomed");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const off = fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    free();
+    await held;
+    const answer = await deleted;
+    expect((await off).status).to.equal(200);
+    expect([answer.status, answer.headers.get("x-csrf-token")]).to.deep.equal([403, "Required"]);
+    expect(existsSync(join(root, "src", "zcl_osd_doomed.clas.abap")), "the object is still there").to.equal(true);
+  });
+
+  it("a probe and a refused write keep no session row; a fetch does", async () => {
+    const probe = await fetch(`${url}${BASE}/core/discovery`);
+    expect(probe.status).to.equal(200);
+    expect(probe.headers.get("x-csrf-token"), "the answer still carries a token").to.match(/^[A-Za-z0-9_-]{24}$/);
+    expect(await sessionRow(cookieId(probe)), "a probe").to.equal(undefined);
+    const refused = await fetch(`${url}${BASE}/oo/classes/${LOCKED}?_action=LOCK`, {method: "POST"});
+    expect(refused.status).to.equal(403);
+    expect(await sessionRow(cookieId(refused)), "a refused write").to.equal(undefined);
+    const fetched = await fetch(`${url}${BASE}/core/discovery`, {headers: {"x-csrf-token": "fetch"}});
+    expect(await sessionRow(cookieId(fetched)), "a fetch").to.not.equal(undefined);
+  });
+
+  it("a step whose ENQ session ended while it waited is the refusal, not a dump", async () => {
+    const one = await logon();
+    dumpNext = "enq";
+    const answer = await as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`);
+    expect([answer.status, answer.headers.get("x-csrf-token"), await answer.text()])
       .to.deep.equal([403, "Required", "CSRF token validation failed"]);
-    expect(await sessionRow(id), "the refusal's deletion committed").to.equal(undefined);
-    const again = await as(client, "GET", "/core/discovery");
-    expect(again.status).to.equal(200);
-    const next = cookieId(again);
-    expect(next).to.match(/^[0-9a-f]{24}$/);
-    expect(next).to.not.equal(id);
-    await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${next}`}});
+    await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
+  });
+
+  it("the body goes to ABAP only for a row ABAP serves, and the answer names who served it", async () => {
+    const asks = [["PUT", `${BASE}/oo/classes/zcl_x/source/main`, false], ["POST", `${BASE}/oo/classes/ZCL_X`, true],
+      ["GET", `${BASE}/core/http/systeminformation`, true], ["GET", `${BASE}/core/discovery`, false]];
+    for (const [method, path, expected] of asks) {
+      expect(await dialogStep(() => abapServes(method, path), "test: the router's match"), `${method} ${path}`).to.equal(expected);
+    }
+    const one = await logon();
+    expect((await as(one, "GET", "/core/http/systeminformation")).headers.get("x-osd-served-by")).to.equal("ABAP");
+    expect((await as(one, "GET", "/core/discovery")).headers.get("x-osd-served-by")).to.equal("HOST");
+    await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
   });
 
   describe("a continuation runs after the step", () => {
@@ -252,6 +325,18 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
         const id = cookieId(fresh);
         expect(seen).to.deep.equal([{held: false, payload: {method: "GET", path: ECHO}, session: id},
           "a step after the step"]);
+        // a continuation that throws is said on the console, and answered
+        const errors = [];
+        const error = console.error;
+        const off = registerContinuation("test-throws", () => { throw new Error("the continuation fell over"); });
+        console.error = (...args) => errors.push(args.join(" "));
+        try {
+          expect((await fetch(`${url}${ECHO}?kind=test-throws`)).status).to.equal(500);
+        } finally {
+          console.error = error;
+          off();
+        }
+        expect(errors.join("\n")).to.contain("the continuation fell over");
         const unknown = await fetch(`${url}${ECHO}?kind=nobody-registered`);
         expect(unknown.status).to.equal(500);
         expect(await unknown.text()).to.contain("no continuation &quot;nobody-registered&quot; is registered");

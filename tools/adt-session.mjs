@@ -306,6 +306,14 @@ export class Sessions {
     }
   }
 
+  /** the work, once the handle is checked to hold the object; one turn of
+   *  the event loop here, so nothing runs between the two */
+  async whileHeld(session, handle, type, name, work) {
+    if (await this.holds(session, handle, type, name) === false) return false;
+    await work();
+    return true;
+  }
+
   // Express middleware. Every request leaves here with req.adt.session set
   // and the response already carrying its token and cookies, so no handler
   // can forget them.

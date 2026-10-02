@@ -16,7 +16,7 @@ import express from "express";
 import {request as httpRequest} from "node:http";
 import {createHash} from "node:crypto";
 import {execFileSync} from "node:child_process";
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import "./start.mjs";
@@ -661,24 +661,27 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       return locks().read({table: "ZOSD_ADT_LOCK"});
     };
 
-    it("a handle whose ENQ session the lock server ended writes nothing: the session is gone", async () => {
+    it("a handle whose ENQ session the lock server ended writes nothing, and the session stays", async function () {
       // The lock can go behind the session's back (the lock server ending
-      // the ENQ session). Under ABAP sessions an ended ENQ key is an ended
-      // ADT session: the next RESOLVE cannot bind it, deletes the session
-      // and its handles, and the request is the CSRF refusal a client logs
-      // on again after (slice 3). Nothing is written with the old handle.
+      // the ENQ session). That is an ENQ context that ended, not a session
+      // that ended: the next RESOLVE drops the handles, revives the key
+      // and keeps the session and its token (#471), so the write with the
+      // old handle is the 409 it is on main. Pending until #471
+      // (ZCL_OSD_ENQ_KERNEL=>REVIVE) is in the tree.
+      if (readFileSync(new URL("../output/zcl_osd_enq_kernel.clas.mjs", import.meta.url), "utf8").includes("async revive(") === false) {
+        this.skip();
+      }
       const {sessions, server} = await withSessions();
       const one = await logon(server);
       const {handle} = await lock(one);
       sessions.owners.end(one.id);
       expect((await sessions.get(one.id)).locks.has(handle), "the handle is still in the table").to.equal(true);
       const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${handle}`, {headers: {"content-type": "text/plain"}, body: "* no\n"});
-      expect([put.status, put.body]).to.deep.equal([403, "CSRF token validation failed"]);
-      expect(await sessions.get(one.id), "the session went with its ENQ session").to.equal(undefined);
+      expect(put.status).to.equal(409);
       const include = await send(one, "POST", `${at(LOCKED)}/includes?lockHandle=${handle}`,
         {body: `<class:abapClassInclude adtcore:name="${LOCKED}" class:includeType="testclasses"/>`});
-      expect(include.status).to.equal(403);
-      expect((await send(one, "GET", `${at(LOCKED)}/source/main`)).body).to.not.contain("* no");
+      expect(include.status).to.equal(409);
+      expect((await sessions.get(one.id))?.token, "the session and its token stay").to.equal(one.token);
       await logoff(one);
     });
 

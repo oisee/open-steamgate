@@ -24,7 +24,7 @@ import {readFileSync, appendFileSync} from "node:fs";
 import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
 import {randomUUID, randomBytes, createHash} from "node:crypto";
-import {Sessions, parseCookies, sessionIdOf} from "./adt-session.mjs";
+import {Sessions, parseCookies, refuseToken, sessionIdOf} from "./adt-session.mjs";
 import {abapFront} from "./adt-abap-front.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
 import {abapSession, statelessLock} from "./adt-enq.mjs";
@@ -719,6 +719,7 @@ export function adtRouter(options = {}) {
   // which resolves the session, gates and answers or hands over; locks go
   // to ENQ (adt-enq.mjs)
   if (options.abap !== undefined) router.use(BASE, abapFront({...options.abap, served: options.abapServed, refuse, store,
+    generation: () => liveHash(store.root),
     sessions, ...abapSession(sessions, (kind) => (kind === "IDENTITY" ? identity : undefined))}));
 
   // ---- What an ABAP Cloud Project needs that an ordinary one does not.
@@ -2119,6 +2120,12 @@ export function adtRouter(options = {}) {
         const name = decodeURIComponent(req.params.name);
         if (req.adt.sessions.deleteObject !== undefined) {
           const result = await req.adt.sessions.deleteObject(req.adt.session, type, name, store);
+          // the caller's session ended after the front resolved it (its own
+          // logoff, queued behind the verdict): it may delete nothing
+          if (result.ended === true) {
+            refuseToken(res);
+            return;
+          }
           if (result.holder !== undefined) {
             res.status(403).type("application/xml").send(lockedByOtherDocument(result.holder.session.user, String(name).toUpperCase()));
             return;
@@ -2211,13 +2218,15 @@ export function adtRouter(options = {}) {
       }
       return true;
     };
-    // the handle of mayWrite, asked again just before a write: still this
-    // session's, still the object's holder
-    const stillHeld = async (req, res) => {
+    // the handle of mayWrite, asked again where the write happens: still this
+    // session's, still the object's holder, and the write in the same step as
+    // the question (sessions.whileHeld), so a logoff or an UNLOCK that runs
+    // after the front's verdict cannot slip in between the two
+    const stillHeld = async (req, res, write) => {
       const {session, sessions} = req.adt;
       const handle = String(req.query.lockHandle ?? "");
       const lock = session.locks.get(handle);
-      if (lock === undefined || await sessions.holds(session, handle, lock.type, lock.name) === false) {
+      if (lock === undefined || await sessions.whileHeld(session, handle, lock.type, lock.name, write) === false) {
         res.status(409).type("application/xml").send(exceptionDocument("ExceptionResourceNotLocked",
           `lock handle ${handle} was released before the source arrived`));
         return false;
@@ -2256,10 +2265,9 @@ export function adtRouter(options = {}) {
           // while it does (an UNLOCK, a logoff, an expiry, another session
           // taking the object after that). Checked again right beside the
           // write, which is the moment the handle has to be good for.
-          if (await stillHeld(req, res) === false) {
+          if (await stillHeld(req, res, () => store.write(type, req.params.name, body.toString("utf8"), include)) === false) {
             return;
           }
-          store.write(type, req.params.name, body.toString("utf8"), include);
           // The tag of what was just written, computed from what a read now
           // returns so that it is the tag the next GET will carry. The
           // client files it beside the source it saved; a save answered
@@ -2298,10 +2306,9 @@ export function adtRouter(options = {}) {
           if (current.empty !== true) {
             throw new Conflict(type, `${current.name} include ${include}`);
           }
-          if (await stillHeld(req, res) === false) {
+          if (await stillHeld(req, res, () => store.write(type, req.params.name, "", include)) === false) {
             return;
           }
-          store.write(type, req.params.name, "", include);
           res.status(201)
             .set("Location", `${BASE}/${adt}/${encodeURIComponent(current.name.toLowerCase())}/includes/${include}`)
             .end();

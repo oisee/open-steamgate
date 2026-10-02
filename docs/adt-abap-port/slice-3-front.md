@@ -81,9 +81,11 @@ Every request under `/sap/bc/adt` enters `ZCL_OSD_ADT_HANDLER` first, in one dia
 3. `ANSWER` resolves the session, runs the gate (Part A) and routes. The `RESOLVE` it calls also sets `req.adt`
    (`{session, sessions, fetching}`), so the host's SYSTEM answers (`LOCK_HANDLE`, `SESSION`, `LOCK_HOLDER`)
    and the Node routes see the same session.
-4. A session that ended while its request waited (`ZCX_OSD_ADT=>SESSION_ENDED`, an ended ENQ key) is answered
-   in `ANSWER` as the CSRF refusal (403, `Required`), with no cookies. The step ends without an exception, so the
-   deletion of the session's rows commits.
+4. An ENQ context that ended is not a session that ended. `ANSWER` never turns `SESSION_ENDED` into the CSRF
+   refusal: the session binds its key again and keeps its token (#471), a read is answered, and a write with a
+   dead handle is the route's 409. Only a logoff or an expiry ends a session. A step whose ENQ session ended while
+   it waited (a logoff during the wait, `ENQ_SESSION_ENDED` from the lock server) is answered by the front as the
+   CSRF refusal (403, `Required`), not as a dump.
 5. The verdict:
    - **ABAP**: the record is replayed onto the response.
    - **HOST**: the record's two `Set-Cookie` lines and its `x-csrf-token` go onto the response. Then the
@@ -98,10 +100,20 @@ client, and refuses a Node `Sessions` next to the front. `ZCL_OSD_ADT_HANDLER=>U
 
 Per host:
 
-- `test/start.mjs` inline (and so `npm start`, `test/run.mjs`, `osd up` in the binary): the front with
-  `AbapSessions`.
-- `test/start.mjs` in child mode, and `OSD_ADT=js`: no ABAP in that process, so Node's `Sessions` and its
-  middleware, as before.
+- `test/start.mjs` inline (the suites that call `startServer()` themselves): the front with `AbapSessions`, over
+  the system's own classes.
+- `test/start.mjs` in child mode, the default of `test/run.mjs` and so of `npm start`, the deploys and `osd up`:
+  the front with `AbapSessions` too. The parent runs no system, so it loads the **ADT kernel**
+  (`tools/adt-abap-kernel.mjs`): the closure of the classes the front calls, read off the generated modules (138
+  modules, against 1939 for the whole system), with a database of its own in memory holding only their tables,
+  and the lock server in the parent. Measured: about 110 MB RSS and 0.2 s to load, against 430 MB and 1.6 s for
+  the whole system. The sessions and their locks therefore outlive every recycle of the serving child (an editor
+  locks, saves, activates and saves again under one handle; `test/osd-child.mjs` kills the child and the lock is
+  still held). They last as long as the parent, as Node's `Sessions` did. A change to `ZCL_OSD_ADT_*` reaches the
+  parent's kernel at its next start, not at an activation.
+- `OSD_ADT=js`, in either shape: Node's `Sessions`, its middleware and Node's routes, as before slice 3. This is
+  the emergency exit when the ABAP front itself is broken. A step of the front that dumps logs the reason once per
+  generation and names this switch. If the kernel cannot load, the parent says why and falls back the same way.
 - `tools/osd-serve.mjs` (the child, and `osd serve`): mounts no ADT façade.
 - `web/preview-backend.mjs`: mounts no ADT façade (no ADT client reaches a service worker).
 
@@ -115,9 +127,19 @@ What changed in behaviour, on purpose:
 - **The logoff waits for the work process.** The logoff and the session DELETE end the session through
   `AbapSessions`, in a step of their own. A LOCK queued before the logoff now runs first and is granted, and the
   logoff then releases it. Before, the logoff passed the queued LOCK and the LOCK found its session gone.
-- **An ended ENQ session is an ended ADT session.** When the lock server ends a session's ENQ key, the next
-  request cannot bind it. It deletes the session and answers the CSRF refusal. Before, a write with an old handle
-  answered 409.
+- **A session that ends behind the verdict acts on nothing.** Between the front's step and the Node route, another
+  step can run (the session's own logoff, an UNLOCK, an expiry). The routes that change an object therefore ask
+  again inside a step of their own, where they act: a write runs inside `sessions.whileHeld(session, handle, type,
+  name, work)` (the handle check and the write in one step), and `deleteObject` first checks that the caller's
+  session is still alive and answers the CSRF refusal when it is not. Before, a DELETE queued behind its own
+  logoff deleted the object with no holder left to stop it.
+- **A session nobody needs keeps no row.** A request that opens a session and asks nothing of it (no token
+  fetch, no state, no write: a readiness probe, a plain GET) is answered as before, cookies and token included,
+  but its step ends the session again. A refused write keeps no session it opened either. The session that stays
+  is opened by the first request that fetches a token or asks for state, which is how every ADT client starts.
+- **The body goes to ABAP only for an ABAP row**, asked of `ZCL_OSD_ADT_ROUTER=>MATCH` over the router's own
+  table, so a big PUT that a Node route serves is not copied into hex. Every answer of the front names who served
+  it: `X-OSD-Served-By: ABAP` or `HOST`.
 - **A delegated request queues** behind a long step, because it takes the work process for its session.
 
 ### The continuation
@@ -135,6 +157,10 @@ const unregister = registerContinuation("publish", async ({req, res, next, kind,
 ```
 
 - A kind is registered once per process, at host startup, and registering it twice throws.
+- **What a continuation gets is a snapshot.** The step has ended and no lock is held, so another step may have run
+  in between, and the session it is handed may have ended. A continuation that changes something under a
+  session's lock asks again inside a step where it acts, with `sessions.whileHeld` or as `deleteObject` does. A
+  continuation that throws is logged (`console.error`) and answered 500.
 - The handler runs after the step. `payload` is the parsed JSON, `session` is `req.adt.session` (resolved in
   ABAP), and `answer` is the handler's record (`status`, `contentType`, `headers`, `body`, `servedBy`,
   `continuation`). The session's cookies and token are already on `res`.
@@ -165,122 +191,33 @@ it in front of the table with `ZCL_OSD_ADT_HANDLER=>USE_ROUTES`.
   row of `ZOSD_ADT_SESS`, a foreign-token write is not refused by ABAP, and `an_ended_session` fails (an
   exception document instead of the refusal).
 - **Green:** the `adt` suite group (`test/suites.d/adt.json`) together with `osd-enq` and `osd-enq-abap` gives
-  524 passing and 4 pending, the 7 new cases included. The adapter's parity suite, `adt-abap-diff` (rewritten for option B), `adt-abap-csrf`,
+  527 passing and 6 pending: 11 cases in `test/adt-abap-front.mjs` (two of them are #471's acceptance test and pending until it lands, see below). The adapter's parity suite, `adt-abap-diff` (rewritten for option B), `adt-abap-csrf`,
   `adt-abap-session`, `adt-devloop`, `adt-activation` and `tmp-package` are all part of that run.
 - **ABAP-FS conformance** (`--start`, own port): 30 PASS, 1 FAIL, 16 MISSING, no regressions.
 
 ### Measured overhead, with the real session
 
-One process per run, 120 requests per cell, the median of the last 100, two rounds per run. The same script ran on
-main (`d0768a9f`, mixed front, Node sessions) and on the branch (option B, `AbapSessions`), alternating, four runs
-each. The LOCK is a relock of the session's own lock.
+One process per run, 120 requests per cell, the median of the last 100, two rounds per run, the inline mount. The
+same script ran on main (`d0768a9f`, mixed front, Node sessions) and on the branch (option B, `AbapSessions`),
+alternating, three runs each, after the fix round (the body no longer copied into hex for a HOST row). The LOCK is
+a relock of the session's own lock. Figures are round 2 of each run.
 
 | request | main | option B | added |
 |---|---|---|---|
-| `core/discovery` (HOST) | 0.47-0.52 ms | 1.83-2.68 ms | +1.3 to +2.2 ms |
-| source GET (HOST) | 0.39-0.46 ms | 1.52-2.41 ms | +1.1 to +2.0 ms |
-| LOCK (ABAP) | 1.57-1.90 ms | 2.37-2.56 ms | +0.6 to +0.9 ms |
+| `core/discovery` (HOST) | 0.48-0.54 ms | 1.63-1.86 ms | +1.1 to +1.4 ms |
+| source GET (HOST) | 0.38-0.45 ms | 1.31-1.68 ms | +0.9 to +1.3 ms |
+| LOCK (ABAP) | 1.42-1.82 ms | 2.05-2.13 ms | +0.2 to +0.7 ms |
 
-The figures are round 2 of each run. This is more than the 0.45 to 0.6 ms the earlier shim-only measurement
-(below) predicted. The real session adds a sweep, a read and a touch per request, then the adapter's `peek` and
-`handles` for `req.adt`, and the commit. The LOCK already paid for a step and a bind on main, so its share is
-smaller.
+The first measurement, before the fix round, gave +1.3 to +2.2 ms for a HOST row. That is still more than the
+0.45 to 0.6 ms the shim-only measurement (below) predicted: the real session adds a sweep, a read and a touch per
+request, then the adapter's `peek` and `handles` for `req.adt`, and the commit.
 
-### The fork: how a HOST row reaches Node
-
-**A. A host call from inside the step.** The handler calls a kernel seam such as
-`KERNEL_ADT_HOST=>FORWARD( method path headers body session )`. The seam would be an `abap.Classes` slot like
-`KERNEL_LOCK`, and it returns status, headers and body for the handler to write. To keep the
-work-process rules, the seam has to:
-
-1. commit the step's LUW, which also persists the session row it touched;
-2. roll out: snapshot the shim's static server (`tools/osd-dialog-step.mjs`, #438) and release the FIFO lock, as
-   `WAIT` does;
-3. run the Node route outside the step's async context (`outsideStepContext`). Without that, any route that takes a
-   step of its own (`exclusive`, `lockedClient`, the data preview, unit runs) throws "a nested dialog step". A long
-   route such as activation or a unit run would also hold every OData request behind it;
-4. re-enter the express router with a synthetic `req`/`res`, record the answer, take the lock back and roll in.
-
-Costs:
-
-- a new kernel seam, reached from ABAP through `@KERNEL` lines;
-- a synthetic express request for 142 route registrations, including body parsers, `req.params` and HEAD/ETag/304
-  handling;
-- the unit-run cancellation seam (`X-OSD-Request-Id`, socket `close`) loses its socket;
-- one more place where a forgotten roll-in answers a caller with another caller's response.
-
-**B. A verdict, then delegate after the step.** The handler's step ends with the HOST verdict it already gives (the
-`X-OSD-Served-By: HOST` marker) plus the resolved session: id, user, stateful, token and the Set-Cookie lines. The
-front copies the cookies and the token onto the real response, sets `req.adt` from the verdict, and calls `next()`.
-The Node route runs after the step, outside the lock, exactly as a HOST row runs today.
-
-Costs and benefits:
-
-- no new seam, no roll-out and no synthetic express request;
-- each delegated request costs one step;
-- risk 5 is sidestepped on Node **only if the front takes the cookies from `ANSWER`'s own record**
-  (`es_response-headers`), which keeps both Set-Cookie lines. The shim's recorder does not: `HANDLE_REQUEST` writes
-  the record through `set_header_field`, which replaces the first `set-cookie` with the second before the shim
-  reads anything, and no recording downstream of the shim can bring the lost line back (measured: a fresh GET with
-  `fetch` through the shim arrives with one cookie, `test/adt-abap-csrf.mjs`). So under B the front calls
-  `ZCL_OSD_ADT_HANDLER=>ANSWER` with the request record, in the step, and replays that record; the shim stays the
-  path of a real ICF only. On a system, ICF owns the cookies (the interface says so) and there is no host behind
-  the handler, so a HOST row is the 404 it already is.
-
-B is the smaller mechanism. A is closer to the brief's wording, "delegate through a host call".
-
-**Decision (dell and stoker, 2026-10-02): B.** stoker builds the Node session adapter over `ZCL_OSD_ADT_SESSION`
-(item 1 below). The order is: the session implementation (`feat/adt-session-impl`), then the adapter, then B is
-switched on (`USE_SESSION` bound, the front moved up, the Node middleware and the JS matcher removed).
-
-### Needed whichever way the fork goes
-
-Where each item stands with B built:
-
-1. Done: the Node routes read the session through `AbapSessions` (#465).
-2. Logoff stays Node's and calls `END` through the adapter.
-3. `X-OSD-Generation` and the capture stay in the Node front, mounted before it.
-4. Done: the ENQ binding is `RESOLVE`'s, and an ended session is the handler's CSRF refusal.
-5. Sidestepped on Node by reading `ANSWER`'s record. Still open for the shim path.
-
-The original notes follow.
-
-1. **The Node routes' view of the session.** In `tools/adt-facade.mjs`, 11 places read `req.adt.session` (`.id`,
-   `.locks`, `.stateful`, `.user`) or call `Sessions` methods: `holds`, `holderOf`, `lock`, `unlock`, `release`,
-   `end` (logoff and `DELETE core/http/sessions/:id`). `abapSession` in `tools/adt-enq.mjs` clears `.locks` from
-   `onEnqContextEnded`. Once the session and its handles are in `ZOSD_ADT_SESS` / `ZOSD_ADT_SHDL`, the façade needs
-   one of two things:
-   - an adapter: a `Sessions` whose `get`, `holds`, `end` and the rest are ABAP calls in a step, run before or after
-     the route and never inside it;
-   - or those routes have moved to ABAP. The write path is group A, stoker's.
-
-   This decides the order more than the fork does. The front can move up only when the routes still on Node read
-   the session through the adapter. Otherwise there are two session stores again.
-2. **Logoff.** `/sap/public/bc/icf/logoff` sits outside BASE: no gate, no token, no cookies. It needs either the
-   second ICF node with the same handler (port-map step 1) or it stays Node's and calls `END` through the adapter.
-3. **`X-OSD-Generation` and the `STG_ADT_DUMP` capture** stay in the Node front. The capture has to wrap the ABAP
-   entry too, which means mounting it before the moved front.
-4. **The ENQ binding** (`enter`) moves into `RESOLVE` (stoker's `KERNEL_ENQ_SESSION`), so the front's `enter` and
-   `ended` options go. A session that ended while its step waited then has to come back as the CSRF refusal, out of
-   the handler.
-
-   **A session that ends during a WAIT** is not covered by the step boundary. A WAIT (an ABAP route polling a job,
-   or `_WAIT` on an ENQUEUE) commits, rolls out and gives the work process up; a logoff or a session DELETE can run
-   in that gap and end the session. When the step rolls back in, nothing re-resolves it, so:
-   - the step's answer is still stamped with the old token and cookies. That is harmless: the next request names a
-     session that is gone, opens a fresh one, and its write is refused with `Required`, which makes a client log on
-     again;
-   - an ENQUEUE after the WAIT runs under an ENQ key that is ended and stays ended (#433), so `KERNEL_ENQ_SESSION`
-     throws `EnqSessionEnded`, no lock is taken, and the request is answered as one from a session that is gone
-     (the CSRF refusal), as slice 2 answers a LOCK queued behind its own logoff;
-   - a handle the step wrote after the WAIT belongs to a session row that is deleted. The implementation must not
-     resurrect the row on that write (stoker's `ADOPT_HANDLE` on an unknown id: nothing, or an error);
-   - under B a delegated Node route runs after the step, so the session can also end between the verdict and the
-     route. The adapter therefore re-checks at use (`holds`, `get` read the tables) rather than trusting the
-     verdict's copy.
-5. **Risk 5.** For the shim path on any host (a real ICF, or option A), two Set-Cookie lines need open-abap-core's
-   `if_http_entity~set_cookie`. It should append a `set-cookie` row rather than assert. That is a fork PR like
-   #1218, with an ANORMALIES entry first.
+**The sweep grows with the table.** `RESOLVE` ends expired sessions on every request with a scan of
+`ZOSD_ADT_SESS` by `TOUCHED`, which has no index. Measured through the adapter: 0.54 ms with 1 session, 0.58 ms
+with 1 001, 1.61 ms with 11 001 and 7.86 ms with 61 001, so about 0.12 ms per thousand. Sessions nobody needs no
+longer stay (above), so the table holds only the sessions of real clients. An index on `TOUCHED`, or a sweep at
+most every N seconds, is a change to `ZCL_OSD_ADT_SESSION` and its table, and is left to that class's owner (#471
+is open on both).
 
 ### Measured overhead (before the session existed)
 

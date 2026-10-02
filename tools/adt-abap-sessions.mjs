@@ -152,8 +152,27 @@ export class AbapSessions {
     });
   }
 
+  /** The work, run in one step with the proof that the session's handle
+   *  still holds the object: a route's last check before it writes, with
+   *  nothing able to run between the check and the write (a logoff, an
+   *  UNLOCK, an expiry would otherwise fit in the gap). Answers false, and
+   *  runs nothing, when the handle no longer holds. */
+  whileHeld(session, handle, type, name, work) {
+    return this.#run(async (obj) => {
+      if ((await this.#call(obj, "holds", {iv_id: session.id, iv_handle: handle, iv_type: type, iv_name: name})).get() !== "X") return false;
+      const holder = await this.#holder(obj, type, name);
+      if (holder?.session.id !== session.id || holder.handle !== handle) return false;
+      await work();
+      return true;
+    });
+  }
+
+  // {ended} when the caller's session is gone by the time the delete runs:
+  // its logoff can run between the front's verdict and this step, and a
+  // session that is gone holds nothing and may delete nothing
   deleteObject(session, type, name, store) {
     return this.#run(async (obj) => {
+      if ((await this.#call(obj, "alive", {iv_id: session.id})).get() !== "X") return {ended: true};
       const holder = await this.#holder(obj, type, store.find(type, name)?.name ?? name);
       if (holder !== undefined && holder.session.id !== session.id) return {holder};
       const gone = store.delete(type, name);
