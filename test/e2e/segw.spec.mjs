@@ -131,6 +131,11 @@ test("SEGW editor: the project tree, a property edited in place, Generate over t
   const source = page.getByRole("dialog", {name: "zcl_zstg_mapped_mpc.clas.abap"});
   await expect(source.getByRole("textbox")).toHaveValue(/iv_property_name = 'Price' iv_abap_fieldname = 'PRICE'/);
   await source.getByRole("button", {name: "Close"}).click();
+  await generated.getByText("zcl_zstg_mapped_dpc.clas.abap", {exact: true}).click();
+  const dpcSource = page.getByRole("dialog", {name: "zcl_zstg_mapped_dpc.clas.abap", exact: true});
+  await expect(dpcSource.getByRole("textbox")).toHaveValue(/class ZCL_ZSTG_MAPPED_DPC definition/);
+  await expect(dpcSource.getByRole("textbox")).toHaveValue(/method planeset_get_entityset\./i);
+  await dpcSource.getByRole("button", {name: "Close"}).click();
   await generated.getByRole("button", {name: "Close"}).click();
   const rows = (await (await page.request.get(
     "/sap/opu/odata/sap/ZSTG_SEGW_SRV/GenerateSet?$filter=" + encodeURIComponent("Project eq 'ZSTG_MAPPED'") + "&$format=json",

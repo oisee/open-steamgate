@@ -272,8 +272,15 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
       const mpcName = traceName.replace(".clas.trace.json", ".clas.abap");
       expect(sidecar.lines.length, `${name}: one trace per MPC line`).to.equal(made[mpcName].trimEnd().split("\n").length);
       expect(sidecar.lines.every((line, index) => line.line === index + 1 && line.node), `${name}: named trace lines`).to.equal(true);
+      const dpcTraceName = Object.keys(made).find((file) => file.endsWith("_dpc.clas.trace.json"));
+      if (Object.keys(expected).some((file) => file.endsWith("_dpc.clas.abap"))) {
+        expect(dpcTraceName, `${name}: DPC trace sidecar`).to.be.a("string");
+        const dpcSidecar = JSON.parse(made[dpcTraceName]);
+        expect(dpcSidecar.generator, `${name}: DPC sidecar from the DSL`).to.equal("dsl-dpc");
+        expect(dpcSidecar.lines.length, `${name}: one trace per DPC line`).to.equal(made[dpcTraceName.replace(".clas.trace.json", ".clas.abap")].trimEnd().split("\n").length);
+      }
       // The ABAP generator adds provenance; the JS twin still supplies the class oracle.
-      expect(Object.keys(made).filter((file) => file !== traceName).sort(), name).to.deep.equal(Object.keys(expected).sort());
+      expect(Object.keys(made).filter((file) => file !== traceName && file !== dpcTraceName).sort(), name).to.deep.equal(Object.keys(expected).sort());
       for (const [file, content] of Object.entries(expected)) {
         const a = content.split("\n");
         const b = made[file].split("\n");
