@@ -13,6 +13,7 @@ import {expect} from "chai";
 import express from "express";
 import {request as httpRequest} from "node:http";
 import {createHash} from "node:crypto";
+import {execFileSync} from "node:child_process";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -60,13 +61,14 @@ async function listen(app) {
   });
 }
 
-async function call(server, method, path) {
-  const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {method});
+async function call(server, method, path, headers) {
+  const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {method, headers});
   return {
     status: response.status,
     type: response.headers.get("content-type"),
     length: response.headers.get("content-length"),
     etag: response.headers.get("etag"),
+    history: response.headers.get("x-osd-history"),
     body: Buffer.from(await response.arrayBuffer()).toString("utf8"),
   };
 }
@@ -111,6 +113,99 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
   const withAbap = (options, runner = abapSide) => ({...options, abap: counted(runner),
     abapServed: (by, req) => served.push(`${by} ${req.method} ${req.originalUrl}`)});
   const store = () => new ObjectStore({root, libs: []});
+
+  it("versions slice: every feed, source and refusal is served by ABAP and byte-equal", async () => {
+    const versionRoot = mkdtempSync(join(tmpdir(), "osd-adt-ver-gate-"));
+    const file = (name, value) => writeFileSync(join(versionRoot, "src", name), value);
+    const git = (...args) => execFileSync("git", args, {cwd: versionRoot, stdio: ["ignore", "pipe", "pipe"]});
+    try {
+      mkdirSync(join(versionRoot, "src"));
+      file("zcl_osd_ver.clas.abap", "CLASS zcl_osd_ver DEFINITION. ENDCLASS.\nCLASS zcl_osd_ver IMPLEMENTATION. ENDCLASS.\n");
+      file("zcl_osd_ver.clas.locals_imp.abap", "* first include\n");
+      file("zif_osd_ver.intf.abap", "INTERFACE zif_osd_ver. ENDINTERFACE.\n");
+      file("zosd_ver.prog.abap", "REPORT zosd_ver.\n");
+      file("zosd_ver.ddls.asddls", "define view entity ZOSD_VER_ENTITY as select from zosd_stub { mandt }\n");
+      git("init", "-q");
+      git("config", "user.name", "Test Author");
+      git("config", "user.email", "test@example.invalid");
+      git("add", ".");
+      git("commit", "-q", "-m", "first & <one> "+ "x".repeat(90));
+      file("zcl_osd_ver.clas.abap", "CLASS zcl_osd_ver DEFINITION. ENDCLASS.\nCLASS zcl_osd_ver IMPLEMENTATION. * second\nENDCLASS.\n");
+      file("zcl_osd_ver.clas.locals_imp.abap", "* second include\n");
+      git("commit", "-q", "-am", "second class revision");
+      file("zcl_osd_ver.clas.abap", "CLASS zcl_osd_ver DEFINITION. ENDCLASS.\nCLASS zcl_osd_ver IMPLEMENTATION. * active\nENDCLASS.\n");
+      const shared = new ObjectStore({root: versionRoot, libs: []});
+      const node = await mount({store: shared});
+      const ported = await mount(withAbap({store: shared}));
+      const bases = [
+        "/sap/bc/adt/oo/classes/zcl_osd_ver/source/main/versions",
+        "/sap/bc/adt/oo/classes/zcl_osd_ver/includes/implementations/versions",
+        "/sap/bc/adt/oo/classes/zcl_osd_ver/includes/testclasses/versions",
+        "/sap/bc/adt/oo/interfaces/zif_osd_ver/includes/main/versions",
+        "/sap/bc/adt/programs/programs/zosd_ver/source/main/versions",
+        "/sap/bc/adt/ddic/ddl/sources/zosd_ver/versions",
+        "/sap/bc/adt/ddic/ddl/sources/zosd_ver_entity/versions",
+      ];
+      const cases = bases.map((path) => ["GET", path]);
+      for (const base of bases) {
+        for (const version of ["00000", "00001", "00002", "99999", "bad"]) {
+          cases.push(["GET", `${base}/19700101101123/${version}/content`]);
+        }
+      }
+      cases.push(["GET", "/sap/bc/adt/oo/interfaces/zif_osd_ver/includes/definitions/versions"]);
+      cases.push(["GET", "/sap/bc/adt/oo/classes/zcl_osd_ver/includes/unknown/versions"]);
+      cases.push(["GET", "/sap/bc/adt/oo/classes/zcl_osd_ver_none/source/main/versions"]);
+      cases.push(["HEAD", bases[0]]);
+      for (const [method, path] of cases) {
+        const expected = await call(node, method, path);
+        served.length = 0;
+        const actual = await call(ported, method, path);
+        expect(actual, `${method} ${path}`).to.deep.equal(expected);
+        expect(served, `${method} ${path}`).to.deep.equal([`ABAP ${method} ${path}`]);
+      }
+      const feed = await call(node, "GET", bases[0]);
+      expect(feed.body).to.contain("first &amp; &lt;one&gt; " + "x".repeat(90));
+      served.length = 0;
+      const tag = await call(ported, "GET", bases[0], {"If-None-Match": `W/\"${feed.etag}\"`});
+      expect(tag).to.deep.equal(await call(node, "GET", bases[0], {"If-None-Match": `W/\"${feed.etag}\"`}));
+      expect(tag.status).to.equal(304);
+      expect(served).to.deep.equal([`ABAP GET ${bases[0]}`]);
+      // If-None-Match that is no tag of this body: shorter than the W/ prefix,
+      // a wildcard, a list; and a matching one on a content route
+      const content = `${bases[0]}/19700101101123/00000/content`;
+      const source = await call(node, "GET", content);
+      for (const [path, header] of [[bases[0], "*"], [bases[0], "a"], [bases[0], `"x", W/"${feed.etag}"`],
+        [content, `"${source.etag}"`], [content, "*"]]) {
+        served.length = 0;
+        const actual = await call(ported, "GET", path, {"If-None-Match": header});
+        expect(actual, `${path} If-None-Match: ${header}`).to.deep.equal(await call(node, "GET", path, {"If-None-Match": header}));
+        expect(served, `${path} If-None-Match: ${header}`).to.deep.equal([`ABAP GET ${path}`]);
+      }
+    } finally {
+      rmSync(versionRoot, {recursive: true, force: true});
+    }
+  });
+
+  it("versions slice: a tree without git has one active version and the same history note", async () => {
+    const versionRoot = mkdtempSync(join(tmpdir(), "osd-adt-ver-nogit-"));
+    try {
+      mkdirSync(join(versionRoot, "src"));
+      writeFileSync(join(versionRoot, "src", "zosd_ver.prog.abap"), "REPORT zosd_ver.\n");
+      const shared = new ObjectStore({root: versionRoot, libs: []});
+      const node = await mount({store: shared});
+      const ported = await mount(withAbap({store: shared}));
+      const path = "/sap/bc/adt/programs/programs/zosd_ver/source/main/versions";
+      const expected = await call(node, "GET", path);
+      served.length = 0;
+      const actual = await call(ported, "GET", path);
+      expect(actual).to.deep.equal(expected);
+      expect(actual.history).to.match(/^none: /);
+      expect(actual.body.match(/<atom:entry>/g)).to.have.length(1);
+      expect(served).to.deep.equal([`ABAP GET ${path}`]);
+    } finally {
+      rmSync(versionRoot, {recursive: true, force: true});
+    }
+  });
 
   before(async () => {
     const {cl_express_icf_shim: shim} = await output("cl_express_icf_shim.clas.mjs");
@@ -284,7 +379,12 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     const paths = ["/sap/bc/adt/packages/zpkg", "/sap/bc/adt/packages/valuehelps/x", "/sap/bc/adt/packages/",
       "/sap/bc/adt/packages//x", "/SAP/bc/ADT/Discovery/", "/sap/bc/adt/discovery", "/sap/bc/adt/oo/classes/zcl_x/includes",
       "/sap/bc/adt/oo/classes//includes", "/sap/bc/adt", "/sap/bc/adt/", "/sap/bc/other", SYSINFO, `${SYSINFO}/`,
-      `${SYSINFO}/x`, "/sap/bc/adt/compatibility/graph", "/sap/bc/adt/packages/%zz", "/sap/bc/adt//packages/zpkg"];
+      `${SYSINFO}/x`, "/sap/bc/adt/compatibility/graph", "/sap/bc/adt/packages/%zz", "/sap/bc/adt//packages/zpkg",
+      "/sap/bc/adt/oo/classes/zcl_x/source/main/versions",
+      "/sap/bc/adt/oo/classes/zcl_x/source/main/versions/19700101101123/00000/content",
+      "/sap/bc/adt/oo/interfaces/zif_x/includes/main/versions",
+      "/sap/bc/adt/ddic/ddl/sources/zx/versions",
+      "/sap/bc/adt/programs/programs/zx/source/main/versions"];
     for (const table of [real, synthetic]) {
       const rows = routeRows(table);
       for (const method of ["GET", "HEAD", "POST", "DELETE"]) {

@@ -18,6 +18,11 @@ CLASS zcl_osd_adt_types DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS lockable
       RETURNING VALUE(rt_types) TYPE tt_type.
 
+    "! The Node facade's SOURCE_TYPES, derived from TYPES.source in
+    "! tools/osd-store.mjs (the six source collections, in that order).
+    CLASS-METHODS sources
+      RETURNING VALUE(rt_types) TYPE tt_type.
+
     "! the type whose collection a path names: the path without its last
     "! segment, compared without case, as the router matched it; initial
     "! when no lockable collection matches
@@ -34,13 +39,17 @@ ENDCLASS.
 CLASS zcl_osd_adt_types IMPLEMENTATION.
 
   METHOD lockable.
+    rt_types = sources( ).
+    add( EXPORTING iv_type = `DEVC` iv_collection = `packages` CHANGING ct_types = rt_types ).
+  ENDMETHOD.
+
+  METHOD sources.
     add( EXPORTING iv_type = `CLAS` iv_collection = `oo/classes` CHANGING ct_types = rt_types ).
     add( EXPORTING iv_type = `INTF` iv_collection = `oo/interfaces` CHANGING ct_types = rt_types ).
     add( EXPORTING iv_type = `PROG` iv_collection = `programs/programs` CHANGING ct_types = rt_types ).
     add( EXPORTING iv_type = `DDLS` iv_collection = `ddic/ddl/sources` CHANGING ct_types = rt_types ).
     add( EXPORTING iv_type = `SRVD` iv_collection = `ddic/srvd/sources` CHANGING ct_types = rt_types ).
     add( EXPORTING iv_type = `INCL` iv_collection = `programs/includes` CHANGING ct_types = rt_types ).
-    add( EXPORTING iv_type = `DEVC` iv_collection = `packages` CHANGING ct_types = rt_types ).
   ENDMETHOD.
 
   METHOD add.

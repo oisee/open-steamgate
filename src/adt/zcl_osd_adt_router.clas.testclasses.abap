@@ -17,9 +17,34 @@ CLASS ltcl_match DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL
     METHODS a_param_is_never_empty FOR TESTING RAISING cx_static_check.
     METHODS the_rest_is_the_hosts FOR TESTING RAISING cx_static_check.
     METHODS a_host_row_is_not_served FOR TESTING RAISING cx_static_check.
+    METHODS versions_rows FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
 CLASS ltcl_match IMPLEMENTATION.
+
+  METHOD versions_rows.
+    DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
+    DATA ls_route TYPE zcl_osd_adt_router=>ty_route.
+    DATA lv_found TYPE abap_bool.
+    DATA lt_paths TYPE string_table.
+    DATA lv_path TYPE string.
+    lt_routes = zcl_osd_adt_router=>routes( ).
+    APPEND `/sap/bc/adt/oo/classes/zcl_x/source/main/versions` TO lt_paths.
+    APPEND `/sap/bc/adt/oo/classes/zcl_x/source/main/versions/19700101101123/00000/content` TO lt_paths.
+    APPEND `/sap/bc/adt/oo/classes/zcl_x/includes/testclasses/versions` TO lt_paths.
+    APPEND `/sap/bc/adt/oo/interfaces/zif_x/includes/main/versions/19700101101123/00000/content` TO lt_paths.
+    APPEND `/sap/bc/adt/ddic/ddl/sources/zx/versions` TO lt_paths.
+    APPEND `/sap/bc/adt/programs/programs/zx/source/main/versions` TO lt_paths.
+    APPEND `/sap/bc/adt/programs/includes/zx/source/main/versions` TO lt_paths.
+    APPEND `/sap/bc/adt/ddic/srvd/sources/zx/source/main/versions` TO lt_paths.
+    LOOP AT lt_paths INTO lv_path.
+      zcl_osd_adt_router=>match( EXPORTING it_routes = lt_routes iv_method = `HEAD` iv_path = lv_path
+                                IMPORTING ev_found = lv_found es_route = ls_route ).
+      cl_abap_unit_assert=>assert_true( lv_found ).
+      cl_abap_unit_assert=>assert_equals( act = ls_route-handler exp = `ZCL_OSD_ADT_VERSIONS` ).
+      cl_abap_unit_assert=>assert_equals( act = ls_route-served_by exp = zcl_osd_adt_router=>c_abap ).
+    ENDLOOP.
+  ENDMETHOD.
 
   METHOD setup.
     DATA ls_route TYPE zcl_osd_adt_router=>ty_route.

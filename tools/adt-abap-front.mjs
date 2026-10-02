@@ -192,7 +192,7 @@ export function abapFront(options) {
     // (`.end()`), unless it is typed and not a HEAD: the Node façade answers
     // that with `.type(t).send("")`, and express gives it an ETag (UNLOCK)
     const typed = answer.headers.some(([name]) => name.toLowerCase() === "content-type");
-    if (answer.body.length === 0 && (typed === false || req.method === "HEAD")) res.end();
+    if (answer.body.length === 0 && (typed === false || req.method === "HEAD" || answer.code === 304)) res.end();
     else res.send(answer.body);
   };
 }

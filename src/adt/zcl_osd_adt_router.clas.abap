@@ -95,6 +95,30 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
       add( EXPORTING iv_method = `POST` iv_pattern = lv_pattern iv_handler = `ZCL_OSD_ADT_LOCK`
            CHANGING ct_routes = rt_routes ).
     ENDLOOP.
+*   Versions use the same source collections as the Node facade. These
+*   specific GET rows precede the HOST catch-all and cannot shadow POST LOCK.
+    lt_types = zcl_osd_adt_types=>sources( ).
+    LOOP AT lt_types INTO ls_type.
+      lv_pattern = c_base && `/` && ls_type-collection && `/:name/source/main/versions`.
+      add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern iv_handler = `ZCL_OSD_ADT_VERSIONS`
+           CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern && `/:stamp/:version/content`
+                     iv_handler = `ZCL_OSD_ADT_VERSIONS` CHANGING ct_routes = rt_routes ).
+      IF ls_type-type = `DDLS`.
+        lv_pattern = c_base && `/` && ls_type-collection && `/:name/versions`.
+        add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern iv_handler = `ZCL_OSD_ADT_VERSIONS`
+             CHANGING ct_routes = rt_routes ).
+        add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern && `/:stamp/:version/content`
+                       iv_handler = `ZCL_OSD_ADT_VERSIONS` CHANGING ct_routes = rt_routes ).
+      ENDIF.
+      IF ls_type-type = `CLAS` OR ls_type-type = `INTF`.
+        lv_pattern = c_base && `/` && ls_type-collection && `/:name/includes/:include/versions`.
+        add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern iv_handler = `ZCL_OSD_ADT_VERSIONS`
+             CHANGING ct_routes = rt_routes ).
+        add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern && `/:stamp/:version/content`
+                       iv_handler = `ZCL_OSD_ADT_VERSIONS` CHANGING ct_routes = rt_routes ).
+      ENDIF.
+    ENDLOOP.
 *   everything else is still the Node facade's, until its group moves
     add( EXPORTING iv_method = `*` iv_pattern = `/sap/bc/adt/*` iv_served_by = c_host
          CHANGING ct_routes = rt_routes ).
