@@ -27,7 +27,6 @@
 // the Node façade answers one -- the ADT exception document, 500,
 // ExceptionInternalError in our namespace -- for every request, a HOST row
 // included: no session was resolved, so nothing may go past the gate.
-import {waitUnitWarmup} from "./osd-unit.mjs";
 import {withSystem} from "./osd-store-destination.mjs";
 
 export const HANDLER = "ZCL_OSD_ADT_HANDLER";
@@ -270,6 +269,7 @@ export function abapFront(options) {
       // Discovery must wait before acquiring the shared work process.
       if (options.store !== undefined && ["GET", "HEAD"].includes(req.method)
         && /^\/sap\/bc\/adt\/core\/http\/unit\/object\/?$/i.test(path)) {
+        const {waitUnitWarmup} = await import("./osd-unit.mjs");
         await waitUnitWarmup(options.store);
       }
       record = await withSystem((kind, name, json) => system(kind, name, req, json),
