@@ -1509,6 +1509,14 @@ Labels follow the release rule: only a must blocks its tag.
   `osd-dialog-step` lesson). ABAP side: `ENQUEUE_<obj>` / `DEQUEUE_<obj>` generated from lock objects (abapGit
   `ENQU`), `DEQUEUE_ALL`, `ENQUEUE_READ`. Gate: every E0 fixture SAME on Go and Node. Owners: stoker (Go), dell
   (ABAP generation, Node host).
+  **Done 2026-10-02** (#393 Go, #403 Node core, #410 every host through the generated modules): 77/77 on the Go
+  and Node cores; 73/77 as ABAP, the 4 `update-window-*` cases skipped by name -- the item below.
+- should: **an asynchronous update task** (`CALL FUNCTION ... IN UPDATE TASK` queued until COMMIT WORK, V1 run
+  after it, `COMMIT WORK AND WAIT` waiting for it, ROLLBACK discarding the queue). Today the runtime calls an
+  update module at once, so the window between COMMIT WORK and the update -- where the committed session's own
+  `_SCOPE 2` lock answers 601 -- does not exist locally (ANOMALY-2026-10-02-update-task-synchronous). Needs the
+  transpiler to mark `IN UPDATE TASK` calls (today it emits a plain call) or a runtime hook; the gate is the 4
+  skipped `update-window-*` cases in `test/osd-enq-abap.mjs`. Owner: stoker.
 - must: **ADT façade skeleton in ABAP** (ADR 0007): an ICF handler for `/sap/bc/adt/*`, our own URL router, CSRF,
   the stateful session; ADT LOCK/UNLOCK call ENQ E1. The ABAP façade replaces the Node one only when vsp's
   scenarios and the A4H diff harness pass for what it serves (migration by diff against OSG-JS). Owner: dell.
