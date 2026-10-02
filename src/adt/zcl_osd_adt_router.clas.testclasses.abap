@@ -28,8 +28,9 @@ CLASS ltcl_match IMPLEMENTATION.
     DATA ls_route TYPE zcl_osd_adt_router=>ty_route.
     lt_routes = zcl_osd_adt_router=>routes( ).
     zcl_osd_adt_router=>match( EXPORTING it_routes = lt_routes iv_method = `GET` iv_path = `/sap/bc/adt/packages/SETTINGS` IMPORTING es_route = ls_route ).
-    cl_abap_unit_assert=>assert_equals( act = ls_route-served_by exp = zcl_osd_adt_router=>c_host ).
-    cl_abap_unit_assert=>assert_equals( act = ls_route-pattern exp = `/sap/bc/adt/*` ).
+*   B1's static row precedes packages/:name and matches without case
+    cl_abap_unit_assert=>assert_equals( act = ls_route-served_by exp = zcl_osd_adt_router=>c_abap ).
+    cl_abap_unit_assert=>assert_equals( act = ls_route-pattern exp = `/sap/bc/adt/packages/settings` ).
     zcl_osd_adt_router=>match( EXPORTING it_routes = lt_routes iv_method = `GET` iv_path = `/sap/bc/adt/packages/%73ettings` IMPORTING es_route = ls_route ).
     cl_abap_unit_assert=>assert_equals( act = ls_route-served_by exp = zcl_osd_adt_router=>c_abap ).
     cl_abap_unit_assert=>assert_equals( act = ls_route-pattern exp = `/sap/bc/adt/packages/:name` ).

@@ -128,6 +128,8 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
     ls_answer = store( `COMMANDS` ).
     TRY.
         lo_json = zcl_ajson=>parse( ls_answer-json ).
+*       membership only, so order does not matter here; anything that
+*       reaches the wire uses ZCL_OSD_ADT_JSON=>ORDERED_MEMBERS
         lt_commands = lo_json->array_to_string_table( `/commands` ).
       CATCH zcx_ajson_error.
         lx_error = zcx_osd_adt=>internal( `invalid COMMANDS answer` ).
