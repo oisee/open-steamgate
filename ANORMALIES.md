@@ -3362,3 +3362,35 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Upstream issue: none; branch `generate-subroutine-pool-refusal` in abaplint/transpiler, PR held for the critic gate
 - Regression-test location: `tools/gogen/semantics.mjs` (`ZCL_GOGEN_T_GENPOOL`), `tools/gogen/unit.test.mjs`; upstream `test/statements/generate_subroutine.ts`, `test/statements/perform.ts`
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-10-02-casting-i-from-x-field — ASSIGN … CASTING TYPE i over an x field: a system dumps, the runtime writes nothing
+
+- Status: `open`
+- Discovery date: `2026-10-02`
+- Affected versions: OSD `vscode-v0.6.1511` (JS runtime); not checked on later tags
+- Affected ABAP statement, runtime API or adapter: `ASSIGN <row>+off(4) TO <i> CASTING.` with `<row> TYPE x LENGTH 4096` and `<i> TYPE i`
+- Minimal ABAP reproducer: `FIELD-SYMBOLS <row> TYPE x4096. FIELD-SYMBOLS <i> TYPE i. READ TABLE mt_mem INDEX 1 ASSIGNING <row>. ASSIGN <row>+0(4) TO <i> CASTING. <i> = 16909060.` then read the four bytes back with `<row>+0(1)` … `<row>+3(1)`, and read `<i>` back
+- Exact command used to run it: oisee/abapiti `abap/bench/zcl_abapiti_bench_mem`, model C (`st_i32` / `ld_i32` with `mv_model = 'C'`), deployed to OSD with vsp and run as ABAP Unit; the same class run on a system (release 758, 2026-10-02) through ABAP Unit
+- Expected SAP behaviour: runtime error `ASSIGN_BASE_WRONG_ALIGNMENT`, already at offset 0 (x has 1-byte alignment, i needs 4)
+- Actual open-abap behaviour: no runtime error; the write through `<i>` leaves the bytes unchanged (they read back as 00), and reading `<i>` fails with "Conversion no number"
+- Impact on open-steamgate: code that relies on CASTING over byte fields passes or fails differently from a system; a program that would dump on a system runs on with wrong data
+- Smallest safe workaround: do not CASTING into i over an x field; move the bytes with offset access and convert x LENGTH 4 to i
+- Upstream issue: none yet
+- Regression-test location: none yet; abapiti dropped model C after the measurement
+- Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-10-02-get-run-time-units — GET RUN TIME FIELD counts in milliseconds and can go backwards
+
+- Status: `open` (osgo measures in monotonic microseconds since #473; the JS runtime does not)
+- Discovery date: `2026-10-02`
+- Affected versions: OSD `vscode-v0.6.1511` (JS runtime)
+- Affected ABAP statement, runtime API or adapter: `GET RUN TIME FIELD lv_t0. … GET RUN TIME FIELD lv_t1. lv_d = lv_t1 - lv_t0.`
+- Minimal ABAP reproducer: two `GET RUN TIME FIELD` around a loop of a few thousand statements, repeated; compare the difference with the wall-clock time of the run
+- Exact command used to run it: oisee/abapiti `abap/bench/zcl_abapiti_bench_mem` console run (`if_oo_adt_classrun`) on OSD; the same class on a system (release 758, 2026-10-02), three runs and `run_one( )` per memory size
+- Expected SAP behaviour: microseconds, never negative; the sum of the measured differences matches the run time
+- Actual open-abap behaviour: the ABAP Unit run of one model took 7.7 s while its measured differences summed to about 7,800, so the unit is milliseconds; several differences came out negative (shown as `15-`, `79-`, `132-`, `482-`)
+- Impact on open-steamgate: timings measured on OSD cannot be compared with a system, and a negative difference can break code that divides by it or uses it as a timeout
+- Smallest safe workaround: measure performance on a system or on osgo
+- Upstream issue: none yet
+- Regression-test location: none yet
+- Upstream version containing a fix: `unknown`
