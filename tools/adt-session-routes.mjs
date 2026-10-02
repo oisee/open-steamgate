@@ -1,5 +1,5 @@
 // Node routes retained for child mode and the byte-equality oracle.
-// The ABAP front answers these rows before this fallback is reached.
+// ABAP mode does not mount them: a stale front must not end a session in a second step.
 import {createHash} from "node:crypto";
 import {parseCookies, sessionIdOf} from "./adt-session.mjs";
 const BASE = "/sap/bc/adt";

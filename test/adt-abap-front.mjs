@@ -97,6 +97,28 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     headers: {cookie: `sap-contextid=${client.id}`, "x-csrf-token": client.token, "x-sap-adt-sessiontype": "stateful",
       ...extra.headers}});
 
+  it("mounts Node session routes only in child mode, never behind an ABAP front", () => {
+    const paths = [`${BASE}/core/http/sessions`, `${BASE}/core/http/sessions/:id`, "/sap/public/bc/icf/logoff"];
+    for (const abap of [undefined, abapRunner({handler, step: dialogStep})]) {
+      const {router} = adtRouter({store: new ObjectStore({root, libs: []}), data: {}, watch: false,
+        logMisses: false, transpileOnActivate: false, abap});
+      const mounted = router.stack.filter((layer) => paths.includes(layer.route?.path)).map((layer) => layer.route.path);
+      expect(mounted).to.deep.equal(abap === undefined ? paths : []);
+    }
+  });
+
+  it("logoff enters the front exactly once and is served by ABAP", async () => {
+    const one = await logon();
+    entered.length = 0;
+    served.length = 0;
+    const path = "/sap/public/bc/icf/logoff";
+    const res = await fetch(`${url}${path}`, {headers: {cookie: `sap-contextid=${one.id}`}});
+    expect([res.status, await res.text()]).to.deep.equal([200, "logged off"]);
+    expect(entered).to.deep.equal([`GET ${path}`]);
+    expect(served).to.deep.equal([`ABAP GET ${path}`]);
+    expect(await sessionRow(one.id)).to.equal(undefined);
+  });
+
   it("every ADT request enters the handler once, whoever serves it", async () => {
     const one = await logon();
     const paths = [

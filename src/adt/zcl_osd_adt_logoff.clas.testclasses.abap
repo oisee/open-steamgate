@@ -6,6 +6,7 @@ CLASS ltcl_logoff DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINA
     METHODS teardown.
     METHODS precedence FOR TESTING RAISING cx_static_check.
     METHODS empty_context FOR TESTING RAISING cx_static_check.
+    METHODS failing_identity FOR TESTING RAISING cx_static_check.
     METHODS cookie_end IMPORTING iv_empty TYPE abap_bool RAISING cx_static_check.
 ENDCLASS.
 CLASS ltcl_logoff IMPLEMENTATION.
@@ -92,5 +93,29 @@ CLASS ltcl_logoff IMPLEMENTATION.
   ENDMETHOD.
   METHOD empty_context.
     cookie_end( abap_true ).
+  ENDMETHOD.
+  METHOD failing_identity.
+*   Resolve the sessions before making the optional host lookup fail.
+    DATA lo_route TYPE REF TO zcl_osd_adt_logoff.
+    DATA lo_mem TYPE REF TO zcl_osd_adt_session_mem.
+    DATA li_mem TYPE REF TO zif_osd_adt_session.
+    DATA ls_one TYPE zif_osd_adt_session=>ty_session.
+    DATA ls_request TYPE zif_osd_adt_route=>ty_request.
+    DATA ls_response TYPE zif_osd_adt_route=>ty_response.
+    DATA ls_header TYPE ihttpnvp.
+    DATA lt_fields TYPE tihttpnvp.
+    CREATE OBJECT lo_route.
+    CREATE OBJECT lo_mem.
+    li_mem = lo_mem.
+    ls_one = li_mem->resolve( it_cookies = lt_fields it_headers = lt_fields ).
+    ls_request-sessions = li_mem.
+    ls_header-name = `cookie`.
+    ls_header-value = `sap-contextid=` && ls_one-id.
+    APPEND ls_header TO ls_request-headers.
+    WRITE '@KERNEL abap.Classes.ZCL_OSD_ADT_HOST.identity = async () => { throw new Error("identity unavailable"); };'.
+    ls_response = lo_route->zif_osd_adt_route~handle( ls_request ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-status exp = 200 ).
+    cl_abap_unit_assert=>assert_equals( act = ls_response-body exp = `logged off` ).
+    cl_abap_unit_assert=>assert_false( li_mem->token_valid( iv_id = ls_one-id iv_token = ls_one-token ) ).
   ENDMETHOD.
 ENDCLASS.

@@ -811,7 +811,7 @@ export function adtRouter(options = {}) {
     res.redirect(307, url.toString());
   });
 
-  sessionRoutes(router, sessions, answer);
+  if (options.abap === undefined) sessionRoutes(router, sessions, answer);
 
   // ---- Virtual folders: how a cloud project builds its tree.
   //
