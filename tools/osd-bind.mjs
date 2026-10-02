@@ -46,43 +46,79 @@ export function describeBind(env = process.env) {
   return bindAddresses(env).join(", ");
 }
 
-/**
- * Listen `server` (http, https, net) on `port` at the configured host. With
- * the loopback default, ::1 is opened as well once the first listener is up
- * (on its actual port, so port 0 works): a plain net listener that hands each
- * connection to `server`, so requests, TLS and upgrades are answered by the
- * one server and its handlers. ::1 is best effort: a host without IPv6 just
- * has the IPv4 loopback. Returns `server`; `server.close` closes the twin too.
- */
-export function listenBound(server, port, env = process.env, callback) {
+/** the startup hint for a loopback-only binding, or undefined */
+export function bindHint(env = process.env) {
   const host = bindHost(env);
-  let twin;
-  if (isLoopbackDefault(env)) {
-    server.once("listening", () => {
-      const actual = server.address()?.port ?? port;
-      twin = createServer({pauseOnConnect: false}, (socket) => server.emit("connection", socket));
-      twin.on("error", (error) => {
-        // no IPv6 on this host, or ::1 taken by somebody else: the IPv4
-        // loopback stands, and a client resolving localhost falls back to it
-        if (!["EADDRNOTAVAIL", "EAFNOSUPPORT", "EADDRINUSE"].includes(error?.code)) {
-          console.error(`::1 listener on ${actual}: ${error?.message ?? error}`);
-        }
-        twin = undefined;
-      });
-      twin.listen(actual, "::1");
-      twin.unref?.();
-    });
-    const close = server.close.bind(server);
-    server.close = (...args) => {
-      twin?.close();
-      twin = undefined;
-      return close(...args);
-    };
-  }
-  return server.listen(port, host, callback);
+  return host === LOOPBACK || host === "::1"
+    ? "listening on localhost only; for the network set OSD_BIND=0.0.0.0"
+    : undefined;
 }
 
-/** for a re-listen after EADDRINUSE: the same host, no second twin */
-export function relisten(server, port, env = process.env) {
-  return server.listen(port, bindHost(env));
+const INSTALLED = Symbol("osd-bind");
+
+/**
+ * Listen `server` (http, https, net) on `port` at the configured host. With
+ * the loopback default, ::1 is opened as well each time the server starts
+ * listening (on its actual port, so port 0 works): a plain net listener that
+ * hands each connection to `server`, so requests, TLS and upgrades are
+ * answered by the one server and its handlers. ::1 is best effort: a host
+ * without IPv6 just has the IPv4 loopback.
+ *
+ * Idempotent across close and listen: `server.close(cb)` closes the twin as
+ * well and calls back once both have closed (the twin waits for its own
+ * connections, like the primary), and a later `listen` -- relisten() or a
+ * plain server.listen -- opens a fresh twin. Returns `server`.
+ */
+export function listenBound(server, port, env = process.env, callback) {
+  install(server, env);
+  return server.listen(port, bindHost(env), callback);
+}
+
+/** for a re-listen after close or EADDRINUSE: the same host, a fresh twin */
+export function relisten(server, port, env = process.env, callback) {
+  install(server, env);
+  return server.listen(port, bindHost(env), callback);
+}
+
+function install(server, env) {
+  if (server[INSTALLED] !== undefined) {
+    server[INSTALLED].env = env;
+    return;
+  }
+  const state = {env, twin: undefined};
+  server[INSTALLED] = state;
+  server.on("listening", () => {
+    if (!isLoopbackDefault(state.env) || state.twin !== undefined) return;
+    const actual = server.address()?.port;
+    const twin = createServer((socket) => server.emit("connection", socket));
+    state.twin = twin;
+    twin.on("error", (error) => {
+      // no IPv6 on this host, or ::1 taken by somebody else: the IPv4
+      // loopback stands, and a client resolving localhost falls back to it
+      if (!["EADDRNOTAVAIL", "EAFNOSUPPORT", "EADDRINUSE"].includes(error?.code)) {
+        console.error(`::1 listener on ${actual}: ${error?.message ?? error}`);
+      }
+      if (state.twin === twin) state.twin = undefined;
+    });
+    twin.listen(actual, "::1");
+    twin.unref?.();
+  });
+  const close = server.close.bind(server);
+  server.close = (cb) => {
+    const twin = state.twin;
+    state.twin = undefined;
+    let pending = twin?.listening ? 2 : 1;
+    let first;
+    const done = (error) => {
+      first ??= error;
+      if (--pending === 0 && typeof cb === "function") cb(first);
+    };
+    if (twin?.listening) {
+      twin.close(() => done());
+    } else {
+      twin?.close();
+    }
+    close((error) => done(error));
+    return server;
+  };
 }

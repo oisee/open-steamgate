@@ -30,7 +30,13 @@ app.use(express.static(build));
 const port = Number(process.env.STG_PREVIEW_PORT ?? 3031);
 const tlsPort = Number(process.env.STG_PREVIEW_TLS_PORT ?? port + 1);
 
-app.listen(port, () => console.log(`preview build on http://localhost:${port}/`));
+// every interface on purpose, unlike the system (tools/osd-bind.mjs): this
+// serves static files to another machine's browser, and the TLS port below
+// exists for exactly that. It says so when it starts.
+app.listen(port, () => {
+  console.log(`preview build on http://localhost:${port}/`);
+  console.log("listening on all interfaces on purpose (a LAN preview of static files, no backend); OSD_BIND does not apply");
+});
 
 // A preview may need a certificate for a LAN address that was assigned after
 // the main OSD certificate was minted. Keep its key separate from the main

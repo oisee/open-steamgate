@@ -15,7 +15,10 @@ import {createServer as createHttpsServer, get as httpsGet} from "node:https";
 import {mkdtempSync, rmSync} from "node:fs";
 import {networkInterfaces, tmpdir} from "node:os";
 import {join} from "node:path";
-import {bindAddresses, bindHost, listenBound} from "../tools/osd-bind.mjs";
+import {bindAddresses, bindHost, listenBound, relisten} from "../tools/osd-bind.mjs";
+import {forwardPorts} from "../tools/osd-tcp-forward.mjs";
+import {existsSync, readFileSync, readdirSync, statSync} from "node:fs";
+import {execFileSync} from "node:child_process";
 import {credentials, generate} from "../tools/osd-tls.mjs";
 import {closeProtocols, listenProtocols} from "../tools/protocols/server.mjs";
 
@@ -122,14 +125,17 @@ describe("bind address (OSD_BIND)", function () {
         expect(await reachable(address, one.port), `reachable on ${address}`).to.equal(false);
       }
       expect(one.log()).to.match(/bound to 127\.0\.0\.1/);
+      expect(one.log()).to.include("listening on localhost only; for the network set OSD_BIND=0.0.0.0");
     });
 
     it("answers a client that resolves localhost, to either loopback", async () => {
       one = await front({OSD_BIND: undefined});
-      expect(await answers(`http://localhost:${one.port}/`)).to.be.a("number");
-      expect(await answers(`http://localhost:${one.port}/`, {family: 4})).to.be.a("number");
+      // /osd/serving is answered by the front itself, also while the
+      // serving child is still booting
+      expect(await answers(`http://localhost:${one.port}/osd/serving`, {timeout: 30000})).to.be.a("number");
+      expect(await answers(`http://localhost:${one.port}/osd/serving`, {family: 4, timeout: 30000})).to.be.a("number");
       if (hasV6Loopback) {
-        expect(await answers(`http://localhost:${one.port}/`, {family: 6})).to.be.a("number");
+        expect(await answers(`http://localhost:${one.port}/osd/serving`, {family: 6, timeout: 30000})).to.be.a("number");
         expect(await reachable("::1", one.port)).to.equal(true);
       }
     });
@@ -141,6 +147,7 @@ describe("bind address (OSD_BIND)", function () {
       expect(await reachable(address, one.port)).to.equal(true);
       expect(await reachable("127.0.0.1", one.port)).to.equal(true);
       expect(one.log()).to.match(/bound to 0\.0\.0\.0/);
+      expect(one.log()).not.to.include("listening on localhost only");
     });
   });
 
@@ -191,12 +198,195 @@ describe("bind address (OSD_BIND)", function () {
     });
   });
 
+  describe("the ::1 twin across close and listen", () => {
+    const waitFor = async (check) => {
+      for (let i = 0; i < 40; i++) {
+        if (await check()) return true;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return false;
+    };
+
+    it("serves ::1 again after close and relisten", async function () {
+      if (!hasV6Loopback) this.skip();
+      const server = createHttpServer((req, res) => res.end("ok"));
+      await new Promise((resolve) => listenBound(server, 0, {}, resolve));
+      const {port} = server.address();
+      expect(await waitFor(() => reachable("::1", port))).to.equal(true);
+      await new Promise((resolve) => server.close(resolve));
+      expect(await reachable("::1", port)).to.equal(false);
+      await new Promise((resolve) => relisten(server, port, {}, resolve));
+      try {
+        expect(await waitFor(() => reachable("::1", port)), "::1 after relisten").to.equal(true);
+        expect(await answers(`http://[::1]:${port}/`, {agent: false})).to.equal(200);
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    });
+
+    it("calls close back only after an active ::1 request has ended", async function () {
+      if (!hasV6Loopback) this.skip();
+      let release;
+      const held = new Promise((resolve) => { release = resolve; });
+      let arrived;
+      const inside = new Promise((resolve) => { arrived = resolve; });
+      const server = createHttpServer(async (req, res) => {
+        arrived();
+        await held;
+        res.end("late");
+      });
+      await new Promise((resolve) => listenBound(server, 0, {}, resolve));
+      const {port} = server.address();
+      expect(await waitFor(() => reachable("::1", port))).to.equal(true);
+      const response = answers(`http://[::1]:${port}/`, {agent: false});
+      await inside;
+      let closed = false;
+      const closing = new Promise((resolve) => server.close(() => { closed = true; resolve(); }));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(closed, "close called back while a ::1 request was still running").to.equal(false);
+      release();
+      expect(await response).to.equal(200);
+      await closing;
+      expect(closed).to.equal(true);
+    });
+  });
+
+  describe("forwarders and stands", () => {
+    it("osd-tcp-forward listens on loopback unless --bind says otherwise", async () => {
+      const port = await freePort();
+      const {servers} = forwardPorts({host: "127.0.0.1", ports: [port]});
+      try {
+        await new Promise((resolve) => servers[0].listening ? resolve() : servers[0].once("listening", resolve));
+        expect(servers[0].address().address).to.equal("127.0.0.1");
+      } finally {
+        await Promise.all(servers.map((one) => new Promise((resolve) => one.close(resolve))));
+      }
+    });
+
+    const stand = async (command, args, env) => {
+      const port = await freePort();
+      const childEnv = {...process.env, ...env};
+      for (const key of Object.keys(childEnv)) if (childEnv[key] === undefined) delete childEnv[key];
+      const child = spawn(command, [...args(port)], {env: childEnv, stdio: "ignore"});
+      for (let i = 0; i < 100 && !await reachable("127.0.0.1", port); i++) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      return {port, child};
+    };
+    const standCases = [
+      ["o4dserve-js.mjs (Node)", "tools/gogen/.out/o4dserve/demo.mjs",
+        process.execPath, (port) => ["tools/gogen/o4dserve-js.mjs", "--listen", String(port), "--upstream", "http://127.0.0.1:9"]],
+      ["o4dserve (Go)", "tools/gogen/.out/o4dserve/o4dserve",
+        "tools/gogen/.out/o4dserve/o4dserve", (port) => ["-listen", `:${port}`, "-upstream", "http://127.0.0.1:9"]],
+    ];
+    for (const [name, built, command, args] of standCases) {
+      it(`${name}: a bare port stays on loopback, OSD_BIND=0.0.0.0 opens it`, async function () {
+        // the ZO4D stands proxy everything else to the loopback backend,
+        // ADT included; they exist only after node tools/gogen/o4dserve.mjs
+        if (!existsSync(built)) this.skip();
+        const address = outside();
+        let one = await stand(command, args, {OSD_BIND: undefined});
+        try {
+          expect(await reachable("127.0.0.1", one.port)).to.equal(true);
+          if (hasV6Loopback) expect(await reachable("::1", one.port), "::1").to.equal(true);
+          if (address !== undefined) expect(await reachable(address, one.port), `reachable on ${address}`).to.equal(false);
+        } finally {
+          await stop(one);
+        }
+        if (address === undefined) return;
+        one = await stand(command, args, {OSD_BIND: "0.0.0.0"});
+        try {
+          expect(await reachable(address, one.port)).to.equal(true);
+        } finally {
+          await stop(one);
+        }
+      });
+    }
+  });
+
+  // a listener added later must not bind every interface unasked: each call
+  // takes a host, goes through tools/osd-bind.mjs / osdbind, or is listed
+  // here with the reason it may
+  describe("no listener binds every interface unasked", () => {
+    const allowed = new Map([
+      ["scripts/serve-build.mjs", "the LAN preview of static files, all interfaces on purpose, and it says so"],
+      ["docker/image/free-instance.mjs", "a probe that binds and closes at once to find a free port"],
+      ["tools/gogen/go/cmd/osgo/main.go", "pprof on osdbind.PprofAddr, which keeps a bare port on the bind host"],
+      ["tools/gogen/go/cmd/osabap/sapgui.go", "-sapgui, default 127.0.0.1:3232"],
+      ["tools/gogen/go/osdbind/bind.go", "the module every Go listener goes through"],
+    ]);
+    const tracked = execFileSync("git", ["ls-files", "-z", "tools", "scripts", "web", "bin", "docker", "editors", "test/start.mjs", "test/run.mjs"],
+      {encoding: "utf8"}).split("\0").filter((f) => /\.(mjs|js|cjs|go)$/.test(f) && !/_test\.go$|\.test\.mjs$|node_modules|\/generated\//.test(f));
+
+    // the argument text of each .listen( call, split at its top-level commas
+    function listenCalls(text) {
+      const out = [];
+      for (const match of text.matchAll(/\.listen\(/g)) {
+        let depth = 1;
+        let i = match.index + match[0].length;
+        const start = i;
+        for (; i < text.length && depth > 0; i++) {
+          if ("([{".includes(text[i])) depth++;
+          else if (")]}".includes(text[i])) depth--;
+        }
+        const inner = text.slice(start, i - 1);
+        const args = [];
+        let level = 0;
+        let from = 0;
+        for (let j = 0; j < inner.length; j++) {
+          if ("([{".includes(inner[j])) level++;
+          else if (")]}".includes(inner[j])) level--;
+          else if (inner[j] === "," && level === 0) { args.push(inner.slice(from, j).trim()); from = j + 1; }
+        }
+        args.push(inner.slice(from).trim());
+        out.push({args: args.filter((a) => a !== ""), line: text.slice(0, match.index).split("\n").length});
+      }
+      return out;
+    }
+
+    it("Node: every .listen( names a host", () => {
+      const offenders = [];
+      for (const file of tracked.filter((f) => !f.endsWith(".go"))) {
+        if (allowed.has(file)) continue;
+        for (const {args, line} of listenCalls(readFileSync(file, "utf8"))) {
+          const [first, second] = args;
+          if (first === undefined || first.startsWith("{") || /sock|path|join\(/i.test(first)) continue; // options object or a unix socket
+          const hostless = second === undefined || /=>|^function\b|^(resolve|r|ok|done|cb|callback)$/.test(second);
+          if (hostless || args.some((a) => /^["'](0\.0\.0\.0|::)["']$/.test(a))) offenders.push(`${file}:${line} .listen(${args.join(", ")})`);
+        }
+      }
+      expect(offenders).to.deep.equal([]);
+    });
+
+    it("Go: every listener goes through osdbind", () => {
+      const offenders = [];
+      for (const file of tracked.filter((f) => f.endsWith(".go"))) {
+        if (allowed.has(file)) continue;
+        readFileSync(file, "utf8").split("\n").forEach((text, i) => {
+          if (/\b(ListenAndServe(TLS)?|net\.Listen)\(/.test(text) && !/^\s*\/\//.test(text)) offenders.push(`${file}:${i + 1} ${text.trim()}`);
+        });
+      }
+      expect(offenders).to.deep.equal([]);
+    });
+  });
+
   describe("the DIAG and RFC listeners (tools/protocols/server.mjs)", () => {
     it("bind loopback by default", async () => {
       const servers = await listenProtocols({INSTANCE: "11", STG_DIAG_PORT: "0", STG_RFC_PORT: "0", STG_PORT: "3030"});
       try {
         expect(servers.diag.address().address).to.equal("127.0.0.1");
         expect(servers.rfc.address().address).to.equal("127.0.0.1");
+        if (hasV6Loopback) {
+          // docs/docker.md: every listener answers both loopbacks
+          for (const server of [servers.diag, servers.rfc]) {
+            const port = server.address().port;
+            let up = false;
+            for (let i = 0; i < 20 && !(up = await reachable("::1", port)); i++) {
+              await new Promise((resolve) => setTimeout(resolve, 50));
+            }
+            expect(up, `::1:${port}`).to.equal(true);
+          }
+        }
       } finally {
         await closeProtocols(servers);
       }

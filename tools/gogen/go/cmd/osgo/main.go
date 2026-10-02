@@ -650,6 +650,9 @@ func main() {
 		go func(ln net.Listener) { log.Printf("listener %s: %v", ln.Addr(), server.Serve(ln)) }(extra)
 	}
 	ln := lns[0]
+	if hint := osdbind.Hint(binds); hint != "" && !addrExplicit {
+		log.Print(hint)
+	}
 	log.Printf("Listening on http://localhost:%d/  (launchpad /app/flp.html, OData %s/; bound to %s)", *port, odataBase, osdbind.Describe(lns))
 	// the status tables have this process in them before anybody asks, with
 	// the listener already open (its state is read off /proc/net/tcp)

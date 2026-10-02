@@ -26,7 +26,7 @@ import {applyAtStartup, currentRows} from "../tools/osd-icf-apply.mjs";
 import {seedAtStartup} from "../tools/osd-xref-seed.mjs";
 import {snapshot as statusSnapshot} from "../tools/osd-status.mjs";
 import {request as httpRequest, createServer as createHttpServer} from "node:http";
-import {bindAddresses, describeBind, listenBound, relisten} from "../tools/osd-bind.mjs";
+import {bindAddresses, bindHint, describeBind, listenBound, relisten} from "../tools/osd-bind.mjs";
 import {serveSandboxConfig} from "../tools/osd-sandbox-config.mjs";
 import {mountPortableCells} from "../tools/sqlscript-to-procedure-ir.mjs";
 
@@ -605,8 +605,10 @@ export function startServer(quiet) {
   }
 
   if (quiet !== true) {
-    console.log("Listening on http://localhost:" + PORT + "/sap/opu/odata/sap/  (bound to " + describeBind()
-      + (bindAddresses()[0] === "127.0.0.1" ? "; OSD_BIND=0.0.0.0 opens it to the network" : "; reachable from the network") + ")");
+    console.log("Listening on http://localhost:" + PORT + "/sap/opu/odata/sap/  (bound to " + describeBind() + ")");
+    if (bindHint() !== undefined) {
+      console.log(bindHint());
+    }
     console.log("ADT façade   on http://localhost:" + PORT + "/sap/bc/adt/core/discovery");
     if (secure === undefined) {
       console.log("No TLS: run `npm run osd:tls` to make a certificate, for a client that refuses plain HTTP");

@@ -16,9 +16,15 @@ for a client that resolves `localhost` to IPv6. One variable, `OSD_BIND`,
 read in one place (`tools/osd-bind.mjs`, and `tools/gogen/go/osdbind` for
 OSGo), sets the address of every listener: HTTP, HTTPS, the push channels on
 the HTTP port, DIAG and RFC (`STG_DIAG_HOST` / `STG_RFC_HOST` still override
-those two). The serving child behind the front stays on `127.0.0.1` whatever
-it says. The log line `Listening on ... (bound to ...)` and `bind` in
-`/osd/serving` say which addresses were taken.
+those two), the dev proxies and the ZO4D stands (`o4dserve`, a bare
+`-listen :port`). The serving child behind the front stays on `127.0.0.1`
+whatever it says. The log line `Listening on ... (bound to ...)`, `bind` in
+`/osd/serving` and `osd doctor` say which addresses were taken, and a
+loopback-only start prints `listening on localhost only; for the network set
+OSD_BIND=0.0.0.0`. OSGo's `-addr` wins over `OSD_BIND`. Two tools stay apart
+on purpose: `tools/osd-tcp-forward.mjs` exists to expose ports and takes
+`--bind` (default `127.0.0.1`), and `scripts/serve-build.mjs`, the LAN
+preview of static files, listens everywhere and says so.
 
 **A container is open.** The images and every compose file here set
 `OSD_BIND=0.0.0.0`, because a published port arrives on the container's own

@@ -131,3 +131,43 @@ func TestBindAllInterfaces(t *testing.T) {
 		}
 	}
 }
+
+func TestHint(t *testing.T) {
+	if Hint([]string{"127.0.0.1", "::1"}) == "" || Hint([]string{"127.0.0.1"}) == "" {
+		t.Fatal("loopback binding must give the hint")
+	}
+	if Hint([]string{"0.0.0.0"}) != "" || Hint([]string{"192.0.2.10"}) != "" {
+		t.Fatal("a network binding must not give the hint")
+	}
+}
+
+func TestListenFlagBarePortTakesTheBind(t *testing.T) {
+	for _, value := range []string{":0", "0"} {
+		lns, err := ListenFlag(value, env(nil))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, l := range lns {
+			if !l.Addr().(*net.TCPAddr).IP.IsLoopback() {
+				t.Errorf("%q bound %s", value, Describe(lns))
+			}
+			l.Close()
+		}
+	}
+	lns, err := ListenFlag(":0", env(map[string]string{"OSD_BIND": "0.0.0.0"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lns) != 1 || !lns[0].Addr().(*net.TCPAddr).IP.IsUnspecified() {
+		t.Errorf("OSD_BIND=0.0.0.0 bound %s", Describe(lns))
+	}
+	lns[0].Close()
+	lns, err = ListenFlag("127.0.0.1:0", env(map[string]string{"OSD_BIND": "0.0.0.0"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lns) != 1 || lns[0].Addr().(*net.TCPAddr).IP.String() != "127.0.0.1" {
+		t.Errorf("a named host must be taken as given: %s", Describe(lns))
+	}
+	lns[0].Close()
+}

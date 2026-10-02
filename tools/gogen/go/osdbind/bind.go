@@ -94,3 +94,36 @@ func Describe(lns []net.Listener) string {
 	}
 	return strings.Join(parts, ", ")
 }
+
+// Hint is the startup line for a loopback-only binding, "" otherwise.
+func Hint(addrs []string) string {
+	for _, a := range addrs {
+		if ip := net.ParseIP(a); ip == nil || !ip.IsLoopback() {
+			return ""
+		}
+	}
+	return "listening on localhost only; for the network set OSD_BIND=0.0.0.0"
+}
+
+// ListenFlag opens a -listen style address. One that names a host is taken
+// as given; a bare port (":3092" or "3092") takes the OSD_BIND addresses,
+// so a default of ":port" no longer means every interface.
+func ListenFlag(value string, getenv func(string) string) ([]net.Listener, error) {
+	value = strings.TrimSpace(value)
+	if !strings.Contains(value, ":") {
+		value = ":" + value
+	}
+	host, portText, err := net.SplitHostPort(value)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		return nil, err
+	}
+	addrs := []string{host}
+	if host == "" {
+		addrs = Selected("", false, getenv)
+	}
+	return ListenAll(addrs, port)
+}
