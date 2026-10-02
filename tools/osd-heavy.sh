@@ -20,10 +20,11 @@
 # the locks go with it. A background process the command leaves behind inherits the
 # descriptors too, and keeps both until it exits: stop your servers.
 #
-# Each run gets its own TMPDIR, removed when the command ends.
+# Each run gets its own TMPDIR, removed after the command has exited. A signal sent
+# to this wrapper (TERM, INT, HUP) is passed on to the command first.
 set -euo pipefail
 slots=${OSD_HEAVY_SLOTS:-6}
-if ! [[ "$slots" =~ ^[0-9]+$ ]] || [ "$slots" -lt 1 ] || [ "$slots" -gt 40 ]; then
+if ! [[ "$slots" =~ ^[1-9][0-9]?$ ]] || [ "$slots" -gt 40 ]; then
   echo "osd-heavy: OSD_HEAVY_SLOTS must be a whole number from 1 to 40, not '$slots'" >&2
   exit 2
 fi
@@ -61,9 +62,20 @@ unset OSD_SERVE_PORT STG_PREVIEW_PORT PROBE_HTTP_PORT PROBE_HTTPS_PORT
 export OSD_HEAVY_SLOT=$got INSTANCE=$inst STG_PORT=80$inst STG_TLS_PORT=443$inst
 export STG_DIAG_PORT=32$inst DIAG_PORT=32$inst STG_RFC_PORT=33$inst
 TMPDIR=$(mktemp -d "/tmp/osd-heavy-slot-$got.XXXXXX"); export TMPDIR
-trap 'rm -rf "$TMPDIR"' EXIT
 echo "osd-heavy: slot $got/$slots, INSTANCE=$INSTANCE, STG_PORT=$STG_PORT, STG_TLS_PORT=$STG_TLS_PORT, DIAG=$STG_DIAG_PORT, RFC=$STG_RFC_PORT, waited $(( $(date +%s) - t0 ))s: $*" >&2
+# the command runs as a child, so its TMPDIR can be removed after it; a signal to
+# this wrapper goes on to the child, and the directory goes only once the child is gone
+child=""
+forward() { [ -n "$child" ] && kill -"$1" "$child" 2>/dev/null; }
+trap 'forward TERM' TERM
+trap 'forward INT' INT
+trap 'forward HUP' HUP
 set +e
-"$@"
-status=$?
+"$@" <&0 &   # a background job would get /dev/null as stdin; keep the caller's
+child=$!
+while :; do
+  wait "$child"; status=$?
+  kill -0 "$child" 2>/dev/null || break   # wait returns early when a trapped signal arrives
+done
+rm -rf "$TMPDIR"
 exit $status
