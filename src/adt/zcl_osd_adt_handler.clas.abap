@@ -19,17 +19,15 @@
 "!
 "! The session (slice 3): when a ZIF_OSD_ADT_SESSION is in use (IO_SESSION
 "! of ANSWER, which the Node front passes per request; USE_SESSION for the
-"! ICF path), every request resolves its session first, the CSRF gate of
+"! ICF path), requests under /sap/bc/adt resolve their session first; the
 "! ZCL_OSD_ADT_CSRF runs before the router, and every answer carries the
 "! session's token and cookies. A session that ended while its request
 "! waited (ZCX_OSD_ADT=>SESSION_ENDED) is answered as the CSRF refusal,
 "! which makes a client log on again (docs/adt-abap-port/slice-3-front.md).
 "!
-"! There is no COMMIT here: the step around the handler commits when it
-"! ends without an exception, whatever the status, so the session's rows
-"! survive a 4xx (port-map.md, risk 1). Every refusal is caught in ANSWER
-"! for that reason. LOCK and UNLOCK write to the lock server, which no
-"! COMMIT or ROLLBACK touches at _SCOPE 1.
+"! FENCE commits session work before dispatch and rolls back only when
+"! dispatch raises. The surrounding step commits successful route work,
+"! whatever its response status. ENQ locks at _SCOPE 1 are independent.
 CLASS zcl_osd_adt_handler DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
     INTERFACES if_http_extension.
@@ -42,6 +40,15 @@ CLASS zcl_osd_adt_handler DEFINITION PUBLIC CREATE PUBLIC.
                 io_session   TYPE REF TO zif_osd_adt_session OPTIONAL
       EXPORTING es_response  TYPE zif_osd_adt_route=>ty_response
                 ev_served_by TYPE string.
+
+    "! The transaction boundary for route work. No route commits itself.
+    "! Called once per request by the handler; never call it from inside a
+    "! route, because the inner COMMIT would persist the outer route's work.
+    CLASS-METHODS fence
+      IMPORTING is_request TYPE zif_osd_adt_route=>ty_request
+                it_routes TYPE zcl_osd_adt_router=>tt_route OPTIONAL
+      RETURNING VALUE(rs_result) TYPE zcl_osd_adt_router=>ty_result
+      RAISING cx_root.
 
     "! the session every request of HANDLE_REQUEST resolves; none (the
     "! default) leaves the session and CSRF to the host in front
@@ -75,6 +82,7 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
 
     ls_request-method = to_upper( server->request->get_header_field( '~request_method' ) ).
     ls_request-path = server->request->get_header_field( '~path' ).
+    ls_request-uri = server->request->get_header_field( '~request_uri' ).
     server->request->get_form_fields_cs( CHANGING fields = ls_request-query ).
     server->request->get_header_fields( CHANGING fields = lt_headers ).
 *   the pseudo fields (~path, ~request_method, ...) are the ICF's, not the
@@ -116,12 +124,19 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
 
   METHOD answer.
     DATA ls_session TYPE zif_osd_adt_session=>ty_session.
+    DATA ls_request TYPE zif_osd_adt_route=>ty_request.
+    DATA lv_path TYPE string.
     DATA lt_cookies TYPE string_table.
     DATA lx_adt TYPE REF TO zcx_osd_adt.
 
     CLEAR: es_response, ev_served_by.
-    IF io_session IS NOT BOUND.
-      route( EXPORTING is_request   = is_request
+    ls_request = is_request.
+    CLEAR ls_request-session.
+    ls_request-sessions = io_session.
+    lv_path = to_lower( is_request-path ).
+    IF io_session IS NOT BOUND OR
+        ( lv_path <> `/sap/bc/adt` AND lv_path NP `/sap/bc/adt/*` ).
+      route( EXPORTING is_request   = ls_request
              IMPORTING es_response  = es_response
                        ev_served_by = ev_served_by ).
       RETURN.
@@ -159,7 +174,8 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    route( EXPORTING is_request   = is_request
+    ls_request-session = ls_session.
+    route( EXPORTING is_request   = ls_request
            IMPORTING es_response  = es_response
                      ev_served_by = ev_served_by ).
     zcl_osd_adt_csrf=>stamp( EXPORTING it_cookies  = lt_cookies
@@ -176,6 +192,17 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD fence.
+    DATA lx_error TYPE REF TO cx_root.
+    COMMIT WORK.
+    TRY.
+        rs_result = zcl_osd_adt_router=>dispatch( is_request = is_request it_routes = it_routes ).
+      CATCH cx_root INTO lx_error.
+        ROLLBACK WORK.
+        RAISE EXCEPTION lx_error.
+    ENDTRY.
+  ENDMETHOD.
+
   METHOD route.
     DATA ls_result TYPE zcl_osd_adt_router=>ty_result.
     DATA lx_adt TYPE REF TO zcx_osd_adt.
@@ -184,8 +211,7 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
 
     CLEAR: es_response, ev_served_by.
     TRY.
-        ls_result = zcl_osd_adt_router=>dispatch( is_request = is_request
-                                                  it_routes  = gt_routes ).
+        ls_result = fence( is_request = is_request it_routes = gt_routes ).
         ev_served_by = ls_result-served_by.
         IF ls_result-response-continuation-kind IS NOT INITIAL.
 *         the route's own HOST verdict: its answer and what follows it

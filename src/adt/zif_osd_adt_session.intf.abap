@@ -30,10 +30,10 @@
 "! without case.
 "!
 "! Two things an implementation must keep in mind:
-"!   - RESOLVE writes inside the request's step. If the step dumps, a session
-"!     it opened is rolled back with it: the client holds the cookie of a
-"!     session that does not exist, and its next request opens a fresh one
-"!     (an unknown id is treated as none). That is accepted.
+"!   - The handler fences session writes before route work, so a route
+"!     exception rolls back its work while the resolved session stays.
+"!     A stateless probe whose route dumps keeps its fresh row, because
+"!     the end of the step never runs; the sweep removes it after the TTL.
 "!   - RESOLVE touches the session on every request, a database write. The
 "!     touch must not wait on, or take, a lock another step holds: it is a
 "!     row of the session table only, never the ENQ lock table.
@@ -120,6 +120,13 @@ INTERFACE zif_osd_adt_session PUBLIC.
               iv_handle TYPE string
     EXPORTING ev_type   TYPE string
               ev_name   TYPE string.
+
+  "! Forget this session's handle for one object, without ending the
+  "! session or releasing its ENQ lock (the caller owns that operation).
+  METHODS release_object
+    IMPORTING iv_id   TYPE string
+              iv_type TYPE string
+              iv_name TYPE string.
 
   "! whether the handle is the session's for that object; whether the lock
   "! server still holds the lock is the caller's second question

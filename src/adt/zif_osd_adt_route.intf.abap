@@ -13,14 +13,21 @@ INTERFACE zif_osd_adt_route PUBLIC.
 
   "! method is upper case; path is the full path (/sap/bc/adt/...), not
   "! decoded; params are the :name segments of the matched pattern,
-  "! percent-decoded after the split; query and headers as the ICF has them
+  "! percent-decoded after the split; query and headers as the ICF has them.
+  "! uri is ~request_uri, including the query; pattern is the matched row.
+  "! session is resolved only under /sap/bc/adt; sessions is available also
+  "! outside that base, so logoff can end a session without resolving one.
   TYPES: BEGIN OF ty_request,
-           method  TYPE string,
-           path    TYPE string,
-           params  TYPE tt_param,
-           query   TYPE tihttpnvp,
-           headers TYPE tihttpnvp,
-           body    TYPE xstring,
+           method   TYPE string,
+           path     TYPE string,
+           uri      TYPE string,
+           pattern  TYPE string,
+           session  TYPE zif_osd_adt_session=>ty_session,
+           sessions TYPE REF TO zif_osd_adt_session,
+           params   TYPE tt_param,
+           query    TYPE tihttpnvp,
+           headers  TYPE tihttpnvp,
+           body     TYPE xstring,
          END OF ty_request.
 
   "! What a host does after the step, when a route asks for it

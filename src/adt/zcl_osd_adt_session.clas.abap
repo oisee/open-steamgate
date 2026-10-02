@@ -327,6 +327,16 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
     ENDIF.
   ENDMETHOD.
 
+  METHOD zif_osd_adt_session~release_object.
+*   One handle per object and session: ADOPT_HANDLE removes duplicates,
+*   so deleting the first match drops all of them.
+    DATA ls_row TYPE zosd_adt_shdl.
+    ls_row = find_handle( iv_id = iv_id iv_type = iv_type iv_name = iv_name ).
+    IF ls_row-handle IS NOT INITIAL.
+      DELETE FROM zosd_adt_shdl WHERE mandt = sy-mandt AND id = iv_id AND handle = ls_row-handle.
+    ENDIF.
+  ENDMETHOD.
+
   METHOD zif_osd_adt_session~holds.
     DATA ls_row TYPE zosd_adt_shdl.
     SELECT SINGLE * FROM zosd_adt_shdl INTO ls_row

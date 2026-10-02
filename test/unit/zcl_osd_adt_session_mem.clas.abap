@@ -3,7 +3,7 @@
 "! the Node Sessions keeps them in a Map, with the rules the gate reads --
 "! the context cookie wins over the session cookie, an empty or unknown id
 "! opens a new session, one token per session, the header
-"! x-sap-adt-sessiontype = stateful marks it. No expiry, no handles, no
+"! x-sap-adt-sessiontype = stateful marks it. No expiry or
 "! ENQ: those are the real implementation's (stoker's half of slice 3).
 "! Not for a system: the state is one process's memory.
 CLASS zcl_osd_adt_session_mem DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -15,6 +15,13 @@ CLASS zcl_osd_adt_session_mem DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PRIVATE SECTION.
     TYPES tt_session TYPE STANDARD TABLE OF zif_osd_adt_session=>ty_session WITH DEFAULT KEY.
     CLASS-DATA gt_sessions TYPE tt_session.
+    TYPES: BEGIN OF ty_handle,
+             id TYPE string,
+             handle TYPE string,
+             objtype TYPE string,
+             objname TYPE string,
+           END OF ty_handle.
+    CLASS-DATA gt_handles TYPE STANDARD TABLE OF ty_handle WITH DEFAULT KEY.
     CLASS-METHODS random
       RETURNING VALUE(rv_hex) TYPE string.
 ENDCLASS.
@@ -22,7 +29,7 @@ ENDCLASS.
 CLASS zcl_osd_adt_session_mem IMPLEMENTATION.
 
   METHOD reset.
-    CLEAR gt_sessions.
+    CLEAR: gt_sessions, gt_handles.
   ENDMETHOD.
 
   METHOD random.
@@ -96,6 +103,7 @@ CLASS zcl_osd_adt_session_mem IMPLEMENTATION.
 
   METHOD zif_osd_adt_session~end.
     DELETE gt_sessions WHERE id = iv_id.
+    DELETE gt_handles WHERE id = iv_id.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~alive.
@@ -104,19 +112,58 @@ CLASS zcl_osd_adt_session_mem IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~enq_context_ended.
-    RETURN.
+    DELETE gt_handles WHERE id = iv_id.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~adopt_handle.
-    CLEAR rv_handle.
+    DATA ls_handle TYPE ty_handle.
+    DATA lv_type TYPE string.
+    DATA lv_name TYPE string.
+    READ TABLE gt_sessions TRANSPORTING NO FIELDS WITH KEY id = iv_id.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    lv_type = to_upper( iv_type ).
+    lv_name = to_upper( iv_name ).
+    READ TABLE gt_handles INTO ls_handle WITH KEY id = iv_id
+      objtype = lv_type objname = lv_name.
+    IF sy-subrc <> 0.
+      ls_handle-id = iv_id.
+      ls_handle-handle = random( ).
+      ls_handle-objtype = lv_type.
+      ls_handle-objname = lv_name.
+      APPEND ls_handle TO gt_handles.
+    ENDIF.
+    rv_handle = ls_handle-handle.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~release_handle.
+    DATA ls_handle TYPE ty_handle.
     CLEAR: ev_type, ev_name.
+    READ TABLE gt_handles INTO ls_handle WITH KEY id = iv_id handle = iv_handle.
+    IF sy-subrc = 0.
+      ev_type = ls_handle-objtype.
+      ev_name = ls_handle-objname.
+      DELETE gt_handles WHERE id = iv_id AND handle = iv_handle.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD zif_osd_adt_session~release_object.
+    DATA lv_type TYPE string.
+    DATA lv_name TYPE string.
+    lv_type = to_upper( iv_type ).
+    lv_name = to_upper( iv_name ).
+    DELETE gt_handles WHERE id = iv_id AND objtype = lv_type AND objname = lv_name.
   ENDMETHOD.
 
   METHOD zif_osd_adt_session~holds.
-    rv_holds = abap_false.
+    DATA lv_type TYPE string.
+    DATA lv_name TYPE string.
+    lv_type = to_upper( iv_type ).
+    lv_name = to_upper( iv_name ).
+    READ TABLE gt_handles TRANSPORTING NO FIELDS WITH KEY id = iv_id handle = iv_handle
+      objtype = lv_type objname = lv_name.
+    rv_holds = boolc( sy-subrc = 0 ).
   ENDMETHOD.
 
 ENDCLASS.
