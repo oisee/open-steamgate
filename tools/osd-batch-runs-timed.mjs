@@ -87,11 +87,12 @@ class TimedJobs {
   }
 
   /** the earliest start time of `source` still waiting, for the next timer */
-  nextTimed(source) {
+  nextTimed(source, except = []) {
     if (!source) return undefined;
+    const skip = except.length ? ` AND id NOT IN (${except.map(() => "?").join(", ")})` : "";
     return this.readSnapshot(() => this.db.prepare(`SELECT MIN(sdl_at) AS at FROM batch_runs
-      WHERE state IN ('WAITING', 'RELEASING') AND sdl_at IS NOT NULL ${sourceScope}`)
-      .get(...sourceParams(source))?.at ?? undefined);
+      WHERE state IN ('WAITING', 'RELEASING') AND sdl_at IS NOT NULL ${sourceScope}${skip}`)
+      .get(...sourceParams(source), ...except)?.at ?? undefined);
   }
 
   /** the job count of the run imported for an intent, if any */

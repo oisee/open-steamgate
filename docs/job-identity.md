@@ -50,7 +50,16 @@ run, steps, log, import ledger and completion event in the operations store.
 Never a job that is not final, never one a waiting job is chained behind, never
 the latest instance of a periodic chain. When a reservation still fails, the
 scheduler leaves that run RELEASING, says so, retries it a minute later and
-carries on with the other due runs; it always re-arms.
+carries on with the other due runs; it always re-arms, and the one-minute
+retry floor applies to that run's own next try only, the other timed jobs keep
+their due time. Both stores go in one dialog step (business rows first), so no
+job read sees a run without its identity; a crash between the two leaves such a
+run, which reads as "predates retained identity" until the next reorganisation
+removes it. A non-numeric `OSD_JOB_RETENTION_DAYS` falls back to 14 with a
+warning. Known limits: the final run of a chain that ended (its successor
+deleted) is kept for good; the identity row of a `JOB_OPEN` that was never
+closed has no run and is never removed; `legacyCountUsed` opens the operations
+store once per candidate count.
 
 The private port returns the canonical name (trimmed and upper case) to both
 `JOB_OPEN` and `JOB_CLOSE`, so the reservation and outbox use the same key.

@@ -171,7 +171,7 @@ export class JobScheduler {
     this.nextReorg = undefined; // the clock's ms of the next one; host start makes it due
     this.failures = []; // per-run release failures of the last passes, newest last
     this.onFailure = (run, error) => console.error(`osd-job-scheduler: release of ${run.job_name}/${run.job_count} failed, retried later: ${error?.message ?? error}`);
-    this.failedPass = false;
+    this.stuck = new Map();
     this.timer = undefined;
     this.stopped = false;
     this.running = undefined;
@@ -205,7 +205,7 @@ export class JobScheduler {
 
   async #pass() {
     const outcomes = [];
-    this.failedPass = false;
+    this.stuck = new Map(); // run id -> ms of its next try: the 60 s floor is its own
     try {
       if (this.env.STG_DB === "file") await drainJobOutbox(this.store, {env: this.env});
       await this.#reorganise();
@@ -259,7 +259,7 @@ export class JobScheduler {
       try {
         if (periodMinutes(periodOf(run)) > 0) await this.ensureSuccessor(run, decided.next);
       } catch (error) {
-        this.failedPass = true;
+        this.stuck.set(run.id, this.clock.now() + RETRY_MS);
         this.failures.push({id: run.id, name: run.job_name, count: run.job_count, error: String(error?.message ?? error)});
         if (this.failures.length > 50) this.failures.shift();
         this.onFailure(run, error);
@@ -316,12 +316,11 @@ export class JobScheduler {
     if (this.stopped) return;
     const now = this.clock.now();
     const waits = [];
-    const next = this.store.nextTimed(workerSource());
-    if (next !== undefined) {
-      const wait = Math.max(0, stampMs(next) - now);
-      // a run that failed to release is due already: retry it later, not in a spin
-      waits.push(this.failedPass ? Math.max(wait, RETRY_MS) : wait);
-    }
+    // every run at its due time, except one that failed to release: its next
+    // try is a minute on, and the others do not wait for it
+    const next = this.store.nextTimed(workerSource(), [...this.stuck.keys()]);
+    if (next !== undefined) waits.push(Math.max(0, stampMs(next) - now));
+    for (const at of this.stuck.values()) waits.push(Math.max(0, at - now));
     if (this.retentionDays !== null && this.nextReorg !== undefined) waits.push(Math.max(0, this.nextReorg - now));
     if (waits.length === 0) return;
     this.timer = this.clock.setTimer(() => this.tick(), Math.min(...waits));

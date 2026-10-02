@@ -7,7 +7,7 @@
 import {expect} from "chai";
 import {mkdtempSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join, resolve} from "node:path";
+import {join, relative, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
 import {BatchRuns} from "../tools/osd-batch-runs.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
@@ -15,6 +15,7 @@ import {JobScheduler, installAbapClock, manualClock} from "../tools/osd-job-sche
 import {msStamp, stampMs, successorIntentId} from "../tools/osd-job-schedule.mjs";
 import {identity as runtimeIdentity} from "../tools/osd-identity.mjs";
 import {readJobSnapshot} from "../tools/osd-job-snapshot.mjs";
+import {reorgJobs, retentionDays} from "../tools/osd-job-reorg.mjs";
 import {nextJobCount, JobCountExhausted} from "../tools/osd-job-count.mjs";
 import {jobHeaderType} from "./fixtures/job-header.mjs";
 
@@ -273,7 +274,9 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
       expect(waiting.map((run) => stampMs(run.sdl_at) - w.t0)).to.deep.equal([(120 * DAY + 60) * 1000]);
       const rows = identity(name);
       expect(new Set(rows).size).to.equal(rows.length);
-      expect(rows.length).to.be.below(100); // not one row of every day
+      expect(rows.length).to.be.below(20); // history was removed: not one row of every day
+      const completed = runs.filter((run) => run.state === "COMPLETED").length;
+      expect(completed).to.be.below(20); // 119 instances ran; the reorganisation took the old ones
       expect(first).to.match(/^\d{8}$/);
       w.scheduler.stop();
     });
@@ -326,6 +329,82 @@ describe("JOBCOUNT: creation second plus a counter per job name", function () {
       expect(identity(w.name("LATEST"))).to.deep.equal([c]);
       expect(a).to.match(/^\d{8}$/);
       w.scheduler.stop();
+    });
+    it("the reorganisation finds the runs when the connection's path is relative, as the default STG_DB_PATH is", async () => {
+      const w = world(now(), {retention: 14});
+      await schedule(w.name("REL"), w.at(3600));
+      await w.scheduler.tick();
+      w.store.db.prepare(`UPDATE batch_runs SET state = 'COMPLETED', ended_at = '2020-01-01T00:00:00.000Z'
+        WHERE job_name = ?`).run(w.name("REL"));
+      const relativeClient = {db: client.db, path: relative(process.cwd(), dbPath), inTransaction: false};
+      expect(relativeClient.path).to.not.equal(dbPath);
+      const done = await reorgJobs({store: w.store, client: relativeClient, ms: w.clock.now(), days: 14});
+      expect(done.removed).to.equal(1);
+      expect(identity(w.name("REL"))).to.deep.equal([]);
+      w.scheduler.stop();
+    });
+
+    it("a run something waits behind is kept: a real JOB_CLOSE with PRED_JOBNAME/PRED_JOBCOUNT", async () => {
+      const w = world(now(), {retention: 14});
+      const pred = w.name("PRED"), waiter = w.name("WAITER");
+      const predCount = await schedule(pred, w.at(3600));
+      await dialogStep(async () => {
+        const count = await openIn(waiter);
+        await abap.FunctionModules.JOB_SUBMIT({exporting: {jobname: box(waiter), jobcount: box(count),
+          report: box("ZGG_EX_012"), authcknam: box(user())}});
+        await abap.FunctionModules.JOB_CLOSE({exporting: {jobname: box(waiter), jobcount: box(count),
+          pred_jobname: box(pred), pred_jobcount: box(predCount), predjob_checkstat: box("X")},
+        importing: {job_was_released: new abap.types.String()}});
+      });
+      await w.scheduler.tick(); // imports both
+      const aged = (name, state) => w.store.db.prepare(`UPDATE batch_runs SET state = ?,
+        ended_at = '2020-01-01T00:00:00.000Z' WHERE job_name = ?`).run(state, name);
+      aged(pred, "COMPLETED");
+      expect(w.store.db.prepare("SELECT state, after_job_name FROM batch_runs WHERE job_name = ?").get(waiter))
+        .to.deep.include({state: "WAITING", after_job_name: pred});
+      w.scheduler.nextReorg = undefined;
+      w.clock.set(w.clock.now() + 1000);
+      await w.scheduler.tick();
+      expect(w.store.db.prepare("SELECT 1 FROM batch_runs WHERE job_name = ?").all(pred)).to.have.length(1);
+      // once the waiter is final too, both may go
+      aged(waiter, "COMPLETED");
+      w.scheduler.nextReorg = undefined;
+      w.clock.set(w.clock.now() + 1000);
+      await w.scheduler.tick();
+      expect(w.store.db.prepare("SELECT 1 FROM batch_runs WHERE job_name IN (?, ?)").all(pred, waiter)).to.have.length(0);
+      w.scheduler.stop();
+    });
+
+    it("one run stuck RELEASING delays only itself: the other timed jobs start at their due time", async () => {
+      const w = world(now(), {retention: null});
+      await schedule(w.name("STUCK"), w.at(60), {prdmins: 2});
+      await schedule(w.name("OTHER"), w.at(65));
+      const real = w.scheduler.ensureSuccessor.bind(w.scheduler);
+      w.scheduler.ensureSuccessor = async (run, next) => {
+        if (run.job_name === w.name("STUCK")) throw new Error("no count today");
+        return real(run, next);
+      };
+      w.scheduler.onFailure = () => {};
+      await w.scheduler.start();
+      await w.clock.advance(70 * 1000);
+      expect([...new Set(w.scheduler.failures.map((item) => item.name))]).to.deep.equal([w.name("STUCK")]);
+      const state = (name) => w.store.db.prepare("SELECT state FROM batch_runs WHERE job_name = ?").all(w.name(name)).map((r) => r.state);
+      expect(state("OTHER")).to.deep.equal(["COMPLETED"]); // at +65 s, not at +120 s
+      expect(state("STUCK")).to.deep.equal(["RELEASING"]);
+      w.scheduler.stop();
+    });
+
+    it("a retention that is not a number falls back to the default, with a warning", () => {
+      const warned = [];
+      const warn = console.warn;
+      console.warn = (text) => warned.push(text);
+      try {
+        expect(retentionDays({OSD_JOB_RETENTION_DAYS: "soon"})).to.equal(14);
+        expect(retentionDays({OSD_JOB_RETENTION_DAYS: "7"})).to.equal(7);
+        expect(retentionDays({OSD_JOB_RETENTION_DAYS: "off"})).to.equal(null);
+        expect(retentionDays({}, "x")).to.equal(14);
+      } finally { console.warn = warn; }
+      expect(warned.length).to.be.at.least(1);
     });
   });
 });

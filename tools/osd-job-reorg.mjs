@@ -11,10 +11,16 @@
 // and aborted on a system -- or DELETED) and only when it ended before the
 // cutoff. Never a job that is not final, never one a waiting job is chained
 // behind (after-job), never the latest instance of a periodic chain (a final
-// periodic run no later run names as its predecessor). The business rows go
-// first, in a dialog step of their own: a crash in between leaves a run
-// without identity, which reads as unknown and is picked up by the next
-// reorganisation, and not an identity pointing at nothing.
+// periodic run no later run names as its predecessor). Both stores go in one
+// dialog step, the business rows first: a crash in between leaves a run
+// without identity, which the next reorganisation picks up, and not an
+// identity pointing at nothing.
+//
+// Known limits: the final run of a chain that ended (a deleted successor) is
+// kept for good; an identity row of a JOB_OPEN that was never closed has no
+// run and is not removed; legacyCountUsed opens the operations store once
+// per candidate count.
+import {resolve} from "node:path";
 import {dialogStep} from "./osd-dialog-step.mjs";
 
 export const DEFAULT_RETENTION_DAYS = 14;
@@ -24,12 +30,14 @@ const FINAL = "('COMPLETED', 'FAILED', 'INTERRUPTED', 'DELETED')";
 /** days of retention: a number, or null for "keep everything" */
 export function retentionDays(env = process.env, given) {
   if (given === null) return null;
-  if (given !== undefined) return Number(given);
+  if (given !== undefined) return Number.isFinite(Number(given)) && Number(given) >= 0 ? Number(given) : retentionDays(env);
   const text = String(env.OSD_JOB_RETENTION_DAYS ?? "").trim().toLowerCase();
   if (text === "") return DEFAULT_RETENTION_DAYS;
   if (["off", "never", "none"].includes(text)) return null;
   const days = Number(text);
-  return Number.isFinite(days) && days >= 0 ? days : DEFAULT_RETENTION_DAYS;
+  if (Number.isFinite(days) && days >= 0) return days;
+  console.warn(`osd-job-reorg: OSD_JOB_RETENTION_DAYS=${env.OSD_JOB_RETENTION_DAYS} is not a number of days; using ${DEFAULT_RETENTION_DAYS}`);
+  return DEFAULT_RETENTION_DAYS;
 }
 
 const period = (column) => `CAST(COALESCE(NULLIF(${column}, ''), 0) AS INTEGER)`;
@@ -52,10 +60,15 @@ export function reorgCandidates(store, {sourceDb, cutoff}) {
  *  (DatabaseSync at .db, its file at .path), `ms` the clock's now. */
 export async function reorgJobs({store, client, ms, days}) {
   if (days === null || days === undefined || !client?.db || !client.path) return {removed: 0};
-  const sourceDb = client.path;
+  const sourceDb = resolve(client.path); // every writer stores the resolved path
   const cutoff = new Date(ms - days * DAY_MS).toISOString();
   const runs = reorgCandidates(store, {sourceDb, cutoff});
   if (!runs.length) return {removed: 0};
+  // One dialog step holds the work process over both stores, the business
+  // rows first: the job reads of this runtime take the same process, so none
+  // sees a run without its identity. (A crash between the two leaves such a
+  // run; the next reorganisation picks it up, and a read of it before then
+  // says the job predates retained identity.)
   await dialogStep(async () => {
     if (client.inTransaction) await client.commit();
     client.db.exec("BEGIN IMMEDIATE");
@@ -69,16 +82,16 @@ export async function reorgJobs({store, client, ms, days}) {
       }
       client.db.exec("COMMIT");
     } catch (error) { client.db.exec("ROLLBACK"); throw error; }
-  }, "job reorganisation");
-  store.db.exec("BEGIN IMMEDIATE");
-  try {
-    for (const run of runs) {
-      for (const table of ["batch_job_log", "batch_run_steps", "batch_job_events", "batch_imports"]) {
-        store.db.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(run.id);
+    store.db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const run of runs) {
+        for (const table of ["batch_job_log", "batch_run_steps", "batch_job_events", "batch_imports"]) {
+          store.db.prepare(`DELETE FROM ${table} WHERE run_id = ?`).run(run.id);
+        }
+        store.db.prepare(`DELETE FROM batch_runs WHERE id = ? AND state IN ${FINAL}`).run(run.id);
       }
-      store.db.prepare(`DELETE FROM batch_runs WHERE id = ? AND state IN ${FINAL}`).run(run.id);
-    }
-    store.db.exec("COMMIT");
-  } catch (error) { store.db.exec("ROLLBACK"); throw error; }
+      store.db.exec("COMMIT");
+    } catch (error) { store.db.exec("ROLLBACK"); throw error; }
+  }, "job reorganisation");
   return {removed: runs.length, jobs: runs.map((run) => ({name: run.name, count: run.count}))};
 }
