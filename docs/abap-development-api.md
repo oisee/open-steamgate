@@ -155,14 +155,15 @@ built on the fast path still enters the next cold build, and from then on it is 
   the source.
 - **The path.** It uses the same check and the same `only` transpile as the fast path, against the live
   registry. A cache hit (the same source generated again; how common that is, UNMEASURED) costs nothing.
-- **NAME.** The kernel's shape: `%_T` plus five characters, unique per process. The forms register as
+- **NAME.** The kernel's shape: `%_T` plus five characters, eight in all, counting up per generation
+  (measured in PR #469, one increment observed: `%_T002QE`, then `%_T002QF`); here unique per process. The forms register as
   `abap.Forms['PROG-%_Txxxxx-<FORM>']`, which is what `PERFORM ... IN PROGRAM (name)` looks up at call time
   (transpiler `perform.js`). A gap to fix first: that branch passes only CHANGING parameters, while the
   oracle's `USING 21` needs USING passed as well.
 - **Errors.** The first issue gives sy-subrc 4, LINE (the issue row) and WORD (the token at the issue start).
   A parser error gives WORD `SYS$$INCOMPLETE$$`. MESSAGE is abaplint's text, not the kernel's. The tests
   compare subrc, LINE and WORD, and MESSAGE only for the few messages mapped. Anything else (a prime that
-  fails or goes silent, limits) gives the M1 refusal, subrc 8.
+  fails or goes silent) gives the M1 refusal, subrc 8.
 - **Speed.** On a primed registry a GENERATE is a warm compile of one pool, with a sub-second target (section 3),
   and a cache hit costs nothing. The 11 to 17 s prime is paid once, eagerly, not per GENERATE.
 - **No registry yet (rare).** GENERATE waits for the prime rolled out, with the work process released,
@@ -177,7 +178,18 @@ built on the fast path still enters the next cold build, and from then on it is 
 - **Lifetime.** A pool lives for the internal session: the step for a stateless request, and the session
   token for a stateful one (ADT, APC, webgui). At the end its `abap.Forms` entries are removed. An ES module
   cannot be unloaded, so pools count toward the catch-up recycle's heap limit (`OSD_WARM_HEAP_MB`), and there
-  is a cap per session and per process (the kernel's limit is to be measured).
+  is a cap per session and per process (the per-process cap is ours, not a kernel number). Measured on the
+  sandbox (PR #469, `test/fixtures/kernel-oracle/subpool.json`):
+  - a `PERFORM` into a pool after `COMMIT WORK` in the same internal session still answers, so a WAIT-style
+    roll-out and roll-in, which commits, must not drop the pool's `abap.Forms` entries;
+  - a second internal session (`SUBMIT ... AND RETURN`) does not see it (`PERFORM ... IN PROGRAM (name) IF FOUND`
+    finds nothing);
+  - in a fresh internal session 36 pools fit (`DO 36` succeeded) and the 37th GENERATE (`DO 37`) ends in the
+    runtime error `GENERATE_SUBPOOL_DIR_FULL` ("Maximum number of temporary subroutine pools exceeded."),
+    which is not catchable and sets no sy-subrc. Whether pools made by called programs count was not probed.
+
+  Decision: OSG's cap per internal session is 36, and the 37th GENERATE ends the step the way a dump does
+  (the dialog-step rollback), not with a subrc.
 - **Browser preview.** It has no transpiler and no `fs`, so it keeps the refusal. OSGo keeps it too.
 
 ## 5. Development systems only
@@ -226,17 +238,19 @@ activate through ADT, so the API gives such a client nothing new. The new risks 
 
 - T000 fields and the system change option for the sandbox clients;
 - whether GENERATE works in a client marked production;
-- the name pattern and the pool limit per internal session, and what happens past it;
+- ~~the name pattern and the pool limit per internal session, and what happens past it~~ (measured, PR #469: see
+  NAME and Lifetime in section 4);
 - LINE with leading comments and with `INCLUDE`;
 - WORD for other error kinds;
 - `PERFORM ... USING` into a pool;
-- whether a pool is visible after `SUBMIT ... AND RETURN` or in a new internal session.
+- ~~whether a pool is visible after `SUBMIT ... AND RETURN` or in a new internal session~~ (measured, PR #469: it
+  is not).
 
 ## 8. Questions, decided by Alice (2026-10-02)
 
 1. ~~Pools outside `$TMP` or in `$TMP`?~~ **Decided (Alice, 2026-10-02): a transient area outside `$TMP`.**
-   On a system the generated pools are believed to be transient and not repository objects at all (no TADIR
-   row); UNMEASURED, to be confirmed by a sandbox probe (TADIR / TRDIR after GENERATE).
+   On a system the generated pools are transient and not repository objects at all: measured in PR #469, a
+   generated pool has no TADIR, TRDIR or REPOSRC row.
 2. **Decided (Alice, 2026-10-02, accepting the recommendations):** a CLAS or PROG already loaded becomes live
    after the step (option c); a NEW object nobody has loaded may be built during a WAIT-style roll-out and called
    in the same step (option a).
