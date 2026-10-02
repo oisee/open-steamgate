@@ -6,6 +6,12 @@
 //                                               drop exemptions no longer needed
 //   node tools/osd-size-budget.mjs --base <ref> also: a budget raised against
 //                                               the one at <ref> needs a reason
+//   node tools/osd-size-budget.mjs --changed <ref>
+//                                               judge only what this branch
+//                                               changed since its merge base
+//                                               with <ref> (the pre-push hook);
+//                                               a breach already on <ref> is
+//                                               printed, not yours, and passes
 //
 // What it checks, each a ratchet that only loosens through an edit of the
 // budget file a reviewer sees:
@@ -125,27 +131,31 @@ export function measure(budget) {
   return sizes;
 }
 
-export function check(budget, sizes, {deps, base} = {}) {
+/** the rules, each breach with the key it is about: a file path, a package
+ * ("go:<name>"), or null for an edit of the budget file itself (judged
+ * against the base, so always the branch's own) */
+export function checkKeyed(budget, sizes, {deps, base} = {}) {
   const errors = [];
+  errors.add = (key, message) => errors.push({key, message});
   const b = budget.budgets;
   const limitGo = budget.fileLimits?.go ?? 800;
   const limitMjs = budget.fileLimits?.mjs ?? 1000;
   for (const [key, entry] of Object.entries(b)) {
     if (sizes[key] === undefined) continue;
-    if (sizes[key] > entry.lines) errors.push(`${key}: ${sizes[key]} lines, budget ${entry.lines} -- ${HINT}`);
+    if (sizes[key] > entry.lines) errors.add(key, `${key}: ${sizes[key]} lines, budget ${entry.lines} -- ${HINT}`);
   }
   for (const [key, n] of Object.entries(sizes)) {
     if (b[key]) continue;
     if (key.startsWith("tools/gogen/go/abap/") && key.endsWith(".go")) {
-      errors.push(`${key}: a new file in go/abap (budget 0) -- a new capability goes in tools/gogen/go/<name> with a README; go/abap keeps binding glue`);
+      errors.add(key, `${key}: a new file in go/abap (budget 0) -- a new capability goes in tools/gogen/go/<name> with a README; go/abap keeps binding glue`);
     } else if (key.endsWith(".go") && n > limitGo) {
-      errors.push(`${key}: ${n} lines, over ${limitGo} without a budget -- ${HINT}`);
+      errors.add(key, `${key}: ${n} lines, over ${limitGo} without a budget -- ${HINT}`);
     } else if (key.endsWith(".mjs") && n > limitMjs) {
-      errors.push(`${key}: ${n} lines, over ${limitMjs} without a budget -- ${HINT}`);
+      errors.add(key, `${key}: ${n} lines, over ${limitMjs} without a budget -- ${HINT}`);
     } else if ((budget.watched ?? []).includes(key)) {
-      errors.push(`${key}: watched, without a budget -- run --update`);
+      errors.add(key, `${key}: watched, without a budget -- run --update`);
     } else if (key.startsWith("go:")) {
-      errors.push(`${key}: a package without a budget -- run node tools/osd-size-budget.mjs --update to record it`);
+      errors.add(key, `${key}: a package without a budget -- run node tools/osd-size-budget.mjs --update to record it`);
     }
   }
   for (const key of Object.keys(sizes).filter((k) => k.startsWith("go:"))) {
@@ -154,39 +164,55 @@ export function check(budget, sizes, {deps, base} = {}) {
     const readme = join(GO, name, "README.md");
     const short = !existsSync(readme) || lines(readme) < 3;
     if (short && !(budget.readmeMissing ?? []).includes(name)) {
-      errors.push(`tools/gogen/go/${name}: no README.md of at least three lines (what it is, its API, its invariants)`);
+      errors.add(key, `tools/gogen/go/${name}: no README.md of at least three lines (what it is, its API, its invariants)`);
     }
     if (deps instanceof Map && deps.get(name) && !(name in (budget.importsAbap ?? {}))) {
-      errors.push(`tools/gogen/go/${name}: depends on osg/gogen/abap -- a package takes a narrow interface; only go/abap imports packages`);
+      errors.add(key, `tools/gogen/go/${name}: depends on osg/gogen/abap -- a package takes a narrow interface; only go/abap imports packages`);
     }
   }
   if (base) {
     for (const [key, entry] of Object.entries(b)) {
       const was = base.budgets?.[key];
       if (was && entry.lines > was.lines && (!entry.reason || entry.reason === was.reason)) {
-        errors.push(`${key}: budget raised ${was.lines} -> ${entry.lines} without a new reason`);
+        errors.add(null, `${key}: budget raised ${was.lines} -> ${entry.lines} without a new reason`);
       }
       // a budget the base did not have: a renamed package that grew, or a big
       // new one, needs a reason a reviewer reads, not the one --update writes
       if (!was && entry.lines > limitGo && (!entry.reason || entry.reason === UPDATE_REASON)) {
-        errors.push(`${key}: a new budget of ${entry.lines} lines without a reason`);
+        errors.add(null, `${key}: a new budget of ${entry.lines} lines without a reason`);
       }
     }
     for (const name of budget.readmeMissing ?? []) {
-      if (!(base.readmeMissing ?? []).includes(name)) errors.push(`readmeMissing: ${name} added -- the exemption list only shrinks; write the README`);
+      if (!(base.readmeMissing ?? []).includes(name)) errors.add(null, `readmeMissing: ${name} added -- the exemption list only shrinks; write the README`);
     }
     for (const name of Object.keys(budget.importsAbap ?? {})) {
-      if (!(name in (base.importsAbap ?? {}))) errors.push(`importsAbap: ${name} added -- the exemption list only shrinks; take a narrow interface`);
+      if (!(name in (base.importsAbap ?? {}))) errors.add(null, `importsAbap: ${name} added -- the exemption list only shrinks; take a narrow interface`);
     }
     for (const kind of ["go", "mjs"]) {
-      if ((budget.fileLimits?.[kind] ?? 0) > (base.fileLimits?.[kind] ?? Infinity)) errors.push(`fileLimits.${kind} raised -- the limits only go down`);
+      if ((budget.fileLimits?.[kind] ?? 0) > (base.fileLimits?.[kind] ?? Infinity)) errors.add(null, `fileLimits.${kind} raised -- the limits only go down`);
     }
     for (const f of base.watched ?? []) {
-      if (!(budget.watched ?? []).includes(f) && existsSync(join(ROOT, f))) errors.push(`watched: ${f} removed while it exists`);
+      if (!(budget.watched ?? []).includes(f) && existsSync(join(ROOT, f))) errors.add(null, `watched: ${f} removed while it exists`);
     }
   }
   return errors;
 }
+
+export const check = (budget, sizes, options) => checkKeyed(budget, sizes, options).map((e) => e.message);
+
+/** splits keyed breaches into the branch's own and those it only inherits:
+ * a file is the branch's when it touched the file, a package when it touched
+ * a file directly in the package's directory (its README included) */
+export function attribute(errors, touched) {
+  const dirs = new Set([...touched].map((p) => p.slice(0, p.lastIndexOf("/"))));
+  const mine = (key) => key === null
+    || (key.startsWith("go:") ? dirs.has(`tools/gogen/go/${key.slice(3)}`) : touched.has(key));
+  return {
+    own: errors.filter((e) => mine(e.key)).map((e) => e.message),
+    inherited: errors.filter((e) => !mine(e.key)).map((e) => e.message),
+  };
+}
+
 
 export function update(budget, sizes, {deps} = {}) {
   const b = budget.budgets;
@@ -220,20 +246,49 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     writeFileSync(BUDGET, JSON.stringify(update(budget, sizes, {deps}), null, 2) + "\n");
     console.log("osd-size-budget: budgets lowered to what is there, new packages recorded");
   } else {
-    let base;
-    const at = args.indexOf("--base");
-    if (at >= 0) {
+    const git = (...a) => execFileSync("git", a, {cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1e8});
+    const option = (name) => (args.indexOf(name) >= 0 ? args[args.indexOf(name) + 1] : undefined);
+    // --changed <ref>: the branch is judged against where it left <ref>, so
+    // what <ref> gained since (a breach that landed while CI was advisory, a
+    // budget raised there) is not the branch's to fix
+    let baseRef = option("--base");
+    let touched;
+    const changed = option("--changed");
+    if (changed) {
+      let mergeBase;
       try {
-        base = JSON.parse(execFileSync("git", ["show", `${args[at + 1]}:tools/osd-size-budget.json`], {cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"]}));
+        mergeBase = git("merge-base", "HEAD", changed).trim();
+      } catch {
+        mergeBase = undefined;
+      }
+      if (mergeBase) {
+        baseRef ??= mergeBase;
+        // the working tree against the merge base: what a push of this
+        // branch carries, plus what is not committed yet
+        touched = new Set(git("diff", "--name-only", "-z", mergeBase).split("\0").filter(Boolean));
+      } else {
+        console.error(`osd-size-budget: no merge base with ${changed} -- judging the whole tree`);
+      }
+    }
+    let base;
+    if (baseRef) {
+      try {
+        base = JSON.parse(git("show", `${baseRef}:tools/osd-size-budget.json`));
       } catch {
         base = undefined; // the base has no budget file yet
       }
     }
-    const errors = check(budget, sizes, {deps, base});
+    const keyed = checkKeyed(budget, sizes, {deps, base});
+    const {own: errors, inherited} = touched ? attribute(keyed, touched) : {own: keyed.map((e) => e.message), inherited: []};
     if (deps instanceof Error) errors.push(`the dependency direction could not be checked: ${deps.message}`);
     if (deps === undefined) {
       if (process.env.CI) errors.push("no Go toolchain in CI -- the dependency direction was not checked");
       else console.error("osd-size-budget: no Go toolchain -- the dependency direction was not checked");
+    }
+    if (inherited.length > 0) {
+      const tty = process.stderr.isTTY ? ["\x1b[33m", "\x1b[0m"] : ["", ""];
+      console.error(`${tty[0]}osd-size-budget: ${inherited.length} breach(es) already on ${changed}, not this branch's (it does not touch them):${tty[1]}`);
+      for (const e of inherited) console.error(`${tty[0]}  ${e}${tty[1]}`);
     }
     if (errors.length > 0) {
       // --warn reports and passes: CI is advisory (Alice, 2026-10-02); the
@@ -242,6 +297,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       console.error(`osd-size-budget: ${errors.length} breach(es)${warn ? " (advisory)" : ""}:`);
       for (const e of errors) console.error(warn && process.env.GITHUB_ACTIONS ? `::warning title=size budget::${e}` : `  ${e}`);
       if (!warn) process.exit(1);
+      process.exit(0);
+    }
+    if (inherited.length > 0) {
+      console.log("osd-size-budget: nothing this branch touched is over its budget");
       process.exit(0);
     }
     console.log(`osd-size-budget: ${Object.keys(budget.budgets).length} budgets, all within`);
