@@ -107,6 +107,9 @@ export function snapshot({coverage = false} = {}) {
   const go = {};
   for (const [pkg, m] of Object.entries(goFns)) {
     const key = `go:${pkg}`;
+    // what git tracks only, as the size budget measures: a local run must
+    // not count the generated cmd/* a build leaves on disk
+    if (sizes[key] === undefined) continue;
     go[pkg] = {lines: sizes[key] ?? 0, budget: budget.budgets[key]?.lines ?? null,
       functions: m.functions, sum: m.sum, max: m.max, over15: m.over15, top: m.top,
       ...(cov[pkg] !== undefined ? {coverage: cov[pkg]} : {})};
