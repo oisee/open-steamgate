@@ -15,7 +15,7 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 12762,
+      "lines": 12269,
       "reason": "baseline 2026-10-01"
     },
     "go:abaperr": {
@@ -110,6 +110,10 @@
       "lines": 209,
       "reason": "baseline 2026-10-01"
     },
+    "go:sandbox": {
+      "lines": 533,
+      "reason": "carved out of go/abap/dataset.go (wave 2, docs/gogen-go-packages.md)"
+    },
     "go:session": {
       "lines": 53,
       "reason": "baseline 2026-10-01"
@@ -203,7 +207,7 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/dataset.go": {
-      "lines": 914,
+      "lines": 442,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/datesplit.go": {
@@ -475,7 +479,6 @@
     "charsearch": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
     "classname": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
     "datearith": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
-    "filepick": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
     "subwrite": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
     "tstmpsecs": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface"
   }

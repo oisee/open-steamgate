@@ -93,7 +93,7 @@ type Host interface{
     Delete(name string) bool                      // false = nothing to delete
 }
 type Sandbox struct{...}   // implements Host + Browse*
-func FromEnv() (*Sandbox, error)
+func FromEnv() *Sandbox  // with neither root set it refuses everything
 ```
 - go/abap keeps the statement half (OpenDataset, ReadDataset and the rest) with these aliases:
   - `type DatasetMode = sandbox.Mode`, with `const DatasetInput = sandbox.Input` and the others

@@ -37,7 +37,7 @@ func TestFrontendTransferConfinedAndSwap(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	sb := &Sandbox{Read: []string{root}, Write: []string{root}}
 	SetDatasetHost(sb)
-	t.Cleanup(func() { datasetSwap = nil; SetDatasetHost(nil); sb.Close() })
+	t.Cleanup(func() { SetDatasetHost(nil); sb.Close() })
 	var rows []string
 	data := stringTable(&rows)
 	var length int32
@@ -62,8 +62,8 @@ func TestFrontendTransferConfinedAndSwap(t *testing.T) {
 	}
 	parent := filepath.Join(root, "child")
 	os.Mkdir(parent, 0700)
-	datasetSwap = func() {
-		datasetSwap = nil
+	sb.BeforeOpen = func() {
+		sb.BeforeOpen = nil
 		os.Rename(parent, parent+"-old")
 		os.Symlink(outside, parent)
 	}
