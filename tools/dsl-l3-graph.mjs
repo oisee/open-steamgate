@@ -139,7 +139,10 @@ const NODE_SHAPE = {
   "port-source": [">", "]"], "port-sink": [">", "]"], "port-autoclose": [">", "]"], "port-work": [">", "]"],
 };
 const ARROW = {flow: "-->", gate: "==>", read: "-.->", fill: "-.->", write: "-->", config: "-.->", use: "-.->"};
-const text = (s) => s.replace(/"/g, "#quot;").split("\n").join("<br/>");
+// A label is literal text: # & < > and " go out as Mermaid entities first (# first, it starts one),
+// so the <br/> breaks added after are the only tags in it. Brackets are safe inside the quotes.
+const ENTITY = {"#": "#35;", "&": "#amp;", "<": "#lt;", ">": "#gt;", '"': "#quot;"};
+const text = (s) => s.replace(/[#&<>"]/g, (c) => ENTITY[c]).split("\n").join("<br/>");
 
 // Node ids: the model's @id with everything outside letters and digits made
 // _, in the order the nodes were made; a clash gets a counter.

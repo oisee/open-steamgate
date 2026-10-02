@@ -163,6 +163,25 @@ describe("dsl-l3 graph", function () {
     });
   });
 
+  describe("labels are literal text", () => {
+    it("a title, a rule name and a port name with <x>, &, \" and brackets keep their text and break no tag", () => {
+      const model = structuredClone(modelOf(SETS.fleet2));
+      const odd = 'A <ship> B & C "q" [D] (E) <b>bold</b> #1';
+      model.title = odd;
+      model.rules[0].name = odd;
+      model.ports[0].name = odd;
+      const mermaid = graphMermaid(graphOf(model));
+      const escaped = 'A #lt;ship#gt; B #amp; C #quot;q#quot; [D] (E) #lt;b#gt;bold#lt;/b#gt; #35;1';
+      expect(mermaid).to.contain(`fleet2: ${escaped}`);
+      expect(mermaid).to.contain(`${escaped}<br/>zcl_l2_`);
+      expect(mermaid).to.contain(`${escaped} (source`);
+      // every label is one well-formed quoted string with no tag but our breaks
+      for (const m of mermaid.matchAll(/"([^"\n]*)"/g)) expect(m[1]).to.not.match(/<(?!br\/>)/);
+      for (const line of mermaid.split("\n").slice(1)) expect((line.match(/"/g) ?? []).length % 2, line).to.equal(0);
+      expect(mermaid).to.contain("<br/>");
+    });
+  });
+
   describe("refusals", () => {
     it("unknown flags, other commands' flags, two formats and a missing set are refused", () => {
       for (const args of [["--bogus"], ["--ddic", "x"], ["--set", "x"], ["--db", "x"], ["--dot"], ["--mermaid", "--json"]]) {
