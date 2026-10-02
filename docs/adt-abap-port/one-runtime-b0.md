@@ -1,6 +1,10 @@
 # B0: ADT state across a serving-child recycle
 
-B0 prepares option B without moving the front. Today the ADT front, sessions,
+B0 prepares option B without moving the front. It ships OFF by default until
+B1: set `OSD_ADT_ONE_RUNTIME=1` on the supervisor to opt in. Only then does
+`ServingRuntime` set `OSD_ADT_CARRY=1` on its child. Other IPC parents boot
+without a carry handshake. An opted-in child falls back to database rows
+after 5 seconds without `adt-state`, announcing the timeout. Today the ADT front, sessions,
 CSRF tokens and handles still live in the parent's in-memory ADT kernel.
 The serving child owns a separate ENQ table. A child quiesce therefore carries
 no authoritative front rows today; the parent supplies its current rows at
@@ -25,9 +29,11 @@ lock-server internals:
   `adt-state-request`. The supervisor answers `adt-state` with optional
   `state` and `replace`.
 - `state` is `{version: 1, zosd_adt_sess: [...], zosd_adt_shdl: [...]}`.
-  Column names are lowercase; rows retain MANDT, token, stateful flag,
+  Column names are lowercase; rows retain MANDT, stateful flag,
   timestamps and handles. Carry stays in supervisor memory, not a tracked
-  file, environment variable or log.
+  file, environment variable or log. The parent blanks CSRF tokens until B1.
+  Both snapshots include only handles whose actual ENQ holder matches the
+  session owner key; the child reads its own lock table under the step lock.
 - A parent-kernel provider is captured in the spawn caller's step context.
   Publication currently can wait for a recycle while holding that step;
   requesting a new exclusive parent step from child IPC would deadlock it.
@@ -46,10 +52,13 @@ lock-server internals:
   commits, snapshots both tables while the connection is open and sends
   `adt-carry`. The child waits for the IPC send callback before disconnecting
   a file client or exiting an export-at-exit client. The supervisor saves
-  this snapshot for the next spawn.
+  this snapshot for the next spawn. Snapshot/send failures are announced
+  separately and still allow the committed file connection to disconnect.
 - A child-owned carry is upserted in one dialog step after database setup
-  (including schema recreation), before lock rebuilding and ready. The
-  consumed carry is cleared at ready so a subsequent crash cannot replay
+  (including schema recreation), before lock rebuilding and ready. The handle
+  set of each carried session replaces its old set, preserving dead-handle
+  deletions. Unknown carry versions are announced and dropped; only database
+  rows are rebuilt in that case. The consumed carry is cleared at ready so a subsequent crash cannot replay
   an old clean snapshot and resurrect logged-off sessions.
 
 A crash or quiesce that cannot finish within its grace has no new carry.
@@ -74,13 +83,16 @@ RAISING zcx_osd_adt
 It reads the current client's stateful session and handles, binds the ENQ
 session through `ZCL_OSD_ENQ_KERNEL=>BIND` (the host computes the new process's
 `adt:<prefix>:<id>` key), then calls `ENQUEUE_EZOSD_ADT_OBJ` for each handle:
-mode X, scope 1, both key fields specific. It leaves tokens, timestamps and
-handles unchanged. An already-owned X lock (602) is accepted without adding
-another lock count; other failures stop boot instead of claiming ready.
+mode X, scope 1, both key fields specific. It leaves tokens and timestamps unchanged. An already-owned X lock (602) is accepted without adding
+another lock count. A foreign lock (601) deletes the dead SHDL row and
+continues; the returned count includes only recovered handles, and the host
+reports the skipped count. Other rebuild
+failures are announced and boot continues: the mirror must never block ready.
 It deliberately avoids normal session BIND, whose missing-context cleanup
 would delete the handles being restored.
 
-The host runs one dialog step per stateful session with handles. Native ICF
+The host scans sessions by `touched DESC` (newest wins), and runs one dialog
+step per stateful session with handles. Native ICF
 can pass `iv_bind_context = abap_false` to use its existing ENQ context rather
 than the host-only binding bridge. osgo can use the default with its bridge.
 Those two hosts were not executed in this slice.
@@ -105,24 +117,8 @@ recovery without replaying stale carry. The drift is forced by changing the
 file's schema fingerprint after clean quiesce, exercising setup's recreation.
 `adt-abap-session` also boots under a held parent step, both directly and
 when that step joins a background boot, guarding the publication wait cycle.
-`adt-abap-front` checks an old handle's PUT succeeds after rebuild and keeps
-its CSRF token. Removing REHYDRATE makes that PUT return 409; removing the
-child's boot rebuild makes ENQUEUE_READ show zero rows. The session ABAP Unit
-covers idempotent rebuild and unchanged rows.
-
-Validation on `feat/adt-one-runtime-b0`, using only the authorized targets
-through `OSD_HEAVY_RANGE=80-89 tools/osd-heavy.sh`:
-
-- `osd-enq`, `adt-abap-session(s)`, `adt-session`, `adt-abap-front`,
-  `adt-abap-diff`, `xml-wellformed`: 235 passing.
-- Full `osd-child`: 15 passing.
-- Final rerun of B0 measurements, both publication orderings, current-front
-  child-table acceptance and the three child-owned backends: 7 passing.
-  This run measured 3.86 / 62.63 ms for 20 / 1,000 handles.
-- `ZCL_OSD_ADT_SESSION` ABAP Unit: 15 passing.
-- Both rebuild omissions produced one expected failure, then were restored.
-  No full suite or SAP connection was used. Serving-process checks found no
-  leftovers from this clone after the completed runs.
-
-The plan's critic reviewed the changes; its publication wait-cycle and
-native-context findings were addressed and the mirror limitations documented.
+`adt-abap-front` checks a dead handle stays 409 after filtered carry and
+rebuild. The fork test covers an IPC parent that never answers `adt-state`;
+the conflict test covers two persisted sessions claiming the same object.
+Removing the child's boot rebuild makes ENQUEUE_READ show zero rows. The
+session ABAP Unit covers idempotent rebuild and unchanged rows.

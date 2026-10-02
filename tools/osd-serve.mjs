@@ -36,12 +36,20 @@ import {withAbapCase} from "./osd-case-determinism.mjs";
 
 const started = Date.now();
 // Install the receive side before boot: IPC can arrive during module load.
-const initialAdtState = process.send === undefined ? Promise.resolve({}) : new Promise((resolve) => {
+const initialAdtState = process.send === undefined || process.env.OSD_ADT_CARRY !== "1" ? Promise.resolve({}) : new Promise((resolve) => {
   const receive = (message) => {
     if (message?.type !== "adt-state") return;
+    clearTimeout(timer);
     process.off("message", receive);
     resolve(message);
   };
+  const timer = setTimeout(() => {
+    process.off("message", receive);
+    const line = "ADT carry: no adt-state after 5 s; continuing with database rows";
+    console.log(line);
+    if (process.connected) process.send({type: "say", line});
+    resolve({});
+  }, 5000);
   process.on("message", receive);
   process.send({type: "adt-state-request"});
 });
@@ -151,9 +159,13 @@ bootStep("restoring ADT state and rebuilding locks");
 const {snapshotAdtRows, restoreAdtRows, rebuildAdtLocks} = await import("./adt-runtime-state.mjs");
 const initial = await initialAdtState;
 await dialogStep(() => restoreAdtRows(globalThis.abap.context.databaseConnections.DEFAULT, initial.state,
-  {replace: initial.replace === true}), "restoring ADT carry");
-const rebuilt = await rebuildAdtLocks(globalThis.abap.context.databaseConnections.DEFAULT);
-announce(`ADT rehydrate: ${rebuilt.sessions} sessions, ${rebuilt.ms.toFixed(2)} ms`);
+  {replace: initial.replace === true, say: announce}), "restoring ADT carry");
+try {
+  const rebuilt = await rebuildAdtLocks(globalThis.abap.context.databaseConnections.DEFAULT);
+  announce(`ADT rehydrate: ${rebuilt.sessions} sessions, ${rebuilt.handles} handles, ${rebuilt.skipped} skipped, ${rebuilt.ms.toFixed(2)} ms`);
+} catch (error) {
+  announce(`ADT rehydrate failed: ${error.message}; continuing boot`);
+}
 
 const app = express();
 app.disable("x-powered-by");
@@ -456,13 +468,20 @@ process.on("message", (message) => {
         exclusive(async () => {
           await db.commit?.();
           // Send while the connection is open, after the last step commits.
-          const state = await snapshotAdtRows(db);
-          if (process.connected) await new Promise((resolve, reject) => {
-            process.send({type: "adt-carry", state}, (error) => error ? reject(error) : resolve());
-          });
           committed = true;
-          if (typeof db.export !== "function") {
-            await db.disconnect?.();
+          try {
+            if (process.env.OSD_ADT_CARRY === "1") {
+              const state = await snapshotAdtRows(db);
+              if (process.connected) await new Promise((resolve, reject) => {
+                process.send({type: "adt-carry", state}, (error) => error ? reject(error) : resolve());
+              });
+            }
+          } catch (error) {
+            announce(`ADT carry failed: ${error.message}; disconnecting after commit`);
+          } finally {
+            if (typeof db.export !== "function") {
+              await db.disconnect?.();
+            }
           }
         }, "leaving for a recycle"),
         new Promise((resolve) => setTimeout(resolve, grace).unref()),

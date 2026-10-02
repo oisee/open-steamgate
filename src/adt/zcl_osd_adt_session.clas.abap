@@ -93,6 +93,12 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
           foreign_lock = 1
           system_failure = 2
           OTHERS = 3.
+      IF sy-subrc = 1 AND sy-msgno = '601'.
+*       A newer session owns this object; the old handle is dead.
+        DELETE FROM zosd_adt_shdl WHERE mandt = sy-mandt
+          AND id = iv_id AND handle = ls_handle-handle.
+        CONTINUE.
+      ENDIF.
       IF sy-subrc <> 0 AND NOT ( sy-subrc = 1 AND sy-msgno = '602' ).
         lx_error = zcx_osd_adt=>internal( `could not rehydrate ADT lock` ).
         RAISE EXCEPTION lx_error.

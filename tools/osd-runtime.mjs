@@ -436,7 +436,8 @@ export class ServingRuntime {
     // Capture at spawn, before child IPC. The temporary parent provider
     // reads both SQLite tables in one statement without queuing behind a
     // publication step that can itself be waiting for this boot.
-    const snapshot = Promise.resolve().then(() => this.adtSnapshot?.());
+    const carryEnabled = (this.env.OSD_ADT_ONE_RUNTIME ?? process.env.OSD_ADT_ONE_RUNTIME) === "1";
+    const snapshot = Promise.resolve().then(() => carryEnabled ? this.adtSnapshot?.() : undefined);
     snapshot.catch(() => undefined);
     return new Promise((resolve, reject) => {
       const epoch = this.epoch + 1;
@@ -471,6 +472,7 @@ export class ServingRuntime {
           ...(this.database === undefined ? {} : {STG_DB_PATH: this.database}),
           ...this.env,
           OSD_GENERATION: generation,
+          OSD_ADT_CARRY: carryEnabled ? "1" : "0",
           ...(nodeOptions === "" ? {} : {NODE_OPTIONS: nodeOptions}),
         },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
@@ -483,7 +485,7 @@ export class ServingRuntime {
               replace: state !== undefined});
           }, (error) => {
             console.error(`ADT snapshot failed: ${error.message}`);
-            child.kill("SIGTERM");
+            if (child.connected) child.send({type: "adt-state"});
           });
         }
       });

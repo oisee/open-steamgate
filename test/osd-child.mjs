@@ -40,7 +40,7 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     child = spawn(process.execPath, ["test/run.mjs"], {
       // Always use a private file, never an inherited HANA connection.
       env: {...process.env, STG_DB: backend, STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: undefined,
-        OSD_USER_FULL: testIdentity, STG_DB_BASE: join(databaseDir, "base"),
+        OSD_ADT_ONE_RUNTIME: "1", OSD_USER_FULL: testIdentity, STG_DB_BASE: join(databaseDir, "base"),
         STG_DB_PATH: join(databaseDir, backend === "duckdb" ? "osd.duckdb" : "osd.sqlite"),
         OSD_OPERATIONS_DB: operationsDb, OSD_BATCH_READ_TOKEN: monitorToken},
       stdio: ["ignore", "pipe", "pipe"],
@@ -435,7 +435,7 @@ describe("B0 child-owned ADT carry", function () {
     it(`${backend}: clean carry and boot rebuild; crash uses only database rows`, async () => {
       const dir = mkdtempSync(join(tmpdir(), "osd-b0-"));
       const database = backend === "file" ? join(dir, "osd.sqlite") : undefined;
-      const runtime = new ServingRuntime({database, grace: 10000, env: {STG_DB: backend, OSD_CLIENT: "123", STG_DB_PATH: database ?? "",
+      const runtime = new ServingRuntime({database, grace: 10000, env: {OSD_ADT_ONE_RUNTIME: "1", STG_DB: backend, OSD_CLIENT: "123", STG_DB_PATH: database ?? "",
         STG_DB_BASE: join(dir, "base"), OSD_DEMO_ROWS: "0"}, adtSnapshot: state});
       const read = async () => {
         const response = await fetch(runtime.url + "/osd/classrun", {method: "POST",
