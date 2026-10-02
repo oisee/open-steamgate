@@ -107,6 +107,9 @@ CLASS zcl_l3_fleet DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " puts the rows of zosd_l2_ship back after a replay: the rows kept before it
     CLASS-METHODS restore_1
       IMPORTING it_keep TYPE zif_l3_fleet_ships=>tt_rows.
+    " persists the pile's mutable execution fields under this set and key
+    CLASS-METHODS save_pile
+      IMPORTING is_pile TYPE zosd_l3_pile.
     CLASS-METHODS submit
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
@@ -331,6 +334,14 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     INSERT zosd_l2_ship FROM TABLE it_keep.
   ENDMETHOD.
 
+  METHOD save_pile.
+    UPDATE zosd_l3_pile SET status = is_pile-status alerts = is_pile-alerts
+      started = is_pile-started ended = is_pile-ended
+      job_name = is_pile-job_name job_count = is_pile-job_count
+      WHERE set_name = c_set AND run_id = is_pile-run_id
+        AND rule_name = is_pile-rule_name AND pile_no = is_pile-pile_no.
+  ENDMETHOD.
+
   METHOD rules.
     DATA ls_rule TYPE ty_rule.
     ls_rule-rule = c_rule_1.
@@ -360,6 +371,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD run_rule.
+    DATA lv_run_status TYPE zosd_l3_run-status.
     DATA lt_alerts TYPE string_table.
     DATA ls_pile TYPE zosd_l3_pile.
     DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
@@ -372,7 +384,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     rs_rule-rule = iv_rule.
     " the plan row of the pile: RUNNING now, DONE or FAILED at the end. A
     " pile that dumps leaves it as it was, and collect( ) reads the job
-    SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_pile INTO ls_pile
       WHERE set_name = c_set
         AND run_id = iv_run
         AND rule_name = iv_rule
@@ -382,9 +394,22 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
       RETURN.
     ENDIF.
     rs_rule-piles = 1.
+    " a duplicate or late job never works a pile already claimed or finished
+    IF ls_pile-status <> 'PLANNED'.
+      rs_rule-status = 'NOT-PLANNED'.
+      RETURN.
+    ENDIF.
+    " the lock row names the latest run of this set and date
+    SELECT SINGLE status FROM zosd_l3_run INTO lv_run_status
+      WHERE set_name = c_set AND check_date = iv_date
+        AND run_id = iv_run AND status = 'HELD'.
+    IF sy-subrc <> 0.
+      rs_rule-status = 'STALE-RUN'.
+      RETURN.
+    ENDIF.
     ls_pile-status = 'RUNNING'.
     GET TIME STAMP FIELD ls_pile-started.
-    UPDATE zosd_l3_pile FROM ls_pile.
+    save_pile( ls_pile ).
     " the range is the plan row's, data and not a selection field; pile 0
     " is a rule that is not piled, over every row
     IF ls_pile-pile_no > 0.
@@ -488,7 +513,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
     ELSE.
       ls_pile-status = 'FAILED'.
     ENDIF.
-    UPDATE zosd_l3_pile FROM ls_pile.
+    save_pile( ls_pile ).
   ENDMETHOD.
 
   METHOD write.
@@ -608,12 +633,12 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
         OTHERS = 1.
     IF sy-subrc <> 0.
       cs_pile-status = 'FAILED'.
-      UPDATE zosd_l3_pile FROM cs_pile.
+      save_pile( cs_pile ).
       RETURN.
     ENDIF.
     cs_pile-job_name = lv_jobname.
     cs_pile-job_count = lv_jobcount.
-    UPDATE zosd_l3_pile FROM cs_pile.
+    save_pile( cs_pile ).
     SUBMIT zl3_fleet
       WITH p_rule = cs_pile-rule_name
       WITH p_date = iv_date
@@ -634,7 +659,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
         OTHERS = 1.
     IF sy-subrc <> 0 OR lv_released <> 'X'.
       cs_pile-status = 'FAILED'.
-      UPDATE zosd_l3_pile FROM cs_pile.
+      save_pile( cs_pile ).
     ENDIF.
   ENDMETHOD.
 
@@ -711,7 +736,7 @@ CLASS zcl_l3_fleet IMPLEMENTATION.
             IF ls_pile-status <> 'DONE'.
               ls_pile-status = 'FAILED'.
               GET TIME STAMP FIELD ls_pile-ended.
-              UPDATE zosd_l3_pile FROM ls_pile.
+              save_pile( ls_pile ).
             ENDIF.
           ELSE.
             lv_final = abap_false.

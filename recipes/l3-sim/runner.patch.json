@@ -106,7 +106,7 @@
     "before": [
       "    ls_pile-status = 'RUNNING'.\n",
       "    GET TIME STAMP FIELD ls_pile-started.\n",
-      "    UPDATE zosd_l3_pile FROM ls_pile.\n",
+      "    save_pile( ls_pile ).\n",
       "    CASE iv_rule.\n"
     ],
     "after": [
@@ -127,7 +127,7 @@
       "{{/simulate}}\n",
       "    ls_pile-status = 'RUNNING'.\n",
       "    GET TIME STAMP FIELD ls_pile-started.\n",
-      "    UPDATE zosd_l3_pile FROM ls_pile.\n",
+      "    save_pile( ls_pile ).\n",
       "{{#simulate}}\n",
       "    \" the work: the L2 classes below (variant real), or the simulated twin\n",
       "    li_work = {{ports_class}}=>get_work( lv_work ).\n",
@@ -340,7 +340,7 @@
       "          cs_pile-status = 'FAILED'.\n",
       "          cs_pile-reason = 'BIND-REFUSED'.\n",
       "          GET TIME STAMP FIELD cs_pile-ended.\n",
-      "          UPDATE zosd_l3_pile FROM cs_pile.\n",
+      "          save_pile( cs_pile ).\n",
       "          RETURN.\n",
       "      ENDTRY.\n",
       "    ENDIF.\n",

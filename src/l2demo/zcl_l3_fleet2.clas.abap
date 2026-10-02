@@ -176,9 +176,13 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " this user, or initial when the set is not scheduled
     CLASS-METHODS scheduled
       RETURNING VALUE(rv_jobcount) TYPE tbtcjob-jobcount.
-    " deletes the waiting instance of the driver, which ends the chain
+    TYPES: BEGIN OF ty_unschedule,
+             deleted TYPE i,
+             refused TYPE i,
+           END OF ty_unschedule.
+    " deletes waiting instances; a refusal is distinct from no matching job
     CLASS-METHODS unschedule
-      RETURNING VALUE(rv_deleted) TYPE i.
+      RETURNING VALUE(rs_deleted) TYPE ty_unschedule.
     " continues an open run, one that still holds its lock: piles PLANNED
     " without a job and FAILED piles within the retry budget are submitted
     " again at once, a gate whose stage is complete advances
@@ -305,6 +309,9 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " puts the rows of zosd_l2_ship back after a replay: the rows kept before it
     CLASS-METHODS restore_1
       IMPORTING it_keep TYPE zif_l3_fleet2_ships=>tt_rows.
+    " persists the pile's mutable execution fields under this set and key
+    CLASS-METHODS save_pile
+      IMPORTING is_pile TYPE zosd_l3_pile.
     CLASS-METHODS submit
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
@@ -352,7 +359,7 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
       CHANGING ct_report TYPE tt_doctor.
     CLASS-METHODS schedule_doctor.
     CLASS-METHODS unschedule_doctor
-      RETURNING VALUE(rv_deleted) TYPE i.
+      RETURNING VALUE(rs_deleted) TYPE ty_unschedule.
 ENDCLASS.
 
 CLASS zcl_l3_fleet2 IMPLEMENTATION.
@@ -492,7 +499,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           ENDIF.
           GET TIME STAMP FIELD lv_stamp.
           UPDATE zosd_l3_stage SET status = 'OPEN' opened = lv_stamp
-            WHERE run_id = rs_result-run_id
+            WHERE set_name = c_set AND run_id = rs_result-run_id
               AND stage_no = ls_stage-stage_no
               AND status = 'WAITING'.
           lt_piles = plan( iv_run = rs_result-run_id
@@ -568,7 +575,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
             ENDIF.
             GET TIME STAMP FIELD lv_stamp.
             UPDATE zosd_l3_stage SET status = ls_stage-status ended = lv_stamp
-              WHERE run_id = rs_result-run_id
+              WHERE set_name = c_set AND run_id = rs_result-run_id
                 AND stage_no = ls_stage-stage_no.
           ENDIF.
           APPEND ls_stage TO rs_result-stages.
@@ -747,14 +754,14 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ENDIF.
     GET TIME STAMP FIELD lv_stamp.
     UPDATE zosd_l3_stage SET status = 'DONE' ended = lv_stamp
-      WHERE run_id = iv_run
+      WHERE set_name = c_set AND run_id = iv_run
         AND stage_no = iv_stage
         AND status = 'OPEN'.
     lt_rules = rules( ).
     lv_stage = iv_stage + 1.
     WHILE lv_stage <= c_stages.
       UPDATE zosd_l3_stage SET status = 'OPEN' opened = lv_stamp
-        WHERE run_id = iv_run
+        WHERE set_name = c_set AND run_id = iv_run
           AND stage_no = lv_stage
           AND status = 'WAITING'.
       IF sy-dbcnt <> 1.
@@ -779,7 +786,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         RETURN.
       ENDIF.
       UPDATE zosd_l3_stage SET status = 'DONE' ended = lv_stamp
-        WHERE run_id = iv_run
+        WHERE set_name = c_set AND run_id = iv_run
           AND stage_no = lv_stage.
       lv_stage = lv_stage + 1.
     ENDWHILE.
@@ -966,6 +973,16 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     INSERT zosd_l2_ship FROM TABLE it_keep.
   ENDMETHOD.
 
+  METHOD save_pile.
+    UPDATE zosd_l3_pile SET status = is_pile-status alerts = is_pile-alerts
+      started = is_pile-started ended = is_pile-ended
+      job_name = is_pile-job_name job_count = is_pile-job_count
+      attempt = is_pile-attempt reason = is_pile-reason
+      hits = is_pile-hits closed = is_pile-closed open_alerts = is_pile-open_alerts
+      WHERE set_name = c_set AND run_id = is_pile-run_id
+        AND rule_name = is_pile-rule_name AND pile_no = is_pile-pile_no.
+  ENDMETHOD.
+
   METHOD rules.
     DATA ls_rule TYPE ty_rule.
     ls_rule-rule = c_rule_1.
@@ -1013,6 +1030,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD run_rule.
+    DATA lv_run_status TYPE zosd_l3_run-status.
     " a pile of one rule: its plan row RUNNING now, DONE or FAILED at the end;
     " a filter rule's keys go to its worklist, a check rule's alerts to the log
     DATA lt_alerts TYPE string_table.
@@ -1031,14 +1049,6 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_key_1 LIKE LINE OF lt_keys_1.
     DATA ls_params TYPE ty_params.
     rs_rule-rule = iv_rule.
-    SELECT SINGLE * FROM zosd_l3_budget INTO ls_budget
-      WHERE run_id = iv_run AND set_name = c_set.
-    IF sy-subrc <> 0 OR ls_budget-state = 'GLASS'.
-      UPDATE zosd_l3_pile SET status = 'GLASS' reason = 'GLASS'
-        WHERE run_id = iv_run AND rule_name = iv_rule AND pile_no = iv_pile AND status = 'PLANNED'.
-      rs_rule-status = 'GLASS'.
-      RETURN.
-    ENDIF.
     SELECT SINGLE FOR UPDATE * FROM zosd_l3_pile INTO ls_pile
       WHERE set_name = c_set
         AND run_id = iv_run
@@ -1049,12 +1059,25 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       RETURN.
     ENDIF.
     rs_rule-piles = 1.
-    " only a PLANNED pile is worked. A job may start before the step that
-    " submitted it commits: FOR UPDATE above makes it wait for that commit
-    " and read the row as it was left, and a pile the doctor or collect( )
-    " has taken as FAILED, or one another job runs, is not run twice
+    " a duplicate or late job never works a pile already claimed or finished
     IF ls_pile-status <> 'PLANNED'.
       rs_rule-status = 'NOT-PLANNED'.
+      RETURN.
+    ENDIF.
+    " the lock row names the latest run of this set and date
+    SELECT SINGLE status FROM zosd_l3_run INTO lv_run_status
+      WHERE set_name = c_set AND check_date = iv_date
+        AND run_id = iv_run AND status = 'HELD'.
+    IF sy-subrc <> 0.
+      rs_rule-status = 'STALE-RUN'.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE * FROM zosd_l3_budget INTO ls_budget
+      WHERE run_id = iv_run AND set_name = c_set.
+    IF sy-subrc <> 0 OR ls_budget-state = 'GLASS'.
+      UPDATE zosd_l3_pile SET status = 'GLASS' reason = 'GLASS'
+        WHERE set_name = c_set AND run_id = iv_run AND rule_name = iv_rule AND pile_no = iv_pile AND status = 'PLANNED'.
+      rs_rule-status = 'GLASS'.
       RETURN.
     ENDIF.
     IF is_settings IS NOT INITIAL.
@@ -1085,7 +1108,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         ls_pile-attempt = ls_pile-attempt - 1.
       ENDIF.
       GET TIME STAMP FIELD ls_pile-ended.
-      UPDATE zosd_l3_pile FROM ls_pile.
+      save_pile( ls_pile ).
       rs_rule-status = 'KILLED'.
       RETURN.
     ENDIF.
@@ -1104,7 +1127,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ENDIF.
     ls_pile-status = 'RUNNING'.
     GET TIME STAMP FIELD ls_pile-started.
-    UPDATE zosd_l3_pile FROM ls_pile.
+    save_pile( ls_pile ).
     " the work: the L2 classes below (variant real), or the simulated twin
     li_work = zcl_l3_fleet2_ports=>get_work( lv_work ).
     IF li_work IS BOUND.
@@ -1354,7 +1377,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ls_pile-hits = lines( lt_alerts ).
     ls_pile-closed = rs_rule-closed.
     ls_pile-open_alerts = rs_rule-open_alerts.
-    UPDATE zosd_l3_pile FROM ls_pile.
+    save_pile( ls_pile ).
     IF ls_pile-job_count IS NOT INITIAL AND rs_rule-status <> 'GLASS'.
       flow( iv_run = iv_run iv_date = iv_date iv_stage = ls_pile-stage_no iv_bind = iv_bind
             is_params = is_params ).
@@ -1637,7 +1660,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           cs_pile-status = 'FAILED'.
           cs_pile-reason = 'BIND-REFUSED'.
           GET TIME STAMP FIELD cs_pile-ended.
-          UPDATE zosd_l3_pile FROM cs_pile.
+          save_pile( cs_pile ).
           RETURN.
       ENDTRY.
     ENDIF.
@@ -1660,7 +1683,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       ENDIF.
     ENDIF.
     UPDATE zosd_l3_pile SET reason = 'GOV-CLAIM'
-      WHERE run_id = iv_run AND rule_name = cs_pile-rule_name AND pile_no = cs_pile-pile_no
+      WHERE set_name = c_set AND run_id = iv_run AND rule_name = cs_pile-rule_name AND pile_no = cs_pile-pile_no
         AND status = 'PLANNED' AND job_count = '' AND reason <> 'GOV-CLAIM'.
     IF sy-dbcnt <> 1.
       RETURN.
@@ -1677,12 +1700,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       cs_pile-status = 'FAILED'.
       cs_pile-reason = 'JOB-OPEN'.
       GET TIME STAMP FIELD cs_pile-ended.
-      UPDATE zosd_l3_pile FROM cs_pile.
+      save_pile( cs_pile ).
       RETURN.
     ENDIF.
     cs_pile-job_name = lv_jobname.
     cs_pile-job_count = lv_jobcount.
-    UPDATE zosd_l3_pile FROM cs_pile.
+    save_pile( cs_pile ).
     SUBMIT zl3_fleet2
       WITH p_rule = cs_pile-rule_name
       WITH p_date = iv_date
@@ -1717,7 +1740,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       cs_pile-status = 'FAILED'.
       cs_pile-reason = 'JOB-CLOSE'.
       GET TIME STAMP FIELD cs_pile-ended.
-      UPDATE zosd_l3_pile FROM cs_pile.
+      save_pile( cs_pile ).
     ENDIF.
   ENDMETHOD.
 
@@ -1818,7 +1841,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA lt_jobs TYPE STANDARD TABLE OF tbtcjob WITH DEFAULT KEY.
     DATA ls_job TYPE tbtcjob.
     " the doctor's job goes with the schedule
-    rv_deleted = unschedule_doctor( ).
+    rs_deleted = unschedule_doctor( ).
     ls_select-jobname = c_driver.
     ls_select-username = sy-uname.
     ls_select-schedul = 'X'.
@@ -1829,8 +1852,13 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       TABLES
         jobselect_joblist = lt_jobs
       EXCEPTIONS
-        OTHERS = 1.
+        no_jobs_found = 1
+        OTHERS = 2.
+    IF sy-subrc = 1.
+      RETURN.
+    ENDIF.
     IF sy-subrc <> 0.
+      rs_deleted-refused = rs_deleted-refused + 1.
       RETURN.
     ENDIF.
     LOOP AT lt_jobs INTO ls_job WHERE status = 'S'.
@@ -1841,7 +1869,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         EXCEPTIONS
           OTHERS = 1.
       IF sy-subrc = 0.
-        rv_deleted = rv_deleted + 1.
+        rs_deleted-deleted = rs_deleted-deleted + 1.
+      ELSE.
+        rs_deleted-refused = rs_deleted-refused + 1.
       ENDIF.
     ENDLOOP.
   ENDMETHOD.
@@ -1958,7 +1988,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           " one UPDATE on the row as read, and on the job that was checked
           GET TIME STAMP FIELD ls_pile-ended.
           UPDATE zosd_l3_pile SET status = 'FAILED' ended = ls_pile-ended
-            WHERE run_id = ls_pile-run_id
+            WHERE set_name = c_set AND run_id = ls_pile-run_id
               AND rule_name = ls_pile-rule_name
               AND pile_no = ls_pile-pile_no
               AND status = ls_pile-status
@@ -2008,7 +2038,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       IF ls_gate-status = 'WAITING' AND lv_closed = abap_true.
         " after a PARTIAL stage: never opened, and now never opens
         UPDATE zosd_l3_stage SET status = 'NOT-RUN' ended = lv_stamp
-          WHERE run_id = is_result-run_id
+          WHERE set_name = c_set AND run_id = is_result-run_id
             AND stage_no = ls_gate-stage_no
             AND status = 'WAITING'.
         ls_stage-status = 'NOT-RUN'.
@@ -2023,7 +2053,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         lv_final = abap_false.
       ELSEIF lv_lost = abap_true.
         UPDATE zosd_l3_stage SET status = 'PARTIAL' ended = lv_stamp
-          WHERE run_id = is_result-run_id
+          WHERE set_name = c_set AND run_id = is_result-run_id
             AND stage_no = ls_gate-stage_no.
         ls_stage-status = 'PARTIAL'.
         lv_closed = abap_true.
@@ -2409,7 +2439,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       ENDIF.
       IF lv_reason IS NOT INITIAL.
         UPDATE zosd_l3_pile SET status = 'FAILED' reason = lv_reason ended = iv_now
-          WHERE run_id = ls_pile-run_id
+          WHERE set_name = c_set AND run_id = ls_pile-run_id
             AND rule_name = ls_pile-rule_name
             AND pile_no = ls_pile-pile_no
             AND status = ls_pile-status
@@ -2468,7 +2498,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       lv_next = ls_pile-attempt + 1.
       UPDATE zosd_l3_pile SET status = 'PLANNED' attempt = lv_next reason = lv_reason
                               job_name = ' ' job_count = ' '
-        WHERE run_id = ls_pile-run_id
+        WHERE set_name = c_set AND run_id = ls_pile-run_id
           AND rule_name = ls_pile-rule_name
           AND pile_no = ls_pile-pile_no
           AND status = ls_pile-status
@@ -2491,7 +2521,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         " a refused submit did not spend an attempt or create a RESUBMIT
         UPDATE zosd_l3_pile SET status = ls_claim-status attempt = ls_claim-attempt reason = ls_claim-reason
                                 job_name = ls_claim-job_name job_count = ls_claim-job_count
-          WHERE run_id = iv_run AND rule_name = ls_claim-rule_name AND pile_no = ls_claim-pile_no
+          WHERE set_name = c_set AND run_id = iv_run AND rule_name = ls_claim-rule_name AND pile_no = ls_claim-pile_no
             AND status = 'PLANNED' AND attempt = lv_next AND job_count = ''.
         CONTINUE.
       ENDIF.
@@ -2533,7 +2563,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           CONTINUE.
         ENDIF.
         UPDATE zosd_l3_stage SET opened = iv_now
-          WHERE run_id = iv_run
+          WHERE set_name = c_set AND run_id = iv_run
             AND stage_no = ls_gate-stage_no
             AND status = 'OPEN'
             AND opened = ls_gate-opened.
@@ -2578,7 +2608,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           CONTINUE.
         ENDIF.
         UPDATE zosd_l3_stage SET status = 'DONE' ended = iv_now
-          WHERE run_id = iv_run
+          WHERE set_name = c_set AND run_id = iv_run
             AND stage_no = ls_gate-stage_no
             AND status = 'OPEN'.
         IF sy-dbcnt <> 1.
@@ -2707,12 +2737,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         CONTINUE.
       ENDIF.
       DELETE FROM zosd_l3_pile WHERE set_name = c_set AND run_id = ls_run-run_id.
-      DELETE FROM zosd_l3_work WHERE run_id = ls_run-run_id.
-      DELETE FROM zosd_l3_doctor WHERE run_id = ls_run-run_id.
-      DELETE FROM zosd_l3_stage WHERE run_id = ls_run-run_id.
-      DELETE FROM zosd_l3_event WHERE run_id = ls_run-run_id.
+      DELETE FROM zosd_l3_work WHERE set_name = c_set AND run_id = ls_run-run_id.
+      DELETE FROM zosd_l3_doctor WHERE set_name = c_set AND run_id = ls_run-run_id.
+      DELETE FROM zosd_l3_stage WHERE set_name = c_set AND run_id = ls_run-run_id.
+      DELETE FROM zosd_l3_event WHERE set_name = c_set AND run_id = ls_run-run_id.
       DELETE FROM zosd_l3_object WHERE run_id = ls_run-run_id.
-      DELETE FROM zosd_l3_budget WHERE run_id = ls_run-run_id.
+      DELETE FROM zosd_l3_budget WHERE set_name = c_set AND run_id = ls_run-run_id.
       act( EXPORTING iv_run = ls_run-run_id
                      iv_date = ls_run-check_date
                      iv_action = 'PURGE'
@@ -2734,7 +2764,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       IF ls_lock-run_id = ls_audit-run_id AND ls_lock-status = 'HELD'.
         CONTINUE.
       ENDIF.
-      DELETE FROM zosd_l3_doctor WHERE run_id = ls_audit-run_id AND seq = ls_audit-seq.
+      DELETE FROM zosd_l3_doctor WHERE set_name = c_set AND run_id = ls_audit-run_id AND seq = ls_audit-seq.
     ENDLOOP.
     " the lock rows of dates whose last run let go before the cut
     DELETE FROM zosd_l3_run
@@ -2913,8 +2943,13 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       TABLES
         jobselect_joblist = lt_jobs
       EXCEPTIONS
-        OTHERS = 1.
+        no_jobs_found = 1
+        OTHERS = 2.
+    IF sy-subrc = 1.
+      RETURN.
+    ENDIF.
     IF sy-subrc <> 0.
+      rs_deleted-refused = rs_deleted-refused + 1.
       RETURN.
     ENDIF.
     LOOP AT lt_jobs INTO ls_job WHERE status = 'S'.
@@ -2925,7 +2960,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         EXCEPTIONS
           OTHERS = 1.
       IF sy-subrc = 0.
-        rv_deleted = rv_deleted + 1.
+        rs_deleted-deleted = rs_deleted-deleted + 1.
+      ELSE.
+        rs_deleted-refused = rs_deleted-refused + 1.
       ENDIF.
     ENDLOOP.
   ENDMETHOD.
@@ -3036,7 +3073,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         WHERE run_id = iv_run AND set_name = c_set AND status = 'OPEN' ORDER BY PRIMARY KEY.
       LOOP AT lt_gates INTO ls_gate.
         UPDATE zosd_l3_stage SET status = 'PARTIAL'
-          WHERE run_id = iv_run AND stage_no = ls_gate-stage_no AND status = 'OPEN'.
+          WHERE set_name = c_set AND run_id = iv_run AND stage_no = ls_gate-stage_no AND status = 'OPEN'.
         IF sy-dbcnt = 1.
           budget_event( iv_run = iv_run iv_kind = 'GLASS-STAGE' iv_amount = ls_gate-stage_no ).
         ENDIF.
@@ -3174,15 +3211,15 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ENDIF.
     UPDATE zosd_l3_pile SET status = 'PLANNED' job_count = '' job_name = '' reason = 'RELEASE'
                            per_pile = lv_cap
-      WHERE run_id = iv_run AND rule_name = iv_rule AND pile_no = iv_pile AND status = 'HELD'.
+      WHERE set_name = c_set AND run_id = iv_run AND rule_name = iv_rule AND pile_no = iv_pile AND status = 'HELD'.
     IF sy-dbcnt <> 1.
       RETURN.
     ENDIF.
     budget_event( iv_run = iv_run iv_kind = 'RELEASE' iv_amount = lv_cap iv_reason = iv_reason iv_pile = iv_pile iv_rule = iv_rule ).
     UPDATE zosd_l3_stage SET status = 'OPEN'
-      WHERE run_id = iv_run AND stage_no = ls_pile-stage_no AND ( status = 'PARTIAL' OR status = 'DONE' ).
+      WHERE set_name = c_set AND run_id = iv_run AND stage_no = ls_pile-stage_no AND ( status = 'PARTIAL' OR status = 'DONE' ).
     UPDATE zosd_l3_stage SET status = 'WAITING'
-      WHERE run_id = iv_run AND stage_no > ls_pile-stage_no AND status = 'NOT-RUN'.
+      WHERE set_name = c_set AND run_id = iv_run AND stage_no > ls_pile-stage_no AND status = 'NOT-RUN'.
     rv_ok = abap_true.
   ENDMETHOD.
 ENDCLASS.
