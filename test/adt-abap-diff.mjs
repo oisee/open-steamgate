@@ -24,7 +24,7 @@ import {abapRunner, matchRoute, routeRows} from "../tools/adt-abap-front.mjs";
 import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
-import {Sessions} from "../tools/adt-session.mjs";
+import {Sessions, SESSION_COOKIE} from "../tools/adt-session.mjs";
 import {EnqOwners} from "../tools/adt-enq.mjs";
 
 const output = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
@@ -511,7 +511,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     const lock = (client, name = LOCKED, headers = {}) => send(client, "POST", `${at(name)}?_action=LOCK&accessMode=MODIFY`, {headers});
     const unlock = (client, handle, name = LOCKED) => send(client, "POST", `${at(name)}?_action=UNLOCK&lockHandle=${handle}`);
     const logoff = (client) => fetch(`http://127.0.0.1:${client.server.address().port}/sap/public/bc/icf/logoff`,
-      {headers: {cookie: `SAP_SESSIONID_OSD_001=${client.id}`}}).then((r) => r.status);
+      {headers: {cookie: `${SESSION_COOKIE}=${client.id}`}}).then((r) => r.status);
 
     // the sequences: each takes a server and answers what it saw, in order
     const SEQUENCES = {

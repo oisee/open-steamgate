@@ -19,10 +19,10 @@ reason.
 - `npm start` serves the façade under `/sap/bc/adt/` on port 3030, beside the
   OData front on the same port.
 - `sh scripts/osd-restart.sh 3030` frees the port by its owner and restarts,
-  waiting until discovery answers. `STG_ADT_SID=<SID>` renames the system;
-  the default is **OS2** (a client refuses a logon when the id it stored at
-  project creation differs from the one reported, so the id is a code default
-  and not a variable a restart must remember).
+  waiting until discovery answers. `OSD_SID=<SID>` (alias `STG_ADT_SID`)
+  renames the system, every surface at once; the default is **OSD** (a client
+  refuses a logon when the id it stored at project creation differs from the
+  one reported, so rename before projects exist, not after).
 - A client that speaks HTTPS reaches the same façade through the TLS listener
   the runner brings up; the certificate is `.local/tls/osd.crt`.
 - `STG_ADT_DUMP=<file.jsonl>` records every exchange under the façade in the
@@ -39,8 +39,8 @@ with nothing on the wire to show why.
 
 | What | Resource | Note |
 |------|----------|------|
-| Token + context | `HEAD/GET core/discovery` | `X-CSRF-Token` not the literal `Required`; `sap-contextid` and `SAP_SESSIONID_OS2_001` cookies |
-| System identity | `GET core/http/systeminformation` | systemID OS2, client 001, user DEVELOPER |
+| Token + context | `HEAD/GET core/discovery` | `X-CSRF-Token` not the literal `Required`; `sap-contextid` and `SAP_SESSIONID_<SID>_001` cookies |
+| System identity | `GET core/http/systeminformation` | systemID = the system id (OSD by default), client 001, user DEVELOPER |
 | Discovery | `GET core/discovery` | every `app:collection` carries an `atom:category term+scheme`, or the client's parser NPEs on the whole document |
 | Compatibility graph | `GET compatibility/graph` | the real gate: `compatibilityAvailable` must be present or the client reads every capability as absent and asks for nothing |
 
@@ -48,7 +48,7 @@ The graph is what silently gates features. `SOURCESERVICES/outline` gates the
 class and interface outline; `DDIC.DDLSOURCES/ddlSources` gates opening a CDS
 view; `PROJECTEXPLORER` without `treePath` keeps the tree on `nodestructure`
 rather than a resource we do not serve. Tests: `test/adt-session.mjs`,
-`test/adt-facade.mjs` (the gate, the discovery categories, the OS2 identity).
+`test/adt-facade.mjs` (the gate, the discovery categories, the one system id).
 
 ## Wave 1 — browsing a repository
 

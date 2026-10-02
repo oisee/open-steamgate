@@ -36,7 +36,7 @@ const CORE_APPS = [
   {
     title: "System status",
     intent: "System-status",
-    ready: (page) => page.locator(".sapMListTblRow", {hasText: "OSG"}).first(),
+    ready: (page) => page.locator(".sapMListTblRow", {hasText: "OSD"}).first(),
   },
 ];
 

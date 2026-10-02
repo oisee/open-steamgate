@@ -3886,7 +3886,7 @@ function fieldChain(n, ctx) {
   if (text === "SY-MANDT") return {e: "sy_mandt", type: C(3)};
   if (text === "SY-BATCH") return {e: "chars", value: "", type: C(1)};
   // who the system is and its clock, as the host says (abap.SysID / UName,
-  // the identity tools/osd-identity.mjs gives the Node boot: OSG, DEVELOPER;
+  // the identity tools/osd-identity.mjs gives the Node boot: OSD, DEVELOPER;
   // date and time in UTC, as the transpiler runtime has them)
   if (text === "SY-SYSID") return {e: "sy_host", name: "SysID", type: C(8)};
   if (text === "SY-UNAME") return {e: "sy_host", name: "UName", type: C(12)};

@@ -139,7 +139,7 @@ snapshot takes `ZOSD_SYS-SID` from the same function, and so does the ADT
 façade. The screen then reads `sy` and prints what it finds:
 
 ```
-OSG (436726) 123 DEVELOPER · node · open-steamgate
+OSD (436726) 123 DEVELOPER · node · open-steamgate
  |    |       |   |          |      root_hint
  |    |       |   |          host kind
  |    |       |   sy-uname
@@ -148,19 +148,19 @@ OSG (436726) 123 DEVELOPER · node · open-steamgate
  sy-sysid
 ```
 
-**Two names, and why they differ.** `OSD_SID` is the runtime-facing id: what
-the ABAP sees as `sy-sysid` and what the status service reports. `STG_ADT_SID`
-is the ADT-facing one, what Eclipse sees, and it defaults to `OS2` rather than
-to the runtime's `OSG`. That is not an oversight: an ABAP project stores the id
-it was created against and refuses a logon to a system reporting another one
-("Logon was not performed to the service instance of the project OS2, but to
-service instance: OSD"), so renaming it locks the owner of a working project
-out — which happened twice, and is why `tools/adt-facade.mjs` made the id a
-constant in the first place. The same holds for the façade's client `001`,
-which is also part of what a project was created against and of the session
-cookie's name (`SAP_SESSIONID_OS2_001`), while the runtime's client is `123`
-because that is the client the seed rows in `data/` are in. `STG_ADT_SID` still
-renames both, exactly as it did before. `OSD_CLIENT` and `OSD_USER` are the
+**One name.** `OSD_SID` is the system id, and `STG_ADT_SID` is an alias with
+the same meaning (`OSD_SID` wins when both are set); with neither it is `OSD`.
+It is what the ABAP sees as `sy-sysid`, what the status service reports, what
+the ADT façade tells Eclipse (`systeminformation`, the feeds, the session
+cookie `SAP_SESSIONID_<SID>_001`), what this screen prints and what OSGo uses,
+and `osd doctor` prints it with where it came from (setting or default). Until
+2026-10-02 the runtime said `OSG` and the façade `OS2`, kept apart because an
+ABAP project stores the id it was created against and refuses a logon to a
+system reporting another one; nobody runs Eclipse against this system yet, so
+that lock-out was moot and the two names became one. The client stays split:
+the façade's `001` is part of what a project is created against and of the
+cookie's name, while the runtime's client is `123` because that is the client
+the seed rows in `data/` are in. `OSD_CLIENT` and `OSD_USER` are the
 other two knobs, and `OSD_CLIENT` moves `sy-mandt` away from the seeded rows,
 so it is for experiments rather than for a working tree.
 

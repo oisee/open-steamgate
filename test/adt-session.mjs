@@ -1,6 +1,8 @@
 import {expect} from "chai";
 import express from "express";
+import {spawnSync} from "node:child_process";
 import {Sessions, REQUIRED, CONTEXT_COOKIE, SESSION_COOKIE} from "../tools/adt-session.mjs";
+import {identity} from "../tools/osd-identity.mjs";
 
 // The session layer on its own, without the façade around it: these are the
 // rules an ADT client checks on every single answer, so they are worth
@@ -40,6 +42,26 @@ describe("tools/adt-session: the token dance", () => {
     const cookies = cookiesOf(res);
     expect(cookies).to.contain(CONTEXT_COOKIE + "=");
     expect(cookies).to.contain(SESSION_COOKIE + "=");
+  });
+
+  // the cookie of a real system is named after its id and its client, and
+  // so is this one: the one id (tools/osd-identity.mjs), not a constant
+  it("names the session cookie after the system id and the ADT client", () => {
+    const who = identity();
+    expect(SESSION_COOKIE).to.equal(`SAP_SESSIONID_${who.sid}_${who.adt.client}`);
+    const nameUnder = (env) => {
+      const clean = {...process.env};
+      delete clean.OSD_SID;
+      delete clean.STG_ADT_SID;
+      const run = spawnSync(process.execPath, ["--input-type=module", "-e",
+        "const m = await import(process.argv[1]); console.log(m.SESSION_COOKIE);",
+        new URL("../tools/adt-session.mjs", import.meta.url).href], {env: {...clean, ...env}, encoding: "utf8"});
+      expect(run.status, run.stderr).to.equal(0);
+      return run.stdout.trim();
+    };
+    expect(nameUnder({}), "the default").to.equal("SAP_SESSIONID_OSD_001");
+    expect(nameUnder({OSD_SID: "qrs"}), "the setting").to.equal("SAP_SESSIONID_QRS_001");
+    expect(nameUnder({STG_ADT_SID: "osx"}), "its alias").to.equal("SAP_SESSIONID_OSX_001");
   });
 
   it("every answer carries a token, not only the one that asked for it", async () => {

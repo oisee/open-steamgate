@@ -41,6 +41,7 @@ import (
 	"osg/gogen/abap"
 	"osg/gogen/apc"
 	"osg/gogen/osdbind"
+	"osg/gogen/sysid"
 )
 
 //go:embed zz_db.json
@@ -376,18 +377,10 @@ func selectedPort(flagValue string, explicit bool, getenv func(string) string) (
 	return port, source, nil
 }
 
+// selectedSID is the one system id (sysid.FromEnv, the rule of
+// tools/osd-identity.mjs): sy-sysid and the status service's Sid
 func selectedSID(lookup func(string) (string, bool)) string {
-	sid, present := lookup("OSD_SID")
-	if !present {
-		sid, _ = lookup("STG_ADT_SID")
-	}
-	sid = strings.ToUpper(strings.TrimSpace(sid))
-	if sid == "" {
-		return "OSG"
-	}
-	if len(sid) > 3 {
-		sid = sid[:3]
-	}
+	sid, _ := sysid.FromEnv(lookup)
 	return sid
 }
 
@@ -437,7 +430,9 @@ func main() {
 	}
 	port := &portValue
 	binds := osdbind.Selected(*addr, addrExplicit, os.Getenv)
-	abap.SysID = selectedSID(os.LookupEnv)
+	sid, sidSource := sysid.FromEnv(os.LookupEnv)
+	abap.SysID = sid
+	log.Printf("system id: %s (%s)", sid, sysid.Describe(sidSource))
 	*dbFile = selectedDB(*dbFile, *homeDir, dbExplicit, os.Getenv)
 	if *homeDir != "" {
 		if err := os.MkdirAll(*homeDir, 0700); err != nil {

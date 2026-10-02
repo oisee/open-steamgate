@@ -242,6 +242,26 @@ describe("webgui: Easy Success, the screen SAP calls Easy Access", () => {
     expect(text, "no invented client").to.not.contain(" 100 ");
   });
 
+  // One system id, one setting (tools/osd-identity.mjs): the screen (sy),
+  // the status service (ZOSD_SYS), ADT systeminformation and its feeds, and
+  // the name of the ADT session cookie all say the same three letters, and
+  // they are OSD unless OSD_SID (or its alias STG_ADT_SID) says otherwise.
+  it("every surface reports the same system id, and it is the setting or OSD", async () => {
+    const setting = [process.env.OSD_SID, process.env.STG_ADT_SID].map((v) => String(v ?? "").trim()).find((v) => v !== "");
+    const expected = setting === undefined ? "OSD" : setting.toUpperCase().slice(0, 3);
+    expect(identity().sid, "the identity").to.equal(expected);
+    const system = await systemRow();
+    expect(String(system.Sid).trim(), "ZOSD_SYS through the status service").to.equal(expected);
+    const bar = /<span class="dim" id="sysinfo">([^<]*)/.exec(page)[1];
+    expect(bar.trim().split(/\s+/)[0], "sy-sysid on the screen").to.equal(expected);
+    const adt = `http://localhost:${PORT}/sap/bc/adt`;
+    const discovery = await fetch(`${adt}/core/discovery`, {headers: {"x-csrf-token": "fetch"}});
+    const cookies = (discovery.headers.getSetCookie?.() ?? []).join("; ");
+    expect(cookies, "the ADT session cookie").to.contain(`SAP_SESSIONID_${expected}_${identity().adt.client}=`);
+    const info = await (await fetch(`${adt}/core/http/systeminformation`, {headers: {cookie: cookies.split(/;\s*/).filter((c) => /^(sap-contextid|SAP_SESSIONID_)/.test(c)).join("; ")}})).json();
+    expect(info.systemID, "ADT systeminformation").to.equal(expected);
+  });
+
   // the command field is the second way in, and it is resolved on the server
   // against the same list the tree is built from
   it("takes an ok-code to where clicking the node goes", async () => {

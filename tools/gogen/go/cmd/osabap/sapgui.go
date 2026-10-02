@@ -12,6 +12,7 @@ import (
 	"github.com/oisee/open-diag-go/pkg/diag"
 	"github.com/oisee/open-diag-go/pkg/frame"
 
+	"osg/gogen/abap"
 	"osg/gogen/reportargs"
 )
 
@@ -65,7 +66,7 @@ func serveSAPGUI(listen string, launch bool, selection ZCL_GG_HOST__TY_RESULT, e
 		fmt.Sscanf(port[len(port)-2:], "%d", &instance)
 	}
 	fmt.Printf("OS/ABAP %s waiting for SAP GUI\n", appProgram)
-	fmt.Printf("Application Server: %s\nInstance Number:    %02d\nSystem ID:          OSG\n", host, instance)
+	fmt.Printf("Application Server: %s\nInstance Number:    %02d\nSystem ID:          %s\n", host, instance, abap.SysID)
 	if launch {
 		clientHost := host
 		if clientHost == "0.0.0.0" || clientHost == "::" {

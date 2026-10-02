@@ -80,8 +80,10 @@ func TestSelectedDB(t *testing.T) {
 }
 
 func TestSelectedSID(t *testing.T) {
+	// the rule of abap.SIDFromEnv and tools/osd-identity.mjs: OSD_SID, then
+	// the alias STG_ADT_SID, then OSD; blank counts as unset
 	for _, tc := range []struct{ osd, adt, want string }{
-		{"", "", "OSG"}, {"", "osx", "OSX"}, {"abcde", "xyz", "ABC"}, {"  ", "os2", "OSG"},
+		{"", "", "OSD"}, {"", "osx", "OSX"}, {"abcde", "xyz", "ABC"}, {"  ", "os2", "OS2"},
 	} {
 		lookup := func(name string) (string, bool) {
 			if name == "OSD_SID" {
@@ -100,8 +102,8 @@ func TestSelectedSID(t *testing.T) {
 		if name == "OSD_SID" {
 			return "", true
 		}
-		return "OS2", true
-	}); got != "OSG" {
+		return "", false
+	}); got != "OSD" {
 		t.Fatal(got)
 	}
 }

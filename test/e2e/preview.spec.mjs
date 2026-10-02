@@ -894,7 +894,7 @@ test("the status app says what the deployment in the browser is", async () => {
     await expect(row).toBeVisible({timeout: 60000});
     await row.click();
 
-    await expect(page.locator(".sapUxAPObjectPageHeaderTitle").first()).toContainText("OSG");
+    await expect(page.locator(".sapUxAPObjectPageHeaderTitle").first()).toContainText("OSD");
     const section = (id) => page.locator(`[id$="--${id}::Section"]`).first();
     // one work process, and it is the worker itself (the count is in the
     // section title, which a hidden header row in the table would not fake)

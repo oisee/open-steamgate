@@ -7,7 +7,7 @@
 //     sy-uname USERNAME (@abaplint/runtime, builtin/sy.ts), never set by us;
 //   - the status table ZOSD_SYS-SID, which was STG_ADT_SID or "OSG"
 //     (tools/osd-status.mjs);
-//   - the ADT façade, which tells Eclipse it is OS2, client 001, user
+//   - the ADT façade, which told Eclipse it was OS2, client 001, user
 //     DEVELOPER (tools/adt-facade.mjs);
 //   - and the Easy Access screen, whose status bar printed a session number
 //     and a client nobody had ever set.
@@ -17,35 +17,42 @@
 // same sid, the façade takes its identity from here, and the screen reads sy
 // — so the bar cannot say something the rest of the system does not.
 //
-// Two names, and the reason they differ.
+// One name, one setting.
 //
-// The runtime-facing id (OSD_SID) is what the ABAP in this system sees as
-// sy-sysid and what the status service reports. The ADT-facing id
-// (STG_ADT_SID) is what Eclipse sees, and it is a different thing: an ABAP
-// project stores the id it was created against and refuses a logon to a
-// system reporting another one ("Logon was not performed to the service
-// instance of the project OS2, but to service instance: OSD"), so renaming it
-// locks the owner of a working project out — which is exactly what happened,
-// twice, and why the default is a constant and not derived from anything.
-// The same holds for the ADT client: 001 is part of what a project was
-// created against and of the session cookie's name (SAP_SESSIONID_OS2_001),
-// while the runtime client is 123 because that is the client the seed rows in
-// data/ are in. So: one module, two names, defaults that are deliberately not
-// the same, and nothing invented anywhere.
+// The system id is OSD_SID (STG_ADT_SID is an alias that means exactly the
+// same; when both are set OSD_SID wins), and when neither is set it is "OSD",
+// the product. Every surface reads it from here: sy-sysid (the boot below),
+// ZOSD_SYS-SID and the status service (tools/osd-status.mjs), the ADT
+// systeminformation's systemID and the feeds' contributor
+// (tools/adt-facade.mjs, the ABAP front through SYSTEM IDENTITY), the ADT
+// session cookie SAP_SESSIONID_<SID>_<client> (tools/adt-session.mjs), the
+// Easy Success status bar (it prints sy), the DIAG/RFC bridges
+// (tools/protocols/) and the preview (scripts/build-preview.mjs). OSGo
+// applies the same rule (tools/gogen/go/abap/sysinfo.go, SIDFromEnv).
+// `osd doctor` prints the id and whether the setting or the default chose it.
 //
-// STG_ADT_SID still renames both, as it always did (scripts/check-hosts.mjs,
-// test/osd-binary.mjs set it), so nothing that used it changes meaning.
+// History: the runtime used to say OSG and the ADT façade OS2, kept apart
+// because an Eclipse project refuses a logon to a system reporting another
+// id than the one it was created against. Nobody runs Eclipse against this
+// system yet, so that lock-out is moot and the two names became one
+// (2026-10-02). Rename a system before Eclipse projects exist, not after.
+//
+// The client stays split on purpose: sy-mandt is 123 because that is the
+// client the seed rows in data/ are in, while ADT presents client 001
+// (OSD_ADT_CLIENT), which is also the client in the session cookie's name.
 
-const DEFAULT_SID = "OSG";
+const DEFAULT_SID = "OSD";
 const DEFAULT_CLIENT = "123";
 const DEFAULT_USER = "DEVELOPER";
-const DEFAULT_ADT_SID = "OS2";
 const DEFAULT_ADT_CLIENT = "001";
 
+// the setting, its alias, in the order they are asked; an empty or blank
+// value counts as unset, so it falls through to the next one
+const SID_SETTINGS = ["OSD_SID", "STG_ADT_SID"];
+
 // a system id is three characters, upper case, on a real system and here
-function sidOf(value, fallback) {
-  const text = String(value ?? "").trim().toUpperCase();
-  return text === "" ? fallback : text.slice(0, 3);
+function sidOf(value) {
+  return String(value ?? "").trim().toUpperCase().slice(0, 3);
 }
 
 function clientOf(value, fallback) {
@@ -54,21 +61,43 @@ function clientOf(value, fallback) {
 }
 
 /**
+ * The system id and where it came from: {sid, source}, source being the
+ * name of the setting that gave it ("OSD_SID" or "STG_ADT_SID") or
+ * "default".
+ */
+export function systemId(env = globalThis.process?.env ?? {}) {
+  for (const name of SID_SETTINGS) {
+    const sid = sidOf(env[name]);
+    if (sid !== "") {
+      return {sid, source: name};
+    }
+  }
+  return {sid: DEFAULT_SID, source: "default"};
+}
+
+/** The name of the ADT session cookie: SAP_SESSIONID_<SID>_<client>. */
+export function sessionCookieName(env = globalThis.process?.env ?? {}) {
+  const who = identity(env);
+  return `SAP_SESSIONID_${who.adt.systemID}_${who.adt.client}`;
+}
+
+/**
  * What this system is, from the environment (or any object shaped like one,
  * which is how the browser build passes the build-time id in).
  */
 export function identity(env = globalThis.process?.env ?? {}) {
-  const sid = sidOf(env.OSD_SID ?? env.STG_ADT_SID, DEFAULT_SID);
+  const {sid, source} = systemId(env);
   const client = clientOf(env.OSD_CLIENT, DEFAULT_CLIENT);
   const user = String(env.OSD_USER ?? DEFAULT_USER).trim().toUpperCase().slice(0, 12);
   return {
     sid,
+    sidSource: source,
     client,
     user,
     language: "E",
-    // what Eclipse sees, and why it is allowed to differ: see above
+    // what Eclipse sees: the same id, and the ADT client (see above)
     adt: {
-      systemID: sidOf(env.STG_ADT_SID, DEFAULT_ADT_SID),
+      systemID: sid,
       client: clientOf(env.OSD_ADT_CLIENT, DEFAULT_ADT_CLIENT),
       userName: user,
       userFullName: String(env.OSD_USER_FULL ?? "Off-Stack Doppelganger"),

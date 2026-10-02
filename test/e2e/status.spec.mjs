@@ -20,14 +20,14 @@ test("system status: the object page over the running tree", async ({page}) => {
   await page.goto("/app/status/index.html");
 
   // the list report: one row, the SID of the running tree
-  const row = page.locator(".sapMListTblRow", {hasText: "OSG"}).first();
+  const row = page.locator(".sapMListTblRow", {hasText: "OSD"}).first();
   await expect(row).toBeVisible();
   await row.click();
 
   // the object page header: HeaderInfo's Title is Sid, its Description GenLive
   const header = page.locator(".sapUxAPObjectPageHeaderTitle").first();
   await expect(header).toBeVisible();
-  await expect(header).toContainText("OSG");
+  await expect(header).toContainText("OSD");
 
   // the five table facets, each scoped by the ID the service's ReferenceFacet
   // gave it (the section id ends in "--<ID>::Section")

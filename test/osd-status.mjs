@@ -116,10 +116,18 @@ describe("tools/osd-status: the system as one JSON object", () => {
     rmSync(root, {recursive: true, force: true});
   });
 
+  // ZOSD_SYS-SID is the one system id (tools/osd-identity.mjs): the setting
+  // OSD_SID, its alias STG_ADT_SID, else OSD
+  it("names the system by the one system id: the setting, else OSD", async () => {
+    expect((await take({env: {OSD_SID: "qrs"}})).system.sid).to.equal("QRS");
+    expect((await take({env: {STG_ADT_SID: "osx"}})).system.sid).to.equal("OSX");
+    expect((await take()).system.sid).to.equal("OSD");
+  });
+
   it("names the system, the generation and the tree, and nothing above it", async () => {
     const s = await take();
     expect(s.system).to.deep.equal({
-      sid: "OSG",
+      sid: "OSD",
       host_kind: "node",
       gen_live: "gen-live",
       gen_serving: "gen-live",

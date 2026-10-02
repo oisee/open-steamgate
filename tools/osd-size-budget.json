@@ -59,8 +59,8 @@
       "reason": "baseline 2026-10-01"
     },
     "go:cmd/osabap": {
-      "lines": 1115,
-      "reason": "baseline 2026-10-01"
+      "lines": 1119,
+      "reason": "sy-sysid from the one system id (go/sysid, tools/osd-identity.mjs), 2026-10-02"
     },
     "go:cmd/osgo": {
       "lines": 1178,
@@ -137,6 +137,10 @@
     "go:sxmlscan": {
       "lines": 42,
       "reason": "recorded by --update"
+    },
+    "go:sysid": {
+      "lines": 41,
+      "reason": "one system id: the rule of tools/osd-identity.mjs in Go (2026-10-02)"
     },
     "go:termgui": {
       "lines": 307,

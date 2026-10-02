@@ -704,19 +704,10 @@ export function adtRouter(options = {}) {
   // the right answer to it is 404 and that is what an unmounted path already
   // gives. A4H answers the same, and the wizard carries on regardless.
   //
-  // The system id is OS2, not OSD, and it is the default rather than an
-  // environment variable. A client logs on to a project by comparing the id
-  // the system reports with the one the project was created against, and
-  // refuses the logon when they differ ("Logon was not performed to the
-  // service instance of the project OS2, but to service instance: OSD").
-  // The id was set by STG_ADT_SID alone, so a restart without it renamed
-  // the system under a working project and locked its owner out, twice.
-  // OSD is the product; OS2 is what it answers to on the wire.
-  //
-  // The defaults come from tools/osd-identity.mjs now, which is the one
-  // source the ABAP boot and the status snapshot read as well — and which is
-  // also where it is written down why the id and the client this façade
-  // presents are allowed to differ from sy-sysid and sy-mandt (backlog G.1b).
+  // The system id is the one id of this system, as sy-sysid and the status
+  // service have it; the client (001) is not sy-mandt (123). A project
+  // refuses a logon to a system reporting another id than the one it was
+  // created against, so rename before projects exist: tools/osd-identity.mjs.
   const whoami = osdIdentity().adt;
   const identity = {
     systemID: options.systemID ?? whoami.systemID,

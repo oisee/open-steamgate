@@ -14,9 +14,10 @@ when somebody reads the service.
 
 The SID is not chosen here: it comes from `tools/osd-identity.mjs`, the one
 place this tree says which system it is, and the same function sets `sy-sysid`,
-`sy-mandt` and `sy-uname` at boot and gives the ADT façade its identity. What
-each name means, and why the façade's id and client are allowed to differ from
-`sy`, is in `docs/webgui.md` ("The status bar tells the truth").
+`sy-mandt` and `sy-uname` at boot and gives the ADT façade its identity. The id
+is one setting, `OSD_SID` (alias `STG_ADT_SID`, default `OSD`), the same for
+the façade; only the façade's client differs from `sy-mandt`, and
+`docs/webgui.md` ("The status bar tells the truth") says why.
 
 `ZOSD_SYS-PID` is the process these tables were *written in*, which is the
 process that answers the read: the façade when it holds the ABAP inline, and

@@ -26,6 +26,7 @@ import * as guiConverter from "../.local/lars/open-abap-gui/converter/src/api.mj
 import * as setup from "../test/setup.mjs";
 import {dirname, resolve} from "node:path";
 import {createRequire} from "node:module";
+import {systemId} from "../tools/osd-identity.mjs";
 import {compiled, setHostModules, dataDirOf, ensureBinaryHome, homesIn, isCheckout, layerList} from "../tools/osd-host.mjs";
 
 const embeddedSeed = typeof __OSD_BINARY_SEEDED__ !== "undefined" && __OSD_BINARY_SEEDED__;
@@ -183,6 +184,10 @@ switch (mode) {
     // the address every listener of `osd up` takes (tools/osd-bind.mjs)
     const {bindHint, describeBind} = await import("../tools/osd-bind.mjs");
     console.log(`bind: ${describeBind()}${bindHint() === undefined ? "  (reachable from the network)" : "  (OSD_BIND=0.0.0.0 for the network)"}`);
+    // the one system id (tools/osd-identity.mjs) and what chose it: the
+    // setting OSD_SID, its alias STG_ADT_SID, or the default
+    const {sid, source} = systemId();
+    console.log(`system id: ${sid} (${source === "default" ? "default" : `setting ${source}`})`);
     // what the bundle did to the runtime: a class the runtime looks up by
     // its name must still carry that name after bundling
     const renamed = [];

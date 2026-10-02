@@ -9,6 +9,7 @@ import {nodeStructureDocument} from "../tools/adt-documents.mjs";
 import {adtRouter, unitRunDbEnv, unitRunOptions, UNIT_RUN_DB_ENV_KEYS} from "../tools/adt-facade.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {layerList} from "../tools/osd-host.mjs";
+import {identity} from "../tools/osd-identity.mjs";
 
 const {pickInspectorPort} = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
@@ -142,7 +143,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       // and the cookie is the part that actually carries the session
       // afterwards — Eclipse sent no Authorization header on any request
       const cookies = (res.headers.getSetCookie?.() ?? []).join("; ");
-      expect(cookies).to.match(/SAP_SESSIONID_/);
+      expect(cookies).to.contain(`SAP_SESSIONID_${identity().sid}_${identity().adt.client}=`);
       expect(cookies).to.match(/sap-usercontext=/);
     });
 
@@ -188,11 +189,14 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       expect(info.systemID).to.be.a("string").with.length(3);
     });
 
-    it("the system id is OS2 unless the start asks otherwise, so a bare restart keeps a project's logon", async () => {
-      // a client compares the id it stored when the project was made with
-      // the one the system reports now, and refuses the logon on a mismatch
+    it("the system id is the one id of the system: OSD unless OSD_SID (or STG_ADT_SID) says otherwise", async () => {
+      // one setting for every surface (tools/osd-identity.mjs); a client
+      // compares the id it stored when the project was made with the one
+      // the system reports now, so the id changes only when the setting does
       const info = await (await call("/core/http/systeminformation")).json();
-      expect(info.systemID).to.equal(process.env.STG_ADT_SID ?? "OS2");
+      const setting = [process.env.OSD_SID, process.env.STG_ADT_SID].map((v) => String(v ?? "").trim()).find((v) => v !== "");
+      expect(info.systemID).to.equal(setting === undefined ? "OSD" : setting.toUpperCase().slice(0, 3));
+      expect(info.systemID).to.equal(identity().sid);
       // and the feeds name the same system as their contributor
       const dumps = await (await call("/runtime/dumps")).text();
       expect(dumps).to.contain(`<atom:contributor><atom:name>${info.systemID}</atom:name></atom:contributor>`);

@@ -164,7 +164,8 @@ export function startServer(quiet) {
   // the data layer of OSD boots its own runtime when it is used from a
   // command line; here one is already up, so it is handed the connection
   // rather than starting a second and re-running the seed under a live server
-  // STG_ADT_SID renames the system this façade says it is.
+  // OSD_SID (or its alias STG_ADT_SID) renames the system this façade says
+  // it is, and the rest of the system with it (tools/osd-identity.mjs).
   //
   // A client keys its cached compatibility metadata by system id, not by
   // project — which is why creating project after project against a system
@@ -202,7 +203,6 @@ export function startServer(quiet) {
   const facade = adtRouter({
     store,
     data,
-    systemID: process.env.STG_ADT_SID,
     abap: adtAbap,
   });
   // the façade claims no path of its own -- it is a router that answers
