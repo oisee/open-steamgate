@@ -77,7 +77,7 @@ describe("ADT B5: package and repository tree Node diff", function () {
       app.use(express.raw({type: "*/*"}));
       const facade = adtRouter({store, data: {}, watch: false, logMisses: false,
         ...(isAbap ? {abap: abapRunner({handler: abap.Classes.ZCL_OSD_ADT_HANDLER, step: dialogStep}),
-          abapServed: (by, req) => served.push(`${by} ${req.method} ${req.originalUrl}`)} : {})});
+          abapServed: (by, req) => served.push(`${by} ${req.method} ${req.originalUrl.replace(/\?$/, "")}`)} : {})});
       app.use(facade.router);
       const server = await new Promise((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
       const warm = await fetch(`http://127.0.0.1:${server.address().port}/sap/bc/adt/b5/warmup`, {headers: {"x-csrf-token": "fetch"}});
@@ -114,7 +114,7 @@ describe("ADT B5: package and repository tree Node diff", function () {
     const expected = await wire(node,path,ask(node));
     served.length = 0;
     expect(await wire(ported,path,ask(ported))).to.deep.equal(expected);
-    expect(served).to.deep.equal([`ABAP ${method} ${path}`]);
+    expect(served).to.deep.equal([`ABAP ${method} ${path.replace(/\?$/, "")}`]);
     return expected;
   }
   for (const name of ["%24root", "%24zt_a", "%24zta", "%2Fdemo%2Fpkg", "%24lib", "ZNope"])
@@ -148,7 +148,7 @@ describe("ADT B5: package and repository tree Node diff", function () {
         : "application/vnd.sap.adt.packages.settings+xml; charset=utf-8");
       if (method === "GET") expect(expected.body.toString()).to.include(encoded
         ? "SETTINGS does not exist" : 'pkcs:showPackageCheckErrors="false"');
-      expect(served).to.deep.equal([`ABAP ${method} ${path}`]);
+      expect(served).to.deep.equal([`ABAP ${method} ${path.replace(/\?$/, "")}`]);
     }
   });
   for (const accept of ["*/*", "application/vnd.sap.adt.packages.v2+xml"])
