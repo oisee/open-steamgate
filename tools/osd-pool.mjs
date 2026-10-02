@@ -108,12 +108,41 @@ export class RuntimePool {
   // leaves some already recycled and some not; the stop then takes them all
   // (each runtime's stop wins over its own recycle), so nothing half-done
   // keeps serving, and the half-done recycle is harmless (review of #60)
-  async recycle() {
-    const done = [];
-    for (const runtime of this.runtimes) {
-      done.push(await runtime.recycle());
-    }
-    return done[0];
+  recycle() {
+    if (this.#recycling !== undefined) return this.#recycling;
+    const recycling = (async () => {
+      const done = [];
+      for (const runtime of this.runtimes) {
+        done.push(await runtime.recycle());
+      }
+      return done[0];
+    })();
+    this.#recycling = recycling;
+    const clear = () => {
+      if (this.#recycling === recycling) this.#recycling = undefined;
+    };
+    recycling.then(clear, clear);
+    return recycling;
+  }
+
+  #recycling = undefined;
+
+  // The pool changing hands, for a caller that must not answer while it
+  // does (ObjectStore#publish): the pool's own recycle, which walks the work
+  // processes one after the other and so has gaps where none of them is
+  // recycling, or any one work process recycling or starting on its own.
+  // undefined when nothing is changing, like a single runtime's fields.
+  get recycling() {
+    return this.#recycling ?? this.#any("recycling");
+  }
+
+  get starting() {
+    return this.#any("starting");
+  }
+
+  #any(field) {
+    const busy = this.runtimes.map((r) => r[field]).filter((p) => p !== undefined);
+    return busy.length === 0 ? undefined : Promise.allSettled(busy);
   }
 
   // every work process takes the same swap; one that cannot fails the lot,
