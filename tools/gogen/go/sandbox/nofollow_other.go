@@ -1,6 +1,6 @@
 //go:build !unix
 
-package abap
+package sandbox
 
 // noFollow: no such flag here; the realpath checks stand alone
 const noFollow = 0

@@ -2,6 +2,7 @@ package abap
 
 import (
 	"os"
+	"osg/gogen/sandbox"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -279,8 +280,8 @@ func TestDatasetParentSwappedWhileOpening(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	datasetSwap = swap
-	t.Cleanup(func() { datasetSwap = nil })
+	sandbox.SwapHook = swap
+	t.Cleanup(func() { sandbox.SwapHook = nil })
 	name := filepath.Join(sub, "new.txt")
 	if rc, msg := f.open(name, DatasetOutput, false); rc == 0 || !strings.Contains(msg, "outside the dataset roots") {
 		t.Fatalf("OUTPUT through a swapped parent: rc %d %q", rc, msg)

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
-	"osg/gogen/abap"
+	"osg/gogen/sandbox"
 )
 
 func TestFIFOIsNeverOpenedOrReturned(t *testing.T) {
@@ -23,7 +23,7 @@ func TestFIFOIsNeverOpenedOrReturned(t *testing.T) {
 	if err := exec.Command("mkfifo", filepath.Join(root, "pipe")).Run(); err != nil {
 		t.Skipf("mkfifo unavailable: %v", err)
 	}
-	b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open}
+	b := Browser{Sandbox: &sandbox.Sandbox{Read: []string{root}}, Mode: Open}
 	done := make(chan error, 1)
 	go func() {
 		entries, err := b.entries(root, "")
@@ -55,7 +55,7 @@ func TestLongDirectoryViewportAndNavigation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open}
+	b := Browser{Sandbox: &sandbox.Sandbox{Read: []string{root}}, Mode: Open}
 	entries, err := b.entries(root, "")
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +125,7 @@ func TestOpenConfinedAndCancel(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, "escape.txt")); err != nil {
 		t.Fatal(err)
 	}
-	b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open}
+	b := Browser{Sandbox: &sandbox.Sandbox{Read: []string{root}}, Mode: Open}
 	entries, err := b.entries(root, "")
 	if err != nil {
 		t.Fatal(err)
@@ -158,13 +158,13 @@ func TestFilterSaveAndMissingGrants(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open}
+	b := Browser{Sandbox: &sandbox.Sandbox{Read: []string{root}}, Mode: Open}
 	s := simulated(t, letter('/'), letter('b'), press(tcell.KeyEnter), press(tcell.KeyEnter))
 	got, err := b.Run(s)
 	if err != nil || got != filepath.Join(root, "beta.txt") {
 		t.Fatalf("filtered pick %q: %v", got, err)
 	}
-	save := Browser{Sandbox: &abap.Sandbox{Write: []string{root}}, Mode: Save, DefaultName: "new.txt"}
+	save := Browser{Sandbox: &sandbox.Sandbox{Write: []string{root}}, Mode: Save, DefaultName: "new.txt"}
 	s = simulated(t, letter('n'), press(tcell.KeyEnter))
 	got, err = save.Run(s)
 	if err != nil || got != filepath.Join(root, "new.txt") {
@@ -184,7 +184,7 @@ func TestFilterSaveAndMissingGrants(t *testing.T) {
 		t.Fatal("symlink save target accepted")
 	}
 	for _, mode := range []Mode{Open, Save, Directory} {
-		_, err := (Browser{Sandbox: &abap.Sandbox{}, Mode: mode}).Run(simulated(t))
+		_, err := (Browser{Sandbox: &sandbox.Sandbox{}, Mode: mode}).Run(simulated(t))
 		if err == nil || !strings.Contains(err.Error(), "-allow-") {
 			t.Fatalf("mode %v: %v", mode, err)
 		}
@@ -197,7 +197,7 @@ func TestOpenAndDirectoryRequireReadGrant(t *testing.T) {
 	if err := os.WriteFile(name, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	sb := &abap.Sandbox{Write: []string{private}}
+	sb := &sandbox.Sandbox{Write: []string{private}}
 	for _, mode := range []Mode{Open, Directory} {
 		b := Browser{Sandbox: sb, Mode: mode, Initial: private}
 		if _, err := b.initial(); err == nil || !strings.Contains(err.Error(), "-allow-read") {
@@ -233,7 +233,7 @@ func TestSwapAfterListingIsRefused(t *testing.T) {
 		} else {
 			os.WriteFile(path, nil, 0600)
 		}
-		b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}, Write: []string{root}}, Mode: mode}
+		b := Browser{Sandbox: &sandbox.Sandbox{Read: []string{root}, Write: []string{root}}, Mode: mode}
 		swapped := false
 		b.afterList = func() {
 			if swapped {
@@ -262,17 +262,17 @@ func TestSAPFilterExtensionAndMulti(t *testing.T) {
 	if len(patterns) != 2 {
 		t.Fatalf("patterns: %v", patterns)
 	}
-	b := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open, Patterns: SAPPatterns("Text (*.txt)|*.txt"), Multi: true}
+	b := Browser{Sandbox: &sandbox.Sandbox{Read: []string{root}}, Mode: Open, Patterns: SAPPatterns("Text (*.txt)|*.txt"), Multi: true}
 	path, err := b.Run(simulated(t, letter(' '), press(tcell.KeyDown), letter(' '), press(tcell.KeyEnter)))
 	if err != nil || path != filepath.Join(root, "a.txt")+"\x00"+filepath.Join(root, "b.txt") {
 		t.Fatalf("multi: %q %v", path, err)
 	}
-	open := Browser{Sandbox: &abap.Sandbox{Read: []string{root}}, Mode: Open, DefaultName: "a", Extension: "txt"}
+	open := Browser{Sandbox: &sandbox.Sandbox{Read: []string{root}}, Mode: Open, DefaultName: "a", Extension: "txt"}
 	path, err = open.Run(simulated(t, letter('n'), press(tcell.KeyEnter)))
 	if err != nil || path != filepath.Join(root, "a.txt") {
 		t.Fatalf("open extension: %q %v", path, err)
 	}
-	save := Browser{Sandbox: &abap.Sandbox{Write: []string{root}}, Mode: Save, Extension: "txt", DefaultName: "new"}
+	save := Browser{Sandbox: &sandbox.Sandbox{Write: []string{root}}, Mode: Save, Extension: "txt", DefaultName: "new"}
 	path, err = save.Run(simulated(t, letter('n'), press(tcell.KeyEnter)))
 	if err != nil || path != filepath.Join(root, "new.txt") {
 		t.Fatalf("extension: %q %v", path, err)
@@ -296,7 +296,7 @@ func TestOverwriteCheckRejectsSwappedSymlink(t *testing.T) {
 	root := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.txt")
 	os.WriteFile(outside, nil, 0600)
-	b := Browser{Sandbox: &abap.Sandbox{Write: []string{root}}, Mode: Save, ConfirmOverwrite: true}
+	b := Browser{Sandbox: &sandbox.Sandbox{Write: []string{root}}, Mode: Save, ConfirmOverwrite: true}
 	path, ok := b.saveName(root, "target.txt")
 	if !ok {
 		t.Fatal("save name refused")
@@ -320,7 +320,7 @@ func TestBackspaceSwitchesGrantedRoots(t *testing.T) {
 	if err := os.WriteFile(wanted, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	b := Browser{Sandbox: &abap.Sandbox{Read: []string{first, second}}, Mode: Open}
+	b := Browser{Sandbox: &sandbox.Sandbox{Read: []string{first, second}}, Mode: Open}
 	got, err := b.Run(simulated(t, press(tcell.KeyBackspace), press(tcell.KeyDown), press(tcell.KeyEnter), press(tcell.KeyEnter)))
 	if err != nil || got != wanted {
 		t.Fatalf("second root: %q, %v", got, err)

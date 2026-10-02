@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
-	"osg/gogen/abap"
+	"osg/gogen/sandbox"
 )
 
 var ErrCancel = errors.New("file dialog cancelled")
@@ -24,7 +24,7 @@ const (
 )
 
 type Browser struct {
-	Sandbox          *abap.Sandbox
+	Sandbox          *sandbox.Sandbox
 	Mode             Mode
 	Initial          string
 	DefaultName      string

@@ -15,7 +15,7 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 12762,
+      "lines": 12269,
       "reason": "baseline 2026-10-01"
     },
     "go:abaperr": {
@@ -110,6 +110,10 @@
       "lines": 209,
       "reason": "baseline 2026-10-01"
     },
+    "go:sandbox": {
+      "lines": 534,
+      "reason": "carved out of go/abap/dataset.go (wave 2, docs/gogen-go-packages.md)"
+    },
     "go:session": {
       "lines": 53,
       "reason": "baseline 2026-10-01"
@@ -203,7 +207,7 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/dataset.go": {
-      "lines": 914,
+      "lines": 442,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/datesplit.go": {
@@ -238,6 +242,10 @@
       "lines": 316,
       "reason": "baseline 2026-10-01"
     },
+    "tools/gogen/go/abap/deref.go": {
+      "lines": 14,
+      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
+    },
     "tools/gogen/go/abap/events.go": {
       "lines": 238,
       "reason": "baseline 2026-10-01"
@@ -249,6 +257,10 @@
     "tools/gogen/go/abap/find.go": {
       "lines": 371,
       "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/fmarg.go": {
+      "lines": 6,
+      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
     },
     "tools/gogen/go/abap/frontend.go": {
       "lines": 184,
@@ -266,9 +278,17 @@
       "lines": 103,
       "reason": "baseline 2026-10-01"
     },
+    "tools/gogen/go/abap/gzip_http.go": {
+      "lines": 24,
+      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
+    },
     "tools/gogen/go/abap/gzip.go": {
       "lines": 21,
       "reason": "baseline 2026-10-01"
+    },
+    "tools/gogen/go/abap/http_utility.go": {
+      "lines": 9,
+      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
     },
     "tools/gogen/go/abap/httpc.go": {
       "lines": 615,
@@ -437,22 +457,6 @@
     "tools/stg-compile.mjs": {
       "lines": 1242,
       "reason": "baseline 2026-10-01"
-    },
-    "tools/gogen/go/abap/deref.go": {
-      "lines": 14,
-      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
-    },
-    "tools/gogen/go/abap/fmarg.go": {
-      "lines": 6,
-      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
-    },
-    "tools/gogen/go/abap/gzip_http.go": {
-      "lines": 24,
-      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
-    },
-    "tools/gogen/go/abap/http_utility.go": {
-      "lines": 9,
-      "reason": "wave 0 of docs/gogen-go-packages.md (#411): helper moved within go/abap as core glue, per the plan"
     }
   },
   "readmeMissing": [
@@ -475,7 +479,6 @@
     "charsearch": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
     "classname": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
     "datearith": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
-    "filepick": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
     "subwrite": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface",
     "tstmpsecs": "baseline 2026-10-01: imported go/abap before the rule; carve a narrow interface"
   }

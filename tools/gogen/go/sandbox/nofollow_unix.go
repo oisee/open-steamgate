@@ -1,6 +1,6 @@
 //go:build unix
 
-package abap
+package sandbox
 
 import (
 	"errors"
