@@ -24,6 +24,9 @@ npm run conformance:abapfs -- --start --only write,create   # some groups (conne
 npm run conformance:abapfs -- --start --update-expected     # accept the current matrix
 ```
 
+`--update-expected` refuses to write after an aborted or unclean run. A
+scenario that did not run keeps its previous expectation.
+
 `--start` runs `test/run.mjs` from this checkout with `STG_PORT` and a
 database under `.local/conformance/abapfs/db/`. It waits for `/osd/serving`
 and stops the process group at the end. Run it under
@@ -48,7 +51,7 @@ was left behind:
   answers a confirmed 404. A timeout, an auth error or a 500 is reported as
   "existence unknown".
 - **In the checkout.** With `--start`, every tracked and untracked file
-  (except `.local/`) is hashed before the run and again after OSG has
+  (except `.local/`) is recorded before the run, as git sees it: its mode and a content hash and again after OSG has
   stopped. That also catches a second change to a file that was already
   dirty. With `--url` the checkout is not this tool's to judge, so the repo
   check is skipped and the report says so. The system-side cleanup is still

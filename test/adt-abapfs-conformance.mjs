@@ -1,7 +1,11 @@
 import {expect} from "chai";
 import {readFileSync} from "node:fs";
 import {Fatal, PIN, SCENARIOS, STATUSES, ensureGone, parseArgs, requireHandle, snapshotDiff, writeRoundTrip} from "../tools/abapfs-conformance.mjs";
-import {compare} from "../tools/abapfs-conformance.mjs";
+import {compare, nextExpectations, treeSnapshot} from "../tools/abapfs-conformance.mjs";
+import {spawnSync} from "node:child_process";
+import {chmodSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 
 // The conformance run itself is on demand (npm run conformance:abapfs); this
 // suite only keeps its expectations file and its command line honest, and
@@ -162,5 +166,33 @@ describe("tools/abapfs-conformance: safety paths, offline", () => {
     const before = new Map([["a", "1"], ["b", "2"]]);
     expect(snapshotDiff(before, new Map([["a", "1"], ["b", "3"], ["c", "4"]]))).to.deep.equal(["changed b", "added c"]);
     expect(snapshotDiff(before, new Map([["a", "1"]]))).to.deep.equal(["removed b"]);
+  });
+
+  it("refuses to update the expectations after an abort or a cleanup problem", () => {
+    const all = SCENARIOS.map(x => ({id: x.id, status: "PASS"}));
+    expect(() => nextExpectations(all, expected, ["run aborted: write.lockWriteUnlock failed fatally"])).to.throw(/not clean/);
+    expect(() => nextExpectations(all, expected, ["system: x: existence unknown"])).to.throw(/not clean/);
+  });
+
+  it("keeps the previous expectation of a scenario that did not run", () => {
+    const id = SCENARIOS.at(-1).id;
+    const results = SCENARIOS.map(x => x.id === id ? {id, status: "FAIL", error: "not run: aborted"} : {id: x.id, status: "PASS"});
+    const next = nextExpectations(results, expected, []);
+    expect(next.scenarios[id].status).to.equal(expected.scenarios[id].status);
+    expect(next.scenarios[SCENARIOS[0].id].status).to.equal("PASS");
+    expect(() => nextExpectations(results, {scenarios: {}}, [])).to.throw(/no previous expectation/);
+  });
+
+  it("sees a mode change with the same content", () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-afs-snap-"));
+    try {
+      spawnSync("git", ["init", "-q"], {cwd: root});
+      writeFileSync(join(root, "run.sh"), "echo hi\n");
+      const before = treeSnapshot(root);
+      chmodSync(join(root, "run.sh"), 0o755);
+      expect(snapshotDiff(before, treeSnapshot(root))).to.deep.equal(["changed run.sh"]);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
   });
 });

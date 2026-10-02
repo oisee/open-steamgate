@@ -13,7 +13,7 @@
 // 2.10.3's pnpm-lock.yaml (42 packages, every integrity equal); `npm ci` puts
 // it into .local/conformance/abapfs/deps on first use.
 import {spawn, spawnSync} from "node:child_process";
-import {copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readlinkSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
 import {dirname, join, resolve} from "node:path";
@@ -455,10 +455,25 @@ export function treeSnapshot(root = ROOT) {
   if (out.status !== 0) throw new Error(`git ls-files failed in ${root}`);
   const map = new Map();
   for (const f of [...new Set(out.stdout.split("\0"))].filter(f => f && !f.startsWith(".local/")).sort()) {
-    const p = join(root, f);
-    map.set(f, existsSync(p) ? createHash("sha1").update(readFileSync(p)).digest("hex") : "(deleted)");
+    map.set(f, fileSignature(join(root, f)));
   }
   return map;
+}
+
+/** git's view of one file: its mode (symlink, executable or plain) and a
+ *  hash of its content, read in bounded chunks rather than whole. */
+export function fileSignature(p) {
+  let st;
+  try { st = lstatSync(p); } catch { return "(deleted)"; }
+  if (st.isSymbolicLink()) return `120000 ${readlinkSync(p)}`;
+  const mode = st.mode & 0o111 ? "100755" : "100644";
+  const hash = createHash("sha1");
+  const buf = Buffer.allocUnsafe(1 << 16);
+  const fd = openSync(p, "r");
+  try {
+    for (let n; (n = readSync(fd, buf, 0, buf.length, null)) > 0;) hash.update(buf.subarray(0, n));
+  } finally { closeSync(fd); }
+  return `${mode} ${hash.digest("hex")}`;
 }
 
 export function snapshotDiff(before, after) {
@@ -466,6 +481,20 @@ export function snapshotDiff(before, after) {
   for (const [f, h] of after) if (!before.has(f)) lines.push(`added ${f}`); else if (before.get(f) !== h) lines.push(`changed ${f}`);
   for (const f of before.keys()) if (!after.has(f)) lines.push(`removed ${f}`);
   return lines;
+}
+
+/** The expectations a run would write. Refused after an abort or a cleanup
+ *  problem; a scenario that did not run keeps its previous expectation. */
+export function nextExpectations(results, expected, leftBehind = []) {
+  if (leftBehind.length) throw new Error(`the run was not clean (${leftBehind[0]})`);
+  return {client: {name: PIN.name, version: PIN.version, integrity: PIN.integrity},
+    scenarios: Object.fromEntries(SCENARIOS.map(s => {
+      const r = results.find(x => x.id === s.id);
+      const ran = r && !String(r.error ?? "").startsWith("not run");
+      const status = ran ? r.status : expected?.scenarios?.[s.id]?.status;
+      if (!status) throw new Error(`${s.id} did not run and has no previous expectation`);
+      return [s.id, {status, feature: s.feature}];
+    }))};
 }
 
 export function compare(results, expected) {
@@ -576,13 +605,13 @@ export async function main(argv = process.argv.slice(2)) {
   writeFileSync(join(opts.out, "report.json"), JSON.stringify(report, null, 2) + "\n");
   writeFileSync(join(opts.out, "report.md"), markdown(report));
   if (opts.updateExpected) {
-    const next = {client: {name: PIN.name, version: PIN.version, integrity: PIN.integrity},
-      scenarios: Object.fromEntries(SCENARIOS.map(s => {
-        const r = results.find(x => x.id === s.id) ?? {status: expected?.scenarios?.[s.id]?.status ?? "MISSING"};
-        return [s.id, {status: r.status, feature: s.feature}];
-      }))};
-    mkdirSync(dirname(opts.expected), {recursive: true});
-    writeFileSync(opts.expected, JSON.stringify(next, null, 2) + "\n");
+    try {
+      const next = nextExpectations(results, expected, leftBehind);
+      mkdirSync(dirname(opts.expected), {recursive: true});
+      writeFileSync(opts.expected, JSON.stringify(next, null, 2) + "\n");
+    } catch (e) {
+      console.log(`  expectations NOT updated: ${e.message}`);
+    }
   }
   const d = report.diff;
   console.log(`abapfs-conformance: ${counts.PASS} PASS, ${counts.FAIL} FAIL, ${counts.MISSING} MISSING of ${results.length} in ${(report.ms / 1000).toFixed(1)} s against ${opts.url}`);
