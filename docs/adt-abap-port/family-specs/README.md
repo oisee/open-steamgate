@@ -1,6 +1,6 @@
 # Family specs (ADT on ABAP 100%)
 
-One file per Node route family: behaviour to keep byte-equal, host dependencies, recommendation, ABAP design, test plan, risks, effort, owner. The plan is [port-plan.md](../port-plan.md). The critic's findings are in [critic.md](critic.md).
+One file per Node route family: behaviour to keep byte-equal, host dependencies, recommendation, ABAP design, test plan, risks, effort, owner. The plan is [port-plan.md](../port-plan.md). Line numbers are as of 2026-10-02 and drift: find a route by its pattern. The critic's findings are in [critic.md](critic.md).
 
 - [discovery-compatibility](discovery-compatibility.md): port-to-abap, S, stoker (proposed: discovery is the logon handshake, HEAD core/discovery is the CSRF token fetch, and it sits next to sessions/logoff and the slice-3 front that stoker already owns; the graph, its twin, is also from the skeleton slices)
 - [checkruns](checkruns.md): port-to-abap, M, dell

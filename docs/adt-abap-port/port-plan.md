@@ -1,8 +1,8 @@
-<!-- Produced 2026-10-02 by a 16-agent workflow (one spec agent per route family, a completeness critic, a synthesis), read-only against origin/main. Inputs to codex slices; each slice still gets its own critic. Ownership agreed 2026-10-02: group A and discovery, feeds/users, debugger/listeners, OSD introspection, notebook: stoker; group C and the front (F1/F2): dell; group B: osg-research. -->
+<!-- Produced 2026-10-02 by a 16-agent workflow (one spec agent per route family, a completeness critic, a synthesis), read-only against origin/main. Inputs to codex slices; each slice still gets its own critic. Line numbers in the family specs are as of the run and drift as main moves (tools/adt-facade.mjs has since been reorganised): find a route by its pattern, not its line. Ownership agreed 2026-10-02: group A and discovery, feeds/users, debugger/listeners, OSD introspection, notebook: stoker; group C and the front (F1/F2): dell; group B: osg-research. -->
 
 # ADT on ABAP 100%: port plan (milestone 0.7, "must")
 
-Sources: 15 family specs plus the critic's findings. I checked one fact on origin/main as of 2026-10-02: the router has graph, sysinfo, LOCK and versions rows, then a `*` HOST catch-all. `debugger/listeners` is still Node-only (`tools/adt-facade.mjs:1711`), and `feat/adt-front-up` has not been merged.
+Sources: 15 family specs plus the critic's findings. I checked one fact on origin/main as of 2026-10-02: the router has graph, sysinfo, LOCK and versions rows, then a `*` HOST catch-all. `debugger/listeners` is still Node-only (`tools/adt-facade.mjs`), and `feat/adt-front-up` has not been merged.
 
 ## 1. Summary
 
@@ -71,7 +71,7 @@ One PR with two codex runs (0a for ABAP, 0b for the host seam) and one critic pa
 - **Non-document refusals:** a route may return a non-2xx `ty_response` with its own body only when Node does. Known cases: the reentranceticket 400s (text/plain) and the notebook (JSON). This is recorded in `ZIF_OSD_ADT_ROUTE`'s contract; nothing is decided per slice.
 - **Wire format:**
   - Content types: the front replays a Buffer with `res.set`, so an ABAP `content_type` literal must already be the normalized wire form.
-  - ETags: production runs with `app etag false` (`test/start.mjs:97`, `osd-serve:142`). The diff harness is switched to `etag false` as well, so weak-ETag and 304 claims in the specs that come from the harness are dropped. Only strong `ENTITY` tags are part of the contract.
+  - ETags: production runs with `app etag false` (`test/start.mjs`, `tools/osd-serve.mjs`). The diff harness is switched to `etag false` as well, so weak-ETag and 304 claims in the specs that come from the harness are dropped. Only strong `ENTITY` tags are part of the contract.
   - Ordering: ABAP never re-sorts a list the host has ordered (localeCompare/ICU). ABAP may `SORT` only where JS uses a plain `.sort()`.
 - **Conformance baseline:** the ABAP-FS figure is re-measured on main in S0 and recorded in `docs/abapfs-conformance.md`. Every later slice compares against the figure at its merge base. The two numbers quoted today, 29/2/16 and 30/1/16, are both superseded.
 - **Done gate (new test, `test/adt-abap-coverage.mjs`):**
@@ -91,7 +91,7 @@ Every slice is one codex run plus a Claude critic. Every acceptance is `test/adt
 
 | Slice | Content | Acceptance |
 |---|---|---|
-| **F1** | Rebase and merge `feat/adt-front-up`, which is 4 commits ahead of main and 6 behind. Extend `TY_REQUEST` once: `session` (id, user, stateful), a `sessions` ref, `pattern`, `uri` (`~request_uri`). Add `ZIF_OSD_ADT_SESSION~RELEASE_OBJECT`. The handler skips RESOLVE, CSRF and stamping outside `/sap/bc/adt`. Add `ZCL_OSD_ADT_HANDLER=>FENCE` (commit before route work, roll back route work only), so routes never COMMIT or ROLLBACK ad hoc. | `adt-abap-session(s)`, `adt-session` and the existing diff tests stay green; a route reads `is_request-session`. |
+| **F1** | Rebase and merge `feat/adt-front-up`, rebased on main after #471. Extend `TY_REQUEST` once: `session` (id, user, stateful), a `sessions` ref, `pattern`, `uri` (`~request_uri`). Add `ZIF_OSD_ADT_SESSION~RELEASE_OBJECT`. The handler skips RESOLVE, CSRF and stamping outside `/sap/bc/adt`. Add `ZCL_OSD_ADT_HANDLER=>FENCE` (commit before route work, roll back route work only), so routes never COMMIT or ROLLBACK ad hoc. | `adt-abap-session(s)`, `adt-session` and the existing diff tests stay green; a route reads `is_request-session`. |
 | **F2** | Front extensions: replay 3xx and 201 with `res.end` and an explicit Content-Length (no ETag); append every Set-Cookie instead of setting it; mount the front on `/sap/public/bc/icf/logoff` (Node host only, no sicf); build the query record from `req.query` (qs semantics, so a stray `%` no longer throws in `unescape_url`); add an `X-OSD-Miss` marker driven by the ZCX flag (stripped, then recorded in `facade.missed`); add a host-only **`/osd/ready`** outside `/sap/bc/adt` that never enters a step, and switch `osd ready`, release smoke, `run.ps1` and `osd-restart.sh` from `core/http/build` and HEAD discovery to it. | Fixture routes return 307 and 201 byte-equal; three cookies survive the replay; a 404 shows up in `/osd/not-served`; `osd ready` answers while a gated step is held. |
 
 ### stoker
