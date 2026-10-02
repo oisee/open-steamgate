@@ -32,7 +32,7 @@ CLASS zcl_osd_dsl_dpc DEFINITION PUBLIC FINAL CREATE PRIVATE.
              flag TYPE string,
              kind TYPE string,
              operation TYPE ty_op,
-             opaque TYPE string,
+             mapping TYPE string,
            END OF ty_impl.
     TYPES tt_impl TYPE STANDARD TABLE OF ty_impl WITH DEFAULT KEY.
     CLASS-METHODS quoted IMPORTING iv_text TYPE string RETURNING VALUE(rv_text) TYPE string.
@@ -169,7 +169,7 @@ CLASS zcl_osd_dsl_dpc IMPLEMENTATION.
     DATA lv_cases TYPE string.
     DATA lv_op_json TYPE string.
     DATA lv_first TYPE abap_bool.
-    DATA lv_opaque TYPE string.
+    DATA lv_mapping TYPE string.
     DATA lv_missing TYPE string.
     DATA lv_node TYPE string.
     DATA lv_separator TYPE string.
@@ -325,31 +325,23 @@ CLASS zcl_osd_dsl_dpc IMPLEMENTATION.
     ENDIF.
     IF lv_shlp = abap_true.
       ls_impl-name = zcl_stg_segw_gen_rfc=>gc_shlp_interface && '~GET_SEARCH_HELP_VALUES'.
-      ls_impl-flag = 'opaque'.
-      ls_impl-opaque = zcl_stg_segw_gen_rfc=>shlp_implementation( ).
+      ls_impl-flag = 'shlp_interface'.
       APPEND ls_impl TO lt_impls.
     ENDIF.
     LOOP AT lt_sorted INTO ls_op.
       CLEAR ls_impl.
       ls_impl-name = ls_op-method.
       ls_impl-operation = ls_op.
-      IF ls_op-op-mapping_kind = 'RFC'.
-        lv_opaque = zcl_stg_segw_gen_rfc=>rfc_method(
-          is_op = ls_op-op is_type = ls_op-entity is_model = is_model
-          it_signature = zcl_stg_segw_fugr=>signature( ls_op-op-function_name ) ).
-        IF lv_opaque IS INITIAL.
+      IF ls_op-op-mapping_kind = 'RFC' OR ls_op-op-mapping_kind = 'SHLP'.
+        lv_node = `entity/` && ls_op-entity-name && `/set/` && ls_op-set_name
+          && `/operation/` && ls_op-method.
+        lv_mapping = zcl_osd_dsl_dpc_map=>model(
+          is_op = ls_op-op is_type = ls_op-entity is_model = is_model iv_id = lv_node ).
+        IF lv_mapping IS INITIAL.
           ls_impl-flag = 'stub'.
         ELSE.
-          ls_impl-flag = 'opaque'.
-          ls_impl-opaque = lv_opaque.
-        ENDIF.
-      ELSEIF ls_op-op-mapping_kind = 'SHLP'.
-        lv_opaque = zcl_stg_segw_gen_rfc=>shlp_method( is_op = ls_op-op is_type = ls_op-entity ).
-        IF lv_opaque IS INITIAL.
-          ls_impl-flag = 'stub'.
-        ELSE.
-          ls_impl-flag = 'opaque'.
-          ls_impl-opaque = lv_opaque.
+          ls_impl-flag = to_lower( ls_op-op-mapping_kind ) && `_mapped`.
+          ls_impl-mapping = lv_mapping.
         ENDIF.
       ELSEIF ls_op-entity_set-sadl_type = 'ODC'.
         IF ls_op-kind = 'Q' OR ls_op-kind = 'R'.
@@ -407,8 +399,8 @@ CLASS zcl_osd_dsl_dpc IMPLEMENTATION.
           && `,"function_name":` && quoted( ls_impl-operation-op-function_name )
           && `,"missing_rfc":` && quoted( lv_missing ).
       ENDIF.
-      IF ls_impl-opaque IS NOT INITIAL.
-        lv_impls = lv_impls && `,"opaque":` && quoted( ls_impl-opaque ).
+      IF ls_impl-mapping IS NOT INITIAL.
+        lv_impls = lv_impls && `,"mapping":` && ls_impl-mapping.
       ENDIF.
       lv_impls = lv_impls && `}`.
     ENDLOOP.
