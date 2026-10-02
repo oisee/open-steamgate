@@ -1299,14 +1299,15 @@ ENDCLASS.
           const name = `${PROOF}_pm3`;
           const tests = readFileSync(join(PROOF_DIR, `${PROOF}.clas.testclasses.abap`), "utf8").replaceAll(PROOF, name);
           await loadRunner(name, readFileSync(join(PROOF_DIR, `${PROOF}.clas.abap`), "utf8").replaceAll(PROOF, name), {
-            extra: {[`${name}.clas.testclasses.abap`]: mutate(tests, "      WAIT UP TO 1 SECONDS.\n", "")}});
+            extra: {[`${name}.clas.testclasses.abap`]: mutate(tests, "      WAIT UP TO 1 SECONDS.\n      lv_waited = lv_waited + 1.\n    ENDDO.\n  ENDMETHOD.\n\n  METHOD expected.",
+            "      lv_waited = lv_waited + 1.\n    ENDDO.\n  ENDMETHOD.\n\n  METHOD expected.")}});
           const local = await proofClass(pathToFileURL(join(scratch, name, `${name}.clas.testclasses.mjs`)).href);
           const failure = await runMethod(local, "mode_p");
           // a rule whose piles are all still to run shows the state of an open job, as before piles
           expect(failure).to.match(/^the jobs did not end within 180 seconds: L3_FLEET_01 +maintenance-ship-no-future-voyage READY ;/);
           expect(failure.match(/ READY ;/g)).to.have.length(6);
-          // the jobs were released all the same: they run once the step is
-          // over, after the teardown, and write under the run it deleted
+          // the jobs were released all the same: the teardown waits for them
+          // (settle, bounded) before it deletes, so they ran inside its WAIT
           await settled();
           expect(ours().seed).to.equal(0);
           await exec([`DELETE FROM zosd_l3_alert WHERE check_date = '${CHECK_DATE}'`, `DELETE FROM zosd_l3_pile WHERE check_date = '${CHECK_DATE}'`]);

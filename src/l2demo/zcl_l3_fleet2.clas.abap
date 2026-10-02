@@ -804,7 +804,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       ls_params-active_status = 'A'.
     ENDIF.
     rs_rule-rule = iv_rule.
-    SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_pile INTO ls_pile
       WHERE set_name = c_set
         AND run_id = iv_run
         AND rule_name = iv_rule
@@ -814,6 +814,14 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       RETURN.
     ENDIF.
     rs_rule-piles = 1.
+    " only a PLANNED pile is worked. A job may start before the step that
+    " submitted it commits: FOR UPDATE above makes it wait for that commit
+    " and read the row as it was left, and a pile the doctor or collect( )
+    " has taken as FAILED, or one another job runs, is not run twice
+    IF ls_pile-status <> 'PLANNED'.
+      rs_rule-status = 'NOT-PLANNED'.
+      RETURN.
+    ENDIF.
     " the kill switch: the pile goes back to PLANNED without a job and its
     " attempt is not spent; resume( ) or the doctor submits it again
     IF killed( ) = abap_true.

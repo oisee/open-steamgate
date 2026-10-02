@@ -40,6 +40,8 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     DATA mt_runs TYPE tt_run.
     METHODS setup.
     METHODS teardown.
+    METHODS settle.
+    METHODS cleanup.
     METHODS mode_s FOR TESTING.
     METHODS rerun FOR TESTING.
     METHODS rerun_fewer_piles FOR TESTING.
@@ -129,8 +131,15 @@ CLASS ltcl_proof IMPLEMENTATION.
     add_cargo( iv_id = 'L30001' iv_ship = 'L303' iv_weight = '600.50' ).
     add_cargo( iv_id = 'L30002' iv_ship = 'L303' iv_weight = '500.00' ).
     add_cargo( iv_id = 'L30003' iv_ship = 'L304' iv_weight = '1.25' ).
-    " rows an interrupted run may have left under the same keys
+    " rows an interrupted run may have left under the same keys, and its
+    " locks of the proof's date and a kill switch, so no method depends on
+    " how the one before it ended
     delete_seed( ).
+    DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet=>c_set
+                              AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet2=>c_set
+                              AND check_date = zcl_l3_fleet_proof=>c_check_date.
+    DELETE FROM zosd_l3_kill WHERE set_name = zcl_l3_fleet2=>c_set.
     INSERT zosd_l2_ship FROM TABLE mt_ship.
     INSERT zosd_l2_voy FROM TABLE mt_voy.
     INSERT zosd_l2_crew FROM TABLE mt_crew.
@@ -139,6 +148,76 @@ CLASS ltcl_proof IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD teardown.
+    " a method that failed may leave jobs of its runs open: wait for them,
+    " bounded, so the deletes meet no job that writes the same rows; a delete
+    " that fails all the same (a deadlock with such a job) is rolled back and
+    " tried once more. Teardown never raises: an exception here would stop
+    " the methods after this one on a system
+    settle( ).
+    TRY.
+        cleanup( ).
+      CATCH cx_sy_open_sql_db.
+        ROLLBACK WORK.
+        WAIT UP TO 1 SECONDS.
+        TRY.
+            cleanup( ).
+          CATCH cx_sy_open_sql_db.
+            ROLLBACK WORK.
+        ENDTRY.
+    ENDTRY.
+    CLEAR mt_runs.
+  ENDMETHOD.
+
+  METHOD settle.
+    " the jobs of the method's runs that are still open (a pile PLANNED or
+    " RUNNING with a job neither finished nor aborted), waited for up to
+    " c_wait_limit seconds
+    DATA lt_piles TYPE STANDARD TABLE OF zosd_l3_pile WITH DEFAULT KEY.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lv_run TYPE zosd_l3_alert-run_id.
+    DATA lv_open TYPE i.
+    DATA lv_waited TYPE i.
+    DATA lv_aborted TYPE btch0000-char1.
+    DATA lv_finished TYPE btch0000-char1.
+    DATA lv_running TYPE btch0000-char1.
+    DATA lv_ready TYPE btch0000-char1.
+    DATA lv_scheduled TYPE btch0000-char1.
+    DATA lv_preliminary TYPE btch0000-char1.
+    DO.
+      lv_open = 0.
+      LOOP AT mt_runs INTO lv_run.
+        SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
+          WHERE run_id = lv_run
+            AND job_count <> space.
+        LOOP AT lt_piles INTO ls_pile WHERE status = 'PLANNED' OR status = 'RUNNING'.
+          CLEAR: lv_aborted, lv_finished, lv_running, lv_ready, lv_scheduled, lv_preliminary.
+          CALL FUNCTION 'SHOW_JOBSTATE'
+            EXPORTING
+              jobname = ls_pile-job_name
+              jobcount = ls_pile-job_count
+            IMPORTING
+              aborted = lv_aborted
+              finished = lv_finished
+              preliminary = lv_preliminary
+              ready = lv_ready
+              running = lv_running
+              scheduled = lv_scheduled
+            EXCEPTIONS
+              OTHERS = 1.
+          IF sy-subrc = 0 AND lv_aborted <> 'X' AND lv_finished <> 'X'.
+            lv_open = lv_open + 1.
+          ENDIF.
+        ENDLOOP.
+      ENDLOOP.
+      IF lv_open = 0 OR lv_waited >= c_wait_limit.
+        RETURN.
+      ENDIF.
+      WAIT UP TO 1 SECONDS.
+      lv_waited = lv_waited + 1.
+    ENDDO.
+  ENDMETHOD.
+
+  METHOD cleanup.
     DATA lv_run TYPE zosd_l3_alert-run_id.
     delete_seed( ).
     LOOP AT mt_runs INTO lv_run.
@@ -158,7 +237,6 @@ CLASS ltcl_proof IMPLEMENTATION.
                               AND check_date = zcl_l3_fleet_proof=>c_check_date.
     DELETE FROM zosd_l3_run WHERE set_name = zcl_l3_fleet2=>c_set
                               AND check_date = zcl_l3_fleet_proof=>c_check_date.
-    CLEAR mt_runs.
     COMMIT WORK.
   ENDMETHOD.
 

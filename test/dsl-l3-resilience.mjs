@@ -549,6 +549,36 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
       expect(content(log())).to.deep.equal(want);
     });
 
+    // ---- a job that comes late: its pile is no longer PLANNED ------------------------
+    // On a system with several background work processes a job can start before
+    // the step that submitted it commits (A4H, slice 5a run 2): it read the pile as
+    // it was before the doctor's claim, worked it and wrote that stale copy back, so
+    // collect( ) found a RUNNING pile without a job and made the run PARTIAL. A job
+    // works only a pile that is PLANNED, read FOR UPDATE (so it waits for the
+    // submitter's commit on a system). Here: the pile of a submitted job is taken
+    // as FAILED before the job runs; the job must not work it
+    async function latePileProblems() {
+      const problems = [];
+      const run = (await runSet({mode: "P"})).run;
+      await exec([`UPDATE zosd_l3_pile SET status = 'FAILED', reason = 'JOB-GONE' WHERE run_id = '${run}' AND stage_no = 1 AND pile_no = 1`]);
+      const outcomes = await drainAndWork(2);
+      const [first] = plan(run, 1);
+      if (first.status !== "FAILED" || first.reason !== "JOB-GONE") problems.push(`the late job worked the pile: ${JSON.stringify(first)}`);
+      if (!outcomes.includes("failed")) problems.push(`the late job ended ${JSON.stringify(outcomes)}, not aborted`);
+      if (read("SELECT COUNT(*) AS n FROM zosd_l3_work WHERE run_id = ? AND key_value IN ('S001', 'S002')", run)[0].n) problems.push("the late job filled the worklist");
+      return {problems};
+    }
+
+    it("a job whose pile is no longer PLANNED (taken as FAILED before it ran) works nothing and aborts", async () => {
+      expect((await latePileProblems()).problems).to.deep.equal([]);
+    });
+
+    it("mutant: a job that works a pile that is not PLANNED", async () => {
+      const {problems} = await mutant("zcl_l3_fleet2_m_late", mutate("    IF ls_pile-status <> 'PLANNED'.\n      rs_rule-status = 'NOT-PLANNED'.\n",
+        "    IF abap_false = abap_true.\n      rs_rule-status = 'NOT-PLANNED'.\n"), () => latePileProblems());
+      expect(problems.join("\n")).to.match(/the late job worked the pile/);
+    });
+
     // ---- the kill switch set by another session during the doctor's pass ----------
     // stage 1 done, its gate still OPEN: the job that ended the stage dumped in advance( )
     async function gateLeftOpen() {

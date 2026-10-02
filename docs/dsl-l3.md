@@ -236,8 +236,13 @@ passes, `rerun` fails with the rules `WRITE-FAILED`), and a proof whose wait loo
 (collect reads the jobs before they ran; it fails naming six jobs `READY`, and the released jobs
 then run after the teardown, which is the case the next paragraph warns about).
 
-If `mode_p` gives up on a system, the jobs it released may still run after `teardown` and write
-rows under the run id it deleted; delete `ZOSD_L3_ALERT` rows of check date `20991001` by hand.
+If `mode_p` gives up on a system, the jobs it released may still be open at `teardown`. Since slice
+5a `teardown` first waits for the open jobs of the method's runs (`settle( )`, bounded by the same
+180 s), then deletes; a delete that fails all the same is rolled back and tried once more, and
+`teardown` never raises, so one failing method does not stop the methods after it. `setup` also
+deletes the proof date's locks and a kill switch row of the set, so no method depends on how the one
+before it ended. Rows a job still writes after 180 s are the proof date's (`20991001`); delete them
+by hand.
 
 **On A4H.** The deploy unit `l3demo` (`deploy/manifest.json`) lists exactly what the proof needs:
 the four L2 tables and `ZOSD_L2_WEIGHT`, the six enabled rule classes (with their own generated
@@ -1083,7 +1088,7 @@ doctor calls it at the end of every pass.
 
 ### Proof
 
-`test/dsl-l3-resilience.mjs` (registered in `test/suites.d/infra-misc.json`, 33 tests), on a file
+`test/dsl-l3-resilience.mjs` (registered in `test/suites.d/infra-misc.json`, 35 tests), on a file
 database with the jobs facade (`drainJobOutbox`, `workQueuedBatch`) and the injectable clock:
 
 - the manifest: the committed `fleet2` is a fresh build and the one-stage `fleet` is too; the model;
@@ -1147,6 +1152,7 @@ against the test named:
 | the doctor's `ADVANCE` without its kill check | the switch set before the `ADVANCE`: stage 1 `DONE`, stage 2 shut |
 | the release ignoring an `OPEN` gate that could still advance | the switch set before the `ADVANCE`: the lock is released |
 | the release ignoring a `WAITING` gate after a `DONE` one | the switch set between the `ADVANCE` and `advance( )`: the lock is released |
+| a job that works a pile that is not `PLANNED` (the state before the A4H run 2 fix) | the late job: it made the pile `DONE` and filled the worklist |
 
 **The ABAP Unit proof** (`src/l3proof`) gains two methods of `ltcl_proof` over `ZCL_L3_FLEET2`, on
 the same seed and check date: `doctor_heals` (a run as mode P leaves it, its lock and stage 1 gate
@@ -1160,6 +1166,25 @@ all still there). `npm run unit` skips `doctor_heals` by configuration (`abap_tr
 `mode_p`; `test/dsl-l3.mjs` runs the whole class with a worker beside it (seventeen jobs of the two
 stages, every one `COMPLETED`), and its teardown deletes the runs' doctor rows too. Its
 `doctor( )` passes over every open run of the set and purges old final ones, as on any system.
+
+**On A4H.** Run 1 (98db1792) passed, 10 of 10 proof methods on real jobs. Run 2 (fe4d4d5f) ran
+`doctor_heals` alone: `'the healed run ends DONE'` failed, and a `CX_SY_OPEN_SQL_DB` stopped the
+class. Read off the generated code (nothing could be run there), the cause was not the order of the
+gate and the plan: in `advance( )`, `heal( )` and `resume( )` the conditional gate `UPDATE` comes
+first and only its `sy-dbcnt = 1` plans and inserts, every `INSERT ... FROM TABLE` writes a plan of a
+new run or of a stage that winner just opened, and the single-row inserts (`ZOSD_L3_RUN`,
+`ZOSD_L3_DOCTOR`) check `sy-subrc`. It was the job: A4H has several background work processes, and
+`JOB_CLOSE` with `STRTIMMED` lets a job start before the step that submitted it commits. The
+resubmitted job read its pile as it was before the doctor's claim (`FAILED`, attempt 1, no job),
+worked it and wrote that copy back, so `collect( )` in the proof's wait found a `RUNNING` pile
+without a job, took it as `FAILED` and made the run `PARTIAL` (the assertion); the jobs still
+running then met `teardown`'s deletes, and the database error there, in `teardown`, is what
+stopped the class (the run-1 timing had the job start after the commit). The fix: a job reads its
+pile `FOR UPDATE`, so on a system it waits for the submitter's commit, and it works only a pile that
+is `PLANNED`; any other answers `NOT-PLANNED` and its job aborts without touching the row. One work
+process here never starts a job inside a step, so the mocha test takes the pile of a submitted job
+as `FAILED` before the job runs and checks that the job works nothing (red before the fix: the job
+made the pile `DONE` and filled the worklist); the proof's `teardown` is made robust as above.
 
 ### Deviations from the slice's design, with their reason
 
