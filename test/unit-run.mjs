@@ -3,6 +3,7 @@ import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {testClassesIn, reported, missing} from "../tools/osd-unit-run.mjs";
+import {harnessEntries, runAll} from "../tools/osd-unit-all.mjs";
 
 // **`npm run unit` printed OK whether it executed 156 test classes or none.**
 //
@@ -101,5 +102,44 @@ describe("a unit run can say it ran nothing", () => {
     // where it is cheap beats wondering about it later
     const flagged = testClassesIn().filter((n) => n.includes("no .clas.abap"));
     expect(flagged, `these have a testclasses include and no class: ${flagged.join(", ")}`).to.deep.equal([]);
+  });
+});
+
+// The generated harness ends the process at the first failing assertion, so
+// one red class hid every class after it (ZCL_OSD_DEMO_TAXI, 2026-10-02).
+describe("a unit run goes on past a failure", () => {
+  const harness = [
+    "function getData() {",
+    "  const ret = [];",
+    "  ret.push({objectName: \"ZCL_A\", localClass: \"ltcl_a\", methods: [{\"name\":\"red\",\"skip\":false},{\"name\":\"green\",\"skip\":false}], riskLevel: \"HARMLESS\", filename: \"./a.mjs\"});",
+    "  ret.push({objectName: \"ZCL_B\", localClass: \"ltcl_b\", methods: [{\"name\":\"green\",\"skip\":false},{\"name\":\"off\",\"skip\":true}], riskLevel: \"DANGEROUS\", filename: \"./b.mjs\"});",
+    "  return ret;",
+    "}",
+    "",
+    "async function run() {}",
+  ].join("\n");
+  const fake = (methods) => class {
+    async constructor_() { this.FRIENDS_ACCESS_INSTANCE = methods; return this; }
+  };
+
+  it("reads the list out of the generated harness", () => {
+    const entries = harnessEntries(harness);
+    expect(entries.map((e) => e.objectName)).to.deep.equal(["ZCL_A", "ZCL_B"]);
+    expect(() => harnessEntries("run();")).to.throw(/shape changed/);
+  });
+
+  it("runs the class after a failing one and names the failure", async () => {
+    const calls = [];
+    const modules = {
+      "./a.mjs": {ltcl_a: fake({red: async () => { calls.push("a.red"); throw new Error("assert"); }, green: async () => { calls.push("a.green"); }})},
+      "./b.mjs": {ltcl_b: fake({green: async () => { calls.push("b.green"); }})},
+    };
+    const lines = [];
+    const {ran, failed} = await runAll(harnessEntries(harness), async (f) => modules[f], {log: (l) => lines.push(l)});
+    expect(calls).to.deep.equal(["a.red", "a.green", "b.green"]);
+    expect(ran).to.equal(3);
+    expect(failed.map((f) => f.name)).to.deep.equal(["ZCL_A: ltcl_a->red"]);
+    expect(reported(lines.join("\n"))).to.deep.equal(["ZCL_A", "ZCL_B"]);
+    expect(lines).to.include("ZCL_B: running ltcl_b->off, skipped due to configuration");
   });
 });

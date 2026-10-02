@@ -93,7 +93,9 @@ if (basename(process.argv[1] ?? "") === "osd-unit-run.mjs") {
   let code;
   let captured;
   try {
-    const child = spawn("node", ["--expose-gc", "--import", "./tools/osd-unit-bootstrap.mjs", "output/index.mjs"], {stdio: ["inherit", fd, "inherit"]});
+    // tools/osd-unit-all.mjs runs the generated harness's list but goes on
+    // past a failure, so one red class no longer hides every class after it
+    const child = spawn("node", ["--expose-gc", "--import", "./tools/osd-unit-bootstrap.mjs", "tools/osd-unit-all.mjs", ...process.argv.slice(2)], {stdio: ["inherit", fd, "inherit"]});
     code = await new Promise((resolve) => child.on("close", resolve));
     closeSync(fd);
     captured = readFileSync(capturePath, "utf8");
@@ -102,8 +104,8 @@ if (basename(process.argv[1] ?? "") === "osd-unit-run.mjs") {
     try { closeSync(fd); } catch { /* already closed */ }
     rmSync(captureDir, {recursive: true, force: true});
   }
-  if (code !== 0) process.exit(code);
-
+  // a failing run still gets its inventory: what never ran is a second
+  // finding, not one the first should hide
   const ran = reported(captured);
   const never = missing(inTree, ran);
   // "12 of 11" reads like an error in the counter. They are two different
@@ -118,5 +120,6 @@ if (basename(process.argv[1] ?? "") === "osd-unit-run.mjs") {
     console.log("different claims, and only one of them used to be printable.");
     process.exit(1);
   }
+  if (code !== 0) process.exit(code);
   console.log("OK");
 }
