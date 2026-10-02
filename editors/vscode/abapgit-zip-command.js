@@ -59,8 +59,11 @@ async function prepareAbapgitZip(vscode, output, checkout) {
     if (action === "Reveal in Explorer") await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(outcome.path));
     if (action === "Copy path") await vscode.env.clipboard.writeText(outcome.path);
   } catch (error) {
-    output.appendLine(String(error.message ?? error));
-    const action = await vscode.window.showErrorMessage(String(error.message ?? error), "Show output");
+    const message = error?.code === "ENOENT" && error?.syscall?.startsWith("spawn")
+      ? `osd: could not start Node to run the zip tool (${error.path ?? "node"} not found)`
+      : String(error.message ?? error);
+    output.appendLine(message);
+    const action = await vscode.window.showErrorMessage(message, "Show output");
     if (action === "Show output") output.show();
   }
 }

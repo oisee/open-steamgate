@@ -40,9 +40,9 @@ function outcomeOf(exitCode, stdout, stderr) {
   return {ok: exitCode === 0 && written !== undefined, path: written, objects, refusal, lastError};
 }
 
-// Like osdRunCommandLine, use Node on PATH in the checkout. VS Code's
-// process.execPath may be Electron, which is not the checkout's Node.
-function runZip(checkout, unit, out, {node = "node", onOutput = () => {}} = {}) {
+// process.execPath, as Start and the fetch do (launcher.js): the extension
+// host already is a Node, and a VSIX user may have none on PATH.
+function runZip(checkout, unit, out, {node = process.execPath, onOutput = () => {}} = {}) {
   const args = zipArgs(unit, out);
   return new Promise((resolve, reject) => {
     const child = spawn(node, args, {cwd: checkout, env: {...process.env, OSD_ROOT: checkout}, shell: false});

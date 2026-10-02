@@ -24,7 +24,7 @@ under `npm start` the parent used to forward only `/sap/bc/*` and
 `test/start.mjs` now forwards every HOST node `src/icf/nodes.json` declares
 for `tools/osd-serve.mjs` (#95).
 
-`osd: Prepare abapGit zip…` (Command Palette and OSD view overflow) picks a deploy unit from the checkout’s `deploy/manifest.json`, preferring the active file’s source unit, and saves its offline zip under `build/deploy/` by default. It runs the checkout’s zip tool with Node on PATH, logs to **osd**, preserves object-naming refusals, and offers Reveal in Explorer or Copy path on success. A checkout is required; units without sources must be prepared separately. Import the zip with abapGit; delivery to a system is not part of this command.
+`osd: Prepare abapGit zip…` (Command Palette and OSD view overflow) picks a deploy unit from the checkout’s `deploy/manifest.json`, preferring the active file’s source unit, and saves its offline zip under `build/deploy/` by default. It runs the checkout’s zip tool with the extension host’s own Node (`process.execPath`, as Start does), logs to **osd**, preserves object-naming refusals, and offers Reveal in Explorer or Copy path on success. A checkout is required; units without sources must be prepared separately. Import the zip with abapGit; delivery to a system is not part of this command.
 
 ## Key bindings
 
