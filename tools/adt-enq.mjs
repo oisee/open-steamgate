@@ -124,7 +124,13 @@ export function abapSession(sessions, other) {
         // ...but the request resolved its session before it queued, so ask
         // again: a logoff that ran meanwhile has removed it, and then this is
         // the refusal (#432: no lock under a logged-off session)
-        if (await sessions.get(session.id) === undefined) throw e;
+        const live = await sessions.get(session.id);
+        if (live === undefined) throw e;
+        // the handles of the ended context hold nothing: they go before the
+        // key lives again, so a relock gives a new handle, never an old one
+        if (typeof sessions.contextEnded === "function") await sessions.contextEnded(session.id);
+        else live.locks.clear();
+        session.locks?.clear?.();
         reviveEnqSession(key);
         bindEnqSession(key, {user: session.user});
       }

@@ -67,6 +67,11 @@ export class AbapSessions {
       ? this.#view(obj, id) : undefined);
   }
 
+  /** the lock server ended the session's ENQ context: its handles go */
+  contextEnded(id) {
+    return this.#run((obj) => this.#call(obj, "enq_context_ended", {iv_id: id}));
+  }
+
   open(user) {
     return this.#run(async (obj) => {
       const session = await obj[API + "resolve"]({it_cookies: fields({}),

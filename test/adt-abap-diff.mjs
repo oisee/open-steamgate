@@ -817,6 +817,10 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       expect(put.status, put.body).to.equal(409);
       const again = await lock(one);
       expect(again.status, again.body).to.equal(200);
+      expect(again.handle, "a relock gives a new handle").to.not.equal(locked.handle);
+      const stale = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${locked.handle}`,
+        {headers: {"content-type": "text/plain"}, body: "* no\n"});
+      expect(stale.status, "the old handle stays dead after the relock").to.equal(409);
       await logoff(one);
       expect((await rows()).map((r) => r.arg), "logoff released the new context").to.deep.equal([]);
     });
