@@ -1210,7 +1210,9 @@ made the pile `DONE` and filled the worklist); the proof's `teardown` is made ro
 - **`max_alerts` and `kill` are optional**; without them nothing of the fuse or the switch is
   generated.
 - **A killed pile job ends without abort**: an abort would roll back the pile's return to `PLANNED`;
-  the submit remains in `ATTEMPT` history and the kill does not consume the failure retry budget.
+  the submit remains in `ATTEMPT` history, so a killed pile has one failure retry fewer
+  (killed at attempt 1 with `retry.max` 2, it gets attempts 2 and 3); the operator's resume itself is
+  never refused by the cap, which guards only `FAILED` piles.
 - **`resume( )` takes `iv_bind` and `is_params`**: neither is stored with a run; the doctor submits
   with the manifest's bindings and the set parameters' defaults (a limit, below). It resumes only a
   run that still holds its lock.
