@@ -334,6 +334,81 @@ describe("DSL L3 slice 5c-1: governor", function () {
         expect(read("SELECT status FROM zosd_l3_run WHERE run_id=?", runId)[0].status).to.equal("RELEASED");
       } finally { abap.Classes.ZCL_L2_SHIP_MIN_CREW.check = check; }
     });
+    // Real job failures consume attempts 1 and 2. Attempt 3 reaches an
+    // operator stop, which is not a failure and must allow submit 4.
+    async function retryReleaseOracle(stop) {
+      await tune("retry.max", "2"); await tune("retry.backoff", "0");
+      const runId = await planned(stop === "GLASS" ? 1 : 10, stop === "HELD" ? 1 : 50);
+      await exec([`DELETE FROM zosd_l3_pile WHERE run_id='${runId}' AND pile_no=2`,
+        `UPDATE zosd_l3_pile SET range_high='S002' WHERE run_id='${runId}'`]);
+      // Capture the result shape while this run holds its date lock. A dry
+      // run after completion would replace the released row with a new run.
+      const r = await dialogStep(() => cls().dry({iv_date: date()})); r.get().run_id.set(runId);
+      const check = abap.Classes.ZCL_L2_SHIP_MIN_CREW.check;
+      let calls = 0;
+      abap.Classes.ZCL_L2_SHIP_MIN_CREW.check = async function (args) {
+        calls++;
+        if (calls <= 2 || stop === "FAILED") throw new Error("retry release regression dump");
+        return check.call(this, args);
+      };
+      const work = async (kind) => {
+        await drainJobOutbox(store);
+        expect((await workQueuedBatch(process.cwd(), store)).kind).to.equal(kind);
+      };
+      const heal = async () => {
+        await exec([`UPDATE zosd_l3_pile SET ended=20000101000000 WHERE run_id='${runId}'`,
+          `UPDATE zosd_l3_run SET started=20000101000000 WHERE run_id='${runId}'`]);
+        await dialogStep(() => cls().doctor({}));
+      };
+      try {
+        await dialogStep(() => cls().resume({iv_run: str(runId)}));
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          await work("failed"); await heal();
+          expect(piles(runId)[0].attempt).to.equal(attempt + 1);
+        }
+        if (stop === "KILLED") await exec(["INSERT INTO zosd_l3_kill (mandt,set_name,reason) VALUES ('','fleet2','operator pause')"]);
+        await work(stop === "FAILED" ? "failed" : "completed");
+        if (stop === "FAILED") {
+          await heal();
+          await dialogStep(() => cls().resume({iv_run: str(runId)}));
+          await drainJobOutbox(store);
+          const outcome = await workQueuedBatch(process.cwd(), store);
+          return outcome.kind !== "completed" && outcome.kind !== "failed"
+            && piles(runId)[0].status === "FAILED" && piles(runId)[0].attempt === 3 && calls === 3;
+        }
+        expect(piles(runId)[0]).to.include({status: stop === "KILLED" ? "PLANNED" : stop, attempt: 3});
+        if (stop === "GLASS") {
+          expect(trim((await continueGlass(runId, 10, "capacity reviewed after retries")).get())).to.equal("X");
+        } else {
+          if (stop === "HELD") {
+            const released = await dialogStep(() => cls().release_pile({iv_run: str(runId), iv_rule: str("ship-min-crew"),
+              iv_pile: int(1), iv_per_pile: int(2), iv_reason: str("pile reviewed after retries")}));
+            expect(trim(released.get())).to.equal("X");
+          } else await exec(["DELETE FROM zosd_l3_kill"]);
+          await dialogStep(() => cls().resume({iv_run: str(runId)}));
+        }
+        await drain();
+        const result = await collect(r);
+        return piles(runId)[0].status === "DONE" && piles(runId)[0].attempt === 4
+          && status(result) === "DONE" && read("SELECT status FROM zosd_l3_run WHERE run_id=?", runId)[0].status === "RELEASED";
+      } finally { abap.Classes.ZCL_L2_SHIP_MIN_CREW.check = check; }
+    }
+    for (const stop of ["GLASS", "HELD", "KILLED", "FAILED"]) {
+      it(`retry cap: ${stop} after retries ${stop === "FAILED" ? "remains capped" : "can be operator-released and finishes DONE"}`, async () => {
+        expect(await retryReleaseOracle(stop)).to.equal(true);
+      });
+    }
+    for (const stop of ["GLASS", "HELD", "KILLED"]) {
+      it(`mutant retry cap before branch: ${stop} release is red, restored green`, async () => {
+        expect(await retryReleaseOracle(stop)).to.equal(true);
+        await fresh();
+        const edit = methodEdit("heal", "IF ls_pile-status = 'FAILED'.\n        \" cap failed retries only; operator-released PLANNED piles keep submit history\n        IF ls_pile-attempt > gs_settings-vals-retry_max.\n          CONTINUE.\n        ENDIF.",
+          "IF ls_pile-attempt > gs_settings-vals-retry_max.\n        CONTINUE.\n      ENDIF.\n      IF ls_pile-status = 'FAILED'.");
+        expect(await mutant(`zcl_l3_fleet2_g_retry_${stop.toLowerCase()}`, edit, () => retryReleaseOracle(stop))).to.equal(false);
+        await fresh(); expect(await retryReleaseOracle(stop)).to.equal(true);
+      });
+    }
+
     it("RUNNING after a refund has its own event kind", async () => {
       await tune("budget.glass", "5"); await tune("budget.warn", "1"); await tune("budget.narrow_at", "1");
       const r = await run("S", "close=maintenance"), es = events(id(r));
