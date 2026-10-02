@@ -80,7 +80,8 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_u TYPE i
       RETURNING VALUE(rv_hits) TYPE i.
     CLASS-METHODS act
-      IMPORTING is_draw TYPE ty_draw.
+      IMPORTING is_draw TYPE ty_draw
+                is_pile TYPE {{iface}}=>ty_pile.
 ENDCLASS.
 
 CLASS {{class}} IMPLEMENTATION.
@@ -252,6 +253,9 @@ CLASS {{class}} IMPLEMENTATION.
     " fixed, uniform, or the Poisson's table P(K <= k) in millionths
     DATA lt_cdf TYPE string_table.
     DATA lv_text TYPE string.
+{{#replay}}
+    DATA ls_quantile TYPE ty_config.
+{{/replay}}
     DATA lv_bound TYPE i.
     DATA lv_span TYPE p LENGTH 16 DECIMALS 0.
     DATA lv_product TYPE p LENGTH 16 DECIMALS 0.
@@ -261,6 +265,12 @@ CLASS {{class}} IMPLEMENTATION.
         lv_product = lv_span * iv_u.
         lv_product = lv_product DIV c_million.
         rv_hits = is_config-hits_a + lv_product.
+{{#replay}}
+      WHEN 'Q'.
+        ls_quantile-dist = 'L'.
+        ls_quantile-knots = is_config-cdf.
+        rv_hits = duration( is_config = ls_quantile iv_u = iv_u ).
+{{/replay}}
       WHEN 'P'.
         SPLIT is_config-cdf AT ` ` INTO TABLE lt_cdf.
         rv_hits = lines( lt_cdf ) - 1.
@@ -327,7 +337,7 @@ CLASS {{class}} IMPLEMENTATION.
     lv_u = lv_state MOD c_million.
     rs_draw-hits = hits( is_config = ls_config
                          iv_u = lv_u ).
-    IF iv_filter = abap_true.
+    IF iv_filter = abap_true{{#replay}} AND 1 = 2{{/replay}}.
       " a filter keeps each key with the probability keep
       LOOP AT it_keys INTO lv_key.
         lv_state = next( lv_state ).
@@ -364,6 +374,7 @@ CLASS {{class}} IMPLEMENTATION.
     " the simulated seconds: slow takes slow_factor times as long, a dump
     " half, a hang half as long again as stale; then the wall wait, rounded
     lv_product = lv_base.
+{{^replay}}
     CASE rs_draw-outcome.
       WHEN 'SLOW'.
         lv_product = lv_product * ls_config-slow_factor.
@@ -373,6 +384,7 @@ CLASS {{class}} IMPLEMENTATION.
         lv_product = is_pile-stale DIV 2.
         lv_product = lv_product + is_pile-stale.
     ENDCASE.
+{{/replay}}
     IF lv_product > c_modulus.
       lv_product = c_modulus.
     ENDIF.
@@ -391,18 +403,42 @@ CLASS {{class}} IMPLEMENTATION.
     WHILE strlen( lv_key ) < is_config-key_length.
       lv_key = lv_key && ` `.
     ENDWHILE.
-    rv_text = |SIM { is_config-prefix }{ lv_key }: simulated hit, pile { is_pile-pile_no }, attempt { is_pile-attempt }|.
+    rv_text = |{{^replay}}SIM{{/replay}}{{#replay}}RPL{{/replay}} { is_config-prefix }{ lv_key }: simulated hit, pile { is_pile-pile_no }, attempt { is_pile-attempt }|.
   ENDMETHOD.
 
   METHOD act.
     " the work is done for real: the wait, then a normal end or an abnormal one
-    IF is_draw-wait > 0.
-      WAIT UP TO is_draw-wait SECONDS.
-    ENDIF.
+    DATA ls_audit TYPE zosd_l3_doctor.
+    DATA lv_hits TYPE i.
+    ls_audit-mandt = sy-mandt.
+    ls_audit-run_id = is_pile-run_id.
+    ls_audit-set_name = {{set | literal}}.
+    ls_audit-rule_name = is_pile-rule.
+    ls_audit-pile_no = is_pile-pile_no.
+    SELECT SINGLE check_date stage_no FROM zosd_l3_pile
+      INTO (ls_audit-check_date, ls_audit-stage_no)
+      WHERE run_id = is_pile-run_id
+        AND rule_name = is_pile-rule
+        AND pile_no = is_pile-pile_no.
+    ls_audit-doc_action = 'WORK'.
+    lv_hits = lines( is_draw-keys ).
+    ls_audit-reason = |{ is_draw-outcome } { is_draw-wait } { lv_hits }|.
+    GET TIME STAMP FIELD ls_audit-acted.
+    " negative audit keys keep simultaneous work apart from doctor actions
+    SELECT MIN( seq ) FROM zosd_l3_doctor INTO ls_audit-seq
+      WHERE run_id = is_pile-run_id.
+    DO.
+      ls_audit-seq = ls_audit-seq - 1.
+      INSERT zosd_l3_doctor FROM ls_audit.
+      IF sy-subrc = 0.
+        EXIT.
+      ENDIF.
+    ENDDO.
+    WAIT UP TO is_draw-wait SECONDS.
     IF is_draw-outcome = 'DUMP' OR is_draw-outcome = 'HANG'.
       RAISE EXCEPTION TYPE {{exception}}
         EXPORTING iv_port = 'work'
-                  iv_variant = 'sim'
+                  iv_variant = {{variant | literal}}
                   iv_reason = 'SIM: the simulated work ends abnormally, as a dump does'.
     ENDIF.
   ENDMETHOD.
@@ -414,7 +450,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_text TYPE string.
     ls_draw = draw( is_pile = is_pile
                     it_keys = it_keys ).
-    act( ls_draw ).
+    act( is_draw = ls_draw is_pile = is_pile ).
     ls_config = config( is_pile-rule ).
     LOOP AT ls_draw-keys INTO lv_key.
       lv_text = alert( is_pile = is_pile
@@ -429,7 +465,7 @@ CLASS {{class}} IMPLEMENTATION.
     ls_draw = draw( is_pile = is_pile
                     it_keys = it_keys
                     iv_filter = abap_true ).
-    act( ls_draw ).
+    act( is_draw = ls_draw is_pile = is_pile ).
     rt_keys = ls_draw-keys.
   ENDMETHOD.
 ENDCLASS.

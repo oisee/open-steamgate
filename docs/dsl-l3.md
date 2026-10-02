@@ -2013,3 +2013,107 @@ are never changed by a mutant.
 | omit the run refusal (fleet and fleet2) | superseded job calls a rule instead of doing nothing |
 | drop collect's set condition | parsed UPDATE has no set condition |
 | swallow delete refusals | unschedule reports zero refusals after two FORBIDDEN responses |
+
+## Replay: a twin of one night
+
+A replay takes the measured work of one settled run and answers a settings
+question without running its L2 checks. The gates, jobs, doctor, retries and
+GLASS remain the generated ABAP machinery.
+
+```sh
+node tools/dsl-l3.mjs profile src/l2demo/fleet2.l3.yaml \
+  --run <run-id> --db <night.sqlite> --out profile.json
+flock /tmp/osd-heavy.lock node tools/dsl-l3.mjs whatif src/l2demo/fleet2.l3.yaml \
+  --profile profile.json --db <night.sqlite> --setting budget.glass=300
+# Or derive the profile directly from the night:
+flock /tmp/osd-heavy.lock node tools/dsl-l3.mjs whatif src/l2demo/fleet2.l3.yaml \
+  --run <run-id> --db <night.sqlite> --setting retry.max=1
+```
+
+`profile` opens SQLite read-only and takes one read transaction. Its JSON is
+deterministic: version, set, run, integer quantile knots at the sim twin's
+15 percentiles, outcome counts and millionth frequencies, hits per pile,
+autoclose share, the run settings snapshot, inferred attempt samples and
+all source pile, doctor, event, gate, alert and worklist rows. Each observed
+rule and stage has a distribution. An unobserved rule can use its observed
+stage's distribution; compilation refuses a rule whose stage is unobserved
+too. Profiling refuses an unknown run, another set's run, or a run with no
+observed work. A paused or unfinished night's snapshot can be profiled:
+unfinished work without a `WORK` audit contributes only its recorded earlier
+attempts, without inventing an outcome for work that has not finished.
+
+The pile row retains the final attempt only. The profiler includes earlier
+retries from the doctor's `RESUBMIT RETRY` rows and the attempt count. For
+older nights it treats vanished jobs as hangs, other failures as dumps, and
+successful durations over twice the rule's median as slow. Missing earlier
+durations and hit counts are **censored** (null in samples), excluded from
+those quantile tables, and counted explicitly. A wholly unmeasured table is
+null; replay uses the stage table if measured, otherwise compilation refuses it. These rows cannot reveal the
+exact earlier durations or distinguish every dump from a hang. The profile
+keeps that limitation beside its data rather than manufacturing observations.
+New sim and replay work writes `WORK` audit rows containing the drawn outcome,
+integer wait in clock seconds and number of selected keys, before its WAIT
+commits them.
+Those synthetic attempts have exact measurements even when the job dumps.
+
+A manifest opts into the generated work variant with:
+
+```yaml
+simulate:
+  profile: profile.json # relative to the set, or the version 1 mapping inline
+  seed: 42
+  time_scale: 1
+  allow_sink: [log]
+```
+
+Build the set normally, then call `run( iv_bind = 'work=replay' )`. If the
+set has a `close=sim` variant, compilation also adds `close=replay`; bind it
+explicitly to use the profile's empirical autoclose share. `work=sim` keeps
+the original distributions. `work=replay` compiles the profile's duration
+and hit knots into integer constants, uses the same MINSTD stream and draw
+order, and interpolates them with integer arithmetic. Empirical durations
+already include slow and failed work: replay does not apply the sim twin's
+slow factor or dump halving again. Filters sample the measured hit count
+from the pile's keys. Outcome, duration and hits are independent marginals;
+the profile does not claim to preserve their correlations or arrival order.
+
+Replay rows say `RPL` and use `rpl256:` hashes, separate from both `sha256:`
+and `sim256:`. The existing sink refusal covers replay at compile time and
+in the factory, the submit path and the work path. WAIT still prevents
+binding table-capture replay ports. `RUN_BIND` records the explicit work
+variant, retries and finalisation use it, resume refuses a work override,
+and an initial recorded binding continues to mean real.
+
+`whatif` snapshots the file DB once, including committed WAL content, then
+runs two replays on disposable copies with identical run IDs and a manual
+clock. It applies the source run's settings through `set_setting`, followed
+by the requested overrides for the second run. The manual clock uses scale 1:
+profile durations already measure clock seconds, including a sim source's
+scaled waits, and a real source never used the sim speed setting. An explicit
+`simulate.time_scale` override applies to the second replay. Multiple `--setting` options
+are allowed; unavailable or out-of-bounds settings are refused. It reports
+end time, failed piles, open alerts and GLASS for each experiment and their
+differences. GLASS is a terminal observation for this comparison: the clock
+stops when continuation would require an operator. The source database is
+never modified. The source tables are those still in that file: a historical
+pile profile cannot recover keys already deleted from the source tables.
+
+`test/dsl-l3-replay.mjs` takes a profile from an actual 5d sim night on a file
+DB. At 10,000 draws per rule its tolerance is 2.5 percentage points per
+outcome, 12.5 percentage points for the duration CDF (the largest knot gap
+is 10 points), and 0.15 for mean hits. It also
+runs identical replay experiments through the actual jobs facade and checks
+that lowered glass triggers GLASS where the baseline did not. The mutants
+remove doctor retries, draw sim distributions instead of the empirical
+profile, and omit replay sink safety; each must be detected.
+
+The proof night has 48 ships, 168 piles and 181 attempted work observations:
+162 OK, 6 SLOW, 7 DUMP and 6 HANG. Keeping only final pile rows loses 13
+earlier attempts. The generated ABAP draws also match the JavaScript twin
+over rules, seeds, scales and retries, including the filter's hit knots.
+
+| Mutant | Detection |
+| --- | --- |
+| Ignore doctor retries | Fewer samples and lost earlier dump outcomes |
+| Draw sim distributions instead of the profile | Empirical frequency/CDF/hit tolerances fail |
+| Remove replay sink refusal | A binding the runtime must refuse becomes allowed |

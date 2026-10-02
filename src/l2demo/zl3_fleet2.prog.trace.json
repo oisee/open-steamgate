@@ -3,7 +3,7 @@
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-job/template.tpl",
  "overlay": "recipes/l3-governor/job.patch.json",
- "model": "sha256:6afc59bfa786fd8ed203a3c12562e5e195330b645a16199d9849da9af9f4064e",
+ "model": "sha256:5a266b3f60ab5d55dcb15581eb888a7a935121a4e4ee29b077c05d88ad53cedf",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",

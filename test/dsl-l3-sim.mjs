@@ -217,7 +217,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       expect(safetyProblems(sinkSafety)).to.deep.equal([]);
       const copy = join(scratch, "safety.mjs");
       const text = readFileSync("tools/dsl-l3-sim.mjs", "utf8");
-      const from = "if (work === \"sim\" && bound && (bound.is_log || bound.hand) && !allow.includes(bound.name)) return bound.name;";
+      const from = "if ([\"sim\", \"replay\"].includes(work) && bound && (bound.is_log || bound.hand) && !allow.includes(bound.name)) return bound.name;";
       expect(text).to.include(from);
       writeFileSync(copy, text.replace(from, ""));
       expect(safetyProblems((await import(pathToFileURL(copy).href)).sinkSafety).join("\n")).to.match(/a simulated run on the log is allowed/);
