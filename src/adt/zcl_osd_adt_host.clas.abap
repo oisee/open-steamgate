@@ -36,7 +36,33 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
              type     TYPE string,
              name     TYPE string,
              writable TYPE abap_bool,
+             package TYPE string,
+             packages TYPE string_table,
+             changed_at TYPE string,
+             changed_by TYPE string,
+             version TYPE string,
+             includes TYPE string_table,
            END OF ty_object.
+
+    TYPES: BEGIN OF ty_answer,
+             json TYPE string,
+             source TYPE string,
+           END OF ty_answer.
+
+    "! All host calls share the typed error envelope. SOURCE is a raw body.
+    CLASS-METHODS store
+      IMPORTING iv_command TYPE string
+                iv_type TYPE string OPTIONAL
+                iv_name TYPE string OPTIONAL
+                iv_include TYPE string OPTIONAL
+                iv_json TYPE string OPTIONAL
+      RETURNING VALUE(rs_answer) TYPE ty_answer
+      RAISING zcx_osd_adt.
+
+    "! Also public for callers that need the older scalar/table parameters.
+    CLASS-METHODS check_error
+      IMPORTING iv_json TYPE string iv_error TYPE string OPTIONAL
+      RAISING zcx_osd_adt.
 
     "! one SYSTEM kind, answered as the host's JSON text
     CLASS-METHODS system
@@ -90,61 +116,102 @@ ENDCLASS.
 
 CLASS zcl_osd_adt_host IMPLEMENTATION.
 
-  METHOD system.
+  METHOD store.
     DATA lv_error TYPE string.
     DATA lv_msg TYPE c LENGTH 255.
     DATA lx_error TYPE REF TO zcx_osd_adt.
-
     CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
-      EXPORTING iv_command = `SYSTEM`
-                iv_type    = iv_kind
-                iv_name    = iv_name
-      IMPORTING ev_json    = rv_json
-                ev_error   = lv_error
-      EXCEPTIONS
-                system_failure        = 1 MESSAGE lv_msg
-                communication_failure = 2 MESSAGE lv_msg
-                OTHERS                = 3.
+      EXPORTING iv_command = iv_command
+                iv_type = iv_type
+                iv_name = iv_name
+                iv_include = iv_include
+                iv_json = iv_json
+      IMPORTING ev_json = rs_answer-json
+                ev_source = rs_answer-source
+                ev_error = lv_error
+      EXCEPTIONS system_failure = 1 MESSAGE lv_msg
+                 communication_failure = 2 MESSAGE lv_msg
+                 OTHERS = 3.
     IF sy-subrc <> 0.
-      lv_error = |no host here: { lv_msg }|.
-    ENDIF.
-    IF lv_error IS NOT INITIAL.
-      lv_error = |SYSTEM { iv_kind }: { lv_error }|.
-      lx_error = zcx_osd_adt=>internal( lv_error ).
+      lx_error = zcx_osd_adt=>internal( |no host here: { lv_msg }| ).
       RAISE EXCEPTION lx_error.
+    ENDIF.
+    check_error( iv_json = rs_answer-json iv_error = lv_error ).
+  ENDMETHOD.
+
+  METHOD check_error.
+    DATA lo_json TYPE REF TO zcl_ajson.
+    DATA lv_code TYPE string.
+    DATA lv_message TYPE string.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+    IF iv_json IS NOT INITIAL.
+      lo_json = parse( iv_what = `STORE` iv_json = iv_json ).
+      lv_code = lo_json->get_string( `/error/code` ).
+      lv_message = lo_json->get_string( `/error/message` ).
+    ENDIF.
+    IF lv_code IS INITIAL.
+      IF iv_error IS INITIAL.
+        RETURN.
+      ENDIF.
+*     Older hosts only carry EV_ERROR. An absent command is always 501.
+      lv_message = iv_error.
+      IF iv_error CP `unknown store command *`.
+        lv_code = `NOT_SUPPORTED`.
+      ENDIF.
+    ENDIF.
+    CASE lv_code.
+      WHEN `NOT_FOUND`.
+        lx_error = zcx_osd_adt=>not_found( lv_message ).
+      WHEN `CONFLICT`.
+        lx_error = zcx_osd_adt=>conflict( lv_message ).
+      WHEN `READ_ONLY`.
+        lx_error = zcx_osd_adt=>read_only( lv_message ).
+      WHEN `NOT_SUPPORTED`.
+        lx_error = zcx_osd_adt=>not_supported( lv_message ).
+      WHEN `INVALID_NAME`.
+        lx_error = zcx_osd_adt=>invalid_request( lv_message ).
+      WHEN OTHERS.
+        lx_error = zcx_osd_adt=>internal( lv_message ).
+    ENDCASE.
+    RAISE EXCEPTION lx_error.
+  ENDMETHOD.
+
+  METHOD system.
+    DATA ls_answer TYPE ty_answer.
+    ls_answer = store( iv_command = `SYSTEM` iv_type = iv_kind iv_name = iv_name ).
+    IF ls_answer-json IS INITIAL.
+      rv_json = ls_answer-source.
+    ELSE.
+      rv_json = ls_answer-json.
     ENDIF.
   ENDMETHOD.
 
   METHOD object.
-    DATA lv_json TYPE string.
-    DATA lv_error TYPE string.
-    DATA lv_msg TYPE c LENGTH 255.
+    DATA ls_answer TYPE ty_answer.
     DATA lo_json TYPE REF TO zcl_ajson.
+    DATA lx_json TYPE REF TO zcx_ajson_error.
     DATA lx_error TYPE REF TO zcx_osd_adt.
-
-    CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
-      EXPORTING iv_command = `OBJECT`
-                iv_type    = iv_type
-                iv_name    = iv_name
-      IMPORTING ev_json    = lv_json
-                ev_error   = lv_error
-      EXCEPTIONS
-                system_failure        = 1 MESSAGE lv_msg
-                communication_failure = 2 MESSAGE lv_msg
-                OTHERS                = 3.
-    IF sy-subrc <> 0.
-      lv_error = |no host here: { lv_msg }|.
-    ENDIF.
-    IF lv_error IS NOT INITIAL.
-      lv_error = |OBJECT { iv_type } { iv_name }: { lv_error }|.
-      lx_error = zcx_osd_adt=>internal( lv_error ).
-      RAISE EXCEPTION lx_error.
-    ENDIF.
-    lo_json = parse( iv_what = `OBJECT` iv_json = lv_json ).
+    ls_answer = store( iv_command = `OBJECT` iv_type = iv_type iv_name = iv_name ).
+    lo_json = parse( iv_what = `OBJECT` iv_json = ls_answer-json ).
     rs_object-found = lo_json->get_boolean( `/found` ).
+    IF rs_object-found = abap_false.
+      RETURN.
+    ENDIF.
     rs_object-type = lo_json->get_string( `/type` ).
     rs_object-name = lo_json->get_string( `/name` ).
     rs_object-writable = lo_json->get_boolean( `/writable` ).
+    rs_object-package = lo_json->get_string( `/package` ).
+    TRY.
+        rs_object-packages = lo_json->array_to_string_table( `/packages` ).
+        rs_object-includes = lo_json->array_to_string_table( `/includes` ).
+      CATCH zcx_ajson_error INTO lx_json.
+        lx_error = zcx_osd_adt=>internal( lx_json->get_text( ) ).
+        RAISE EXCEPTION lx_error.
+    ENDTRY.
+    rs_object-changed_at = lo_json->get_string( `/changedAt` ).
+    rs_object-changed_by = lo_json->get_string( `/changedBy` ).
+    rs_object-version = lo_json->get_string( `/version` ).
+
   ENDMETHOD.
 
   METHOD lock_handle.

@@ -32,7 +32,7 @@ import {basename, join} from "node:path";
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
-const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION"];
+export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM"];
 
 /** What this host can do, as the screen asks it (CAPABILITIES, EV_NOTE):
  *  the editor draws a button only for a command named here. Node holds the
@@ -76,7 +76,7 @@ try {
 
 /** Run work with `answers` ((kind, name) => value; throw to refuse) bound
  *  as the SYSTEM answers of every STORE call it makes, and `store` (the
- *  facade instance's ObjectStore, port-map risk 12) as the one OBJECT reads. */
+ *  facade instance's ObjectStore, port-map risk 12) for every STORE command. */
 export function withSystem(answers, work, {store} = {}) {
   if (systemCalls === undefined) throw new Error("SYSTEM needs an async context (Node or Bun)");
   return systemCalls.run({answers, store}, work);
@@ -123,29 +123,34 @@ export class StoreDestination {
 
   async call(name, signature) {
     const command = givenText(signature, "IV_COMMAND", "LIST").toUpperCase();
-    const answer = await this.#answer(command, signature);
+    let answer;
+    try {
+      answer = await this.#answer(command, signature);
+    } catch (error) {
+      answer = refusal(error);
+    }
+    // EV_ERROR remains for existing screens; ADT consumes the typed envelope.
+    if (answer.EV_ERROR && !answer.EV_JSON) answer = {...answer, ...refusal(answer.EV_ERROR)};
     fill(signature, {...EMPTY, ...answer});
     return undefined;
   }
 
   async #answer(command, signature) {
+    if (command === "COMMANDS") return {EV_JSON: JSON.stringify({commands: COMMANDS}), EV_NOTE: COMMANDS.join(" ")};
+    if (command === "CAPABILITIES") return {EV_NOTE: CAPABILITIES.join(" ")};
+    if (!COMMANDS.includes(command)) return refusal(`unknown store command ${command}`, "NOT_SUPPORTED");
     if (command === "SYSTEM") {
-      return this.#system(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));
+      return this.#system(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"), givenText(signature, "IV_JSON"));
     }
     if (command === "OBJECT") {
       return this.#object(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));
     }
-    const store = ["READ", "HISTORY", "REVISION"].includes(command)
-      ? (systemCalls?.getStore()?.store ?? await this.#open())
-      : await this.#open();
+    const store = systemCalls?.getStore()?.store ?? await this.#open();
     if (store === undefined) {
       // Named, and with the reason. "No store" answered as an empty list is
       // a screen that says the system is empty, which is a different and
       // false statement.
       return {EV_ERROR: `no object store here: ${this.reason}`};
-    }
-    if (COMMANDS.includes(command) === false) {
-      return {EV_ERROR: `unknown store command ${command}`};
     }
     const type = givenText(signature, "IV_TYPE").toUpperCase();
     const name = givenText(signature, "IV_NAME").toUpperCase();
@@ -154,12 +159,11 @@ export class StoreDestination {
     const started = Date.now();
     try {
       switch (command) {
-        case "CAPABILITIES": return {EV_NOTE: CAPABILITIES.join(" ")};
-        case "LIST": return this.#list(signature);
+        case "LIST": return this.#list(signature, store);
         case "READ": return this.#read(type, name, include, store);
-        case "WRITE": return this.#write(type, name, include, source, started);
-        case "CHECK": return this.#check(type, name, include, source, started);
-        case "ACTIVATE": return await this.#activate(type, name, started);
+        case "WRITE": return this.#write(type, name, include, source, started, store);
+        case "CHECK": return this.#check(type, name, include, source, started, store);
+        case "ACTIVATE": return await this.#activate(type, name, started, store);
         case "HISTORY": return await this.#history(type, name, include, signature, store);
         case "REVISION": return await this.#revision(type, name, include, givenText(signature, "IV_REVISION"), store);
       }
@@ -167,7 +171,7 @@ export class StoreDestination {
       // the store's own refusals -- NotFound, ReadOnly, NotSupported -- are
       // answers a person can act on, so they are carried through as they are
       // written rather than turned into "failed"
-      return {EV_ERROR: String(error?.message ?? error), EV_MS: String(Date.now() - started)};
+      return {...refusal(error), EV_MS: String(Date.now() - started)};
     }
   }
 
@@ -182,13 +186,15 @@ export class StoreDestination {
     try {
       const entry = store.find(type, name);
       return {EV_JSON: JSON.stringify(entry === undefined ? {found: false}
-        : {found: true, type: entry.type, name: entry.name, writable: entry.writable !== false})};
+        : {found: true, type: entry.type, name: entry.name, writable: entry.writable !== false,
+          package: entry.package, packages: entry.packages ?? [], ...store.stateOf(entry),
+          changedBy: entry.changedBy, includes: entry.type === "CLAS" ? store.classIncludes(entry.name) : []})};
     } catch (error) {
-      return {EV_ERROR: String(error?.message ?? error)};
+      return refusal(error);
     }
   }
 
-  async #system(kind, name) {
+  async #system(kind, name, json) {
     if (SYSTEM_KINDS.includes(kind) === false) {
       return {EV_ERROR: `unknown SYSTEM kind ${kind || "(none)"}`};
     }
@@ -197,19 +203,19 @@ export class StoreDestination {
       return {EV_ERROR: `nothing answers SYSTEM ${kind} for this call: it is bound per ADT facade instance (withSystem)`};
     }
     try {
-      const value = await bound.answers(kind, name);
+      const value = await bound.answers(kind, name, json);
       if (value === undefined) return {EV_ERROR: `SYSTEM ${kind} has no answer here`};
-      return {EV_JSON: JSON.stringify(value)};
+      return typeof value?.raw === "string" ? {EV_SOURCE: value.raw} : {EV_JSON: JSON.stringify(value)};
     } catch (error) {
-      return {EV_ERROR: String(error?.message ?? error)};
+      return refusal(error);
     }
   }
 
-  #list(signature) {
+  #list(signature, store) {
     const type = givenText(signature, "IV_TYPE").toUpperCase();
     const filter = givenText(signature, "IV_FILTER").toUpperCase();
     const limit = Number(givenText(signature, "IV_LIMIT")) || this.limit;
-    const matching = this.store.list()
+    const matching = store.list()
       .filter((entry) => filter === "" || entry.name.includes(filter));
     // **The tally is of what the FILTER matched, before the type narrows
     // it**, and it is a structure of its own rather than a number pushed
@@ -241,14 +247,14 @@ export class StoreDestination {
       // into the row and every FILE column was empty, which reads as "this
       // object has no file" rather than as "nobody asked for it"
       ET_OBJECT: all.slice(0, limit)
-        .map((entry) => this.store.find(entry.type, entry.name) ?? entry)
-        .map((entry) => this.#row(entry)),
+        .map((entry) => store.find(entry.type, entry.name) ?? entry)
+        .map((entry) => this.#row(entry, store)),
       ET_TYPE: [...tally.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .map(([kind, count]) => ({TYPE: kind, COUNT: count})),
     };
   }
 
-  #row(entry, store = this.store) {
+  #row(entry, store) {
     const state = store.stateOf(entry);
     return {
       TYPE: entry.type,
@@ -316,6 +322,7 @@ export class StoreDestination {
     const read = store.read(type, name, include);
     return {
       EV_SOURCE: read.source,
+      EV_JSON: JSON.stringify({name: read.name, changedBy: read.changedBy, empty: read.empty === true}),
       EV_FILE: String(read.file ?? ""),
       EV_PACKAGE: String(read.package ?? ""),
       EV_WRITABLE: read.writable === false ? "" : "X",
@@ -324,13 +331,13 @@ export class StoreDestination {
     };
   }
 
-  #write(type, name, include, source, started) {
+  #write(type, name, include, source, started, store) {
     if (source === undefined) {
       // not "an empty source": a screen that posts a form with no text area
       // in it would otherwise silently empty the object it was showing
       return {EV_ERROR: "WRITE without IV_SOURCE: nothing was written"};
     }
-    const written = this.store.write(type, name, String(source), include);
+    const written = store.write(type, name, String(source), include);
     return {
       EV_FILE: String(written.file ?? ""),
       EV_PACKAGE: String(written.package ?? ""),
@@ -340,9 +347,9 @@ export class StoreDestination {
     };
   }
 
-  #check(type, name, include, source, started) {
+  #check(type, name, include, source, started, store) {
     const options = source === undefined ? {} : {source: String(source), include};
-    const result = this.store.check(type, name, options);
+    const result = store.check(type, name, options);
     return {
       EV_ACTIVE: result.issues.length === 0 ? "X" : "",
       EV_COUNT: String(result.issues.length),
@@ -351,8 +358,8 @@ export class StoreDestination {
     };
   }
 
-  async #activate(type, name, started) {
-    const result = this.store.activate(type, name);
+  async #activate(type, name, started, store) {
+    const result = store.activate(type, name);
     // An activation refused by a *dependent* is the case activation exists
     // for, and the screen has to be able to say which caller broke -- so the
     // dependent's own name travels on its rows and is not flattened into the
@@ -395,10 +402,10 @@ export class StoreDestination {
     // fourteen. So no number is right for both, and a screen that says
     // "activated" while it has just rewritten the MPC and DPC of a service
     // nobody opened is hiding the part worth seeing.
-    const before = snapshotOf(join(this.store.root, "gen"));
-    const published = await this.store.publish({activate: [{type, name}]});
-    const committed = published?.ok !== false && this.store.completeActivation(result, published?.transpile?.built);
-    const regenerated = changedSince(before, join(this.store.root, "gen"));
+    const before = snapshotOf(join(store.root, "gen"));
+    const published = await store.publish({activate: [{type, name}]});
+    const committed = published?.ok !== false && store.completeActivation(result, published?.transpile?.built);
+    const regenerated = changedSince(before, join(store.root, "gen"));
     const objects = [
       ...regenerated.written.map((path) => generatedRow(path, "generated")),
       ...regenerated.removed.map((path) => generatedRow(path, "removed")),
@@ -501,4 +508,11 @@ function revisionRow(entry) {
     SUBJECT: String(entry.subject ?? "").slice(0, 80),
     SUBJECT_FULL: String(entry.subject ?? ""),
   };
+}
+
+// Unknown host failures are INTERNAL, never guessed from their message.
+function refusal(error, code = error?.code) {
+  const message = String(error?.message ?? error);
+  const known = ["NOT_FOUND", "CONFLICT", "READ_ONLY", "NOT_SUPPORTED", "INVALID_NAME", "INTERNAL"];
+  return {EV_ERROR: message, EV_JSON: JSON.stringify({error: {code: known.includes(code) ? code : "INTERNAL", message}})};
 }

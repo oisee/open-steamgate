@@ -33,7 +33,7 @@ func StoreCall(in map[string]*string) StoreAnswer { return objstore.Call(in) }
 // caller's values in, every exporting parameter and table it passed filled
 func ZOSD_STORE(s *Session, args map[string]Data) {
 	in := map[string]*string{}
-	for _, k := range []string{"IV_COMMAND", "IV_TYPE", "IV_NAME", "IV_INCLUDE", "IV_SOURCE", "IV_FILTER", "IV_LIMIT", "IV_REVISION"} {
+	for _, k := range []string{"IV_COMMAND", "IV_TYPE", "IV_NAME", "IV_INCLUDE", "IV_SOURCE", "IV_FILTER", "IV_LIMIT", "IV_REVISION", "IV_JSON"} {
 		if d, ok := fmArg(args, k); ok {
 			v := DataString(d)
 			in[k] = &v
