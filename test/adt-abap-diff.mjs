@@ -183,6 +183,25 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     }
   });
 
+  it("a route table that fails to read once is asked again, not cached as 'Node serves everything'", async () => {
+    const shared = store();
+    let reads = 0;
+    const flaky = {...abapSide, retryMs: 0, routes: async () => {
+      reads += 1;
+      if (reads === 1) throw new Error("the generation is not loaded yet");
+      return abapSide.routes();
+    }};
+    const ported = await mount(withAbap({store: shared}, flaky));
+    const [, path] = PORTED[0];
+    served.length = 0;
+    await call(ported, "GET", path); // the first read fails: Node answers it
+    expect(served).to.deep.equal([`HOST GET ${path}`]);
+    served.length = 0;
+    await call(ported, "GET", path); // asked again: ABAP answers now
+    expect(served).to.deep.equal([`ABAP GET ${path}`]);
+    expect(reads).to.equal(2);
+  });
+
   it("a ported row that raises answers on the wire what the Node façade answers for it", async () => {
     // SYSTEM IDENTITY refused by the host: ZCL_OSD_ADT_HOST raises
     // ZCX_OSD_ADT=>INTERNAL with the host's reason, the handler answers it

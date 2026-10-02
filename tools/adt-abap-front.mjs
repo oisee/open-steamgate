@@ -115,14 +115,26 @@ function recorder() {
  * @param {Function} options.refuse the façade's refusal: (res, status, type, message, options)
  * @param {Function} [options.system] (kind) => value: this façade's SYSTEM answers
  * @param {Function} [options.served] (servedBy, req) => void, for a test or a log
+ * @param {number} [options.retryMs] how long a failed route-table read waits before the next try (5000)
  */
 export function abapFront(options) {
+  const RETRY_MS = options.retryMs ?? 5000;
+  // a read that fails (the generation not loaded yet, a hot swap in the way)
+  // is not cached: Node serves every route meanwhile, and the table is asked
+  // again after RETRY_MS, so a transient failure does not last the process
   let table;
-  const rows = () => (table ??= Promise.resolve().then(options.routes).catch((e) => {
-    // no table, no ABAP rows: everything stays the Node façade's, said once
-    console.error(`ADT front: the ABAP route table could not be read, Node serves every route: ${String(e?.message?.get?.() ?? e?.message ?? e)}`);
-    return [];
-  }));
+  let failedAt = 0;
+  const rows = () => {
+    if (table === undefined && Date.now() - failedAt >= RETRY_MS) {
+      table = Promise.resolve().then(options.routes).catch((e) => {
+        table = undefined;
+        failedAt = Date.now();
+        console.error(`ADT front: the ABAP route table could not be read, Node serves every route for now: ${String(e?.message?.get?.() ?? e?.message ?? e)}`);
+        return [];
+      });
+    }
+    return table ?? Promise.resolve([]);
+  };
   return async (req, res, next) => {
     // the full path, undecoded, whatever router prefix express has stripped
     const url = req.originalUrl ?? req.url;
