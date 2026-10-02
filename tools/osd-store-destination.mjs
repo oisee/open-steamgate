@@ -158,7 +158,8 @@ export class StoreDestination {
       // Kind refusals require no tree and must not open the default store.
       let parseInput;
       if (command === "PARSE") {
-        parseInput = JSON.parse(givenText(signature, "IV_JSON"));
+        try { parseInput = JSON.parse(givenText(signature, "IV_JSON") || "{}"); }
+        catch { return refusal("PARSE needs IV_JSON {kind, ...}", "NOT_SUPPORTED"); }
         if (!Object.hasOwn(PARSE_KINDS, parseInput?.kind)) return refusal(`unknown PARSE kind ${parseInput?.kind ?? "(none)"}`, "NOT_SUPPORTED");
       }
       const store = systemCalls?.getStore()?.store ?? await this.#open();

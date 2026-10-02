@@ -85,8 +85,10 @@ describe("ADT host seam", () => {
     const destination = new StoreDestination();
     expect(JSON.parse((await call(destination, "COMMANDS")).EV_JSON)).to.deep.equal({commands: COMMANDS});
     expect((await call(destination, "CAPABILITIES")).EV_NOTE).to.equal(CAPABILITIES.join(" "));
-    const refused = await call(destination, "PARSE");
-    expect(JSON.parse(refused.EV_JSON)).to.deep.equal({error: {code: "NOT_SUPPORTED", message: "unknown store command PARSE"}});
+    const refused = await call(destination, "BOGUS");
+    expect(JSON.parse(refused.EV_JSON)).to.deep.equal({error: {code: "NOT_SUPPORTED", message: "unknown store command BOGUS"}});
+    const parseWithoutKind = await call(destination, "PARSE");
+    expect(JSON.parse(parseWithoutKind.EV_JSON).error.code).to.equal("NOT_SUPPORTED");
   });
 
   it("SYSTEM passes raw bodies untouched and forwards optional IV_JSON", async () => {
