@@ -12,6 +12,7 @@
 // guess. A method whose body or signature is outside it is skipped and says
 // why; a method that calls a skipped one is refused in turn.
 import {syntaxDiagnostics} from "./frontend-diagnostics.mjs";
+import {sourceOwnershipSafety} from "./frontend-owned.mjs";
 import {replaceStatement, lowerByteFind} from "./frontend-bytes.mjs";
 import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
@@ -263,8 +264,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   program.exceptionSupers = exceptionSupers(reg, program);
   program.cdsViews = cdsViewsByRegistry.get(reg) ?? {};
   program.tables = tableRegistry(reg, program);
-  program.amcChannels = samcOf(folders);
-  return program;
+  return Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: sourceOwnershipSafety(reg)});
 }
 
 /**
@@ -1388,7 +1388,7 @@ function classIr(ctx0, obj) {
     }
     try {
       const type = typeOf(id.getType(), `${className} ${name}`, program);
-      attributes.push({name, type, static: meta.includes("static"), value: attributeValue(id, type, `${className} ${name}`)});
+      attributes.push({name, type, private: privateAttrs.has(name), static: meta.includes("static"), value: attributeValue(id, type, `${className} ${name}`)});
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
       attributes.push({name, unsupported: e.message});

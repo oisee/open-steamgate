@@ -1,3 +1,5 @@
+import {analyzeOwnership} from "./frontend-owned.mjs";
+import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.mjs";
 import {emitByteStatement} from "./emit-bytes.mjs";
 // IR -> Go source, for the Go backend spike.
 //
@@ -12,7 +14,8 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
   + "panic print println real recover bool byte error float32 float64 int int8 int16 int32 int64 rune string uint uint8 uint16 "
   + "uint32 uint64 uintptr true false nil iota me s math abap").split(" "));
 
-let exportedFields = false;
+let exportedFields = false, OWNERSHIP;
+const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), "hXbuf.Buffer") : goType(v.type);
 export const ident = (name) => {
   // INTF~ATTR, an interface's attribute in the object, keeps the ~ apart
   // from the _ of an attribute of the class's own
@@ -305,6 +308,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
   for (const cls of program.classes ?? program) for (const method of cls.methods ?? []) collectStable(method.body);
   exportedFields = Boolean(layers);
   HELPER_IMPORTS = new Set();
+  OWNERSHIP = analyzeOwnership(program);
   const classes = layers?.classes ?? (Array.isArray(program) ? program : program.classes);
   const structs = layers?.structs ?? (Array.isArray(program) ? new Map() : program.structs);
   CLONES = new Map();
@@ -357,7 +361,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
     // handlers registered FOR it (go/abap/events.go); once per chain, the
     // subclasses get it through the embedding
     if (cls.instanceEvents && !(cls.super && CLASSES.get(cls.super)?.instanceEvents)) out.push("\tabap.Events");
-    for (const a of inst) out.push(`\t${ident(a.name)} ${goType(a.type)}`);
+    for (const a of inst) out.push(`\t${ident(a.name)} ${ownedType(a)}`);
     // ultra/events: an object of a class without fields would be zero-sized,
     // and Go may give two of them one address: ref <> ref and the handler
     // registry need each object to be itself
@@ -916,7 +920,7 @@ function method(cls, m) {
   // assigned read as zero bytes long
   for (const l of m.locals) {
     const z = zero(l.type);
-    lines.push(isGoZero(z) ? `\tvar ${ident(l.name)} ${goType(l.type)}` : `\tvar ${ident(l.name)} ${goType(l.type)} = ${z}`, `\t_ = ${ident(l.name)}`);
+    lines.push(isGoZero(z) ? `\tvar ${ident(l.name)} ${ownedType(l)}` : `\tvar ${ident(l.name)} ${goType(l.type)} = ${z}`, `\t_ = ${ident(l.name)}`);
   }
   // the RETURNING parameter starts at its initial value too (the JS emitter's
   // let r = zero(t)); Go's named result starts at Go's zero value
@@ -1181,6 +1185,8 @@ function stmt(st, ctx, d) {
 
 function stmtLines(st, ctx, d) {
   const t = tab(d);
+  const owned = ownedStatement(st, ctx, t, {ownership: OWNERSHIP, expr, place, rowValue});
+  if (owned) return owned;
   switch (st.s) {
     case "assign":
       if (st.target.e === "substr_target") {
@@ -1641,16 +1647,7 @@ ${t}	}`));
       const p = place(st.target, ctx);
       return [`${t}if len(${p}) > 0 {`, `${t}\t${p} = ${p}[1:] + ${p}[:1]`, `${t}}`];
     }
-    case "concat_bytes":
-      if (st.table) {
-        return [`${t}${place(st.target, ctx)} = func() string { var b []string; for _, ConcatRowStored := range ${expr(st.table, ctx)} { ConcatRow := ${rowValue(st.table.type, "ConcatRowStored")}; b = append(b, ${expr(st.row, ctx)}) }; return strings.Join(b, "") }()`, `${t}s.Sy.Subrc = 0`];
-      }
-      if (st.fixed !== undefined) return [`${t}${place(st.target, ctx)}, s.Sy.Subrc = abap.CatBytesX(${st.fixed}, ${st.parts.map((x) => expr(x, ctx)).join(" + ")})`];
-      // x = x + y grows x where it lies (abap.AppendBytes), not by a copy of x
-      if (st.parts.length === 2 && expr(st.parts[0], ctx) === place(st.target, ctx)) {
-        return [`${t}${place(st.target, ctx)} = abap.AppendBytes(${place(st.target, ctx)}, ${expr(st.parts[1], ctx)})`, `${t}s.Sy.Subrc = 0`];
-      }
-      return [`${t}${place(st.target, ctx)} = ${st.parts.map((x) => expr(x, ctx)).join(" + ")}`, `${t}s.Sy.Subrc = 0`];
+    case "concat_bytes": return emitByteConcat(st, ctx, t, {expr, place, rowValue});
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];
@@ -1975,6 +1972,8 @@ const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
 const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
 
 function expr(e, ctx) {
+  const owned = ownedExpression(e, ctx, {ownership: OWNERSHIP, expr, place});
+  if (owned !== null) return owned;
   switch (e.e) {
     case "static": {
       const cls = e.owner && CLASSES.get(e.owner);

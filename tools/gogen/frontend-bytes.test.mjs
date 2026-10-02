@@ -42,7 +42,7 @@ test("byte REPLACE accepts either default and fixed or variable byte targets", (
       const p = compile(`REPLACE SECTION ${section} OF xs WITH p IN BYTE MODE.`, `DATA xs TYPE ${type}. DATA p TYPE xstring.`);
       assert.deepEqual(p.partial, []);
       assert.equal(p.classes[0].methods[0].body[0].s, "replace_bytes");
-      assert.match(emitGo(p), /abap.ReplaceBytes/);
+      assert.match(emitGo(p), type === "xstring" ? /xs\.Replace/ : /abap.ReplaceBytes/);
     }
   }
 });

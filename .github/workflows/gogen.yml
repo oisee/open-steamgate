@@ -98,7 +98,7 @@ jobs:
         working-directory: tools/gogen/go
         run: |
           go vet ./abap/ ./termgui/ ./filepick/ ./amc/ ./session/... ./enq/ ./sandbox/ ./objstore/ ./osdbind/
-          go test ./abap/... ./termgui/... ./filepick/... ./session/... ./sandbox/... ./objstore/... ./osdbind/...
+          go test ./xbuf/... ./bytesection/... ./abap/... ./termgui/... ./filepick/... ./session/... ./sandbox/... ./objstore/... ./osdbind/...
           # the sandbox builds for the browser too (nofollow_other.go)
           GOOS=js GOARCH=wasm go build ./sandbox/ ./objstore/
           # the AMC broker and the lock server are concurrent by nature: their
@@ -106,6 +106,10 @@ jobs:
           go test -race ./amc/... ./enq/...
       - name: Semantics, Go and IR-as-JS against the measured answers
         run: node tools/gogen/semantics.mjs
+      - name: Byte ownership and frontend emission
+        run: node --test tools/gogen/frontend-owned.test.mjs tools/gogen/frontend-bytes.test.mjs tools/gogen/emit-go.test.mjs
+      - name: Go byte fixtures and ABAPiti repros
+        run: node tools/gogen/unit.mjs --fixture tools/gogen/testdata --jobs 4
       # osabap: a report built into a native command (open-abap-gui's
       # converter, from the pinned clone osd-libs made), run with flags,
       # ranges, no arguments and the native frontend
