@@ -291,7 +291,10 @@ FUNCTION job_close.
   ls_intent-created_at = sy-uzeit.
   " the release order: one more than any intent still in the outbox; the
   " drain imports a second's jobs in this order (a deleted row leaves a gap,
-  " never a reordering). Tested where the facade runs today, a SQLite file
+  " never a reordering). Tested where the facade runs today, a SQLite file.
+  " It orders the rows now in the outbox and nothing else: a number is
+  " reused once its row is gone, so it is not an identity and not a release
+  " number to show anyone
   SELECT MAX( release_seq ) FROM zosd_job_outbox INTO lv_release
     WHERE mandt = sy-mandt.
   lv_release = lv_release + 1.
