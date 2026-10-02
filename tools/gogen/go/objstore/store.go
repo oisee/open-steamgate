@@ -14,8 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"osg/gogen/abaperr"
 )
 
 // The object store: CALL FUNCTION 'ZOSD_STORE' DESTINATION
@@ -101,7 +99,7 @@ func SetStore(root string, config []byte, reason string) error {
 	for _, p := range cfg.Excluded {
 		re, err := regexp.Compile(p)
 		if err != nil {
-			return abaperr.HostError{Where: "store exclusion " + strconv.Quote(p), Text: err.Error()}
+			return fmt.Errorf("store exclusion %q: %v", p, err)
 		}
 		storeState.excluded = append(storeState.excluded, re)
 	}

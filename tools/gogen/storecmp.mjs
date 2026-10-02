@@ -1,5 +1,5 @@
 // The Go host's DESTINATION 'STORE' against the Node host's, answer by
-// answer, over the same files (go/abap/store.go, tools/osd-store-destination.mjs).
+// answer, over the same files (go/objstore, tools/osd-store-destination.mjs).
 //
 //   node tools/gogen/storecmp.mjs [--root <tree>] [--tools <checkout>]
 //

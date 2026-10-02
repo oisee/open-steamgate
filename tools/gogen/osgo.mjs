@@ -100,7 +100,7 @@ if (echo) {
     else if (!compiled.has(String(c.handler).toUpperCase())) channelsLeftOut.push({path: c.path, handler: String(c.handler).toUpperCase(), why: `${String(c.handler).toUpperCase()} is not in this program`});
     else channels.push({path: c.path, name: c.name, handler: String(c.handler).toUpperCase()});
   }
-  // DESTINATION 'STORE' over the files of the tree (go/abap/store.go)
+  // DESTINATION 'STORE' over the files of the tree (go/objstore)
   const {storeConfig} = await import("./store.mjs");
   const cfg = await storeConfig(home);
   store = JSON.stringify(cfg);
