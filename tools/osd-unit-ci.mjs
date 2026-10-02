@@ -1,7 +1,133 @@
 // The common folder CI contract for the Go and JavaScript ABAP Unit hosts.
+import {createRequire} from "node:module";
 import {spawn} from "node:child_process";
 import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync} from "node:fs";
-import {join, resolve} from "node:path";
+import {basename, join, resolve} from "node:path";
+
+const ownerOf = (file) => basename(file).split(".")[0].replaceAll("#", "/").toUpperCase();
+
+const warningDiagnostics = new WeakMap();
+const bitDiagnostic = "Operator only valid for XSTRING or HEX";
+const writeDiagnostic = "xstring/string offset/length in writer position not possible";
+const diagnosticKey = (file, token, message) => `${basename(file)}:${token.getRow()}:${token.getCol()}:${message}`;
+
+export function kernelWarnings(input) {
+  // Resolve lazily: ordinary transpilation and a compiled host need no checkout-only scanner.
+  // Use the transpiler's copy throughout: its AST nodes use instanceof checks.
+  const require = createRequire(import.meta.url);
+  const coreRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
+  const core = coreRequire("@abaplint/core");
+  const syntaxPath = "@abaplint/core/build/src/abap/5_syntax/";
+  const {CurrentScope} = coreRequire(syntaxPath + "_current_scope");
+  const {Source} = coreRequire(syntaxPath + "expressions/source");
+  const {Target} = coreRequire(syntaxPath + "expressions/target");
+  const {Rearranger} = require("@abaplint/transpiler/build/src/rearranger");
+  const {Nodes, Expressions: E, BasicTypes: T} = core;
+  const expr = (node, kind) => node instanceof Nodes.ExpressionNode && node.get() instanceof kind;
+  const byteType = (type) => type instanceof T.HexType || type instanceof T.XStringType
+    || type instanceof T.XGenericType || type instanceof T.XSequenceType;
+  const knownType = (type) => type && !(type instanceof T.VoidType) && !(type instanceof T.UnknownType);
+
+  // Registries live in child processes in both runners. This focused pass reads
+  // only input objects, including synthesized metadata, and never lint rules.
+  const reg = new core.Registry(new core.Config(JSON.stringify({
+    global: {files: "/**/*.*"}, syntax: {version: core.Version.OpenABAP}, rules: {},
+  })));
+  for (const file of readdirSync(input).filter((f) => /\.(abap|xml)$/.test(f)).sort())
+    reg.addFile(new core.MemoryFile(file, readFileSync(join(input, file), "utf8")));
+  reg.parse();
+  const warnings = [], seen = new Set(), permitted = new Set();
+  const warn = (file, node, form, source = node) => {
+    permitted.add(diagnosticKey(file, source.getFirstToken(), form.startsWith("BIT-") ? bitDiagnostic : writeDiagnostic));
+    const line = node.getFirstToken().getRow();
+    const key = `${file}:${node.getFirstToken().getCol()}:${line}:${form}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    warnings.push({file, line, kind: "kernel-reject", form,
+      message: `${file}:${line}: ${form}: OSG is more permissive than the kernel; this form is rejected on a SAP system`});
+  };
+  for (const obj of reg.getObjects()) {
+    if (!obj.getABAPFiles) continue;
+    const {spaghetti} = new core.SyntaxLogic(reg, obj).run();
+    for (const file of obj.getABAPFiles()) {
+      const filename = file.getFilename();
+      const tree = new Rearranger().run(obj.getType(), file.getStructure());
+      if (!tree) continue;
+      const visit = (node) => {
+        const scopeNode = node instanceof Nodes.ExpressionNode
+          ? spaghetti.lookupPosition(node.getFirstToken().getStart(), filename) : undefined;
+        if (scopeNode && node instanceof Nodes.ExpressionNode) {
+          // CurrentScope is abaplint's expression resolver. Reuse the completed
+          // lexical scope in our disposable registry, without rebuilding declarations.
+          const scope = new CurrentScope(reg, obj);
+          scope.current = scopeNode;
+          const syntax = {scope, filename, issues: []};
+          const children = node.getChildren();
+          if (expr(node, E.Source)) {
+            const operator = children.find((c) => expr(c, E.ArithOperator)
+              && ["BIT-AND", "BIT-OR", "BIT-XOR"].includes(c.concatTokens().toUpperCase()));
+            const prefix = children.slice(0, 3);
+            const unary = prefix.every((c) => c instanceof Nodes.TokenNode)
+              && prefix.map((c) => c.getFirstToken().getStr()).join("").toUpperCase() === "BIT-NOT";
+            const split = operator ? children.indexOf(operator) : children.length;
+            const check = (part, op, location) => {
+              const operand = new Nodes.ExpressionNode(new E.Source()).setChildren(part);
+              const type = Source.runSyntax(operand, syntax);
+              if (knownType(type) && !byteType(type))
+                warn(filename, location, `${op} on ${type.toABAP().replace(/\s+/g, " ")}`, node);
+            };
+            if (unary) check(children.slice(3, split), "BIT-NOT", node);
+            if (operator) {
+              const op = operator.concatTokens().toUpperCase();
+              check(children.slice(unary ? 3 : 0, split), op, operator);
+              check(children.slice(split + 1), op, operator);
+            }
+          } else if (expr(node, E.Target) && children.some((c) => expr(c, E.FieldOffset) || expr(c, E.FieldLength))) {
+            // Resolve the base before slicing: Target.runSyntax deliberately
+            // returns VoidType for precisely the xstring write we are diagnosing.
+            const base = new Nodes.ExpressionNode(new E.Target()).setChildren(children.filter((c) =>
+              !expr(c, E.FieldOffset) && !expr(c, E.FieldLength)));
+            if (Target.runSyntax(base, syntax) instanceof T.XStringType)
+              warn(filename, node, "offset/length write on xstring");
+          }
+        }
+        for (const child of node.getChildren()) if (!(child instanceof Nodes.TokenNode)) visit(child);
+      };
+      visit(tree);
+    }
+  }
+  warningDiagnostics.set(warnings, [...permitted]);
+  return warnings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
+}
+
+// Only a diagnosed input location in a folder Unit child can be relaxed.
+// Parser errors and all other type errors remain compilation failures.
+export function isWarnedKernelDiagnostic(issue) {
+  if (issue.getKey() !== "check_syntax" || ![
+    "Operator only valid for XSTRING or HEX",
+    "xstring/string offset/length in writer position not possible",
+  ].includes(issue.getMessage())) return false;
+  const locations = JSON.parse(process.env.OSD_UNIT_KERNEL_WARNINGS ?? "[]");
+  return locations.includes(`${basename(issue.getFilename())}:${issue.getStart().getRow()}:${issue.getStart().getCol()}:${issue.getMessage()}`);
+}
+
+export const kernelWarningEnv = (warnings) => ({OSD_UNIT_KERNEL_WARNINGS:
+  JSON.stringify(warningDiagnostics.get(warnings) ?? [])});
+
+export function applyKernelWarnings(result, warnings, strict = false) {
+  for (const warning of warnings) console.error(warning.message);
+  const rows = result.rows.map((row) => {
+    const alerts = warnings.filter((w) => ownerOf(w.file) === row.class).map((w) => w.message);
+    return alerts.length ? {...row, alerts: [...(row.alerts ?? []), ...alerts],
+      ...(strict ? {status: "ERROR", message: alerts.join("\n")} : {})} : row;
+  });
+  if (strict) for (const owner of new Set(warnings.map((w) => ownerOf(w.file)))) {
+    if (rows.some((r) => r.class === owner)) continue;
+    const alerts = warnings.filter((w) => ownerOf(w.file) === owner).map((w) => w.message);
+    rows.push({class: owner, status: "ERROR", message: alerts.join("\n"), alerts});
+  }
+  return {...result, rows, warnings};
+}
 
 export function metadata(name) {
   const xml = (s) => s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
