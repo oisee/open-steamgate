@@ -1,0 +1,39 @@
+{
+ "contract": "job-count",
+ "version": 1,
+ "measured": {
+  "date": "2026-10-02",
+  "on": "the SAP sandbox, JOB_OPEN called repeatedly inside one second; the jobs deleted afterwards",
+  "by": "docs/job-standard-fms.md and docs/job-identity.md, JOBCOUNT"
+ },
+ "schema": {
+  "EXPECT": "where the expected values come from: A4H = measured on the sandbox; 'unmeasured: assumption' = chosen here",
+  "clock": "the injectable clock, system time (UTC); frozen: nothing advances it inside a case",
+  "opens": "JOB_OPEN calls in order, each with the job name it was given",
+  "counts": "the JOBCOUNT each call answered: hhmmss of the clock, then NN"
+ },
+ "cases": [
+  {
+   "id": "counter-per-name-per-second",
+   "EXPECT": "A4H",
+   "clock": "2026-10-02T03:47:32Z",
+   "opens": ["SAME", "SAME", "SAME", "A", "B", "SAME"],
+   "counts": ["03473200", "03473201", "03473202", "03473200", "03473200", "03473203"]
+  },
+  {
+   "id": "different-names-share-a-count",
+   "EXPECT": "A4H",
+   "clock": "2026-10-02T03:44:00Z",
+   "opens": ["L3_ONE", "L3_TWO", "L3_THREE", "L3_FOUR", "L3_FIVE", "L3_SIX"],
+   "counts": ["03440000", "03440000", "03440000", "03440000", "03440000", "03440000"]
+  },
+  {
+   "id": "next-second-starts-again",
+   "EXPECT": "unmeasured: assumption",
+   "assumption": "the counter restarts at 00 in a new second (the A4H sequences all stayed inside one second)",
+   "clock": "2026-10-02T03:47:32Z",
+   "opens": ["TICK", "TICK", "+1", "TICK", "TICK"],
+   "counts": ["03473200", "03473201", null, "03473300", "03473301"]
+  }
+ ]
+}

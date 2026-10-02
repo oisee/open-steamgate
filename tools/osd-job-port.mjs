@@ -1,7 +1,7 @@
 // Pending definitions for the narrow JOB_* ABAP facade. The private RFC
 // destination uses the current dialog-step token; no definition is process
 // global or allowed to survive COMMIT, ROLLBACK, WAIT, dump, or step exit.
-import {randomUUID, randomInt} from "node:crypto";
+import {randomUUID} from "node:crypto";
 import {existsSync} from "node:fs";
 import {DatabaseSync} from "node:sqlite";
 import {resolve} from "node:path";
@@ -12,6 +12,8 @@ import {identity} from "./osd-identity.mjs";
 import {readJobSnapshot} from "./osd-job-snapshot.mjs";
 import {jobInputJson} from "./osd-job-input.mjs";
 import {periodMinutes} from "./osd-job-schedule.mjs";
+import {nextJobCount, JobCountExhausted, JOB_COUNT_EXHAUSTED} from "./osd-job-count.mjs";
+import {abapNow} from "./osd-job-scheduler.mjs";
 
 const pending = new WeakMap();
 const keyOf = (name, count) => `${name}\0${count}`;
@@ -72,7 +74,6 @@ function scheduleFields(schedule) {
     EV_PRDWEEKS: pad(schedule.period.weeks, 2)};
 }
 export const MAX_JOB_STEPS = 16;
-const MAX_COUNT = 100000000;
 
 // Older outbox rows can have been acknowledged before the identity table was
 // introduced. The operations run row currently has no retention policy and
@@ -100,7 +101,9 @@ export class JobDestination {
     this.root = root;
     this.env = env;
     this.generation = liveGeneration(root);
-    this.candidate = () => randomInt(MAX_COUNT);
+    // test seam: sees the allocator's proposal {second, nn, count} and may
+    // answer another count (a forced collision); the default keeps it
+    this.candidate = (proposal) => proposal.count;
   }
 
   // BP_JOB_DELETE. Only a committed, imported job can be deleted: one
@@ -298,13 +301,23 @@ export class JobDestination {
       case "OPEN": {
         if (!jobname || jobname.length > 32) { answer = {EV_ERROR: "Invalid job name"}; break; }
         let number;
-        // A bounded search also handles deterministic collision probes and a
-        // saturated namespace without trapping an ABAP caller indefinitely.
-        for (let i = 0; i < 64; i++) {
-          number = String(this.candidate()).padStart(8, "0");
-          if (!jobs.has(keyOf(jobname, number)) &&
-              !legacyCountUsed(this.root, this.env, resolve(db.path), client, jobname, number)) break;
-          number = undefined;
+        // The count is the system's: hhmmss and a per-(name, second) counter,
+        // from tools/osd-job-count.mjs. A bounded search also handles
+        // deterministic collision probes and a saturated namespace without
+        // trapping an ABAP caller indefinitely.
+        try {
+          for (let i = 0; i < 64; i++) {
+            const taken = (count) => jobs.has(keyOf(jobname, count)) ||
+              legacyCountUsed(this.root, this.env, resolve(db.path), client, jobname, count);
+            const proposal = nextJobCount(db.db, {client, jobname, ms: abapNow(), taken});
+            number = String(this.candidate(proposal) ?? proposal.count).padStart(8, "0");
+            if (!jobs.has(keyOf(jobname, number)) &&
+                !legacyCountUsed(this.root, this.env, resolve(db.path), client, jobname, number)) break;
+            number = undefined;
+          }
+        } catch (error) {
+          if (!(error instanceof JobCountExhausted)) throw error;
+          answer = {EV_ERROR: JOB_COUNT_EXHAUSTED}; break;
         }
         if (!number) { answer = {EV_ERROR: "Could not allocate a job count"}; break; }
         jobs.set(keyOf(jobname, number), {jobname, count: number, owner, client, steps: []});

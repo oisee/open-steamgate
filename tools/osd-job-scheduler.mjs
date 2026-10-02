@@ -16,14 +16,13 @@
 // docs/job-standard-fms.md, "Periodic jobs"; the known differences are in
 // ANORMALIES.md (one work process: overlapping instances queue; no minute
 // tick: a due job starts when the scheduler looks, not at hh:mm:51).
-import {randomInt} from "node:crypto";
 import {resolve} from "node:path";
 import {exclusive, outsideStepContext} from "./osd-dialog-step.mjs";
 import {runConvertedBatch, workQueuedBatch, workerSource} from "./osd-batch-runs.mjs";
 import {drainJobOutbox} from "./osd-job-outbox.mjs";
+import {nextJobCount} from "./osd-job-count.mjs";
 import {msStamp, nextSchedule, periodMinutes, stampMs, successorIntentId} from "./osd-job-schedule.mjs";
 
-const MAX_COUNT = 100000000;
 const INTENT_INDEX = "zosd_job_identity_intent";
 
 /** The successor's count, reserved atomically on its intent: the intent is
@@ -36,7 +35,7 @@ const INTENT_INDEX = "zosd_job_identity_intent";
  *  transaction; `beforeInsert` is a test seam between the read and the
  *  write. */
 export function reserveSuccessorCount(db, {client, jobname, owner, intentId},
-  {candidate = () => randomInt(MAX_COUNT), winnerOf = () => undefined, beforeInsert} = {}) {
+  {candidate = (proposal) => proposal.count, winnerOf = () => undefined, beforeInsert, ms} = {}) {
   const transaction = (work) => {
     db.exec("BEGIN IMMEDIATE");
     try { const answer = work(); db.exec("COMMIT"); return answer; }
@@ -64,8 +63,11 @@ export function reserveSuccessorCount(db, {client, jobname, owner, intentId},
   if (found) return found;
   beforeInsert?.();
   for (let attempt = 0; attempt < 64; attempt++) {
-    const count = String(candidate()).padStart(8, "0");
     const answer = transaction(() => {
+      // the proposal is read inside the write transaction, so two workers
+      // never propose the same pair from one reading
+      const proposal = nextJobCount(db, {client, jobname, ms: ms ?? abapNow()});
+      const count = String(candidate(proposal) ?? proposal.count).padStart(8, "0");
       db.prepare(`INSERT INTO zosd_job_identity (mandt, jobname, jobcount, owner, intent_id)
         VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`).run(client, jobname, count, owner, intentId);
       return existing(); // ours, or the one another worker reserved first
@@ -155,7 +157,7 @@ export function installAbapClock(abap, clock) {
 
 export class JobScheduler {
   constructor({root = process.cwd(), store, env = process.env, clock = systemClock,
-    execute = runConvertedBatch, candidate = () => randomInt(MAX_COUNT)} = {}) {
+    execute = runConvertedBatch, candidate = (proposal) => proposal.count} = {}) {
     if (!store) throw new TypeError("JobScheduler needs the operations store");
     this.root = root;
     this.store = store;
@@ -231,7 +233,7 @@ export class JobScheduler {
   }
 
   /** the successor of a periodic instance: a new job of the same name and
-   *  steps, a count from the usual allocator, status S, start = this
+   *  steps, a count from the one allocator, status S, start = this
    *  instance's scheduled time + period */
   async ensureSuccessor(run, next = null) {
     const intentId = successorIntentId(run.id);
@@ -250,9 +252,10 @@ export class JobScheduler {
         sourceInstance: run.source_instance}} : {})});
   }
 
-  // JOB_OPEN's allocator (a random eight-digit count, retried on a taken
-  // key), bound atomically to the successor's intent; see
-  // reserveSuccessorCount.
+  // JOB_OPEN's allocator (tools/osd-job-count.mjs: the creation second and a
+  // per-name counter), read at the successor's creation, which is the moment
+  // its predecessor starts, and bound atomically to the successor's intent;
+  // see reserveSuccessorCount.
   async #reserveCount(run, intentId) {
     return exclusive(async () => {
       const client = globalThis.abap?.context?.databaseConnections?.DEFAULT;
@@ -261,7 +264,7 @@ export class JobScheduler {
       }
       if (client.inTransaction) await client.commit();
       return reserveSuccessorCount(client.db, {client: run.source_client, jobname: run.job_name,
-        owner: run.source_owner, intentId}, {candidate: this.candidate,
+        owner: run.source_owner, intentId}, {candidate: this.candidate, ms: this.clock.now(),
         winnerOf: (intent) => this.store.importedCount(intent), beforeInsert: this.beforeReserve});
     }, "periodic job successor");
   }

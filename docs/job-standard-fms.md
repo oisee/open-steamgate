@@ -7,7 +7,7 @@ names and classic exceptions for `JOB_OPEN`, `JOB_SUBMIT`, `JOB_CLOSE`,
 facade uses the retained job identity and `ZOSD_JOB_READ`/`ZOSD_JOB_STATUS`
 bridge. A read cannot create a job or import pending work.
 
-`JOB_OPEN` reserves a local job key. `JOB_SUBMIT` accepts supported static ABAP
+`JOB_OPEN` reserves a local job key; its `JOBCOUNT` is `hhmmss` of the creation second plus `NN` counted per (job name, second) as on the sandbox, so two names share a count and only (name, count) is a key (docs/job-identity.md). `JOB_SUBMIT` accepts supported static ABAP
 reports and returns step number 1. `JOB_CLOSE` accepts immediate, predecessor,
 named event and date/time starts, the latter once or periodic (see
 [Periodic jobs](#periodic-jobs)); it releases the intent. `BP_EVENT_RAISE`
@@ -99,8 +99,8 @@ four it had.
 
 **The chain.** The sandbox makes the successor of a periodic job **when an
 instance starts**, as a new job of the same name and steps with status `S`
-and a count from the usual allocator (`JOBCOUNT` = creation time + two digits
-there, a random free count here). Its start time is the predecessor's
+and a count from the one allocator (`JOBCOUNT` = creation time `hhmmss` + a two-digit counter per job
+name and second, here as there; docs/job-identity.md has the A4H sequence). Its start time is the predecessor's
 **scheduled** time plus the period, not its actual start: an instance due at
 224501 started at 22:45:51 and its successor was due at 224701. A start in the
 past rewritten to the close time counts the chain from the rewritten time. No

@@ -3223,3 +3223,19 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Regression-test location: `test/osd-enq-abap.mjs` (the 4 `update-window-*` cases are skipped by name, with
   this reason in their title)
 - Upstream version containing a fix: `unknown`
+
+### ANOMALY-2026-10-02-jobcount-unique-per-name — JOBCOUNT was a random eight-digit number unique across names, a system's is hhmmss plus a counter per name
+
+- Status: `fixed` (in this repository's JOB_* facade; no upstream involved)
+- Discovery date: `2026-10-02`
+- Affected versions: `tools/osd-job-port.mjs` and `tools/osd-job-scheduler.mjs` before this change
+- Affected ABAP statement, runtime API or adapter: `JOB_OPEN` (`JOBCOUNT`), the periodic successor's count
+- Minimal reproducer: `JOB_OPEN` three times for one name and once each for two others inside one second
+- Exact command used to run it: `npx mocha test/job-count.mjs`; measured on the sandbox on 2026-10-02
+- Expected SAP behaviour: `JOBCOUNT` = creation time `hhmmss` in system time + `NN`, counted per (job name, second): the same name three times in 03:47:32 gives 03473200, 03473201, 03473202; two other names in that second give 03473200 each; the first name again gives 03473203; six jobs of different names in one second all share 03440000. (Jobname, jobcount) is the key; the count alone collides. Past NN = 99 is not measured.
+- Actual open-abap behaviour: a random eight-digit number, retried until no name had it; so no two jobs ever shared a count, and code that identifies a job by its count alone worked here and not on a system
+- Impact on open-steamgate: count-only lookups were invisible locally; a program that sorts or parses JOBCOUNT saw numbers a system never makes
+- Smallest safe workaround: none needed; `tools/osd-job-count.mjs` is the one allocator (JOB_OPEN and the periodic successor), per-name counter, refusal (`CANT_CREATE_JOB`) past 99 rather than a wrap; counts of earlier builds stay valid and are skipped on a clash
+- Upstream issue: none; the facade is this repository's
+- Regression-test location: `test/job-count.mjs` (the A4H sequences of `test/fixtures/job-count/contract.json`; each of four mutants -- counter per second, no hhmmss, wrap past 99, a lookup by count alone -- turns it red)
+- Upstream version containing a fix: not applicable
