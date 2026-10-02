@@ -451,6 +451,30 @@ function sameAbapSource(a, b, realpath = fs.realpathSync) {
   return undefined;
 }
 
+/** Which of the breakpoint `files` are in the source a command acts on
+ *  (`target`), each with `{file, why, counts}`. A match by path or real path
+ *  counts. A match by object alone counts only when the breakpoint's file is
+ *  the copy the running generation was compiled from (`running`, from
+ *  runningAbapSources()). A shadowed copy of the same object, such as a
+ *  packs/ copy, a worktree, .local/lars or output/, never binds, so it must
+ *  neither make a call look covered nor hold a wait for 15 s. Files that do
+ *  not match at all are left out. */
+function breakpointMatches(files, target, running) {
+  const matches = [];
+  for (const file of files) {
+    const why = sameAbapSource(file, target);
+    if (why === undefined) continue;
+    if (why !== "object") {
+      matches.push({file, why, counts: true});
+      continue;
+    }
+    const isRunning = running?.files?.has(sourceKey(realOrSelf(file))) === true;
+    matches.push({file, why: isRunning ? "object, the running copy" : "object, not the running copy",
+      counts: isRunning});
+  }
+  return matches;
+}
+
 /** `{type, name, base, include}` for a file Check or Activate can reach
  *  (a class, its includes, an interface, a program), else undefined. */
 function adtObjectOf(file) {
@@ -2642,7 +2666,7 @@ function serviceDetailsHtml(details, nonce = "") {
     </style></head><body>${body}${script}</body></html>`;
 }
 
-module.exports = {osdRunCommandLine, unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning, objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor, sameAbapSource,
+module.exports = {osdRunCommandLine, unitRiskOf, unitDurationOf, unitSchedule, runUnitQueue, unitPoolSize, riskWarning, objectOf, adtObjectOf, uriOf, fileOf, Osd, abapFrame, outcomes, parseCheckReport, parseActivationResult, runActionFor, sameAbapSource, breakpointMatches,
   debuggerConfiguration, debugAttachPlan, runWithDebuggerAttach, breakpointToggleText,
   packSourceMappings, runningAbapSources, breakpointWarning, sourceKey,
   warmStatusText, activationBuildText, closureTestsText,

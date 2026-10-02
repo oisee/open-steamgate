@@ -328,7 +328,11 @@ run or the request. Two facts govern that wait.
   host. The wait therefore asks the named session and every session under
   it.
 - A breakpoint matches the command's file by path, by real path, or by the
-  same ABAP object and include (`lib.js` `sameAbapSource`).
+  same ABAP object and include, but only in the copy the running generation
+  was compiled from (`lib.js` `breakpointMatches`). A shadowed copy never
+  binds and is ignored: packs/, a worktree, .local/lars, output/. The wait
+  is over once one breakpoint per object is verified.
+- Cancelling the wait sends nothing. Giving up after 15 s sends anyway.
 
 A wait that gives up is reported, and the run or call goes ahead anyway.
 There is no prompt to answer, since an unattended run has nobody to answer

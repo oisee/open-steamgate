@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
-import {spawn} from "node:child_process";
+import {execFileSync, spawn} from "node:child_process";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, matchesGlob, relative, resolve} from "node:path";
 import {pathToFileURL, fileURLToPath} from "node:url";
@@ -460,7 +460,7 @@ describe("VS Code debugger configuration: which generations' maps js-debug may r
 });
 
 describe("VS Code debugger transport: a generation goes live ahead of the serving process", function () {
-  this.timeout(240000);
+  this.timeout(600000);
 
   // osg-demo on 0.5.1467: "Run as ABAP Application with debugger" and
   // "Attach debugger and call" showed a bound breakpoint and never stopped.
@@ -469,12 +469,39 @@ describe("VS Code debugger transport: a generation goes live ahead of the servin
   // source maps from the live generation only. Read the real script URLs off
   // the running process's inspector and check them against the configuration
   // the extension builds at that moment.
+  // The test moves build/live, so it runs on a home of its own rather than
+  // on this checkout: every entry of ROOT linked, except build/ (its own,
+  // seeded with a hard-linked copy of the generation ROOT would serve, so
+  // nothing is transpiled when one exists) and output/.
+  function mirrorHome() {
+    const dir = mkdtempSync(join(tmpdir(), "osd-debug-ahead-home-"));
+    const home = join(dir, "home");
+    mkdirSync(join(home, "build", "by-input"), {recursive: true});
+    for (const entry of readdirSync(ROOT)) {
+      if (["build", "output", "node_modules"].includes(entry)) continue;
+      symlinkSync(join(ROOT, entry), join(home, entry));
+    }
+    // a generation's modules resolve @abaplint/runtime from where they lie
+    const runtime = createRequire(import.meta.url).resolve("@abaplint/runtime/package.json");
+    symlinkSync(dirname(dirname(dirname(runtime))), join(home, "node_modules"), "dir");
+    const hash = hashOf(ROOT);
+    const cached = join(ROOT, "build", "by-input", hash);
+    try {
+      readFileSync(join(cached, "manifest.json"));
+      execFileSync("cp", ["-al", cached, join(home, "build", "by-input", hash)]);
+    } catch {
+      // no cached generation: the start below builds one in the mirror
+    }
+    return {dir, home};
+  }
+
   it("keeps the classrun class and the DPC the process loaded inside resolveSourceMapLocations", async () => {
     const storageDir = mkdtempSync(join(tmpdir(), "osd-debug-ahead-"));
-    const launcher = new Launcher({osdHome: ROOT, storageDir, workspaceFolders: [], warm: "off"});
-    const liveLink = join(ROOT, "build", "live");
-    const other = join(ROOT, "build", "by-input", `osd-test-ahead-${process.pid}`);
-    let liveTarget;
+    const {dir, home} = mirrorHome();
+    const launcher = new Launcher({osdHome: home, storageDir, workspaceFolders: [], warm: "off"});
+    const liveLink = join(home, "build", "live");
+    const other = join(home, "build", "by-input", `osd-test-ahead-${process.pid}`);
+    const rootLive = readlinkSync(join(ROOT, "build", "live"));
     let client;
     try {
       const {port} = await launcher.start();
@@ -496,11 +523,10 @@ describe("VS Code debugger transport: a generation goes live ahead of the servin
       const scripts = ["zcl_osd_classrun_demo", "zcl_zstg_demo_dpc_ext"].map(loaded);
       expect(scripts.every(Boolean), "both modules are loaded in the serving process").to.equal(true);
       // Another generation goes live; the serving process is not recycled.
-      liveTarget = readlinkSync(liveLink);
       mkdirSync(join(other, "output"), {recursive: true});
       rmSync(liveLink);
       symlinkSync(other, liveLink, "dir");
-      const config = debuggerConfiguration(inspectPort, {root: ROOT, storageDir, layers: launcher.layers});
+      const config = debuggerConfiguration(inspectPort, {root: home, storageDir, layers: launcher.layers});
       expect(config.outFiles[0]).to.include(`osd-test-ahead-${process.pid}`);
       for (const script of scripts) {
         const moduleFile = fileURLToPath(script.url);
@@ -509,14 +535,11 @@ describe("VS Code debugger transport: a generation goes live ahead of the servin
           ? fileURLToPath(script.sourceMapURL) : resolve(dirname(moduleFile), script.sourceMapURL);
         expect(sourceMapAllowed(config, mapFile), `${mapFile} against ${config.resolveSourceMapLocations}`).to.equal(true);
       }
+      expect(readlinkSync(join(ROOT, "build", "live")), "this checkout's live link is untouched").to.equal(rootLive);
     } finally {
       client?.socket.close();
-      if (liveTarget !== undefined) {
-        rmSync(liveLink, {force: true});
-        symlinkSync(liveTarget, liveLink, "dir");
-      }
-      rmSync(other, {recursive: true, force: true});
       await launcher.stop();
+      rmSync(dir, {recursive: true, force: true});
       rmSync(storageDir, {recursive: true, force: true});
     }
   });
@@ -648,7 +671,7 @@ describe("VS Code controller: Attach and call across a generation switch", funct
     expect(requests).to.have.length(1);
   });
 
-  it("matches a DPC breakpoint set through a link or in another copy of the same object", async () => {
+  it("matches a DPC breakpoint set through a link or in the running copy, never in a shadowed copy", async () => {
     const dir = mkdtempSync(join(tmpdir(), "osd-bp-identity-"));
     try {
       const real = join(dir, "osg-demo", "src");
@@ -656,22 +679,27 @@ describe("VS Code controller: Attach and call across a generation switch", funct
       writeFileSync(join(real, "zcl_zosd_fleet_dpc_ext.clas.abap"), "");
       symlinkSync(join(dir, "osg-demo"), join(dir, "linked"), "dir");
       const viaLink = join(dir, "linked", "src", "zcl_zosd_fleet_dpc_ext.clas.abap");
-      const elsewhere = join(dir, "packs", "ws-osg-demo", "src", "zcl_zosd_fleet_dpc_ext.clas.abap");
-      for (const breakpointFile of [viaLink, elsewhere]) {
+      // the copy the running generation was compiled from, as the command's
+      // file may name the store's path or another layer's
+      const runningCopy = join(dir, "packs", "ws-osg-demo", "src", "zcl_zosd_fleet_dpc_ext.clas.abap");
+      // a shadowed copy: same object, never compiled (packs/, .worktrees, .local/lars, output/)
+      const shadowed = join(dir, ".local", "lars", "src", "zcl_zosd_fleet_dpc_ext.clas.abap");
+      const running = {files: new Map([[runningCopy, runningCopy]])};
+      for (const [breakpointFile, counts] of [[viaLink, true], [runningCopy, true], [shadowed, false]]) {
         const commands = new Map();
         const warnings = [];
         const requests = [];
         const api = entitySetApi([[breakpointFile, true]], warnings, commands);
         const registerEntitySetCommands = loadEntitySetCommands(api);
         const waited = [];
-        const controller = {attachSystemDebugger: async () => true,
+        const controller = {attachSystemDebugger: async () => true, runningSources: () => running,
           waitForDebuggerReady: async (file) => { waited.push(file); return true; }, debugNote() {}};
         await withFetch(requests, async () => {
           registerEntitySetCommands({subscriptions: []}, {appendLine() {}}, undefined, controller);
           await commands.get("osd.callEntitySetWithDebugger")({service: "ZOSD_FLEET_SRV", set: "ShipSet",
             kind: "get_entityset", file: join(real, "zcl_zosd_fleet_dpc_ext.clas.abap")});
         });
-        expect(warnings, `${breakpointFile} is the same source`).to.deep.equal([]);
+        expect(warnings.length, `${breakpointFile} ${counts ? "is" : "is not"} the source that runs`).to.equal(counts ? 0 : 1);
         expect(waited).to.deep.equal([join(real, "zcl_zosd_fleet_dpc_ext.clas.abap")]);
         expect(requests).to.have.length(1);
       }
