@@ -323,6 +323,17 @@ describe("deploy/manifest.json: only listed objects leave, never an SAP-owned na
     expect(copied()).to.deep.equal([]);
   });
 
+  it("a service's hub registration travels when it names itself, and not when it names another", () => {
+    // IWSG/IWOM as abapGit serialises a registered service: the registration
+    // in every SRV_IDENTIFIER, the model in every MODEL_IDENTIFIER
+    writeFileSync(join(dir, "zosd_srv_0001.iwsg.xml"), "<SRV_IDENTIFIER>ZOSD_SRV_0001</SRV_IDENTIFIER><MODEL_IDENTIFIER>ZOSD_MDL_0001_BE</MODEL_IDENTIFIER><SRV_IDENTIFIER>ZOSD_SRV_0001</SRV_IDENTIFIER>\n");
+    writeFileSync(join(dir, "zosd_mdl_0001_be.iwom.xml"), "<MODEL_IDENTIFIER>ZOSD_MDL_0001_BE</MODEL_IDENTIFIER><MODEL_ID>ZOSD_MDL_0001_BE</MODEL_ID>\n");
+    expect(() => layout(dir, out, "p", undefined, probe("IWSG ZOSD_SRV_0001", "IWOM ZOSD_MDL_0001_BE"))).to.not.throw();
+    writeFileSync(join(dir, "zosd_srv_0001.iwsg.xml"), "<SRV_IDENTIFIER>ZOSD_SRV_0001</SRV_IDENTIFIER><SRV_IDENTIFIER>/IWFND/SG_MED_CATALOG_0001</SRV_IDENTIFIER>\n");
+    expect(() => layout(dir, join(dir, "..", "out2"), "p", undefined, probe("IWSG ZOSD_SRV_0001", "IWOM ZOSD_MDL_0001_BE")))
+      .to.throw(/IWSG ZOSD_SRV_0001[\s\S]*<SRV_IDENTIFIER> says \/IWFND\/SG_MED_CATALOG_0001/);
+  });
+
   it("an enhancement is refused by its type unless intended: it changes an SAP object", () => {
     writeFileSync(join(dir, "zosd_enh.enho.xml"), "<X/>\n");
     expect(() => layout(dir, out, "p", undefined, probe("ENHO ZOSD_ENH"))).to.throw(/ENHO ZOSD_ENH[\s\S]*modifies-sap/);

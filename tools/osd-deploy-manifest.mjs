@@ -217,6 +217,11 @@ export const NAME_TAGS = {
   IWSV: {tag: "TECHNICAL_NAME", version: "VERSION"},
   IWMO: {tag: "TECHNICAL_NAME", version: "VERSION"},
   IWVB: {tag: "TECHNICAL_NAME", version: "VERSION"},
+  // the hub side of a service (measured on A4H, read off abapGit's own
+  // serialisation of a registered service): IWSG is the registration, named in
+  // every SRV_IDENTIFIER; IWOM its model, named in every MODEL_IDENTIFIER
+  IWSG: {tag: "SRV_IDENTIFIER", all: true},
+  IWOM: {tag: "MODEL_IDENTIFIER", all: true},
 };
 
 /** Types that change an SAP object rather than add one of ours. */
