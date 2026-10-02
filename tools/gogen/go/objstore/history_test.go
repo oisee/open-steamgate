@@ -1,4 +1,4 @@
-package abap
+package objstore
 
 import (
 	"os"
@@ -128,7 +128,7 @@ func TestStoreHistoryMergesCopiesPaths(t *testing.T) {
 	}
 }
 
-// the bridge: HISTORY and REVISION through StoreCall on a store over a
+// the bridge: HISTORY and REVISION through Call on a store over a
 // repository, as ZOSD_STORE DESTINATION 'STORE' reaches them
 func TestStoreCallHistory(t *testing.T) {
 	root := t.TempDir()
@@ -153,15 +153,15 @@ func TestStoreCallHistory(t *testing.T) {
 	}
 	defer SetStore("", nil, "")
 	str := func(v string) *string { return &v }
-	a := StoreCall(map[string]*string{"IV_COMMAND": str("HISTORY"), "IV_TYPE": str("PROG"), "IV_NAME": str("ZHIST")})
+	a := Call(map[string]*string{"IV_COMMAND": str("HISTORY"), "IV_TYPE": str("PROG"), "IV_NAME": str("ZHIST")})
 	if a.Scalars["EV_ERROR"] != "" || a.Scalars["EV_COUNT"] != "2" || len(a.Revisions) != 2 || a.Revisions[1].SUBJECT != "first" {
 		t.Fatalf("HISTORY: %v %+v", a.Scalars, a.Revisions)
 	}
-	a = StoreCall(map[string]*string{"IV_COMMAND": str("REVISION"), "IV_TYPE": str("PROG"), "IV_NAME": str("ZHIST"), "IV_REVISION": str(a.Revisions[1].REVISION)})
+	a = Call(map[string]*string{"IV_COMMAND": str("REVISION"), "IV_TYPE": str("PROG"), "IV_NAME": str("ZHIST"), "IV_REVISION": str(a.Revisions[1].REVISION)})
 	if a.Scalars["EV_ERROR"] != "" || a.Scalars["EV_SOURCE"] != "REPORT zhist.\n" || a.Scalars["EV_FILE"] != "src/zhist.prog.abap" {
 		t.Fatalf("REVISION: %v", a.Scalars)
 	}
-	a = StoreCall(map[string]*string{"IV_COMMAND": str("HISTORY"), "IV_TYPE": str("PROG"), "IV_NAME": str("ZNONE")})
+	a = Call(map[string]*string{"IV_COMMAND": str("HISTORY"), "IV_TYPE": str("PROG"), "IV_NAME": str("ZNONE")})
 	if a.Scalars["EV_ERROR"] == "" {
 		t.Fatal("an unknown object is an error, not an empty history")
 	}

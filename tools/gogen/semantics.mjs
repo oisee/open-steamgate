@@ -605,7 +605,7 @@ const EXPECT = {
   // the transpiler runtime's constant (ultra/gaps, the AMDP sandbox page)
   ZCL_GOGEN_T_AMDPDEST: "illegal_func out:[] db:[sqlite] rel:[OPEN]",
   // CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE' over a copy of
-  // testdata-store/tree (go/abap/store.go). Not an A4H value: the Node
+  // testdata-store/tree (go/objstore). Not an A4H value: the Node
   // host's destination answers LIST, READ and WRITE the same over the same
   // fixture (tools/gogen/storecmp.mjs --root, every call of this class
   // among its calls); CHECK, ACTIVATE and TOKENS are the Go host's own

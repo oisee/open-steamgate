@@ -46,7 +46,7 @@ import (
 var dbScript []byte
 
 // what the build says about the tree the object store answers over
-// (tools/gogen/store.mjs, go/abap/store.go): empty when it was built without one
+// (tools/gogen/store.mjs, go/objstore): empty when it was built without one
 //
 //go:embed zz_store.json
 var storeConfig []byte

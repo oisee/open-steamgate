@@ -1,5 +1,5 @@
 // What the Go host needs to answer DESTINATION 'STORE' over the files of a
-// tree (go/abap/store.go): the roots the Node store indexes, in its order,
+// tree (go/objstore): the roots the Node store indexes, in its order,
 // the file lists of its libraries, the build's exclusions, and a digest of
 // every file of a writable root, which is what "active" means for a binary
 // (the file is still what this generation was built from).

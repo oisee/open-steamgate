@@ -1,7 +1,7 @@
 // The versions of an object out of git (docs/backlog/adt.md, "Versions of an
 // object, read out of git"): HISTORY follows a rename, REVISION reads an old
 // version at the path it had, and a file git does not track says why it has
-// no history. The Go host has the same cases (store_history_test.go).
+// no history. The Go host has the same cases (tools/gogen/go/objstore/history_test.go).
 import {expect} from "chai";
 import {execFileSync} from "node:child_process";
 import {mkdtempSync, mkdirSync, rmSync, writeFileSync} from "node:fs";

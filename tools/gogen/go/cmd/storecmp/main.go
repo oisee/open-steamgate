@@ -1,5 +1,5 @@
 // storecmp answers a list of ZOSD_STORE calls with the Go host's object
-// store (go/abap/store.go), as JSON, so tools/gogen/storecmp.mjs can put the
+// store (go/objstore), as JSON, so tools/gogen/storecmp.mjs can put the
 // answers beside the Node destination's for the same calls over the same
 // files.
 //

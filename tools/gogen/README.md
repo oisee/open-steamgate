@@ -1069,7 +1069,7 @@ node) reaches the object store with `CALL FUNCTION 'ZOSD_STORE' DESTINATION
 'STORE'`. On Node that is `tools/osd-store-destination.mjs` over
 `tools/osd-store.mjs`; OSGo refused the call at compile time. Now the front
 end maps DESTINATION 'STORE' + ZOSD_STORE (`DESTINATION_FM`) to a host
-function, `go/abap/store.go`, which answers over the same files. The files,
+function, `go/objstore` (adapter in `go/abap/store.go`), which answers over the same files. The files,
 named the abapGit way, stay the only copy of a source; git is the history.
 
 - **LIST, READ, WRITE** as Node answers them, field for field: the roots in
@@ -1396,11 +1396,11 @@ change (note left in `.local/ultra-wip/parity-wave2-PROGRESS.md`).
 Follow-ups on this branch from the same review:
 
 - the store answers `CAPABILITIES` with `LIST READ WRITE`
-  (`go/abap/store.go` `StoreCapabilities`, `TestStoreCapabilities`), so
+  (`go/objstore` `Capabilities`, `TestStoreCapabilities`), so
   `ZCL_OSD_EDIT` draws no Check or Activate button on OSGo once the
   open-steamgate branch `feat/editor-capabilities` is in
   the tree osgo is built from. Done in this commit.
-- `TOKENS` can go once the colouring PR is in that tree: `go/abap/store.go`
+- `TOKENS` can go once the colouring PR is in that tree: `go/objstore/store.go`
   (the command switch, the `case "CHECK", "ACTIVATE", "TOKENS"` dispatch,
   the `TOKENS` branch of `storeNoCompiler` and the comment above
   `storeNoCompiler` and at the top of the file), the `TOKENS` call in

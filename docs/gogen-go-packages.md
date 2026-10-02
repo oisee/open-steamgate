@@ -245,7 +245,7 @@ Why they stay:
 - **Tests reaching internals**:
   - unit_session_test (`s.httpc`, `httpcOf`, fake DatasetHost)
   - dataset_test (`datasetFiles`, `datasetSwap`)
-  - frontend_test/filedialog_test/store_history_test (shared `str`/`stringTable`)
+  - frontend_test/filedialog_test (store_history_test moved to go/objstore) (shared `str`/`stringTable`)
   - gzip/inflate/httpc tests (`unhex`)
   - httpc_test (`httpcRoots`, which becomes `httpc.SetRoots`)
   - row_binding_cache_test and foldeq_test (unexported, cannot move)

@@ -458,7 +458,7 @@ const isAdt = (t) => t.file === "test/adt-facade.mjs" || [...(t.node?.requests ?
 // "compiler-deferred" (Alice, 2026-09-25): the editor's CHECK, which on
 // Node is abaplint over the whole system behind DESTINATION 'STORE'. OSGo is
 // a built generation and answers CHECK with an explicit refusal naming the
-// missing compiler (go/abap/store.go storeNoCompiler); it is deferred until
+// missing compiler (go/objstore storeNoCompiler); it is deferred until
 // the incremental rebuild exists. Out of the headline's numerator and
 // denominator, as adt-deferred is, and listed on its own line. That test
 // only: the parser colouring (TOKENS) is not deferred, it moves to ABAP

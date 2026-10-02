@@ -15,7 +15,7 @@
   ],
   "budgets": {
     "go:abap": {
-      "lines": 12269,
+      "lines": 11289,
       "reason": "baseline 2026-10-01"
     },
     "go:abaperr": {
@@ -105,6 +105,10 @@
     "go:nodehdr": {
       "lines": 19,
       "reason": "recorded by --update"
+    },
+    "go:objstore": {
+      "lines": 1028,
+      "reason": "carved out of go/abap/store.go and store_history.go (wave 2, docs/gogen-go-packages.md)"
     },
     "go:reportargs": {
       "lines": 209,
@@ -196,14 +200,6 @@
     },
     "tools/gogen/go/abap/data.go": {
       "lines": 412,
-      "reason": "baseline 2026-10-01"
-    },
-    "tools/gogen/go/abap/dataset_nofollow_other.go": {
-      "lines": 8,
-      "reason": "baseline 2026-10-01"
-    },
-    "tools/gogen/go/abap/dataset_nofollow_unix.go": {
-      "lines": 13,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/dataset.go": {
@@ -374,12 +370,8 @@
       "lines": 21,
       "reason": "baseline 2026-10-01"
     },
-    "tools/gogen/go/abap/store_history.go": {
-      "lines": 147,
-      "reason": "baseline 2026-10-01"
-    },
     "tools/gogen/go/abap/store.go": {
-      "lines": 942,
+      "lines": 109,
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/strings.go": {
