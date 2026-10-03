@@ -173,9 +173,10 @@ describe('VS Code job worker supervision', function () {
 });
 
 
-describe('VS Code jobs status while debugging', () => {
-  let savedFetch, savedInterval, savedClearInterval, tick, start, end, item, subscriptions, api, controller, messages;
+describe('VS Code jobs status poll grace and debugging', () => {
+  let savedFetch, savedInterval, savedClearInterval, tick, start, end, item, subscriptions, api, controller, messages, savedNow, now;
   beforeEach(() => {
+    savedNow = Date.now; now = 0; Date.now = () => now;
     savedFetch = globalThis.fetch;
     savedInterval = globalThis.setInterval;
     savedClearInterval = globalThis.clearInterval;
@@ -202,6 +203,7 @@ describe('VS Code jobs status while debugging', () => {
   });
   afterEach(() => {
     for (const subscription of subscriptions) subscription.dispose();
+    Date.now = savedNow;
     globalThis.fetch = savedFetch;
     globalThis.setInterval = savedInterval;
     globalThis.clearInterval = savedClearInterval;
@@ -226,7 +228,7 @@ describe('VS Code jobs status while debugging', () => {
   });
   it('tracks system sessions even when another session is focused; timeout and HTTP errors are neutral', async () => {
     await install();
-    expect(item.backgroundColor.id).to.equal('statusBarItem.errorBackground');
+    expect(item.backgroundColor).to.equal(undefined);
     const session = {name: 'custom attach', configuration: {request: 'attach', port: 9480}};
     start(session);
     api.debug.activeDebugSession = {name: 'unrelated'};
@@ -238,18 +240,19 @@ describe('VS Code jobs status while debugging', () => {
     expect(item.text).to.equal('OSD jobs: paused (debugger)');
     expect(item.backgroundColor).to.equal(undefined);
     globalThis.fetch = async () => ({ok: false, status: 503});
+    now = 60000;
     await tick();
     expect(item.text).to.equal('OSD jobs: paused (debugger)');
     end(session);
     await new Promise(resolve => setImmediate(resolve));
-    expect(item.text).to.equal('OSD jobs: status unavailable');
-    expect(item.backgroundColor.id).to.equal('statusBarItem.errorBackground');
+    expect(item.text).to.equal('OSD jobs: busy');
+    expect(item.backgroundColor).to.equal(undefined);
   });
-  it('keeps failures red outside this system and clears the background on success or worker stop', async () => {
+  it('uses the grace outside this system and clears the background on success or worker stop', async () => {
     api.debug.activeDebugSession = {name: 'OSD: ABAP (9481)'};
     await install();
-    expect(item.text).to.equal('OSD jobs: status unavailable');
-    expect(item.backgroundColor.id).to.equal('statusBarItem.errorBackground');
+    expect(item.text).to.equal('OSD jobs: busy');
+    expect(item.backgroundColor).to.equal(undefined);
     globalThis.fetch = async () => ({ok: true, json: async () => ({counts: {running: 2, queued: 1}})});
     await tick();
     expect(item.text).to.equal('OSD jobs: running 2, queued 1');
@@ -261,4 +264,60 @@ describe('VS Code jobs status while debugging', () => {
     expect(item.text).to.equal('OSD jobs: worker stopped');
     expect(item.backgroundColor).to.equal(undefined);
   });
+  it('keeps the last counts through a timed-out first classrun without a debugger', async () => {
+    globalThis.fetch = async () => ({ok: true, json: async () => ({counts: {running: 2, queued: 1}})});
+    await install();
+    globalThis.fetch = async () => { throw new DOMException('timed out', 'TimeoutError'); };
+    now = 3000; await tick();
+    expect(item.text).to.equal('OSD jobs: running 2, queued 1');
+    expect(item.backgroundColor).to.equal(undefined);
+    expect(messages).to.deep.equal([]);
+    now = 4400;
+    globalThis.fetch = async () => ({ok: true, json: async () => ({counts: {running: 0, queued: 0}})});
+    await tick();
+    expect(item.text).to.equal('OSD jobs: idle');
+  });
+  it('requires both three consecutive misses and fifteen seconds, and success resets the grace', async () => {
+    await install();
+    now = 1000; await tick();
+    now = 2000; await tick();
+    expect(item.backgroundColor).to.equal(undefined);
+    now = 14999; await tick();
+    expect(item.backgroundColor).to.equal(undefined);
+    now = 15000; await tick();
+    expect(item.text).to.equal('OSD jobs: status unavailable');
+    expect(item.backgroundColor.id).to.equal('statusBarItem.errorBackground');
+    globalThis.fetch = async () => ({ok: true, json: async () => ({counts: {running: 0, queued: 0}})});
+    await tick();
+    globalThis.fetch = async () => { throw Error('dead system'); };
+    now = 20000; await tick();
+    now = 40000; await tick(); // Enough time, but only two misses.
+    expect(item.text).to.equal('OSD jobs: idle');
+    expect(item.backgroundColor).to.equal(undefined);
+    await tick();
+    expect(item.backgroundColor.id).to.equal('statusBarItem.errorBackground');
+    controller.launcher.jobWorker.running = false; await tick();
+    expect(item.text).to.equal('OSD jobs: worker stopped');
+    controller.launcher.jobWorker.running = true; await tick();
+    expect(item.text).to.equal('OSD jobs: busy');
+    expect(item.backgroundColor).to.equal(undefined);
+  });
+  it('turns a genuinely unreachable system red after sustained connection failures', async () => {
+    const {createServer} = await import('node:http');
+    const server = createServer();
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    controller.launcher.port = server.address().port;
+    await new Promise(resolve => server.close(resolve));
+    globalThis.fetch = savedFetch;
+    await install();
+    // Wait for the real connection refusal (install only yields one event turn).
+    await until(() => item.text === 'OSD jobs: busy');
+    now = 7500; await tick();
+    expect(item.backgroundColor).to.equal(undefined);
+    now = 15000; await tick();
+    expect(item.text).to.equal('OSD jobs: status unavailable');
+    expect(item.backgroundColor.id).to.equal('statusBarItem.errorBackground');
+    expect(messages).to.have.length(1);
+  });
+
 });
