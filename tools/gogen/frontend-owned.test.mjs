@@ -9,12 +9,12 @@ import {emitGo} from "./emit-go.mjs";
 
 mkdirSync(join(import.meta.dirname, ".out"), {recursive: true});
 
-function compile(body, extra = "", definition = "") {
+function compile(body, extra = "", definition = "", staticMemory = false) {
   const dir = mkdtempSync(join(import.meta.dirname, ".out", "gogen-owned-"));
   try {
     writeFileSync(join(dir, "zcl_owned.clas.abap"), `CLASS zcl_owned DEFINITION PUBLIC FINAL CREATE PUBLIC.
 PUBLIC SECTION. METHODS run. ${definition}
-PRIVATE SECTION. DATA mv_mem TYPE xstring.
+PRIVATE SECTION. ${staticMemory ? "CLASS-DATA" : "DATA"} mv_mem TYPE xstring.
 ENDCLASS.
 CLASS zcl_owned IMPLEMENTATION.
 METHOD run. DATA mem TYPE xstring. DATA b TYPE xstring. ${body} ENDMETHOD.
@@ -171,10 +171,10 @@ test("replacement targets retain strings when a byte operand calls a method", ()
   assert.equal(owns(p), false);
 });
 
-test("generated owned equal-length REPLACE allocates nothing on 16 pages", () => {
+for (const staticMemory of [false, true]) test(`generated owned ${staticMemory ? "static" : "instance"} equal-length REPLACE allocates nothing on 16 pages`, () => {
   // Compile a fixed byte operand through the same frontend as ABAP stores.
   const stores = compile("DATA replacement TYPE x LENGTH 4 VALUE '01020304'. REPLACE SECTION OFFSET 1024 LENGTH 4 OF mv_mem WITH replacement IN BYTE MODE.",
-    "METHOD init. mv_mem = memory. ENDMETHOD.", "METHODS init IMPORTING VALUE(memory) TYPE xstring.");
+    "METHOD init. mv_mem = memory. ENDMETHOD.", "METHODS init IMPORTING VALUE(memory) TYPE xstring.", staticMemory);
   assert.deepEqual(stores.partial, []);
   assert.deepEqual(stores.broken, []);
   assert.ok(analyzeOwnership(stores).declarations.has(stores.classes[0].attributes[0]));
@@ -189,7 +189,7 @@ func TestGeneratedStore(t *testing.T) {
   s := &abap.Session{}
   me := &ZCL_OWNED{}
   me.INIT(s, strings.Repeat("\\x00", 16*65536))
-  if me.mv_mem.Len() != 16*65536 { t.Fatal("buffer is not 16 pages") }
+  if ${staticMemory ? "ZCL_OWNED__MV_MEM" : "me.mv_mem"}.Len() != 16*65536 { t.Fatal("buffer is not 16 pages") }
   if allocations := testing.AllocsPerRun(1000, func() { me.RUN(s) }); allocations != 0 {
     t.Fatalf("generated store allocations: %g", allocations)
   }
@@ -197,4 +197,32 @@ func TestGeneratedStore(t *testing.T) {
 `);
     execFileSync("go", ["test", "./ownedcheck"], {cwd: dir, env: process.env});
   } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("private statics qualify in static/instance methods and the class constructor", () => {
+  const p = compile("DATA b1 TYPE x LENGTH 1 VALUE 'FF'. b = zcl_owned=>mv_mem+0(1). REPLACE SECTION OFFSET 0 LENGTH 1 OF zcl_owned=>mv_mem WITH b1 IN BYTE MODE. CONCATENATE zcl_owned=>mv_mem zcl_owned=>mv_mem INTO zcl_owned=>mv_mem IN BYTE MODE.",
+    "METHOD class_constructor. zcl_owned=>mv_mem = '0102'. ENDMETHOD. METHOD store. CLEAR mv_mem. ENDMETHOD.",
+    "CLASS-METHODS class_constructor. CLASS-METHODS store.", true);
+  assert.deepEqual(p.partial, []);
+  assert.ok(analyzeOwnership(p).declarations.has(p.classes[0].attributes[0]));
+  const go = emitGo(p);
+  assert.match(go, /ZCL_OWNED__MV_MEM hXbuf.Buffer/);
+  assert.match(go, /ZCL_OWNED__MV_MEM.Sub/);
+  assert.match(go, /ZCL_OWNED__MV_MEM.Replace/);
+  assert.match(go, /ZCL_OWNED__MV_MEM.Append/);
+  assert.doesNotMatch(go, /func\(\) \*string \{ Ensure_ZCL_OWNED/);
+});
+
+test("static escapes and evaluation order preserve the string ABI", () => {
+  for (const body of [
+    "FIELD-SYMBOLS <x> TYPE any. ASSIGN zcl_owned=>mv_mem TO <x>.",
+    "DATA r TYPE REF TO xstring. GET REFERENCE OF zcl_owned=>mv_mem INTO r.",
+    "other( CHANGING p = zcl_owned=>mv_mem ).",
+    "DATA n TYPE i. n = xstrlen( zcl_owned=>mv_mem ) + xstrlen( grow( ) ).",
+    "DATA rows TYPE STANDARD TABLE OF xstring WITH DEFAULT KEY. APPEND zcl_owned=>mv_mem TO rows.",
+  ]) {
+    const p = compile(body, "METHOD other. ENDMETHOD. METHOD grow. r = 'FF'. ENDMETHOD.", "METHODS other CHANGING p TYPE xstring. METHODS grow RETURNING VALUE(r) TYPE xstring.", true);
+    assert.deepEqual(p.partial, []);
+    assert.equal(analyzeOwnership(p).declarations.has(p.classes[0].attributes[0]), false, body);
+  }
 });

@@ -31,7 +31,7 @@ export function analyzeOwnership(program) {
   for (const cls of classes) {
     const safety = program.ownershipSafety?.get(sourceOwner(cls));
     const eligible = (v) => safety && v.type?.k === "xstring" && !safety.dynamic && !safety.names.has(v.name);
-    attrs.set(cls.name, new Set((cls.attributes ?? []).filter((a) => eligible(a) && a.private && !a.static && !a.fromIntf && !cls.stubs?.length && a.value === undefined).map((a) => a.name)));
+    attrs.set(cls.name, new Set((cls.attributes ?? []).filter((a) => eligible(a) && a.private && !a.fromIntf && !cls.stubs?.length && a.value === undefined).map((a) => a.name)));
     for (const m of methods(cls)) locals.set(localKey(cls, m), new Set(m.locals.filter(eligible).map((v) => v.name)));
   }
   const external = new Set();
@@ -42,6 +42,7 @@ export function analyzeOwnership(program) {
       if (!n || typeof n !== "object") return;
       if (n.e === "var") ll.delete(n.name);
       if (n.e === "attr") aa.delete(n.name);
+      if (n.e === "static") attrs.get(n.owner)?.delete(n.name);
       if (n.e === "refattr") external.add(n.name);
       for (const v of children(n)) reject(v);
     };
@@ -72,7 +73,7 @@ export function analyzeOwnership(program) {
       for (const v of children(n)) read(v);
     };
     const write = (n, supported) => {
-      if (!supported || !["var", "attr"].includes(n?.e) || n.ref) reject(n);
+      if (!supported || !["var", "attr", "static"].includes(n?.e) || n.ref) reject(n);
     };
     const calls = (n) => n && typeof n === "object" && (n.e === "call" || n.e === "new" || n.s === "call_fm" || n.s === "call_dyn_static" || (Array.isArray(n) ? n : children(n)).some(calls));
     const statements = (n) => {
@@ -106,6 +107,6 @@ export function analyzeOwnership(program) {
     for (const m of methods(cls)) for (const l of m.locals) if (locals.get(localKey(cls, m)).has(l.name)) declarations.add(l);
   }
   return {declarations, has(p, ctx) {
-    return p?.e === "attr" ? attrs.get(ctx.cls.name)?.has(p.name) : p?.e === "var" && !p.ref && locals.get(localKey(ctx.cls, ctx.method))?.has(p.name);
+    return p?.e === "static" ? p.owner === ctx.cls.name && attrs.get(p.owner)?.has(p.name) : p?.e === "attr" ? attrs.get(ctx.cls.name)?.has(p.name) : p?.e === "var" && !p.ref && locals.get(localKey(ctx.cls, ctx.method))?.has(p.name);
   }};
 }

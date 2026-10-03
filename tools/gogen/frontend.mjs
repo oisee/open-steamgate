@@ -11,7 +11,7 @@
 // Everything outside the subset is a named refusal (Unsupported), never a
 // guess. A method whose body or signature is outside it is skipped and says
 // why; a method that calls a skipped one is refused in turn.
-import {resolveStatic as lowerStatic} from "./frontend-static.mjs";
+import {resolveStatic as lowerStatic, staticSlot} from "./frontend-static.mjs";
 import {syntaxDiagnostics} from "./frontend-diagnostics.mjs";
 import {sourceOwnershipSafety} from "./frontend-owned.mjs";
 import {lowerBoolx} from "./frontend-boolx.mjs";
@@ -3290,7 +3290,7 @@ function findAttribute(ctx, n) {
     return {e: "const", go, type: ctx.program.consts.get(go).type};
   }
   const type = ctx.program.excAttrs?.has(`${ctx.className}|${n}`) ? EXC : typeOf(id.getType(), `${ctx.className} ${n}`, ctx.program);
-  if (id.getMeta().includes("static")) return {e: "static", go: goName(`${declaringClass(ctx.reg, ctx.className, n, "attr") ?? ctx.className}=>${n}`), type};
+  if (id.getMeta().includes("static")) return staticSlot(declaringClass(ctx.reg, ctx.className, n, "attr") ?? ctx.className, n, type, goName);
   return {e: "attr", name: n, type};
 }
 

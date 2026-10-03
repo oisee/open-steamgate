@@ -1,6 +1,9 @@
 CLASS ltcl_owned DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
   PRIVATE SECTION.
     DATA mv_mem TYPE xstring.
+    CLASS-DATA escaped_static TYPE xstring.
+    METHODS static_changing FOR TESTING.
+    METHODS change_generic CHANGING cv_mem TYPE any.
     METHODS snapshots FOR TESTING.
     METHODS self_append FOR TESTING.
     METHODS value_input FOR TESTING.
@@ -12,6 +15,19 @@ CLASS ltcl_owned DEFINITION FOR TESTING RISK LEVEL HARMLESS DURATION SHORT.
       RETURNING VALUE(rv_mem) TYPE xstring.
 ENDCLASS.
 CLASS ltcl_owned IMPLEMENTATION.
+  METHOD change_generic.
+    DATA bytes TYPE xstring VALUE 'AABB'.
+    cv_mem = bytes.
+  ENDMETHOD.
+  METHOD static_changing.
+    DATA saved TYPE xstring.
+    escaped_static = '1234'.
+    saved = escaped_static.
+    change_generic( CHANGING cv_mem = escaped_static ).
+    cl_abap_unit_assert=>assert_equals( act = saved exp = '1234' ).
+    saved = escaped_static.
+    cl_abap_unit_assert=>assert_equals( act = saved exp = 'AABB' ).
+  ENDMETHOD.
   METHOD self_append.
     DATA mem TYPE xstring.
     DATA saved TYPE xstring.

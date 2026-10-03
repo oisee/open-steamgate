@@ -374,7 +374,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
     for (const a of statics) {
       // a CLASS-DATA without VALUE starts at its type's initial value (critic finding 1)
       const init = a.value !== undefined ? constLiteral(a) : isGoZero(zero(a.type)) ? undefined : zero(a.type);
-      out.push(`var ${typeName(`${cls.name}=>${a.name}`)} ${goType(a.type)}${init === undefined ? "" : ` = ${init}`}`);
+      out.push(`var ${typeName(`${cls.name}=>${a.name}`)} ${ownedType(a)}${init === undefined ? "" : ` = ${init}`}`);
     }
     if (chainCctor(cls)) {
       const sup = cls.super && CLASSES.get(cls.super) && chainCctor(CLASSES.get(cls.super)) ? `\tEnsure_${typeName(cls.super)}(s)` : null;
@@ -385,7 +385,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false) 
     }
     if (unitBuild && (statics.length || chainCctor(cls))) {
       out.push("func init() { session.Register(func() {");
-      for (const a of statics) out.push(`\t${typeName(`${cls.name}=>${a.name}`)} = ${a.value !== undefined ? constLiteral(a) : zero(a.type)}`);
+      for (const a of statics) out.push(`\t${typeName(`${cls.name}=>${a.name}`)} = ${OWNERSHIP.declarations.has(a) ? "hXbuf.Buffer{}" : a.value !== undefined ? constLiteral(a) : zero(a.type)}`);
       if (chainCctor(cls)) out.push(`\tcctor_${typeName(cls.name)} = false`);
       out.push("}) }", "");
     }
@@ -1000,7 +1000,7 @@ function place(p, ctx) {
   switch (p.e) {
     case "var": return p.ref && !ctx.valueOutputs?.has(p.name) ? `(*${ident(p.name)})` : ident(p.name);
     case "attr": return `me.${ident(p.name)}`;
-    case "static": return p.owner && CLASSES.has(p.owner) && chainCctor(CLASSES.get(p.owner))
+    case "static": return p.owner && p.owner !== ctx.cls.name && CLASSES.has(p.owner) && chainCctor(CLASSES.get(p.owner))
       ? `(*func() *${goType(p.type)} { Ensure_${typeName(p.owner)}(s); return &${p.go} }())` : p.go;
     case "const": return p.go;
     case "sy": return `s.Sy.${p.field}`;

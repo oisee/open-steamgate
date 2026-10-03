@@ -1,0 +1,8 @@
+CLASS zcl_gogen_t_staticfriend DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-DATA gv_ro TYPE xstring READ-ONLY.
+  PRIVATE SECTION.
+    CLASS-DATA gv_priv TYPE xstring.
+ENDCLASS.
+CLASS zcl_gogen_t_staticfriend IMPLEMENTATION.
+ENDCLASS.
