@@ -27,6 +27,7 @@ import {randomUUID, randomBytes, createHash} from "node:crypto";
 import {Sessions, parseCookies, refuseToken, sessionIdOf} from "./adt-session.mjs";
 import {virtualFoldersDocument} from "./adt-vfs.mjs";
 import {abapFront} from "./adt-abap-front.mjs";
+import {RemoteSessions} from "./adt-remote-sessions.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
 import {abapSession, statelessLock} from "./adt-enq.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
@@ -621,6 +622,7 @@ export function adtRouter(options = {}) {
     throw new Error("the ABAP front resolves its sessions in ABAP: pass AbapSessions, or no sessions");
   }
   const sessions = options.sessions ?? (options.abap === undefined ? new Sessions()
+    : options.abap.remote !== undefined ? new RemoteSessions(options.abap.remote, {identity})
     : new AbapSessions({identity: {systemID: identity.systemID, client: identity.client}}));
 
   const data = options.data ?? store.data();

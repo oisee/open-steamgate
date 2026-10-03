@@ -32,6 +32,10 @@ import {persistDump} from "./osd-dumps.mjs";
 import {serveSandboxConfig} from "./osd-sandbox-config.mjs";
 import {mountPortableCells} from "./sqlscript-to-procedure-ir.mjs";
 import {batchMonitorHandler} from "./osd-batch-monitor.mjs";
+import {answerOf} from "./adt-abap-front.mjs";
+import {sessionJSON, sessionValue} from "./adt-remote-sessions.mjs";
+import {AbapSessions} from "./adt-abap-sessions.mjs";
+import {withSystem} from "./osd-store-destination.mjs";
 import {withAbapCase} from "./osd-case-determinism.mjs";
 
 const started = Date.now();
@@ -251,6 +255,48 @@ function dump(error, request) {
 }
 hostNodes.dumps = (a, node) => a.get(node.path, function (req, res) {
   res.json(dumps.slice().reverse());
+});
+hostNodes["adt-step"] = (a, node) => a.post(node.path, async (req, res) => {
+  const address = req.socket.remoteAddress ?? "";
+  if (address !== "::1" && !/^127\./.test(address) && !/^::ffff:127\./.test(address)) {
+    res.status(403).json({error: {code: "LOCAL_ONLY"}});
+    return;
+  }
+  if (process.env.OSD_ADT_ONE_RUNTIME !== "1") return res.status(404).end();
+  let input;
+  try {
+    input = JSON.parse(req.body.toString("utf8"));
+    if (input.view?.sessionCall === undefined && (!input.view || typeof input.view.method !== "string" || typeof input.view.path !== "string"
+      || typeof input.view.url !== "string" || typeof input.view.headers !== "object"
+      || (input.bodyHex !== undefined && !/^(?:[0-9a-f]{2})*$/i.test(input.bodyHex)))) throw new Error("invalid view or bodyHex");
+  } catch (error) {
+    return res.status(400).json({error: {code: "BAD_REQUEST", message: error.message}});
+  }
+  const sessions = new AbapSessions({identity: input.identity});
+  if (input.view.sessionCall !== undefined) {
+    const method = input.view.sessionCall;
+    if (!["get", "end", "holderOf", "holds", "lock", "unlock", "release"].includes(method)) return res.status(400).json({error: {message: "unknown session operation"}});
+    try {
+      const value = await dialogStep(() => sessions[method](...sessionValue(input.view.args)), "ADT session compatibility");
+      return res.json({value: sessionJSON(value ?? null)});
+    } catch (error) {
+      return res.status(500).json({error: {message: String(error.message ?? error)}});
+    }
+  }
+  const request = {headers: input.view.headers};
+  try {
+    const record = await withSystem((kind) => kind === "IDENTITY" ? sessions.identity : undefined,
+      () => dialogStep(async () => {
+        const session = await sessions.sessionFor(request);
+        return answerOf(globalThis.abap.Classes.ZCL_OSD_ADT_HANDLER,
+          {...input.view, body: Buffer.from(input.bodyHex ?? "", "hex")}, session);
+      }, `ADT ${input.view.method} ${input.view.path}`));
+    const adt = request.adt === undefined ? undefined : {...request.adt, sessions: undefined,
+      session: request.adt.session === undefined ? undefined : {...request.adt.session, locks: [...request.adt.session.locks]}};
+    res.json({record: {...record, body: record.body.toString("utf8")}, adt});
+  } catch (error) {
+    res.status(500).json({error: {code: error.code ?? "FAILED", message: String(error.message?.get?.() ?? error.message ?? error)}});
+  }
 });
 hostNodes["batch-runs"] = (a, node) => a.get(node.path, batchMonitorHandler(root));
 

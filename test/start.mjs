@@ -109,7 +109,7 @@ async function loadChildKernel() {
     return undefined;
   }
 }
-const adtKernel = MODE === "child" && process.env.OSD_ADT !== "js" ? await loadChildKernel() : undefined;
+const adtKernel = MODE === "child" && process.env.OSD_ADT !== "js" && process.env.OSD_ADT_ONE_RUNTIME !== "1" ? await loadChildKernel() : undefined;
 
 
 /** Host memory only; child readiness starts with its first running generation. */
@@ -233,7 +233,8 @@ export function startServer(quiet) {
   const adtHandler = MODE === "inline" ? inline.zcl_osd_adt_handler : adtKernel?.handler;
   // the kernel is loaded once; a generation that changes the front's classes
   // or tables is said (X-OSD-Front-Stale, one console line) until a restart
-  const adtAbap = adtHandler !== undefined && process.env.OSD_ADT !== "js"
+  const adtAbap = runtime !== undefined && process.env.OSD_ADT_ONE_RUNTIME === "1" && process.env.OSD_ADT !== "js"
+    ? abapRunner({remote: runtime}) : adtHandler !== undefined && process.env.OSD_ADT !== "js"
     ? abapRunner({handler: adtHandler, step: dialogStep, stale: adtKernel === undefined ? undefined
       : kernelFreshness({output: adtKernel.output, loaded: adtKernel.hash, generation: () => liveHash(process.env.OSD_ROOT ?? process.cwd())})})
     : undefined;
@@ -497,7 +498,7 @@ export function startServer(quiet) {
     for (const node of declaredNodeList.filter((n) => n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
       const proxy = odataProxy(runtime);
       app.all(node.path, node.path === "/osd/serving" ? withWarm(proxy)
-        : node.path === "/osd/batch-runs" ? localBatch(proxy) : proxy);
+        : ["/osd/batch-runs", "/osd/adt-step"].includes(node.path) ? localBatch(proxy) : proxy);
     }
     // STG_DEV=1: the disk is the other editor. A save becomes a check, a
     // build and a recycle of this runtime (tools/osd-dev.mjs), and the

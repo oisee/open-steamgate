@@ -178,7 +178,28 @@ export async function answerOf(handler, view, session) {
 /** {step, answer} for adtRouter's `abap` option, from the transpiled handler
  *  and the host's dialogStep: what test/start.mjs and the tests mount, said
  *  once. answer(view, session) runs inside the step. */
-export function abapRunner({handler, step, stale}) {
+export function abapRunner({handler, step, stale, remote}) {
+  if (remote !== undefined) {
+    const runtime = remote.primary ?? remote;
+    return {
+      remote: runtime,
+      async execute(view, req, options) {
+        await runtime.ensure();
+        const {body, ...request} = view;
+        const response = await fetch(`${runtime.url}/osd/adt-step`, {
+          method: "POST", headers: {"content-type": "application/json"},
+          body: JSON.stringify({view: request, bodyHex: body.toString("hex"),
+            identity: options.sessions.identity}),
+        });
+        const result = await response.json();
+        if (!response.ok) throw Object.assign(new Error(result.error?.message ?? "ADT step failed"), {code: result.error?.code});
+        if (result.adt !== undefined) req.adt = {...result.adt, sessions: options.sessions,
+          session: result.adt.session === undefined ? undefined : {...result.adt.session,
+            locks: new Map(result.adt.session.locks)}};
+        return {...result.record, body: Buffer.from(result.record.body, "utf8")};
+      },
+    };
+  }
   return {
     stale,
     step: (work, label) => step(work, label),
@@ -272,7 +293,7 @@ export function abapFront(options) {
         const {waitUnitWarmup} = await import("./osd-unit.mjs");
         await waitUnitWarmup(options.store);
       }
-      record = await withSystem((kind, name, json) => system(kind, name, req, json),
+      record = options.execute !== undefined ? await options.execute(view, req, options) : await withSystem((kind, name, json) => system(kind, name, req, json),
         () => options.step(async () => {
           const answer = await options.answer(view, await options.sessions?.sessionFor?.(req));
           // Until A3a ports logoff, its HOST fallback must end the session
