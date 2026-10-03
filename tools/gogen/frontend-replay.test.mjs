@@ -1,5 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
+import {readFileSync, readdirSync} from "node:fs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 
 const program = () => ({wanted: new Set(["BASE"]), sigs: new Map(), skipped: [], currentClass: undefined});
@@ -35,22 +36,23 @@ test("nested mutations and previous-class traversal refuse caching", () => {
   assert.equal(recordLowering(p, (p) => p.classes.length).replay, undefined);
 });
 
-test("assigned collections replay from their initial state without sharing cache storage", () => {
-  const first = program();
-  const cached = recordLowering(first, (p) => {
-    p.output = new Map();
-    assert.equal(p.output.has("TYPE"), false);
-    p.output.set("TYPE", 80);
-    p.wanted.has("DEPENDENCY");
-  });
-  assert.ok(cached.replay);
-  const next = program();
-  assert.ok(replayLowering(next, cached.replay));
-  next.output.set("UNRELATED", 10);
-  assert.equal(first.output.has("UNRELATED"), false);
-  const changed = program();
-  changed.wanted.add("DEPENDENCY");
-  assert.equal(replayLowering(changed, cached.replay), false);
-  assert.equal(changed.output, undefined);
-  assert.ok(replayLowering(program(), cached.replay));
+test("assigning a collection refuses replay, including a first chained write", () => {
+  for (const value of [new Map(), new Set(), new WeakMap(), new WeakSet(), []]) {
+    const first = program();
+    const cached = recordLowering(first, (p) => {
+      const raw = (p.output ??= value);
+      if (raw instanceof Map) raw.set("TYPE", 80);
+      if (raw instanceof Set) raw.add("TYPE");
+      if (Array.isArray(raw)) raw.push("TYPE");
+    });
+    assert.equal(cached.replay, undefined);
+    assert.equal(replayLowering(program(), cached.replay), false);
+  }
+});
+
+test("frontend program state is initialized eagerly", () => {
+  for (const file of readdirSync(import.meta.dirname).filter((f) => /^frontend.*\.mjs$/.test(f))) {
+    assert.doesNotMatch(readFileSync(new URL(file, import.meta.url), "utf8"),
+      /\b(?:program|PROGRAM)\s*\.\s*\w+\s*\?\?=/, file);
+  }
 });

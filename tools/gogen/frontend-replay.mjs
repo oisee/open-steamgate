@@ -70,6 +70,12 @@ export function recordLowering(program, lower) {
       return read(key, undefined, [], value);
     },
     set(target, key, value) {
+      // Assignment expressions return the raw RHS: a following .set/.add
+      // would bypass the collection proxy and leave an incomplete transcript.
+      // Current-class context is restored separately by compileClass.
+      if (!ignored.has(key) && !context.has(key)
+          && (value instanceof Map || value instanceof Set || value instanceof WeakMap
+            || value instanceof WeakSet || Array.isArray(value))) safe = false;
       target[key] = value;
       if (!ignored.has(key)) { written.add(key); ops.push({kind: "assign", key, value: clone(value)}); }
       return true;

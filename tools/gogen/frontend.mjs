@@ -127,8 +127,10 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
           && !includeTests?.has?.(objName(e.name).toUpperCase())) continue;
       else if (/\.(abap|xml)$/i.test(e.name)) {
         const source = readFileSync(path, "utf8");
-        reg.addFile(new abaplint.MemoryFile(e.name, wanted.includes(objName(e.name))
-          ? lowerNarrowSubmit(lowerBoolx(source, e.name, abaplint), e.name, abaplint) : source));
+        // Later rounds can select any loaded object. Normalize once before
+        // parsing so newly selected app classes match a fresh final registry.
+        reg.addFile(new abaplint.MemoryFile(e.name,
+          lowerNarrowSubmit(lowerBoolx(source, e.name, abaplint), e.name, abaplint)));
       }
       // a CDS view's source: its SQL view name, for the table registry
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
@@ -173,7 +175,11 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
     }
   }
 
-  const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
+  // Eager collections keep first writes inside the replay proxies. Anonymous
+  // type identities use a Map so their ordered effects can be replayed too;
+  // these keys already belong to the registry retained for this compilation.
+  const program = {anonStructs: new Map(), badStructs: new Map(), ddicOutputLen: new Map(),
+    excAttrs: new Set(), dynStatics: new Set(), intfOwnAttrs: new Map(), interfaceAttrs: new Map(), structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
     diagnostics, frontendCounts: {lowered: 0, reused: 0, loweredClasses: [], reusedClasses: []}, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
   program.supplied = suppliedParams(reg, program.wanted);
   PROGRAM = program;
@@ -1214,7 +1220,7 @@ function typeOf(t, where, program) {
     // OF a parameter: it keeps the name it was first given, or the places
     // that share it name two Go types
     if (!q) {
-      const seen = (program.anonStructs ??= new WeakMap()).get(t);
+      const seen = program.anonStructs.get(t);
       if (seen !== undefined) go = seen;
       else program.anonStructs.set(t, go);
     }
@@ -1232,7 +1238,7 @@ function typeOf(t, where, program) {
         // a field outside the subset: the structure is not in the program,
         // and every later use of it is refused with the same reason
         program.structs.delete(go);
-        (program.badStructs ??= new Map()).set(go, e.message);
+        program.badStructs.set(go, e.message);
         throw e;
       }
     }
@@ -1260,7 +1266,7 @@ function typeOf(t, where, program) {
  * left out, and RTTI keeps refusing it.
  */
 function ddicOutputLength(name) {
-  const map = (PROGRAM.ddicOutputLen ??= new Map());
+  const map = PROGRAM.ddicOutputLen;
   if (map.has(name) || name.includes("-") || !REG) return;
   const xmlOf = (type, n) => REG.getObject(type, n)?.getXMLFile?.()?.getRaw?.() ?? "";
   const tag = (xml, t) => new RegExp(`<${t}>([^<]*)</${t}>`).exec(xml)?.[1];
@@ -1360,7 +1366,7 @@ function classIr(ctx0, obj) {
     // an inherited attribute lives in the superclass's part of the object
     if (!ownAttrs.has(name)) continue;
     if (excInto.has(name)) {
-      (program.excAttrs ??= new Set()).add(`${className}|${name}`);
+      program.excAttrs.add(`${className}|${name}`);
       attributes.push({name, type: EXC, static: meta.includes("static")});
       continue;
     }
@@ -2783,7 +2789,7 @@ function statement(node, ctx) {
     const args = (mp?.findAllExpressions(Expressions.ParameterS) ?? []).map((p) => ({name: upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()),
       value: convert(source(p.findDirectExpression(Expressions.Source), ctx), {k: "data"})}));
     const method = upper(kids[2].concatTokens());
-    (ctx.program.dynStatics ??= new Set()).add(method);
+    ctx.program.dynStatics.add(method);
     return {s: "call_dyn_static", cls, method, args};
   }
   if (isStmt(node, Statements.CallFunction)) return callFunction(node, ctx, text);
@@ -3402,7 +3408,6 @@ function rowOf(place, te, ctx) {
 
 /** the DATA and CLASS-DATA of one interface (not of those it includes), cached */
 function ownInterfaceAttributes(program, intf) {
-  program.intfOwnAttrs ??= new Map();
   if (program.intfOwnAttrs.has(intf)) return program.intfOwnAttrs.get(intf);
   const obj = program.reg.getObject("INTF", intf);
   const def = obj?.getDefinition();
@@ -3457,7 +3462,6 @@ function ownInterfaceAttributes(program, intf) {
 
 /** the attributes of an interface and of every interface it includes */
 function interfaceAttributes(program, intf) {
-  program.interfaceAttrs ??= new Map();
   if (!program.interfaceAttrs.has(intf)) {
     program.interfaceAttrs.set(intf, [intf, ...componentInterfaces(program.reg, intf)].flatMap((i) => ownInterfaceAttributes(program, i)));
   }
