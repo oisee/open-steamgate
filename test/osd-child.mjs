@@ -397,7 +397,15 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     await send("Debugger.removeBreakpoint", {breakpointId: set.result.breakpointId});
     await send("Debugger.resume");
     expect((await request).status, "and went on when resumed").to.equal(200);
-    cdp.close();
+    // detached the way a debugger detaches, the close handshake finished.
+    // (Closing the inspector while it was still in flight froze the child
+    // inside node:inspector's close(), the CI flake of 2026-10-02; the
+    // runtime now recycles the child instead of closing, so this is order,
+    // not a guard: tools/osd-runtime.mjs inspector())
+    await new Promise((resolve) => {
+      cdp.onclose = resolve;
+      cdp.close();
+    });
     // and nothing answers on this machine's other addresses
     const others = Object.values(networkInterfaces()).flat().filter((i) => i && !i.internal && i.family === "IPv4");
     for (const {address} of others) {
@@ -408,7 +416,8 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
       expect(refused, `the inspector does not answer on ${address}`).to.equal(true);
     }
     const closed = await door({open: false});
-    expect(await closed.json()).to.include({open: false});
+    const closedAnswer = await closed.json();
+    expect(closedAnswer, JSON.stringify(closedAnswer)).to.include({open: false});
     let reachable = true;
     try {
       await fetch(`http://127.0.0.1:${port}/json/list`);

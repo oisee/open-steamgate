@@ -307,7 +307,8 @@ export function startServer(quiet) {
     }
     try {
       const answer = await runtime.inspector({open: request?.open === true, port: request?.port});
-      res.json({open: answer.open, port: answer.port, ...(answer.pending ? {pending: true} : {})});
+      res.json({open: answer.open, port: answer.port, ...(answer.pending ? {pending: true} : {}),
+        ...(answer.recycled ? {recycled: true, recovering: answer.recovering === true} : {})});
     } catch (e) {
       res.status(409).json({error: String(e?.message ?? e)});
     }

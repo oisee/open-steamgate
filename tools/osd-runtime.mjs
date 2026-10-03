@@ -273,6 +273,25 @@ export class ServingRuntime {
   // it again. `open: false` closes it and keeps it closed, OSD_INSPECT
   // notwithstanding. Answers {open, port, url} ({pending: true} when no
   // child is serving yet: the next one opens it).
+  //
+  // **The serving child never calls node:inspector's close().** close()
+  // joins the inspector's I/O thread, and that thread ends only when every
+  // attached debugger has finished the WebSocket close handshake: until
+  // then the child's event loop is blocked -- no IPC, no HTTP -- for as long
+  // as the debugger takes, which is forever for one that does not answer
+  // (Node documents close() as blocking; same on Node 22, 24 and 26). That
+  // was the CI flake of test/osd-child.mjs: its CDP socket was still
+  // closing when the door closed the inspector, and the child froze inside
+  // close(). Recovering from a frozen close (kill it, checkpoint first, tell
+  // a wedge from a busy child) grew a new edge with every review, so the
+  // close is not made at all: closing, or moving to another port, is an
+  // ordinary graceful recycle -- quiesce with its grace, commit, carry and
+  // the exit-time save, then a new child started with the inspector off or
+  // on the new port. Opening stays in-process: open() does not block. The
+  // answer comes once the old child has exited ({recycled: true,
+  // recovering: true}); /osd/ready says when the new one serves, so a
+  // caller with a deadline (the VS Code extension's 15 s) is not held for
+  // a boot.
   async inspector({open, port} = {}) {
     if (open === true && (!Number.isInteger(port) || port < 1 || port > 65535)) {
       throw new Error(`invalid inspector port: ${port}`);
@@ -283,7 +302,25 @@ export class ServingRuntime {
     if (this.running !== true || child === undefined) {
       return {open: open === true, port: open === true ? port : undefined, pending: true};
     }
+    // what the serving child has open: the port it was started with, or the
+    // one it opened on request (osdInspectPort, set in #spawnOne and below)
+    const current = child.osdInspectPort;
+    if (open !== true && current === undefined) {
+      return {open: false, port: undefined, url: undefined};
+    }
+    if (open !== true || (current !== undefined && current !== port)) {
+      const gone = child.exitCode !== null || child.signalCode !== null ? Promise.resolve()
+        : new Promise((resolve) => child.once("exit", resolve));
+      // its failure is what /osd/ready and the next request report
+      this.recycle().catch(() => undefined);
+      await gone;
+      return {open: open === true, port: open === true ? port : undefined, url: undefined, recycled: true, recovering: true};
+    }
     const id = (this.inspectSeq = (this.inspectSeq ?? 0) + 1);
+    // counted as open from the moment it is asked: a request a busy child
+    // answers after the timeout below still opens it, and a close must then
+    // still recycle rather than believe there is nothing to close
+    child.osdInspectPort = port;
     const done = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         child.off("message", onMessage);
@@ -296,15 +333,20 @@ export class ServingRuntime {
         child.off("message", onMessage);
         clearTimeout(timer);
         if (message.ok === true) resolve(message);
-        else reject(new Error(message.error));
+        else {
+          // refused (no V8 inspector, a bad host): nothing was opened
+          child.osdInspectPort = current;
+          reject(new Error(message.error));
+        }
       };
       child.on("message", onMessage);
-      child.send({type: "inspector", id, open: open === true, port});
+      child.send({type: "inspector", id, open: true, port});
     }).catch((error) => {
       // not changed: the next child does what it would have done before
       this.inspecting = before;
       throw error;
     });
+    child.osdInspectPort = done.port;
     return {open: done.open, port: done.port, url: done.url};
   }
 
@@ -477,6 +519,8 @@ export class ServingRuntime {
         },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       });
+      // the inspector this child was started with (inspector() above)
+      child.osdInspectPort = inspectPort || undefined;
       child.on("message", (message) => {
         if (message?.type === "adt-carry") this.adtCarry = message.state;
         if (message?.type === "adt-state-request") {
