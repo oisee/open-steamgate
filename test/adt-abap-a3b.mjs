@@ -77,5 +77,5 @@ describe("A3b reentrance live Node byte diff",function () {
   it("HEAD and case/trailing slash",async () => {await diff(ask("http://localhost/"),"HEAD","text/html",307,base.toUpperCase()+"/");});
 });
 describe("A3b focused ABAP Unit",() => {
-  for(const method of ["grammar","query","accept","escaping","clock"]) it(method,async () => {const {ltcl_reentrance}=await import("../output/zcl_osd_adt_reentrance.clas.testclasses.mjs");const o=new ltcl_reentrance();await o.constructor_();await o.FRIENDS_ACCESS_INSTANCE[method]();});
+  for(const method of ["grammar","query","accept","escaping","clock","subtract_precision"]) it(method,async () => {const {ltcl_reentrance}=await import("../output/zcl_osd_adt_reentrance.clas.testclasses.mjs");const o=new ltcl_reentrance();await o.constructor_();await o.FRIENDS_ACCESS_INSTANCE[method]();});
 });
