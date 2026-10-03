@@ -2857,12 +2857,23 @@ function setServingAvailability(available) {
 // itself started (docs/vscode-extension.md, "Databases").
 const DB_ENGINE_LABEL = {sqlite: "SQLite", duckdb: "DuckDB", HDB: "HANA", postgres: "PostgreSQL"};
 
-function statusBar(context, findingCount = () => kernelFindingCount) {
+function statusBar(context, findingCount = () => kernelFindingCount, controller = activeController) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
   item.command = "osd.showDumps";
   item.show();
   let dumpsSeen;
+  let disposed = false;
+  const transitioning = () => ["building", "starting", "stopping"].includes(controller?.launcher?.state);
+  const visibility = () => {
+    if (disposed) return;
+    if (transitioning()) item.hide();
+    else item.show();
+  };
+  const onState = controller?.onDidChange(visibility);
   const tick = async () => {
+    if (disposed) return;
+    visibility();
+    if (transitioning()) return;
     try {
       const serving = await osd().serving();
       setServingAvailability(true);
@@ -2892,24 +2903,17 @@ function statusBar(context, findingCount = () => kernelFindingCount) {
       dumpsSeen ??= dumps.length;
     } catch {
       setServingAvailability(false);
-      // T7: right after a launch the façade answers nothing at all while the
-      // warm registry primes synchronously (docs/warm-compile.md), for up to
-      // about the ~9 s that was measured -- "warming up..." rather than
-      // "osd down" for the first 20 s of a launch this window itself made,
-      // so a person does not read a normal start as a failure.
-      const since = activeController?.launcher?.startedAt;
-      const launching = activeController?.launcher?.state !== "stopped" && since !== undefined && Date.now() - since < 20000;
-      item.text = launching ? "$(sync~spin) osd warming up…" : "$(debug-disconnect) osd down";
-      item.tooltip = launching
-        ? `${osd().url} has not answered yet -- normal for the first few seconds of a launch (osd.warm primes synchronously)`
-        : `nothing answers /osd/serving at ${osd().url} (setting osd.url)`;
+      item.text = "$(debug-disconnect) osd down";
+      item.tooltip = `nothing answers /osd/serving at ${osd().url} (setting osd.url)`;
       item.backgroundColor = undefined;
     }
     item.tooltip += `\nOSD kernel: ${findingCount()} finding(s)`;
+    // A poll begun before Start may finish after the launcher changes state.
+    visibility();
   };
   tick();
   const timer = setInterval(tick, 5000);
-  context.subscriptions.push({dispose: () => clearInterval(timer)});
+  context.subscriptions.push({dispose: () => { disposed = true; clearInterval(timer); onState?.dispose(); }});
   return item;
 }
 

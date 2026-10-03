@@ -4100,6 +4100,42 @@ describe("editors/vscode: running parts status and actions", () => {
 });
 
 describe("editors/vscode: serving generation status", () => {
+  it("hides immediately throughout long startup, guards a late poll, and restores stopped/crashed status", async () => {
+    const h = runningStatusApi();
+    h.api.workspace = {getConfiguration() { return {get: (_, fallback) => fallback}; }};
+    const {statusBar} = loadExtension(h.api);
+    let refresh, rejectPoll;
+    const controller = {launcher: {state: "stopped", startedAt: Date.now() - 60000},
+      onDidChange(fn) { refresh = fn; return {dispose() { refresh = undefined; }}; }};
+    const originalFetch = globalThis.fetch;
+    const context = {subscriptions: []};
+    try {
+      globalThis.fetch = () => new Promise((_, reject) => { rejectPoll = reject; });
+      const item = statusBar(context, () => 0, controller);
+      for (const state of ["building", "starting"]) {
+        controller.launcher.state = state;
+        refresh();
+        expect(item.visible, state).to.equal(false);
+      }
+      rejectPoll(new Error("not serving yet"));
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(item.visible, "late failed poll during startup").to.equal(false);
+      for (const state of ["running", "stopped"]) {
+        controller.launcher.state = state;
+        refresh();
+        expect(item.visible, state).to.equal(true);
+        expect(item.text).to.include("osd down");
+      }
+      controller.launcher.state = "stopping";
+      refresh();
+      expect(item.visible).to.equal(false);
+    } finally {
+      context.subscriptions.forEach(s => s.dispose());
+      globalThis.fetch = originalFetch;
+    }
+    expect(refresh).to.equal(undefined);
+  });
+
   it("preserves generation, database, dump action and kernel findings tooltip", async () => {
     const h = runningStatusApi();
     h.api.workspace = {getConfiguration() { return {get: (_, fallback) => fallback}; }};
