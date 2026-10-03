@@ -502,6 +502,7 @@ export function startServer(quiet) {
       }
       proxy(req, res, next);
     };
+    app.get("/osd/job-counts", localBatch(odataProxy(runtime)));
     for (const node of declaredNodeList.filter((n) => !n.internal && n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
       const proxy = odataProxy(runtime);
       app.all(node.path, node.path === "/osd/serving" ? withWarm(proxy)

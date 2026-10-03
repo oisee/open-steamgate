@@ -80,3 +80,30 @@ export function batchMonitorHandler(root, env = process.env) {
     }
   };
 }
+
+// The extension's private counts door shares authentication with the monitor.
+export function batchCountsHandler(root, env = process.env) {
+  return function (req, res) {
+    const address = req.socket.remoteAddress ?? "";
+    if (address !== "::1" && !/^127\./.test(address) && !/^::ffff:127\./.test(address)) {
+      res.status(403).json({error: {code: "LOCAL_ONLY"}});
+      return;
+    }
+    if (!authorized(req, res, env)) return;
+    if (Object.keys(req.query).length !== 0) {
+      res.status(400).json({error: {code: "BAD_QUERY"}});
+      return;
+    }
+    try {
+      const store = new BatchRuns(root, env);
+      try {
+        const counts = store.readSnapshot(() => store.db.prepare(`SELECT
+          COALESCE(SUM(state = 'RUNNING'), 0) AS running,
+          COALESCE(SUM(state = 'QUEUED'), 0) AS queued FROM batch_runs`).get());
+        res.json({counts});
+      } finally { store.close(); }
+    } catch (error) {
+      res.status(500).json({error: {code: "MONITOR_FAILED", message: String(error.message ?? error)}});
+    }
+  };
+}

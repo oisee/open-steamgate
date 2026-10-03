@@ -32,3 +32,15 @@ VS Code 1.101 or newer is required. The system runs locally on desktop or in a R
 - The Marketplace build has no browser extension entry. The separate web gateway probe remains a development experiment.
 
 The extension is MIT licensed. Bundled dependency declarations and licence review items are in `THIRD-PARTY-NOTICES.md` inside the VSIX.
+
+### Background jobs
+
+**osd: Start system** also starts the job worker, restarts it after a crash,
+and stops it with the system or extension. Serving generation changes restart
+the worker after its active job finishes, with a bounded shutdown wait.
+No terminal command is needed.
+`osd.jobs.worker` defaults to `auto`; use `off` to disable it or `on` to enable
+it explicitly. Both modes require durable file SQLite. The default `osd.database.system=sqlite` stores a shared file.
+Other backends leave the worker stopped and show one message to use file SQLite.
+The **OSD jobs** status bar shows idle, running/queued counts, or a stopped
+worker. Click it to open the **OSD jobs** output channel.

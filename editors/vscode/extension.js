@@ -6,6 +6,7 @@
 // the language server; this adds only what needs a running system.
 "use strict";
 
+const {jobsStatusBar} = require("./job-worker");
 const vscode = require("vscode");
 const path = require("node:path");
 const fs = require("node:fs");
@@ -571,8 +572,22 @@ class SystemController {
         storageDir: storageDirFor(this.context, osdHome),
         workspaceFolders: workspaceFoldersFor(osdHome),
         database,
+        jobsWorker: vscode.workspace.getConfiguration("osd").get("jobs.worker", "auto"),
         warm: osdWarmModeOf(),
         debug: osdDebugEnabled() || forceDebug,
+      });
+      launcher.on("jobsLog", line => this.jobsOutput?.append(line));
+      launcher.on("jobsUnavailable", () => {
+        if (this.jobsWarningShown) return;
+        this.jobsWarningShown = true;
+        vscode.window.showWarningMessage("OSD background jobs need the file SQLite database for now.", "Use file database")
+          .then(async choice => {
+            if (choice === "Use file database") {
+              await vscode.workspace.getConfiguration("osd").update("database.system", "sqlite", vscode.ConfigurationTarget.Global);
+              this.launcher.database = {kind:"sqlite"};
+              await this.launcher.rebuild();
+            }
+          });
       });
       launcher.homeKind = choice.kind;
       this.attachLauncher(launcher);
@@ -580,6 +595,7 @@ class SystemController {
       // Same osdHome, stopped: pick up current folders and settings before
       // the launcher's next projection and build.
       this.launcher.workspaceFolders = workspaceFoldersFor(osdHome);
+      this.launcher.jobsWorkerMode = vscode.workspace.getConfiguration("osd").get("jobs.worker", "auto");
       this.launcher.database = database;
       this.launcher.databaseLabel = describeDatabase(database);
       this.launcher.warmMode = osdWarmModeOf();
@@ -2650,6 +2666,7 @@ function activate(context) {
   const controller = new SystemController(context, systemOutput);
   activeController = controller;
   context.subscriptions.push(statusBar(context));
+  jobsStatusBar(vscode, context, controller);
   breakpointToggleStatusBar(context);
   breakpointGuard(context);
   debugOnDemand(context);
@@ -2810,6 +2827,7 @@ function statusBar(context) {
     try {
       const serving = await osd().serving();
       setServingAvailability(true);
+      await activeController?.launcher?.refreshJobsGeneration(serving);
       await activeController?.refreshDebuggerGeneration().catch((error) =>
         activeController.output.appendLine(`osd debugger: ${String(error?.message ?? error)}`));
       const dumps = await osd().dumps().catch(() => []);

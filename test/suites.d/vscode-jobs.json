@@ -1,0 +1,6 @@
+{
+  "files": [
+    "test/vscode-job-worker.mjs",
+    "test/vscode-job-worker-integration.mjs"
+  ]
+}

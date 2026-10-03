@@ -23,3 +23,6 @@ For example, `osd-job-next.mjs` goes to `jobs.json` rather than the broader `osd
 The generated-class CI entry suites `test/osgo-unit.mjs` and
 `test/osgjs-unit.mjs` belong to `groups.gogen` in `gogen-osgo.json`. The gogen
 workflow gates both with real builds under the shared heavy-test lock.
+
+The `vscode-job-worker*.mjs` suites belong to `vscode-jobs.json`: this slice owns
+worker lifecycle and server/worker integration separately from VSIX packaging.
