@@ -334,6 +334,7 @@ export class ServingRuntime {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         child.off("message", onMessage);
+        child.off("exit", onExit);
         reject(new Error("the serving process did not answer the inspector request within 10 s"));
       }, 10000);
       const onMessage = (message) => {
@@ -341,6 +342,7 @@ export class ServingRuntime {
           return;
         }
         child.off("message", onMessage);
+        child.off("exit", onExit);
         clearTimeout(timer);
         if (message.ok === true) resolve(message);
         else {
@@ -349,7 +351,14 @@ export class ServingRuntime {
           reject(new Error(message.error));
         }
       };
+      // a child recycled away answers nothing: do not hold the caller 10 s
+      const onExit = () => {
+        child.off("message", onMessage);
+        clearTimeout(timer);
+        reject(new Error("the serving process exited before it answered the inspector request"));
+      };
       child.on("message", onMessage);
+      child.once("exit", onExit);
       child.send({type: "inspector", id, open: true, port});
     }).then((done) => {
       child.osdInspectPort = done.port;
@@ -485,7 +494,20 @@ export class ServingRuntime {
         const current = this.child?.osdInspectPort;
         if (current === desired) break;
         if (current === undefined) {
-          await this.#openInspector(this.child, desired);
+          const wanted = this.inspecting;
+          try {
+            await this.#openInspector(this.child, desired);
+          } catch (error) {
+            // a child that serves without the inspector is better than one
+            // that never announces itself: the caller already has its
+            // `pending` answer and sees the endpoint missing. The desired
+            // state follows what the child has, unless a newer request came.
+            console.error(`inspector not opened on the new runtime: ${error.message}`);
+            if (this.inspecting !== wanted) continue;
+            const has = this.child?.osdInspectPort;
+            this.inspecting = has === undefined ? null : {port: has};
+            break;
+          }
         } else {
           await this.#stopChild();
           if (this.stops !== stops) throw new NotServing("stopped while starting");

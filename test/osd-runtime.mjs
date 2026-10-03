@@ -168,6 +168,37 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
     });
   }
 
+  // the tie-breaker's finding: a refused open during reconciliation left a
+  // live child that never announced readiness, so every request was
+  // NotServing until somebody asked for the inspector again
+  it("serves without the inspector when the new child refuses to open it", async () => {
+    const command = [process.execPath, "--input-type=module", "-e", [
+      "process.on('message', m => {",
+      "  if (m.type === 'release') process.send({type: 'ready', port: 1, pid: process.pid, ms: 0});",
+      "  if (m.type === 'quiesce') process.exit(0);",
+      "  if (m.type === 'inspector') process.send({type: 'inspector-done', id: m.id, ok: false, error: 'refused'});",
+      "});",
+      "process.send({type: 'booting', phase: 'gated'});",
+    ].join("\n")];
+    const runtime = new ServingRuntime({command});
+    try {
+      const starting = runtime.start();
+      const deadline = Date.now() + 5000;
+      while (runtime.booting?.phase !== "gated") {
+        if (Date.now() >= deadline) throw new Error("child never reached boot gate");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(await runtime.inspector({open: true, port: await freePort()})).to.include({pending: true});
+      runtime.bootingChild.send({type: "release"});
+      await starting;
+      expect(runtime.child.osdInspectPort).to.equal(undefined);
+      expect(runtime.inspecting).to.equal(null);
+      await runtime.whenReady();
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   // a WebSocket upgrade on the inspector, and then silence: the close frame
   // the inspector sends when it closes is never answered
   const silentDebugger = async (port) => {
