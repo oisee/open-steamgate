@@ -13,6 +13,8 @@ ENDCLASS.
 CLASS zcl_osd_kernel_guard IMPLEMENTATION.
   METHOD has_generation.
     rv_available = abap_true.
+*   One-runtime comes from OSD_ADT_ONE_RUNTIME or the request's
+*   withSystem oneRuntime binding (STORE->oneRuntimeEnabled).
     WRITE '@KERNEL if (globalThis.__osdAdtKernel !== undefined || !((typeof process !== "undefined" && process.env?.OSD_ADT_ONE_RUNTIME === "1") || abap.context.RFCDestinations.STORE?.oneRuntimeEnabled?.() === true)) rv_available.set(" ");'.
   ENDMETHOD.
   METHOD call_classrun.
