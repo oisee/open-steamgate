@@ -7,6 +7,32 @@ in `docs/` as `YYYY-MM-DD-topic.md`.
 > [`docs/backlog/README.md`](docs/backlog/README.md). This file stays the narrative: what
 > was decided and why.
 
+## CI isolation for ADT pull requests, temporary (2026-10-03)
+
+Decided by Alice (through dell) after three ADT pull requests with green tests
+waited half a day on an image check that failed for reasons outside ADT (a
+Docker Hub token reset, then two DuckDB engines on one file).
+
+1. **The image does not gate an ADT-only pull request.** `docker.yml` excludes
+   `src/adt/**`, `tools/adt-*`, `test/adt-*` and `test/suites.d/adt.json` from its
+   `pull_request` paths
+   (`docs/**` was never in them). The image is needed only on tagged
+   releases, which still build, probe and publish it: **an image break caused
+   by an ADT change shows up at the tag; adt-i5 fixes it before the release.**
+   **Revert this at the 0.7 tag or when the image has its first user,
+   whichever comes first. Owner: adt-i5.**
+2. **Quarantine.** A check that is red on the latest `main` run is not waited
+   for by `merge-when-green` for at most 24 hours: one line here with the
+   check's name, the link to that red `main` run (the evidence is on `main`,
+   not on another pull request), an owner and the expiry. The check keeps running. Never
+   quarantined: `leak-scan`, `test`, `suites`.
+3. **What an ADT pull request waits for** follows from (1): `test` and the
+   `suites` shards, plus any check its own paths still trigger.
+
+Quarantined checks (name, red main run, owner, expires):
+
+- none
+
 ## Names a system reserves: ZONE, HANDLER, SECTION, PARAMETER (2026-09-24)
 
 Decided: the taxi fact table's field `ZONE`, a reserved word on a system
