@@ -1181,7 +1181,22 @@ class Launcher extends EventEmitter {
     this.servingLock = undefined;
   }
 
+  async refreshJobsGeneration(serving) {
+    if (this.state !== "running" || this.jobsStopping || serving?.ready !== true
+        || serving.generation === undefined || serving.generation === this.generation) return;
+    this.generation = serving.generation;
+    const worker = this.jobWorker;
+    if (!worker) return;
+    // Serialize swaps. stop() gives an active job its bounded shutdown grace.
+    this.jobsRefresh = (this.jobsRefresh ?? Promise.resolve()).then(async () => {
+      await worker.stop();
+      if (this.state === "running" && !this.jobsStopping && this.jobWorker === worker) worker.start();
+    });
+    await this.jobsRefresh;
+  }
+
   #setState(state) {
+    if (state === "stopped") clearInterval(this.jobsPoll);
     if (state === "stopped" && this.servingLock !== undefined) {
       try { fs.rmSync(this.servingLock); } catch { /* A leftover lock conservatively keeps the home. */ }
       this.servingLock = undefined;
@@ -1206,6 +1221,7 @@ class Launcher extends EventEmitter {
     }
     await this.jobWorker?.stop();
     this.buildCancelled = false;
+    this.jobsStopping = false;
     this.lastLog = "";
     fs.mkdirSync(this.storageDir, {recursive: true});
     this.startedAt = Date.now();
@@ -1452,6 +1468,17 @@ class Launcher extends EventEmitter {
       this.emit("jobsUnavailable", {database:env.STG_DB});
     }
     this.#setState("running");
+    let checking = false;
+    this.jobsPoll = setInterval(async () => {
+      if (checking || this.jobsStopping || this.child !== child) return;
+      checking = true;
+      try {
+        const current = await servingOnce(port, 2000);
+        if (this.child === child) await this.refreshJobsGeneration(current);
+      } catch (error) { this.#log(`OSD jobs: ${error.message}\n`); }
+      finally { checking = false; }
+    }, 250);
+    this.jobsPoll.unref();
     return {port: this.port, pid: this.pid, generation: this.generation, inspectPort: this.inspectPort};
   }
 
@@ -1517,6 +1544,9 @@ class Launcher extends EventEmitter {
    *  before this process exits. Never sends a signal to a pid this launcher
    *  did not itself spawn. */
   async stop() {
+    this.jobsStopping = true;
+    clearInterval(this.jobsPoll);
+    await this.jobsRefresh;
     await this.jobWorker?.stop();
     if (this.state === "building") {
       this.buildCancelled = true;

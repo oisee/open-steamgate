@@ -18,7 +18,11 @@ describe('VS Code job worker supervision', function () {
     expect(jobsStatus(false)).to.equal('OSD jobs: worker stopped');
     expect(jobsStatus(true, {running:0,queued:0})).to.equal('OSD jobs: idle');
     expect(jobsStatus(true, {running:2,queued:3})).to.equal('OSD jobs: running 2, queued 3');
-    for (const db of ['file','duckdb','postgres','hana']) expect(workerEnabled('auto', {STG_DB:db, STG_DB_PATH:'/tmp/jobs.db'})).to.equal(true);
+    expect(workerEnabled('auto', {STG_DB:'file', STG_DB_PATH:'/tmp/jobs.db'})).to.equal(true);
+    for (const mode of ['auto', 'on']) {
+      for (const db of ['duckdb','postgres','hana','sqlite']) expect(workerEnabled(mode, {STG_DB:db, STG_DB_PATH:'/tmp/jobs.db'}), `${mode} ${db}`).to.equal(false);
+      for (const dbPath of [undefined, '', ':memory:']) expect(workerEnabled(mode, {STG_DB:'file', STG_DB_PATH:dbPath})).to.equal(false);
+    }
     expect(workerEnabled('on', {STG_DB:'file', STG_DB_PATH:':memory:'})).to.equal(false);
     expect(workerEnabled('auto', {STG_DB:'sqlite'})).to.equal(false);
     expect(workerEnabled('off', {STG_DB:'file'})).to.equal(false);
@@ -46,6 +50,33 @@ describe('VS Code job worker supervision', function () {
     expect(alive(lines[2].pid)).to.equal(false);
     await worker.stop();
     expect(alive(lines[3].pid)).to.equal(false);
+  });
+  it('reloads on serving generation changes after an active job finishes, and stop wins a pending reload', async () => {
+    const {JobWorker} = require('../editors/vscode/job-worker.js');
+    const {Launcher} = require('../editors/vscode/launcher.js');
+    const script = join(dir, 'active.cjs');
+    writeFileSync(script, `console.log('ready'); process.on('SIGTERM',()=>setTimeout(()=>{console.log('finished');process.exit(0);},100)); setInterval(()=>{},100);`);
+    const lines = [];
+    worker = new JobWorker({cwd:dir,env:process.env,script,graceMs:2000,log:s=>lines.push(s.trim())});
+    const launcher = new Launcher({osdHome:dir,storageDir:join(dir,'storage')});
+    launcher.jobWorker = worker; launcher.state = 'running'; launcher.generation = 'old';
+    worker.start();
+    await until(()=>lines.length === 1);
+    const first = worker.child.pid;
+    await launcher.refreshJobsGeneration({ready:false,generation:'new'});
+    expect(worker.child.pid).to.equal(first);
+    await launcher.refreshJobsGeneration({ready:true,generation:'new'});
+    await until(()=>lines.length === 3);
+    expect(lines).to.deep.equal(['ready','finished','ready']);
+    expect(worker.child.pid).not.to.equal(first);
+    const second = worker.child.pid;
+    await launcher.refreshJobsGeneration({ready:true,generation:'new'});
+    expect(worker.child.pid).to.equal(second);
+    const changing = launcher.refreshJobsGeneration({ready:true,generation:'newer'});
+    await launcher.stop(); await changing;
+    await pause(100);
+    expect(lines).to.deep.equal(['ready','finished','ready','finished']);
+    expect(worker.running).to.equal(false);
   });
   it('kills an unresponsive worker by PID after the shutdown grace', async () => {
     const {JobWorker} = require('../editors/vscode/job-worker.js');

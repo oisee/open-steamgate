@@ -36,10 +36,11 @@ The extension is MIT licensed. Bundled dependency declarations and licence revie
 ### Background jobs
 
 **osd: Start system** also starts the job worker, restarts it after a crash,
-and stops it with the system or extension. No terminal command is needed.
+and stops it with the system or extension. Serving generation changes restart
+the worker after its active job finishes, with a bounded shutdown wait.
+No terminal command is needed.
 `osd.jobs.worker` defaults to `auto`; use `off` to disable it or `on` to enable
-it explicitly. The default `osd.database.system=sqlite` stores a shared file.
-In-memory databases cannot share jobs. JOB_* currently supports file SQLite;
-DuckDB, PostgreSQL and HANA still require runtime support for that facade.
+it explicitly. Both modes require durable file SQLite. The default `osd.database.system=sqlite` stores a shared file.
+Other backends leave the worker stopped and show one message to use file SQLite.
 The **OSD jobs** status bar shows idle, running/queued counts, or a stopped
 worker. Click it to open the **OSD jobs** output channel.

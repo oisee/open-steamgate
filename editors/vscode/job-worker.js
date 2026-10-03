@@ -4,7 +4,8 @@ const {spawn} = require('node:child_process');
 const path = require('node:path');
 const {EventEmitter} = require('node:events');
 function workerEnabled(mode = 'auto', env = {}) {
-  return mode !== 'off' && ['file', 'duckdb', 'postgres', 'hana'].includes(env.STG_DB)
+  return mode !== 'off' && env.STG_DB === 'file'
+    && typeof env.STG_DB_PATH === 'string' && env.STG_DB_PATH !== ''
     && env.STG_DB_PATH !== ':memory:';
 }
 function reap(child, graceMs) {
@@ -80,7 +81,7 @@ function jobsStatusBar(vscode, context, controller) {
     const launcher = controller.launcher;
     try {
       if (!launcher?.jobWorker?.running) { item.text = jobsStatus(false); return; }
-      const answer = await fetch(`http://127.0.0.1:${launcher.port}/osd/batch-runs?counts=1`,
+      const answer = await fetch(`http://127.0.0.1:${launcher.port}/osd/job-counts`,
         {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}, signal:AbortSignal.timeout(3000)});
       if (!answer.ok) throw Error(`job counts: HTTP ${answer.status}`);
       item.text = jobsStatus(true, (await answer.json()).counts);

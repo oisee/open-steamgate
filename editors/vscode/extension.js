@@ -580,7 +580,7 @@ class SystemController {
       launcher.on("jobsUnavailable", () => {
         if (this.jobsWarningShown) return;
         this.jobsWarningShown = true;
-        vscode.window.showWarningMessage("OSD background jobs need a shared database. Switch to a file database to run jobs.", "Use file database")
+        vscode.window.showWarningMessage("OSD background jobs need the file SQLite database for now.", "Use file database")
           .then(async choice => {
             if (choice === "Use file database") {
               await vscode.workspace.getConfiguration("osd").update("database.system", "sqlite", vscode.ConfigurationTarget.Global);
@@ -2827,6 +2827,7 @@ function statusBar(context) {
     try {
       const serving = await osd().serving();
       setServingAvailability(true);
+      await activeController?.launcher?.refreshJobsGeneration(serving);
       await activeController?.refreshDebuggerGeneration().catch((error) =>
         activeController.output.appendLine(`osd debugger: ${String(error?.message ?? error)}`));
       const dumps = await osd().dumps().catch(() => []);

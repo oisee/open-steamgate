@@ -33,7 +33,7 @@ import {dumpOf} from "./osd-where.mjs";
 import {persistDump} from "./osd-dumps.mjs";
 import {serveSandboxConfig} from "./osd-sandbox-config.mjs";
 import {mountPortableCells} from "./sqlscript-to-procedure-ir.mjs";
-import {batchMonitorHandler} from "./osd-batch-monitor.mjs";
+import {batchMonitorHandler, batchCountsHandler} from "./osd-batch-monitor.mjs";
 import {identity} from "./osd-identity.mjs";
 import {abapSession} from "./adt-enq.mjs";
 import {answerOf, abapServes, resumeOf, resumeRecord} from "./adt-abap-front.mjs";
@@ -357,6 +357,7 @@ hostNodes["adt-resume"] = (a, node) => a.post(node.path, async (req, res) => {
     res.status(500).json({error: {code: error.code ?? "FAILED", message: String(error.message?.get?.() ?? error.message ?? error)}});
   }
 });
+hostNodes["job-counts"] = (a, node) => a.get(node.path, batchCountsHandler(root));
 hostNodes["batch-runs"] = (a, node) => a.get(node.path, batchMonitorHandler(root));
 
 // The end of a dialog step lives in tools/osd-dialog-step.mjs, because it is

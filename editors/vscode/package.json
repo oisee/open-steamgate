@@ -106,7 +106,7 @@
           "type": "string",
           "enum": ["auto", "off", "on"],
           "default": "auto",
-          "description": "Start and supervise the background job worker with the local system. auto enables it for shared file or server databases; off disables it. In-memory databases cannot share jobs."
+          "description": "Start and supervise the background job worker with the local system. auto enables it only for durable file SQLite; off disables it. Background jobs need the file SQLite database for now."
         },
         "osd.database.system": {
           "type": "string",

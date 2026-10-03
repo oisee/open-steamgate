@@ -256,7 +256,7 @@ export class JobScheduler {
     try {
       if (this.env.STG_DB === "file") await drainJobOutbox(this.store, {env: this.env});
       await this.#reorganise();
-      for (;;) {
+      while (!this.stopped) {
         await this.releaseDue();
         const outcome = await workQueuedBatch(this.root, this.store, this.execute);
         if (outcome.kind === "empty" || outcome.kind === "busy") break;

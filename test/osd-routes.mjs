@@ -29,6 +29,12 @@ describe("tools/osd-routes: one inventory, and what nothing explains", () => {
       rmSync(root, {recursive: true, force: true});
     }
   });
+  it("job counts have an internal node and an explicit guarded parent forwarding", () => {
+    const node = declaredNodes('.').find(n => n.path === '/osd/job-counts');
+    expect(node).to.include({internal: true, handler: 'job-counts'});
+    expect(servedBy('test/start.mjs', '/osd/job-counts').wrapper).to.include('loopback-guarded');
+  });
+
   it("every express registration is explained by a declared node", async () => {
     const {unexplained} = await drift();
     expect(unexplained.map((r) => `${r.host}:${r.line} ${r.path}`),

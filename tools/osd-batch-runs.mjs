@@ -845,6 +845,10 @@ function resultRecordingError(runId, stepNumber, cause, executionError) {
 }
 
 export async function workQueuedBatch(root, store, execute = runConvertedBatch) {
+  // The extension restarts on serving changes. Until then, leave new jobs
+  // queued rather than claiming them with an obsolete initialized runtime.
+  if (process.env.OSD_JOB_WORKER === "extension"
+      && globalThis.abap?.context?.osdGeneration !== liveGeneration(root)) return {kind: "busy"};
   const source = workerSource();
   const next = store.claimNext(source ?? {legacyOnly: true});
   if (next.kind !== "claimed") return next;
@@ -934,6 +938,7 @@ async function main(args) {
       return 0;
     }
     const {JobScheduler} = await import("./osd-job-scheduler.mjs"); // not at the top: it imports this module
+    let stopping = false;
     const scheduler = new JobScheduler({root, store});
     if (command === "work") {
       if (process.env.STG_DB === "file") await drainJobOutbox(store);
@@ -942,8 +947,7 @@ async function main(args) {
       console.log(JSON.stringify(result, null, 2));
       return result.kind === "failed" ? 1 : 0;
     }
-    let stopping = false;
-    for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { stopping = true; });
+    for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { stopping = true; scheduler.stop(); });
     // a worker start is a host start (overdue time jobs start once); later passes poll
     try {
       for (let first = true; !stopping; first = false) {

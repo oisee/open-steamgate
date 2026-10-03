@@ -76,6 +76,10 @@
     "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "batch-runs", "needs": "state",
     "text": "opt-in, token-protected read access to saved batch runs and output"
   },
+  "/osd/job-counts": {
+    "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "job-counts", "needs": "state", "internal": true,
+    "text": "loopback-only, token-protected background job counts for the extension"
+  },
   "/osd/adt-sessions": {
     "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "adt-sessions", "needs": "state", "internal": true,
     "text": "loopback-only compatibility session calls in the serving child, with parent callbacks inside the step; opt-in OSD_ADT_ONE_RUNTIME=1"

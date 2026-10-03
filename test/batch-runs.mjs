@@ -1,13 +1,13 @@
 import {expect} from "chai";
 import {randomUUID} from "node:crypto";
-import {appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {appendFileSync, mkdirSync, mkdtempSync, symlinkSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
 import express from "express";
 import {BatchRuns, liveGeneration, runPersistedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
-import {batchMonitorHandler} from "../tools/osd-batch-monitor.mjs";
+import {batchMonitorHandler, batchCountsHandler} from "../tools/osd-batch-monitor.mjs";
 import {beforeJobPredecessorDDL, ensureJobEventMetadata, migrateJobEventFile,
   migrateJobStepInputFile, beforeJobScheduleDDL, migrateJobScheduleFile, beforeJobReleaseDDL, migrateJobReleaseFile,
   migrateJobIdentityFile, migrateJobPredecessorFile} from "./setup.mjs";
@@ -385,6 +385,31 @@ describe("durable one-shot batch runs", function () {
     }
   });
 
+  it("leaves the critic's new-generation job queued until the extension worker reloads", async () => {
+    const priorAbap = globalThis.abap;
+    const priorWorker = process.env.OSD_JOB_WORKER;
+    const store = new BatchRuns(dir, env);
+    mkdirSync(join(dir, 'build/new-server-generation'), {recursive:true});
+    symlinkSync('new-server-generation', join(dir, 'build/live'));
+    globalThis.abap = {context: {osdGeneration: 'old-worker-generation'}};
+    process.env.OSD_JOB_WORKER = 'extension';
+    let executions = 0;
+    try {
+      const run = store.enqueue({program: 'ZGG_EX_012', generation: 'new-server-generation'});
+      const execute = async () => { executions++; return {status: 'COMPLETED'}; };
+      expect(await workQueuedBatch(dir, store, execute)).to.deep.equal({kind: 'busy'});
+      expect(store.get(run.id).state).to.equal('QUEUED');
+      expect(executions).to.equal(0);
+      globalThis.abap.context.osdGeneration = 'new-server-generation';
+      expect((await workQueuedBatch(dir, store, execute)).kind).to.equal('completed');
+      expect(store.get(run.id).state).to.equal('COMPLETED');
+      expect(executions).to.equal(1);
+    } finally {
+      store.close(); globalThis.abap = priorAbap;
+      if (priorWorker === undefined) delete process.env.OSD_JOB_WORKER; else process.env.OSD_JOB_WORKER = priorWorker;
+    }
+  });
+
   it("reports a legacy generation rejection that cannot be recorded with its run ID", async () => {
     const store = new BatchRuns(root, env);
     try {
@@ -584,6 +609,8 @@ describe("durable one-shot batch runs", function () {
     const token = randomUUID().replaceAll("-", "");
     const app = express();
     app.get("/osd/batch-runs", batchMonitorHandler(root, {...env, OSD_BATCH_READ_TOKEN: token}));
+    app.get("/osd/job-counts", batchCountsHandler(root, {...env, OSD_BATCH_READ_TOKEN: token}));
+    app.get("/closed-counts", batchCountsHandler(root, env));
     app.get("/closed", batchMonitorHandler(root, env));
     const server = await new Promise((done) => {
       const listener = app.listen(0, "127.0.0.1", () => done(listener));
@@ -592,12 +619,14 @@ describe("durable one-shot batch runs", function () {
       const url = `http://127.0.0.1:${server.address().port}`;
       const auth = {Authorization: `Bearer ${token}`};
       expect((await fetch(`${url}/closed`, {headers: auth})).status).to.equal(404);
+      expect((await fetch(`${url}/closed-counts`, {headers: auth})).status).to.equal(404);
+      expect((await fetch(`${url}/osd/batch-runs?counts=1`, {headers: auth})).status).to.equal(400);
       expect((await fetch(`${url}/osd/batch-runs`)).status).to.equal(401);
       expect((await fetch(`${url}/osd/batch-runs`, {headers: {Authorization: "Bearer wrong"}})).status).to.equal(401);
-      expect((await fetch(`${url}/osd/batch-runs?counts=1`)).status).to.equal(401);
-      expect((await (await fetch(`${url}/osd/batch-runs?counts=1`, {headers: auth})).json()).counts)
+      expect((await fetch(`${url}/osd/job-counts`)).status).to.equal(401);
+      expect((await (await fetch(`${url}/osd/job-counts`, {headers: auth})).json()).counts)
         .to.deep.equal({running: 0, queued: 0});
-      expect((await fetch(`${url}/osd/batch-runs?counts=1&limit=1`, {headers: auth})).status).to.equal(400);
+      expect((await fetch(`${url}/osd/job-counts?limit=1`, {headers: auth})).status).to.equal(400);
       const listed = await fetch(`${url}/osd/batch-runs?limit=1`, {headers: auth});
       expect(listed.status).to.equal(200);
       expect(listed.headers.get("cache-control")).to.equal("no-store");
@@ -615,7 +644,7 @@ describe("durable one-shot batch runs", function () {
         active.enqueue({program: "ZGG_EX_012", generation: "test-generation"});
         active.claimNext();
       } finally { active.close(); }
-      expect((await (await fetch(`${url}/osd/batch-runs?counts=1`, {headers: auth})).json()).counts)
+      expect((await (await fetch(`${url}/osd/job-counts`, {headers: auth})).json()).counts)
         .to.deep.equal({running: 1, queued: 1});
       writeFileSync(join(dir, "batch-output", `${run.id}.json`), "tampered");
       expect((await fetch(`${url}/osd/batch-runs?id=${run.id}&output=1`, {headers: auth})).status).to.equal(500);
