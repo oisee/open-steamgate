@@ -112,6 +112,7 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS identity
       RETURNING VALUE(rs_identity) TYPE ty_identity
       RAISING   zcx_osd_adt.
+    CLASS-METHODS one_runtime RETURNING VALUE(rv_on) TYPE abap_bool.
   PRIVATE SECTION.
     CLASS-METHODS parse
       IMPORTING iv_what        TYPE string
@@ -121,6 +122,10 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 
 CLASS zcl_osd_adt_host IMPLEMENTATION.
+  METHOD one_runtime.
+    " The serving child installs this binding; a parent kernel never does.
+    WRITE '@KERNEL rv_on.set(abap.context.RFCDestinations.STORE?.localSystem ? "X" : "");'.
+  ENDMETHOD.
 
   METHOD require.
     DATA ls_answer TYPE ty_answer.

@@ -153,6 +153,18 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
                        iv_handler = `ZCL_OSD_ADT_VERSIONS` CHANGING ct_routes = rt_routes ).
       ENDIF.
     ENDLOOP.
+    IF zcl_osd_adt_host=>one_runtime( ) = abap_true.
+      add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/datapreview/freestyle`
+                     iv_handler = `ZCL_OSD_ADT_FREESTYLE` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/datapreview/ddic/:name/metadata`
+                     iv_handler = `ZCL_OSD_ADT_PREVIEW` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/datapreview/ddic`
+                     iv_handler = `ZCL_OSD_ADT_PREVIEW` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/datapreview/cds/:name/metadata`
+                     iv_handler = `ZCL_OSD_ADT_PREVIEW` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/datapreview/cds`
+                     iv_handler = `ZCL_OSD_ADT_PREVIEW` CHANGING ct_routes = rt_routes ).
+    ENDIF.
 *   everything else is still the Node facade's, until its group moves
     add( EXPORTING iv_method = `*` iv_pattern = `/sap/bc/adt/*` iv_served_by = c_host
          CHANGING ct_routes = rt_routes ).
