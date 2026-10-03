@@ -3,6 +3,7 @@ import {databasePath} from "../tools/osd-persist.mjs";
 import {dialogStep, lockedClient} from "../tools/osd-dialog-step.mjs";
 import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import express from "express";
+import {StoreDestination} from "../tools/osd-store-destination.mjs";
 import {existsSync} from "node:fs";
 import {generatorFoldersOf, tilesOf, webappsOf} from "../tools/osd-packs.mjs";
 import {packApplications} from "../tools/osd-bsp-registry.mjs";
@@ -218,6 +219,11 @@ export function startServer(quiet) {
     : undefined;
   if (runtime !== undefined && adtKernel !== undefined) {
     (runtime.primary ?? runtime).adtSnapshot = parentAdtSnapshot;
+  }
+  if (runtime !== undefined && process.env.OSD_ADT_ONE_RUNTIME === "1") {
+    for (const worker of runtime.runtimes ?? [runtime]) {
+      worker.storeDestination = new StoreDestination({store});
+    }
   }
   const data = MODE === "child"
     ? new Data({root: process.cwd(), runtime})

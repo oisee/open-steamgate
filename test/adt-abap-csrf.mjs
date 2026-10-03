@@ -11,6 +11,9 @@
 // session's lookup rules; so the token itself is compared by shape, never by
 // value, and the session's own contract is the implementation's test, not
 // this one. What is compared byte for byte is the gate's answer.
+import {remoteForTest} from "./helpers/adt-remote.mjs";
+import {RemoteSessions} from "../tools/adt-remote-sessions.mjs";
+import {abapFront, abapRunner} from "../tools/adt-abap-front.mjs";
 import {expect} from "chai";
 import express from "express";
 import {request as httpRequest} from "node:http";
@@ -84,6 +87,8 @@ describe("ADT façade in ABAP: the CSRF gate against the Node middleware", funct
   let handler;
   let identity;
   let double;
+  let remoteRuntime;
+  let remoteSessions;
   const servers = [];
 
   before(async () => {
@@ -105,7 +110,13 @@ describe("ADT façade in ABAP: the CSRF gate against the Node middleware", funct
     double = await new mem().constructor_();
     await handler.use_session({io_session: double});
     const abapApp = express();
-    abapApp.use(BASE, async (req, res) => {
+    if (process.env.OSD_ADT_ONE_RUNTIME === "1") {
+      remoteRuntime = await remoteForTest();
+      remoteSessions = new RemoteSessions(remoteRuntime, {});
+      abapApp.use(BASE, abapFront({...abapRunner({remote: remoteRuntime}), sessions: remoteSessions,
+        system: kind => kind === "IDENTITY" ? identity : undefined,
+        refuse: (res, status, type, message) => res.status(status).send(message)}));
+    } else abapApp.use(BASE, async (req, res) => {
       const url = req.originalUrl;
       const view = {method: req.method, headers: req.headers, url, path: url.split("?")[0], body: await bodyOf(req)};
       await withSystem((kind) => (kind === "IDENTITY" ? identity : undefined),
@@ -121,6 +132,7 @@ describe("ADT façade in ABAP: the CSRF gate against the Node middleware", funct
     // the mixed phase, where the Node middleware gates
     await handler?.use_session({});
     for (const server of servers) await new Promise((resolve) => server.close(resolve));
+    await remoteRuntime?.stop();
     rmSync(root, {recursive: true, force: true});
   });
 
@@ -257,6 +269,8 @@ describe("ADT façade in ABAP: the CSRF gate against the Node middleware", funct
       // a session that ended, with its old cookie and token
       if (side === "node") {
         await call(server, "GET", "/sap/public/bc/icf/logoff", {cookie: mine.cookie});
+      } else if (remoteSessions !== undefined) {
+        await remoteSessions.end(mine.cookie.split("=")[1].split(";")[0]);
       } else {
         await double["zif_osd_adt_session$end"]({iv_id: mine.cookie.split("=")[1].split(";")[0]});
       }
@@ -275,7 +289,7 @@ describe("ADT façade in ABAP: the CSRF gate against the Node middleware", funct
     const expected = await call(node, "GET", SYSINFO, {"x-csrf-token": "fetch"});
     const actual = await call(abap, "GET", SYSINFO, {"x-csrf-token": "fetch"});
     expect(expected.cookies).to.have.length(2);
-    expect(actual.cookies).to.have.length(1);
-    expect(actual.cookies[0]).to.match(/^SAP_SESSIONID_OSD_001=[0-9a-f]{24}; Path=\/; HttpOnly; SameSite=Strict$/);
+    expect(actual.cookies).to.have.length(remoteRuntime === undefined ? 1 : 2);
+    expect(actual.cookies.find(c => c.startsWith("SAP_SESSIONID_"))).to.match(/^SAP_SESSIONID_OSD_001=[0-9a-f]{24}; Path=\/; HttpOnly; SameSite=Strict$/);
   });
 });

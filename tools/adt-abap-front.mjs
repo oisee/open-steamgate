@@ -27,6 +27,7 @@
 // the Node façade answers one -- the ADT exception document, 500,
 // ExceptionInternalError in our namespace -- for every request, a HOST row
 // included: no session was resolved, so nothing may go past the gate.
+import {remoteStep} from "./adt-remote-step.mjs";
 import {withSystem} from "./osd-store-destination.mjs";
 
 export const HANDLER = "ZCL_OSD_ADT_HANDLER";
@@ -184,19 +185,26 @@ export function abapRunner({handler, step, stale, remote}) {
     return {
       remote: runtime,
       async execute(view, req, options) {
-        await runtime.ensure();
         const {body, ...request} = view;
-        const response = await fetch(`${runtime.url}/osd/adt-step`, {
-          method: "POST", headers: {"content-type": "application/json"},
-          body: JSON.stringify({view: request, bodyHex: body.toString("hex"),
-            identity: options.sessions.identity}),
-        });
-        const result = await response.json();
-        if (!response.ok) throw Object.assign(new Error(result.error?.message ?? "ADT step failed"), {code: result.error?.code});
-        if (result.adt !== undefined) req.adt = {...result.adt, sessions: options.sessions,
-          session: result.adt.session === undefined ? undefined : {...result.adt.session,
-            locks: new Map(result.adt.session.locks)}};
-        return {...result.record, body: Buffer.from(result.record.body, "utf8")};
+        const context = (runtime.adtContextSeq = (runtime.adtContextSeq ?? 0) + 1);
+        runtime.adtContexts ??= new Map();
+        runtime.adtContexts.set(context, {store: options.store,
+          system: (kind, name, json) => options.system(kind, name, req, json)});
+        try {
+          let systemIdentity, identityError;
+          try {
+            const identity = await options.system?.("IDENTITY", "", req, "");
+            if (identity !== undefined) systemIdentity = JSON.parse(JSON.stringify(identity));
+          } catch (error) { identityError = String(error.message ?? error); }
+          const response = await remoteStep(runtime, {view: request, bodyHex: body.toString("hex"),
+            identity: options.sessions.identity, context, systemIdentity, identityError});
+          const result = await response.json();
+          if (!response.ok) throw Object.assign(new Error(result.error?.message ?? "ADT step failed"), {code: result.error?.code});
+          if (result.adt !== undefined) req.adt = {...result.adt, sessions: options.sessions,
+            session: result.adt.session === undefined ? undefined : {...result.adt.session,
+              locks: new Map(result.adt.session.locks)}};
+          return {...result.record, body: Buffer.from(result.record.body, "utf8")};
+        } finally { runtime.adtContexts.delete(context); }
       },
     };
   }

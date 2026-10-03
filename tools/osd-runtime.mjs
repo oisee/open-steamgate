@@ -19,6 +19,7 @@
 // Every instance is (a source tree, a port, a database) and nothing here
 // assumes there is one of them. Two of these can run side by side over two
 // worktrees, which is what a branch under test would be.
+import {attachStoreIPC} from "./osd-store-ipc.mjs";
 import {spawn} from "node:child_process";
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
@@ -489,6 +490,7 @@ export class ServingRuntime {
           });
         }
       });
+      if (process.env.OSD_ADT_ONE_RUNTIME === "1" || this.env.OSD_ADT_ONE_RUNTIME === "1") attachStoreIPC(child, this);
       reapOnExit();
       CHILDREN.add(child);
 

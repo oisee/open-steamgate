@@ -622,7 +622,7 @@ export function adtRouter(options = {}) {
     throw new Error("the ABAP front resolves its sessions in ABAP: pass AbapSessions, or no sessions");
   }
   const sessions = options.sessions ?? (options.abap === undefined ? new Sessions()
-    : options.abap.remote !== undefined ? new RemoteSessions(options.abap.remote, {identity})
+    : options.abap.remote !== undefined ? new RemoteSessions(options.abap.remote, {identity: {systemID: identity.systemID, client: identity.client}})
     : new AbapSessions({identity: {systemID: identity.systemID, client: identity.client}}));
 
   const data = options.data ?? store.data();

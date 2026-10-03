@@ -4,6 +4,14 @@ Base: origin/main `e359bcf5`, mainly `tools/adt-facade.mjs` (3097 lines) and `to
 
 ## 1. Summary
 
+**A destination runs where its resource lives.** With the opt-in
+`OSD_ADT_ONE_RUNTIME=1`, STORE and build/store/supervisor SYSTEM kinds run
+in the parent through process IPC. SQL, SQLCHECK, CLASSRUN, DUMP, XREF and
+child database/session facts run in the primary serving child. Publication
+runs as a parent continuation after the child step ends, because it can
+recycle that child. See [B1](one-runtime-b1.md) and
+[B2](one-runtime-b2.md) for the contracts, proofs and measurements.
+
 ### Counting rule
 
 - A **route row** is one (method, path pattern, handler).

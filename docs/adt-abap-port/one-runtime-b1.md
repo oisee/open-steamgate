@@ -12,6 +12,9 @@ AbapSessions and calls ANSWER in one dialog step. The parent replays the
 record and runs HOST continuations after that step. A pool uses its primary.
 The door is 404 with the switch off and rejects malformed input with 400.
 
+The resource bridge and completed acceptance results are in
+[B2](one-runtime-b2.md); the remote front needs both slices for STORE routes.
+
 During the mixed ABAP/Node port, the same door also accepts a view with
 `sessionCall` and JSON `args` for the remaining Node session operations.
 They run in the child's FIFO; this compatibility is necessary when the

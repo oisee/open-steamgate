@@ -85,10 +85,14 @@ try {
 /** Run work with `answers` ((kind, name, json) => value; throw to refuse) bound
  *  as the SYSTEM answers of every STORE call it makes, and `store` (the
  *  facade instance's ObjectStore, port-map risk 12) for every STORE command. */
-export function withSystem(answers, work, {store} = {}) {
+export function withSystem(answers, work, {store, deferActivate} = {}) {
   if (systemCalls === undefined) throw new Error("SYSTEM needs an async context (Node or Bun)");
-  return systemCalls.run({answers, store: store ?? systemCalls.getStore()?.store}, work);
+  const inherited = systemCalls.getStore();
+  return systemCalls.run({answers, deferActivate: deferActivate ?? inherited?.deferActivate,
+    store: store ?? inherited?.store}, work);
 }
+
+export const currentSystemAnswers = () => systemCalls?.getStore()?.answers;
 
 export class StoreDestination {
   /**
@@ -129,18 +133,17 @@ export class StoreDestination {
     return this.store;
   }
 
-  async call(name, signature) {
-    const command = givenText(signature, "IV_COMMAND", "LIST").toUpperCase();
+  async execute(parameters) {
+    const signature = {exporting: parameters};
     let answer;
-    try {
-      answer = await this.#answer(command, signature);
-    } catch (error) {
-      answer = refusal(error);
-    }
-    // EV_ERROR remains for existing screens; ADT consumes the typed envelope.
+    try { answer = await this.#answer(givenText(signature, "IV_COMMAND", "LIST").toUpperCase(), signature); }
+    catch (error) { answer = refusal(error); }
     if (answer.EV_ERROR && !answer.EV_JSON) answer = {...answer, ...refusal(answer.EV_ERROR)};
-    fill(signature, {...EMPTY, ...answer});
-    return undefined;
+    return {...EMPTY, ...answer};
+  }
+
+  async call(name, signature) {
+    fill(signature, await this.execute(signature.exporting ?? signature.EXPORTING ?? {}));
   }
 
   async #answer(command, signature) {
@@ -260,7 +263,7 @@ export class StoreDestination {
   }
 
   async #system(kind, name, json) {
-    if (SYSTEM_KINDS.includes(kind) === false) {
+    if (SYSTEM_KINDS.includes(kind) === false && !["BUILD", "CHANGED", "GIT", "SERVING", "SUPERVISOR", "WARM", "SQL", "SQLCHECK", "CLASSRUN", "DUMP", "XREF", "SERVICES", "TRANSACTIONS"].includes(kind)) {
       return {EV_ERROR: `unknown SYSTEM kind ${kind || "(none)"}`};
     }
     const bound = systemCalls?.getStore();
@@ -467,29 +470,37 @@ export class StoreDestination {
     // fourteen. So no number is right for both, and a screen that says
     // "activated" while it has just rewritten the MPC and DPC of a service
     // nobody opened is hiding the part worth seeing.
-    const before = snapshotOf(join(store.root, "gen"));
-    const published = await store.publish({activate: [{type, name}]});
-    const committed = published?.ok !== false && store.completeActivation(result, published?.transpile?.built);
-    const regenerated = changedSince(before, join(store.root, "gen"));
-    const objects = [
-      ...regenerated.written.map((path) => generatedRow(path, "generated")),
-      ...regenerated.removed.map((path) => generatedRow(path, "removed")),
-    ];
-    return {
-      EV_ACTIVE: committed ? "X" : "",
-      EV_LIVE: committed && published?.recycled === true ? "X" : "",
-      EV_NOTE: published?.ok === false
-        ? `the check held and the build did not: ${published?.transpile?.error ?? "no reason given"}`
-        : !committed ? "source changed during activation; check and activate again"
-        : `${published?.recycled === true
-          ? `built and live (generation ${published?.generation ?? "?"})`
-          : "built, and the process serving this screen still runs the code it started with -- it is replaced when it is next restarted"}`
-          + (objects.length === 0 ? "" : `; ${objects.length} generated object${objects.length === 1 ? "" : "s"} rewritten`),
-      EV_COUNT: "0",
-      EV_MS: String(Date.now() - started),
-      ET_ISSUE: [],
-      ET_OBJECT: objects,
+    const publish = async () => {
+      const before = snapshotOf(join(store.root, "gen"));
+      const published = await store.publish({activate: [{type, name}]});
+      const committed = published?.ok !== false && store.completeActivation(result, published?.transpile?.built);
+      const regenerated = changedSince(before, join(store.root, "gen"));
+      const objects = [
+        ...regenerated.written.map((path) => generatedRow(path, "generated")),
+        ...regenerated.removed.map((path) => generatedRow(path, "removed")),
+      ];
+      return {
+        EV_ACTIVE: committed ? "X" : "",
+        EV_LIVE: committed && published?.recycled === true ? "X" : "",
+        EV_NOTE: published?.ok === false
+          ? `the check held and the build did not: ${published?.transpile?.error ?? "no reason given"}`
+          : !committed ? "source changed during activation; check and activate again"
+          : `${published?.recycled === true
+            ? `built and live (generation ${published?.generation ?? "?"})`
+            : "built, and the process serving this screen still runs the code it started with -- it is replaced when it is next restarted"}`
+            + (objects.length === 0 ? "" : `; ${objects.length} generated object${objects.length === 1 ? "" : "s"} rewritten`),
+        EV_COUNT: "0",
+        EV_MS: String(Date.now() - started),
+        ET_ISSUE: [],
+        ET_OBJECT: objects,
+      };
     };
+    const defer = systemCalls?.getStore()?.deferActivate;
+    if (defer !== undefined) {
+      defer(publish);
+      return {EV_ACTIVE: "X", EV_LIVE: "", EV_NOTE: "live after the step", EV_COUNT: "0", EV_MS: String(Date.now() - started)};
+    }
+    return publish();
   }
 }
 

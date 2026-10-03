@@ -428,3 +428,37 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     });
   });
 });
+
+// The local tests above intentionally inject faults into the local class
+// slots. This checks the same front seam over the real serving-child door.
+describe("ADT front: remote continuation stays in the parent", function () {
+  this.timeout(60000);
+  let runtime, server;
+  before(async () => {
+    const {remoteForTest} = await import("./helpers/adt-remote.mjs");
+    runtime = await remoteForTest();
+    const response = await fetch(runtime.url + "/osd/classrun", {method: "POST",
+      headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_FRONT_PROBE"})});
+    expect((await response.json()).ok).to.equal(true);
+    const app = express();
+    app.use(adtRouter({store: new ObjectStore({root: process.cwd()}), data: {}, watch: false, logMisses: false,
+      abap: abapRunner({remote: runtime})}).router);
+    server = await new Promise(resolve => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+  });
+  after(async () => { if (server) await new Promise(r => server.close(r)); await runtime?.stop(); });
+  it("replays both cookies and runs the HOST echo continuation after the child step", async () => {
+    const url = `http://127.0.0.1:${server.address().port}`;
+    const login = await fetch(url + BASE + "/core/discovery", {headers: {"x-csrf-token": "fetch"}});
+    const cookie = login.headers.getSetCookie().map(c => c.split(";")[0]).join("; ");
+    const response = await fetch(url + BASE + "/osd/test/continuation", {method: "POST",
+      headers: {cookie, "x-csrf-token": login.headers.get("x-csrf-token")}});
+    expect(response.status).to.equal(200);
+    expect((await response.json()).kind).to.equal("echo");
+    expect(response.headers.get("x-osd-served-by")).to.equal("HOST");
+    // A new child step can run: the continuation did not keep the FIFO.
+    const probe = await fetch(runtime.url + "/osd/classrun", {method: "POST",
+      headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_ENQ_PROBE"})});
+    expect((await probe.json()).ok).to.equal(true);
+    expect(login.headers.getSetCookie()).to.have.length(2);
+  });
+});

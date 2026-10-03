@@ -173,11 +173,8 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     }
   });
 
-  it("the ADT front runs in this process, and a lock outlives the serving child", async () => {
-    // slice 3, option B in the workbench shape: the parent loads the ADT
-    // kernel (tools/adt-abap-kernel.mjs), so every ADT request enters
-    // ZCL_OSD_ADT_HANDLER here, and the sessions and their locks live here,
-    // where a recycle of the child does not reach them
+  it("the ADT front shares the child database and ENQ table, and a lock outlives a recycle", async () => {
+    // B1/B2: the child owns the front, session rows and lock table.
     const logon = async (user) => {
       const res = await fetch(`${ADT}/core/discovery`, {method: "HEAD", headers: {"x-csrf-token": "fetch",
         "x-sap-adt-sessiontype": "stateful", authorization: "Basic " + Buffer.from(`${user}:x`).toString("base64")}});
@@ -195,6 +192,15 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     expect(locked.status, await locked.clone().text()).to.equal(200);
     expect(locked.headers.get("x-osd-served-by")).to.equal("ABAP");
     const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
+    const readRows = async (sql) => {
+      const response = await fetch(`${BASE}/osd/sql`, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({sql})});
+      expect(response.status).to.equal(200);
+      return (await response.json()).rows;
+    };
+    expect((await readRows("SELECT handle FROM zosd_adt_shdl")).map(r => r.handle)).to.include(handle);
+    expect((await readRows("SELECT id FROM zosd_adt_sess")).length).to.be.greaterThan(0);
+    const firstProbe = await fetch(`${BASE}/osd/classrun`, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_ENQ_PROBE"})});
+    expect((await firstProbe.json()).text.trim(), "the first child already sees ADT's one lock").to.equal("1");
     // Start it explicitly so this case also runs alone for its red proof.
     expect((await fetch(`${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`)).status).to.equal(200);
     // the serving child goes away and comes back
