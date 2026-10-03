@@ -11,8 +11,9 @@ and activation (A6/A7), git (A8b), ABAP Unit runs (C2b), unit/object/run
 No new continuation routes are planned. See [port-plan.md](port-plan.md)
 for the current slices: B2a, B2b, A1, A2, A3a, A3b, A8a, A9 and A10.
 Done means `PORT_PENDING` is empty and the coverage checks still pass;
-`HOST_ALLOWED` is permanent scope, not a port queue. The gate currently
-records 56 pending document registrations and 31 host registrations.
+`HOST_ALLOWED` is permanent scope, not a port queue. The gate's own summary
+line (`test/adt-abap-coverage.mjs`) prints the current pending, ABAP and host
+counts; at variant C's start it held 56 pending and 31 host registrations.
 
 **A destination runs where its resource lives.** With the opt-in
 `OSD_ADT_ONE_RUNTIME=1`, STORE and build/store/supervisor SYSTEM kinds run
