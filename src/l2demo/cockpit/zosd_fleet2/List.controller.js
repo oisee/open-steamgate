@@ -1,6 +1,6 @@
 sap.ui.define(["sap/ui/core/Fragment", "sap/m/MessageToast", "sap/m/MessageBox", "sap/m/MessageStrip", "sap/ui/model/json/JSONModel",
-  "l3/fleet2/Cockpit.controller"],
-function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit) {
+  "l3/fleet2/Cockpit.controller", "l3/fleet2/Live"],
+function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit, Live) {
   "use strict";
   var config = {
    "service": "ZL3C_FLEET2_SRV",
@@ -212,7 +212,13 @@ function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit) 
       if (this.strip.getParent()) return;
       var pages = this.getView().findAggregatedObjects(true, function (c) {return c.isA("sap.f.DynamicPage");});
       if (pages.length) {this.page = pages[0]; this.page.getHeader().addContent(this.strip);}
+      // the list's refresh button is the object page's, without the Live switch
+      var self = this, view = this.getView(), title = this.page && this.page.getTitle();
+      this.live = new Live({id: function (name) {return view.createId(name);}, text: this.text.bind(this), live: false,
+        refresh: function () {return self.refresh();}});
+      if (title && title.insertAction) this.live.controls.slice().reverse().forEach(function (c) {title.insertAction(c, 0);});
     },
+    onExit: function () {if (this.live) this.live.destroy();},
     app: Cockpit.app,
     memo: Cockpit.memo,
     initTexts: Cockpit.initTexts,
@@ -223,7 +229,11 @@ function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit) 
       this.strip.setText(this.human(answer)).setVisible(true);
       if (this.page) this.page.setHeaderExpanded(true);
     },
-    refresh: function () {this.getView().getModel().refresh(true);},
+    refresh: function () {
+      var table = this.getView().findAggregatedObjects(true, function (c) {return c.isA("sap.ui.comp.smarttable.SmartTable");})[0];
+      if (table) table.rebindTable(true);
+      return Promise.resolve();
+    },
     // the start dialog: a date, how the piles run, the twin when the set has one
     askStartRun: function () {
       var self = this, view = this.getView();

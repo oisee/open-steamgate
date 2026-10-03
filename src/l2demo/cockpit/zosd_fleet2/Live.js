@@ -53,11 +53,13 @@ sap.ui.define(["sap/m/Button", "sap/m/Switch", "sap/m/Label", "sap/m/Text"], fun
     if (this.busy) return this.busy;
     this.busy = Promise.resolve(this.spec.refresh()).catch(function () {}).then(function () {
       self.busy = false;
-      self.stamp.setText(self.spec.text("updated") + " " + clock(new Date()));
+      self.mark();
       if (self.isOn() && self.spec.final && self.spec.final()) self.set(false);
     });
     return this.busy;
   };
+  // "updated hh:mm:ss": when the page last read what it shows
+  Live.prototype.mark = function () {this.stamp.setText(this.spec.text("updated") + " " + clock(new Date()));};
   Live.prototype.destroy = function () {
     clearTimeout(this.timer);
     this.controls.forEach(function (c) {c.destroy();});

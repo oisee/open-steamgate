@@ -399,6 +399,18 @@
    "template_line": 66,
    "node": "set/fleet2/cockpit",
    "set_line": 104
+  },
+  {
+   "line": 67,
+   "template_line": 67,
+   "node": "set/fleet2/cockpit",
+   "set_line": 104
+  },
+  {
+   "line": 68,
+   "template_line": 68,
+   "node": "set/fleet2/cockpit",
+   "set_line": 104
   }
  ]
 }
