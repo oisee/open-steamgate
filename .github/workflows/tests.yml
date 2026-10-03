@@ -256,9 +256,16 @@ jobs:
       # "passed" here and "passed" on a workstation are different claims
       # that say which they are.
       - name: The suites, shard ${{ matrix.shard }}/4
-        run: node tools/osd-suites.mjs --report-skips --shard "${{ matrix.shard }}/4"
+        run: node tools/osd-suites.mjs --report-skips --shard "${{ matrix.shard }}/4" --timings suite-results/timings.json --report suite-results/flaky.md
         env:
           STG_PORT: "3030"
+      - name: Upload suite timings and retry report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suite-results-${{ matrix.shard }}
+          path: suite-results/
+          if-no-files-found: warn
 
   packaging:
     needs: build
@@ -449,12 +456,25 @@ jobs:
       actions: read
       pull-requests: write
     steps:
+      - name: Download shard retry reports
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: suite-results-*
+          path: suite-results
       - name: Update one PR comment with this run's jobs
         uses: actions/github-script@v7
         env:
           GATE_RESULT: ${{ needs.test.result }}
         with:
           script: |
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const reports = fs.existsSync('suite-results')
+              ? fs.readdirSync('suite-results').sort().flatMap((dir) => {
+                  const file = path.join('suite-results', dir, 'flaky.md');
+                  return fs.existsSync(file) ? [fs.readFileSync(file, 'utf8').trim()].filter(Boolean) : [];
+                }) : [];
             const marker = '<!-- osd-pr-test-report -->';
             const icon = (v) => v === 'success' ? '🟢 pass' : v === 'failure' ? '🔴 fail' : v === 'cancelled' ? '⚫ cancelled' : v === 'skipped' ? '⚪ skipped' : '⚪ ' + (v || 'not run');
             const { owner, repo } = context.repo;
@@ -474,7 +494,9 @@ jobs:
               '| --- | --- | --- |',
               ...rows,
               '',
-              'The preview deployment, the gogen inventory and the leak scan are separate workflows and report as their own checks.',
+              ...reports,
+              '',
+              'Required merge checks: test + scan. Docker, gogen, preview, size and queue are advisory on PRs (Alice, 2026-10-03).',
             ].join('\n');
             const issue_number = context.issue.number;
             const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });

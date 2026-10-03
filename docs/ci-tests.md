@@ -56,7 +56,7 @@ The tar preserves `build/live` and `output` symlinks and executable bits, which 
 
 Each feature fragment in `test/suites.d/*.json` has a `files` array; `vscode.json` also lists `test/vscode-vsix-packaging.mjs` under `groups.packaging`. `loadSuites()` in `tools/osd-suites.mjs` merges fragments and sorts both ordinary and grouped suite paths alphabetically before returning `{files, groups}` to the runner and Go parity. This intentionally changes execution order once. CI will surface hidden order dependencies, including ones like the earlier `apc-timers`/`adt-facade` trap. `node tools/osd-suites.mjs` and all `--shard i/4` runs select only `files` and print the groups omitted. `node tools/osd-suites.mjs --group packaging` runs exactly the packaging file. The list drift check covers both arrays, while `--list-shard i/4` remains the ordinary file list.
 
-To add another group, add its test file under `groups.<name>` in `test/suites.d/*.json`, give it a measured weight in `test/suite-timings.json`, and add a CI job or step that runs `--group <name>` with an explicit gate. Every new `test/*.mjs` suite must appear in `files` or a group. Use the prefix placement table in `test/suites.d/README.md`; `node tools/osd-suites.mjs --check` reports a suggested fragment for each unlisted suite.
+To add another group, add its test file under `groups.<name>` in `test/suites.d/*.json`, give it a measured weight in `test/suites.timings.json`, and add a CI job or step that runs `--group <name>` with an explicit gate. Every new `test/*.mjs` suite must appear in `files` or a group. Use the prefix placement table in `test/suites.d/README.md`; `node tools/osd-suites.mjs --check` reports a suggested fragment for each unlisted suite.
 
 ## Build and browser caches
 
@@ -64,9 +64,54 @@ The `tests` build job and `preview` job share an `actions/cache` entry for `../t
 
 The `tests` and `preview` browser jobs share `~/.cache/ms-playwright` through a `chromium-v1` key containing the runner OS and the installed `@playwright/test` version read from `package-lock.json`. A hit runs `npx playwright install-deps chromium` for uncached system packages; a miss runs `npx playwright install --with-deps chromium`. A Playwright version change creates a new key. To force a browser download, increment `chromium-v1` in both workflows. `release.yml` does not install Playwright, so it has no browser cache.
 
-`tools/osd-suites.mjs --shard i/4` sorts files by measured wall time, longest first, then gives each file to the shard with the smallest assigned total. Ties use path order, so assignments are stable; each shard runs its assigned files alphabetically. The alphabetical change kept all 186 ordinary suites in the same four shard memberships (45/46/47/48 files) at the same estimated weights (140.09184/140.09178/140.09193/140.09178 seconds); execution order within each shard changes. A suite without a timing gets the median measured time and still runs. `--list-shard i/4` prints the assignment without running Mocha. Every invocation checks the complete `test/suites.d/*.json` against files on disk before selecting a shard, and `--report-skips` still names optional inputs absent on that runner. The ordinary list never contains the packaging group. Scheduled, manual, tag and packaging changes select the full profile, which runs that group in its own job.
+## Balanced shards and visible retries (2026-10-03)
 
-To refresh the ordinary weights after building the tree and choosing a free port, run `STG_PORT=<free-port> node tools/osd-suites.mjs --timings test/suite-timings.json`. Run the complete ordinary list, without `--grep` or `--shard`. Measure a named group separately with `node tools/osd-suites.mjs --group packaging --timings <temporary-file>` and copy its weight into the timing file. The reporter records each file's elapsed wall time including its hooks and inter-file overhead. Commit the new JSON and update the table below. These are local relative weights, not a CI wall-time prediction; runner load, profiles and suite interactions can change them.
+`--shard i/4` assigns whole files longest first to the least-loaded shard using
+`test/suites.timings.json` (file → seconds). Ties use path/shard index; missing
+or invalid weights get the median (one second for an empty seed). Files execute
+alphabetically in one process, preserving the existing loader order. There is
+no `test/suites.json` or co-process/order constraint in the fragments. The
+complete manifest drift check still runs before selecting a shard or group.
+
+Seed: `gh run view 37148565297 --log`, the latest green `tests` run available
+on 2026-10-03, commit `3979272e`. Top-level spec titles, including engine-specific
+titles, map to all 273 ordinary files. Durations sum log timestamp differences
+from each title to the next top-level title or final passing line, including
+hooks/inter-file work but excluding initial import/startup. No local full-suite
+measurement was used. Four shards predict **12.03 min each**; five predict
+9.62 min each, both totaling 48.12 execution minutes. We retain four because
+five adds another runner's npm/install/restore cost. These are timing weights,
+not guaranteed CI elapsed times. The older `test/suite-timings.json` is historical.
+
+Each shard uploads `suite-results-<index>` with first-run `timings.json` and
+`flaky.md`, even on failure. Download and refresh the committed weights:
+
+```sh
+gh run download <run-id> --pattern 'suite-results-*' --dir <download-dir>
+node tools/osd-suites-timings.mjs test/suites.timings.json <download-dir>/suite-results-*/timings.json
+```
+
+Partial downloads preserve unmeasured weights; multiple samples use their median.
+Retries never replace first-run weights. Local runs can write the same artifacts
+with `--timings <artifact.json> --report <flaky.md>`.
+
+After a failed shard, up to three distinct failing files each run once in a
+fresh Mocha process; test-level retries are forced to zero. More than three
+failing files means no retries. A second failure, crash, missing/incomplete
+failure report or unattributed failure stays red. Isolation recoveries keep the
+shard green and write this line to `$GITHUB_STEP_SUMMARY` and the PR comment:
+
+```text
+- flaky / order-dependent: `test/example.mjs` — persistence restores rows (passed once in isolation)
+```
+
+The label flags possible order dependence: isolation success cannot distinguish
+an ordering dependency from a transient flake. Investigate recurring lines.
+PR comments retain the existing same-repository restriction.
+
+Alice's merge policy (2026-10-03): **required checks are `test` + `scan` only**.
+Docker, gogen, preview, size and queue are advisory on PRs. This slice leaves
+the `test` rollup's own required jobs unchanged.
 
 ### Per-file integration timing, 2026-09-29
 
