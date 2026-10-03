@@ -18,7 +18,7 @@ import {basename, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DatabaseSync} from "node:sqlite";
 import {checkSet, compileSet, renderSet, SetError, unitFindings} from "../tools/dsl-l3.mjs";
-import {alertText, closes, configOf, draw, predictPile, precedence, sinkSafety, start} from "../tools/dsl-l3-sim.mjs";
+import {alertText, chaosOf, closes, configOf, draw, predictPile, precedence, sinkSafety, start} from "../tools/dsl-l3-sim.mjs";
 import {lowerNarrowSubmit} from "../tools/osd-narrow-submit.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
 
@@ -71,6 +71,8 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       expect(text, `the set has ${JSON.stringify(from)}`).to.include(from);
       text = text.replace(from, to);
     }
+    // a variant that replaces the simulate: block has no profiles to choose from
+    if (!/^  profiles:/m.test(text)) text = text.replace("simulate.profile, ", "");
     text = text.replace(/rule: ([a-z_]+\.l2\.yaml)/g, (m, f) => `rule: ${relative(dir, join(process.cwd(), OUT, f)).split(sep).join("/")}`);
     const file = join(dir, "fleet2.l3.yaml");
     writeFileSync(file, text);
@@ -88,7 +90,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
   const STRIPPED = SET_TEXT.replace(/^cockpit:.*\n/m, "").replace(/^simulate:\n(  .*\n)+/m, "")
     .replace("  work:\n    kind: work\n    variants:\n      real: generated\n      sim: generated\n", "")
     .replace("      sim: generated\n", "").replace("  work: real\n", "")
-    .replace(/^# Slice 5d[^\n]*\n(#[^\n]*\n)*?(?=# `node)/m, "").replace(", simulate.seed, simulate.time_scale, piles", ", piles");
+    .replace(/^# Slice 5d[^\n]*\n(#[^\n]*\n)*?(?=# `node)/m, "").replace(/, simulate\.[a-z_]+/g, "");
 
   describe("the manifest", () => {
     it("the committed fleet2 is a fresh build, and the one-stage fleet without simulate: is too", async () => {
@@ -286,7 +288,9 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
     it("seed and time scale are run-scoped settings; their defaults are the manifest's", () => {
       const entries = model.settings.entries.filter((e) => e.name.startsWith("simulate."));
       expect(entries.map((e) => [e.name, e.default, e.min, e.max, e.scoped])).to.deep.equal([
-        ["simulate.seed", "42", "1", "2147483646", true], ["simulate.time_scale", "10000", "0", "1000000", true]]);
+        ["simulate.seed", "42", "1", "2147483646", true], ["simulate.time_scale", "10000", "0", "1000000", true],
+        ["simulate.profile", "default", "1", "20", true], ["simulate.dump", "-1", "-1", "1000", true], ["simulate.hang", "-1", "-1", "1000", true],
+        ["simulate.slow", "-1", "-1", "1000", true], ["simulate.hits_mean", "-1", "-1", "100", true], ["simulate.autoclose", "-1", "-1", "1000", true]]);
     });
   });
 
@@ -622,9 +626,20 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
     }
 
     // ---- the generator: what the ABAP draws, the JavaScript twin draws -------
+    // the chaos of a run as the work interface types it (ty_chaos): nothing set is the manifest's own draw
+    const chaosType = () => new abap.types.Structure({profile: new abap.types.Character(20), outcome_set: new abap.types.Character(1),
+      slow: new abap.types.Integer(), dump: new abap.types.Integer(), hang: new abap.types.Integer(), hits_set: new abap.types.Character(1),
+      hits_mean: new abap.types.Integer(), close_set: new abap.types.Character(1), close: new abap.types.Integer()});
+    const chaosOfJs = (c = {}) => {
+      const s = chaosType(), g = s.get();
+      g.profile.set(c.profile ?? ""); g.outcome_set.set(c.outcome_set ? "X" : " "); g.slow.set(c.slow ?? 0); g.dump.set(c.dump ?? 0); g.hang.set(c.hang ?? 0);
+      g.hits_set.set(c.hits_set ? "X" : " "); g.hits_mean.set(c.hits_mean ?? 0); g.close_set.set(c.close_set ? "X" : " "); g.close.set(c.close ?? 0);
+      return s;
+    };
     const pileOf = (p) => {
       const s = new abap.types.Structure({run_id: new abap.types.Character(32), rule: new abap.types.Character(60), pile_no: new abap.types.Integer(),
-        attempt: new abap.types.Integer(), seed: new abap.types.Integer(), scale: new abap.types.Integer(), stale: new abap.types.Integer()});
+        attempt: new abap.types.Integer(), seed: new abap.types.Integer(), scale: new abap.types.Integer(), stale: new abap.types.Integer(), chaos: chaosType()});
+      s.get().chaos.set(chaosOfJs(p.chaos));
       s.get().run_id.set(p.run); s.get().rule.set(p.rule); s.get().pile_no.set(p.pile); s.get().attempt.set(p.attempt);
       s.get().seed.set(p.seed); s.get().scale.set(p.scale); s.get().stale.set(p.stale);
       return s;
@@ -647,13 +662,13 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       }
       return out;
     })();
-    async function drawProblems(className = SIM) {
+    async function drawProblems(className = SIM, {chaos, inputs = INPUTS} = {}) {
       const problems = [];
-      for (const input of INPUTS) {
+      for (const input of inputs.map((i) => (chaos ? {...i, chaos} : i))) {
         const got = await cls(className).draw({is_pile: pileOf(input), it_keys: keysOf(input.keys), ...(input.filter ? {iv_filter: new abap.types.Character(1).set("X")} : {})});
         const g = got.get();
         const abapDraw = {outcome: trim(g.outcome.get()), duration: g.duration.get(), wait: g.wait.get(), hits: g.hits.get(), keys: g.keys.array().map((k) => k.get())};
-        const want = draw(configOf(ruleOf(input.rule)), input, input.keys, {filter: input.filter});
+        const want = draw(configOf(ruleOf(input.rule), input.chaos), input, input.keys, {filter: input.filter});
         if (JSON.stringify(abapDraw) !== JSON.stringify(want)) problems.push(`${JSON.stringify(input)}: ABAP ${JSON.stringify(abapDraw)}, twin ${JSON.stringify(want)}`);
         if (problems.length > 3) break;
       }
@@ -699,6 +714,163 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
         + "        rs_config-cdf = rs_config-cdf && `135335 406006 676676 857123 947347 983436 995466 998903 999763 999954 999992 999999 1000000`.\n");
       await loadAs(SIM, name, mutated);
       expect((await drawProblems(name)).join("\n")).to.match(/ship-min-crew/);
+    });
+
+    // ---- chaos: profiles and explicit overrides (slice 6c) ----------------------
+    // The values of simulate.profile and the overrides a case sets, as the runner's
+    // ty_chaos says them; configOf( ) with it is what the twin draws under.
+    const CHAOS_CASES = [{profile: "calm"}, {profile: "squall"}, {profile: "storm"}, {profile: "flood"}, {profile: "stuck"}, {profile: "random"},
+      {profile: "default"}, {profile: "nonesuch"},
+      {outcome_set: true, slow: 100, dump: 300, hang: 50}, {profile: "storm", outcome_set: true, slow: 0, dump: 0, hang: 0},
+      {profile: "stuck", outcome_set: true, slow: 0, dump: 0, hang: 0}, {outcome_set: true, slow: 1000, dump: 0, hang: 0},
+      {hits_set: true, hits_mean: 0}, {hits_set: true, hits_mean: 7}, {profile: "flood", hits_set: true, hits_mean: 100},
+      {profile: "random", outcome_set: true, slow: 0, dump: 0, hang: 500, hits_set: true, hits_mean: 1, close_set: true, close: 1000}];
+    it("chaos: the ABAP draws, under every profile and override, what its JavaScript twin draws", async () => {
+      const inputs = INPUTS.filter((_, i) => i % 3 === 0);
+      expect(inputs.length).to.be.greaterThan(70);
+      for (const chaos of CHAOS_CASES) expect(await drawProblems(SIM, {chaos, inputs}), JSON.stringify(chaos)).to.deep.equal([]);
+      // the cases are not all one draw: random gives every outcome, stuck no dump, calm more OK than storm
+      const count = (chaos) => {
+        const n = {OK: 0, SLOW: 0, DUMP: 0, HANG: 0};
+        for (const input of INPUTS) if (input.rule !== "ship-busy") n[draw(configOf(ruleOf(input.rule), chaos), input, input.keys).outcome]++;
+        return n;
+      };
+      expect(count({profile: "random"}), "random").to.satisfy((n) => Object.values(n).every((c) => c > 20));
+      expect(count({profile: "stuck"}).DUMP, "stuck: no dump").to.equal(0);
+      expect(count({profile: "calm"}).OK, "calm").to.be.greaterThan(count({profile: "storm"}).OK + 40);
+      // config( ) itself: the profile, then the override, per mille into millionths
+      const config = async (rule, chaos) => (await cls(SIM).config({iv_rule: str(rule), is_chaos: chaosOfJs(chaos)})).get();
+      const got = await config("ship-cargo-limit", {profile: "storm", outcome_set: true, slow: 7, dump: 11, hang: 13});
+      expect([got.ok.get(), got.slow.get(), got.dump.get(), got.hang.get(), got.slow_factor.get()]).to.deep.equal([969000, 7000, 11000, 13000, 10]);
+      expect((await config("ship-cargo-limit", {profile: "storm"})).ok.get()).to.equal(600000);
+      expect((await config("ship-cargo-limit", {})).ok.get(), "no profile: the manifest's default").to.equal(930000);
+    });
+
+    // the generated class with an edit, drawn under every case: red when the draws leave the twin's
+    const chaosMutant = async (name, from, to) => {
+      await loadAs(SIM, name, edit(committed(SIM), from, to));
+      const problems = [];
+      for (const chaos of CHAOS_CASES) problems.push(...await drawProblems(name, {chaos, inputs: INPUTS.filter((_, i) => i % 3 === 0)}));
+      return problems.join("\n");
+    };
+    it("mutant: the profile blocks off (CASE on another name): the draws under a profile differ", async () => {
+      expect(await chaosMutant("zcl_l3_fleet2_m_prof", "CASE is_chaos-profile.", "CASE 'none'.")).to.match(/ABAP .* twin /);
+    });
+    it("mutant: the outcome override ignored: the draws under an override differ", async () => {
+      expect(await chaosMutant("zcl_l3_fleet2_m_ovr", "    IF is_chaos-outcome_set = abap_true.\n", "    IF 1 = 2.\n")).to.match(/ABAP .* twin /);
+    });
+    it("mutant: the hits mean override draws once (not the sum of its mean): the hits differ", async () => {
+      expect(await chaosMutant("zcl_l3_fleet2_m_sum", "      lv_more = ls_config-hits_a - 1.\n", "      lv_more = 0.\n")).to.match(/ABAP .* twin /);
+    });
+    it("mutant: the pile's chaos not handed to config( ): every draw is the manifest's", async () => {
+      expect(await chaosMutant("zcl_l3_fleet2_m_arg", "    ls_config = config( iv_rule = is_pile-rule\n                        is_chaos = is_pile-chaos ).\n", "    ls_config = config( is_pile-rule ).\n")).to.match(/ABAP .* twin /);
+    });
+
+    // ---- the chaos settings through the runner: bounds, enum, the sum of the shares --
+    const trySet = async (name, value) => trim((await dialogStep(() => cls().set_setting({iv_param: str(name), iv_value: str(value), iv_note: str("chaos test")}))).get()) === "X";
+    it("chaos settings: the profile is one of the manifest's, shares and the mean within bounds, the three shares not above 1000", async () => {
+      for (const name of ["calm", "squall", "storm", "flood", "stuck", "random", "default"]) expect(await trySet("simulate.profile", name), name).to.equal(true);
+      for (const bad of ["nonesuch", "Storm", "", "calm,storm", "storm "]) expect(await trySet("simulate.profile", bad), JSON.stringify(bad)).to.equal(false);
+      for (const [name, ok, bad] of [["simulate.dump", ["0", "1000", "-1"], ["1001", "-2", "1.5", "x"]], ["simulate.hits_mean", ["0", "100"], ["101"]],
+        ["simulate.autoclose", ["500"], ["1001"]]]) {
+        for (const v of ok) expect(await trySet(name, v), `${name} = ${v}`).to.equal(true);
+        for (const v of bad) expect(await trySet(name, v), `${name} = ${v}`).to.equal(false);
+      }
+      // the three shares together: a change that passes 1000 is refused and changes nothing
+      expect(await trySet("simulate.dump", "600")).to.equal(true);
+      expect(await trySet("simulate.hang", "400")).to.equal(true);
+      expect(await trySet("simulate.slow", "1"), "600 + 400 + 1").to.equal(false);
+      expect(await trySet("simulate.slow", "0")).to.equal(true);
+      expect(await trySet("simulate.dump", "601"), "601 + 400").to.equal(false);
+      const row = (name) => read("SELECT param_val FROM zosd_l3_conf WHERE set_name = 'fleet2' AND param_name = ?", name)[0].param_val;
+      expect([row("simulate.dump"), row("simulate.hang"), row("simulate.slow")]).to.deep.equal(["600", "400", "0"]);
+      // a share set to -1 (the profile's) takes nothing of the 1000
+      expect(await trySet("simulate.hang", "-1")).to.equal(true);
+      expect(await trySet("simulate.dump", "1000")).to.equal(true);
+    });
+    it("mutant: the sum of the shares unchecked: a total over 1000 is accepted", async () => {
+      const name = "zcl_l3_fleet2_conf_m_sum";
+      const text = readFileSync(join(OUT, "zcl_l3_fleet2_conf.clas.abap"), "utf8");
+      await loadAs("zcl_l3_fleet2_conf", name, edit(text, "    IF lv_sum > 1000.\n", "    IF lv_sum > 100000.\n"));
+      await answering("zcl_l3_fleet2_conf", name, async () => {
+        expect(await trySet("simulate.dump", "600")).to.equal(true);
+        expect(await trySet("simulate.hang", "400")).to.equal(true);
+        expect(await trySet("simulate.slow", "300"), "the mutant accepts 1300").to.equal(true);
+      });
+    });
+
+    // ---- a night under a profile, and under overrides ------------------------------
+    const nightOf = async (settings, {ships = 24, retryMax = 20} = {}) => {
+      await fresh();
+      await seedShips(ships);
+      for (const [name, value] of [["simulate.time_scale", "1000000"], ["budget.glass", "100000"], ["retry.max", String(retryMax)], ["retry.backoff", "30"], ...Object.entries(settings)]) await tune(name, value);
+      const {run} = await twin({prefix: "5EED0000"});
+      const chaos = chaosOf(settings);
+      const predicted = prediction(run, {retryMax, configs: (name) => configOf(ruleOf(name), chaos)});
+      const attempts = predicted.flatMap(({p, pred}) => pred.attempts.slice(0, p.attempt).map((a) => ({stage: p.stage_no, outcome: a.outcome})));
+      const count = (stage, outcome) => attempts.filter((a) => a.stage === stage && a.outcome === outcome).length;
+      const piles = pilesOf(run);
+      return {run, predicted, piles, problems: [...problemsAgainst(run, predicted), ...logProblems(run, predicted)],
+        dumps: count(2, "DUMP"), hangs: count(2, "HANG"), slows: count(2, "SLOW"), attempts: attempts.length,
+        alerts: piles.reduce((n, p) => n + (p.alerts ?? 0), 0),
+        snapshot: Object.fromEntries(read("SELECT param_name, param_val, origin FROM zosd_l3_run_conf WHERE run_id = ? AND param_name LIKE 'simulate.%'", run).map((r) => [r.param_name, `${r.param_val}/${r.origin}`]))};
+    };
+
+    it("chaos: the same seed under calm and storm, over 200 piles: a measurably different night, each exactly the twin's", async () => {
+      const seen = {};
+      for (const profile of ["calm", "storm"]) {
+        const night = await nightOf({"simulate.profile": profile}, {ships: 110});
+        expect(night.piles.length, `${profile}: piles`).to.be.greaterThanOrEqual(200);
+        expect(night.problems, profile).to.deep.equal([]);
+        expect(night.snapshot["simulate.profile"], `${profile}: the run's snapshot says so`).to.equal(`${profile}/USER`);
+        expect(night.snapshot["simulate.dump"], "an override not set is the DSL's").to.equal("-1/DSL");
+        seen[profile] = {piles: night.piles.length, attempts: night.attempts, dumps: night.dumps, hangs: night.hangs, slows: night.slows, failed: night.piles.filter((p) => p.status === "FAILED").length};
+        // eslint-disable-next-line no-console
+        console.log(`      ${profile}: ${JSON.stringify(seen[profile])}`);
+      }
+      // exact: the draws are a pure function of (seed, run, rule, pile, attempt), the stage-2 outcomes counted over every attempt made
+      expect(seen).to.deep.equal({
+        calm: {piles: 271, attempts: 305, dumps: 0, hangs: 0, slows: 3, failed: 0},
+        storm: {piles: 271, attempts: 375, dumps: 47, hangs: 23, slows: 21, failed: 0}});
+      expect(seen.storm.dumps, "storm dumps").to.be.greaterThan(5 * seen.calm.dumps);
+      expect(seen.storm.hangs, "storm hangs").to.be.greaterThan(seen.calm.hangs + 10);
+    });
+
+    it("chaos: an override beats the profile (and the profile the manifest's default), through SetSetting and into the snapshot", async () => {
+      const stuck = await nightOf({"simulate.profile": "stuck"});
+      expect(stuck.problems, "stuck").to.deep.equal([]);
+      expect(stuck.hangs, "the stuck profile hangs piles").to.be.greaterThan(2);
+      expect(stuck.snapshot).to.include({"simulate.profile": "stuck/USER", "simulate.hang": "-1/DSL"});
+      // the same night with the hang share overridden to 0: all three shares are the override's, so every attempt is OK; a mean of 3, every alert auto-closed
+      const calmed = await nightOf({"simulate.profile": "stuck", "simulate.hang": "0", "simulate.hits_mean": "3", "simulate.autoclose": "1000", "piles.checks.size": "20"});
+      expect(calmed.problems, "override").to.deep.equal([]);
+      expect(calmed.snapshot).to.include({"simulate.profile": "stuck/USER", "simulate.hang": "0/USER", "simulate.hits_mean": "3/USER", "simulate.autoclose": "1000/USER", "simulate.dump": "-1/DSL"});
+      expect([calmed.hangs, calmed.dumps, calmed.slows], "no outcome but OK").to.deep.equal([0, 0, 0]);
+      expect(calmed.piles.every((p) => p.status === "DONE" && p.attempt === 1), "every pile done at its first attempt").to.equal(true);
+      const alerts = read("SELECT closed FROM zosd_l3_alert WHERE run_id = ?", calmed.run);
+      expect(alerts.length, "alerts were made").to.be.greaterThan(5);
+      expect(alerts.every((a) => a.closed === "X"), "autoclose 1000 closes every alert").to.equal(true);
+      // the profile flood against the override: more hits per pile under flood (mean 12) than under the mean of 3
+      const flood = await nightOf({"simulate.profile": "flood", "piles.checks.size": "20"});
+      expect(flood.problems, "flood").to.deep.equal([]);
+      expect(flood.alerts, "flood hits more than a mean of 3").to.be.greaterThan(calmed.alerts);
+      // and with autoclose 0 nothing closes
+      const open = await nightOf({"simulate.autoclose": "0"});
+      expect(open.problems, "autoclose 0").to.deep.equal([]);
+      expect(read("SELECT closed FROM zosd_l3_alert WHERE run_id = ?", open.run).every((a) => a.closed !== "X")).to.equal(true);
+    });
+
+    it("mutant: the runner not handing the run's chaos to the work: a stuck night has no hang", async () => {
+      const name = "zcl_l3_fleet2_m_runner";
+      await loadAs(RUNNER, name, edit(committed(RUNNER), "      ls_work-chaos = zcl_l3_fleet2_work_sim=>chaos_of_run( iv_run ).\n", ""));
+      const night = await answering(RUNNER, name, () => nightOf({"simulate.profile": "stuck"}));
+      expect(night.problems.join("\n")).to.match(/the twin says/);
+    });
+    it("mutant: the chance autoclose not asking for the run's chaos: an autoclose of 1000 closes by the manifest's 0.4", async () => {
+      const name = "zcl_l3_fleet2_close_m_chaos";
+      await loadAs("zcl_l3_fleet2_close_sim", name, edit(committed("zcl_l3_fleet2_close_sim"), "        ls_chaos = zcl_l3_fleet2_work_sim=>chaos_of_run( lv_run ).\n", ""));
+      const night = await answering("zcl_l3_fleet2_close_sim", name, () => nightOf({"simulate.autoclose": "1000", "simulate.hits_mean": "3", "piles.checks.size": "20"}));
+      expect(night.problems.join("\n")).to.match(/the log has|the twin/);
     });
 
     // ---- the golden draws the ABAP Unit proof checks on a system ---------------

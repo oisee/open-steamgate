@@ -29,7 +29,7 @@ import {replayOverlay} from "./dsl-l3-replay-overlay.mjs";
 import {compileReplay} from "./dsl-l3-replay.mjs";
 import {compileCockpit, renderCockpit, cockpitRunnerTemplate} from "./dsl-l3-cockpit.mjs";
 import {compileSettings} from "./dsl-l3-settings.mjs";
-import {compileSimulate, simPorts, simVariant, WORK_PORT} from "./dsl-l3-sim.mjs";
+import {CHAOS_SETTINGS, compileSimulate, POISSON1, simPorts, simVariant, WORK_PORT} from "./dsl-l3-sim.mjs";
 import {docDrift, graphJson, graphMermaid, graphOf} from "./dsl-l3-graph.mjs";
 
 export const SET_TEMPLATE = "recipes/l3-set/template.tpl";
@@ -497,6 +497,14 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   // a tunable seed is the run's: the chance autoclose reads it from the run's snapshot
   if (model.simulate && model.settings?.simulate_seed) model.simulate.seed_conf = {"@id": model.simulate["@id"], set_line: model.simulate.set_line, conf: model.settings.class};
   if (model.replay) model.replay.seed_conf = model.simulate.seed_conf;
+  // chaos: profiles are chosen by a setting, so a set that names profiles must let the operator choose
+  if (model.simulate?.profile_names && !model.settings?.entries.some((e) => e.name === "simulate.profile")) fail(line("simulate/profiles"), "simulate.profiles are chosen by the setting simulate.profile: list it in settings.tunable (without it the profiles could never run)");
+  // the work class reads the chaos settings of the run's snapshot (after the replay copy: a replay twin has none)
+  const chaos = model.settings?.entries.filter((e) => CHAOS_SETTINGS.includes(e.name)).map((e) => e.name) ?? [];
+  if (model.simulate && chaos.length) model.simulate.chaos_conf = {"@id": model.simulate["@id"], set_line: model.simulate.set_line, conf: model.settings.class,
+    poisson1: POISSON1, "poisson1@type": {built_in: "STRG"},
+    has_profile: chaos.includes("simulate.profile"), has_dump: chaos.includes("simulate.dump"), has_hang: chaos.includes("simulate.hang"),
+    has_slow: chaos.includes("simulate.slow"), has_hits: chaos.includes("simulate.hits_mean"), has_close: chaos.includes("simulate.autoclose")};
   if (doc.cockpit !== undefined) model.cockpit = compileCockpit(doc, model, {line, fail});
   Object.defineProperty(model, "where", {value: where});
   return model;
@@ -617,8 +625,15 @@ export async function renderSet(model) {
   if (model.settings) {
     for (const [name, template, kind] of [[model.settings.class, "recipes/l3-settings/class.tpl", "clas"],
       [model.settings.report, "recipes/l3-settings/report.tpl", "prog"]]) {
-      const rendered = await renderRecipe(model, template, {profile: "abap", ...((model.governor || model.cockpit) && kind === "clas" ? {templateText:
-        cockpitRunnerTemplate(model, model.governor ? governorTemplate(readFileSync(template, "utf8"), JSON.parse(readFileSync("recipes/l3-governor/settings.patch.json", "utf8"))) : readFileSync(template, "utf8"), "settings")} : model.cockpit && kind === "prog" ? {templateText: cockpitRunnerTemplate(model, readFileSync(template, "utf8"), "settings-report")} : {})});
+      // the governor's patch, then the twin's (the sum of the outcome shares), then the cockpit's
+      const patched = () => {
+        let text = readFileSync(template, "utf8");
+        if (model.governor) text = governorTemplate(text, JSON.parse(readFileSync("recipes/l3-governor/settings.patch.json", "utf8")));
+        if (model.settings.chaos_sum) text = governorTemplate(text, JSON.parse(readFileSync("recipes/l3-sim/settings.patch.json", "utf8")));
+        return cockpitRunnerTemplate(model, text, "settings");
+      };
+      const rendered = await renderRecipe(model, template, {profile: "abap", ...((model.governor || model.cockpit || model.settings.chaos_sum) && kind === "clas" ? {templateText: patched()}
+        : model.cockpit && kind === "prog" ? {templateText: cockpitRunnerTemplate(model, readFileSync(template, "utf8"), "settings-report")} : {})});
       results.push([`${name}.${kind}.abap`, rendered]);
     }
   }

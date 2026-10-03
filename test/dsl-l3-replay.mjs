@@ -46,6 +46,7 @@ describe('DSL L3 replay: a twin of one night', function () {
     for (let i = 0; i < 48; i++) insert.run(`R${String(i).padStart(3,'0')}`);
     const variant = doc();
     variant.simulate = {seed:'42',time_scale:'1',allow_sink:['log'],default:{duration:{dist:'uniform',min:'10',max:'30'},outcome:{ok:'0.88',slow:'0.04',dump:'0.06',hang:'0.02'},slow_factor:'3',hits:{dist:'fixed',value:'1'},autoclose:'0.4'},stages:{candidates:{duration:{dist:'fixed',value:'5'},outcome:{ok:'1'},keep:'1'}}};
+    variant.simulate.profiles = doc().simulate.profiles; // the committed set's chaos profiles: its settings class keeps its shape
     const simModel = compileSet(manifest(variant,'night'));
     const {files} = await renderSet(simModel);
     await loadGenerated(files,[model.simulate.work_class],join(scratch,'sim-modules'),simModel);
@@ -124,7 +125,7 @@ describe('DSL L3 replay: a twin of one night', function () {
     const p = structuredClone(sourceProfile), d = doc();
     delete p.rules['ship-cargo-limit'];
     writeFileSync(join(scratch,'knots.json'),JSON.stringify(p));
-    d.simulate = {profile:'knots.json',allow_sink:['log']};
+    d.simulate = {profile:'knots.json',allow_sink:['log'],profiles:d.simulate.profiles};
     const m = compileSet(manifest(d,'relative'));
     expect(configOf(m.replay.rules.find((r) => r.rule === 'ship-cargo-limit')).knots).to.equal(p.stages.checks.duration.join(' '));
     p.set = 'other'; d.simulate.profile = p;

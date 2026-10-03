@@ -24,6 +24,7 @@ export function compileReplay(spec, sim, model, {file, line, fail}) {
     if (!integer(d.autoclose,1000000)) fail(at, 'profile autoclose is within 0..1000000');
     const copy = structuredClone(node);
     copy.empirical = true;
+    delete copy.chaos; // measured work has no chaos profile
     copy.duration = {...copy.duration, dist: 'L', a: '0', b: '0', knots: table(d.duration ?? stageData?.duration,2147483647,'duration'), 'knots@type': {built_in:'STRG'}};
     copy.hits = {...copy.hits, dist: 'Q', a: '0', b: '0', chunks: [{text: table(d.hits ?? stageData?.hits,100000,'hits'), 'text@type': {built_in:'STRG'}}]};
     copy.outcome = {...copy.outcome, ...Object.fromEntries(O.map((o) => [o,String(d.outcome[o])]))};

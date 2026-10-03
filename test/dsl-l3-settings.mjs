@@ -82,7 +82,8 @@ describe("DSL L3 slice 5b: settings", function () {
   it("marks what belongs to a run (fuse, pile sizes, parameters) and what is the pass's policy", () => {
     const model = compileSet(SET);
     expect(model.settings.entries.map((e) => [e.name, e.scoped])).to.deep.equal([["budget.glass", true], ["budget.warn", true], ["budget.narrow_at", true], ["budget.per_pile", true], ["retry.max", false], ["retry.backoff", false],
-      ["stale", false], ["fuses.max_alerts", true], ["keep.days", false], ["simulate.seed", true], ["simulate.time_scale", true], ["piles.checks.size", true]]);
+      ["stale", false], ["fuses.max_alerts", true], ["keep.days", false], ["simulate.seed", true], ["simulate.time_scale", true],
+      ["simulate.profile", true], ["simulate.dump", true], ["simulate.hang", true], ["simulate.slow", true], ["simulate.hits_mean", true], ["simulate.autoclose", true], ["piles.checks.size", true]]);
   });
   it("a dry run reads its settings without seeding, logging or a snapshot", async () => {
     const text = readFileSync(SET, "utf8");
@@ -226,7 +227,7 @@ describe("DSL L3 slice 5b: settings", function () {
       const second = await run();
       expect(second.rules.some((r) => r.status === "FUSED")).to.equal(true);
       const snapshot = read("SELECT * FROM zosd_l3_run_conf WHERE run_id = ? ORDER BY param_name", second.run);
-      expect(snapshot).to.have.length(12);
+      expect(snapshot).to.have.length(18);
       expect(snapshot.find((r) => trim(r.param_name) === "fuses.max_alerts")).to.include({param_val: "1", origin: "USER", dsl_value: "500"});
       expect(read("SELECT param_val FROM zosd_l3_run_conf WHERE run_id = ? AND param_name = 'fuses.max_alerts'", first.run)[0].param_val).to.equal("500");
       const alert = read("SELECT * FROM zosd_l3_alert WHERE run_id = ? ORDER BY rule_name, pile_no, alert_seq LIMIT 1", second.run)[0];
@@ -266,7 +267,7 @@ describe("DSL L3 slice 5b: settings", function () {
         .to.include.members(["operator edit", "DSL default changed", "reset to DSL default"]);
       expect(logs().filter((r) => trim(r.param_name) === "fuses.max_alerts")).to.have.length(4);
       expect(logs().filter((r) => trim(r.param_name) === "retry.max")).to.have.length(2);
-      expect(logs()).to.have.length(16);
+      expect(logs()).to.have.length(22);
     });
 
     it("refuses an unknown value and a value beyond its bounds without a change", async () => {
@@ -372,7 +373,7 @@ describe("DSL L3 slice 5b: settings", function () {
       };
       try { await seed(); } finally { client.select = real; }
       expect(raced).to.equal(true);
-      expect(rows().map((r) => trim(r.changed_by))).to.deep.equal(Array(12).fill("OTHER"));
+      expect(rows().map((r) => trim(r.changed_by))).to.deep.equal(Array(18).fill("OTHER"));
       expect(logs()).to.have.length(0);
     });
 

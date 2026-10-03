@@ -44,10 +44,26 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_million TYPE i VALUE 1000000.
     CONSTANTS c_alphabet TYPE string VALUE {{alphabet | literal}}.
     CONSTANTS c_percentiles TYPE string VALUE {{percentiles | literal}}.
+{{#chaos_conf}}
+    " Poisson(1), P(K <= k) in millionths: a hits mean override sums that many draws of it
+    CONSTANTS c_poisson1 TYPE string VALUE {{poisson1 | literal}}.
+{{/chaos_conf}}
 {{/sim}}
     CLASS-METHODS config
       IMPORTING iv_rule TYPE csequence
+{{#sim.chaos_conf}}
+                is_chaos TYPE {{iface}}=>ty_chaos OPTIONAL
+{{/sim.chaos_conf}}
       RETURNING VALUE(rs_config) TYPE ty_config.
+{{#sim.chaos_conf}}
+    " the chaos settings of the runner's values, and of the snapshot of run iv_run
+    CLASS-METHODS chaos_of
+      IMPORTING is_vals TYPE {{sim.chaos_conf.conf}}=>ty_values
+      RETURNING VALUE(rs_chaos) TYPE {{iface}}=>ty_chaos.
+    CLASS-METHODS chaos_of_run
+      IMPORTING iv_run TYPE csequence
+      RETURNING VALUE(rs_chaos) TYPE {{iface}}=>ty_chaos.
+{{/sim.chaos_conf}}
     CLASS-METHODS draw
       IMPORTING is_pile TYPE {{iface}}=>ty_pile
                 it_keys TYPE string_table
@@ -125,14 +141,130 @@ CLASS {{class}} IMPLEMENTATION.
         rs_config-prefix = {{prefix | literal}}.
         rs_config-key_length = {{length | literal}}.
 {{/layout}}
+{{#chaos}}
+        " a profile takes the place of default: only what it changes for this rule
+        CASE is_chaos-profile.
+{{#profiles}}
+          WHEN {{name | literal}}.
+{{#p_duration}}
+            rs_config-dist = {{dist | literal}}.
+            rs_config-dur_a = {{a | literal}}.
+            rs_config-dur_b = {{b | literal}}.
+{{#knots}}
+            rs_config-knots = {{knots | literal}}.
+{{/knots}}
+{{/p_duration}}
+{{#p_outcome}}
+            rs_config-ok = {{ok | literal}}.
+            rs_config-slow = {{slow | literal}}.
+            rs_config-dump = {{dump | literal}}.
+            rs_config-hang = {{hang | literal}}.
+{{/p_outcome}}
+{{#p_slow_factor}}
+            rs_config-slow_factor = {{value | literal}}.
+{{/p_slow_factor}}
+{{#p_hits}}
+            rs_config-hits = {{dist | literal}}.
+            rs_config-hits_a = {{a | literal}}.
+            rs_config-hits_b = {{b | literal}}.
+            CLEAR rs_config-cdf.
+{{#chunks}}
+            rs_config-cdf = rs_config-cdf && {{text | literal}}.
+{{/chunks}}
+{{/p_hits}}
+{{#p_autoclose}}
+            rs_config-autoclose = {{value | literal}}.
+{{/p_autoclose}}
+{{/profiles}}
+        ENDCASE.
+{{/chaos}}
 {{/rules}}
       WHEN OTHERS.
         rs_config-ok = c_million.
         rs_config-slow_factor = 1.
         rs_config-keep = c_million.
     ENDCASE.
+{{#chaos_conf}}
+    " explicit overrides beat the manifest and the profile; ok is the rest
+    IF is_chaos-outcome_set = abap_true.
+      rs_config-slow = is_chaos-slow * 1000.
+      rs_config-dump = is_chaos-dump * 1000.
+      rs_config-hang = is_chaos-hang * 1000.
+      rs_config-ok = c_million - rs_config-slow - rs_config-dump - rs_config-hang.
+    ENDIF.
+    IF is_chaos-hits_set = abap_true.
+      IF is_chaos-hits_mean = 0.
+        rs_config-hits = 'F'.
+        rs_config-hits_a = 0.
+      ELSE.
+        rs_config-hits = 'S'.
+        rs_config-hits_a = is_chaos-hits_mean.
+        rs_config-cdf = c_poisson1.
+      ENDIF.
+    ENDIF.
+    IF is_chaos-close_set = abap_true.
+      rs_config-autoclose = is_chaos-close * 1000.
+    ENDIF.
+{{/chaos_conf}}
 {{/sim}}
   ENDMETHOD.
+{{#sim.chaos_conf}}
+
+  METHOD chaos_of.
+{{#sim}}
+{{#chaos_conf}}
+    DATA lv_slow TYPE i VALUE -1.
+    DATA lv_dump TYPE i VALUE -1.
+    DATA lv_hang TYPE i VALUE -1.
+{{#has_profile}}
+    rs_chaos-profile = is_vals-simulate_profile.
+{{/has_profile}}
+{{#has_slow}}
+    lv_slow = is_vals-simulate_slow.
+{{/has_slow}}
+{{#has_dump}}
+    lv_dump = is_vals-simulate_dump.
+{{/has_dump}}
+{{#has_hang}}
+    lv_hang = is_vals-simulate_hang.
+{{/has_hang}}
+    IF lv_slow >= 0 OR lv_dump >= 0 OR lv_hang >= 0.
+      rs_chaos-outcome_set = abap_true.
+      IF lv_slow > 0.
+        rs_chaos-slow = lv_slow.
+      ENDIF.
+      IF lv_dump > 0.
+        rs_chaos-dump = lv_dump.
+      ENDIF.
+      IF lv_hang > 0.
+        rs_chaos-hang = lv_hang.
+      ENDIF.
+    ENDIF.
+{{#has_hits}}
+    IF is_vals-simulate_hits_mean >= 0.
+      rs_chaos-hits_set = abap_true.
+      rs_chaos-hits_mean = is_vals-simulate_hits_mean.
+    ENDIF.
+{{/has_hits}}
+{{#has_close}}
+    IF is_vals-simulate_autoclose >= 0.
+      rs_chaos-close_set = abap_true.
+      rs_chaos-close = is_vals-simulate_autoclose.
+    ENDIF.
+{{/has_close}}
+{{/chaos_conf}}
+{{/sim}}
+  ENDMETHOD.
+
+  METHOD chaos_of_run.
+    " the run's own settings: its snapshot, else the compiled defaults
+    DATA ls_vals TYPE {{sim.chaos_conf.conf}}=>ty_values.
+    ls_vals = {{sim.chaos_conf.conf}}=>defaults( ).
+    ls_vals = {{sim.chaos_conf.conf}}=>scope( iv_run = iv_run
+                                              is_vals = ls_vals ).
+    rs_chaos = chaos_of( ls_vals ).
+  ENDMETHOD.
+{{/sim.chaos_conf}}
 
   METHOD next.
     " 16807 * x mod (2^31 - 1) by Schrage's method: no product leaves INT4
@@ -271,7 +403,7 @@ CLASS {{class}} IMPLEMENTATION.
         ls_quantile-knots = is_config-cdf.
         rv_hits = duration( is_config = ls_quantile iv_u = iv_u ).
 {{/replay}}
-      WHEN 'P'.
+      WHEN 'P'{{#sim.chaos_conf}} OR 'S'{{/sim.chaos_conf}}.
         SPLIT is_config-cdf AT ` ` INTO TABLE lt_cdf.
         rv_hits = lines( lt_cdf ) - 1.
         LOOP AT lt_cdf INTO lv_text.
@@ -296,6 +428,9 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_u TYPE i.
     DATA lv_base TYPE i.
     DATA lv_bound TYPE i.
+{{#sim.chaos_conf}}
+    DATA lv_more TYPE i.
+{{/sim.chaos_conf}}
     DATA lt_pool TYPE string_table.
     DATA lv_key TYPE string.
     DATA lv_other TYPE string.
@@ -305,7 +440,13 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_j TYPE i.
     DATA lv_span TYPE p LENGTH 16 DECIMALS 0.
     DATA lv_product TYPE p LENGTH 16 DECIMALS 0.
+{{#sim.chaos_conf}}
+    ls_config = config( iv_rule = is_pile-rule
+                        is_chaos = is_pile-chaos ).
+{{/sim.chaos_conf}}
+{{^sim.chaos_conf}}
     ls_config = config( is_pile-rule ).
+{{/sim.chaos_conf}}
     lv_run = is_pile-run_id.
     lv_rule = is_pile-rule.
     lv_text = |{ lv_run }\|{ lv_rule }\|{ is_pile-pile_no }\|{ is_pile-attempt }|.
@@ -337,6 +478,18 @@ CLASS {{class}} IMPLEMENTATION.
     lv_u = lv_state MOD c_million.
     rs_draw-hits = hits( is_config = ls_config
                          iv_u = lv_u ).
+{{#sim.chaos_conf}}
+    IF ls_config-hits = 'S'.
+      " a hits mean override: the sum of that many Poisson(1) draws, the first being the one above
+      lv_more = ls_config-hits_a - 1.
+      DO lv_more TIMES.
+        lv_state = next( lv_state ).
+        lv_u = lv_state MOD c_million.
+        rs_draw-hits = rs_draw-hits + hits( is_config = ls_config
+                                            iv_u = lv_u ).
+      ENDDO.
+    ENDIF.
+{{/sim.chaos_conf}}
     IF iv_filter = abap_true{{#replay}} AND 1 = 2{{/replay}}.
       " a filter keeps each key with the probability keep
       LOOP AT it_keys INTO lv_key.

@@ -1623,7 +1623,9 @@ CLASS {{class}} IMPLEMENTATION.
 {{/planned}}
       WITH p_bind = iv_bind
 {{#settings.entries}}
+{{^chaos}}
       WITH {{screen}} = gs_settings-vals-{{field}}
+{{/chaos}}
 {{/settings.entries}}
 {{#params}}
       WITH {{screen}} = is_params-{{name}}

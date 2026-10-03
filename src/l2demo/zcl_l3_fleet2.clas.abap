@@ -1199,6 +1199,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       ls_work-seed = gs_settings-vals-simulate_seed.
       ls_work-scale = gs_settings-vals-simulate_time_scale.
       ls_work-stale = gs_settings-vals-stale.
+      " the chaos of the run is read from its snapshot: it takes no selection field of the job (at most 20)
+      ls_work-chaos = zcl_l3_fleet2_work_sim=>chaos_of_run( iv_run ).
     ENDIF.
     CASE iv_rule.
       WHEN c_rule_1.

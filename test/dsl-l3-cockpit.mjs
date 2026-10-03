@@ -164,6 +164,21 @@ describe("DSL L3 run cockpit", function () {
       expect((await action("ResetSetting", {Param: "budget.glass", Note: "restore capacity"})).Answer).equal("OK");
       expect((await get("ChangeSet")).results.some((r) => r.NoteText === "restore capacity")).equal(true);
     });
+    it("chaos settings through the cockpit: a profile from the manifest, and outcome shares that total over 1000 are refused in words", async () => {
+      try {
+        expect((await action("SetSetting", {Param: "simulate.dump", Value: "700", Note: "a rough night"})).Answer).equal("OK");
+        const over = (await action("SetSetting", {Param: "simulate.hang", Value: "400", Note: "too rough"})).Answer;
+        expect(over).match(/^REFUSED: SetSetting: .*simulate dump \+ hang \+ slow above 1000/);
+        expect(over.length, "an ABAP literal holds 255 characters").lessThan(255);
+        expect((await action("SetSetting", {Param: "simulate.hang", Value: "300", Note: "just fits"})).Answer).equal("OK");
+        expect((await action("SetSetting", {Param: "simulate.profile", Value: "typhoon", Note: "no such profile"})).Answer).match(/^REFUSED: SetSetting:/);
+        expect((await action("SetSetting", {Param: "simulate.profile", Value: "storm", Note: "weather"})).Answer).equal("OK");
+        const stored = Object.fromEntries((await get("SettingSet")).results.map((r) => [trim(r.ParamName), trim(r.ParamVal)]));
+        expect([stored["simulate.dump"], stored["simulate.hang"], stored["simulate.profile"]]).deep.equal(["700", "300", "storm"]);
+      } finally {
+        for (const Param of ["simulate.dump", "simulate.hang", "simulate.profile"]) expect((await action("ResetSetting", {Param, Note: "back to the manifest"})).Answer).equal("OK");
+      }
+    });
     it("returns the runner refusal text for an unknown work variant", async () => {
       expect((await action("StartRun", {CheckDate: "20261001", Mode: "S", Work: "bogus"})).Answer)
         .include("REFUSED:").and.include("no such variant for the port");

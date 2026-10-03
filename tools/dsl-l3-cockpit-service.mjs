@@ -37,7 +37,8 @@ export function cockpitActions(m) {
     boolean("ClearKill", "clear_kill", {Reason: "String(80)"}, "iv_reason = lv_reason", true, "the reason is empty or over 80 characters");
   }
   if (m.settings) {
-    boolean("SetSetting", "set_setting", {Param: "String(30)", Value: "String(40)", Note: "String(80)"}, "iv_param = lv_param iv_value = lv_value iv_note = lv_note", true, "unknown setting, a value outside its range, budget.warn above budget.narrow_at, or the note is empty or over 80 characters");
+    boolean("SetSetting", "set_setting", {Param: "String(30)", Value: "String(40)", Note: "String(80)"}, "iv_param = lv_param iv_value = lv_value iv_note = lv_note", true,
+      `unknown setting, a value outside its range, budget.warn above budget.narrow_at, ${m.settings.chaos_sum ? "simulate dump + hang + slow above 1000, " : ""}or the note is empty or over 80 characters`);
     boolean("ResetSetting", "cockpit_reset_setting", {Param: "String(30)", Note: "String(80)"}, "iv_param = lv_param iv_note = lv_note", true, "unknown setting, or the note is empty or over 80 characters");
   }
   if (m.schedule) {

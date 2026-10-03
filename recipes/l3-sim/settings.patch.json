@@ -1,0 +1,15 @@
+[
+  {
+    "before": [
+      "    ls_old = ls_row.\n",
+      "    ls_row-param_val = iv_value.\n"
+    ],
+    "after": [
+      "    IF chaos_ok( iv_param = iv_param iv_value = iv_value ) = abap_false.\n",
+      "      RETURN.\n",
+      "    ENDIF.\n",
+      "    ls_old = ls_row.\n",
+      "    ls_row-param_val = iv_value.\n"
+    ]
+  }
+]

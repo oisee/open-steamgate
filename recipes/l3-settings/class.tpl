@@ -50,6 +50,12 @@ CLASS {{settings.class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS audit
       IMPORTING is_old TYPE zosd_l3_conf is_new TYPE zosd_l3_conf iv_note TYPE csequence.
     CLASS-METHODS authorised RETURNING VALUE(rv_ok) TYPE abap_bool.
+{{#settings.chaos_sum}}
+    " the simulated twin's three outcome shares (per mille) together may not exceed 1000
+    CLASS-METHODS chaos_ok
+      IMPORTING iv_param TYPE csequence iv_value TYPE csequence
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
+{{/settings.chaos_sum}}
 ENDCLASS.
 
 CLASS {{settings.class}} IMPLEMENTATION.
@@ -150,6 +156,13 @@ CLASS {{settings.class}} IMPLEMENTATION.
         IF strlen( lv_text ) < {{min}} OR strlen( lv_text ) > {{max}}.
           RETURN.
         ENDIF.
+{{#pattern}}
+        " one of the values the manifest lists: {{values}}
+        FIND REGEX {{pattern | literal}} IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+{{/pattern}}
 {{#digit_text}}
         FIND REGEX '^[0-9]+$' IN lv_text.
         IF sy-subrc <> 0.
@@ -190,6 +203,31 @@ CLASS {{settings.class}} IMPLEMENTATION.
     ENDCASE.
   ENDMETHOD.
 
+{{#settings.chaos_sum}}
+  METHOD chaos_ok.
+    DATA ls_current TYPE ty_state.
+    DATA lv_sum TYPE i.
+    DATA lv_share TYPE i.
+    rv_ok = abap_true.
+    IF iv_param <> 'simulate.dump' AND iv_param <> 'simulate.hang' AND iv_param <> 'simulate.slow'.
+      RETURN.
+    ENDIF.
+    ls_current = load( iv_write = abap_false ).
+{{#settings.chaos_outcomes}}
+    lv_share = ls_current-vals-{{field}}.
+    IF iv_param = {{name | literal}}.
+      lv_share = iv_value.
+    ENDIF.
+    IF lv_share > 0.
+      lv_sum = lv_sum + lv_share.
+    ENDIF.
+{{/settings.chaos_outcomes}}
+    IF lv_sum > 1000.
+      rv_ok = abap_false.
+    ENDIF.
+  ENDMETHOD.
+
+{{/settings.chaos_sum}}
   METHOD audit.
     DATA ls_log TYPE zosd_l3_conf_log.
     DATA lv_stamp TYPE timestampl.

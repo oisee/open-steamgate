@@ -139,6 +139,10 @@
       "      ls_work-seed = {{#settings.simulate_seed}}gs_settings-vals-simulate_seed{{/settings.simulate_seed}}{{^settings.simulate_seed}}c_sim_seed{{/settings.simulate_seed}}.\n",
       "      ls_work-scale = {{#settings.simulate_time_scale}}gs_settings-vals-simulate_time_scale{{/settings.simulate_time_scale}}{{^settings.simulate_time_scale}}c_sim_scale{{/settings.simulate_time_scale}}.\n",
       "      ls_work-stale = {{#settings.stale}}gs_settings-vals-stale{{/settings.stale}}{{^settings.stale}}c_stale{{/settings.stale}}.\n",
+      "{{#chaos_conf}}\n",
+      "      \" the chaos of the run is read from its snapshot: it takes no selection field of the job (at most 20)\n",
+      "      ls_work-chaos = {{work_class}}=>chaos_of_run( iv_run ).\n",
+      "{{/chaos_conf}}\n",
       "    ENDIF.\n",
       "{{/simulate}}\n",
       "    CASE iv_rule.\n"

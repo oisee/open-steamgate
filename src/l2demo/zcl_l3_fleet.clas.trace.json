@@ -4603,938 +4603,938 @@
   },
   {
    "line": 648,
-   "template_line": 1629,
+   "template_line": 1631,
    "path": "/params/1/screen",
    "node": "set/fleet/param/active_status",
    "set_line": 10
   },
   {
    "line": 649,
-   "template_line": 1631,
-   "path": "/",
-   "node": "set/fleet",
-   "set_line": 6
-  },
-  {
-   "line": 650,
-   "template_line": 1632,
-   "path": "/",
-   "node": "set/fleet",
-   "set_line": 6
-  },
-  {
-   "line": 651,
    "template_line": 1633,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 652,
+   "line": 650,
    "template_line": 1634,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 653,
+   "line": 651,
    "template_line": 1635,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 654,
+   "line": 652,
    "template_line": 1636,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 655,
+   "line": 653,
    "template_line": 1637,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 656,
+   "line": 654,
    "template_line": 1638,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 657,
+   "line": 655,
    "template_line": 1639,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 658,
+   "line": 656,
    "template_line": 1640,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 659,
+   "line": 657,
    "template_line": 1641,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 660,
+   "line": 658,
    "template_line": 1642,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
+   "line": 659,
+   "template_line": 1643,
+   "path": "/",
+   "node": "set/fleet",
+   "set_line": 6
+  },
+  {
+   "line": 660,
+   "template_line": 1644,
+   "path": "/",
+   "node": "set/fleet",
+   "set_line": 6
+  },
+  {
    "line": 661,
-   "template_line": 1648,
+   "template_line": 1650,
    "path": "/planned",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
    "line": 662,
-   "template_line": 1653,
+   "template_line": 1655,
    "path": "/planned",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
    "line": 663,
-   "template_line": 1655,
+   "template_line": 1657,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 664,
-   "template_line": 1659,
+   "template_line": 1661,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 665,
-   "template_line": 1660,
+   "template_line": 1662,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 666,
-   "template_line": 1876,
+   "template_line": 1878,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 667,
-   "template_line": 1884,
-   "path": "/piles",
-   "node": "set/fleet/piles",
-   "set_line": 11
-  },
-  {
-   "line": 668,
-   "template_line": 1885,
-   "path": "/piles",
-   "node": "set/fleet/piles",
-   "set_line": 11
-  },
-  {
-   "line": 669,
    "template_line": 1886,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 670,
+   "line": 668,
    "template_line": 1887,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 671,
+   "line": 669,
    "template_line": 1888,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 672,
+   "line": 670,
    "template_line": 1889,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 673,
+   "line": 671,
    "template_line": 1890,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 674,
+   "line": 672,
    "template_line": 1891,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 675,
+   "line": 673,
    "template_line": 1892,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 676,
+   "line": 674,
    "template_line": 1893,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
+   "line": 675,
+   "template_line": 1894,
+   "path": "/piles",
+   "node": "set/fleet/piles",
+   "set_line": 11
+  },
+  {
+   "line": 676,
+   "template_line": 1895,
+   "path": "/piles",
+   "node": "set/fleet/piles",
+   "set_line": 11
+  },
+  {
    "line": 677,
-   "template_line": 1928,
-   "path": "/",
-   "node": "set/fleet",
-   "set_line": 6
-  },
-  {
-   "line": 678,
-   "template_line": 1929,
-   "path": "/",
-   "node": "set/fleet",
-   "set_line": 6
-  },
-  {
-   "line": 679,
    "template_line": 1930,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 680,
+   "line": 678,
    "template_line": 1931,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 681,
+   "line": 679,
    "template_line": 1932,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 682,
+   "line": 680,
    "template_line": 1933,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 683,
+   "line": 681,
    "template_line": 1934,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 684,
+   "line": 682,
    "template_line": 1935,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
-   "line": 685,
+   "line": 683,
    "template_line": 1936,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
+   "line": 684,
+   "template_line": 1937,
+   "path": "/",
+   "node": "set/fleet",
+   "set_line": 6
+  },
+  {
+   "line": 685,
+   "template_line": 1938,
+   "path": "/",
+   "node": "set/fleet",
+   "set_line": 6
+  },
+  {
    "line": 686,
-   "template_line": 2005,
-   "path": "/piles",
-   "node": "set/fleet/piles",
-   "set_line": 11
-  },
-  {
-   "line": 687,
-   "template_line": 2006,
-   "path": "/piles",
-   "node": "set/fleet/piles",
-   "set_line": 11
-  },
-  {
-   "line": 688,
    "template_line": 2007,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 689,
+   "line": 687,
    "template_line": 2008,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 690,
+   "line": 688,
    "template_line": 2009,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 691,
+   "line": 689,
    "template_line": 2010,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 692,
+   "line": 690,
    "template_line": 2011,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 693,
+   "line": 691,
    "template_line": 2012,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 694,
+   "line": 692,
    "template_line": 2013,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 695,
+   "line": 693,
    "template_line": 2014,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 696,
+   "line": 694,
    "template_line": 2015,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 697,
+   "line": 695,
    "template_line": 2016,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 698,
+   "line": 696,
    "template_line": 2017,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 699,
+   "line": 697,
    "template_line": 2018,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 700,
+   "line": 698,
    "template_line": 2019,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 701,
+   "line": 699,
    "template_line": 2020,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 702,
+   "line": 700,
    "template_line": 2021,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 703,
+   "line": 701,
    "template_line": 2022,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 704,
+   "line": 702,
    "template_line": 2023,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 705,
+   "line": 703,
    "template_line": 2024,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 706,
+   "line": 704,
    "template_line": 2025,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 707,
+   "line": 705,
    "template_line": 2026,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 708,
+   "line": 706,
    "template_line": 2027,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 709,
+   "line": 707,
    "template_line": 2028,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 710,
+   "line": 708,
    "template_line": 2029,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 711,
+   "line": 709,
    "template_line": 2030,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 712,
+   "line": 710,
    "template_line": 2031,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 713,
+   "line": 711,
    "template_line": 2032,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 714,
+   "line": 712,
    "template_line": 2033,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 715,
+   "line": 713,
    "template_line": 2034,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 716,
+   "line": 714,
    "template_line": 2035,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 717,
+   "line": 715,
    "template_line": 2036,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 718,
+   "line": 716,
    "template_line": 2037,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 719,
+   "line": 717,
    "template_line": 2038,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 720,
+   "line": 718,
    "template_line": 2039,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 721,
+   "line": 719,
    "template_line": 2040,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 722,
+   "line": 720,
    "template_line": 2041,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 723,
+   "line": 721,
    "template_line": 2042,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 724,
+   "line": 722,
    "template_line": 2043,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 725,
+   "line": 723,
    "template_line": 2044,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 726,
+   "line": 724,
    "template_line": 2045,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 727,
+   "line": 725,
    "template_line": 2046,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 728,
+   "line": 726,
    "template_line": 2047,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 729,
+   "line": 727,
    "template_line": 2048,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 730,
+   "line": 728,
    "template_line": 2049,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 731,
+   "line": 729,
    "template_line": 2050,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 732,
+   "line": 730,
    "template_line": 2051,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 733,
+   "line": 731,
    "template_line": 2052,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 734,
+   "line": 732,
    "template_line": 2053,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 735,
+   "line": 733,
    "template_line": 2054,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 736,
+   "line": 734,
    "template_line": 2055,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 737,
+   "line": 735,
    "template_line": 2056,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 738,
+   "line": 736,
    "template_line": 2057,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 739,
+   "line": 737,
    "template_line": 2058,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 740,
+   "line": 738,
    "template_line": 2059,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 741,
+   "line": 739,
    "template_line": 2060,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 742,
+   "line": 740,
    "template_line": 2061,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 743,
+   "line": 741,
    "template_line": 2062,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 744,
+   "line": 742,
    "template_line": 2063,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 745,
+   "line": 743,
    "template_line": 2064,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 746,
+   "line": 744,
    "template_line": 2065,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 747,
+   "line": 745,
    "template_line": 2066,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 748,
+   "line": 746,
    "template_line": 2067,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 749,
+   "line": 747,
    "template_line": 2068,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 750,
+   "line": 748,
    "template_line": 2069,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 751,
+   "line": 749,
    "template_line": 2070,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 752,
+   "line": 750,
    "template_line": 2071,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 753,
+   "line": 751,
    "template_line": 2072,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 754,
+   "line": 752,
    "template_line": 2073,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 755,
+   "line": 753,
    "template_line": 2074,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 756,
+   "line": 754,
    "template_line": 2075,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 757,
+   "line": 755,
    "template_line": 2076,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 758,
+   "line": 756,
    "template_line": 2077,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 759,
+   "line": 757,
    "template_line": 2078,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 760,
+   "line": 758,
    "template_line": 2079,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 761,
+   "line": 759,
    "template_line": 2080,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 762,
+   "line": 760,
    "template_line": 2081,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 763,
+   "line": 761,
    "template_line": 2082,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 764,
+   "line": 762,
    "template_line": 2083,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 765,
+   "line": 763,
    "template_line": 2084,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 766,
+   "line": 764,
    "template_line": 2085,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 767,
+   "line": 765,
    "template_line": 2086,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 768,
+   "line": 766,
    "template_line": 2087,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 769,
+   "line": 767,
    "template_line": 2088,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 770,
+   "line": 768,
    "template_line": 2089,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 771,
+   "line": 769,
    "template_line": 2090,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 772,
+   "line": 770,
    "template_line": 2091,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 773,
+   "line": 771,
    "template_line": 2092,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 774,
+   "line": 772,
    "template_line": 2093,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 775,
+   "line": 773,
    "template_line": 2094,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 776,
+   "line": 774,
    "template_line": 2095,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 777,
+   "line": 775,
    "template_line": 2096,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 778,
+   "line": 776,
    "template_line": 2097,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
-   "line": 779,
+   "line": 777,
    "template_line": 2098,
    "path": "/piles",
    "node": "set/fleet/piles",
    "set_line": 11
   },
   {
+   "line": 778,
+   "template_line": 2099,
+   "path": "/piles",
+   "node": "set/fleet/piles",
+   "set_line": 11
+  },
+  {
+   "line": 779,
+   "template_line": 2100,
+   "path": "/piles",
+   "node": "set/fleet/piles",
+   "set_line": 11
+  },
+  {
    "line": 780,
-   "template_line": 2316,
+   "template_line": 2318,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6
   },
   {
    "line": 781,
-   "template_line": 3144,
+   "template_line": 3146,
    "path": "/",
    "node": "set/fleet",
    "set_line": 6

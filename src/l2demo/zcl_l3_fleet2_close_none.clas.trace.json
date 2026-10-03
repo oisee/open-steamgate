@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-ports/autoclose.tpl",
- "model": "sha256:199887a2c2b361e2b982e46eec53885d0fea539f1948129651658a3641f6f615",
+ "model": "sha256:f47b407d590748840f4838ade979a6b87b9398a4ccebf97ee3dbcc0a6f2b80dd",
  "lines": [
   {
    "line": 1,

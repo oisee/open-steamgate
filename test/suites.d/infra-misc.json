@@ -45,6 +45,7 @@
     "test/dsl-l3-settings.mjs",
     "test/dsl-l3-governor.mjs",
     "test/dsl-l3-sim.mjs",
+    "test/dsl-l3-chaos.mjs",
     "test/dsl-l3-graph.mjs",
     "test/dsl-l3-replay.mjs",
     "test/dsl-l3-cockpit.mjs",
