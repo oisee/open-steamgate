@@ -119,6 +119,8 @@ CLASS zcl_osd_adt_ddic IMPLEMENTATION.
     DATA lv_block TYPE string.
     DATA lv_off TYPE i.
     DATA ls_field TYPE ty_field.
+    DATA lt_resolved TYPE HASHED TABLE OF ty_field WITH UNIQUE KEY element.
+    DATA ls_resolved TYPE ty_field.
     rs_table-name = iv_name.
     lv_head = iv_xml.
     FIND FIRST OCCURRENCE OF `<DD03P_TABLE>` IN lv_head MATCH OFFSET lv_off.
@@ -161,7 +163,21 @@ CLASS zcl_osd_adt_ddic IMPLEMENTATION.
       ls_field-description = tag( iv_xml = lv_block iv_tag = `DDTEXT` ).
       IF iv_resolve = abap_true.
         IF ls_field-element IS NOT INITIAL AND ls_field-datatype IS INITIAL.
-          resolve( EXPORTING iv_element = ls_field-element CHANGING cs_field = ls_field ).
+          READ TABLE lt_resolved WITH TABLE KEY element = ls_field-element INTO ls_resolved.
+          IF sy-subrc <> 0.
+            CLEAR ls_resolved.
+            ls_resolved-element = ls_field-element.
+            resolve( EXPORTING iv_element = ls_field-element CHANGING cs_field = ls_resolved ).
+            INSERT ls_resolved INTO TABLE lt_resolved.
+          ENDIF.
+          IF ls_resolved-datatype IS NOT INITIAL.
+            ls_field-datatype = ls_resolved-datatype.
+            ls_field-length = ls_resolved-length.
+            ls_field-decimals = ls_resolved-decimals.
+            IF ls_field-description IS INITIAL.
+              ls_field-description = ls_resolved-description.
+            ENDIF.
+          ENDIF.
         ENDIF.
         ls_field-letter = letter( iv_type = ls_field-datatype iv_default = tag( iv_xml = lv_block iv_tag = `INTTYPE` ) ).
       ENDIF.

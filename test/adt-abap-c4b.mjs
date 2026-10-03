@@ -85,13 +85,13 @@ describe('C4b includes, associations, joins and wide-table READ cost',function()
     const result=await pair.diff('GET',`/sap/bc/adt/datapreview/cds/${name}/metadata`);expect(result.status,result.body).to.equal(200);
     if(name==='zc4_assoc')expect(result.body).not.to.contain('_PEER');else expect(result.body).to.contain('dataPreview:length="0"');
   });
-  it('measures per-field READ cost on 120 resolved fields',async()=>{
+  it('measures cached READ cost on 120 resolved fields',async()=>{
     const original=store.read.bind(store);let reads=0;store.read=(...args)=>{reads++;return original(...args);};
     try {
       const start=performance.now();
       const result=await withSystem(()=>undefined,()=>dialogStep(()=>abap.Classes.ZCL_OSD_ADT_PREVIEW.table_fields({iv_name:new abap.types.String().set('ZC4_WIDE')})),{store});
       const elapsed=performance.now()-start;
-      expect(result.array()).to.have.length(120);expect(reads).to.equal(241);
+      expect(result.array()).to.have.length(120);expect(reads).to.equal(3);
       console.log(`C4b wide table: 120 fields, ${reads} READs, ${elapsed.toFixed(2)} ms, ${(elapsed/120).toFixed(3)} ms/field`);
     }finally{store.read=original;}
   });
