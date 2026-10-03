@@ -41,7 +41,10 @@
       "libs": {
         "sap.m": {},
         "sap.ui.generic.app": {},
-        "sap.suite.ui.generic.template": {}
+        "sap.suite.ui.generic.template": {},
+        "sap.suite.ui.microchart": {
+          "lazy": true
+        }
       }
     },
     "models": {
@@ -80,44 +83,58 @@
                     "press": "askStartRun",
                     "requiresSelection": false,
                     "global": true
-                  },
-                  "Doctor": {
-                    "id": "Doctor",
-                    "text": "{{Doctor}}",
-                    "press": "askDoctor",
-                    "requiresSelection": false,
-                    "global": true
-                  },
-                  "Schedule": {
-                    "id": "Schedule",
-                    "text": "{{Schedule}}",
-                    "press": "askSchedule",
-                    "requiresSelection": false,
-                    "global": true
-                  },
-                  "Unschedule": {
-                    "id": "Unschedule",
-                    "text": "{{Unschedule}}",
-                    "press": "askUnschedule",
-                    "requiresSelection": false,
-                    "global": true
                   }
                 }
               }
             }
           },
           "sap.suite.ui.generic.template.ObjectPage.view.Details": {
-            "controllerName": "l3.fleet2.Cockpit"
+            "controllerName": "l3.fleet2.Cockpit",
+            "sap.ui.generic.app": {
+              "RunSet": {
+                "EntitySet": "RunSet",
+                "Header": {
+                  "Actions": {
+                    "ContinueGlass": {
+                      "id": "ContinueGlass",
+                      "text": "{{ContinueGlass}}",
+                      "press": "askContinueGlass",
+                      "applicablePath": "CanContinue"
+                    },
+                    "Resume": {
+                      "id": "Resume",
+                      "text": "{{Resume}}",
+                      "press": "askResume",
+                      "applicablePath": "CanResume"
+                    }
+                  }
+                },
+                "Sections": {
+                  "Pile": {
+                    "id": "Pile",
+                    "Actions": {
+                      "ReleasePile": {
+                        "id": "ReleasePile",
+                        "text": "{{ReleasePile}}",
+                        "press": "askReleasePile",
+                        "requiresSelection": true,
+                        "applicablePath": "CanRelease"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "sap.ui.viewExtensions": {
           "sap.suite.ui.generic.template.ObjectPage.view.Details": {
-            "AfterFacet|RunSet|Pile": {
+            "BeforeFacet|RunSet|Stage": {
               "className": "sap.ui.core.Fragment",
               "fragmentName": "l3.fleet2.Cockpit",
               "type": "XML",
               "sap.ui.generic.app": {
-                "title": "{{cockpit}}"
+                "title": "{{progress}}"
               }
             }
           }
@@ -140,7 +157,8 @@
             "dataLoadSettings": {
               "loadDataOnAppLaunch": "always"
             },
-            "smartVariantManagement": false
+            "smartVariantManagement": false,
+            "variantManagementHidden": true
           }
         },
         "pages": {
@@ -149,7 +167,10 @@
             "component": {
               "name": "sap.suite.ui.generic.template.ObjectPage",
               "settings": {
-                "editableHeaderContent": false
+                "editableHeaderContent": false,
+                "tableSettings": {
+                  "variantManagement": false
+                }
               }
             }
           }

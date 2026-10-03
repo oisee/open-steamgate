@@ -1,7 +1,7 @@
 {
  "generator": "dsl-l3-cockpit",
  "set": "src/l2demo/fleet2.l3.yaml",
- "model": "sha256:f6cf5937a2ccf5edb40971d95f4de3658953569bb2267dbaa4f6fe1439408953",
+ "model": "sha256:cc6e82b1fb5cda2c8c4a84262be0ed424edd1978f5ef98a76dcf528fc6e03fd3",
  "template": "recipes/l3-cockpit/manifest.json",
  "lines": [
   {
@@ -961,6 +961,132 @@
   {
    "line": 160,
    "template_line": 160,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 161,
+   "template_line": 161,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 162,
+   "template_line": 162,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 163,
+   "template_line": 163,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 164,
+   "template_line": 164,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 165,
+   "template_line": 165,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 166,
+   "template_line": 166,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 167,
+   "template_line": 167,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 168,
+   "template_line": 168,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 169,
+   "template_line": 169,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 170,
+   "template_line": 170,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 171,
+   "template_line": 171,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 172,
+   "template_line": 172,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 173,
+   "template_line": 173,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 174,
+   "template_line": 174,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 175,
+   "template_line": 175,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 176,
+   "template_line": 176,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 177,
+   "template_line": 177,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 178,
+   "template_line": 178,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 179,
+   "template_line": 179,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 180,
+   "template_line": 180,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
+  },
+  {
+   "line": 181,
+   "template_line": 181,
    "node": "set/fleet2/cockpit",
    "set_line": 114
   }
