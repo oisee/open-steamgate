@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {execFile} from "node:child_process";
 import {promisify} from "node:util";
 import express from "express";
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import "./start.mjs";
@@ -14,6 +14,7 @@ import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {WarmCompiler} from "../tools/osd-warm.mjs";
+import {build} from "../tools/osd-build.mjs";
 const base = "/sap/bc/adt/core/http/xref/";
 const clean = s => s.replace(/\?$/, "");
 const str = s => new abap.types.String().set(s);
@@ -160,18 +161,36 @@ for (const remote of [false, true]) describe(`A9 ${remote ? "OSD_ADT_ONE_RUNTIME
     finally {store.list=original;}
   });
   it("real primed compiler answers both warm routes", async () => {
-    const compiler=new WarmCompiler({root:process.cwd()});
+    // Other suites can restore sources after building a different live
+    // generation. Own both the tree and its cold baseline before priming.
+    const warmRoot=mkdtempSync(join(tmpdir(), "osd-a9-warm-"));
+    const compiler=new WarmCompiler({root:warmRoot});
     const previous=store, warm=process.env.OSD_WARM;
     process.env.OSD_WARM="1";
     try {
+      mkdirSync(join(warmRoot,"src"));
+      writeFileSync(join(warmRoot,"src","zcl_a9_warm_root.clas.abap"),
+        "CLASS zcl_a9_warm_root DEFINITION PUBLIC CREATE PUBLIC. ENDCLASS. CLASS zcl_a9_warm_root IMPLEMENTATION. ENDCLASS.");
+      writeFileSync(join(warmRoot,"src","zcl_a9_warm_reader.clas.abap"),
+        "CLASS zcl_a9_warm_reader DEFINITION PUBLIC. PUBLIC SECTION. DATA target TYPE REF TO zcl_a9_warm_root. ENDCLASS. CLASS zcl_a9_warm_reader IMPLEMENTATION. ENDCLASS.");
+      writeFileSync(join(warmRoot,"abap_transpile.json"), JSON.stringify({
+        input_folder:["src"], output_folder:"output", libs:[], write_source_map:true,
+        options:{ignoreSyntaxCheck:false, addFilenames:true, addCommonJS:true, unknownTypes:"compileError"},
+      }));
+      writeFileSync(join(warmRoot,"package.json"), "{}");
+      symlinkSync(resolve("node_modules"), join(warmRoot,"node_modules"));
+      const cold=await build({root:warmRoot, generators:false});
+      expect(cold.ok, JSON.stringify(cold)).to.equal(true);
       await compiler.prime();
-      store=new ObjectStore({root:process.cwd()});store.warm().compiler=compiler;
+      store=new ObjectStore({root:warmRoot, libs:[]});store.warm().compiler=compiler;
       const sides=[await mount(false),await mount(true)];
       for(const route of ["readers","closure"]) {
-        const result=await diff(`${route}?type=CLAS&name=ZCL_ZSTG_DEMO_MPC_EXT`,200,"GET",sides);
+        const result=await diff(`${route}?type=CLAS&name=ZCL_A9_WARM_ROOT`,200,"GET",sides);
         expect(result.source).to.equal("warm");
+        const objects=route === "readers" ? result.readers : result.closure;
+        expect(objects.map(o=>o.name)).to.include("ZCL_A9_WARM_READER");
       }
-    } finally {compiler.close();store=previous;if(warm === undefined) delete process.env.OSD_WARM;else process.env.OSD_WARM=warm;}
+    } finally {compiler.close();store=previous;rmSync(warmRoot,{recursive:true,force:true});if(warm === undefined) delete process.env.OSD_WARM;else process.env.OSD_WARM=warm;}
   });
   it("readers count direct DPC and MPC registrations without readers", async () => {
     for(const name of ["ZCL_A9_DPC","ZCL_A9_MPC"]) {
