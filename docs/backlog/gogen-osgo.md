@@ -1561,3 +1561,23 @@ Labels follow the release rule: only a must blocks its tag.
   service app goes").
 - generous: a lock table that survives the lock server's restart (replication, as a standalone enqueue server
   keeps it). Only if a measured case needs it.
+
+## ADT on OSGo: what the Go side lacks (measured 2026-10-03)
+
+A compile-and-unit survey of the ADT classes on OSGo after the ADT port's
+`PORT_PENDING` reached 0: all 49 ADT classes compile, with 39 statement traps
+in 24 methods; their ABAP Unit gives 94 passing and 55 NOT_COMPILED methods,
+no failed assertion; `/sap/bc/adt` is not mounted on OSGo (discovery 404).
+Whether to serve read-only ADT on OSGo is Alice's call (estimate: several M
+slices plus two L integrations -- sessions/ENQ on Go and a parser seam).
+
+- must (parity, independent of ADT): **`ZOSD_STORE`'s Go signature is behind
+  the ABAP callers.** `CALL FUNCTION 'ZOSD_STORE'` traps on OSGo because
+  `IV_JSON`, `EV_JSON` and `EV_STATE` are not in the host's signature (five
+  call sites in ZCL_OSD_ADT_HOST, _DDIC, _FREESTYLE, _VERSIONS). Bring the Go
+  destination's signature to the JSON envelope the ABAP side uses. [S/M]
+  Owner: stoker.
+- should: the small runtime gaps the survey hit -- `WHERE ... NP` on an
+  internal table, `CONVERT TIME STAMP ... INTO DATE ... TIME`, converting and
+  re-raising an exception reference -- each with a focused parity probe. [M]
+  Owner: stoker.

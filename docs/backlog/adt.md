@@ -505,3 +505,24 @@ SUBTRACT returns on a real kernel (an A4H probe; not a blocker).
   `default clock`.
 - Upstream: none; whole-second return is the locked API's declared contract,
   and the originally reported dump is unconfirmed.
+
+## Open items from the clean-room acceptance run (2026-10-03)
+
+- should: **create answers like SAP.** On the A4H sandbox `POST programs/programs`
+  answered 200 with no content type and an empty body; our facade answers 201
+  with `Location`. Align to SAP (clients are written against it and cannot
+  expect `Location`), after checking that the VS Code extension, the ABAP-FS
+  bridge and our tests do not read `Location` after a create. Low priority,
+  after the activation and active/inactive slices. [S] Owner: adt-i5.
+- nice: **a stale read after PUT was not reproduced.** One whole-fragment run
+  under `OSD_ADT_ONE_RUNTIME=1`, with four other heavy runs on the host, saw
+  `adt-devloop` read the old source right after a PUT (and two 404s after it).
+  It did not recur: the fragment passed under CPU load, and with a one-second
+  delay injected into the write path every PUT -> GET read the new source. If
+  it recurs, run the whole adt.json fragment in one-runtime mode with three
+  more fragment runs in parallel and capture the source-read/write trace.
+  Owner: adt-i5.
+- nice: **`test/start.mjs`'s inline front does not record dumps.** It logs a
+  dump without writing it; if one-runtime ever runs through it, it needs the
+  shared recorder in `tools/osd-dumps.mjs` (#561). Owner: adt-i5.
+
