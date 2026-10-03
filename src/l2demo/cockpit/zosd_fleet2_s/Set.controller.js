@@ -1,6 +1,7 @@
 sap.ui.define(["sap/ui/core/mvc/Controller", "sap/ui/model/json/JSONModel", "sap/ui/core/format/DateFormat", "sap/m/Dialog", "sap/m/Button",
-  "sap/m/Input", "sap/m/Label", "sap/m/Text", "sap/m/VBox", "sap/m/MessageBox", "sap/m/MessageToast", "l3/fleet2/set/Live"],
-function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text, VBox, MessageBox, MessageToast, Live) {
+  "sap/m/Input", "sap/m/Label", "sap/m/Text", "sap/m/VBox", "sap/m/MessageBox", "sap/m/MessageToast", "sap/m/Select", "sap/ui/core/Item",
+  "l3/fleet2/set/Live"],
+function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text, VBox, MessageBox, MessageToast, Select, Item, Live) {
   "use strict";
   // what the set can do, from its DSL (actions, settings with bounds)
   var config = {
@@ -121,6 +122,51 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
      "max": "1000000"
     },
     {
+     "name": "simulate.profile",
+     "default": "default",
+     "min": "1",
+     "max": "20",
+     "values": [
+      "default",
+      "calm",
+      "squall",
+      "storm",
+      "flood",
+      "stuck",
+      "random"
+     ]
+    },
+    {
+     "name": "simulate.dump",
+     "default": "-1",
+     "min": "-1",
+     "max": "1000"
+    },
+    {
+     "name": "simulate.hang",
+     "default": "-1",
+     "min": "-1",
+     "max": "1000"
+    },
+    {
+     "name": "simulate.slow",
+     "default": "-1",
+     "min": "-1",
+     "max": "1000"
+    },
+    {
+     "name": "simulate.hits_mean",
+     "default": "-1",
+     "min": "-1",
+     "max": "100"
+    },
+    {
+     "name": "simulate.autoclose",
+     "default": "-1",
+     "min": "-1",
+     "max": "1000"
+    },
+    {
      "name": "piles.checks.size",
      "default": "2",
      "min": "1",
@@ -163,7 +209,7 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
         reads.push(this.read("SettingSet").then(function (rows) {
           data.setProperty("/settings", rows.map(function (r) {
             var def = config.settings.find(function (s) {return s.name === r.ParamName;}) || {};
-            return Object.assign({}, r, {bounds: def.min + " .. " + def.max, changed: r.Origin === "DSL" ? self.text("fromDsl") : r.ChangedBy + ", " + when(r.ChangedAt)});
+            return Object.assign({}, r, {values: def.values, bounds: def.values ? def.values.join(", ") : def.min + " .. " + def.max, changed: r.Origin === "DSL" ? self.text("fromDsl") : r.ChangedBy + ", " + when(r.ChangedAt)});
           }));
         }));
         reads.push(this.read("ChangeSet").then(function (rows) {
@@ -218,13 +264,15 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
       fields.forEach(function (f) {
         box.addItem(new Label({text: self.text(f.label), required: !!f.required}));
         if (f.fixed !== undefined) {box.addItem(new Text({text: f.fixed})); return;}
-        inputs[f.name] = new Input({value: f.value || "", placeholder: f.hint ? self.text(f.hint) : ""});
+        inputs[f.name] = f.values ? new Select({width: "100%", selectedKey: f.value, items: f.values.map(function (v) {return new Item({key: v, text: v});})})
+          : new Input({value: f.value || "", placeholder: f.hint ? self.text(f.hint) : ""});
         box.addItem(inputs[f.name]);
       });
       var dialog = new Dialog({title: title, content: box, beginButton: new Button({text: this.text("confirm"), type: "Emphasized", press: function () {
         var values = {}, missing = false;
         fields.forEach(function (f) {
-          values[f.name] = f.fixed !== undefined ? f.fixed : inputs[f.name].getValue();
+          values[f.name] = f.fixed !== undefined ? f.fixed : inputs[f.name] instanceof Select ? inputs[f.name].getSelectedKey() : inputs[f.name].getValue();
+          if (inputs[f.name]) inputs[f.name].setValueState("None");
           if (f.required && !values[f.name].trim()) {inputs[f.name].setValueState("Error").setValueStateText(self.text("required")); missing = true;}
         });
         if (missing) return;
@@ -238,7 +286,7 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
     askChange: function (e) {
       var row = e.getSource().getBindingContext("set").getObject(), self = this;
       this.ask(this.text("SetSetting") + ": " + row.ParamName, [{name: "Param", label: "Param", fixed: row.ParamName},
-        {name: "Value", label: "Value", value: row.ParamVal, required: true}, {name: "Note", label: "Note", hint: "noteHint", required: true}],
+        {name: "Value", label: "Value", value: row.ParamVal, values: row.values, required: true}, {name: "Note", label: "Note", hint: "noteHint", required: true}],
       function (v) {self.run("SetSetting", v);});
     },
     askReset: function (e) {

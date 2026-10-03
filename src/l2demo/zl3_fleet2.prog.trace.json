@@ -3,7 +3,7 @@
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-job/template.tpl",
  "overlay": "recipes/l3-governor/job.patch.json",
- "model": "sha256:b70c3054b480bf3ec06cd4f06d96223106b633ea15ded844ad173508a997156c",
+ "model": "sha256:cc6e82b1fb5cda2c8c4a84262be0ed424edd1978f5ef98a76dcf528fc6e03fd3",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",
@@ -177,616 +177,616 @@
   },
   {
    "line": 20,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/1/screen",
    "node": "set/fleet2/setting/budget.glass",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 21,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/2/screen",
    "node": "set/fleet2/setting/budget.warn",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 22,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/3/screen",
    "node": "set/fleet2/setting/budget.narrow_at",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 23,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/4/screen",
    "node": "set/fleet2/setting/budget.per_pile",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 24,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/5/screen",
    "node": "set/fleet2/setting/retry.max",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 25,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/6/screen",
    "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 26,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/7/screen",
    "node": "set/fleet2/setting/stale",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 27,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/8/screen",
    "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 28,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/9/screen",
    "node": "set/fleet2/setting/keep.days",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 29,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/10/screen",
    "node": "set/fleet2/setting/simulate.seed",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 30,
-   "template_line": 33,
+   "template_line": 34,
    "path": "/settings/entries/11/screen",
    "node": "set/fleet2/setting/simulate.time_scale",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 31,
-   "template_line": 33,
-   "path": "/settings/entries/12/screen",
+   "template_line": 34,
+   "path": "/settings/entries/18/screen",
    "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 32,
-   "template_line": 36,
+   "template_line": 38,
    "path": "/params/1/screen",
    "node": "set/fleet2/param/active_status",
    "set_line": 19
   },
   {
    "line": 33,
-   "template_line": 39,
+   "template_line": 41,
    "path": "/schedule",
    "node": "set/fleet2/schedule",
    "set_line": 36
   },
   {
    "line": 34,
-   "template_line": 41,
+   "template_line": 43,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
    "line": 35,
-   "template_line": 42,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 15
-  },
-  {
-   "line": 36,
-   "template_line": 43,
-   "path": "/class",
-   "node": "set/fleet2",
-   "set_line": 15
-  },
-  {
-   "line": 37,
    "template_line": 44,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
-   "line": 38,
+   "line": 36,
+   "template_line": 45,
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 37,
    "template_line": 46,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 38,
+   "template_line": 48,
    "path": "/settings/class",
    "node": "set/fleet2/settings",
-   "set_line": 100
+   "set_line": 110
   },
   {
    "line": 39,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/1/field",
    "node": "set/fleet2/setting/budget.glass",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 40,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/2/field",
    "node": "set/fleet2/setting/budget.warn",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 41,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/3/field",
    "node": "set/fleet2/setting/budget.narrow_at",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 42,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/4/field",
    "node": "set/fleet2/setting/budget.per_pile",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 43,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/5/field",
    "node": "set/fleet2/setting/retry.max",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 44,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/6/field",
    "node": "set/fleet2/setting/retry.backoff",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 45,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/7/field",
    "node": "set/fleet2/setting/stale",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 46,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/8/field",
    "node": "set/fleet2/setting/fuses.max_alerts",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 47,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/9/field",
    "node": "set/fleet2/setting/keep.days",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 48,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/10/field",
    "node": "set/fleet2/setting/simulate.seed",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 49,
-   "template_line": 48,
+   "template_line": 51,
    "path": "/settings/entries/11/field",
    "node": "set/fleet2/setting/simulate.time_scale",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 50,
-   "template_line": 48,
-   "path": "/settings/entries/12/field",
+   "template_line": 51,
+   "path": "/settings/entries/18/field",
    "node": "set/fleet2/setting/piles.checks.size",
-   "set_line": 101
+   "set_line": 111
   },
   {
    "line": 51,
-   "template_line": 52,
-   "path": "/class",
-   "node": "set/fleet2",
-   "set_line": 15
-  },
-  {
-   "line": 52,
-   "template_line": 55,
-   "path": "/class",
-   "node": "set/fleet2",
-   "set_line": 15
-  },
-  {
-   "line": 53,
    "template_line": 56,
    "path": "/class",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
-   "line": 54,
-   "template_line": 57,
-   "path": "/schedule",
-   "node": "set/fleet2/schedule",
-   "set_line": 36
-  },
-  {
-   "line": 55,
-   "template_line": 58,
+   "line": 52,
+   "template_line": 59,
    "path": "/class",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
-   "line": 56,
-   "template_line": 59,
-   "path": "/schedule",
-   "node": "set/fleet2/schedule",
-   "set_line": 36
-  },
-  {
-   "line": 57,
+   "line": 53,
    "template_line": 60,
-   "path": "/schedule",
-   "node": "set/fleet2/schedule",
-   "set_line": 36
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 15
   },
   {
-   "line": 58,
+   "line": 54,
    "template_line": 61,
    "path": "/schedule",
    "node": "set/fleet2/schedule",
    "set_line": 36
   },
   {
-   "line": 59,
+   "line": 55,
    "template_line": 62,
-   "path": "/schedule",
-   "node": "set/fleet2/schedule",
-   "set_line": 36
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 15
   },
   {
-   "line": 60,
+   "line": 56,
    "template_line": 63,
    "path": "/schedule",
    "node": "set/fleet2/schedule",
    "set_line": 36
   },
   {
-   "line": 61,
+   "line": 57,
    "template_line": 64,
    "path": "/schedule",
    "node": "set/fleet2/schedule",
    "set_line": 36
   },
   {
-   "line": 62,
+   "line": 58,
    "template_line": 65,
-   "path": "/class",
-   "node": "set/fleet2",
-   "set_line": 15
+   "path": "/schedule",
+   "node": "set/fleet2/schedule",
+   "set_line": 36
   },
   {
-   "line": 63,
+   "line": 59,
    "template_line": 66,
    "path": "/schedule",
    "node": "set/fleet2/schedule",
    "set_line": 36
   },
   {
-   "line": 64,
+   "line": 60,
    "template_line": 67,
    "path": "/schedule",
    "node": "set/fleet2/schedule",
    "set_line": 36
   },
   {
-   "line": 65,
+   "line": 61,
    "template_line": 68,
    "path": "/schedule",
    "node": "set/fleet2/schedule",
    "set_line": 36
   },
   {
-   "line": 66,
-   "template_line": 70,
+   "line": 62,
+   "template_line": 69,
    "path": "/class",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
-   "line": 67,
+   "line": 63,
+   "template_line": 70,
+   "path": "/schedule",
+   "node": "set/fleet2/schedule",
+   "set_line": 36
+  },
+  {
+   "line": 64,
    "template_line": 71,
-   "path": "/resilience",
-   "node": "set/fleet2/resilience",
-   "set_line": 71
+   "path": "/schedule",
+   "node": "set/fleet2/schedule",
+   "set_line": 36
   },
   {
-   "line": 68,
+   "line": 65,
    "template_line": 72,
-   "path": "/resilience",
-   "node": "set/fleet2/resilience",
-   "set_line": 71
+   "path": "/schedule",
+   "node": "set/fleet2/schedule",
+   "set_line": 36
   },
   {
-   "line": 69,
-   "template_line": 73,
-   "path": "/resilience",
-   "node": "set/fleet2/resilience",
-   "set_line": 71
-  },
-  {
-   "line": 70,
+   "line": 66,
    "template_line": 74,
    "path": "/class",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
-   "line": 71,
+   "line": 67,
    "template_line": 75,
    "path": "/resilience",
    "node": "set/fleet2/resilience",
    "set_line": 71
   },
   {
-   "line": 72,
+   "line": 68,
    "template_line": 76,
    "path": "/resilience",
    "node": "set/fleet2/resilience",
    "set_line": 71
   },
   {
-   "line": 73,
+   "line": 69,
    "template_line": 77,
    "path": "/resilience",
    "node": "set/fleet2/resilience",
    "set_line": 71
   },
   {
-   "line": 74,
+   "line": 70,
    "template_line": 78,
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 71,
+   "template_line": 79,
+   "path": "/resilience",
+   "node": "set/fleet2/resilience",
+   "set_line": 71
+  },
+  {
+   "line": 72,
+   "template_line": 80,
+   "path": "/resilience",
+   "node": "set/fleet2/resilience",
+   "set_line": 71
+  },
+  {
+   "line": 73,
+   "template_line": 81,
+   "path": "/resilience",
+   "node": "set/fleet2/resilience",
+   "set_line": 71
+  },
+  {
+   "line": 74,
+   "template_line": 82,
    "path": "/resilience",
    "node": "set/fleet2/resilience",
    "set_line": 71
   },
   {
    "line": 75,
-   "template_line": 82,
+   "template_line": 86,
    "path": "/params/1/name",
    "node": "set/fleet2/param/active_status",
    "set_line": 19
   },
   {
    "line": 76,
-   "template_line": 84,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 15
-  },
-  {
-   "line": 77,
-   "template_line": 85,
-   "path": "/class",
-   "node": "set/fleet2",
-   "set_line": 15
-  },
-  {
-   "line": 78,
-   "template_line": 86,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 15
-  },
-  {
-   "line": 79,
-   "template_line": 87,
-   "path": "/",
-   "node": "set/fleet2",
-   "set_line": 15
-  },
-  {
-   "line": 80,
    "template_line": 88,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
-   "line": 81,
+   "line": 77,
+   "template_line": 89,
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 78,
    "template_line": 90,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 79,
+   "template_line": 91,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 80,
+   "template_line": 92,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 81,
+   "template_line": 94,
    "path": "/settings",
    "node": "set/fleet2/settings",
-   "set_line": 100
+   "set_line": 110
   },
   {
    "line": 82,
-   "template_line": 93,
+   "template_line": 97,
    "path": "/planned",
    "node": "set/fleet2/stages",
    "set_line": 20
   },
   {
    "line": 83,
-   "template_line": 96,
+   "template_line": 100,
    "path": "/with_params",
    "node": "set/fleet2/params",
    "set_line": 18
   },
   {
    "line": 84,
-   "template_line": 98,
+   "template_line": 102,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
    "line": 85,
-   "template_line": 99,
+   "template_line": 103,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
    "line": 86,
-   "template_line": 101,
-   "path": "/governor",
-   "node": "set/fleet2/governor",
-   "set_line": 79
-  },
-  {
-   "line": 87,
-   "template_line": 102,
-   "path": "/governor",
-   "node": "set/fleet2/governor",
-   "set_line": 79
-  },
-  {
-   "line": 88,
-   "template_line": 103,
-   "path": "/governor",
-   "node": "set/fleet2/governor",
-   "set_line": 79
-  },
-  {
-   "line": 89,
-   "template_line": 104,
-   "path": "/governor",
-   "node": "set/fleet2/governor",
-   "set_line": 79
-  },
-  {
-   "line": 90,
    "template_line": 105,
    "path": "/governor",
    "node": "set/fleet2/governor",
    "set_line": 79
   },
   {
-   "line": 91,
+   "line": 87,
+   "template_line": 106,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 79
+  },
+  {
+   "line": 88,
+   "template_line": 107,
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 79
+  },
+  {
+   "line": 89,
    "template_line": 108,
-   "path": "/resilience",
-   "node": "set/fleet2/resilience",
-   "set_line": 71
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 79
   },
   {
-   "line": 92,
+   "line": 90,
    "template_line": 109,
-   "path": "/resilience",
-   "node": "set/fleet2/resilience",
-   "set_line": 71
+   "path": "/governor",
+   "node": "set/fleet2/governor",
+   "set_line": 79
   },
   {
-   "line": 93,
-   "template_line": 110,
-   "path": "/resilience",
-   "node": "set/fleet2/resilience",
-   "set_line": 71
-  },
-  {
-   "line": 94,
-   "template_line": 111,
-   "path": "/resilience",
-   "node": "set/fleet2/resilience",
-   "set_line": 71
-  },
-  {
-   "line": 95,
+   "line": 91,
    "template_line": 112,
    "path": "/resilience",
    "node": "set/fleet2/resilience",
    "set_line": 71
   },
   {
-   "line": 96,
+   "line": 92,
+   "template_line": 113,
+   "path": "/resilience",
+   "node": "set/fleet2/resilience",
+   "set_line": 71
+  },
+  {
+   "line": 93,
+   "template_line": 114,
+   "path": "/resilience",
+   "node": "set/fleet2/resilience",
+   "set_line": 71
+  },
+  {
+   "line": 94,
    "template_line": 115,
-   "path": "/staged",
-   "node": "set/fleet2/stages",
-   "set_line": 20
+   "path": "/resilience",
+   "node": "set/fleet2/resilience",
+   "set_line": 71
   },
   {
-   "line": 97,
+   "line": 95,
    "template_line": 116,
-   "path": "/staged",
-   "node": "set/fleet2/stages",
-   "set_line": 20
+   "path": "/resilience",
+   "node": "set/fleet2/resilience",
+   "set_line": 71
   },
   {
-   "line": 98,
-   "template_line": 117,
-   "path": "/staged",
-   "node": "set/fleet2/stages",
-   "set_line": 20
-  },
-  {
-   "line": 99,
-   "template_line": 118,
-   "path": "/class",
-   "node": "set/fleet2",
-   "set_line": 15
-  },
-  {
-   "line": 100,
+   "line": 96,
    "template_line": 119,
    "path": "/staged",
    "node": "set/fleet2/stages",
    "set_line": 20
   },
   {
-   "line": 101,
+   "line": 97,
    "template_line": 120,
    "path": "/staged",
    "node": "set/fleet2/stages",
    "set_line": 20
   },
   {
-   "line": 102,
-   "template_line": 122,
-   "path": "/with_params",
-   "node": "set/fleet2/params",
-   "set_line": 18
+   "line": 98,
+   "template_line": 121,
+   "path": "/staged",
+   "node": "set/fleet2/stages",
+   "set_line": 20
   },
   {
-   "line": 103,
+   "line": 99,
+   "template_line": 122,
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 100,
+   "template_line": 123,
+   "path": "/staged",
+   "node": "set/fleet2/stages",
+   "set_line": 20
+  },
+  {
+   "line": 101,
    "template_line": 124,
    "path": "/staged",
    "node": "set/fleet2/stages",
    "set_line": 20
   },
   {
+   "line": 102,
+   "template_line": 126,
+   "path": "/with_params",
+   "node": "set/fleet2/params",
+   "set_line": 18
+  },
+  {
+   "line": 103,
+   "template_line": 128,
+   "path": "/staged",
+   "node": "set/fleet2/stages",
+   "set_line": 20
+  },
+  {
    "line": 104,
-   "template_line": 125,
+   "template_line": 129,
    "path": "/staged",
    "node": "set/fleet2/stages",
    "set_line": 20
   },
   {
    "line": 105,
-   "template_line": 127,
+   "template_line": 131,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
    "line": 106,
-   "template_line": 128,
+   "template_line": 132,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 15
   },
   {
    "line": 107,
-   "template_line": 129,
+   "template_line": 133,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 15

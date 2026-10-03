@@ -15,7 +15,9 @@ const OPEN = ["DONE", "PARTIAL", "FAILED", "NOT-RUN"].map((s) => `Status ne '${s
 export async function cockpitPages(m) {
   const c = m.cockpit, files = {};
   const actions = cockpitActions(m).filter((a) => !a.get).map(({name, params, reason}) => ({name, params, reason: !!reason}));
-  const settings = (m.settings?.entries ?? []).map(({name, default: value, min, max}) => ({name, default: value, min, max}));
+  // a setting with a value list (a chaos profile) is chosen from it, not typed against bounds
+  const settings = (m.settings?.entries ?? []).map(({name, default: value, min, max, values}) => ({name, default: value, min, max,
+    ...(values ? {values: values.split(/,\s*/)} : {})}));
   const json = (v) => JSON.stringify(v, null, 1).replaceAll("\n", "\n  ");
   const runs = {service: c.service, actions: actions.filter((a) => RUN_ACTIONS.includes(a.name)), governor: !!m.governor, simulate: !!m.simulate};
   const set = {service: c.service, actions: actions.filter((a) => !RUN_ACTIONS.includes(a.name)), settings};

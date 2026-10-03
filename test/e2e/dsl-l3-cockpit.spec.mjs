@@ -222,6 +222,17 @@ test("the Set app changes a setting with a note, refuses one without, and shows 
   await expect(page.getByRole("alertdialog")).toContainText("SetSetting");
   await page.getByRole("alertdialog").getByRole("button", {name: "Close"}).click();
   await reset(request, "budget.glass");
+  // a setting with a value list (the twin's chaos profile) is chosen, not typed
+  const profile = page.locator(".sapMListTblRow").filter({hasText: "simulate.profile"}).first();
+  await expect(profile).toContainText("default, calm, squall, storm, flood, stuck, random");
+  await profile.getByRole("button", {name: "Change"}).click();
+  await dialog.locator(".sapMSlt").click();
+  await page.getByRole("option", {name: "storm"}).click();
+  await dialog.locator("input").last().fill("browser storm profile");
+  await dialog.getByRole("button", {name: "Confirm"}).click();
+  await expect(dialog).toBeHidden();
+  await expect(profile).toContainText("storm");
+  await reset(request, "simulate.profile");
   // the run page no longer carries the set's actions
   await page.goto(runsApp);
   await expect(page.getByRole("button", {name: "Run doctor"})).toHaveCount(0);
