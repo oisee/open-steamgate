@@ -25,6 +25,7 @@
     "test/adt-session.mjs",
     "test/adt-versions.mjs",
     "test/http-codelens.mjs",
+    "test/osd-adt-fork.mjs",
     "test/store-history.mjs",
     "test/tmp-package.mjs"
   ]

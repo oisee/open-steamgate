@@ -1,3 +1,4 @@
+import {parentAdtSnapshot} from "../tools/adt-runtime-state.mjs";
 import {databasePath} from "../tools/osd-persist.mjs";
 import {dialogStep, lockedClient} from "../tools/osd-dialog-step.mjs";
 import {ensureDemoData} from "../tools/osd-demo-data.mjs";
@@ -215,6 +216,9 @@ export function startServer(quiet) {
   const runtime = MODE === "child"
     ? store.serving({root: process.cwd(), database})
     : undefined;
+  if (runtime !== undefined && adtKernel !== undefined) {
+    (runtime.primary ?? runtime).adtSnapshot = parentAdtSnapshot;
+  }
   const data = MODE === "child"
     ? new Data({root: process.cwd(), runtime})
     // the facade's reads share the one connection with the steps, so they

@@ -98,6 +98,8 @@ export class ServingRuntime {
     // which is why a recycle stops the old one first.
     this.database = options.database;
     this.env = options.env ?? {};
+    this.adtSnapshot = options.adtSnapshot;
+    this.adtCarry = undefined;
     // how long a starting child may say NOTHING (no output, no message)
     // before it counts as hung; a child that keeps saying it is booting
     // (tools/osd-serve.mjs sends "booting" every 5 s) is waited for up to
@@ -431,6 +433,12 @@ export class ServingRuntime {
   }
 
   #spawnOne(options = {}) {
+    // Capture at spawn, before child IPC. The temporary parent provider
+    // reads both SQLite tables in one statement without queuing behind a
+    // publication step that can itself be waiting for this boot.
+    const carryEnabled = (this.env.OSD_ADT_ONE_RUNTIME ?? process.env.OSD_ADT_ONE_RUNTIME) === "1";
+    const snapshot = Promise.resolve().then(() => carryEnabled ? this.adtSnapshot?.() : undefined);
+    snapshot.catch(() => undefined);
     return new Promise((resolve, reject) => {
       const epoch = this.epoch + 1;
       const generation = liveHash(this.root) ?? String(epoch);
@@ -464,9 +472,22 @@ export class ServingRuntime {
           ...(this.database === undefined ? {} : {STG_DB_PATH: this.database}),
           ...this.env,
           OSD_GENERATION: generation,
+          OSD_ADT_CARRY: carryEnabled ? "1" : "0",
           ...(nodeOptions === "" ? {} : {NODE_OPTIONS: nodeOptions}),
         },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
+      });
+      child.on("message", (message) => {
+        if (message?.type === "adt-carry") this.adtCarry = message.state;
+        if (message?.type === "adt-state-request") {
+          snapshot.then((state) => {
+            if (child.connected) child.send({type: "adt-state", state: state ?? this.adtCarry,
+              replace: state !== undefined});
+          }, (error) => {
+            console.error(`ADT snapshot failed: ${error.message}`);
+            if (child.connected) child.send({type: "adt-state"});
+          });
+        }
       });
       reapOnExit();
       CHILDREN.add(child);
@@ -594,6 +615,8 @@ export class ServingRuntime {
         if (timedOut !== undefined) return;
         child.off("message", onMessage);
         stopTimers();
+        // Consumed carry must not resurrect stale rows after a later crash.
+        this.adtCarry = undefined;
         this.died = undefined;
         this.child = child;
         this.port = message.port;

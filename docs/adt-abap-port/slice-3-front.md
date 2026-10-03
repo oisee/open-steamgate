@@ -202,6 +202,11 @@ it in front of the table with `ZCL_OSD_ADT_HANDLER=>USE_ROUTES`.
 
 ### Known limitation: two lock tables
 
+B0 now rebuilds the child's ADT locks at boot from a parent-kernel snapshot;
+see [B0 state across recycle](one-runtime-b0.md). The measurements below are
+before B0. The front and its authoritative rows still live in the parent;
+live lock/unlock synchronization awaits B1's remote step.
+
 In child mode there are two lock servers, one per process. `locks()` keeps one table per process on
 `globalThis.__osdLocks` (`tools/osd-enq.mjs:303-306`). The serving child installs its own through
 `test/setup.mjs:384-398` (`installEnq`), and the parent's ADT kernel installs a second one at

@@ -21,6 +21,7 @@ CLASS ltcl_session DEFINITION FOR TESTING DURATION SHORT RISK LEVEL DANGEROUS FI
     METHODS state_never_unmarks FOR TESTING RAISING cx_static_check.
     METHODS tokens_do_not_touch FOR TESTING RAISING cx_static_check.
     METHODS handles FOR TESTING RAISING cx_static_check.
+    METHODS rehydrate FOR TESTING RAISING cx_static_check.
     METHODS logoff FOR TESTING RAISING cx_static_check.
     METHODS context_end FOR TESTING RAISING cx_static_check.
     METHODS holders FOR TESTING RAISING cx_static_check.
@@ -177,6 +178,30 @@ CLASS ltcl_session IMPLEMENTATION.
                            IMPORTING ev_type = lv_type ev_name = lv_name ).
     cl_abap_unit_assert=>assert_initial( lv_type ).
     cl_abap_unit_assert=>assert_initial( lv_name ).
+  ENDMETHOD.
+
+  METHOD rehydrate.
+    DATA lv_handle TYPE string.
+    DATA lv_id TYPE string.
+    DATA lv_count TYPE i.
+    DATA lt_handles TYPE zcl_osd_adt_session=>ty_handles.
+    DATA ls_row TYPE zosd_adt_sess.
+    ms_one = by_cookie( iv_context = ms_one-id iv_state = `stateful` ).
+    lv_id = ms_one-id.
+    lv_handle = mo_api->adopt_handle( iv_id = lv_id iv_type = `CLAS` iv_name = `ZCL_B0` ).
+*   Model a new process's empty ENQ context without ending the SQL rows.
+    zcl_osd_enq_kernel=>end( lv_id ).
+    zcl_osd_enq_kernel=>revive( lv_id ).
+    lv_count = zcl_osd_adt_session=>rehydrate( lv_id ).
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 ).
+    lv_count = zcl_osd_adt_session=>rehydrate( lv_id ).
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 ).
+    lt_handles = mo_session->handles( lv_id ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_handles ) exp = 1 ).
+    cl_abap_unit_assert=>assert_true( mo_api->holds( iv_id = lv_id iv_handle = lv_handle
+      iv_type = `CLAS` iv_name = `ZCL_B0` ) ).
+    ls_row = mo_session->peek( lv_id ).
+    cl_abap_unit_assert=>assert_equals( act = ls_row-token exp = ms_one-token ).
   ENDMETHOD.
 
   METHOD logoff.

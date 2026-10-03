@@ -10,6 +10,8 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {services} from "../tools/osd-icf.mjs";
 import {createRequire} from "node:module";
+import {ServingRuntime, liveChildren} from "../tools/osd-runtime.mjs";
+import {DatabaseSync} from "node:sqlite";
 import {BatchRuns} from "../tools/osd-batch-runs.mjs";
 
 const {Osd, objectOf, outcomes, unitRiskOf, unitDurationOf, runUnitQueue} = createRequire(import.meta.url)("../editors/vscode/lib.js");
@@ -38,7 +40,7 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     child = spawn(process.execPath, ["test/run.mjs"], {
       // Always use a private file, never an inherited HANA connection.
       env: {...process.env, STG_DB: backend, STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: undefined,
-        OSD_USER_FULL: testIdentity, STG_DB_BASE: join(databaseDir, "base"),
+        OSD_ADT_ONE_RUNTIME: "1", OSD_USER_FULL: testIdentity, STG_DB_BASE: join(databaseDir, "base"),
         STG_DB_PATH: join(databaseDir, backend === "duckdb" ? "osd.duckdb" : "osd.sqlite"),
         OSD_OPERATIONS_DB: operationsDb, OSD_BATCH_READ_TOKEN: monitorToken},
       stdio: ["ignore", "pipe", "pipe"],
@@ -193,6 +195,8 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     expect(locked.status, await locked.clone().text()).to.equal(200);
     expect(locked.headers.get("x-osd-served-by")).to.equal("ABAP");
     const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
+    // Start it explicitly so this case also runs alone for its red proof.
+    expect((await fetch(`${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`)).status).to.equal(200);
     // the serving child goes away and comes back
     const before = await (await fetch(`${BASE}/osd/serving`)).json();
     process.kill(before.pid, "SIGKILL");
@@ -207,6 +211,9 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
       }
     }
     expect(after?.pid, "a new serving child").to.not.equal(before.pid);
+    const probe = await fetch(`${BASE}/osd/classrun`, {method: "POST", headers: {"content-type": "application/json"},
+      body: JSON.stringify({name: "ZCL_OSD_ADT_ENQ_PROBE"})});
+    expect((await probe.json()).text.trim(), "ENQUEUE_READ in the new child sees the ADT lock").to.equal("1");
     const refused = await as(two, "POST", `${object}?_action=LOCK&accessMode=MODIFY`);
     expect(refused.status, "the lock outlived the child").to.equal(403);
     expect(await refused.text()).to.contain("CHILDONE");
@@ -413,4 +420,61 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     expect(invalid.status).to.equal(409);
     expect((await invalid.json()).error).to.match(/invalid inspector port/);
   });
+});
+
+// Exercise the carry where B1 will own the rows, without moving the front.
+describe("B0 child-owned ADT carry", function () {
+  this.timeout(180000);
+  const id = "b00000000000000000000001";
+  const state = () => ({version: 1,
+    zosd_adt_sess: [{mandt: "123", id, username: "B0USER", token: "b0-token", stateful: "X",
+      created: "20261002000000", touched: "20261002000000"}],
+    zosd_adt_shdl: [{mandt: "123", id, handle: "b0-handle", objtype: "CLAS", objname: "ZCL_B0"}],
+  });
+  for (const backend of ["sqlite", "duckdb", "file"]) {
+    it(`${backend}: clean carry and boot rebuild; crash uses only database rows`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), "osd-b0-"));
+      const database = backend === "file" ? join(dir, "osd.sqlite") : undefined;
+      const runtime = new ServingRuntime({database, grace: 10000, env: {OSD_ADT_ONE_RUNTIME: "1", STG_DB: backend, OSD_CLIENT: "123", STG_DB_PATH: database ?? "",
+        STG_DB_BASE: join(dir, "base"), OSD_DEMO_ROWS: "0"}, adtSnapshot: state});
+      const read = async () => {
+        const response = await fetch(runtime.url + "/osd/classrun", {method: "POST",
+          headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_ENQ_PROBE"})});
+        const answer = await response.json();
+        expect(answer.ok, JSON.stringify(answer)).to.equal(true);
+        return answer.text.trim();
+      };
+      const token = async () => {
+        const response = await fetch(runtime.url + "/osd/sql", {method: "POST",
+          headers: {"content-type": "application/json"}, body: JSON.stringify({sql: "SELECT token FROM zosd_adt_sess"})});
+        return JSON.stringify(await response.json());
+      };
+      try {
+        await runtime.start();
+        runtime.adtSnapshot = undefined;
+        expect(await read()).to.equal("1");
+        await runtime.recycle();
+        expect(await read()).to.equal("1");
+        expect(await token()).to.contain("b0-token");
+        if (backend === "file") {
+          await runtime.stop();
+          const db = new DatabaseSync(database);
+          db.exec("UPDATE osd_schema SET fingerprint = 'b0-schema-drift'");
+          db.close();
+          await runtime.start();
+          expect(await read(), "schema drift carry").to.equal("1");
+          expect(await token(), "schema drift token").to.contain("b0-token");
+        }
+        const child = liveChildren().find((c) => c.pid === runtime.child.pid);
+        const exited = once(child, "exit");
+        child.kill("SIGKILL");
+        await exited;
+        await runtime.ensure();
+        expect(await read(), "no stale clean carry after a crash").to.equal(backend === "file" ? "1" : "0");
+      } finally {
+        await runtime.stop();
+        rmSync(dir, {recursive: true, force: true});
+      }
+    });
+  }
 });
