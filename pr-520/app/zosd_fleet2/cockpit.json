@@ -1,0 +1,5 @@
+{
+  "app": "zosd_fleet2",
+  "title": "Fleet run cockpit",
+  "service": "ZL3C_FLEET2_SRV"
+}
