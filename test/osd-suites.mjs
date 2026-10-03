@@ -426,19 +426,50 @@ describe("Mocha file reports", () => {
 describe("required PR retry reports", () => {
   const workflow = readFileSync(".github/workflows/tests.yml", "utf8");
   const script = workflow.split("          script: |\n").at(-1).split("\n").map((line) => line.replace(/^            /, "")).join("\n");
-  const execute = async (mode) => {
+  const execute = async (mode, attempt = 1, canComment = true) => {
     const nativeRequire = createRequire(import.meta.url);
     const fs = nativeRequire("node:fs");
+    const current = [1, 2, 3, 4].map((i) => `suite-results-${i}-attempt-${attempt}`);
     const mockedFs = {...fs,
-      existsSync: () => mode !== "missing-directory",
-      readdirSync: () => { if (mode === "missing-directory") throw Error("ENOENT suite-results"); return mode === "missing-shard" ? ["suite-results-1"] : [1, 2, 3, 4].map((i) => `suite-results-${i}`); },
-      readFileSync: (file) => { if (mode === "unreadable") throw Error("unreadable report"); return ""; },
+      readdirSync: () => {
+        if (mode === "missing-directory") throw Error("ENOENT suite-results");
+        if (mode === "missing-shard") return current.slice(0, 1);
+        if (mode === "missing-rerun-report") return [1, 2, 3, 4].map((i) => `suite-results-${i}-attempt-1`);
+        if (mode === "retained") return ["suite-results-1-attempt-2", ...[1, 2, 3, 4].map((i) => `suite-results-${i}-attempt-1`)];
+        return current;
+      },
+      readFileSync: (file) => {
+        if (mode === "unreadable") throw Error("unreadable report");
+        return mode === "retained" && file.includes("suite-results-1-attempt-1") ? "flaky: earlier isolation recovery" : "";
+      },
     };
-    const github = {paginate: async () => [], rest: {actions: {listJobsForWorkflowRunAttempt() {}}, issues: {listComments() {}, createComment() {}, updateComment() {}}}};
+    let body;
+    const calls = [];
+    const github = {
+      paginate: async (method, args) => {
+        if (method === github.rest.issues.listComments) return [];
+        calls.push(args);
+        if (args.attempt_number === 1 && attempt > 1) {
+          if (mode === "api-error") throw Error("fixture API error");
+          return [{name: "suites (1)", conclusion: "failure"}];
+        }
+        return [{name: "suites (1)", conclusion: "success"}];
+      },
+      rest: {actions: {listJobsForWorkflowRunAttempt() {}}, issues: {
+        listComments() {}, createComment(args) { body = args.body; }, updateComment(args) { body = args.body; },
+      }},
+    };
     const context = {repo: {owner: "fixture", repo: "fixture"}, payload: {pull_request: {head: {sha: "12345678"}}}, issue: {number: 1}, runId: 1};
-    await new (Object.getPrototypeOf(async function () {}).constructor)("require", "github", "context", "process", script)(
-      (name) => name === "node:fs" ? mockedFs : nativeRequire(name), github, context,
-      {env: {EXPECTED_SHARDS: "1,2,3,4", JOB_RESULTS: JSON.stringify({build: {result: "success"}, suites: {result: "success"}, packaging: {result: "skipped"}, e2e: {result: "success"}, "osgo-host": {result: "success"}}), VSIX_PROFILE: "fast"}});
+    try {
+      await new (Object.getPrototypeOf(async function () {}).constructor)("require", "github", "context", "process", "console", script)(
+        (name) => name === "node:fs" ? mockedFs : nativeRequire(name), github, context,
+        {env: {EXPECTED_SHARDS: "1,2,3,4", GITHUB_RUN_ATTEMPT: String(attempt), CAN_COMMENT: String(canComment), JOB_RESULTS: JSON.stringify({build: {result: "success"}, suites: {result: "success"}, packaging: {result: "skipped"}, e2e: {result: "success"}, "osgo-host": {result: "success"}}), VSIX_PROFILE: "fast"}},
+        {log() {}, error() {}});
+    } catch (error) {
+      error.body = body;
+      throw error;
+    }
+    return {body, calls};
   };
   for (const mode of ["missing-directory", "missing-shard", "unreadable"]) {
     it(`fails publication for ${mode}`, async () => {
@@ -448,6 +479,37 @@ describe("required PR retry reports", () => {
     });
   }
   it("accepts four readable empty reports", async () => { await execute("complete"); });
+  it("shows failed jobs recovered by a GitHub rerun and retained flaky reports", async () => {
+    const {body, calls} = await execute("retained", 2);
+    expect(body).to.contain("flaky: rerun suites (1) failed in attempt 1, passed in attempt 2");
+    expect(body).to.contain("flaky: earlier isolation recovery");
+    expect(calls.map((c) => c.attempt_number)).to.deep.equal([2, 1]);
+    expect(calls.every((c) => c.owner === "fixture" && c.repo === "fixture" && c.run_id === 1)).to.equal(true);
+    expect(workflow).to.contain("name: suite-results-${{ matrix.shard }}-attempt-${{ github.run_attempt }}");
+  });
+  it("does not let retained evidence hide a missing report from a rerun shard", async () => {
+    let error;
+    try { await execute("missing-rerun-report", 2); } catch (caught) { error = caught; }
+    expect(error).to.be.instanceOf(Error);
+    expect(error.message).to.equal("Missing current-attempt shard report 1");
+  });
+  it("queries every earlier attempt even without retained artifacts", async () => {
+    const {body, calls} = await execute("complete", 3);
+    expect(calls.map((c) => c.attempt_number)).to.deep.equal([3, 1, 2]);
+    expect(body).to.contain("flaky: rerun suites (1) failed in attempt 1, passed in attempt 2");
+  });
+  for (const canComment of [true, false]) {
+    it(`fails closed on unreadable earlier attempts (comments ${canComment})`, async () => {
+      let error;
+      try { await execute("api-error", 2, canComment); } catch (caught) { error = caught; }
+      expect(error).to.be.instanceOf(Error);
+      expect(error.message).to.equal("rerun: earlier attempts unreadable");
+      if (canComment) {
+        expect(error.body).to.contain("flaky: rerun: earlier attempts unreadable");
+        expect(error.body).to.contain("### PR tests: 🔴 fail");
+      }
+    });
+  }
   it("keeps expected reports in step with the shard matrix", () => {
     const shards = workflow.match(/shard: \[(.*?)\]/)[1].split(',').map((s) => s.trim());
     expect(workflow).to.contain(`EXPECTED_SHARDS: '${shards.join(',')}'`);

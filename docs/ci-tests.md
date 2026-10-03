@@ -83,13 +83,15 @@ measurement was used. Four shards predict **12.03 min each**; five predict
 five adds another runner's npm/install/restore cost. These are timing weights,
 not guaranteed CI elapsed times. The older `test/suite-timings.json` is historical.
 
-Each shard uploads `suite-results-<index>` with first-run `timings.json` and
+Each shard uploads `suite-results-<index>-attempt-<attempt>` with first-run `timings.json` and
 `flaky.md`, even on failure. Download and refresh the committed weights:
 
 ```sh
 gh run download <run-id> --pattern 'suite-results-*' --dir <download-dir>
 node tools/osd-suites-timings.mjs test/suites.timings.json <download-dir>/suite-results-*/timings.json
 ```
+
+When a shard approaches 20 minutes, refresh `test/suites.timings.json` from CI artifacts with `tools/osd-suites-timings.mjs`.
 
 Partial downloads preserve unmeasured weights; multiple samples use their median.
 Retries never replace first-run weights. Local runs can write the same artifacts

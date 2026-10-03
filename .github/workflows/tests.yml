@@ -263,7 +263,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: suite-results-${{ matrix.shard }}
+          name: suite-results-${{ matrix.shard }}-attempt-${{ github.run_attempt }}
           path: suite-results/
           if-no-files-found: warn
 
@@ -479,22 +479,64 @@ jobs:
             const path = require('node:path');
             // The matrix above must supply one readable report per shard, even
             // when empty. A missing artifact is missing evidence, never clean.
-            const expected = process.env.EXPECTED_SHARDS.split(',').map((i) => `suite-results-${i}`);
+            const attempt = Number(process.env.GITHUB_RUN_ATTEMPT || 1);
+            const { owner, repo } = context.repo;
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt,
+              { owner, repo, run_id: context.runId, attempt_number: attempt });
+            const expected = process.env.EXPECTED_SHARDS.split(',');
             const actual = fs.readdirSync('suite-results').sort();
-            if (JSON.stringify(actual) !== JSON.stringify(expected.slice().sort())) {
-              throw new Error(`Expected shard reports ${expected.join(', ')}; got ${actual.join(', ')}`);
+            const reports = [];
+            for (const shard of expected) {
+              // Re-run failed jobs retains successful shards from older attempts.
+              const retained = actual.map((dir) => {
+                const match = dir.match(/^suite-results-(\d+)-attempt-(\d+)$/);
+                return match && match[1] === shard && Number(match[2]) <= attempt
+                  ? { dir, attempt: Number(match[2]) } : null;
+              }).filter(Boolean).sort((a, b) => a.attempt - b.attempt);
+              if (!retained.length) throw new Error(`Expected shard report ${shard}; got ${actual.join(', ')}`);
+              if (jobs.some((job) => job.name === `suites (${shard})`) && retained.at(-1).attempt !== attempt) {
+                throw new Error(`Missing current-attempt shard report ${shard}`);
+              }
+              for (const { dir } of retained) {
+                const report = fs.readFileSync(path.join('suite-results', dir, 'flaky.md'), 'utf8').trim();
+                if (report) reports.push(report);
+              }
             }
-            const reports = expected.map((dir) => fs.readFileSync(path.join('suite-results', dir, 'flaky.md'), 'utf8').trim()).filter(Boolean);
-            if (process.env.CAN_COMMENT === 'false') return;
             const results = JSON.parse(process.env.JOB_RESULTS);
             const gatePassed = ['build', 'suites', 'e2e', 'osgo-host'].every((job) => results[job].result === 'success') &&
               (process.env.VSIX_PROFILE === 'full' ? results.packaging.result === 'success' :
                 process.env.VSIX_PROFILE === 'fast' && results.packaging.result === 'skipped');
             const marker = '<!-- osd-pr-test-report -->';
             const icon = (v) => v === 'success' ? '🟢 pass' : v === 'failure' ? '🔴 fail' : v === 'cancelled' ? '⚫ cancelled' : v === 'skipped' ? '⚪ skipped' : '⚪ ' + (v || 'not run');
-            const { owner, repo } = context.repo;
-            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt,
-              { owner, repo, run_id: context.runId, attempt_number: Number(process.env.GITHUB_RUN_ATTEMPT || 1) });
+            const attempts = new Map([[attempt, jobs]]);
+            let historyUnreadable = false;
+            for (let n = 1; n < attempt; n++) {
+              try {
+                // GET repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{n}/jobs
+                attempts.set(n, await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt,
+                  { owner, repo, run_id: context.runId, attempt_number: n }));
+              } catch (error) {
+                historyUnreadable = true;
+                console.error(error);
+              }
+            }
+            for (let n = 1; n < attempt; n++) {
+              for (const job of attempts.get(n) || []) {
+                if (job.conclusion !== 'failure') continue;
+                for (let m = n + 1; m <= attempt; m++) {
+                  if (attempts.get(m)?.some((later) => later.name === job.name && later.conclusion === 'success')) {
+                    reports.push(`flaky: rerun ${job.name} failed in attempt ${n}, passed in attempt ${m}`);
+                    break;
+                  }
+                }
+              }
+            }
+            if (historyUnreadable) reports.push('flaky: rerun: earlier attempts unreadable');
+            for (const report of reports) console.log(report);
+            if (process.env.CAN_COMMENT === 'false') {
+              if (historyUnreadable) throw new Error('rerun: earlier attempts unreadable');
+              return;
+            }
             const took = (j) => (j.started_at && j.completed_at)
               ? `${Math.round((new Date(j.completed_at) - new Date(j.started_at)) / 1000)} s` : '';
             const rows = jobs.filter((j) => j.name !== 'pr-report')
@@ -502,7 +544,7 @@ jobs:
             const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId}`;
             const body = [
               marker,
-              `### PR tests: ${icon(gatePassed ? 'success' : 'failure')}`,
+              `### PR tests: ${icon(gatePassed && !historyUnreadable ? 'success' : 'failure')}`,
               `Commit: \`${context.payload.pull_request.head.sha.slice(0, 8)}\` · [Full test log](${runUrl})`,
               '',
               '| Job | Result | Time |',
@@ -518,3 +560,4 @@ jobs:
             const existing = comments.find((c) => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker));
             if (existing) await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
             else await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            if (historyUnreadable) throw new Error('rerun: earlier attempts unreadable');
