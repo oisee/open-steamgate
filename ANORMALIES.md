@@ -3580,3 +3580,23 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Smallest safe workaround: use byte operands and replace whole xstrings before deployment; enable `--kernel-strict` to make compatibility warnings ERROR rows (exit 2).
 - Upstream: none; intentional local policy, no refusal added to either runtime.
 - Regression tests: `test/kernel-compat.mjs`, `tools/testdata-kernel-compat/`, `tools/testdata-kernel-bits/`, `tools/testdata-kernel-valid/`; both runners report warnings in JSON, row alerts and stderr.
+
+### ANOMALY-2026-10-03-adt-long-timestamp-subtract — Long timestamp subtraction dumps
+
+- Status: `workaround`
+- Discovery date: `2026-10-03`
+- Affected API: `CL_ABAP_TSTMP=>SUBTRACT` in the locked open-abap-core substrate,
+  with `GET TIME STAMP FIELD` into `TIMESTAMPL` and a long epoch timestamp.
+- Reproducer: A3b reentrance's default `_` case in `test/adt-abap-a3b.mjs`;
+  the first implementation passed both long timestamps directly to SUBTRACT.
+- Exact command: `OSD_HEAVY_RANGE=90-99 tools/osd-heavy.sh npx mocha test/adt-abap-a3b.mjs test/xml-wellformed.mjs`.
+- Expected arithmetic: milliseconds since 1970, within the request's time window.
+  This expectation is a numeric contract, not a new SAP-system measurement.
+- Actual open-abap behaviour: `The number NaN cannot be converted to a BigInt
+  because it is not an integer`; the ADT front answered 500.
+- Smallest safe workaround: calculate UTC epoch milliseconds from date and
+  time differences, adding the first three fractional digits as text. The
+  route uses ABAP arithmetic and adds no host clock command or kernel code.
+- Regression: `test/adt-abap-a3b.mjs`, `default clock`.
+- Upstream: not reported; isolated while building A3b, outside this slice's
+  substrate-change scope. Upstream fix version: unknown.
