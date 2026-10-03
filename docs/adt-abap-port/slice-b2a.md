@@ -33,6 +33,8 @@ ENTITY now avoids duplicate charsets, normalizes string-response MIME casing
 on 200, and retains the caller's original type on an explicit 304. B2a passes
 an explicit charset for text and a bare XML type. The DDIC caller is adjusted
 to pass its explicit charset, preserving that route's different 304 contract.
+Content-Type on a 304 was not compared with A4H; a 304 has no body, and on the
+facade the replay's `res.set()` adds the charset Node sends.
 The existing diff and front tests now expect B2a's source GET to be ABAP;
 the front test releases its lock in finally so a failed assertion cannot
 contaminate later session cases. The existing stop/recycle test waits for the
@@ -94,5 +96,6 @@ classes; the new ABAP is 7-bit ASCII.
 The live ABAP-FS conformance probe returned 30 PASS, 1 FAIL, 16 MISSING of
 47, exactly matching the isolated base at
 `0537100413cb2f6f6d5edc68dc6f4dadb55514a4`. The existing debugger
-coreDiscovery parse failure remains. Coverage reports 76 ABAP rows,
-65 pending host rows, and one host row by design out of 142.
+coreDiscovery parse failure remains. Coverage, as measured on the pre-gate base, reported 76 ABAP rows,
+65 host rows and one host row by design out of 142; after variant C the gate's
+own summary line is the current figure.
