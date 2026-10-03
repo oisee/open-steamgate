@@ -2,6 +2,7 @@
 // Menu and command changes in the extension manifest use the ordinary suite;
 // package identity and payload changes need the full packaging check.
 import {execFileSync} from "node:child_process";
+import {SEED_DIRS, SEED_FILES, shipsTestPath} from "../scripts/build-vsix.mjs";
 
 const packagingPaths = [
   /^scripts\/build-(?:vsix|binary)\.mjs$/,
@@ -9,15 +10,18 @@ const packagingPaths = [
   /^test\/vscode-vsix(?:-packaging)?\.mjs$/,
   /^test\/helpers\/vsix\.mjs$/,
   /^tools\/(?:osd-(?:build|fetch|inputs|lock|packs|xref-seed)|osd-ci-vsix-profile)\.mjs$/,
-  /^packs\/[^/]+\/osd-pack\.json$/,
-  /^packs\/zork\//,
+  // Any in-tree pack can be selected by OSD_VSIX_PACKS.
+  /^packs\//,
   /^(?:libs\.lock\.json|package(?:-lock)?\.json)$/,
   /^\.github\/workflows\/(?:tests|release)\.yml$/,
 ];
 const manifestFields = ["name", "version", "publisher", "main", "browser", "icon", "engines", "files", "dependencies"];
 
 export function needsFullVsix(paths, oldManifest, newManifest) {
-  if (paths.some((path) => packagingPaths.some((pattern) => pattern.test(path)))) return true;
+  if (paths.some((path) => packagingPaths.some((pattern) => pattern.test(path))
+    || SEED_DIRS.some((dir) => path.startsWith(`${dir}/`))
+    || SEED_FILES.includes(path)
+    || (path.startsWith("test/") && shipsTestPath(path.slice("test/".length))))) return true;
   if (!paths.includes("editors/vscode/package.json")) return false;
   if (!oldManifest || !newManifest) return true;
   return manifestFields.some((field) => JSON.stringify(oldManifest[field]) !== JSON.stringify(newManifest[field]));

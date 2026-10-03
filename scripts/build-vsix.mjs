@@ -370,6 +370,11 @@ export function excludeTestOnlyIncludes(seedRoot, excludedPaths) {
   visit(seedRoot);
 }
 
+// Repository inputs copied verbatim; CI imports these same lists. Packs and
+// test/ are copied separately with selection/exclusion rules below.
+export const SEED_DIRS = ["src", "webapp", "tools", "data"];
+export const SEED_FILES = ["abap_transpile.json", "abaplint.jsonc", "libs.lock.json", "package.json"];
+
 export function copySeedTree(seedRoot, selectedPacks) {
   mkdirSync(seedRoot, {recursive: true});
 
@@ -379,14 +384,14 @@ export function copySeedTree(seedRoot, selectedPacks) {
   // seed's own generation and gen/ from the staged, selected inputs instead
   // (T2, prebuildGeneration).
 
-  for (const dir of ["src", "webapp", "tools", "data"]) {
+  for (const dir of SEED_DIRS) {
     copyReal(join(ROOT, dir), join(seedRoot, dir));
   }
   mkdirSync(join(seedRoot, "packs"), {recursive: true});
   for (const pack of selectedPacks) {
     copyReal(pack.dir, join(seedRoot, "packs", pack.name));
   }
-  for (const file of ["abap_transpile.json", "abaplint.jsonc", "libs.lock.json", "package.json"]) {
+  for (const file of SEED_FILES) {
     cpSync(join(ROOT, file), join(seedRoot, file));
   }
 
