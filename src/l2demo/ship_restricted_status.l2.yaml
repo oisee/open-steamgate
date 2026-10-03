@@ -2,16 +2,18 @@
 # that bar a ship from a voyage are a selection table, not a chain of equalities.
 # `restricted` is a SELECT-OPTIONS-shaped parameter: its default [M, D] is two I EQ
 # rows, a caller may pass any table (BT rows, E rows, an empty table = every status),
-# and the generated Open SQL says `ship~status IN lt_p_restricted`.
+# and the generated Open SQL says `ship~status IN lt_p_restricted`. `exempt` is a
+# second one, `not in`, whose default is a BT row: the test ships S900 to S999.
 # `node tools/dsl-l2.mjs build src/l2demo/ship_restricted_status.l2.yaml --out src/l2demo`
 rule: ship-restricted-status-no-voyage
 class: zcl_l2_ship_restricted
 title: A ship whose status is restricted has no voyage departing after the check date
 params:
   restricted: {type: ZOSD_L2_SHIP-STATUS, range: true, default: [M, D]}
+  exempt: {type: ZOSD_L2_SHIP-SHIP_ID, range: true, default: [{sign: I, option: BT, low: S900, high: S999}]}
 for: ZOSD_L2_SHIP as ship
 range: ship.ship_id
-when: ship.status in $restricted
+when: ship.status in $restricted and ship.ship_id not in $exempt
 forbid:
   exists: ZOSD_L2_VOY as voy
   where: voy.ship_id = ship.ship_id and voy.dep_date > $date
@@ -95,6 +97,24 @@ examples:
         - {voyage_id: V00013, ship_id: S003, dep_date: 20261007}
     expect:
       - "S001 Albatross: restricted status M, voyage V00011 departs 20261005"
+  - name: an exempt ship is skipped
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S901, name: Skiff, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00016, ship_id: S901, dep_date: 20261005}]
+    expect: []
+  - name: own exempt table
+    date: 20261001
+    params: {exempt: [S001]}
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S901, name: Skiff, status: M}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00017, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00018, ship_id: S901, dep_date: 20261005}
+    expect:
+      - "S901 Skiff: restricted status M, voyage V00018 departs 20261005"
   - name: key range keeps inner ship
     date: 20261001
     range: [{sign: I, option: EQ, low: S002}]

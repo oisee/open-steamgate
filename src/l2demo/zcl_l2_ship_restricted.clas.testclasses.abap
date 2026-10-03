@@ -15,6 +15,7 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
       IMPORTING iv_date TYPE d
                 it_range TYPE tt_range OPTIONAL
                 iv_restricted TYPE zcl_l2_ship_restricted=>tt_restricted OPTIONAL
+                iv_exempt TYPE zcl_l2_ship_restricted=>tt_exempt OPTIONAL
       RETURNING VALUE(rt_alerts) TYPE string_table.
     METHODS assert_alerts
       IMPORTING it_act TYPE string_table it_exp TYPE string_table iv_example TYPE string.
@@ -28,11 +29,17 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
     METHODS empty_table_is_every_status FOR TESTING.
     METHODS e_row_alone_excludes_its_own FOR TESTING.
     METHODS bt_row_with_an_e_row_cut_out FOR TESTING.
+    METHODS an_exempt_ship_is_skipped FOR TESTING.
+    METHODS own_exempt_table FOR TESTING.
     METHODS key_range_keeps_inner_ship FOR TESTING.
     METHODS b_status_in FOR TESTING.
     METHODS b_status_out FOR TESTING.
     METHODS b_status_empty FOR TESTING.
     METHODS b_status_excl FOR TESTING.
+    METHODS b_ship_id_in FOR TESTING.
+    METHODS b_ship_id_out FOR TESTING.
+    METHODS b_ship_id_empty FOR TESTING.
+    METHODS b_ship_id_excl FOR TESTING.
     METHODS b_ship_id_match FOR TESTING.
     METHODS b_ship_id_nomatch FOR TESTING.
     METHODS b_dep_date_lt FOR TESTING.
@@ -75,8 +82,21 @@ CLASS ltcl_examples IMPLEMENTATION.
       ls_p_restricted-low = 'D'.
       APPEND ls_p_restricted TO lt_p_restricted.
     ENDIF.
+    DATA lt_p_exempt TYPE zcl_l2_ship_restricted=>tt_exempt.
+    DATA ls_p_exempt LIKE LINE OF lt_p_exempt.
+    IF iv_exempt IS SUPPLIED.
+      lt_p_exempt = iv_exempt.
+    ELSE.
+      CLEAR ls_p_exempt.
+      ls_p_exempt-sign = 'I'.
+      ls_p_exempt-option = 'BT'.
+      ls_p_exempt-low = 'S900'.
+      ls_p_exempt-high = 'S999'.
+      APPEND ls_p_exempt TO lt_p_exempt.
+    ENDIF.
     SELECT * FROM zosd_l2_ship INTO TABLE lt_ship
       WHERE status IN lt_p_restricted
+        AND ship_id NOT IN lt_p_exempt
         AND ship_id IN it_range
       ORDER BY PRIMARY KEY.
     LOOP AT lt_ship INTO ls_ship.
@@ -435,6 +455,82 @@ CLASS ltcl_examples IMPLEMENTATION.
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `BT row with an E row cut out` ).
   ENDMETHOD.
 
+  METHOD an_exempt_ship_is_skipped.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S901'.
+    ls_zosd_l2_ship-name = 'Skiff'.
+    ls_zosd_l2_ship-status = 'M'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00016'.
+    ls_zosd_l2_voy-ship_id = 'S901'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
+    lt_act = zcl_l2_ship_restricted=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `an exempt ship is skipped (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `an exempt ship is skipped` ).
+  ENDMETHOD.
+
+  METHOD own_exempt_table.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
+    DATA lt_p_exempt TYPE zcl_l2_ship_restricted=>tt_exempt.
+    DATA ls_p_exempt LIKE LINE OF lt_p_exempt.
+    CLEAR ls_p_exempt.
+    ls_p_exempt-sign = 'I'.
+    ls_p_exempt-option = 'EQ'.
+    ls_p_exempt-low = 'S001'.
+    APPEND ls_p_exempt TO lt_p_exempt.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S001'.
+    ls_zosd_l2_ship-name = 'Albatross'.
+    ls_zosd_l2_ship-status = 'M'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S901'.
+    ls_zosd_l2_ship-name = 'Skiff'.
+    ls_zosd_l2_ship-status = 'M'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00017'.
+    ls_zosd_l2_voy-ship_id = 'S001'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00018'.
+    ls_zosd_l2_voy-ship_id = 'S901'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
+    APPEND `S901 Skiff: restricted status M, voyage V00018 departs 20261005` TO lt_exp.
+    lt_act = zcl_l2_ship_restricted=>check( iv_date = '20261001' it_range = lt_range iv_exempt = lt_p_exempt ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range iv_exempt = lt_p_exempt ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `own exempt table (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `own exempt table` ).
+  ENDMETHOD.
+
   METHOD key_range_keeps_inner_ship.
     DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
     DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
@@ -612,6 +708,135 @@ CLASS ltcl_examples IMPLEMENTATION.
     lt_ref = check_reference( iv_date = '20261001' it_range = lt_range iv_restricted = lt_p_restricted ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.status in $restricted: excl (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.status in $restricted: excl` ).
+  ENDMETHOD.
+
+  METHOD b_ship_id_in.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S900'.
+    ls_zosd_l2_ship-name = 'Albatross'.
+    ls_zosd_l2_ship-status = 'M'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00001'.
+    ls_zosd_l2_voy-ship_id = 'S900'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
+    lt_act = zcl_l2_ship_restricted=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.ship_id not in $exempt: in (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.ship_id not in $exempt: in` ).
+  ENDMETHOD.
+
+  METHOD b_ship_id_out.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S99A'.
+    ls_zosd_l2_ship-name = 'Albatross'.
+    ls_zosd_l2_ship-status = 'M'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00001'.
+    ls_zosd_l2_voy-ship_id = 'S99A'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
+    APPEND `S99A Albatross: restricted status M, voyage V00001 departs 20261005` TO lt_exp.
+    lt_act = zcl_l2_ship_restricted=>check( iv_date = '20261001' it_range = lt_range ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.ship_id not in $exempt: out (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.ship_id not in $exempt: out` ).
+  ENDMETHOD.
+
+  METHOD b_ship_id_empty.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
+    DATA lt_p_exempt TYPE zcl_l2_ship_restricted=>tt_exempt.
+    DATA ls_p_exempt LIKE LINE OF lt_p_exempt.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S99A'.
+    ls_zosd_l2_ship-name = 'Albatross'.
+    ls_zosd_l2_ship-status = 'M'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00001'.
+    ls_zosd_l2_voy-ship_id = 'S99A'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
+    lt_act = zcl_l2_ship_restricted=>check( iv_date = '20261001' it_range = lt_range iv_exempt = lt_p_exempt ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range iv_exempt = lt_p_exempt ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.ship_id not in $exempt: empty (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.ship_id not in $exempt: empty` ).
+  ENDMETHOD.
+
+  METHOD b_ship_id_excl.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
+    DATA lt_p_exempt TYPE zcl_l2_ship_restricted=>tt_exempt.
+    DATA ls_p_exempt LIKE LINE OF lt_p_exempt.
+    CLEAR ls_p_exempt.
+    ls_p_exempt-sign = 'I'.
+    ls_p_exempt-option = 'BT'.
+    ls_p_exempt-low = 'S900'.
+    ls_p_exempt-high = 'S999'.
+    APPEND ls_p_exempt TO lt_p_exempt.
+    CLEAR ls_p_exempt.
+    ls_p_exempt-sign = 'E'.
+    ls_p_exempt-option = 'EQ'.
+    ls_p_exempt-low = 'S900'.
+    APPEND ls_p_exempt TO lt_p_exempt.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S900'.
+    ls_zosd_l2_ship-name = 'Albatross'.
+    ls_zosd_l2_ship-status = 'M'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00001'.
+    ls_zosd_l2_voy-ship_id = 'S900'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
+    APPEND `S900 Albatross: restricted status M, voyage V00001 departs 20261005` TO lt_exp.
+    lt_act = zcl_l2_ship_restricted=>check( iv_date = '20261001' it_range = lt_range iv_exempt = lt_p_exempt ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range iv_exempt = lt_p_exempt ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `ship.ship_id not in $exempt: excl (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `ship.ship_id not in $exempt: excl` ).
   ENDMETHOD.
 
   METHOD b_ship_id_match.

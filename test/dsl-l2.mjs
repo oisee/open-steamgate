@@ -3158,13 +3158,15 @@ examples:
 
     it("compiles to a range parameter, a condition on it, and nodes that trace to their rule lines", () => {
       const model = compileRule(RESTRICTED, {registry});
-      const [parameter] = model.params;
+      const [parameter, exempt] = model.params;
       expect(parameter).to.include({name: "restricted", is_selopt: true, ref: "iv_restricted", use: "lt_p_restricted", selopt_type: "tt_restricted", has_default: true});
       expect(parameter.default_rows.map((r) => [r.sign, r.option, r.low])).to.deep.equal([["I", "EQ", "M"], ["I", "EQ", "D"]]);
       for (const r of parameter.default_rows) expect(r.rule_line).to.equal(lineIn(TEXT, PARAM_AT));
       const condition = model.when.conditions[0];
       expect(condition).to.include({op: "IN", lhs: "ship~status", sref: "lt_p_restricted", text: "ship.status in $restricted"});
       expect(condition.cmp.rhs).to.deep.equal({kind: "range", name: "restricted"});
+      expect(model.when.conditions[1]).to.include({op: "NOT IN", lhs: "ship~ship_id", sref: "lt_p_exempt", text: "ship.ship_id not in $exempt"});
+      expect(exempt.default_rows.map((r) => [r.sign, r.option, r.low, r.high])).to.deep.equal([["I", "BT", "S900", "S999"]]);
       const abap = readFileSync(join(OUT, "zcl_l2_ship_restricted.clas.abap"), "utf8").split("\n");
       const trace = JSON.parse(readFileSync(join(OUT, "zcl_l2_ship_restricted.clas.trace.json"), "utf8"));
       const usage = trace.lines.find((entry) => /ship~status IN lt_p_restricted/.test(abap[entry.line - 1]));
@@ -3175,8 +3177,9 @@ examples:
 
     it("the class takes the range as its own table type, optional, and a default fills it only when it is not supplied", () => {
       const check = readFileSync(join(OUT, "zcl_l2_ship_restricted.clas.abap"), "utf8");
+      expect(check).to.include("      ls_p_exempt-option = 'BT'.\n      ls_p_exempt-low = 'S900'.\n      ls_p_exempt-high = 'S999'.\n");
       for (const line of ["    TYPES tt_restricted TYPE RANGE OF zosd_l2_ship-status.\n", "                iv_restricted TYPE tt_restricted OPTIONAL\n",
-        "    IF iv_restricted IS SUPPLIED.\n      lt_p_restricted = iv_restricted.\n    ELSE.\n", "      WHERE ship~status IN lt_p_restricted\n"]) {
+        "    IF iv_restricted IS SUPPLIED.\n      lt_p_restricted = iv_restricted.\n    ELSE.\n", "      WHERE ship~status IN lt_p_restricted\n        AND ship~ship_id NOT IN lt_p_exempt\n", "                iv_exempt TYPE tt_exempt OPTIONAL\n"]) {
         expect(check).to.include(line);
       }
       const test = readFileSync(join(OUT, "zcl_l2_ship_restricted.clas.testclasses.abap"), "utf8");
@@ -3238,7 +3241,7 @@ examples:
     const paramsOf = (model, c, name = "restricted") => ({date: c.date.value, [name]: (c.param_args.find((a) => a.ref === `iv_${name}`)?.rows
       ?? model.params[0].default_rows).map(({sign, option, low, high}) => ({sign, option, low, ...(high ? {high} : {})}))});
     // the model with its one range comparison replaced by a mutant of it
-    const mutated = (model, leaf) => ({...model, when: {...model.when, conditions: [leaf]}});
+    const mutated = (model, leaf) => ({...model, when: {...model.when, conditions: model.when.conditions.map((c, i) => i === 0 ? leaf : c)}});
     const killers = (model, c) => {
       const cond = model.when.conditions[0];
       const expected = JSON.stringify(c.expect.map((e) => e.value));
@@ -3302,13 +3305,13 @@ examples:
       expect(alerting).to.deep.equal({in: 0, out: 1, empty: 0, excl: 1});
     });
 
-    it("the committed class runs its nine examples and eleven derived cases against check_reference in ABAP", async () => {
+    it("the committed class runs its eleven examples and fifteen derived cases against check_reference in ABAP", async () => {
       await import("./start.mjs");
       const result = await new UnitRun(new ObjectStore()).runDetached("CLAS", "ZCL_L2_SHIP_RESTRICTED");
       const model = compileRule(RESTRICTED, {registry});
-      expect(model.examples).to.have.length(9);
-      expect(model.cases).to.have.length(11);
-      expect(result.counts, JSON.stringify(result.testClasses)).to.include({methods: 20, passed: 20, failed: 0});
+      expect(model.examples).to.have.length(11);
+      expect(model.cases).to.have.length(15);
+      expect(result.counts, JSON.stringify(result.testClasses)).to.include({methods: 26, passed: 26, failed: 0});
     });
 
     it("without a default the class passes the table straight to the query, and the examples run in ABAP", async () => {
@@ -3370,7 +3373,7 @@ examples:
       });
 
       it("the table ignored: the case with a value outside it and the example of an active ship fail, and not against the reference alone", async () => {
-        const {results, messages} = await run("ignored", {"clas.abap": [["      WHERE ship~status IN lt_p_restricted\n        AND voy~dep_date > iv_date", "      WHERE voy~dep_date > iv_date"]]});
+        const {results, messages} = await run("ignored", {"clas.abap": [["      WHERE ship~status IN lt_p_restricted\n        AND ship~ship_id NOT IN lt_p_exempt", "      WHERE ship~ship_id NOT IN lt_p_exempt"]]});
         const red = failed(results);
         expect(red).to.include.members(["b_status_out", "active_ship_is_not_restricted", "another_table_replaces_default"]);
         for (const method of red) expect(messages[method], method).to.include("assert_same_as_reference");

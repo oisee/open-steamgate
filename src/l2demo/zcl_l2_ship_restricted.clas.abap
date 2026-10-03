@@ -4,10 +4,12 @@ CLASS zcl_l2_ship_restricted DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES tt_range TYPE RANGE OF zosd_l2_ship-ship_id.
     TYPES tt_restricted TYPE RANGE OF zosd_l2_ship-status.
+    TYPES tt_exempt TYPE RANGE OF zosd_l2_ship-ship_id.
     CLASS-METHODS check
       IMPORTING iv_date TYPE d
                 it_range TYPE tt_range OPTIONAL
                 iv_restricted TYPE tt_restricted OPTIONAL
+                iv_exempt TYPE tt_exempt OPTIONAL
       RETURNING VALUE(rt_alerts) TYPE string_table.
 ENDCLASS.
 
@@ -40,6 +42,18 @@ CLASS zcl_l2_ship_restricted IMPLEMENTATION.
       ls_p_restricted-low = 'D'.
       APPEND ls_p_restricted TO lt_p_restricted.
     ENDIF.
+    DATA lt_p_exempt TYPE tt_exempt.
+    DATA ls_p_exempt LIKE LINE OF lt_p_exempt.
+    IF iv_exempt IS SUPPLIED.
+      lt_p_exempt = iv_exempt.
+    ELSE.
+      CLEAR ls_p_exempt.
+      ls_p_exempt-sign = 'I'.
+      ls_p_exempt-option = 'BT'.
+      ls_p_exempt-low = 'S900'.
+      ls_p_exempt-high = 'S999'.
+      APPEND ls_p_exempt TO lt_p_exempt.
+    ENDIF.
     SELECT
         ship~ship_id AS ship_ship_id
         voy~voyage_id AS voy_voyage_id
@@ -51,6 +65,7 @@ CLASS zcl_l2_ship_restricted IMPLEMENTATION.
           ON voy~ship_id = ship~ship_id
       INTO CORRESPONDING FIELDS OF TABLE lt_join
       WHERE ship~status IN lt_p_restricted
+        AND ship~ship_id NOT IN lt_p_exempt
         AND voy~dep_date > iv_date
         AND ship~ship_id IN it_range
       ORDER BY
