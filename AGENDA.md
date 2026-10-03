@@ -21,10 +21,10 @@ Docker Hub token reset, then two DuckDB engines on one file).
    by an ADT change shows up at the tag; adt-i5 fixes it before the release.**
    **Revert this at the 0.7 tag or when the image has its first user,
    whichever comes first. Owner: adt-i5.**
-2. **Quarantine.** A check that is red on the latest `main` run, or on another
-   pull request with the same base, is not waited for by `merge-when-green`
-   for at most 24 hours: one line here with the check's name, the link to the
-   red `main` run, an owner and the expiry. The check keeps running. Never
+2. **Quarantine.** A check that is red on the latest `main` run is not waited
+   for by `merge-when-green` for at most 24 hours: one line here with the
+   check's name, the link to that red `main` run (the evidence is on `main`,
+   not on another pull request), an owner and the expiry. The check keeps running. Never
    quarantined: `leak-scan`, `test`, `suites`.
 3. **What an ADT pull request waits for** follows from (1): `test` and the
    `suites` shards, plus any check its own paths still trigger.
