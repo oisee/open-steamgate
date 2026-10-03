@@ -12,6 +12,7 @@
 // process channel: it says "ready" with the port it got, and it exits when
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
+import {timingSafeEqual} from "node:crypto";
 import {dialogStep, exclusive} from "./osd-dialog-step.mjs";
 import {bootGuard} from "./osd-boot-guard.mjs";
 import {HotLoader, applyRuntimeHotSwap, warmVerdict} from "./osd-hot.mjs";
@@ -32,9 +33,24 @@ import {persistDump} from "./osd-dumps.mjs";
 import {serveSandboxConfig} from "./osd-sandbox-config.mjs";
 import {mountPortableCells} from "./sqlscript-to-procedure-ir.mjs";
 import {batchMonitorHandler} from "./osd-batch-monitor.mjs";
+import {identity} from "./osd-identity.mjs";
+import {parseCookies, sessionIdOf} from "./adt-session.mjs";
+import {abapSession} from "./adt-enq.mjs";
+import {answerOf, abapServes} from "./adt-abap-front.mjs";
+import {sessionJSON, sessionValue} from "./adt-remote-sessions.mjs";
+import {AbapSessions} from "./adt-abap-sessions.mjs";
+import {StoreIPCClient, withStoreIPC} from "./osd-store-ipc.mjs";
+import {StoreDestination, withSystem, currentSystemAnswers} from "./osd-store-destination.mjs";
 import {withAbapCase} from "./osd-case-determinism.mjs";
 
 const started = Date.now();
+// setup.mjs installs this exact client while the generation boots. Its
+// database-aware SYSTEM answers attach once the database is available.
+const childStoreIPC = process.env.OSD_ADT_ONE_RUNTIME === "1" && process.send !== undefined
+  ? new StoreIPCClient(process, {localSystem: {call: (name, signature) =>
+    withSystem(kind => kind === "IDENTITY" ? identity().adt : undefined,
+      () => new StoreDestination().call(name, signature))}}) : undefined;
+if (childStoreIPC !== undefined) globalThis.__osdStoreDestination = childStoreIPC;
 // Install the receive side before boot: IPC can arrive during module load.
 const initialAdtState = process.send === undefined || process.env.OSD_ADT_CARRY !== "1" ? Promise.resolve({}) : new Promise((resolve) => {
   const receive = (message) => {
@@ -175,6 +191,19 @@ if (process.env.OSD_ADT_CARRY === "1") {
 const app = express();
 app.disable("x-powered-by");
 app.set("etag", false);
+// The door key is read once and removed from the environment, so processes
+// this child spawns (warm verify, batch workers) do not inherit it.
+const adtStepKey = Buffer.from(process.env.OSD_ADT_STEP_KEY ?? "");
+delete process.env.OSD_ADT_STEP_KEY;
+// Hex plus metadata must fit every body accepted by the public 16 MB parser.
+app.use("/osd/adt-step", (req, res, next) => {
+  if (process.env.OSD_ADT_ONE_RUNTIME !== "1") return res.status(404).end();
+  if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] ?? "")) return res.status(415).json({error: {message: "JSON required"}});
+  const expected = adtStepKey;
+  const supplied = Buffer.from(req.headers["x-osd-adt-step-key"] ?? "");
+  if (!expected.length || supplied.length !== expected.length || !timingSafeEqual(expected, supplied)) return res.status(403).json({error: {message: "invalid step key"}});
+  next();
+}, express.raw({type: "application/json", limit: "34mb"}));
 app.use(express.raw({type: "*/*", limit: "16mb"}));
 mountPortableCells(app, () => globalThis.abap.context.databaseConnections.DEFAULT,
   (work) => exclusive(work, "SQLScript notebook cell"));
@@ -252,6 +281,77 @@ function dump(error, request) {
 hostNodes.dumps = (a, node) => a.get(node.path, function (req, res) {
   res.json(dumps.slice().reverse());
 });
+hostNodes["adt-step"] = (a, node) => a.post(node.path, async (req, res) => {
+  const address = req.socket.remoteAddress ?? "";
+  if (address !== "::1" && !/^127\./.test(address) && !/^::ffff:127\./.test(address)) {
+    res.status(403).json({error: {code: "LOCAL_ONLY"}});
+    return;
+  }
+  if (process.env.OSD_ADT_ONE_RUNTIME !== "1") return res.status(404).end();
+  let input;
+  try {
+    input = JSON.parse(req.body.toString("utf8"));
+    if (input.view?.sessionCall === undefined && (!input.view || typeof input.view.method !== "string" || typeof input.view.path !== "string"
+      || typeof input.view.url !== "string" || input.view.headers === null || typeof input.view.headers !== "object" || Array.isArray(input.view.headers)
+      || (input.bodyHex !== undefined && (typeof input.bodyHex !== "string" || !/^(?:[0-9a-f]{2})*$/i.test(input.bodyHex))))) throw new Error("invalid view or bodyHex");
+  } catch (error) {
+    return res.status(400).json({error: {code: "BAD_REQUEST", message: error.message}});
+  }
+  if (input.bodyRequired === true) {
+    const bodyRequired = await dialogStep(() => abapServes(input.view.method, input.view.path), "ADT body routing");
+    return res.json({bodyRequired});
+  }
+  const sessions = new AbapSessions({identity: {systemID: identity().adt.systemID, client: identity().adt.client, ...input.identity}});
+  if (input.view.sessionCall !== undefined) {
+    const method = input.view.sessionCall;
+    if (!["get", "end", "holderOf", "holds", "lock", "unlock", "release", "whileHeld", "deleteObject"].includes(method)) return res.status(400).json({error: {message: "unknown session operation"}});
+    try {
+      const value = await withStoreIPC(input.context, () => dialogStep(async () => {
+        const args = sessionValue(input.view.args);
+        const callback = (parameters) => globalThis.abap.context.RFCDestinations.STORE.request(parameters, "OSD_SESSION_CALLBACK");
+        if (method === "whileHeld") return sessions.whileHeld(...args, () => callback({action: "work"}));
+        if (method === "deleteObject") {
+          return sessions.deleteObject(...args, {
+            find: (type, name) => callback({action: "find", type, name}),
+            delete: (type, name) => callback({action: "delete", type, name}),
+          });
+        }
+        return sessions[method](...args);
+      }, "ADT session compatibility"));
+      return res.json({value: sessionJSON(value ?? null)});
+    } catch (error) {
+      return res.status(500).json({error: {message: String(error.message ?? error)}});
+    }
+  }
+  const request = {headers: input.view.headers};
+  try {
+    const {system} = abapSession(sessions, async (kind, name, _req, json) => {
+      if (kind !== "IDENTITY") return undefined;
+      if (input.context === undefined) return {...identity().adt, ...input.identity};
+      if (input.identityError !== undefined) throw new Error(input.identityError);
+      return input.systemIdentity;
+    });
+    const record = await withStoreIPC(input.context, () => withSystem((kind, name, json) => system(kind, name, request, json),
+      () => dialogStep(async () => {
+        const session = await sessions.sessionFor(request);
+        const answer = await answerOf(globalThis.abap.Classes.ZCL_OSD_ADT_HANDLER,
+          {...input.view, body: Buffer.from(input.bodyHex ?? "", "hex")}, session);
+        // Until A3a, delegated logoff still ends its session in this same
+        // FIFO turn, before a queued LOCK can resolve the old token.
+        if (input.view.path === "/sap/public/bc/icf/logoff" && ["GET", "HEAD"].includes(input.view.method)
+          && answer.servedBy === "HOST" && answer.continuation === undefined) {
+          const id = sessionIdOf(parseCookies(request.headers.cookie));
+          if (id) await sessions.end(id);
+        }
+        return answer;
+      }, `ADT ${input.view.method} ${input.view.path}`)));
+    const adt = request.adt === undefined ? undefined : {...request.adt, sessions: undefined,
+      session: request.adt.session === undefined ? undefined : {...request.adt.session, locks: [...request.adt.session.locks]}};
+    res.json({record: {...record, body: record.body.toString("utf8")}, adt});
+  } catch (error) {
+    res.status(500).json({error: {code: error.code ?? "FAILED", message: String(error.message?.get?.() ?? error.message ?? error)}});
+  }
+});
 hostNodes["batch-runs"] = (a, node) => a.get(node.path, batchMonitorHandler(root));
 
 // The end of a dialog step lives in tools/osd-dialog-step.mjs, because it is
@@ -264,6 +364,31 @@ const connection = () => globalThis.abap.context.databaseConnections.DEFAULT;
 // is what the application serves, from the same connection. SELECT only,
 // bounded, the same Data the command line uses (tools/osd-data.mjs).
 const data = new Data({root, client: globalThis.abap.context.databaseConnections.DEFAULT});
+if (childStoreIPC !== undefined) {
+  const local = new StoreDestination();
+  const localDestination = {call: (name, signature) => {
+    const previous = currentSystemAnswers();
+    return withSystem(async (kind, name, json) => {
+      const input = JSON.parse(json || "{}");
+      if (kind === "SQL" || kind === "XREF") return data.query(input.sql ?? name, {max: input.max ?? 100});
+      if (kind === "SQLCHECK") { await data.check(input.sql ?? name); return {ok: true}; }
+      if (kind === "DUMP") return dumps.slice().reverse();
+      if (kind === "SERVICES") return servicesFromRows(await currentRows(connection()));
+      if (kind === "TRANSACTIONS") return data.query("SELECT * FROM tstc", {max: 1000});
+      if (kind === "CLASSRUN") {
+        const a = globalThis.abap;
+        const Class = a.Classes[String(name).toUpperCase()];
+        if (!Class || !(Class.IMPLEMENTED_INTERFACES ?? []).includes("IF_OO_ADT_CLASSRUN")) throw new Error("class is not a compiled classrun");
+        const out = await new a.Classes.ZCL_OSD_CLASSRUN_OUT().constructor_();
+        const object = await new Class().constructor_();
+        await object.if_oo_adt_classrun$main({out});
+        return {name, ok: true, text: (await out.text({rv_text: 1})).get()};
+      }
+      return previous?.(kind, name, json);
+    }, () => local.call(name, signature));
+  }};
+  childStoreIPC.localSystem = localDestination;
+}
 hostNodes.sql = (a, node) => a.post(node.path, async function (req, res) {
   let asked;
   try {

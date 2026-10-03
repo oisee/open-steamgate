@@ -10,6 +10,7 @@
 // that ABAP serves fails ("remove it"), and an unlisted one that ABAP does
 // not serve fails ("port it or list it"). Done is HOST_ALLOWED empty and
 // exactly one HOST row in the table, the catch-all.
+import {remoteForTest} from "./helpers/adt-remote.mjs";
 import {expect} from "chai";
 import {mkdtempSync, rmSync} from "node:fs";
 import {createRequire} from "node:module";
@@ -295,6 +296,29 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
         return {method: text(r.method), pattern: text(r.pattern), handler: text(r.handler), servedBy: text(r.served_by)};
       }), verdicts: await verdictsOf(regs, rows)};
     }, "test: the coverage gate's match"));
+    if (process.env.OSD_ADT_ONE_RUNTIME === "1") {
+      const runtime = await remoteForTest();
+      const queries = verdicts.flatMap(v => v.probes.map(p => p.sample));
+      runtime.systemAnswers = kind => kind === "BUILD" ? {raw: queries.join("\n")} : undefined;
+      try {
+        const response = await fetch(runtime.url + "/osd/classrun", {method: "POST",
+          headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_COVERAGE_PROBE"})});
+        const result = await response.json();
+        expect(result.ok, JSON.stringify(result)).to.equal(true);
+        const lines = result.text.trimEnd().split("\n").map(line => line.split("|"));
+        const row = ([method, pattern, handler, servedBy]) => ({method, pattern, handler, servedBy});
+        const childTable = lines.filter(line => line[0] === "TABLE").map(line => row(line.slice(1)));
+        expect(childTable, "coverage uses the serving child's route table").to.deep.equal(table);
+        const matches = lines.filter(line => line[0] === "PROBE");
+        expect(matches).to.have.length(queries.length);
+        let i = 0;
+        verdicts = verdicts.map(v => ({...v, probes: v.probes.map(p => {
+          const match = matches[i++];
+          return {...p, found: match[1] === "X", row: row(match.slice(2))};
+        })}));
+      } finally { await runtime.stop(); }
+    }
+
   });
   after(() => { if (root !== undefined) rmSync(root, {recursive: true, force: true}); });
 

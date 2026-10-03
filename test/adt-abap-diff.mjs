@@ -11,6 +11,7 @@
 // test/start.mjs mounts it inline. The front reports who served each
 // request, so a route that silently fell through to Node cannot pass as
 // ported, and every entry into the handler is counted.
+import {remoteForTest} from "./helpers/adt-remote.mjs";
 import {expect} from "chai";
 import express from "express";
 import {request as httpRequest} from "node:http";
@@ -74,7 +75,7 @@ async function call(server, method, path, headers, complete = false) {
       return id;
     });
     expect(ids[0]).to.equal(ids[1]);
-    sessionHeaders = {location: response.headers.get("location"),
+    sessionHeaders = {location: response.headers.get("location")?.replace(/\?$/, ""),
       cookies: cookies.map((line) => line.replace(/=([0-9a-f]{24});/, "=<session>;"))};
   }
   return {
@@ -107,6 +108,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
   this.timeout(60000);
   let root;
   let abapSide;
+  let wireSide;
+  let remoteRuntime;
   const servers = [];
   const served = [];
   const steps = [];
@@ -121,12 +124,16 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     return server;
   };
   // every entry into the handler is counted, so "ABAP was asked" is a fact
-  const counted = (runner) => ({...runner, answer: (view, session) => {
+  const counted = (runner) => ({...runner,
+    ...(runner.execute === undefined ? {} : {execute: (view, req, options) => {
+      steps.push(`${view.method} ${view.path}`);
+      return runner.execute(view, req, options);
+    }}), answer: (view, session) => {
     steps.push(`${view.method} ${view.path}`);
     return runner.answer(view, session);
   }});
-  const withAbap = (options, runner = abapSide) => ({...options, abap: counted(runner),
-    abapServed: (by, req) => served.push(`${by} ${req.method} ${req.originalUrl}`)});
+  const withAbap = (options, runner = options.sessions === undefined ? wireSide : abapSide) => ({...options, abap: counted(runner),
+    abapServed: (by, req) => served.push(`${by} ${req.method} ${req.originalUrl.replace(/\?$/, "")}`)});
   const store = () => new ObjectStore({root, libs: []});
 
   it("versions slice: every feed, source and refusal is served by ABAP and byte-equal", async () => {
@@ -225,6 +232,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
   before(async () => {
     const {zcl_osd_adt_handler: handler} = await output("zcl_osd_adt_handler.clas.mjs");
     abapSide = abapRunner({handler, step: dialogStep});
+    if (process.env.OSD_ADT_ONE_RUNTIME === "1") remoteRuntime = await remoteForTest();
+    wireSide = remoteRuntime === undefined ? abapSide : abapRunner({remote: remoteRuntime});
     root = mkdtempSync(join(tmpdir(), "osd-adt-abap-"));
     mkdirSync(join(root, "src"));
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
@@ -237,6 +246,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
 
   after(async () => {
     for (const server of servers) await new Promise((resolve) => server.close(resolve));
+    await remoteRuntime?.stop();
     rmSync(root, {recursive: true, force: true});
   });
 
@@ -790,7 +800,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
 
     it("the ENQ row names the ADT session's user, and goes with the session", async () => {
       const {locks} = await import("../tools/osd-enq.mjs");
-      const ported = await mount(withAbap({store: tree()}));
+      const ported = await mount(withAbap({store: tree()}, abapSide));
       const one = await logon(ported, "DEVONE");
       const rows = () => locks().read({table: "ZOSD_ADT_LOCK"});
       expect((await lock(one)).status).to.equal(200);

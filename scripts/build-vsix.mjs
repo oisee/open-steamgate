@@ -330,7 +330,7 @@ function libEntries() {
 export const TEST_ONLY_ABAP = [
   /^integration[/\\]zosd_(voyage|ready)\.prog\.(abap|xml)$/,
   /^unit[/\\]zcl_osd_adt_session_mem\.clas\.(abap|xml)$/,
-  /^unit[/\\]zcl_osd_adt_enq_probe\.clas\.(abap|xml)$/,
+  /^unit[/\\]zcl_osd_adt_(enq|store|coverage|front)_probe\.clas\.(abap|xml)$/,
   // wire replay fixtures (test/adt-abap-f2.mjs)
   /^unit[/\\]zcl_osd_adt_route_f2\.clas\.(abap|xml)$/,
   // the route that ends in an echo continuation (test/adt-abap-front.mjs)

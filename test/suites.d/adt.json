@@ -28,6 +28,7 @@
     "test/adt-versions.mjs",
     "test/http-codelens.mjs",
     "test/osd-adt-fork.mjs",
+    "test/osd-adt-one-runtime.mjs",
     "test/store-history.mjs",
     "test/tmp-package.mjs"
   ]

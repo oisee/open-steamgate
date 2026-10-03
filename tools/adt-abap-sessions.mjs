@@ -173,9 +173,9 @@ export class AbapSessions {
   deleteObject(session, type, name, store) {
     return this.#run(async (obj) => {
       if ((await this.#call(obj, "alive", {iv_id: session.id})).get() !== "X") return {ended: true};
-      const holder = await this.#holder(obj, type, store.find(type, name)?.name ?? name);
+      const holder = await this.#holder(obj, type, (await store.find(type, name))?.name ?? name);
       if (holder !== undefined && holder.session.id !== session.id) return {holder};
-      const gone = store.delete(type, name);
+      const gone = await store.delete(type, name);
       if (holder !== undefined && holder.handle !== undefined) {
         await this.#forget(obj, holder.session, holder.handle);
         this.owners.drop(holder.session, gone.type, gone.name);

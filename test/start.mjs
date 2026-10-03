@@ -3,6 +3,7 @@ import {databasePath} from "../tools/osd-persist.mjs";
 import {dialogStep, lockedClient} from "../tools/osd-dialog-step.mjs";
 import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import express from "express";
+import {StoreDestination} from "../tools/osd-store-destination.mjs";
 import {existsSync} from "node:fs";
 import {generatorFoldersOf, tilesOf, webappsOf} from "../tools/osd-packs.mjs";
 import {packApplications} from "../tools/osd-bsp-registry.mjs";
@@ -109,7 +110,7 @@ async function loadChildKernel() {
     return undefined;
   }
 }
-const adtKernel = MODE === "child" && process.env.OSD_ADT !== "js" ? await loadChildKernel() : undefined;
+const adtKernel = MODE === "child" && process.env.OSD_ADT !== "js" && process.env.OSD_ADT_ONE_RUNTIME !== "1" ? await loadChildKernel() : undefined;
 
 
 /** Host memory only; child readiness starts with its first running generation. */
@@ -219,6 +220,11 @@ export function startServer(quiet) {
   if (runtime !== undefined && adtKernel !== undefined) {
     (runtime.primary ?? runtime).adtSnapshot = parentAdtSnapshot;
   }
+  if (runtime !== undefined && process.env.OSD_ADT_ONE_RUNTIME === "1") {
+    for (const worker of runtime.runtimes ?? [runtime]) {
+      worker.storeDestination = new StoreDestination({store});
+    }
+  }
   const data = MODE === "child"
     ? new Data({root: process.cwd(), runtime})
     // the facade's reads share the one connection with the steps, so they
@@ -233,7 +239,8 @@ export function startServer(quiet) {
   const adtHandler = MODE === "inline" ? inline.zcl_osd_adt_handler : adtKernel?.handler;
   // the kernel is loaded once; a generation that changes the front's classes
   // or tables is said (X-OSD-Front-Stale, one console line) until a restart
-  const adtAbap = adtHandler !== undefined && process.env.OSD_ADT !== "js"
+  const adtAbap = runtime !== undefined && process.env.OSD_ADT_ONE_RUNTIME === "1" && process.env.OSD_ADT !== "js"
+    ? abapRunner({remote: runtime}) : adtHandler !== undefined && process.env.OSD_ADT !== "js"
     ? abapRunner({handler: adtHandler, step: dialogStep, stale: adtKernel === undefined ? undefined
       : kernelFreshness({output: adtKernel.output, loaded: adtKernel.hash, generation: () => liveHash(process.env.OSD_ROOT ?? process.cwd())})})
     : undefined;
@@ -495,7 +502,7 @@ export function startServer(quiet) {
       }
       proxy(req, res, next);
     };
-    for (const node of declaredNodeList.filter((n) => n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
+    for (const node of declaredNodeList.filter((n) => n.path !== "/osd/adt-step" && n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
       const proxy = odataProxy(runtime);
       app.all(node.path, node.path === "/osd/serving" ? withWarm(proxy)
         : node.path === "/osd/batch-runs" ? localBatch(proxy) : proxy);

@@ -1,3 +1,5 @@
+import {remoteForTest} from "./helpers/adt-remote.mjs";
+import {abapRunner} from "../tools/adt-abap-front.mjs";
 import {expect} from "chai";
 import express from "express";
 import {spawnSync} from "node:child_process";
@@ -7,14 +9,25 @@ import {identity} from "../tools/osd-identity.mjs";
 // The session layer on its own, without the façade around it: these are the
 // rules an ADT client checks on every single answer, so they are worth
 // failing loudly and in isolation.
-describe("tools/adt-session: the token dance", () => {
+describe("tools/adt-session: the token dance", function () {
+  this.timeout(60000);
   let server;
   let port;
+  let runtime;
 
   before(async () => {
     const app = express();
     const sessions = new Sessions();
-    app.use(sessions.middleware());
+    if (process.env.OSD_ADT_ONE_RUNTIME === "1") {
+      runtime = await remoteForTest();
+      // Let the continuation reach the two token-dance endpoints below.
+      const {abapFront} = await import("../tools/adt-abap-front.mjs");
+      const {RemoteSessions} = await import("../tools/adt-remote-sessions.mjs");
+      const remoteSessions = new RemoteSessions(runtime, {});
+      app.use(abapFront({...abapRunner({remote: runtime}), sessions: remoteSessions,
+        system: kind => kind === "IDENTITY" ? remoteSessions.identity : undefined,
+        refuse: (res, status, type, message) => res.status(status).send(message)}));
+    } else app.use(sessions.middleware());
     app.get("/sap/bc/adt/core/discovery", (req, res) => res.type("application/atomsvc+xml").send("<service/>"));
     app.post("/sap/bc/adt/write", (req, res) => res.status(200).type("text/plain").send("written"));
     await new Promise((resolve) => {
@@ -23,7 +36,7 @@ describe("tools/adt-session: the token dance", () => {
     port = server.address().port;
   });
 
-  after(() => new Promise((resolve) => server.close(resolve)));
+  after(async () => { if (server) await new Promise((resolve) => server.close(resolve)); await runtime?.stop(); });
 
   const call = (path, options = {}) => fetch(`http://localhost:${port}${path}`, options);
 
@@ -123,7 +136,7 @@ describe("tools/adt-session: the token dance", () => {
   // no longer existed and every write was refused. Re-fetching could not help:
   // the fetch made a new session too.
   it("keeps one session for a client that returns only the session cookie", async () => {
-    const first = await call("/sap/bc/adt/core/discovery");
+    const first = await call("/sap/bc/adt/core/discovery", {headers: process.env.OSD_ADT_ONE_RUNTIME === "1" ? {"x-csrf-token": "fetch"} : {}});
     const cookie = cookiesOf(first).match(new RegExp(SESSION_COOKIE + "=([^;]+)"))[1];
     const token = first.headers.get("x-csrf-token");
 

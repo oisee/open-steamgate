@@ -27,6 +27,8 @@
 // the Node façade answers one -- the ADT exception document, 500,
 // ExceptionInternalError in our namespace -- for every request, a HOST row
 // included: no session was resolved, so nothing may go past the gate.
+import {withoutHostPaths} from "./osd-build-issues.mjs";
+import {remoteStep, stepJSON} from "./adt-remote-step.mjs";
 import {withSystem} from "./osd-store-destination.mjs";
 
 export const HANDLER = "ZCL_OSD_ADT_HANDLER";
@@ -178,7 +180,50 @@ export async function answerOf(handler, view, session) {
 /** {step, answer} for adtRouter's `abap` option, from the transpiled handler
  *  and the host's dialogStep: what test/start.mjs and the tests mount, said
  *  once. answer(view, session) runs inside the step. */
-export function abapRunner({handler, step, stale}) {
+export function abapRunner({handler, step, stale, remote}) {
+  if (remote !== undefined) {
+    const runtime = remote.primary ?? remote;
+    return {
+      remote: runtime,
+      async execute(view, req, options) {
+        const {body, ...request} = view;
+        const context = (runtime.adtContextSeq = (runtime.adtContextSeq ?? 0) + 1);
+        runtime.adtContexts ??= new Map();
+        runtime.adtContexts.set(context, {store: options.store,
+          system: (kind, name, json) => options.system(kind, name, req, json)});
+        try {
+          let systemIdentity, identityError;
+          try {
+            const identity = await options.system?.("IDENTITY", "", req, "");
+            if (identity !== undefined) systemIdentity = JSON.parse(JSON.stringify(identity));
+          } catch (error) { identityError = String(error.message ?? error); }
+          // Ask the child's router before encoding: HOST bodies stay in the parent.
+          const needsBody = body.length > 0 && (await stepJSON(await remoteStep(runtime, {view: request, bodyRequired: true}))).bodyRequired;
+          const response = await remoteStep(runtime, {view: request, bodyHex: needsBody ? body.toString("hex") : "",
+            identity: options.sessions.identity, context, systemIdentity, identityError});
+          const result = await stepJSON(response);
+          if (!response.ok) throw Object.assign(new Error(result.error?.message ?? "ADT step failed"), {code: result.error?.code});
+          if (result.adt !== undefined) req.adt = {...result.adt, sessions: options.sessions,
+            session: result.adt.session === undefined ? undefined : {...result.adt.session,
+              locks: new Map(result.adt.session.locks)}};
+          const publications = await Promise.all(runtime.adtContexts.get(context).publications ?? []);
+          const failed = publications.filter(p => p.EV_ACTIVE !== "X");
+          if (failed.length) {
+            // lazy: adt-documents pulls @abaplint/core and the store, which the
+            // serving child must not load at boot (test/setup.mjs keeps it out)
+            const {activationFailureDocument} = await import("./adt-documents.mjs");
+            const entries = failed.flatMap(p => p.failureEntries ?? [{type: p.type ?? "PROG", name: p.name ?? "",
+              issues: [{message: withoutHostPaths(String(p.EV_NOTE), options.store?.root ?? runtime.root)
+                .split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}],
+            }]);
+            return {...result.record, status: 200, servedBy: "ABAP", continuation: undefined,
+              contentType: "application/xml", body: Buffer.from(activationFailureDocument(entries))};
+          }
+          return {...result.record, body: Buffer.from(result.record.body, "utf8")};
+        } finally { runtime.adtContexts.delete(context); }
+      },
+    };
+  }
   return {
     stale,
     step: (work, label) => step(work, label),
@@ -272,7 +317,7 @@ export function abapFront(options) {
         const {waitUnitWarmup} = await import("./osd-unit.mjs");
         await waitUnitWarmup(options.store);
       }
-      record = await withSystem((kind, name, json) => system(kind, name, req, json),
+      record = options.execute !== undefined ? await options.execute(view, req, options) : await withSystem((kind, name, json) => system(kind, name, req, json),
         () => options.step(async () => {
           const answer = await options.answer(view, await options.sessions?.sessionFor?.(req));
           // Until A3a ports logoff, its HOST fallback must end the session
@@ -288,6 +333,10 @@ export function abapFront(options) {
       // the ENQ session of the step ended while it waited for the work
       // process or in a WAIT (a logoff): the session is gone, and the answer
       // is the refusal a client logs on again after, not a dump
+      if (e?.status === 413) {
+        options.refuse(res, 413, "ExceptionInvalidRequest", e.message, {namespace: NAMESPACE});
+        return;
+      }
       if (e?.code === "ENQ_SESSION_ENDED") {
         res.status(403).set("x-csrf-token", "Required").type("text/plain; charset=utf-8").send("CSRF token validation failed");
         return;

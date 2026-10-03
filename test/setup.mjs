@@ -281,6 +281,13 @@ export function installTraceDestination(abap) {
  */
 export function installStoreDestination(abap, options = {}) {
   abap.context.RFCDestinations ??= {};
+  // A serving child receives the destination from its host before boot.
+  // Never open a second source store, even from a class constructor.
+  const supplied = options.destination ?? globalThis.__osdStoreDestination;
+  if (supplied !== undefined) {
+    abap.context.RFCDestinations.STORE = supplied;
+    return;
+  }
   abap.context.RFCDestinations["STORE"] = new StoreDestination({
     // imported inside the opener, never at the top of this file: the store
     // pulls in abaplint and node:fs, and this module is bundled into the
