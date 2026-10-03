@@ -485,6 +485,10 @@
     "go:charsection": {
       "lines": 63,
       "reason": "Character REPLACE SECTION isolated from go/abap; character bounds and fixed-target fitting, with focused tests."
+    },
+    "go:intarith": {
+      "lines": 120,
+      "reason": "Native checked int8 arithmetic and overflow fallback for integral packed trees; go/abap shrinks, existing ceilings unchanged."
     }
   },
   "readmeMissing": [
