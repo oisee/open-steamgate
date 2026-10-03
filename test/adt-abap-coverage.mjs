@@ -82,9 +82,6 @@ const PORT_PENDING = [
   "GET /sap/bc/adt/gw/errorlog",
   "POST /sap/bc/adt/cts/transportchecks",
   "POST /sap/bc/adt/abapsource/occurencemarkers",
-  // A9: xref
-  "GET /sap/bc/adt/core/http/xref/readers",
-  "GET /sap/bc/adt/core/http/xref/closure",
 ];
 
 const text = (value) => String(value?.get?.() ?? value ?? "").trimEnd();
