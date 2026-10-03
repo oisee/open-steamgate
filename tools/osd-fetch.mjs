@@ -20,7 +20,7 @@
 // The fetch is git's, by commit: init, fetch --depth 1 <ref>, checkout.
 // GitHub answers a fetch of any reachable commit; a server that does not
 // gets a full clone and a checkout instead, which is slower and the same.
-import {execFileSync} from "./osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {basename, join, relative, resolve} from "node:path";

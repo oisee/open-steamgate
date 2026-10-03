@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Materialise locked library commits and keep .local/lars as the public path.
-import {execFileSync} from "./osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {chmodSync, closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync} from "node:fs";
 import {basename, dirname, isAbsolute, join, relative, resolve, sep} from "node:path";
 import {pathToFileURL} from "node:url";

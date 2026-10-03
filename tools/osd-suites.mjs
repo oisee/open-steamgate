@@ -6,7 +6,7 @@
 // the exit code has to be the runner's. A one-liner that spawns mocha and
 // forgets to pass its status back reports success for a failing suite, which
 // is the false green this project keeps paying for.
-import {spawnSync} from "./osd-child-process.mjs";
+import {spawnSync} from "node:child_process";
 import {existsSync, readFileSync, readdirSync, mkdtempSync, writeFileSync, appendFileSync, mkdirSync, rmSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {tmpdir} from "node:os";

@@ -25,7 +25,7 @@
 //   node tools/osd-branch.mjs add <name> [--from <ref>] [--port N]
 //   node tools/osd-branch.mjs list
 //   node tools/osd-branch.mjs remove <name>
-import {execFileSync, spawnSync} from "./osd-child-process.mjs";
+import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, readFileSync, rmSync} from "node:fs";
 import {createServer} from "node:net";
 import {basename, join, relative, resolve} from "node:path";

@@ -1,5 +1,5 @@
 // The common folder CI contract for the Go and JavaScript ABAP Unit hosts.
-import {spawn} from "./osd-child-process.mjs";
+import {spawn} from "node:child_process";
 import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync} from "node:fs";
 import {basename, join, resolve} from "node:path";
 

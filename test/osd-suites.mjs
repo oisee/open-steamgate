@@ -352,7 +352,7 @@ describe("early-stop CLI regressions", () => {
       try {
         mkdirSync(join(dir, "tools"));
         mkdirSync(join(dir, "test", "suites.d"), {recursive: true});
-        for (const file of ["osd-suites.mjs", "osd-suite-timing-reporter.cjs", "osd-suite-no-retries.cjs", "osd-child-process.mjs"])
+        for (const file of ["osd-suites.mjs", "osd-suite-timing-reporter.cjs", "osd-suite-no-retries.cjs"])
           copyFileSync(join("tools", file), join(dir, "tools", file));
         symlinkSync(resolve("node_modules"), join(dir, "node_modules"), "dir");
         writeFileSync(join(dir, "test", "suites.d", "fixtures.json"), JSON.stringify({files: ["test/a.mjs", "test/z.mjs"]}));

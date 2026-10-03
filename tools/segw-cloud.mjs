@@ -7,7 +7,7 @@
 // rule and per file and always exits 0.
 //
 // Usage: node tools/segw-cloud.mjs [--json] [--files <glob>]
-import {execFileSync} from "./osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {runsAs} from "./osd-main.mjs";

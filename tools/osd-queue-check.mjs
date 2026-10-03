@@ -24,7 +24,7 @@
 // Exit 0 nothing contradicted, 1 contradictions, 2 could not ask,
 // 3 no references found.
 import {readFileSync, existsSync} from "node:fs";
-import {execFileSync} from "./osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 
 const backlogSections = JSON.parse(readFileSync("docs/backlog/sections.json", "utf8")).sections;
 const DEFAULT_FILES = ["docs/upstream.md", ...new Set(backlogSections.map(({file}) => `docs/backlog/${file}`))];

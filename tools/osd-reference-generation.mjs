@@ -1,5 +1,5 @@
 // Compare one .http GET against two immutable local generations.
-import {spawn} from "./osd-child-process.mjs";
+import {spawn} from "node:child_process";
 import {serveCommand} from "./osd-host.mjs";
 import {request as httpRequest} from "node:http";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync} from "node:fs";

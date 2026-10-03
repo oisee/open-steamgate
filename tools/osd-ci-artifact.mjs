@@ -1,6 +1,6 @@
 // Archive the output of this run for the suite and browser jobs.
 import {readFileSync, readdirSync, existsSync} from "node:fs";
-import {spawnSync} from "./osd-child-process.mjs";
+import {spawnSync} from "node:child_process";
 
 const archive = process.argv[2] === "pack" ? process.argv[3] : undefined;
 if (!archive) {

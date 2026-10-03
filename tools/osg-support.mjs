@@ -1,7 +1,7 @@
 // Corpus evidence, deliberately distinct from a language specification.
 import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
-import {execFileSync} from "./osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {readFileSync, readdirSync, writeFileSync, existsSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
 import {stageInput} from "./osd-unit-ci.mjs";

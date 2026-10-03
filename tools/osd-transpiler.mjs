@@ -9,7 +9,7 @@
 // So every transpile says which one it used, and it says it in the build log
 // rather than in somebody's memory. A green run here and a red run in CI is
 // then one line apart from being explained.
-import {execFileSync} from "./osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {modulesOf} from "./osd-transpile.mjs";
 import {existsSync, lstatSync, readFileSync, realpathSync} from "node:fs";
 import {dirname, join} from "node:path";

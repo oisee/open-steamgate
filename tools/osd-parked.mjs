@@ -12,7 +12,7 @@
 // Usage:
 //   node tools/osd-parked.mjs            the queue
 //   node tools/osd-parked.mjs --remote   also ask GitHub whether a PR exists
-import {execFileSync} from "./osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {existsSync, readFileSync} from "node:fs";
 import {resolve} from "node:path";
 

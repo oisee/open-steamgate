@@ -15,7 +15,7 @@
 // answer (tools/osd-git.mjs). A folder someone already cloned still
 // works, and the git binary is still there behind `via: "git"` for a
 // remote OSD cannot reach, such as one that needs an ssh key.
-import {execFileSync} from "./osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
