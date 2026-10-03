@@ -1,29 +1,62 @@
-<!-- Produced 2026-10-02 by a 16-agent workflow (one spec agent per route family, a completeness critic, a synthesis), read-only against origin/main. Inputs to codex slices; each slice still gets its own critic. Line numbers in the family specs are as of the run and drift as main moves (tools/adt-facade.mjs has since been reorganised): find a route by its pattern, not its line. Ownership agreed 2026-10-02: group A and discovery, feeds/users, debugger/listeners, OSD introspection, notebook: stoker; group C, the front (F1/F2), information system / search / tree and DDIC reads / typestructure: dell; source read / objectstructure: stoker. -->
+<!-- Produced 2026-10-02 by a 16-agent workflow (one spec agent per route family, a completeness critic, a synthesis), read-only against origin/main. Inputs to codex slices; each slice still gets its own critic. Line numbers in the family specs are as of the run and drift as main moves (tools/adt-facade.mjs has since been reorganised): find a route by its pattern, not its line. Ownership agreed 2026-10-02: group A and discovery, feeds/users, debugger/listeners, OSD introspection, notebook: stoker; group C, the front (F1/F2), information system / search / tree and DDIC reads / typestructure: dell; source read / objectstructure: stoker.
+Re-scoped 2026-10-03 to variant C (Alice). -->
 
-# ADT on ABAP 100%: port plan (milestone 0.7, "must")
+# ADT on ABAP: port plan
 
-Sources: 15 family specs plus the critic's findings. I checked one fact on origin/main as of 2026-10-02: the router has graph, sysinfo, LOCK and versions rows, then a `*` HOST catch-all. `debugger/listeners` is still Node-only (`tools/adt-facade.mjs`), and `feat/adt-front-up` has not been merged.
+## Variant C (2026-10-03)
+
+Alice decided that ABAP owns the grammar: request parsing, XML/JSON
+documents, sessions, CSRF, ENQ and the document routes. The host owns
+orchestration permanently, served by the Node facade through the catch-all:
+write (A4), create/delete (A5), inactive objects and activation (A6/A7),
+git (A8b), ABAP Unit runs (C2b), unit/object/run (C3) and notebook (C6).
+No new route is built through a continuation. F3 and one-runtime B4 remain
+merged infrastructure; nothing is removed.
+
+The coverage gate has two scope lists. `PORT_PENDING` is the ABAP document
+work queue; each slice deletes its own block. `HOST_ALLOWED` is the final
+Map of host orchestration registrations and reasons, not a queue. It only
+grows by a decision of Alice recorded here. `HOST_BY_DESIGN` separately
+names the catch-all registration. Done means `PORT_PENDING` is empty,
+every orchestration method reaches HOST, and the router table has exactly
+one HOST row, the catch-all, last. All other registrations must have an
+ABAP row of their own pattern for every method.
+
+The earlier "100%" goal in section 4, every family behind an ABAP row with
+continuations for host work, is superseded. ADT is a parallel track outside
+milestone 0.7's must. For ADT, 0.7 keeps only the ABAP-FS regression matrix
+in CI.
 
 ## 1. Summary
 
-| # | Family | Node routes (ABAP rows) | Recommendation | Effort | Owner | Depends on |
-|---|---|---|---|---|---|---|
-| 1 | sessions / logoff / reentrance | 4 (4) | port | M | stoker | F1, F2 |
-| 2 | discovery (+ compatibility graph, already done) | 6 (4 new) | port | S | stoker (proposed) | slice 1 (landed) |
-| 3 | debugger/listeners (missed by every spec) | 3 (3) | port | S | stoker (proposed) | none |
-| 4 | source read / objectstructure | 7 (30, generated) | port + STORE PARSE OUTLINE | L | stoker | S0, versions helpers |
-| 5 | object create / delete | 2 (14, generated) | port + STORE CREATE/DELETE | M | stoker | S0, F1 |
-| 6 | write + includes (4a) | 4 (9) | port | M | stoker | S0, F1 (session-native, no LOCK_OF) |
-| 7 | activation + inactiveobjects (4b) | 2 (2) | ABAP protocol + host continuation | L | stoker | S0, F3 |
-| 8 | checkruns | 2 (2) | port + STORE CHECKRUN | M | dell | S0, F1, B5 (PACKAGE) |
-| 9 | ABAP Unit | 5 (5) | ABAP protocol + host continuation | L | dell | S0, F3, PARSE |
-| 10 | data preview | 5 (5) | port + STORE SQL/SQLCHECK | L | dell | S0, B8b, PARSE |
-| 11 | information system / search / tree | 11 (11) | port + STORE PACKAGE/PACKAGES/SEARCH | L | dell | S0, F2 (qs record), Node fixes |
-| 12 | DDIC reads + typestructure | 5 (5) | port | M | dell | S0 |
-| 13 | editor helpers + transport check | 8 (8) | port | M | stoker (proposed) | S0 |
-| 14 | classrun + notebook | 2 (2) | classrun: port; notebook: protocol + continuation | L | dell (classrun), stoker (notebook, proposed) | F1 fence, F3 |
-| 15 | OSD introspection (build, changed, git, services, transactions, entitysets, xref) | 9 (9) | port: thin rows over STORE/SYSTEM, xref and entitysets real ports | L | stoker (proposed: the family is unassigned, and this balances the load) | S0, F2 (/osd/ready) |
-| | **Total** | **~75 Node registrations** | | | | |
+| Family / slices | Variant C | Status | Remaining work |
+|---|---|---|---|
+| Sessions / logoff / reentrance (A3a/A3b) | ABAP | pending; A3a parked | Poll/delete/logoff, reentranceticket |
+| Discovery and debugger/listeners (A1) | ABAP | pending | Discovery documents and listener replies |
+| Source read / objectstructure (B2a/B2b) | ABAP | pending | Source and bare documents, outline, INCL/SRVD alias |
+| Object create / delete (A5) | HOST | host orchestration, not ported | none in this port |
+| Write + includes (A4) | HOST | host orchestration, not ported | none in this port |
+| Inactive objects / activation (A6/A7) | HOST | host orchestration, not ported | none in this port |
+| Checkruns (C1) | ABAP | landed (#511) | none |
+| ABAP Unit metadata / unit/object (C2a) | ABAP | landed (#511) | none |
+| ABAP Unit runs / unit/object/run (C2b/C3) | HOST | host orchestration, not ported | none in this port |
+| Data preview (C4a/C4b) | ABAP | landed (#526) | none |
+| Information system (B1), package/tree (B5), search/VFS (B6) | ABAP | landed (#495, #506, #513) | none |
+| Typestructure / DDIC reads (B8a/B8b) | ABAP | landed (#496, #506) | none |
+| Feeds, system/users, transportchecks, occurencemarkers (A2) | ABAP | pending | Editor documents |
+| Classrun (C5) | ABAP | landed (#525) | none |
+| Notebook (C6) | HOST | host orchestration, not ported | none in this port |
+| Build, changed, services, transactions (A8a) | ABAP | pending | Introspection documents |
+| Git (A8b) | HOST | host orchestration, not ported | none in this port |
+| Xref readers/closure (A9), segw/entitysets (A10) | ABAP | pending | Xref and entity-set documents |
+| Shared helpers / seam (S0), front (F1/F2) | ABAP | landed (#491, #485, #481, #487) | none |
+| Continuation plumbing (F3) | HOST | landed infrastructure (#527) | no new route continuations |
+| One-runtime B0-B4 | ABAP | landed infrastructure, switch off by default (#512, #521, #528, #529) | B5/B6 below |
+
+B5/B6 in the information-system row are the document slices. One-runtime
+B5/B6 below are separate runtime decisions. The coverage test is the
+registration-level source of truth, including earlier graph, sysinfo,
+LOCK/UNLOCK and versions rows.
 
 ## 2. Slice 0: shared infrastructure, landed first
 
@@ -64,10 +97,10 @@ One PR with two codex runs (0a for ABAP, 0b for the host seam) and one critic pa
 - **CAPABILITIES rule:** CAPABILITIES drives screen buttons only. A new `COMMANDS` answer lists what the host implements. Routes refuse with 501 when a command is missing (OSGo, the binary).
 - **`SYSTEM` raw channel:** when an answer carries a `raw` string, it goes to `EV_SOURCE` untouched, so finished bodies never pass through ajson.
 
-**Rules decided in S0, written into `docs/adt-abap-port/port-map.md`:**
+**Rules decided in S0 (subject to the variant C scope above), written into `docs/adt-abap-port/port-map.md`:**
 - **PARSE is one STORE command:** `IV_JSON {kind: OUTLINE | DDLS | UNIT_PLAN, ...}`. One dispatcher, owned by dell, with the first user landing it. `structureOf`, the `cdsEntityOf` halves and `runner.classes` become exported functions that both Node and PARSE call.
 - **PACKAGE is one command:** `IV_JSON {name, mode: raw | local, user}` gives `EV_JSON`. PACKAGES (OBJECTS) and SEARCH are separate. ET_OBJECT is never used for names (CHAR40/CHAR30 truncation).
-- **Git stays on STORE**, the HISTORY/REVISION family, as ADR 0007 says: new commands `GIT_STATE` and `GIT_BLOB`. The route must use `gitObjectRevision` and not `gitObjectRevisionAt` (different message text, no rename following).
+- **Git stays host orchestration under variant C.** The earlier proposed STORE GIT_STATE/GIT_BLOB port is superseded.
 - **Non-document refusals:** a route may return a non-2xx `ty_response` with its own body only when Node does. Known cases: the reentranceticket 400s (text/plain) and the notebook (JSON). This is recorded in `ZIF_OSD_ADT_ROUTE`'s contract; nothing is decided per slice.
 - **Wire format:**
   - Content types: the front replays a Buffer with `res.set`, so an ABAP `content_type` literal must already be the normalized wire form.
@@ -75,15 +108,15 @@ One PR with two codex runs (0a for ABAP, 0b for the host seam) and one critic pa
   - Ordering: ABAP never re-sorts a list the host has ordered (localeCompare/ICU). ABAP may `SORT` only where JS uses a plain `.sort()`.
 - **Conformance baseline:** the ABAP-FS figure is re-measured on main in S0 and recorded in `docs/abapfs-conformance.md`. Every later slice compares against the figure at its merge base. The two numbers quoted today, 29/2/16 and 30/1/16, are both superseded.
 - **Done gate (new test, `test/adt-abap-coverage.mjs`):**
-  - It walks the `adtRouter` Express stack (method plus path, with a sample instance per pattern) and asserts that the front's `MATCH` returns ABAP.
-  - A `HOST_ALLOWED` list starts with every unported route. **Each slice deletes its own entries.** Done means the list is empty and the router has exactly one HOST row.
+  - It walks the `adtRouter` Express stack (method plus path, with a sample instance per pattern) and checks the front's `MATCH` against the variant C scope lists.
+  - `PORT_PENDING` holds the remaining document registrations. **Each slice deletes its own entries.** Done means this queue is empty, with the host checks described above still passing. `HOST_ALLOWED` is permanent orchestration scope.
 - **Acceptance for S0:** versions, lock and sysinfo diffs stay green after the refactor; the TYPES parity mocha test passes; `npm run lint` is clean (ASCII); the coverage test passes with the full allow-list. No behaviour changes.
 
 ## 3. Slices per owner
 
-Every slice is one codex run plus a Claude critic. Every acceptance is `test/adt-abap-diff.mjs`-style: the Node façade and the ABAP-front façade over one store (or over mtime-preserved copies for writes) must agree byte for byte on status, content-type, content-length, strong ETag, Location, every Set-Cookie line, and the body. On top of that, every slice must:
+Every remaining document slice is one codex run plus a Claude critic. Its acceptance is `test/adt-abap-diff.mjs`-style: the Node façade and the ABAP-front façade over one store (or over mtime-preserved copies for writes) must agree byte for byte on status, content-type, content-length, strong ETag, Location, every Set-Cookie line, and the body. On top of that, every document slice must:
 - show the served-by line as ABAP for every row it ports;
-- remove its own entries from `HOST_ALLOWED`;
+- remove its own entries from `PORT_PENDING`;
 - keep ABAP-FS conformance no worse than the baseline;
 - show at least one red proof (a mutant that the diff catches).
 
@@ -91,49 +124,66 @@ Every slice is one codex run plus a Claude critic. Every acceptance is `test/adt
 
 | Slice | Content | Acceptance |
 |---|---|---|
-| **F1** | Rebase and merge `feat/adt-front-up`, rebased on main after #471. Extend `TY_REQUEST` once: `session` (id, user, stateful), a `sessions` ref, `pattern`, `uri` (`~request_uri`). Add `ZIF_OSD_ADT_SESSION~RELEASE_OBJECT`. The handler skips RESOLVE, CSRF and stamping outside `/sap/bc/adt`. Add `ZCL_OSD_ADT_HANDLER=>FENCE` (commit before route work, roll back route work only), so routes never COMMIT or ROLLBACK ad hoc. | `adt-abap-session(s)`, `adt-session` and the existing diff tests stay green; a route reads `is_request-session`. |
-| **F2** | Front extensions: replay 3xx and 201 with `res.end` and an explicit Content-Length (no ETag); append every Set-Cookie instead of setting it; mount the front on `/sap/public/bc/icf/logoff` (Node host only, no sicf); build the query record from `req.query` (qs semantics: joined repeats, nested values and raw bad escapes, matching Node routes); add an `X-OSD-Miss` marker driven by the ZCX flag (stripped, then recorded in `facade.missed`); add a host-only **`/osd/ready`** outside `/sap/bc/adt` that never enters a step, and switch `osd ready`, release smoke, `run.ps1` and `osd-restart.sh` from `core/http/build` and HEAD discovery to it. | Fixture routes return 307 and 201 byte-equal; three cookies survive the replay; a 404 shows up in `/osd/not-served`; `osd ready` answers while a gated step is held. |
+| **F1** | **Landed.** Rebase and merge `feat/adt-front-up`, rebased on main after #471. Extend `TY_REQUEST` once: `session` (id, user, stateful), a `sessions` ref, `pattern`, `uri` (`~request_uri`). Add `ZIF_OSD_ADT_SESSION~RELEASE_OBJECT`. The handler skips RESOLVE, CSRF and stamping outside `/sap/bc/adt`. Add `ZCL_OSD_ADT_HANDLER=>FENCE` (commit before route work, roll back route work only), so routes never COMMIT or ROLLBACK ad hoc. | `adt-abap-session(s)`, `adt-session` and the existing diff tests stay green; a route reads `is_request-session`. |
+| **F2** | **Landed.** Front extensions: replay 3xx and 201 with `res.end` and an explicit Content-Length (no ETag); append every Set-Cookie instead of setting it; mount the front on `/sap/public/bc/icf/logoff` (Node host only, no sicf); build the query record from `req.query` (qs semantics: joined repeats, nested values and raw bad escapes, matching Node routes); add an `X-OSD-Miss` marker driven by the ZCX flag (stripped, then recorded in `facade.missed`); add a host-only **`/osd/ready`** outside `/sap/bc/adt` that never enters a step, and switch `osd ready`, release smoke, `run.ps1` and `osd-restart.sh` from `core/http/build` and HEAD discovery to it. | Fixture routes return 307 and 201 byte-equal; three cookies survive the replay; a 404 shows up in `/osd/not-served`; `osd ready` answers while a gated step is held. |
+
+The host orchestration rows below record the final boundary; their earlier
+port designs and acceptance matrices are superseded. Landed rows retain
+their implementation notes. Pending rows describe planned work.
 
 ### stoker
 
 | Slice | Content | Acceptance |
 |---|---|---|
-| **S0** | Section 2 above. | As in section 2. |
-| **A1** | `ZCL_OSD_ADT_DISCOVERY`: four rows (explicit HEAD rows before GET), `COLLECTIONS` in `advertise()` order, quirks kept. **`debugger/listeners`** gets GET, POST and DELETE rows answering 200 untyped and empty. The diff warm-up moves to an unknown path that hits the catch-all. Discovery rows stay in PORTED permanently. **From this slice on, any PR that changes an `advertise()` call also changes `COLLECTIONS`.** | Byte-equal on both discovery paths, case and trailing-slash variants, HEAD with `x-csrf-token: fetch` (no Content-Length); 3×3 listener cases. Red proofs: one title character changed; a dummy `advertise()` added. |
+| **S0** | **Landed.** Section 2 above. | As in section 2. |
+| **A1** | `ZCL_OSD_ADT_DISCOVERY`: four rows (explicit HEAD rows before GET), `COLLECTIONS` in `advertise()` order, quirks kept. **`debugger/listeners`** gets GET, POST and DELETE rows answering 200 untyped and empty. The diff warm-up moves to an unknown path that hits the catch-all. Discovery rows stay in ABAP coverage permanently. **From this slice on, any PR that changes an `advertise()` call also changes `COLLECTIONS`.** | Byte-equal on both discovery paths, case and trailing-slash variants, HEAD with `x-csrf-token: fetch` (no Content-Length); 3×3 listener cases. Red proofs: one title character changed; a dummy `advertise()` added. |
 | **A2** | Editor helpers: `ZCL_OSD_ADT_FEEDS` (5 feeds plus `system/users`, identity unescaped, a 24-character `now_iso`), `ZCL_OSD_ADT_TRANSPORT` (`OBJECT` package, `OBJECT` errors swallowed as Node does), `ZCL_OSD_ADT_OCCURRENCES`, which **this slice owns, so abap-unit drops its row**. | `atom:updated` masked after a format check; transport matrix (`/source/main`, `#`, `?`, DEVCLASS absent/empty/self-closing, `%zz` gives a 500); occurrence-marker `uri` matrix. |
 | **A3a** | `ZCL_OSD_ADT_SESSIONS` (GET poll with the sha256 security id, DELETE `sessions/:id`) and `ZCL_OSD_ADT_LOGOFF` (no RESOLVE; guard on a 24-character lowercase hex id, pinned by a unit case). Delete the Node `Sessions.end` calls from the façade. | Poll, delete and logoff matrices from the spec; logoff answers carry no Set-Cookie, token or generation, and the row count is unchanged; the two-cookie precedence case passes; `test/adt-devloop.mjs:1270-1360` stays green. |
 | **A3b** | Tighten the Node route first (a strict loopback grammar applied before `new URL()`), then `ZCL_OSD_ADT_REENTRANCE`: query re-serialization, Accept negotiation, `escapeHtml`, the `sap-usercontext` cookie, the three plain-text 400s. Before landing, confirm against a STG_ADT_DUMP capture of an Eclipse cloud logon. | Reentrance matrix incl. 127.1 and 0x7f000001 refused identically on both sides; no ETag on the 307; cookie order is context, session, usercontext. |
-| **A4** | 4a: `ZCL_OSD_ADT_WRITE` covering PUT `source/main`, both PUT include forms and POST includes. It uses the **session interface plus an ENQ probe, not SYSTEM LOCK_OF** (it lands after F1). WRITE goes through the bound store (from S0). The decoder is created with `ignore_cerr`. The slice-2 `byAbap` assertion changes in the same commit. | The spec's sequences 1-11, including the 409 for an unknown object (not 404), If-Match variants, the `stillHeld` race done through ENQ removal, and invalid UTF-8 decoding to U+FFFD. The release-during-body text difference is documented and compared by status only. |
-| **A5** | Create and delete: `ZCL_OSD_ADT_OBJ_CREATE` and `ZCL_OSD_ADT_OBJ_DELETE`, 14 generated rows, new STORE CREATE and DELETE (`IV_JSON`, bound store), ENQ probe lifted into `ZCL_OSD_ADT_ENQ` (shared with LOCK), double decode with a "URI malformed" 500. | 16 create and 12 delete cases on two fixture copies, with the file tree compared and createdAt masked; mutants: missing DEQUEUE, single decode, unbound store. |
-| **F3** | Continuation plumbing on top of front-up: kinds registered once at module scope; per-request `req.osdFacade = {store, options, step}`; one re-entry point `ZCL_OSD_ADT_HANDLER=>RESUME( kind, json )` that calls the route's `ZIF_OSD_ADT_RESUMABLE~RESUME`; preview and service-worker stubs that return today's 500 for every kind. The resume step must not run in `outsideStepContext`. | Two `adtRouter`s in one process each resume against their own store; a fake kind finishes through RESUME. |
-| **A6** | 4b-1: GET `inactiveobjects` (STORE INACTIVE, host order) and POST `activation` step 1: reference scan, If-Match/412, STORE VERDICT, the failure document, and the `transpileOnActivate:false` path through STORE COMPLETE. Publish cases still delegate. | Cases (1)-(4) of the activation plan, with OSD_WARM off. |
-| **A7** | 4b-2: the `activation` continuation (publish, `warmHeaders`) followed by `FINISH` through RESUME, COMPLETE with the named-only `built` map. Flag to the screen's owner that STORE ACTIVATE publishes inside the step (a FIFO violation that is not ours). | Cases (5)-(7), including the FIFO proof: an ABAP row answers while publish is gated. |
-| **A8a** | Thin introspection rows in `ZCL_OSD_ADT_INTROSPECT`: build, changed, services, transactions over SYSTEM `raw`. The Node bodies become shared functions that both the Node route (child mode) and the SYSTEM kind call. Refusals use the com.sap.adt namespace, never `internal()`. | Body and key-order matrix from the spec (root undefined, liveHash undefined, two identities, forced throw). Measure transactions' per-request file walk inside the step; if it is over about 50 ms, turn it into a continuation-kind read. |
-| **A8b** | git/object and git/object/revision over STORE GIT_STATE and GIT_BLOB. | clean, modified (tab, CR, U+2028), untracked, ignored, unborn; a sha before a rename gives a 400 with the capital-G text. |
+| **A4** | **Host orchestration (variant C), not ported.** Source writes and include writes/creation stay in the Node facade. | Every method reaches HOST through the catch-all; existing host tests remain. |
+| **A5** | **Host orchestration (variant C), not ported.** Object creation and deletion stay in the Node facade. | Every method reaches HOST through the catch-all; existing host tests remain. |
+| **F3** | **Landed.** Continuation plumbing on top of front-up: kinds registered once at module scope; per-request `req.osdFacade = {store, options, step}`; one re-entry point `ZCL_OSD_ADT_HANDLER=>RESUME( kind, json )` that calls the route's `ZIF_OSD_ADT_RESUMABLE~RESUME`; preview and service-worker stubs that return today's 500 for every kind. The resume step must not run in `outsideStepContext`. | Two `adtRouter`s in one process each resume against their own store; a fake kind finishes through RESUME. |
+| **A6** | **Host orchestration (variant C), not ported.** Inactive objects and the activation protocol stay in the Node facade. | Every method reaches HOST through the catch-all; existing host tests remain. |
+| **A7** | **Host orchestration (variant C), not ported.** Activation publication and completion stay in the Node facade. | Every method reaches HOST through the catch-all; existing host tests remain. |
+| **A8a** | Thin introspection rows in `ZCL_OSD_ADT_INTROSPECT`: build, changed, services, transactions over SYSTEM `raw`. The Node bodies become shared functions that both the Node route (child mode) and the SYSTEM kind call. Refusals use the com.sap.adt namespace, never `internal()`. | Body and key-order matrix from the spec (root undefined, liveHash undefined, two identities, forced throw). Measure transactions' per-request file walk inside the step; no new continuation route is planned. |
+| **A8b** | **Host orchestration (variant C), not ported.** git/object and git/object/revision stay in the Node facade. | Every method reaches HOST through the catch-all; existing host tests remain. |
 | **A9** | xref/readers and xref/closure: Open SQL over WBCROSSGT/X, SYSTEM XREF_WARM, OBJECT_TYPES, TESTCLASSES, SERVICE_ROWS, SEGW_REGISTRATIONS; `COLLATE` sort for closure; a cap seam `options.xrefLimit`. | The spec's cases; collation checked against V8 over every name in `store.list()`. |
 | **A10** | segw/entitysets. **First wrap the Node route in `answer()`**, so a throw becomes an ADT document instead of Express's HTML page. Then port: per-line scan with CR stripped; the CONSTANTS pattern runs over the whole text. | Demo DPC_EXT, an STG-generated MPC, 16-character prefixes (ambiguous and unique), CRLF, 404, 400. |
-| **C6** | Notebook (moved from dell; it reuses 4b's write/publish/complete path): validation in ABAP (JSON 400s), a `NOTEBOOK_CELL` continuation, then RESUME, then `ZCL_OSD_ADT_CLASSRUN=>RUN`. | Body matrix, 503 when there is no scratch root, 422 with the source restored, 200 JSON with `ms` normalized, two cells serialized. Needs C5. |
+| **C6** | **Host orchestration (variant C), not ported.** Notebook validation, write, publication and execution stay in the Node facade. | Every method reaches HOST through the catch-all; existing host tests remain. |
 
 ### dell
 
 | Slice | Content | Acceptance |
 |---|---|---|
-| **B1** | `ZCL_OSD_ADT_RIS_STATIC`: facets, objecttypes, releasestates, objectproperties/values, `packages/settings`, `packages/valuehelps/:what`. Row order: settings before `packages/:name`. | Six statics × GET/HEAD/slash/case; valuehelps case-sensitivity. |
-| **B8a** | typestructure plus `ddic/tables/parser/info` (miss = resource). | Accept dataname variants. |
-| **B8b** | `ZCL_OSD_ADT_DDIC`: DTEL and TABL documents, `tables/:name/source/main`, `TABLE_FIELDS` (resolver hook prepared but not called). | The spec's DTEL and TABL matrix, including the inactive table still showing `active`/epoch and the mixed-case 404. |
+| **B1** | **Landed.** `ZCL_OSD_ADT_RIS_STATIC`: facets, objecttypes, releasestates, objectproperties/values, `packages/settings`, `packages/valuehelps/:what`. Row order: settings before `packages/:name`. | Six statics × GET/HEAD/slash/case; valuehelps case-sensitivity. |
+| **B8a** | **Landed.** typestructure plus `ddic/tables/parser/info` (miss = resource). | Accept dataname variants. |
+| **B8b** | **Landed.** `ZCL_OSD_ADT_DDIC`: DTEL and TABL documents, `tables/:name/source/main`, `TABLE_FIELDS` (resolver hook prepared but not called). | The spec's DTEL and TABL matrix, including the inactive table still showing `active`/epoch and the mixed-case 404. |
 | **B2a** | `ZCL_OSD_ADT_SOURCE` and `ZCL_OSD_ADT_OBJECT`: source/main, both include routes, bare CLAS/PROG/INTF/DDLS documents; 20 generated rows. | Cases (1)-(7) and (12) (Node PUT followed by an ABAP 304); BOM/CRLF/Cyrillic fixture. |
 | **B2b** | The PARSE dispatcher with kind OUTLINE; `ZCL_OSD_ADT_STRUCTURE`; the INCL/SRVD bare alias. **Precondition in this slice: the host warms the registry (`store.warm`) after write and activation**, so no cold parse runs in a step. | Case (8); case (9) records cold and warm latency; Identifier twins; `xml:base` with the query string. |
-| **B5** | STORE PACKAGE (raw/local); `ZCL_OSD_ADT_PACKAGE` and `ZCL_OSD_ADT_TREE` (nodepath, nodestructure). **Fix the Node nodepath URIError first.** | Fixtures `$ZT_A` vs `$ZTA`, namespaced, library, `$TMP` with two users; the `??` chains; node keys; flat root. |
-| **B6** | Implemented: STORE PACKAGES/SEARCH bulk line replies; ABAP search and VFS filtering/counting/XML; SYSTEM VFS removed. | Live Node diff: maxResults including NaN and huge negatives, `/K`, seed `max*4`, 12-object order and all facet orders. Accepted search 9.24 ms ABAP / 2.14 ms Node; VFS 98.41 ms / 80.65 ms (section 4). |
-| **C1** | Checkruns: STORE CHECKRUN over an extracted shared `checkRunReport()`; reporters; package expansion through PACKAGE raw. | The spec's 15 cases plus a destination test for the bound store and an empty overlay. |
-| **C4a** | Freestyle: SYSTEM SQL and SQLCHECK in the **serving child on raw DEFAULT inside a savepoint**, shared cell module, `ZCL_OSD_ADT_TABLEDATA`. | Freestyle and checkSyntax matrix on sqlite **and duckdb**, plus the PostgreSQL fence client test (a refused SELECT must not lose the session row); the red proof with `lockedClient` shows the nested-step error. |
-| **C4b** | ddic and cds preview (4 rows); PARSE kind DDLS; `TABLE_FIELDS` with the resolver. | Cases 1-4; measure the per-field READ cost on a wide table. |
-| **C2a** | `abapunit/metadata` and GET `core/http/unit/object` over PARSE UNIT_PLAN. Measure the cold xref graph; pre-warm at start if it is over 1 s. | metadata GET/HEAD; unit/object matrix with JSON escapes. |
-| **C2b** | testruns and evaluation, the `AUNIT_DOC` renderer, an `aunit-run` continuation, then RESUME to render. | Fake-runner matrix; content-type negotiation; red proofs from the spec. |
-| **C3** | `unit/object/run` through the `unit-object-run` continuation; the host re-validates the raw body (dbEnv allowlist); cancellation on `res 'close'`. | Options order case; dbEnv filtering; abort mid-run. |
-| **C5** | Classrun: `ZCL_OSD_ADT_CLASSRUN`, a `ZCL_OSD_KERNEL_GUARD` @KERNEL try/catch (a runtime seam, not a host capability; the note goes in the port-map), SYSTEM DUMP (queued, not awaited), `FENCE` from F1. In the same slice, Node gets a 503 NOT_BUILT before `importFresh`. | Cases 1-14; the red proof without the guard (an ASSERT-todo error gives a 500). |
+| **B5** | **Landed.** STORE PACKAGE (raw/local); `ZCL_OSD_ADT_PACKAGE` and `ZCL_OSD_ADT_TREE` (nodepath, nodestructure). **Fix the Node nodepath URIError first.** | Fixtures `$ZT_A` vs `$ZTA`, namespaced, library, `$TMP` with two users; the `??` chains; node keys; flat root. |
+| **B6** | **Landed.** Implemented: STORE PACKAGES/SEARCH bulk line replies; ABAP search and VFS filtering/counting/XML; SYSTEM VFS removed. | Live Node diff: maxResults including NaN and huge negatives, `/K`, seed `max*4`, 12-object order and all facet orders. Accepted search 9.24 ms ABAP / 2.14 ms Node; VFS 98.41 ms / 80.65 ms (section 4). |
+| **C1** | **Landed.** Checkruns: STORE CHECKRUN over an extracted shared `checkRunReport()`; reporters; package expansion through PACKAGE raw. | The spec's 15 cases plus a destination test for the bound store and an empty overlay. |
+| **C4a** | **Landed.** Freestyle: SYSTEM SQL and SQLCHECK in the **serving child on raw DEFAULT inside a savepoint**, shared cell module, `ZCL_OSD_ADT_TABLEDATA`. | Freestyle and checkSyntax matrix on sqlite **and duckdb**, plus the PostgreSQL fence client test (a refused SELECT must not lose the session row); the red proof with `lockedClient` shows the nested-step error. |
+| **C4b** | **Landed.** ddic and cds preview (4 rows); PARSE kind DDLS; `TABLE_FIELDS` with the resolver. | Cases 1-4; measure the per-field READ cost on a wide table. |
+| **C2a** | **Landed.** `abapunit/metadata` and GET `core/http/unit/object` over PARSE UNIT_PLAN. Measure the cold xref graph; pre-warm at start if it is over 1 s. | metadata GET/HEAD; unit/object matrix with JSON escapes. |
+| **C2b** | **Host orchestration (variant C), not ported.** ABAP Unit testruns and evaluation stay in the Node facade. | Every method reaches HOST through the catch-all; existing host tests remain. |
+| **C3** | **Host orchestration (variant C), not ported.** unit/object/run stays in the Node facade. | Every method reaches HOST through the catch-all; existing host tests remain. |
+| **C5** | **Landed.** Classrun: `ZCL_OSD_ADT_CLASSRUN`, a `ZCL_OSD_KERNEL_GUARD` @KERNEL try/catch (a runtime seam, not a host capability; the note goes in the port-map), SYSTEM DUMP (queued, not awaited), `FENCE` from F1. In the same slice, Node gets a 503 NOT_BUILT before `importFresh`. | Cases 1-14; the red proof without the guard (an ASSERT-todo error gives a 500). |
 
-## 4. What stays on the host, and what "100%" means
+## 4. What stays on the host
+
+Variant C keeps A4, A5, A6/A7, A8b, C2b, C3 and C6 as host
+orchestration. These registrations reach the Node facade through the
+catch-all permanently. They are not queued for ABAP rows or continuations.
+The table still has exactly one HOST row, the catch-all; a HOST row per
+family is unnecessary. The gate proves that every method of every
+`HOST_ALLOWED` entry reaches HOST, and rejects even one ABAP-served method.
+
+Host capabilities used by ABAP document rows remain host work: filesystem
+facts through STORE, abaplint parse/check/outline/unit plans, backend SQL,
+and SYSTEM facts. ABAP owns the document and refusal grammar. `/osd/ready`
+remains a host liveness probe outside ADT. F3 and one-runtime B4 continuation
+plumbing remain available infrastructure, with no new route built on it.
 
 B6 accepted measurements (this clone, Node 26, 159 packages / 1,937 objects,
 20 warm wire samples): search **9.24 ms ABAP vs 2.14 ms Node**, below the
@@ -144,55 +194,36 @@ removed. The diagnostic ajson parse of the old 202,026-byte full tree costs
 281.84 ms and is no longer on either ABAP route's bulk path. See
 [slice-b6.md](slice-b6.md) for the decision and measurement table.
 
-**Route rows that stay HOST: only the catch-all `* /sap/bc/adt/*`.** None of the 15 families keeps a HOST row. `debugger/listeners`, the static rows and the introspection rows all become ABAP rows. Introspection gets no exemption: under design B a HOST row costs the same ABAP step plus the Node route, so keeping it saves nothing.
+Completion is `PORT_PENDING` empty with all coverage checks passing:
+no stale or overlapping scope entries, every unlisted registration served
+by its own ABAP pattern for every method, host orchestration always HOST,
+and the single last HOST catch-all. ABAP-FS conformance must remain no
+worse than the baseline. Node handlers also remain the byte-diff reference
+and serve modes that do not mount the ABAP front.
 
-**Host work that stays on the host behind an ABAP row (allowed by the rules):**
+## 5. Critical path
 
-| Work | Why it stays | Mechanism | What an ABAP alternative would cost |
-|---|---|---|---|
-| Build, generation swap, publish | It rebuilds the code the step runs in and holds the work-process FIFO for 0.5-18 s. | Continuation (`activation`, `NOTEBOOK_CELL`). | Not possible in-step. |
-| ABAP Unit run | Needs an isolated child database, takes 1-60 s, and is cancelled through the socket. | Continuation. | Not possible. |
-| abaplint parse, check, outline, unit plan | There is no ABAP parser in the tree. | STORE PARSE / CHECKRUN in the step, with the warm-up precondition. | SCAN/CL_OO_SOURCE_SCANNER on a real system: L, and not byte-equal to abaplint's ranges. |
-| SQL execution and cell rendering | Backend dialect plus the JS value model; open-abap ADBC returns only the first column. | STORE SQL / SQLCHECK. | Finishing ADBC upstream through a fork: L, and still not byte-equal. |
-| Git state, file walks, live symlink, hashOf, warm digests | Host filesystem and process state. | STORE GIT_*, SYSTEM `raw` kinds. | ZOSD_SVC-based services: L, and still made of host paths. |
-| Liveness probe | It must answer while a step is busy. | `/osd/ready`, outside `/sap/bc/adt`, never a row. | n/a |
-| Session middleware, X-OSD-Generation, STG_ADT_DUMP | Front concerns (slice 3). | Node front. | n/a |
+The remaining document slices are B2a, B2b, A1, A2, A3a, A3b, A8a,
+A9 and A10. The landed S0 and F1/F2 provide their shared seam and front.
+A3b follows A3a; B2b needs the PARSE OUTLINE seam and registry warm-up.
+A3a remains pending here despite its parked implementation branch.
+Activation, notebook and unit-run ports are outside this critical path.
+The earlier serial chains A6 -> A7 -> C6 and C2b -> C3 are superseded.
 
-**How "100%" is defined:**
-1. `ZCL_OSD_ADT_ROUTER=>ROUTES` has exactly one HOST row, the catch-all.
-2. `test/adt-abap-coverage.mjs` passes with an empty `HOST_ALLOWED`: every Express registration in `adtRouter` (plus `/sap/public/bc/icf/logoff`) matches an ABAP row.
-3. Replaying a STG_ADT_DUMP Eclipse and abap-fs session in inline mode shows HOST served-by only for paths Node 404s too.
-4. ABAP-FS conformance is no worse than the S0 baseline.
+One-runtime B5/B6 are the other remaining part of this track. Alice's
+2026-10-03 decisions are:
 
-**Scope, stated explicitly:**
-- This covers **inline mode**, the only mode that mounts the front.
-- `STG_SERVE=child`, `OSD_ADT=js`, the preview service worker and OSGo still serve the Node routes. Those Node handlers stay as the Gate-1 reference and as the child-mode server; in inline mode they are unreachable, which the coverage test proves.
-- Deleting them, or mounting the front in child mode, belongs to the next milestone.
+- **B5:** remove the parent kernel and enable `OSD_ADT_ONE_RUNTIME` by
+  default after the items under ["Before the switch is turned on by
+  default" in one-runtime-b2.md](one-runtime-b2.md#scope-differences-and-remaining-slices)
+  are closed. A 2-3 s ADT pause while the serving child restarts is accepted.
+- **B6:** one work process by default; a pool only by explicit setting.
+  There is no shared lock server in this scope; that belongs to E2.
 
-**Deliberate non-equalities, each documented and compared by status only:**
-- 4a: the release-during-body message text.
-- create/delete: the front-up `{ended}` race. ABAP closes that gap entirely.
-- segw/entitysets: a throw becomes an ADT document instead of Express HTML (fixed in Node first, so equal in practice).
-- :param decode failure: ABAP answers the ADT 400 document, Node answers Express's HTML 400; covers the versions rows and packages/valuehelps.
-
-## 5. Critical path and estimate
-
-```
-S0 ─► F1 ─► F2 ─► F3 ─► A6 ─► A7 ─► C6
-              │     └─► C2b ─► C3
-              ├─► B5 ─► C1
-              └─► A3a ─► A3b
-S0 ─► B2b(PARSE) ─► C2a ─► C2b ;  C4b
-```
-
-- Slices that need neither front-up nor a continuation can start right after S0: A1, A2, B1, B8a, B8b, B2a, B2b, C4a. A9 and A10 can also start early but need F2 for `/osd/ready` before they land.
-- **Count:** S0 (2 runs) + front 2 + stoker 15 + dell 15 = **34 slices**.
-- **Critical path:** S0 → F1 → F2 → F3 → A6 → A7 → C6 = **8 slices** of strictly serial dependency.
-- **Throughput bound:** each owner's line is about 15-16 slices. With two owners in parallel, the milestone takes **about 17-18 slice-turns**. dell's line is the binding one, because F1 and F2 block stoker's A3, A4, A5 and F3, so F1 and F2 go first on dell's queue.
-- **Main risks to the estimate:**
-  - the front-up rebase;
-  - the duckdb savepoint for C4a;
-  - zcl_ajson cost in B6 and C4.
+The runtime B0-B4 work is merged and remains off by default today. These
+are planned defaults, not implemented behavior. There is no revised
+slice-turn estimate here. ADT is a parallel track outside 0.7's must;
+0.7 retains only the ABAP-FS regression matrix in CI for this track.
 
 ## 6. The critic's missing routes, resolved
 
@@ -204,9 +235,13 @@ S0 ─► B2b(PARSE) ─► C2a ─► C2b ;  C4b
 | Discovery warm-up "stays HOST" assumption | **A1** | The warm-up uses an unknown path that hits the catch-all. |
 | `occurencemarkers` claimed twice | **A2** (stoker) | C2a drops its row. |
 | `core/http/build` liveness under the FIFO | **F2** (`/osd/ready`) + **A8a** (row) | HEAD core/discovery stops being the restart probe. |
-| Already ABAP: systeminformation, LOCK/UNLOCK, versions (all forms), compatibility/graph | landed | Listed in `HOST_ALLOWED`'s complement from S0. |
+| Already ABAP: systeminformation, LOCK/UNLOCK, versions (all forms), compatibility/graph | landed | Covered by the gate as ABAP registrations. |
 | `router.use` middleware (sessions, X-OSD-Generation, STG_ADT_DUMP) | F1/F2 (front) | Not route rows; out of the row count. |
 
-**Ownership changes against port-map, each needing one line of confirmation:**
-- stoker takes discovery, feeds/users, debugger/listeners, the whole introspection family and the notebook.
-- dell keeps group C minus the notebook, plus front-up F1/F2, plus the B families information system / search / tree and DDIC reads / typestructure. **The B family source read / objectstructure goes to stoker** (agreed 2026-10-02: osg-research's track is the DSL; the split keeps both lines near 18-20 slices). Its slices listed under dell above are stoker's.
+**Document-slice ownership (2026-10-02, subject to variant C scope):**
+
+- stoker owns discovery, feeds/users, debugger/listeners and the ABAP
+  introspection documents. Source read / objectstructure (B2a/B2b), listed
+  under dell above, also belong to stoker by the 2026-10-02 agreement.
+- dell owns the ABAP document subset of group C, the front F1/F2,
+  information system / search / tree and DDIC reads / typestructure.

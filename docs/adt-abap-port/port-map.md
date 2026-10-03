@@ -649,10 +649,12 @@ their first users or with slice 0a/the front, rather than in the host seam:
 - The ABAP-FS conformance baseline will be re-measured on main in S0 and
   recorded in `docs/abapfs-conformance.md`, superseding both 29/2/16 and
   30/1/16. Later slices compare with their merge-base figure.
-- The planned `test/adt-abap-coverage.mjs` walks the Express adtRouter stack
-  by method and sample path and checks the front's MATCH. HOST_ALLOWED
-  starts with all unported routes; each slice removes its entries. Completion
-  means an empty allow-list and exactly one HOST row.
+- `test/adt-abap-coverage.mjs` walks the Express adtRouter stack
+  by method and sample path and checks the front's MATCH. Under
+  [variant C](port-plan.md), PORT_PENDING holds the document-port queue;
+  each slice removes its entries. HOST_ALLOWED is the final Map of host
+  orchestration and reasons. Completion means PORT_PENDING empty, every
+  orchestration method reaching HOST, and exactly one last HOST catch-all.
 
 Acceptance across S0 remains green versions, LOCK and SYSINFO byte diffs,
 TYPES parity, ASCII/7.02 lint and coverage with the initial full allow-list.
@@ -700,8 +702,8 @@ byte-equal dump text including the source location, a durable dump from each
 facade, and the unbuilt-class 500 after the retry against the actual Node
 ClassRun loaded from main cc6b0287. A file arriving during the retry is also
 exercised. The reduced-parent helper checks HOST output (200), unbuilt
-(500), and the retained classrun door (200). The C5 block is removed from
-HOST_ALLOWED.
+(500), and the retained classrun door (200). The C5 block is absent from
+PORT_PENDING (formerly HOST_ALLOWED).
 
 Notebook/C6 and the separate B4/B5 runtime work remain outside C5.
 
