@@ -142,7 +142,7 @@ export const SERVED_BY = {
   "tools/osd-serve.mjs (no path: middleware)": {wrapper: "sets X-OSD-Generation on every answer: it decorates, it does not decide"},
   "tools/osd-serve.mjs /osd/adt-sessions": {wrapper: "guards the declared session door with the same switch, JSON and per-spawn key as adt-step"},
   "tools/osd-serve.mjs /osd/adt-step": {wrapper: "guards the declared /osd/adt-step node (switch, JSON only, per-spawn step key) before any body parser: it refuses, it does not answer"},
-  "test/start.mjs node.path": {wrapper: "forwards each declared child HOST node, with a local-only guard for the batch read door"},
+  "test/start.mjs node.path": {wrapper: "forwards public declared child HOST nodes, excluding internal nodes and guarding the batch read door locally"},
 };
 
 export function servedBy(host, path) {

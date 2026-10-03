@@ -8,7 +8,9 @@ ABAP request door no longer accepts session-only envelopes.
 
 Both doors share the switch, JSON-only parser and per-spawn key checked with
 `timingSafeEqual`. The session door permits loopback callers only, is declared
-in the node inventory, and is excluded from the parent's public proxy.
+in the node inventory, and is excluded from the parent's public proxy by its
+`internal: true` flag (shared with `adt-step`). Its JSON body is limited to
+1 MB; the ABAP step door retains 34 MB for hex-encoded request bodies.
 Operations are explicitly listed with their argument counts.
 
 The child's dialog FIFO encloses the authoritative session check and every
@@ -18,6 +20,11 @@ failure rejects the child step. Process-channel disconnect rejects pending
 callbacks; a child crash drops the old step and the parent request context.
 An uncertain write is never retried. An already-started parent callback cannot
 be undone by a child crash; this bridge does not make filesystem writes transactional.
+The same window exists when the 120 s STORE IPC timer rolls back the child
+step and frees its FIFO while parent work is still running. A timeout or failed
+session step invalidates the parent callback context over IPC, refusing further
+callbacks. Already-running work may still write; completion after invalidation
+is logged as an uncertain write and its result is refused.
 
 No ADT route body, ABAP class or STORE command changes. The session call sites
 in `adt-facade.mjs` and `adt-abap-front.mjs` are byte-unchanged from main
@@ -52,3 +59,14 @@ Temporary mutations, restored before the final green run, proved the checks:
 
 B4 RESUME, B5 kernel deletion and pool-wide ENQ coordination remain outside
 this slice. No new ABAP means no new ABAP Unit or lint targets; Go is unchanged.
+
+## Round-1 review fixes
+
+The requested focused command passed 81 tests, including the three B0 child
+carry cases. The B0 session/front checks passed another 7 tests. Public
+isolation now runs against the real parent port in `test/osd-child.mjs`;
+removing the internal-node exclusion made both door checks fail (403 instead
+of 404), and the exclusion was restored before the final green run. Deletion
+ordering records `deleteDone` before `ended` without a sleep. Dedicated checks
+exercise the 1 MB session body limit and fire the IPC timeout directly to
+verify context invalidation, refusal of further callbacks and late-work logging.

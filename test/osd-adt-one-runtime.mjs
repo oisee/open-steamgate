@@ -9,7 +9,7 @@ import {RemoteSessions} from "../tools/adt-remote-sessions.mjs";
 import {abapFront, abapRunner} from "../tools/adt-abap-front.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
-import {attachStoreIPC, StoreIPCClient, PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "../tools/osd-store-ipc.mjs";
+import {attachStoreIPC, StoreIPCClient, withStoreIPC, PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "../tools/osd-store-ipc.mjs";
 import {stepJSON} from "../tools/adt-remote-step.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
@@ -194,22 +194,22 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
   it("B3: delete callback holds the FIFO through parent deletion and releases its handle", async () => {
     const {session} = await logon();
     const taken = await nodeSessions.lock(session, "PROG", "ZOSD_DELETE");
-    let enter, release, ended = false;
+    let enter, release;
+    const events = [];
     const entered = new Promise(r => { enter = r; });
     const go = new Promise(r => { release = r; });
     const deleting = nodeSessions.deleteObject(session, "PROG", "ZOSD_DELETE", {
       find: () => ({name: "ZOSD_DELETE"}),
-      delete: async () => { enter(); await go; return {type: "PROG", name: "ZOSD_DELETE"}; },
+      delete: async () => { enter(); await go; events.push("deleteDone"); return {type: "PROG", name: "ZOSD_DELETE"}; },
     });
     let off;
     try {
       await entered;
-      off = nodeSessions.end(session.id).then(() => { ended = true; });
-      await new Promise(r => setTimeout(r, 50));
-      expect(ended, "logoff waits while parent deletion runs").to.equal(false);
+      off = nodeSessions.end(session.id).then(() => { events.push("ended"); });
       release();
       expect(await deleting).to.deep.equal({gone: {type: "PROG", name: "ZOSD_DELETE"}});
       await off;
+      expect(events).to.deep.equal(["deleteDone", "ended"]);
       expect(await nodeSessions.holderOf("PROG", "ZOSD_DELETE")).to.equal(undefined);
       expect(taken.handle).to.be.a("string");
     } finally { release(); await deleting; await off; }
@@ -249,14 +249,6 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     } finally { release(); }
   });
 
-  it("B3: public facade exposes neither internal door", async () => {
-    for (const door of ["adt-step", "adt-sessions"]) {
-      const response = await fetch(remote + "/osd/" + door, {method: "POST",
-        headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: "{}"});
-      expect(response.status).to.equal(404);
-    }
-  });
-
   it("B3: the session door refuses invalid operations and the ABAP door refuses session envelopes", async () => {
     for (const [door, input] of [
       ["adt-sessions", {method: "constructor", args: []}],
@@ -267,6 +259,13 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
         headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input)});
       expect(response.status).to.equal(400);
     }
+  });
+
+  it("B3: the session door bounds its JSON body to 1 MB", async () => {
+    const response = await fetch(runtime.url + "/osd/adt-sessions", {method: "POST",
+      headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey},
+      body: JSON.stringify({method: "get", args: ["x".repeat(1024 * 1024)]})});
+    expect(response.status).to.equal(413);
   });
 
   it("ACTIVATE says live after the step and cannot publish while the child is held", async () => {
@@ -527,5 +526,60 @@ describe("B3 switch off", function () {
         expect(response.status).to.equal(404);
       }
     } finally { await runtime.stop(); }
+  });
+});
+
+describe("B3 callback timeout context", () => {
+  it("invalidates on the child timer, refuses further callbacks and logs late completion", async () => {
+    const child = new EventEmitter();
+    child.connected = true;
+    const channel = new EventEmitter();
+    channel.connected = true;
+    channel.send = message => child.emit("message", message);
+    let finish;
+    const finished = new Promise(r => { finish = r; });
+    child.send = message => {
+      channel.emit("message", message);
+      if (message.id === 1) finish(message);
+    };
+    let enter, release, fireTimer, calls = 0;
+    const entered = new Promise(r => { enter = r; });
+    const go = new Promise(r => { release = r; });
+    const runtime = {adtContexts: new Map([[1, {callback: async () => {
+      calls++; enter(); await go; return {};
+    }}]])};
+    attachStoreIPC(child, runtime);
+    const client = new StoreIPCClient(channel);
+    const originalTimer = globalThis.setTimeout;
+    const originalWarn = console.warn;
+    const warnings = [];
+    let pending;
+    try {
+      console.warn = (...args) => warnings.push(args.join(" "));
+      globalThis.setTimeout = (callback, ms) => {
+        expect(ms).to.equal(120000);
+        fireTimer = callback;
+        return undefined;
+      };
+      pending = withStoreIPC(1, () => client.request({action: "work"}, "OSD_SESSION_CALLBACK"))
+        .catch(error => error.message);
+      globalThis.setTimeout = originalTimer;
+      await entered;
+      fireTimer();
+      expect(await pending).to.contain("timed out");
+      expect(runtime.adtContexts.size).to.equal(0);
+      const refused = await withStoreIPC(1, () => client.request({action: "work"}, "OSD_SESSION_CALLBACK"))
+        .catch(error => error.message);
+      expect(refused).to.contain("context ended");
+      expect(calls).to.equal(1);
+      release();
+      const lateReply = await finished;
+      expect(warnings).to.have.length(1);
+      expect(warnings[0]).to.contain("uncertain write");
+      expect(lateReply.error).to.contain("context ended during work");
+    } finally {
+      release(); globalThis.setTimeout = originalTimer; console.warn = originalWarn;
+      client.close(); child.emit("exit");
+    }
   });
 });

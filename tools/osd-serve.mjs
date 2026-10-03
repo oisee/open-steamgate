@@ -205,7 +205,7 @@ const guardAdtDoor = (req, res, next) => {
   next();
 };
 app.use("/osd/adt-step", guardAdtDoor, express.raw({type: "application/json", limit: "34mb"}));
-app.use("/osd/adt-sessions", guardAdtDoor, express.raw({type: "application/json", limit: "34mb"}));
+app.use("/osd/adt-sessions", guardAdtDoor, express.raw({type: "application/json", limit: "1mb"}));
 app.use(express.raw({type: "*/*", limit: "16mb"}));
 mountPortableCells(app, () => globalThis.abap.context.databaseConnections.DEFAULT,
   (work) => exclusive(work, "SQLScript notebook cell"));

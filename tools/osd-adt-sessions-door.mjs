@@ -23,8 +23,9 @@ export function sessionsDoor(identity) {
       return res.status(400).json({error: {message: error.message}});
     }
     try {
-      const sessions = new AbapSessions({identity: {systemID: identity().adt.systemID,
-        client: identity().adt.client, ...input.identity}});
+      const adt = identity().adt;
+      const sessions = new AbapSessions({identity: {systemID: adt.systemID,
+        client: adt.client, ...input.identity}});
       const value = await withStoreIPC(input.context, () => dialogStep(async () => {
         const args = sessionValue(input.args);
         const callback = parameters => globalThis.abap.context.RFCDestinations.STORE
@@ -38,6 +39,7 @@ export function sessionsDoor(identity) {
       }, "ADT session compatibility"));
       return res.json({value: sessionJSON(value ?? null)});
     } catch (error) {
+      if (process.connected) process.send({type: "store-context-ended", context: input.context});
       return res.status(500).json({error: {message: String(error.message ?? error)}});
     }
   };
