@@ -496,8 +496,9 @@ export class WarmCompiler {
   }
 
   // Who reads this object directly, from the reverse index the last build
-  // left: fresher than the seeded cross-reference, which a swap does not
-  // reseed. undefined when the registry is not primed or does not hold it.
+  // left. The serving child refreshes its derived rows under the swap lock;
+  // this index also works before a runtime starts. undefined when the
+  // registry is not primed or does not hold the object.
   readersOf(type, name) {
     if (!this.primed) return undefined;
     const obj = this.reg.getObject(type, name);

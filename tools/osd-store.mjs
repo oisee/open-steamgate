@@ -1365,7 +1365,7 @@ export class ObjectStore {
     if (transpile.warm === true && (transpile.hostHeld ?? []).length === 0) {
       try {
         const swap = await runtime.hot({generation: transpile.hash, from: transpile.from,
-          modules: transpile.modules, verified: transpile.unverified !== true});
+          modules: transpile.modules, only: transpile.closure, verified: transpile.unverified !== true});
         this.lastLoad = {generation: transpile.hash, epoch: runtime.epoch, hot: true, ms: swap.ms};
         // the swap limit or the heap: the catch-up recycle is part of this
         // activation, and its answer is the load that recycle made

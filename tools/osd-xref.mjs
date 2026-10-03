@@ -78,13 +78,15 @@ export class CrossReference {
     return undefined;
   }
 
-  build() {
+  build(only) {
+    const selected = only === undefined ? undefined : new Set(only.map(o => `${o.type} ${o.name.toUpperCase()}`));
     const registry = this.store.registry();
     const names = this.#names();
 
     for (const object of registry.getObjects()) {
       const objectName = object.getName().toUpperCase();
       const type = object.getType();
+      if (selected !== undefined && !selected.has(`${type} ${objectName}`)) continue;
       if (object.getABAPFiles === undefined) {
         continue;
       }

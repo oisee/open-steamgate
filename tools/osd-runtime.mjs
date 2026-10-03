@@ -262,7 +262,7 @@ export class ServingRuntime {
         }
       };
       child.on("message", onMessage);
-      child.send({type: "hot", id, generation: swap.generation, modules: swap.modules, verified: swap.verified === true});
+      child.send({type: "hot", id, generation: swap.generation, modules: swap.modules, only: swap.only, verified: swap.verified === true});
     });
     this.generation = swap.generation;
     this.swaps = done.swaps;

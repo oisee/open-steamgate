@@ -26,7 +26,7 @@ import {pathToFileURL} from "node:url";
 import {mountServices, servicesFromRows, channels} from "./osd-icf.mjs";
 import {mountHost, nodes} from "./osd-nodes.mjs";
 import {applyAtStartup, currentRows} from "./osd-icf-apply.mjs";
-import {seedAtStartup} from "./osd-xref-seed.mjs";
+import {seedAtStartup, refreshAfterSwap} from "./osd-xref-seed.mjs";
 import {mountChannels} from "./osd-apc.mjs";
 import {Data} from "./osd-data.mjs";
 import {createDumpRecorder} from "./osd-dumps.mjs";
@@ -549,6 +549,12 @@ process.on("message", (message) => {
   }
   exclusive(async () => {
     const done = await applyRuntimeHotSwap(hot, message);
+    // The compiler's only set owns these rows. Keep deletion and insertion
+    // under the same lock as module loading, before acknowledging the swap.
+    await refreshAfterSwap(connection(), root, message.only ?? message.modules
+      .filter(m => /\.(clas|intf)\.mjs$/.test(m))
+      .map(m => ({type: m.endsWith(".clas.mjs") ? "CLAS" : "INTF",
+        name: m.replace(/\.(clas|intf)\.mjs$/, "").replaceAll("#", "/").toUpperCase()})));
     // Every consumer of this process's loaded code changes generation under
     // the same work-process lock, before the next ABAP step can start.
     generation = message.generation;
