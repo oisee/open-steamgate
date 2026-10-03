@@ -10,7 +10,7 @@ export async function remoteStep(runtime, input) {
   await runtime.ensure();
   const child = runtime.child;
   const ask = () => fetch(`${runtime.url}/osd/adt-step`, {
-    method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(input),
+    method: "POST", headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input),
   });
   try { return await ask(); }
   catch (error) {
@@ -33,4 +33,12 @@ export async function remoteStep(runtime, input) {
     await runtime.ensure();
     return ask();
   }
+}
+
+export async function stepJSON(response) {
+  if (response.status === 413) throw Object.assign(new Error("ADT request body too large"), {status: 413});
+  if (!/^application\/json(?:;|$)/i.test(response.headers.get("content-type") ?? "")) {
+    throw new Error(`ADT step returned ${response.status} without JSON`);
+  }
+  return response.json();
 }

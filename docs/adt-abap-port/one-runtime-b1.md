@@ -3,7 +3,9 @@
 Opt in with `OSD_ADT_ONE_RUNTIME=1`. The child-mode parent does not load
 an ADT kernel with this switch. The default remains the existing kernel.
 
-`POST /osd/adt-step` is a loopback-only, internal JSON door. Input is
+`POST /osd/adt-step` is an internal JSON door secured by a random
+per-spawn `X-OSD-ADT-Step-Key` header and a loopback socket check. It requires
+`application/json` and is never mounted on the parent public port. Input is
 `{view: {method, path, url, headers, query?}, bodyHex?}`. The hex body must
 contain complete bytes. Output is `{record, adt}`: the record's body is a
 UTF-8 string, headers are ordered name/value pairs (including both cookies),
@@ -12,7 +14,7 @@ AbapSessions and calls ANSWER in one dialog step. The parent replays the
 record and runs HOST continuations after that step. A pool uses its primary.
 The door is 404 with the switch off and rejects malformed input with 400.
 
-The resource bridge and completed acceptance results are in
+The resource bridge and protocol details are in
 [B2](one-runtime-b2.md); the remote front needs both slices for STORE routes.
 
 During the mixed ABAP/Node port, the same door also accepts a view with

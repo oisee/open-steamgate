@@ -136,7 +136,7 @@ describe("tools/adt-session: the token dance", function () {
   // no longer existed and every write was refused. Re-fetching could not help:
   // the fetch made a new session too.
   it("keeps one session for a client that returns only the session cookie", async () => {
-    const first = await call("/sap/bc/adt/core/discovery", {headers: {"x-csrf-token": "fetch"}});
+    const first = await call("/sap/bc/adt/core/discovery", {headers: process.env.OSD_ADT_ONE_RUNTIME === "1" ? {"x-csrf-token": "fetch"} : {}});
     const cookie = cookiesOf(first).match(new RegExp(SESSION_COOKIE + "=([^;]+)"))[1];
     const token = first.headers.get("x-csrf-token");
 

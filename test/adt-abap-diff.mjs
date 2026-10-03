@@ -75,7 +75,7 @@ async function call(server, method, path, headers, complete = false) {
       return id;
     });
     expect(ids[0]).to.equal(ids[1]);
-    sessionHeaders = {location: response.headers.get("location"),
+    sessionHeaders = {location: response.headers.get("location")?.replace(/\?$/, ""),
       cookies: cookies.map((line) => line.replace(/=([0-9a-f]{24});/, "=<session>;"))};
   }
   return {
@@ -133,7 +133,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     return runner.answer(view, session);
   }});
   const withAbap = (options, runner = options.sessions === undefined ? wireSide : abapSide) => ({...options, abap: counted(runner),
-    abapServed: (by, req) => served.push(`${by} ${req.method} ${req.originalUrl}`)});
+    abapServed: (by, req) => served.push(`${by} ${req.method} ${req.originalUrl.replace(/\?$/, "")}`)});
   const store = () => new ObjectStore({root, libs: []});
 
   it("versions slice: every feed, source and refusal is served by ABAP and byte-equal", async () => {

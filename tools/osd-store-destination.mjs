@@ -24,6 +24,8 @@
 // So CHECK (a parse, ~4 s) and ACTIVATE are two commands and the screen
 // gives them two buttons: one name over a cheap and an expensive operation
 // is a button people stop pressing.
+import {withoutHostPaths} from "./osd-build-issues.mjs";
+import {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "./osd-store-ipc.mjs";
 import {given, givenText, fill} from "./osd-destination.mjs";
 import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
 import {objectOf} from "./osd-inputs.mjs";
@@ -85,10 +87,10 @@ try {
 /** Run work with `answers` ((kind, name, json) => value; throw to refuse) bound
  *  as the SYSTEM answers of every STORE call it makes, and `store` (the
  *  facade instance's ObjectStore, port-map risk 12) for every STORE command. */
-export function withSystem(answers, work, {store, deferActivate} = {}) {
+export function withSystem(answers, work, {store, deferActivate, oneRuntime} = {}) {
   if (systemCalls === undefined) throw new Error("SYSTEM needs an async context (Node or Bun)");
   const inherited = systemCalls.getStore();
-  return systemCalls.run({answers, deferActivate: deferActivate ?? inherited?.deferActivate,
+  return systemCalls.run({answers, oneRuntime: oneRuntime ?? inherited?.oneRuntime, deferActivate: deferActivate ?? inherited?.deferActivate,
     store: store ?? inherited?.store}, work);
 }
 
@@ -263,7 +265,7 @@ export class StoreDestination {
   }
 
   async #system(kind, name, json) {
-    if (SYSTEM_KINDS.includes(kind) === false && !["BUILD", "CHANGED", "GIT", "SERVING", "SUPERVISOR", "WARM", "SQL", "SQLCHECK", "CLASSRUN", "DUMP", "XREF", "SERVICES", "TRANSACTIONS"].includes(kind)) {
+    if (SYSTEM_KINDS.includes(kind) === false && !((process.env.OSD_ADT_ONE_RUNTIME === "1" || systemCalls?.getStore()?.oneRuntime === true) && (PARENT_SYSTEM_KINDS.has(kind) || CHILD_SYSTEM_KINDS.has(kind)))) {
       return {EV_ERROR: `unknown SYSTEM kind ${kind || "(none)"}`};
     }
     const bound = systemCalls?.getStore();
@@ -470,10 +472,22 @@ export class StoreDestination {
     // fourteen. So no number is right for both, and a screen that says
     // "activated" while it has just rewritten the MPC and DPC of a service
     // nobody opened is hiding the part worth seeing.
+    let failureEntries;
     const publish = async () => {
       const before = snapshotOf(join(store.root, "gen"));
       const published = await store.publish({activate: [{type, name}]});
-      const committed = published?.ok !== false && store.completeActivation(result, published?.transpile?.built);
+      const committed = published?.ok !== false && await store.completeActivation(result, published?.transpile?.built);
+      if (!committed) {
+        const issues = published?.transpile?.issues ?? [];
+        if (published?.ok === false && published?.transpile?.check === true && issues.length) {
+          const same = o => String(o.name).toUpperCase() === name.toUpperCase();
+          failureEntries = [{type, name, issues: issues.filter(same).flatMap(o => o.issues ?? [])}, ...issues.filter(o => !same(o))];
+        } else {
+          const why = published?.ok === false ? published.error ?? published.transpile?.error ?? "the build after activation failed"
+            : "source changed during activation; check and activate again";
+          failureEntries = [{type, name, issues: [{message: withoutHostPaths(String(why), store.root).split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}]}];
+        }
+      }
       const regenerated = changedSince(before, join(store.root, "gen"));
       const objects = [
         ...regenerated.written.map((path) => generatedRow(path, "generated")),
@@ -483,7 +497,7 @@ export class StoreDestination {
         EV_ACTIVE: committed ? "X" : "",
         EV_LIVE: committed && published?.recycled === true ? "X" : "",
         EV_NOTE: published?.ok === false
-          ? `the check held and the build did not: ${published?.transpile?.error ?? "no reason given"}`
+          ? `the check held and the build did not: ${published?.error ?? published?.transpile?.error ?? "no reason given"}`
           : !committed ? "source changed during activation; check and activate again"
           : `${published?.recycled === true
             ? `built and live (generation ${published?.generation ?? "?"})`
@@ -497,7 +511,7 @@ export class StoreDestination {
     };
     const defer = systemCalls?.getStore()?.deferActivate;
     if (defer !== undefined) {
-      defer(publish);
+      defer(async () => ({...await publish(), type, name, failureEntries}));
       return {EV_ACTIVE: "X", EV_LIVE: "", EV_NOTE: "live after the step", EV_COUNT: "0", EV_MS: String(Date.now() - started)};
     }
     return publish();

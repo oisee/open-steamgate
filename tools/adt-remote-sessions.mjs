@@ -1,6 +1,6 @@
 // Compatibility for Node routes that still use sessions during the ABAP port.
 // All authoritative reads and changes run in the primary's dialog FIFO.
-import {remoteStep} from "./adt-remote-step.mjs";
+import {remoteStep, stepJSON} from "./adt-remote-step.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
 
 export const sessionJSON = (value) => JSON.parse(JSON.stringify(value, (_key, item) =>
@@ -20,7 +20,7 @@ export class RemoteSessions extends AbapSessions {
     try {
       const response = await remoteStep(this.runtime,
         {view: {sessionCall: method, args: sessionJSON(args)}, identity: this.identity, context});
-      const result = await response.json();
+      const result = await stepJSON(response);
       if (!response.ok) throw new Error(result.error?.message ?? "ADT session call failed");
       return result.value === null ? undefined : sessionValue(result.value);
     } finally { this.runtime.adtContexts.delete(context); }

@@ -80,6 +80,11 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
 
   const call = (path, options = {}) => fetch(ADT + path, {...options, headers: {cookie, "x-csrf-token": token, ...(options.headers ?? {})}});
 
+  it("the parent's public port does not mount the internal step door", async () => {
+    const response = await fetch(BASE + "/osd/adt-step", {method: "POST", headers: {"content-type": "application/json"}, body: "{}"});
+    expect(response.status).to.equal(404);
+  });
+
   it("this process holds no ABAP: the build endpoint says the rows are read through the door", async () => {
     // the child starts at the first request that needs it; ask for one
     await fetch(`${BASE}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`);

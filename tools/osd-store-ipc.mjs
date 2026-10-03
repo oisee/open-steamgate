@@ -51,7 +51,9 @@ export class StoreIPCClient {
     const token = currentStepToken();
     if (token !== undefined) token.storeIPC ??= ++this.steps;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const command = String(parameters.IV_COMMAND ?? "").toUpperCase();
+      const long = command === "ACTIVATE" || (command === "SYSTEM" && String(parameters.IV_TYPE).toUpperCase() === "BUILD");
+      const timer = long ? undefined : setTimeout(() => {
         this.pending.delete(id);
         reject(new Error("STORE IPC request timed out"));
       }, 120000);
@@ -88,9 +90,9 @@ export function attachStoreIPC(child, runtime) {
     if (message?.type === "store-step-ended") {
       const work = deferred.get(message.step) ?? [];
       deferred.delete(message.step);
-      if (message.ok) for (const continuation of work) {
-        try { await continuation(); }
-        catch (error) { console.error(`STORE activation continuation: ${error.message}`); }
+      for (const {continuation, resolve, type, name} of work) {
+        try { resolve(message.ok ? await continuation() : {EV_ACTIVE: "", EV_NOTE: "activation step dumped", type, name}); }
+        catch (error) { resolve({EV_ACTIVE: "", EV_NOTE: String(error.message ?? error), type, name}); }
       }
       return;
     }
@@ -105,11 +107,13 @@ export function attachStoreIPC(child, runtime) {
         const {StoreDestination, withSystem} = await import("./osd-store-destination.mjs");
         const destination = runtime.storeDestination ?? new StoreDestination({reason: "no parent store installed"});
         values = await withSystem(context?.system ?? runtime.systemAnswers ?? (() => undefined),
-          () => destination.execute(message.parameters), {store: context?.store,
-            deferActivate: (continuation) => {
-              if (message.step === undefined) throw new Error("ACTIVATE requires a child dialog step");
+          () => destination.execute(message.parameters), {store: context?.store, oneRuntime: true,
+            deferActivate: message.step === undefined ? undefined : (continuation) => {
               const list = deferred.get(message.step) ?? [];
-              list.push(continuation);
+              let resolve;
+              const promise = new Promise(r => { resolve = r; });
+              list.push({continuation, resolve, type: message.parameters.IV_TYPE, name: message.parameters.IV_NAME});
+              if (context) (context.publications ??= []).push(promise);
               deferred.set(message.step, list);
             }});
       }
@@ -119,5 +123,11 @@ export function attachStoreIPC(child, runtime) {
     }
   };
   child.on("message", receive);
-  child.once("exit", () => { deferred.clear(); child.off("message", receive); });
+  child.once("exit", () => {
+    for (const work of deferred.values()) for (const item of work) {
+      item.resolve({EV_ACTIVE: "", EV_NOTE: "activation child exited", type: item.type, name: item.name});
+    }
+    deferred.clear();
+    child.off("message", receive);
+  });
 }

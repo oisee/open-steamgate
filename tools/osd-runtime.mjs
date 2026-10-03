@@ -19,6 +19,7 @@
 // Every instance is (a source tree, a port, a database) and nothing here
 // assumes there is one of them. Two of these can run side by side over two
 // worktrees, which is what a branch under test would be.
+import {randomBytes} from "node:crypto";
 import {attachStoreIPC} from "./osd-store-ipc.mjs";
 import {spawn} from "node:child_process";
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
@@ -462,6 +463,7 @@ export class ServingRuntime {
         this.env.NODE_OPTIONS ?? process.env.NODE_OPTIONS,
         inspectPort ? `--inspect=127.0.0.1:${inspectPort} --enable-source-maps` : undefined,
       ].filter((s) => s !== undefined && s !== "").join(" ");
+      this.adtStepKey = randomBytes(32).toString("hex");
       const child = spawn(this.command[0], this.command.slice(1), {
         cwd: this.root,
         env: {
@@ -472,6 +474,7 @@ export class ServingRuntime {
           ...(this.wanted === undefined ? {} : {OSD_SERVE_PORT: String(this.wanted)}),
           ...(this.database === undefined ? {} : {STG_DB_PATH: this.database}),
           ...this.env,
+          OSD_ADT_STEP_KEY: this.adtStepKey,
           OSD_GENERATION: generation,
           OSD_ADT_CARRY: carryEnabled ? "1" : "0",
           ...(nodeOptions === "" ? {} : {NODE_OPTIONS: nodeOptions}),

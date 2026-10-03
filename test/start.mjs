@@ -501,10 +501,10 @@ export function startServer(quiet) {
       }
       proxy(req, res, next);
     };
-    for (const node of declaredNodeList.filter((n) => n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
+    for (const node of declaredNodeList.filter((n) => n.path !== "/osd/adt-step" && n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
       const proxy = odataProxy(runtime);
       app.all(node.path, node.path === "/osd/serving" ? withWarm(proxy)
-        : ["/osd/batch-runs", "/osd/adt-step"].includes(node.path) ? localBatch(proxy) : proxy);
+        : node.path === "/osd/batch-runs" ? localBatch(proxy) : proxy);
     }
     // STG_DEV=1: the disk is the other editor. A save becomes a check, a
     // build and a recycle of this runtime (tools/osd-dev.mjs), and the

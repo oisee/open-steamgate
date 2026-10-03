@@ -6,10 +6,11 @@ import {join} from "node:path";
 import {EventEmitter} from "node:events";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {RemoteSessions} from "../tools/adt-remote-sessions.mjs";
-import {abapRunner} from "../tools/adt-abap-front.mjs";
+import {abapFront, abapRunner} from "../tools/adt-abap-front.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
-import {StoreDestination} from "../tools/osd-store-destination.mjs";
-import {StoreIPCClient} from "../tools/osd-store-ipc.mjs";
+import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
+import {attachStoreIPC, StoreIPCClient, PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "../tools/osd-store-ipc.mjs";
+import {stepJSON} from "../tools/adt-remote-step.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 
@@ -166,9 +167,29 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     expect(response.status, response.body).to.equal(200);
   });
 
+  for (const [name, type, key, status] of [
+    ["missing key", "application/json", undefined, 403],
+    ["wrong key", "application/json", "wrong", 403],
+    ["text/plain", "text/plain", "valid", 415],
+  ]) {
+    it(`the internal door refuses ${name}`, async () => {
+      const headers = {"content-type": type};
+      if (key) headers["x-osd-adt-step-key"] = key === "valid" ? runtime.adtStepKey : key;
+      const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST", headers, body: "{}"});
+      expect(response.status).to.equal(status);
+    });
+  }
+
+  it("the door accepts an ABAP body larger than 8 MB", async () => {
+    const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST",
+      headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey},
+      body: JSON.stringify({view: {method: "GET", path: BASE + "/core/http/systeminformation", url: BASE + "/core/http/systeminformation", headers: {}}, bodyHex: "00".repeat(9 * 1024 * 1024)})});
+    expect(response.status).to.equal(200);
+  });
+
   it("the internal door rejects invalid views and byte hex", async () => {
     for (const input of [{}, {view: {}}, {view: {method: "GET", path: BASE, url: BASE, headers: {}}, bodyHex: "f"}]) {
-      const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(input)});
+      const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST", headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input)});
       expect(response.status).to.equal(400);
     }
   });
@@ -193,5 +214,146 @@ describe("STORE IPC lifecycle", () => {
       expect(await pending).to.contain("disconnected");
       expect(client.pending.size).to.equal(0);
     } finally { client.close(); }
+  });
+});
+
+describe("remote activation publication", () => {
+  for (const failure of ["publish", "promotion"]) {
+    it(`waits for ${failure} failure and returns the ADT failure document`, async () => {
+      const child = new EventEmitter();
+      child.connected = true;
+      const context = 1;
+      let release, started;
+      const entered = new Promise(r => { started = r; });
+      const go = new Promise(r => { release = r; });
+      const runtime = {child, url: "http://unused", ensure: async () => {}};
+      runtime.storeDestination = new StoreDestination({store: {root: "/tmp",
+        activate: () => ({active: true, issues: []}),
+        publish: async () => { started(); await go; return {ok: failure !== "publish", transpile: {error: "build failed"}}; },
+        completeActivation: () => failure !== "promotion"}});
+      attachStoreIPC(child, runtime);
+      const original = globalThis.fetch;
+      child.send = () => child.emit("message", {type: "store-step-ended", step: 1, ok: true});
+      globalThis.fetch = async () => {
+        child.emit("message", {type: "store-request", id: 1, context, step: 1,
+          parameters: {IV_COMMAND: "ACTIVATE", IV_TYPE: "PROG", IV_NAME: "ZTEST"}});
+        await entered;
+        return new Response(JSON.stringify({record: {status: 200, headers: [], contentType: "application/xml", body: "success"}}), {headers: {"content-type": "application/json"}});
+      };
+      try {
+        let settled = false;
+        const answer = abapRunner({remote: runtime}).execute({body: Buffer.alloc(0), method: "POST", path: BASE + "/activation"}, {},
+          {sessions: {identity: {}}, system: () => undefined}).then(r => { settled = true; return r; });
+        await entered;
+        await new Promise(r => setTimeout(r, 20));
+        expect(settled, "response must wait for publication").to.equal(false);
+        release();
+        const record = await answer;
+        expect(record.status).to.equal(200);
+        expect(record.body.toString()).to.contain('activationExecuted="false"');
+        expect(record.body.toString()).to.contain(failure === "publish" ? "build failed" : "source changed during activation");
+      } finally { release(); globalThis.fetch = original; child.emit("exit"); }
+    });
+  }
+});
+
+describe("step response decoding", () => {
+  it("maps a non-JSON body-parser 413 to an ADT 413", async () => {
+    let error;
+    try { await stepJSON(new Response("too large", {status: 413, headers: {"content-type": "text/html"}})); }
+    catch (e) { error = e; }
+    expect(error.status).to.equal(413);
+  });
+});
+
+describe("STORE long commands and non-dialog activation", () => {
+  it("BUILD and ACTIVATE wait for reply or disconnect without a 120 s timer", async () => {
+    const channel = new EventEmitter();
+    channel.connected = true;
+    channel.send = () => {};
+    const client = new StoreIPCClient(channel);
+    try {
+      for (const parameters of [{IV_COMMAND: "ACTIVATE"}, {IV_COMMAND: "SYSTEM", IV_TYPE: "BUILD"}]) {
+        const pending = client.request(parameters).catch(e => e.message);
+        expect(client.pending.get(client.seq).timer).to.equal(undefined);
+        channel.emit("disconnect");
+        expect(await pending).to.contain("disconnected");
+      }
+    } finally { client.close(); }
+  });
+
+  it("ACTIVATE without a child step publishes immediately", async () => {
+    const child = new EventEmitter();
+    child.connected = true;
+    let published = false;
+    const runtime = {storeDestination: new StoreDestination({store: {root: "/tmp",
+      activate: () => ({active: true, issues: []}), completeActivation: () => true,
+      publish: async () => { published = true; return {ok: true}; }}})};
+    attachStoreIPC(child, runtime);
+    const reply = new Promise(resolve => { child.send = resolve; });
+    child.emit("message", {type: "store-request", id: 1,
+      parameters: {IV_COMMAND: "ACTIVATE", IV_TYPE: "PROG", IV_NAME: "ZTEST"}});
+    try {
+      const answer = await reply;
+      expect(answer.error).to.equal(undefined);
+      expect(published).to.equal(true);
+      expect(answer.values.EV_ACTIVE).to.equal("X");
+    } finally { child.emit("exit"); }
+  });
+});
+
+describe("one-runtime SYSTEM kind gate", () => {
+  for (const enabled of [false, true]) {
+    it(`accepts resource kinds only with the switch on (${enabled ? "on" : "off"})`, async () => {
+      const previous = process.env.OSD_ADT_ONE_RUNTIME;
+      try {
+        if (enabled) process.env.OSD_ADT_ONE_RUNTIME = "1";
+        else delete process.env.OSD_ADT_ONE_RUNTIME;
+        const destination = new StoreDestination({store: {}});
+        for (const kind of [...PARENT_SYSTEM_KINDS, ...CHILD_SYSTEM_KINDS]) {
+          const answer = await withSystem(() => ({owner: kind}), () => destination.execute({IV_COMMAND: "SYSTEM", IV_TYPE: kind}));
+          if (enabled) expect(JSON.parse(answer.EV_JSON)).to.deep.equal({owner: kind});
+          else expect(answer.EV_ERROR).to.equal(`unknown SYSTEM kind ${kind}`);
+        }
+      } finally {
+        if (previous === undefined) delete process.env.OSD_ADT_ONE_RUNTIME;
+        else process.env.OSD_ADT_ONE_RUNTIME = previous;
+      }
+    });
+  }
+});
+
+describe("remote ADT body transport", () => {
+  it("keeps HOST bodies in the parent and hexes only ABAP bodies", async () => {
+    const original = globalThis.fetch;
+    try {
+      for (const bodyRequired of [false, true]) {
+        const inputs = [];
+        const runtime = {url: "http://unused", ensure: async () => {}};
+        globalThis.fetch = async (_url, init) => {
+          const input = JSON.parse(init.body);
+          inputs.push(input);
+          return new Response(JSON.stringify(input.bodyRequired ? {bodyRequired} :
+            {record: {status: 200, headers: [], body: "ok"}}), {headers: {"content-type": "application/json"}});
+        };
+        await abapRunner({remote: runtime}).execute({body: Buffer.from("source"), method: "PUT", path: BASE, url: BASE}, {}, {sessions: {identity: {}}, system: () => undefined});
+        expect(inputs).to.have.length(2);
+        expect(inputs[0].bodyHex).to.equal(undefined);
+        expect(inputs[1].bodyHex).to.equal(bodyRequired ? Buffer.from("source").toString("hex") : "");
+      }
+    } finally { globalThis.fetch = original; }
+  });
+
+  it("returns an ADT 413 for a non-JSON child 413", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => new Response("too large", {status: 413, headers: {"content-type": "text/html"}});
+    try {
+      const runner = abapRunner({remote: {url: "http://unused", ensure: async () => {}}});
+      let refusal;
+      await abapFront({...runner, sessions: {identity: {}}, system: () => undefined,
+        refuse: (_res, status, code, message) => { refusal = {status, code, message}; }})
+        ({method: "GET", originalUrl: BASE, headers: {}, body: Buffer.alloc(0)}, {}, () => {});
+      expect(refusal).to.deep.equal({status: 413, code: "ExceptionInvalidRequest", message: "ADT request body too large"});
+    } finally { globalThis.fetch = original; }
   });
 });

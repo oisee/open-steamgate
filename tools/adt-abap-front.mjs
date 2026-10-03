@@ -27,7 +27,9 @@
 // the Node façade answers one -- the ADT exception document, 500,
 // ExceptionInternalError in our namespace -- for every request, a HOST row
 // included: no session was resolved, so nothing may go past the gate.
-import {remoteStep} from "./adt-remote-step.mjs";
+import {withoutHostPaths} from "./osd-build-issues.mjs";
+import {activationFailureDocument} from "./adt-documents.mjs";
+import {remoteStep, stepJSON} from "./adt-remote-step.mjs";
 import {withSystem} from "./osd-store-destination.mjs";
 
 export const HANDLER = "ZCL_OSD_ADT_HANDLER";
@@ -196,13 +198,25 @@ export function abapRunner({handler, step, stale, remote}) {
             const identity = await options.system?.("IDENTITY", "", req, "");
             if (identity !== undefined) systemIdentity = JSON.parse(JSON.stringify(identity));
           } catch (error) { identityError = String(error.message ?? error); }
-          const response = await remoteStep(runtime, {view: request, bodyHex: body.toString("hex"),
+          // Ask the child's router before encoding: HOST bodies stay in the parent.
+          const needsBody = body.length > 0 && (await stepJSON(await remoteStep(runtime, {view: request, bodyRequired: true}))).bodyRequired;
+          const response = await remoteStep(runtime, {view: request, bodyHex: needsBody ? body.toString("hex") : "",
             identity: options.sessions.identity, context, systemIdentity, identityError});
-          const result = await response.json();
+          const result = await stepJSON(response);
           if (!response.ok) throw Object.assign(new Error(result.error?.message ?? "ADT step failed"), {code: result.error?.code});
           if (result.adt !== undefined) req.adt = {...result.adt, sessions: options.sessions,
             session: result.adt.session === undefined ? undefined : {...result.adt.session,
               locks: new Map(result.adt.session.locks)}};
+          const publications = await Promise.all(runtime.adtContexts.get(context).publications ?? []);
+          const failed = publications.filter(p => p.EV_ACTIVE !== "X");
+          if (failed.length) {
+            const entries = failed.flatMap(p => p.failureEntries ?? [{type: p.type ?? "PROG", name: p.name ?? "",
+              issues: [{message: withoutHostPaths(String(p.EV_NOTE), options.store?.root ?? runtime.root)
+                .split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}],
+            }]);
+            return {...result.record, status: 200, servedBy: "ABAP", continuation: undefined,
+              contentType: "application/xml", body: Buffer.from(activationFailureDocument(entries))};
+          }
           return {...result.record, body: Buffer.from(result.record.body, "utf8")};
         } finally { runtime.adtContexts.delete(context); }
       },
@@ -317,6 +331,10 @@ export function abapFront(options) {
       // the ENQ session of the step ended while it waited for the work
       // process or in a WAIT (a logoff): the session is gone, and the answer
       // is the refusal a client logs on again after, not a dump
+      if (e?.status === 413) {
+        options.refuse(res, 413, "ExceptionInvalidRequest", e.message, {namespace: NAMESPACE});
+        return;
+      }
       if (e?.code === "ENQ_SESSION_ENDED") {
         res.status(403).set("x-csrf-token", "Required").type("text/plain; charset=utf-8").send("CSRF token validation failed");
         return;

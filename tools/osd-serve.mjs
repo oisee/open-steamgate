@@ -12,6 +12,7 @@
 // process channel: it says "ready" with the port it got, and it exits when
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
+import {timingSafeEqual} from "node:crypto";
 import {dialogStep, exclusive} from "./osd-dialog-step.mjs";
 import {bootGuard} from "./osd-boot-guard.mjs";
 import {HotLoader, applyRuntimeHotSwap, warmVerdict} from "./osd-hot.mjs";
@@ -35,7 +36,7 @@ import {batchMonitorHandler} from "./osd-batch-monitor.mjs";
 import {identity} from "./osd-identity.mjs";
 import {parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {abapSession} from "./adt-enq.mjs";
-import {answerOf} from "./adt-abap-front.mjs";
+import {answerOf, abapServes} from "./adt-abap-front.mjs";
 import {sessionJSON, sessionValue} from "./adt-remote-sessions.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
 import {StoreIPCClient, withStoreIPC} from "./osd-store-ipc.mjs";
@@ -190,6 +191,15 @@ if (process.env.OSD_ADT_CARRY === "1") {
 const app = express();
 app.disable("x-powered-by");
 app.set("etag", false);
+// Hex plus metadata must fit every body accepted by the public 16 MB parser.
+app.use("/osd/adt-step", (req, res, next) => {
+  if (process.env.OSD_ADT_ONE_RUNTIME !== "1") return res.status(404).end();
+  if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] ?? "")) return res.status(415).json({error: {message: "JSON required"}});
+  const expected = Buffer.from(process.env.OSD_ADT_STEP_KEY ?? "");
+  const supplied = Buffer.from(req.headers["x-osd-adt-step-key"] ?? "");
+  if (!expected.length || supplied.length !== expected.length || !timingSafeEqual(expected, supplied)) return res.status(403).json({error: {message: "invalid step key"}});
+  next();
+}, express.raw({type: "application/json", limit: "34mb"}));
 app.use(express.raw({type: "*/*", limit: "16mb"}));
 mountPortableCells(app, () => globalThis.abap.context.databaseConnections.DEFAULT,
   (work) => exclusive(work, "SQLScript notebook cell"));
@@ -283,6 +293,10 @@ hostNodes["adt-step"] = (a, node) => a.post(node.path, async (req, res) => {
   } catch (error) {
     return res.status(400).json({error: {code: "BAD_REQUEST", message: error.message}});
   }
+  if (input.bodyRequired === true) {
+    const bodyRequired = await dialogStep(() => abapServes(input.view.method, input.view.path), "ADT body routing");
+    return res.json({bodyRequired});
+  }
   const sessions = new AbapSessions({identity: {systemID: identity().adt.systemID, client: identity().adt.client, ...input.identity}});
   if (input.view.sessionCall !== undefined) {
     const method = input.view.sessionCall;
@@ -293,14 +307,10 @@ hostNodes["adt-step"] = (a, node) => a.post(node.path, async (req, res) => {
         const callback = (parameters) => globalThis.abap.context.RFCDestinations.STORE.request(parameters, "OSD_SESSION_CALLBACK");
         if (method === "whileHeld") return sessions.whileHeld(...args, () => callback({action: "work"}));
         if (method === "deleteObject") {
-          const [session, type, name] = args;
-          if (!await sessions.get(session.id)) return {ended: true};
-          const found = await callback({action: "find", type, name});
-          const holder = await sessions.holderOf(type, found?.name ?? name);
-          if (holder && holder.session.id !== session.id) return {holder};
-          const gone = await callback({action: "delete", type, name});
-          await sessions.release(gone.type, gone.name);
-          return {gone};
+          return sessions.deleteObject(...args, {
+            find: (type, name) => callback({action: "find", type, name}),
+            delete: (type, name) => callback({action: "delete", type, name}),
+          });
         }
         return sessions[method](...args);
       }, "ADT session compatibility"));
