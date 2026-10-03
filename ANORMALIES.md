@@ -56,9 +56,9 @@ Format adapted from `larshp/hithub` (MIT).
 - Expected SAP behaviour: MESSAGE receives the remote failure text.
 - Actual open-abap behaviour: exception lowering sets only sy-subrc, silently ignoring MESSAGE; local dump conversion also discards the original text.
 - Impact on open-steamgate: the doctor sees a failure code without the far-side explanation.
-- Smallest safe workaround: local CallFunction transpiler adapter assigns the caught error's message to the parsed MESSAGE target for the two RFC failures; localClient preserves dump text on the classic error. Both normal transpile and generated-copy loader use modulesOf and the adapter.
-- Upstream issue: not reported; local work only authorized.
-- Regression-test location: `test/dsl-l3-remote.mjs`, "far-side text", including MESSAGE-removal copies.
+- Smallest safe workaround: local CallFunction transpiler adapter assigns the caught error's message to the parsed MESSAGE target for the two RFC failures; localClient preserves dump text on the classic error. The selected modules receive the idempotent adapter for checkout, bundled-host, warm and generated-copy transpiles.
+- Upstream issue: needs an issue in `abaplint/transpiler`; no upstream filing authorized. Present on local current main `71a75787c0013104758e89d79b2830e76bebbb36` (checked 2026-10-03): `call_function.ts` delegates to `CallTranspiler.buildExceptions` in `call.ts`, which emits only sy-subrc assignments and ignores MESSAGE targets.
+- Regression-test location: `test/dsl-l3-remote.mjs`, "far-side text", including MESSAGE-removal copies; `test/rfc-message-host.mjs` covers cold and warm host modules plus missing-install copies.
 - Upstream version containing a fix: unknown.
 
 ### ANOMALY-2026-10-02-repl009-subrc-text -- Oracle return-code text carries an extra sign blank

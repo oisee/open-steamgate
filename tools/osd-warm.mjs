@@ -34,8 +34,8 @@ import {generatorIdentity, hashOf, inputsOf, layout, liveHash, lock, linkRoots, 
 import {describeBuild} from "./osd-transpiler.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {runsAs} from "./osd-main.mjs";
-import {hostModules, toolCommand} from "./osd-host.mjs";
-import {isBinaryFilename, listFiles, loadLibs, modulesOf, outputFiles, readAll} from "./osd-transpile.mjs";
+import {toolCommand} from "./osd-host.mjs";
+import {isBinaryFilename, listFiles, loadLibs, selectedModules, outputFiles, readAll} from "./osd-transpile.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 
@@ -309,7 +309,7 @@ export class WarmCompiler {
     const started = Date.now();
     this.reg = undefined;
     const root = this.root;
-    const loaded = this.modules ?? hostModules() ?? modulesOf(root);
+    const loaded = selectedModules(root, this.modules);
     const {Transpiler, Chunk, core, plugin} = loaded;
     mapStatementStarts(Chunk);
     // a checkout's transpiler can be relinked under a running process; a
