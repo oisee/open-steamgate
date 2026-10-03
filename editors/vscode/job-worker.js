@@ -173,7 +173,7 @@ function jobsStatusBar(vscode, context, controller) {
       lastKnown = item.text; resetMisses();
       item.backgroundColor = undefined;
     } catch (error) {
-      const paused = debugging();
+      const paused = error.name === 'TimeoutError' && debugging();
       // The engine serializes requests: even a normal first classrun can
       // outlast this poll. Require sustained failures before claiming an outage.
       if (paused) resetMisses();

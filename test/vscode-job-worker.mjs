@@ -212,9 +212,10 @@ describe('VS Code jobs status poll grace and debugging', () => {
     require('../editors/vscode/job-worker.js').jobsStatusBar(api, {subscriptions}, controller);
     await new Promise(resolve => setImmediate(resolve));
   };
-  it('shows a neutral failure for an already active system session and recovers after termination', async () => {
+  it('shows a neutral timeout for an already active system session and recovers after termination', async () => {
     const session = {name: 'OSD: ABAP (9480)'};
     api.debug.activeDebugSession = session;
+    globalThis.fetch = async () => { throw new DOMException('timed out', 'TimeoutError'); };
     await install();
     expect(item.text).to.equal('OSD jobs: paused (debugger)');
     expect(item.backgroundColor).to.equal(undefined);
@@ -226,7 +227,7 @@ describe('VS Code jobs status poll grace and debugging', () => {
     expect(item.text).to.equal('OSD jobs: idle');
     expect(item.backgroundColor).to.equal(undefined);
   });
-  it('tracks system sessions even when another session is focused; timeout and HTTP errors are neutral', async () => {
+  it('tracks system sessions even when another session is focused; repeated timeouts stay paused', async () => {
     await install();
     expect(item.backgroundColor).to.equal(undefined);
     const session = {name: 'custom attach', configuration: {request: 'attach', port: 9480}};
@@ -239,15 +240,36 @@ describe('VS Code jobs status poll grace and debugging', () => {
     await tick();
     expect(item.text).to.equal('OSD jobs: paused (debugger)');
     expect(item.backgroundColor).to.equal(undefined);
-    globalThis.fetch = async () => ({ok: false, status: 503});
-    now = 60000;
-    await tick();
+    for (const time of [7500, 15000, 60000]) { now = time; await tick(); }
     expect(item.text).to.equal('OSD jobs: paused (debugger)');
+    expect(item.backgroundColor).to.equal(undefined);
+    expect(messages).to.deep.equal([]);
+    globalThis.fetch = async () => ({ok: false, status: 503});
     end(session);
     await new Promise(resolve => setImmediate(resolve));
     expect(item.text).to.equal('OSD jobs: busy');
     expect(item.backgroundColor).to.equal(undefined);
   });
+  for (const [label, fail] of [
+    ['connection reset', async () => { throw new TypeError('fetch failed', {cause: Object.assign(Error('reset'), {code: 'ECONNRESET'})}); }],
+    ['socket hang-up', async () => { throw Error('socket hang up'); }],
+    ['HTTP 503', async () => ({ok: false, status: 503})],
+    ['HTTP 404', async () => ({ok: false, status: 404})],
+    ['parse error', async () => ({ok: true, json: async () => { throw new SyntaxError('invalid JSON'); }})],
+  ]) {
+    it(`counts ${label} as misses with an active attach session`, async () => {
+      api.debug.activeDebugSession = {configuration: {request: 'attach', port: 9480, restart: true}};
+      globalThis.fetch = fail;
+      await install();
+      now = 15000; await tick(); // Enough time, but only two misses.
+      expect(item.text).to.equal('OSD jobs: busy');
+      expect(item.backgroundColor).to.equal(undefined);
+      await tick();
+      expect(item.text).to.equal('OSD jobs: status unavailable');
+      expect(item.backgroundColor.id).to.equal('statusBarItem.errorBackground');
+      expect(messages).to.have.length(1);
+    });
+  }
   it('uses the grace outside this system and clears the background on success or worker stop', async () => {
     api.debug.activeDebugSession = {name: 'OSD: ABAP (9481)'};
     await install();
@@ -302,7 +324,8 @@ describe('VS Code jobs status poll grace and debugging', () => {
     expect(item.text).to.equal('OSD jobs: busy');
     expect(item.backgroundColor).to.equal(undefined);
   });
-  it('turns a genuinely unreachable system red after sustained connection failures', async () => {
+  it('turns an unreachable system red after sustained connection refusals with an active attach session', async () => {
+    api.debug.activeDebugSession = {configuration: {request: 'attach', port: 9480, restart: true}};
     const {createServer} = await import('node:http');
     const server = createServer();
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
