@@ -238,7 +238,82 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     expect(await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).to.equal(undefined);
   });
 
-  it("B3: recycle during a callback releases the old step without replaying the write", async () => {
+  it("B3: graceful recycle drains a held callback and carries its lock", async () => {
+    const {session} = await logon();
+    const {handle} = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+    let enter, release, calls = 0, recycling;
+    const entered = new Promise(r => { enter = r; });
+    const go = new Promise(r => { release = r; });
+    const pending = nodeSessions.whileHeld(session, handle, "PROG", "ZOSD_REMOTE", async () => {
+      enter(); await go; calls++;
+      store.write("PROG", "ZOSD_REMOTE", "REPORT zosd_remote.\n* carried write\n");
+    }).then(value => ({value}), error => ({error}));
+    try {
+      await entered;
+      const pid = runtime.child.pid;
+      recycling = runtime.recycle();
+      recycling.catch(() => undefined);
+      // Outlast server-close grace plus leave's FIFO grace.
+      await new Promise(r => setTimeout(r, 2 * runtime.grace + 250));
+      release();
+      expect(await pending).to.deep.equal({value: true});
+      await recycling;
+      expect(runtime.child.pid).to.not.equal(pid);
+      expect((await nodeSessions.holderOf("PROG", "ZOSD_REMOTE"))?.handle).to.equal(handle);
+      expect(store.read("PROG", "ZOSD_REMOTE").source).to.contain("carried write");
+      expect(calls).to.equal(1);
+    } finally {
+      release(); await pending; await recycling;
+      await nodeSessions.end(session.id);
+    }
+  });
+
+  it("B3: stop overtakes a recycle waiting for a held callback", async () => {
+    const {session} = await logon();
+    const {handle} = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+    let enter, release;
+    const entered = new Promise(r => { enter = r; });
+    const go = new Promise(r => { release = r; });
+    const pending = nodeSessions.whileHeld(session, handle, "PROG", "ZOSD_REMOTE", async () => {
+      enter(); await go;
+    }).catch(() => undefined);
+    const grace = runtime.grace;
+    try {
+      await entered;
+      runtime.grace = 50;
+      const recycled = runtime.recycle().then(() => undefined, error => error);
+      await new Promise(r => setTimeout(r, 30));
+      await runtime.stop();
+      expect((await recycled).message).to.equal("stopped while recycling");
+      expect(runtime.child).to.equal(undefined);
+      expect(runtime.adtContexts.size).to.equal(0);
+    } finally {
+      release(); await pending; runtime.grace = grace;
+      await runtime.ensure();
+    }
+  });
+
+  it("B3: a failed step after parent deletion releases the surviving handle", async () => {
+    const {session} = await logon();
+    await nodeSessions.lock(session, "PROG", "ZOSD_DELETE_ERROR");
+    let deleted = false, calls = 0;
+    const error = await nodeSessions.deleteObject(session, "PROG", "ZOSD_DELETE_ERROR", {
+      find: () => deleted ? undefined : {name: "ZOSD_DELETE_ERROR"},
+      delete: () => {
+        deleted = true; calls++;
+        // IPC serialization fails after deletion, before the child can forget.
+        return {type: "PROG", name: "ZOSD_DELETE_ERROR", unserializable: 1n};
+      },
+    }).then(() => undefined, e => e);
+    try {
+      expect(error).to.be.instanceOf(Error);
+      expect(deleted).to.equal(true);
+      expect(calls).to.equal(1);
+      expect(await nodeSessions.holderOf("PROG", "ZOSD_DELETE_ERROR")).to.equal(undefined);
+    } finally { await nodeSessions.end(session.id); }
+  });
+
+  it("B3: crash during a callback releases the old step without replaying the write", async () => {
     const {session} = await logon();
     const {handle} = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
     let enter, release, calls = 0;

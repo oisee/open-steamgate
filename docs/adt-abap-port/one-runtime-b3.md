@@ -99,3 +99,43 @@ cases (SQLite, DuckDB and file SQLite). B0 session/front checks passed **7**;
 carry IPC compatibility (`osd-adt-fork`) passed **3**. All ran through the
 same heavy wrapper. Final process inspection found no `osd-serve.mjs` children
 left from this clone.
+
+## Tie-breaker follow-up
+
+Graceful recycle now waits at most `grace + 8000 ms` for the parent's ADT
+contexts to drain before sending quiesce. This lets an in-flight parent
+callback finish and the child commit/snapshot its B0 carry. Stop bypasses
+that wait and still wins over recycle. A callback exceeding the bounded
+wait can still lose carry; uncertain writes are never replayed.
+
+If parent deletion succeeds but the compatibility session step fails before
+forgetting the handle, `RemoteSessions.deleteObject` attempts `release(type,
+name)` in a fresh step, preserving the original error even if cleanup fails.
+This is best-effort cleanup, not a transactional filesystem delete.
+
+Known limit for B6/follow-up (P3-2): a hold near the STORE IPC 120 s ceiling
+can outlast the supervisor's 30 s wait for `hot-done` in `ServingRuntime.hot`.
+The parent rejects the warm swap and removes its message listener, but the
+child's queued hot swap can still execute after the hold releases. The child
+can then carry the new generation while the parent still reports the old
+one. This slice documents the limit; it does not change hot-swap cancellation
+or generation reconciliation.
+
+The regressions were run against the unchanged implementation first:
+
+A held callback released after both quiesce grace periods failed its session
+call (`fetch failed`, 0 passed / 1 failed), proving recycle lost the in-flight
+step and its carry. The post-delete IPC serialization failure retained its
+handle (1 passed / 1 failed in the initial two-case run). After the fixes,
+both cases passed, including `holderOf` on the replacement child and exactly
+one parent write. A third regression checks stop overtaking the drain.
+
+Five consecutive runs of `test/osd-adt-one-runtime.mjs` through the heavy
+wrapper passed **35, 35, 35, 35, 35**, with zero failures.
+
+The full targeted run passed **160 tests**, with zero failures, through the
+same heavy wrapper: `osd-adt-one-runtime`, `osd-child`, `osd-routes`,
+`store-destination`, `osd-runtime`, `osd-adt-fork`, `adt-abap-session`, and
+`adt-abap-front`. This includes B0 carry on SQLite, DuckDB and file SQLite,
+plus the B0 session/front and carry IPC checks. Final `ps` inspection found
+**0** leftover `osd-serve.mjs` processes from this clone; no PID needed killing.
