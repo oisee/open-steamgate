@@ -6,7 +6,7 @@ import {sessionJSON, sessionValue} from "./adt-remote-sessions.mjs";
 import {dialogStep} from "./osd-dialog-step.mjs";
 import {withStoreIPC} from "./osd-store-ipc.mjs";
 
-const ARITY = {get: 1, holderOf: 2, holds: 4, lock: 3,
+const ARITY = {get: 1, logoff: 1, holderOf: 2, holds: 4, lock: 3,
   unlock: 2, release: 2, whileHeld: 4, deleteObject: 3};
 export function sessionsDoor(identity) {
   return async (req, res) => {
@@ -28,6 +28,13 @@ export function sessionsDoor(identity) {
         client: adt.client, ...input.identity}});
       const value = await withStoreIPC(input.context, () => dialogStep(async () => {
         const args = sessionValue(input.args);
+        if (input.method === "logoff") {
+          const a = globalThis.abap;
+          return a.Classes.ZCL_OSD_ADT_LOGOFF.end_session({
+            iv_id: new a.types.String().set(args[0]),
+            io_session: await sessions.sessionFor({headers: {}}),
+          });
+        }
         const callback = parameters => globalThis.abap.context.RFCDestinations.STORE
           .request(parameters, "OSD_SESSION_CALLBACK");
         if (input.method === "whileHeld") return sessions.whileHeld(...args, () => callback({action: "work"}));

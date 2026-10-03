@@ -138,6 +138,21 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       headers: {cookie, "x-csrf-token": login.token, "x-sap-adt-sessiontype": "stateful"}};
   };
 
+  it("A3a: compatibility end removes the child's session and lock through ABAP logoff", async () => {
+    const {session, headers} = await logon();
+    await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+    await nodeSessions.end("foreign-owner");
+    expect((await nodeSessions.get(session.id)).token).to.equal(session.token);
+    await nodeSessions.end(session.id);
+    expect(await nodeSessions.get(session.id)).to.equal(undefined);
+    expect(await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).to.equal(undefined);
+    const refused = await request(remote, "POST", BASE + "/programs/programs/zosd_remote?_action=LOCK", headers);
+    expect(refused.status).to.equal(403);
+    expect(refused.token).to.equal("Required");
+    expect(refused.body).to.equal("CSRF token validation failed");
+    expect(runtime.adtContexts.size).to.equal(0);
+  });
+
   it("B3: child ABAP LOCK and Node holderOf see each other in both directions", async () => {
     const {session, headers} = await logon();
     const object = BASE + "/programs/programs/zosd_remote";
