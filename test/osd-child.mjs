@@ -185,7 +185,8 @@ describe("test/run.mjs: the workbench shape, one generation and one database", f
     const logon = async (user) => {
       const res = await fetch(`${ADT}/core/discovery`, {method: "HEAD", headers: {"x-csrf-token": "fetch",
         "x-sap-adt-sessiontype": "stateful", authorization: "Basic " + Buffer.from(`${user}:x`).toString("base64")}});
-      expect(res.headers.get("x-osd-served-by"), "the front answered").to.equal("HOST");
+      // discovery is an ABAP row since A1; the front answered either way
+      expect(res.headers.get("x-osd-served-by"), "the front answered").to.equal("ABAP");
       return {cookie: res.headers.getSetCookie().join("; ").match(/sap-contextid=[^;]+/)?.[0], token: res.headers.get("x-csrf-token")};
     };
     const as = (client, method, path) => fetch(ADT + path, {method,
