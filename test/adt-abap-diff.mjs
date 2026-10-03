@@ -45,6 +45,9 @@ const DISCOVERY_PATHS = [
 const PORTED = [
   ...DISCOVERY_PATHS.flatMap((path) => [["GET", path], ["HEAD", path]]),
   ["GET", "/sap/bc/adt/debugger/listeners"],
+  ...["build", "changed", "services", "transactions"].flatMap((route) => [
+    ["GET", `/sap/bc/adt/core/http/${route}`], ["HEAD", `/sap/bc/adt/core/http/${route}`],
+  ]),
   ["GET", SYSINFO],
   ["HEAD", SYSINFO],
   ["GET", "/sap/bc/adt/compatibility/graph"],
@@ -995,15 +998,21 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
         served.length = 0;
         const actual = answered(await sequence(ported));
         expect(actual).to.deep.equal(expected);
-        // ABAP answers discovery, LOCK/UNLOCK, A3a session poll, DELETE and logoff, and B2a source GET.
+        // Only the routes these sequences exercise: A1 discovery, LOCK/UNLOCK
+        // (including the two action refusals), A3a sessions/logoff and B2a source GET.
         const posts = served.filter((s) => s.includes("_action="));
         expect(posts.length, "LOCK and UNLOCK reached the front").to.be.greaterThan(0);
         expect(posts.every((s) => s.startsWith("ABAP ")), posts.join("\n")).to.equal(true);
         const byAbap = served.filter((s) => s.startsWith("ABAP "));
         expect(byAbap.every((s) => s === "ABAP HEAD /sap/bc/adt/core/discovery"
-          || (s.startsWith("ABAP POST ") && s.includes("/source/") === false)
-          || s.includes("/core/http/sessions") || s.includes("/sap/public/bc/icf/logoff")
-          || (s.startsWith("ABAP GET ") && s.endsWith("/source/main"))), byAbap.join("\n")).to.equal(true);
+          // served records originalUrl, including the query, so require the action.
+          || /^ABAP POST \/sap\/bc\/adt\/(?:oo\/classes|packages)\/[^/?]+\?_action=(?:LOCK&accessMode=MODIFY|UNLOCK&lockHandle=[^&?#]+)$/.test(s)
+          || s === `ABAP POST ${at(LOCKED)}`
+          || s === `ABAP POST ${at(LOCKED)}?_action=stamp`
+          || /^ABAP GET \/sap\/bc\/adt\/core\/http\/sessions$/.test(s)
+          || /^ABAP DELETE \/sap\/bc\/adt\/core\/http\/sessions\/[0-9A-Fa-f]+$/.test(s)
+          || s === "ABAP GET /sap/public/bc/icf/logoff"
+          || /^ABAP GET \/sap\/bc\/adt\/oo\/classes\/[^/?]+\/source\/main$/.test(s)), byAbap.join("\n")).to.equal(true);
         // a handle is a UUID on both sides
         for (const answer of [...expected, ...actual]) {
           if (answer.handle !== undefined && answer.handle !== "") expect(answer.handle).to.equal("<handle>");

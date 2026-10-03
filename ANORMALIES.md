@@ -2435,6 +2435,18 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Regression-test location: `tools/gogen/semantics.mjs` ZCL_GOGEN_T_PDCONV, _PDCALC, _PDFMT, _PDPREC, _PDCMP, _PDTPL, _PDTPLM; `go test ./abap -run Packed` in `tools/gogen/go`
 - Upstream version containing a fix: pieces in `abaplint/transpiler` main (first release not checked); none yet for the rest (was: none yet)
 
+A2 timestamp observation (2026-10-03): with the installed runtime's bigint-backed
+`Packed`, `20261003123456.9980000` moves to a string without losing the
+fraction, but `get()` converts the scaled bigint to Number before dividing
+and yields `20261003123457`. Consequently `trunc`/`frac` lose the second and
+milliseconds. Reproducer: the `clock` ABAP Unit method in
+`src/adt/zcl_osd_adt_feeds.clas.testclasses.abap`, run by
+`test/adt-abap-a2.mjs`. The route formats the packed timestamp as text first,
+then splits its integer and fraction; only the small fraction goes through
+millisecond arithmetic. This preserves exact literal stamps and the runtime's
+GET TIME STAMP value; the latter already contains the get_time.js floating
+point approximation and is format-checked before masking in wire tests.
+
 ### ANOMALY-2026-09-24-arith-compared-with-string — abaplint accepts an arithmetic expression compared with a character operand, which does not activate on a system
 
 - Status: `open`
@@ -3599,3 +3611,4 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Regression-test location: `test/sqlite-heap-execute.mjs`; replacing the local client with the pinned adapter makes the large INSERT case fail.
 - Upstream version containing a fix: `unknown`
 - Validation: selected owner 7/7 SUCCESS in 82.37 s; full folder 48 class sources / 26 Unit owners, 4,077 SUCCESS, zero FAILURE/NOT_COMPILED/ERROR in 86.26 s. Including two setups and seed, the full run executes 430 SQL calls / 21,911,412 bytes. Peak full-run RSS 2,607,208 KiB includes compilation. Focused regression/batching/anomaly checks: 22 passing.
+

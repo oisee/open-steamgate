@@ -221,7 +221,47 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/oo/classrun/:name`
       iv_handler = `ZCL_OSD_ADT_CLASSRUN` iv_served_by = lv_classrun_by
       CHANGING ct_routes = rt_routes ).
+*   A10: SEGW entity set map.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/segw/entitysets`
+      iv_handler = `ZCL_OSD_ADT_ENTITYSETS` CHANGING ct_routes = rt_routes ).
+*   A8a: thin introspection documents over SYSTEM raw.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/build`
+      iv_handler = `ZCL_OSD_ADT_INTROSPECT` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/changed`
+      iv_handler = `ZCL_OSD_ADT_INTROSPECT` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/services`
+      iv_handler = `ZCL_OSD_ADT_INTROSPECT` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/transactions`
+      iv_handler = `ZCL_OSD_ADT_INTROSPECT` CHANGING ct_routes = rt_routes ).
+*   A3b: loopback browser handoff.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/reentranceticket`
+      iv_handler = `ZCL_OSD_ADT_REENTRANCE` CHANGING ct_routes = rt_routes ).
+*   A9: xref readers and closure use the serving database.
+    IF zcl_osd_kernel_guard=>has_serving_database( ) = abap_true.
+      add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/xref/readers`
+        iv_handler = `ZCL_OSD_ADT_XREF` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/xref/closure`
+        iv_handler = `ZCL_OSD_ADT_XREF` CHANGING ct_routes = rt_routes ).
+    ENDIF.
 *   everything else is still the Node facade's, until its group moves
+*   A2: editor helpers, transport checks and occurrence markers.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/feeds`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/feeds/variants`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/system/users`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/runtime/dumps`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/runtime/systemmessages`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/gw/errorlog`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/cts/transportchecks`
+                   iv_handler = `ZCL_OSD_ADT_TRANSPORT` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/abapsource/occurencemarkers`
+                   iv_handler = `ZCL_OSD_ADT_OCCURRENCES` CHANGING ct_routes = rt_routes ).
+
     add( EXPORTING iv_method = `*` iv_pattern = `/sap/bc/adt/*` iv_served_by = c_host
          CHANGING ct_routes = rt_routes ).
   ENDMETHOD.
