@@ -24,7 +24,7 @@ CLASS zcl_osd_adt_types DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS all RETURNING VALUE(rt_types) TYPE tt_type.
     CLASS-METHODS adt_type IMPORTING iv_type TYPE string RETURNING VALUE(rv_type) TYPE string.
     CLASS-METHODS type_of_collection IMPORTING iv_collection TYPE string RETURNING VALUE(rv_type) TYPE string.
-    CLASS-METHODS object_from_uri IMPORTING iv_uri TYPE string RETURNING VALUE(rs_object) TYPE ty_object.
+    CLASS-METHODS object_from_uri IMPORTING iv_uri TYPE string iv_sources_only TYPE abap_bool DEFAULT abap_false RETURNING VALUE(rs_object) TYPE ty_object.
     "! the source types, then DEVC: what POST <collection>/:name locks
     CLASS-METHODS lockable
       RETURNING VALUE(rt_types) TYPE tt_type.
@@ -304,6 +304,9 @@ CLASS zcl_osd_adt_types IMPLEMENTATION.
       lv_path = lv_path(lv_offset).
     ENDIF.
     lt_types = all( ).
+    IF iv_sources_only = abap_true.
+      lt_types = sources( ).
+    ENDIF.
     LOOP AT lt_types INTO ls_type.
       lv_prefix = `/sap/bc/adt/` && ls_type-collection && `/`.
       lv_len = strlen( lv_prefix ).
