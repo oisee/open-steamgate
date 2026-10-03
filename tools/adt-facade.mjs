@@ -806,7 +806,7 @@ export function adtRouter(options = {}) {
   // Before sessions, captures and the ABAP front. Basic/anonymous local logon
   // stays unchanged; presenting a Bearer credential always requires validation.
   const localToken = options.localToken ?? boundaryToken;
-  pass("local-logon", BASE, (req, res, next) => {
+  pass("local-logon", [BASE, "/sap/public/bc/icf/logoff"], (req, res, next) => {
     const header = String(req.headers.authorization ?? "");
     if (!/^Bearer(?:\s|$)/i.test(header)) return next();
     const supplied = /^Bearer ([A-Za-z0-9_-]+)$/i.exec(header)?.[1];

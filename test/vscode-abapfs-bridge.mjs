@@ -141,6 +141,41 @@ describe("ABAP-FS local bridge", () => {
     await registerAbapFsBridge(f.vscode, f.context, f.controller);
     expect(f.context.subscriptions).to.deep.equal([]); expect(f.messages).to.deep.equal([]);
   });
+  it("validates logoff bearers and replaces the credential before the ABAP front", async () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-logoff-"));
+    const seen = [];
+    let server;
+    try {
+      const made = adtRouter({root, watch: false, data: {}, localToken: "fixture-token", userName: "LOCAL_TEST",
+        abap: {execute: async (view, req) => {
+          seen.push({authorization: view.headers.authorization, raw: [...req.rawHeaders]});
+          return {servedBy: "ABAP", status: 200, contentType: "text/plain", headers: [], body: "logged off"};
+        }}});
+      const app = express(); app.use(made.router);
+      server = await new Promise(resolve => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+      const url = `http://127.0.0.1:${server.address().port}/sap/public/bc/icf/logoff`;
+      for (const token of ["wrong", "", "old-token"]) {
+        const response = await fetch(url, {headers: {Authorization: `Bearer ${token}`}});
+        expect(response.status).to.equal(401); await response.text();
+      }
+      expect(seen).to.deep.equal([]);
+      const response = await fetch(url, {headers: {Authorization: "Bearer fixture-token"}});
+      expect(response.status).to.equal(200); await response.text();
+      expect(seen).to.have.length(1);
+      expect(seen[0].authorization).to.equal(`Basic ${Buffer.from("LOCAL_TEST:").toString("base64")}`);
+      expect(JSON.stringify(seen)).not.to.contain("fixture-token");
+      const gate = made.middleware.find(m => m.id === "local-logon");
+      expect(gate.path).to.include("/sap/public/bc/icf/logoff");
+      let status, passed = false;
+      gate.fn({headers: {authorization: "Bearer fixture-token"}, socket: {remoteAddress: "192.0.2.1"}}, {
+        status(s) { status = s; return this; }, set() { return this; }, send() {},
+      }, () => { passed = true; });
+      expect(status).to.equal(401); expect(passed).to.equal(false);
+    } finally {
+      if (server) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   it("accepts loopback bearer as configured user; rejects wrong/old tokens even with a session cookie; captures contain no token", async () => {
     const root = mkdtempSync(join(tmpdir(), "osd-bearer-"));
     const dump = join(root, "capture.ndjson");
