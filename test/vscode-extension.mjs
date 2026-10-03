@@ -203,6 +203,13 @@ describe("editors/vscode: the extension's logic", function () {
     expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/**", "!**/node_modules/**"]);
     expect(config.outFiles).to.deep.equal(["${workspaceFolder}/build/live/output/**/*.mjs"]);
     expect(config.pauseForSourceMap).to.equal(true);
+    expect(config.skipFiles).to.include("<node_internals>/**");
+    const userSkips = ["**/custom/**", "<node_internals>/**"];
+    for (const target of ["system", "unit"]) {
+      const merged = debuggerConfiguration(9342, {target, skipFiles: userSkips});
+      expect(merged.skipFiles).to.deep.equal(["**/custom/**", "<node_internals>/**", "${workspaceFolder}/node_modules/@abaplint/runtime/**"]);
+    }
+    expect(userSkips).to.deep.equal(["**/custom/**", "<node_internals>/**"]);
     expect(debuggerConfiguration(9342, {target: "unit", restart: false}))
       .to.include({name: "OSD: ABAP Unit (9342)", restart: false, continueOnAttach: true});
     const externalRoot = debuggerConfiguration(9343, {root: "C:\\workspace\\osd"});
