@@ -8,18 +8,30 @@ import {governorTemplate} from "./dsl-l3-governor.mjs";
 import {cockpitService, cockpitActions} from "./dsl-l3-cockpit-service.mjs";
 import {cockpitPages} from "./dsl-l3-cockpit-pages.mjs";
 
+const abapText = (s) => `'${String(s).replaceAll("'", "''")}'`;
+function cockpitUiRoot(service) {
+  return {...service.extra, hides: service.entities.find((e) => e.name === "Run").hides, tally_text: abapText(service.tally.statuses.join(" ")),
+    criticality: Object.entries(service.tally.criticality).map(([value, list]) => ({value, statuses: list.map(abapText).join(" OR ")})),
+    run_statuses: service.statuses.map(([status, text]) => ({status: abapText(status), text: abapText(text)}))};
+}
+
 export function compileCockpit(doc, model, {line, fail}) {
   const spec = doc.cockpit, at = line("cockpit");
-  if (!spec || typeof spec !== "object" || Array.isArray(spec)) fail(at, "cockpit is {app, service, title}");
-  for (const key of Object.keys(spec)) if (!["app", "service", "title"].includes(key)) fail(line(`cockpit/${key}`), `unknown cockpit key ${key}`);
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) fail(at, "cockpit is {app, service, title, set_app}");
+  for (const key of Object.keys(spec)) if (!["app", "service", "title", "set_app"].includes(key)) fail(line(`cockpit/${key}`), `unknown cockpit key ${key}`);
   if (!model.staged) fail(at, "cockpit requires stages");
   if (typeof spec.app !== "string" || !/^[zy][a-z0-9_]{0,14}$/i.test(spec.app)) fail(line("cockpit/app"), "cockpit.app is a Z or Y BSP name of at most 15 characters");
   if (typeof spec.service !== "string" || !/^[zy][a-z0-9_]{0,29}$/i.test(spec.service)) fail(line("cockpit/service"), "cockpit.service is a Z or Y name of at most 30 characters");
   if (typeof spec.title !== "string" || !spec.title.trim() || /[\r\n]/.test(spec.title)) fail(line("cockpit/title"), "cockpit.title is one nonempty line");
+  // the second app (settings, schedule, kill switch, doctor): <app>_s unless named
+  const setApp = spec.set_app ?? (spec.app.length <= 13 ? `${spec.app}_s` : undefined);
+  if (setApp === undefined) fail(line("cockpit/app"), "cockpit.set_app is required when cockpit.app is longer than 13 characters");
+  if (typeof setApp !== "string" || !/^[zy][a-z0-9_]{0,14}$/i.test(setApp)) fail(line("cockpit/set_app"), "cockpit.set_app is a Z or Y BSP name of at most 15 characters");
+  if (setApp.toLowerCase() === spec.app.toLowerCase()) fail(line("cockpit/set_app"), "cockpit.set_app names a second app, not cockpit.app");
   // The generated ZCL_<project>_MPC_EXT must still fit a 30-character
   // class name for the longest legal set name. Keep short names readable.
   const project = model.set.length <= 13 ? `ZL3C_${model.set}` : `ZL3C_${model.set.slice(0, 5)}_${createHash("sha256").update(model.set).digest("hex").slice(0, 7)}`;
-  return {"@id": `${model["@id"]}/cockpit`, set_line: at, app: spec.app.toLowerCase(), service: spec.service.toUpperCase(),
+  return {"@id": `${model["@id"]}/cockpit`, set_line: at, app: spec.app.toLowerCase(), set_app: setApp.toLowerCase(), service: spec.service.toUpperCase(),
     title: spec.title, project: project.toUpperCase()};
 }
 
@@ -36,7 +48,9 @@ export async function renderCockpit(model) {
     class: result.model.classes.dpcExt.toLowerCase(), mpc: result.model.classes.mpc.toLowerCase(),
     settings_class: model.settings?.class, stage_count: String(model.stages.length), resilience: Boolean(model.resilience), governed: Boolean(model.governor), scheduled: Boolean(model.schedule), entities: service.entities,
     // the calls sit inside TRY ... CASE: four more spaces per continuation line
-    actions: cockpitActions(model).map((a) => ({...a, call: a.call.replaceAll("\n", "\n    ")}))};
+    actions: cockpitActions(model).map((a) => ({...a, call: a.call.replaceAll("\n", "\n    ")})),
+    // the run page's computed fields (tools/dsl-l3-cockpit-ui.mjs): constants written as ABAP literals
+    ...cockpitUiRoot(service)};
   const ext = await renderRecipe(root, "recipes/l3-cockpit/dpc.tpl", {profile: "abap"});
   const error = ext.findings.find((f) => f.severity === "E");
   if (error) throw new Error(`cockpit DPC line ${error.line}: ${error.text}`);
@@ -53,7 +67,7 @@ export async function renderCockpit(model) {
     const traced = name === `${root.class}.clas.abap` ? ext.trace : text.trimEnd().split("\n").map((_, i) => ({line: i + 1, template_line: i + 1}));
     files[`${name}.trace.json`] = JSON.stringify({generator: "dsl-l3-cockpit", set: model.source,
       model: `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`,
-      template: name === `${root.class}.clas.abap` ? "recipes/l3-cockpit/dpc.tpl" : name.endsWith(".stg.yaml") ? "dsl-l3-cockpit-service" : name.includes("cockpit/") ? `recipes/l3-cockpit/${name.split("/").at(-1)}` : "stg-compile",
+      template: name === `${root.class}.clas.abap` ? "recipes/l3-cockpit/dpc.tpl" : name.endsWith(".stg.yaml") ? "dsl-l3-cockpit-service" : name.startsWith(`cockpit/${c.set_app}/`) ? `recipes/l3-cockpit/set/${name.split("/").at(-1)}` : name.includes("cockpit/") ? `recipes/l3-cockpit/${name.split("/").at(-1)}` : "stg-compile",
       lines: traced.map((t) => ({...t, node: c["@id"], set_line: c.set_line}))}, null, 1) + "\n";
   }
   return files;

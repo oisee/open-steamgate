@@ -62,6 +62,10 @@ if (abapgit) libs.push(abapgit);
 // (src/gateway/compat overlays three objects of open-abap-odata), and the front end loads one of each
 const layerFiles = new Set(layers.flatMap(walk).filter((f) => !hidden.has(f)).map((f) => f.split("/").pop()));
 for (const f of libs.flatMap(walk)) if (layerFiles.has(f.split("/").pop())) hidden.add(f);
+// a generated web app inside an input (a run cockpit, its Set app) is no ABAP: its Set.view.xml reads
+// like a DDIC view named SET, and the database below would try to create it
+const {cockpitAppsOf} = await import(`${home}/tools/osd-cockpit-apps.mjs`);
+for (const app of cockpitAppsOf(home, layerFolders)) for (const f of walk(app.dir)) hidden.add(f);
 
 /** every class, interface and function group of the layers and libraries, compiled (a statement outside the subset is a stub) */
 export function compileOsg() {

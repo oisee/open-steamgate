@@ -1,3 +1,5 @@
 [
-  {"mandt": "123", "ship_id": "F001", "name": "Fleet cockpit demo", "status": "A"}
+  {"mandt": "123", "ship_id": "F001", "name": "Fleet cockpit demo", "status": "A"},
+  {"mandt": "123", "ship_id": "F002", "name": "Fleet cockpit second", "status": "A"},
+  {"mandt": "123", "ship_id": "F003", "name": "Fleet cockpit third", "status": "A"}
 ]
