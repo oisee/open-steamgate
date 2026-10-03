@@ -13,6 +13,19 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
       internalRetries.push({title: test.fullTitle()});
       console.error(`osd-suites: forbidden internal retry: ${test.fullTitle()}`);
     });
+    const fileTests = {};
+    const fileOf = (test) => test.file && (isAbsolute(test.file) ? relative(process.cwd(), test.file) : test.file).replace(/^\.\//, "");
+    runner.suite.eachTest((test) => {
+      const file = fileOf(test);
+      if (file) (fileTests[file] ??= {registered: 0, passed: 0, pending: 0, failed: 0}).registered++;
+    });
+    for (const [event, field] of [["pass", "passed"], ["pending", "pending"], ["fail", "failed"]]) {
+      runner.on(event, (test) => {
+        if (test.type !== "test") return;
+        const counts = fileTests[fileOf(test)];
+        if (counts) counts[field]++;
+      });
+    }
     let current;
     let began;
     const finish = () => {
@@ -39,6 +52,7 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
         measuredAt: new Date().toISOString(),
         note: "Wall time including hooks and inter-file work; excludes module loading before the first suite.",
         completed: true,
+        fileTests,
         failures,
         internalRetries,
         totalFailures: runner.failures,

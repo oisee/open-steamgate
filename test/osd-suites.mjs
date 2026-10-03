@@ -3,7 +3,7 @@
 // does -- and a reporter checked only where everything is present reports on
 // the specimen made for it.
 import {expect} from "chai";
-import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment, runWithRetries} from "../tools/osd-suites.mjs";
+import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment, runWithRetries, runWithRetries as realRunWithRetries} from "../tools/osd-suites.mjs";
 import {mergeTimings} from "../tools/osd-suites-timings.mjs";
 import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync} from "node:fs";
 import {spawnSync} from "node:child_process";
@@ -135,6 +135,11 @@ describe("suite sharding", () => {
 
 
 describe("bounded file retries", () => {
+  const execute = realRunWithRetries;
+  const runWithRetries = (files, run, options) => execute(files, (selected, phase) => ({
+    ...run(selected, phase),
+    fileTests: Object.fromEntries(selected.map((file) => [file, {registered: 1, passed: 1, pending: 0, failed: 0}])),
+  }), options);
   const failed = (files) => ({status: 1, completed: true, internalRetries: [], totalFailures: files.length,
     failures: files.map((file) => ({file, title: "first failure"}))});
   const passed = {status: 0, completed: true, internalRetries: [], totalFailures: 0, failures: []};
@@ -227,6 +232,20 @@ function fixtureRun(source, options = {}) {
 }
 
 describe("fail closed regressions", () => {
+  it("accepts explicitly all-pending files and records their counts", () => {
+    const {result, reports} = fixtureRun('describe.skip("optional", () => { it("requires local data", () => {}); });');
+    expect(result.status).to.equal(0);
+    expect(Object.values(reports[0].fileTests)).to.deep.equal([{registered: 1, passed: 0, pending: 1, failed: 0}]);
+  });
+  it("rejects an empty first run", () => {
+    expect(fixtureRun('describe("empty", () => {});').result.status).to.equal(1);
+  });
+  it("rejects recovery when the isolated retry registers zero tests", () => {
+    const {result, reports} = fixtureRun('import {existsSync, writeFileSync} from "node:fs"; const marker = new URL("./marker", import.meta.url); describe("empty retry", () => { if (!existsSync(marker)) it("first failure", () => { writeFileSync(marker, "failed"); throw Error("first"); }); });');
+    expect(reports).to.have.length(2);
+    expect(result.status).to.equal(1);
+    expect(result.lines).to.deep.equal([]);
+  });
   it("prevents test-level retries from silently recovering", () => {
     const {result} = fixtureRun('let attempts = 0; describe("retry fixture", function () { this.retries(2); it("recovers internally", function () { this.retries(2); if (++attempts < 3) throw Error("retry"); }); });');
     expect(result.status).to.equal(1);
