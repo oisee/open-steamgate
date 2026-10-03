@@ -425,7 +425,9 @@ Proposed rows, moved from D, **needing osg-research's confirmation**:
 | GET | `ddic/tables/:name` | M | READ | tableDocument + ETag | adt-facade `:1225` |
 | GET | `ddic/tables/:name/source/main` | S | READ | tableSource | adt-facade `:1232` |
 
-Order: B2 → B3 → B6 → B5 → B4. The proposed units follow if confirmed: B1 → B8 → B7.
+The original B ordering and unit table below are superseded by variant C (2026-10-03): their unit names (B2, B3, B4, B7) do not match the current slices. Source read and bare object documents are B2a, objectstructure and the INCL/SRVD alias are B2b; see [port-plan.md](port-plan.md) for the current slice list and what has landed.
+
+Original order: B2 → B3 → B6 → B5 → B4. The proposed units follow if confirmed: B1 → B8 → B7.
 
 B4 is last because it waits for PARSE OUTLINE. B8 provides `tableFieldsOf` to C4.
 
