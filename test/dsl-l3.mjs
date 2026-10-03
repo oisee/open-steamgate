@@ -1,3 +1,4 @@
+import {readJSONFile} from "./trace-reader.mjs";
 import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 import {daemonHost} from "../tools/osd-daemon-host.mjs";
 // DSL L3, slice 1 (docs/dsl-l3.md): a set of L2 rules run as one unit. The
@@ -30,7 +31,7 @@ const REPORT = "zl3_fleet";
 const SET_TEXT = readFileSync(SET, "utf8");
 const DATE = "20261001";
 // every file the set generates beside the rules: the runner, the report, the ports
-const GENERATED = /^(zcl_l3_fleet|zl3_fleet|zif_l3_fleet_|zcx_l3_fleet_port)[a-z_]*\.(clas|prog|intf)\.(abap|xml|trace\.json)$/;
+const GENERATED = /^(zcl_l3_fleet|zl3_fleet|zif_l3_fleet_|zcx_l3_fleet_port)[a-z_]*\.(clas|prog|intf)\.(abap|xml|trace(?:\.meta)?\.json)$/;
 const setLine = (re) => SET_TEXT.split("\n").findIndex((l) => re.test(l)) + 1;
 
 // Rows that make six of the set's rules alert on DATE: a ship in maintenance
@@ -88,7 +89,7 @@ describe("DSL L3: a rule set, its runner, its alert log and its trace", function
       expect(model.disabled.map((r) => r.check_class)).to.deep.equal(["zcl_l2_ship_max_cargo"]);
       const runner = readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8");
       model.rules.forEach((r, i) => {
-        const hash = JSON.parse(readFileSync(join(OUT, `${r.check_class}.clas.trace.json`), "utf8")).model;
+        const hash = readJSONFile(join(OUT, `${r.check_class}.clas.trace.json`), "utf8").model;
         expect(r.hash).to.equal(hash);
         expect(runner).to.include(`CONSTANTS c_hash_${i + 1} TYPE zosd_l3_alert-model_hash VALUE '${hash}'.`);
       });
@@ -451,8 +452,11 @@ ENDCLASS.
   });
 
   describe("the trace", () => {
-    const trace = JSON.parse(readFileSync(join(OUT, `${RUNNER}.clas.trace.json`), "utf8"));
-    const source = readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8").split("\n");
+    let trace, source;
+    before(() => {
+      trace = readJSONFile(join(OUT, `${RUNNER}.clas.trace.json`), "utf8");
+      source = readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8").split("\n");
+    });
 
     it("has one entry per generated line, each with a manifest line", () => {
       expect(trace.lines.map((l) => l.line)).to.deep.equal(source.slice(0, -1).map((_, i) => i + 1));
@@ -485,7 +489,7 @@ ENDCLASS.
       const portsAt = setLine(/^ports:/);
       for (const f of files) {
         const text = readFileSync(join(OUT, f), "utf8").split("\n");
-        const t = JSON.parse(readFileSync(join(OUT, f.replace(/\.abap$/, ".trace.json")), "utf8"));
+        const t = readJSONFile(join(OUT, f.replace(/\.abap$/, ".trace.json")), "utf8");
         expect(t.lines.map((l) => l.line), f).to.deep.equal(text.slice(0, -1).map((_, i) => i + 1));
         for (const entry of t.lines) {
           expect(entry.set_line, `${f}:${entry.line}`).to.be.within(/^zcx_|_ports\./.test(f) ? setLine(/^set:/) : setLine(/^piles:/), yamlLines.length);
@@ -497,7 +501,7 @@ ENDCLASS.
     it("a port's lines trace to the port's line, a variant's to the variant's, the default binding to its binding line", () => {
       const lineOf = (file, re) => {
         const text = readFileSync(join(OUT, file), "utf8").split("\n");
-        const t = JSON.parse(readFileSync(join(OUT, file.replace(/\.abap$/, ".trace.json")), "utf8"));
+        const t = readJSONFile(join(OUT, file.replace(/\.abap$/, ".trace.json")), "utf8");
         const i = text.findIndex((l) => re.test(l));
         expect(i, `${file} has ${re}`).to.be.at.least(0);
         return t.lines[i].set_line;
@@ -521,7 +525,7 @@ ENDCLASS.
       expect(lineOf("zcl_l3_fleet_ports.clas.abap", /METHOD get_alerts/)).to.equal(alerts);
       // each WHEN of a factory method is its variant's line
       const factory = readFileSync(join(OUT, "zcl_l3_fleet_ports.clas.abap"), "utf8").split("\n");
-      const factoryTrace = JSON.parse(readFileSync(join(OUT, "zcl_l3_fleet_ports.clas.trace.json"), "utf8"));
+      const factoryTrace = readJSONFile(join(OUT, "zcl_l3_fleet_ports.clas.trace.json"), "utf8");
       const at = factory.findIndex((l) => /METHOD get_alerts/.test(l));
       for (const name of ["log", "dummy", "capture"]) {
         const i = factory.findIndex((l, k) => k > at && l.includes(`WHEN '${name}'.`));
@@ -532,7 +536,7 @@ ENDCLASS.
 
     it("the runner's lines about a port trace to that port: the swap to the source, the write to the sink", () => {
       const src = readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8").split("\n");
-      const t = JSON.parse(readFileSync(join(OUT, `${RUNNER}.clas.trace.json`), "utf8"));
+      const t = readJSONFile(join(OUT, `${RUNNER}.clas.trace.json`), "utf8");
       const ships = setLine(/^  ships:/), alerts = setLine(/^  alerts:/);
       const of = (re) => src.map((l, i) => [l, t.lines[i]]).filter(([l]) => re.test(l)).map(([, e]) => e.set_line);
       expect(of(/li_src_1|lt_keep_1|lt_scope_1|lv_swap_1/)).to.satisfy((ls) => ls.length >= 10 && ls.every((l) => l === ships));
@@ -540,7 +544,7 @@ ENDCLASS.
     });
 
     it("the job report has its own trace, and names each rule's version", () => {
-      const job = JSON.parse(readFileSync(join(OUT, `${REPORT}.prog.trace.json`), "utf8"));
+      const job = readJSONFile(join(OUT, `${REPORT}.prog.trace.json`), "utf8");
       expect(job.lines.length).to.equal(readFileSync(join(OUT, `${REPORT}.prog.abap`), "utf8").split("\n").length - 1);
       expect(Object.keys(job.rules)).to.have.length(6);
       expect(job.rules["ship-cargo-limit"].model).to.equal(compileSet(SET).rules.find((r) => r.name === "ship-cargo-limit").hash);
@@ -576,7 +580,8 @@ ENDCLASS.
         rules: r.rules.array().map((x) => Object.fromEntries(["rule", "model_hash", "jobname", "jobcount", "status", "alerts", "failed", "piles", "piles_done"]
           .map((k) => [k, typeof x.get()[k].get() === "string" ? x.get()[k].get().trim() : x.get()[k].get()])))};
     };
-    const model = compileSet(SET);
+    let model;
+    before(() => { model = compileSet(SET); });
     // what each rule's own check answers, as the rows the log must hold
     const expected = async () => {
       const rows = [];
@@ -1836,8 +1841,10 @@ ENDCLASS.
         const ruleText = readFileSync(join(OUT, "ship_voyage_limit.l2.yaml"), "utf8").split("\n");
         expect(ruleLine).to.equal(ruleText.findIndex((l) => /^alert:/.test(l)) + 1);
         expect(row.line).to.equal(ruleLine);
-        const trace = JSON.parse(readFileSync(join(OUT, "zcl_l2_ship_voyage_limit.clas.trace.json"), "utf8"));
-        expect(generated).to.deep.equal(trace.lines.filter((l) => l.rule_line === ruleLine).map((l) => l.line));
+        const trace = readJSONFile(join(OUT, "zcl_l2_ship_voyage_limit.clas.trace.json"), "utf8");
+        expect(generated).to.deep.equal(trace.lines.filter((l) => trace.format === "osd-trace/1"
+          ? l.sources.some(s => s.node === `rule/${row.rule}/alert` || s.node.startsWith(`rule/${row.rule}/alert/`))
+          : l.rule_line === ruleLine).map((l) => l.line));
         expect(generated.length).to.be.at.least(1);
         expect(runnerLines.length).to.be.at.least(8);
         expect(text).to.include(`line    src/l2demo/ship_voyage_limit.l2.yaml:${ruleLine}: alert:`);
@@ -1878,7 +1885,7 @@ ENDCLASS.
 
       it("an earlier version of a rule is found in git history", async function () {
         const sidecar = join(OUT, "zcl_l2_maintenance_ship.clas.trace.json");
-        const current = JSON.parse(readFileSync(sidecar, "utf8")).model;
+        const current = readJSONFile(sidecar, "utf8").model;
         const history = spawnSync("git", ["log", "-p", "--format=", "--", sidecar], {encoding: "utf8", maxBuffer: 256 * 1024 * 1024});
         const older = [...new Set([...history.stdout.matchAll(/^[-+] "model": "(sha256:[0-9a-f]{64})"/gm)].map((m) => m[1]))].find((h) => h !== current);
         if (!older) this.skip(); // a shallow clone has no earlier version to find

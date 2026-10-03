@@ -1,18 +1,23 @@
 // Doctor recipes apply after the governor, twin and cockpit overlays.
 import {readFileSync} from "node:fs";
 import {governorTemplate} from "./dsl-l3-governor.mjs";
-export function doctorOverlay(model, text, kind) {
+export function doctorOverlay(model, text, kind, observe) {
+  let previous=text;
+  const record=(recipe="tools/dsl-l3-doctor-overlay.mjs")=>{observe?.(previous,text,recipe);previous=text;};
   if (kind === "runner" && model.resilience?.doctor.explicit_every) {
       text = text.replace("    lv_period = ( gs_settings-vals-stale + 30 ) DIV 60.", "    lv_period = {{resilience.doctor.every}}.");
     }
+  record();
   if (model.autodoctor && kind === "job") {
     const tail = "  WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.\n";
     const at = text.indexOf(tail);
     if (at < 0) throw new Error("doctor recipe needs the pile report's tail anchor");
     text = text.slice(0, at + tail.length) + readFileSync("recipes/l3-doctor/job-tail.tpl", "utf8");
   }
+  record("recipes/l3-doctor/job-tail.tpl");
   if (model.autodoctor && kind === "runner") {
-    text = governorTemplate(text, JSON.parse(readFileSync("recipes/l3-doctor/runner.patch.json", "utf8")));
+    text = governorTemplate(text, JSON.parse(readFileSync("recipes/l3-doctor/runner.patch.json", "utf8")), observe, "recipes/l3-doctor/runner.patch.json");
+    previous=text;
     if (model.governor) {
       const flow = "    IF ls_pile-job_count IS NOT INITIAL AND rs_rule-status <> 'GLASS'.";
       text = text.replace(flow, "{{^autodoctor}}\n" + flow).replace("    ENDIF.\n{{/governor}}\n  ENDMETHOD.\n\n  METHOD write.", "    ENDIF.\n{{/autodoctor}}\n{{/governor}}\n  ENDMETHOD.\n\n  METHOD write.");
@@ -35,7 +40,9 @@ export function doctorOverlay(model, text, kind) {
       body = body.slice(0, at) + body.slice(at).replace("    save_pile( ls_pile ).", "    save_pile( is_pile = ls_pile iv_owned = abap_true ).");
       return body + end;
     });
-    if (model.release_event) text = governorTemplate(text, JSON.parse(readFileSync("recipes/l3-doctor/release.patch.json", "utf8")).filter((p) => !p.governor || model.governor));
+    record();
+    if (model.release_event) text = governorTemplate(text, JSON.parse(readFileSync("recipes/l3-doctor/release.patch.json", "utf8")).filter((p) => !p.governor || model.governor), observe, "recipes/l3-doctor/release.patch.json");
+    previous=text;
     if (model.autodoctor.arm_job) text = text.replace(/(  METHOD run\.[\s\S]*?)(  ENDMETHOD\.)/, "$1    IF iv_mode = c_parallel AND rs_result-status = 'SUBMITTED'.\n      arm_doctor_job( ).\n    ENDIF.\n$2");
     if (model.daemon) text = text.replace(/(  METHOD run\.[\s\S]*?)(  ENDMETHOD\.)/, "$1{{#daemon}}\n    IF iv_mode = c_parallel AND rs_result-status = 'SUBMITTED'.\n      start_daemon( ).\n{{#release_event}}\n      \" a daemon that is stopping is found and not started again; the run's first\n      \" release must not wait for it: a pass job of its own releases the first lanes\n      watcher_pass( ).\n{{/release_event}}\n    ENDIF.\n{{/daemon}}\n$2");
     if (model.daemon) {
@@ -47,8 +54,10 @@ export function doctorOverlay(model, text, kind) {
       text = text.replace(/(  METHOD set_kill\.[\s\S]*?)(    rv_ok = abap_true\.)/, "$1{{#daemon}}\n    stop_daemon( ).\n    watcher_audit( 'DMN-KILL' ).\n{{/daemon}}\n$2");
     }
     if (!model.resilience.doctor.job) text = text.replace("    schedule_doctor( ).\n", "").replace('    " the doctor goes with the schedule, as a periodic job of its own\n', "").replace('    " the doctor\'s job goes with the schedule\n', "").replace("    rs_deleted = unschedule_doctor( ).\n", "");
+    record();
     text = text.replace(/ENDCLASS\.\s*$/, readFileSync("recipes/l3-doctor/runner.tpl", "utf8") + "ENDCLASS.\n");
   }
+  record("recipes/l3-doctor/runner.tpl");
   return text;
 }
 

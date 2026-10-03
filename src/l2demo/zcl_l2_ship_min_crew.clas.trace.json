@@ -1,610 +1,739 @@
 {
- "generator": "dsl-l2",
- "rule": "src/l2demo/ship_min_crew.l2.yaml",
- "template": "recipes/l2-check/template.tpl",
- "model": "sha256:d6bd4b7056cc98985ff457a7c4e5441515492e9316cb4c64a06f2214777204b0",
- "lines": [
-  {
-   "line": 1,
-   "template_line": 1,
-   "path": "/source",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 2,
-   "template_line": 2,
-   "path": "/rule",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 3,
-   "template_line": 3,
-   "path": "/class",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 4,
-   "template_line": 4,
-   "path": "/",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 5,
-   "template_line": 6,
-   "path": "/range/table",
-   "node": "rule/ship-min-crew/range",
-   "rule_line": 5
-  },
-  {
-   "line": 6,
-   "template_line": 13,
-   "path": "/",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 7,
-   "template_line": 14,
-   "path": "/",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 8,
-   "template_line": 16,
-   "path": "/range",
-   "node": "rule/ship-min-crew/range",
-   "rule_line": 5
-  },
-  {
-   "line": 9,
-   "template_line": 26,
-   "path": "/",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 10,
-   "template_line": 42,
-   "path": "/",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 11,
-   "template_line": 43,
-   "path": "/",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 12,
-   "template_line": 44,
-   "path": "/class",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 13,
-   "template_line": 45,
-   "path": "/",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 14,
-   "template_line": 46,
-   "path": "/comment",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 15,
-   "template_line": 48,
-   "path": "/queries/1/type",
-   "node": "rule/ship-min-crew/join",
-   "rule_line": 7
-  },
-  {
-   "line": 16,
-   "template_line": 50,
-   "path": "/queries/1/fields/1/name",
-   "node": "rule/ship-min-crew/join/field/1",
-   "rule_line": 4
-  },
-  {
-   "line": 17,
-   "template_line": 50,
-   "path": "/queries/1/fields/2/name",
-   "node": "rule/ship-min-crew/join/field/2",
-   "rule_line": 11
-  },
-  {
-   "line": 18,
-   "template_line": 52,
-   "path": "/queries/1/type",
-   "node": "rule/ship-min-crew/join",
-   "rule_line": 7
-  },
-  {
-   "line": 19,
-   "template_line": 53,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-min-crew/join",
-   "rule_line": 7
-  },
-  {
-   "line": 20,
-   "template_line": 54,
-   "path": "/queries/1/wa",
-   "node": "rule/ship-min-crew/join",
-   "rule_line": 7
-  },
-  {
-   "line": 21,
-   "template_line": 59,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 22,
-   "template_line": 61,
-   "path": "/queries/1/zero/keys/1/name",
-   "node": "rule/ship-min-crew/join/order/1",
-   "rule_line": 4
-  },
-  {
-   "line": 23,
-   "template_line": 65,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 24,
-   "template_line": 71,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 25,
-   "template_line": 72,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 26,
-   "template_line": 74,
-   "path": "/queries/1/zero/for_fields/1/name",
-   "node": "rule/ship-min-crew/join/field/1",
-   "rule_line": 4
-  },
-  {
-   "line": 27,
-   "template_line": 74,
-   "path": "/queries/1/zero/for_fields/2/name",
-   "node": "rule/ship-min-crew/join/field/2",
-   "rule_line": 11
-  },
-  {
-   "line": 28,
-   "template_line": 76,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 29,
-   "template_line": 77,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 30,
-   "template_line": 78,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 31,
-   "template_line": 79,
-   "path": "/queries/1/zero/key_list",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 32,
-   "template_line": 80,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 33,
-   "template_line": 87,
-   "path": "/",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 34,
-   "template_line": 93,
-   "path": "/threshold/is_count",
-   "node": "rule/ship-min-crew/limit/fewer_than",
-   "rule_line": 10
-  },
-  {
-   "line": 35,
-   "template_line": 94,
-   "path": "/threshold/is_count",
-   "node": "rule/ship-min-crew/limit/fewer_than",
-   "rule_line": 10
-  },
-  {
-   "line": 36,
-   "template_line": 142,
-   "path": "/queries/1/zero/for_query",
-   "node": "rule/ship-min-crew/join/for",
-   "rule_line": 4
-  },
-  {
-   "line": 37,
-   "template_line": 144,
-   "path": "/queries/1/zero/for_fields/1/source",
-   "node": "rule/ship-min-crew/join/field/1",
-   "rule_line": 4
-  },
-  {
-   "line": 38,
-   "template_line": 144,
-   "path": "/queries/1/zero/for_fields/2/source",
-   "node": "rule/ship-min-crew/join/field/2",
-   "rule_line": 11
-  },
-  {
-   "line": 39,
-   "template_line": 147,
-   "path": "/queries/1/zero/for_query/from/table",
-   "node": "rule/ship-min-crew/for",
-   "rule_line": 4
-  },
-  {
-   "line": 40,
-   "template_line": 149,
-   "path": "/queries/1/zero/for_query",
-   "node": "rule/ship-min-crew/join/for",
-   "rule_line": 4
-  },
-  {
-   "line": 41,
-   "template_line": 151,
-   "path": "/queries/1/zero/for_query/where/1/pre",
-   "node": "rule/ship-min-crew/when/1",
-   "rule_line": 6
-  },
-  {
-   "line": 42,
-   "template_line": 151,
-   "path": "/queries/1/zero/for_query/where/2/pre",
-   "node": "rule/ship-min-crew/range",
-   "rule_line": 5
-  },
-  {
-   "line": 43,
-   "template_line": 153,
-   "path": "/queries/1/zero/for_query",
-   "node": "rule/ship-min-crew/join/for",
-   "rule_line": 4
-  },
-  {
-   "line": 44,
-   "template_line": 155,
-   "path": "/queries/1/order/1/source",
-   "node": "rule/ship-min-crew/join/order/1",
-   "rule_line": 4
-  },
-  {
-   "line": 45,
-   "template_line": 160,
-   "path": "/queries/1",
-   "node": "rule/ship-min-crew/join",
-   "rule_line": 7
-  },
-  {
-   "line": 46,
-   "template_line": 169,
-   "path": "/queries/1/join_fields/1/source",
-   "node": "rule/ship-min-crew/join/field/1",
-   "rule_line": 4
-  },
-  {
-   "line": 47,
-   "template_line": 179,
-   "path": "/queries/1/from/table",
-   "node": "rule/ship-min-crew/for",
-   "rule_line": 4
-  },
-  {
-   "line": 48,
-   "template_line": 182,
-   "path": "/queries/1/joins/1/table",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 49,
-   "template_line": 184,
-   "path": "/queries/1/joins/1/on/1/lhs",
-   "node": "rule/ship-min-crew/limit/where/1",
-   "rule_line": 9
-  },
-  {
-   "line": 50,
-   "template_line": 187,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-min-crew/join",
-   "rule_line": 7
-  },
-  {
-   "line": 51,
-   "template_line": 189,
-   "path": "/queries/1/where/1/pre",
-   "node": "rule/ship-min-crew/when/1",
-   "rule_line": 6
-  },
-  {
-   "line": 52,
-   "template_line": 189,
-   "path": "/queries/1/where/2/pre",
-   "node": "rule/ship-min-crew/limit/where/2",
-   "rule_line": 9
-  },
-  {
-   "line": 53,
-   "template_line": 189,
-   "path": "/queries/1/where/3/pre",
-   "node": "rule/ship-min-crew/range",
-   "rule_line": 5
-  },
-  {
-   "line": 54,
-   "template_line": 191,
-   "path": "/queries/1",
-   "node": "rule/ship-min-crew/join",
-   "rule_line": 7
-  },
-  {
-   "line": 55,
-   "template_line": 193,
-   "path": "/queries/1/order/1/source",
-   "node": "rule/ship-min-crew/join/order/1",
-   "rule_line": 4
-  },
-  {
-   "line": 56,
-   "template_line": 199,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-min-crew/join",
-   "rule_line": 7
-  },
-  {
-   "line": 57,
-   "template_line": 211,
-   "path": "/queries/1/zero/join_key",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 58,
-   "template_line": 212,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 59,
-   "template_line": 215,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 60,
-   "template_line": 223,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 61,
-   "template_line": 224,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 62,
-   "template_line": 225,
-   "path": "/queries/1/wa",
-   "node": "rule/ship-min-crew/join",
-   "rule_line": 7
-  },
-  {
-   "line": 63,
-   "template_line": 228,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 64,
-   "template_line": 234,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 65,
-   "template_line": 235,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 66,
-   "template_line": 236,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 67,
-   "template_line": 237,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 68,
-   "template_line": 240,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 69,
-   "template_line": 241,
-   "path": "/queries/1/zero/read_key",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 70,
-   "template_line": 242,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 71,
-   "template_line": 243,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 72,
-   "template_line": 244,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 73,
-   "template_line": 245,
-   "path": "/queries/1/zero/op",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 74,
-   "template_line": 246,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 75,
-   "template_line": 247,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 76,
-   "template_line": 287,
-   "path": "/queries/1/alert_parts/1/jref",
-   "node": "rule/ship-min-crew/alert/hole/1",
-   "rule_line": 11
-  },
-  {
-   "line": 77,
-   "template_line": 287,
-   "path": "/queries/1/alert_parts/2/value",
-   "node": "rule/ship-min-crew/alert/text/1",
-   "rule_line": 11
-  },
-  {
-   "line": 78,
-   "template_line": 287,
-   "path": "/queries/1/alert_parts/3/jref",
-   "node": "rule/ship-min-crew/alert/hole/2",
-   "rule_line": 11
-  },
-  {
-   "line": 79,
-   "template_line": 287,
-   "path": "/queries/1/alert_parts/4/value",
-   "node": "rule/ship-min-crew/alert/text/2",
-   "rule_line": 11
-  },
-  {
-   "line": 80,
-   "template_line": 287,
-   "path": "/queries/1/alert_parts/5/jref",
-   "node": "rule/ship-min-crew/alert/count",
-   "rule_line": 11
-  },
-  {
-   "line": 81,
-   "template_line": 287,
-   "path": "/queries/1/alert_parts/6/value",
-   "node": "rule/ship-min-crew/alert/text/3",
-   "rule_line": 11
-  },
-  {
-   "line": 82,
-   "template_line": 289,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 83,
-   "template_line": 292,
-   "path": "/queries/1/zero/aggregate/is_count",
-   "node": "rule/ship-min-crew/limit/count",
-   "rule_line": 8
-  },
-  {
-   "line": 84,
-   "template_line": 298,
-   "path": "/queries/1/zero",
-   "node": "rule/ship-min-crew/join/zero",
-   "rule_line": 10
-  },
-  {
-   "line": 85,
-   "template_line": 439,
-   "path": "/",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  },
-  {
-   "line": 86,
-   "template_line": 505,
-   "path": "/",
-   "node": "rule/ship-min-crew",
-   "rule_line": 1
-  }
- ]
+  "format": "osd-trace/1",
+  "outputs": [
+    {
+      "file": "zcl_l2_ship_min_crew.clas.abap",
+      "lines": [
+        {
+          "line": 1,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 2,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/rule"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/title"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 3,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/class"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 4,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 5,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/field"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "lines": [6, 7],
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 8,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "lines": [9, 11],
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 12,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/class"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 9}
+          ]
+        },
+        {
+          "line": 13,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 10}
+          ]
+        },
+        {
+          "line": 14,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/comment"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 11}
+          ]
+        },
+        {
+          "line": 15,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 16,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/column"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/name"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 17,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/column"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/name"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 18,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 19,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/itab"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 20,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/type"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/wa"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 21,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 22,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/order/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/order/1", "selector": "/column"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/order/1", "selector": "/name"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/order/1", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 23,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/is_count"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "lines": [24, 25],
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 26,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/column"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/name"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 27,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/column"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/name"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "lines": [28, 30],
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 31,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/key_list"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 32,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 7}
+          ]
+        },
+        {
+          "line": 33,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 12}
+          ]
+        },
+        {
+          "lines": [34, 35],
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/fewer_than", "selector": "/is_count"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 36,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/for", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 37,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/name"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 38,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/name"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/2", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 39,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/for", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/for", "selector": "/alias"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/for", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 40,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/for", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 41,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/op"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/pre"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 42,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/op"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/pre"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 43,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/for", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 44,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/order/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/order/1", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 45,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 46,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/name"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/field/1", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 47,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/for", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/for", "selector": "/alias"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/for", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 48,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/alias"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 49,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/where/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/where/1", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/where/1", "selector": "/op"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/where/1", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 50,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/itab"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 5}
+          ]
+        },
+        {
+          "line": 51,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/op"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/pre"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/when/1", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 52,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/where/2", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/where/2", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/where/2", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/where/2", "selector": "/op"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/where/2", "selector": "/pre"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/where/2", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 53,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/op"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/pre"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/range", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 54,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 55,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/order/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/order/1", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 56,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/itab"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/wa"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 7},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 8}
+          ]
+        },
+        {
+          "line": 57,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/join_key"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 9}
+          ]
+        },
+        {
+          "line": 58,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 10}
+          ]
+        },
+        {
+          "line": 59,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/is_count"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "lines": [60, 61],
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 11}
+          ]
+        },
+        {
+          "line": 62,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join", "selector": "/wa"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 8},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 13}
+          ]
+        },
+        {
+          "line": 63,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/is_count"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "lines": [64, 67],
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 14}
+          ]
+        },
+        {
+          "line": 68,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/is_count"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 69,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/read_key"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/is_count"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 5},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 18}
+          ]
+        },
+        {
+          "lines": [70, 72],
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/is_count"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 73,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/op"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/value"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/is_count"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 9},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 19}
+          ]
+        },
+        {
+          "lines": [74, 75],
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/is_count"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 10}
+          ]
+        },
+        {
+          "line": 76,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/hole/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/hole/1", "selector": "/jref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 77,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/text/1", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/text/1", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 78,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/hole/2", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/hole/2", "selector": "/jref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 79,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/text/2", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/text/2", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 80,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/count", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/count", "selector": "/jref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 81,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/text/3", "selector": "/"},
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/alert/text/3", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 82,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 20}
+          ]
+        },
+        {
+          "line": 83,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/limit/count", "selector": "/is_count"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 12}
+          ]
+        },
+        {
+          "line": 84,
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew/join/zero", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 21}
+          ]
+        },
+        {
+          "lines": [85, 86],
+          "sources": [
+            {"file": "src/l2demo/ship_min_crew.l2.yaml", "node": "rule/ship-min-crew", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 13}
+          ]
+        }
+      ]
+    }
+  ]
 }

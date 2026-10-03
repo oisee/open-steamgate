@@ -9,11 +9,19 @@ CLASS zcl_osd_tpl DEFINITION PUBLIC FINAL CREATE PRIVATE.
         template TYPE string,
       END OF ty_partial,
       tt_partials TYPE STANDARD TABLE OF ty_partial WITH DEFAULT KEY,
+      BEGIN OF ty_contribution,
+        template TYPE string,
+        template_line TYPE i,
+        path TYPE string,
+        invocation TYPE i,
+      END OF ty_contribution,
+      tt_contributions TYPE STANDARD TABLE OF ty_contribution WITH DEFAULT KEY,
       BEGIN OF ty_trace,
         line          TYPE i,
         template      TYPE string,
         template_line TYPE i,
         path          TYPE string,
+        contributors  TYPE tt_contributions,
       END OF ty_trace,
       tt_trace TYPE STANDARD TABLE OF ty_trace WITH DEFAULT KEY,
       BEGIN OF ty_result,
@@ -133,7 +141,11 @@ CLASS zcl_osd_tpl DEFINITION PUBLIC FINAL CREATE PRIVATE.
     DATA mv_pending_indent TYPE string.
     DATA mv_last_newline TYPE abap_bool.
     DATA mv_depth TYPE i.
+    DATA mv_invocation TYPE i VALUE 1.
+    DATA mv_active_invocation TYPE i VALUE 1.
 
+    METHODS contribute
+      IMPORTING iv_template TYPE string iv_line TYPE i iv_path TYPE string.
     METHODS parse
       IMPORTING
         iv_name          TYPE string
@@ -748,6 +760,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     DATA lv_saved_indent TYPE string.
     DATA lv_mark_lines TYPE i.
     DATA lv_mark_len TYPE i.
+    DATA lv_saved_invocation TYPE i.
     FIELD-SYMBOLS <ls_tpl> TYPE ty_parsed.
     FIELD-SYMBOLS <ls_token> TYPE ty_token.
 
@@ -905,12 +918,16 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
               mv_pending_indent = lv_indent.
             ENDIF.
             mv_depth = mv_depth + 1.
+            lv_saved_invocation = mv_active_invocation.
+            mv_invocation = mv_invocation + 1.
+            mv_active_invocation = mv_invocation.
             render_range( iv_tpl    = lv_partial
                           iv_from   = 1
                           iv_to     = lv_partial_count
                           it_frames = lt_inner
                           iv_indent = lv_indent ).
             mv_depth = mv_depth - 1.
+            mv_active_invocation = lv_saved_invocation.
             " after a standalone call the caller continues on a fresh source line
             " of its own: its indentation, not the partial's; after an inline call
             " it is still on the same source line: the indentation it had, if
@@ -1013,6 +1030,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     ELSEIF iv_is_value = abap_true.
       claim_path( iv_path ).
     ENDIF.
+    contribute( iv_template = iv_template iv_line = iv_line iv_path = iv_path ).
     mv_current = mv_current && iv_text.
     mv_last_newline = abap_false.
   ENDMETHOD.
@@ -1028,6 +1046,7 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
       ls_trace-path = iv_path.
       APPEND ls_trace TO mt_trace.
     ENDIF.
+    contribute( iv_template = iv_template iv_line = iv_line iv_path = iv_path ).
     APPEND mv_current TO mt_lines.
     CLEAR mv_current.
     CLEAR mv_pending_indent.
@@ -1428,6 +1447,25 @@ CLASS zcl_osd_tpl IMPLEMENTATION.
     rv_path = `/`.
   ENDMETHOD.
 
+
+  METHOD contribute.
+    DATA ls_contributor TYPE ty_contribution.
+    FIELD-SYMBOLS <ls_trace> TYPE ty_trace.
+    READ TABLE mt_trace INDEX lines( mt_trace ) ASSIGNING <ls_trace>.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    READ TABLE <ls_trace>-contributors TRANSPORTING NO FIELDS
+      WITH KEY template = iv_template path = iv_path invocation = mv_active_invocation.
+    IF sy-subrc = 0.
+      RETURN.
+    ENDIF.
+    ls_contributor-invocation = mv_active_invocation.
+    ls_contributor-template = iv_template.
+    ls_contributor-template_line = iv_line.
+    ls_contributor-path = iv_path.
+    APPEND ls_contributor TO <ls_trace>-contributors.
+  ENDMETHOD.
 
   METHOD claim_path.
 * The first value on a line names the line's path (an empty value claims nothing).

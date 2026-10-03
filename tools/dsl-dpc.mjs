@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Render an imported IWPR's DPC class with its L1 provenance sidecar.
+import {convertTrace, legacyTrace, traceArgs} from "./dsl-trace.mjs";
 import {readFileSync, mkdirSync, writeFileSync} from "node:fs";
 import {basename, join} from "node:path";
 import {randomBytes} from "node:crypto";
@@ -8,7 +9,9 @@ import {readSpec, tableName} from "./segw-tables.mjs";
 
 export async function renderProject(file, out, {project = `ZDSL${randomBytes(6).toString("hex").toUpperCase()}`} = {}) {
   if (!/^Z[A-Z0-9_]{1,31}$/.test(project)) throw new Error(`invalid temporary project ${project}`);
-  const xml = readFileSync(file, "utf8").replace(/<PROJECT>[^<]+<\/PROJECT>/g, `<PROJECT>${project}</PROJECT>`);
+  const inputXml = readFileSync(file, "utf8");
+  const persistentProject = /<PROJECT>([^<]+)<\/PROJECT>/.exec(inputXml)?.[1];
+  const xml = inputXml.replace(/<PROJECT>[^<]+<\/PROJECT>/g, `<PROJECT>${project}</PROJECT>`);
   if (!xml.includes(`<PROJECT>${project}</PROJECT>`)) throw new Error("IWPR has no project rows");
   await import("../test/start.mjs");
   const abap = globalThis.abap;
@@ -32,7 +35,7 @@ export async function renderProject(file, out, {project = `ZDSL${randomBytes(6).
     const result = await abap.Classes.ZCL_OSD_DSL_DPC.render_class({is_model: model});
     const source = (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: result})).get();
     const sidecar = (await abap.Classes.ZCL_OSD_DSL_TRACE.sidecar({
-      iv_generator: box("dsl-dpc"), iv_template: box("dpc_class"), io_model: json, is_result: result,
+      iv_legacy: new abap.types.Character(1).set("X"), iv_generator: box("dsl-dpc"), iv_template: box("dpc_class"), io_model: json, is_result: result,
     })).get();
     const findings = (await abap.Classes.ZCL_OSD_DSL_PROFILE.check({
       iv_profile: box("abap"), iv_strict: new abap.types.Character(1).set(""), is_result: result, io_model: json,
@@ -42,7 +45,17 @@ export async function renderProject(file, out, {project = `ZDSL${randomBytes(6).
     const abapFile = join(out, `${name}.clas.abap`);
     const traceFile = join(out, `${name}.clas.trace.json`);
     writeFileSync(abapFile, source);
-    writeFileSync(traceFile, sidecar);
+    const oldTrace = JSON.parse(sidecar);
+    oldTrace.lines.forEach((e,i) => {
+      e.contributors = result.get().trace.array()[i].get().contributors.array().map(c => ({
+        invocation:c.get().invocation.get(),template:c.get().template.get(),template_line:c.get().template_line.get(),path:c.get().path.get(),
+      }));
+    });
+    const traceModel = JSON.parse((await json.get().zif_ajson$stringify()).get());
+    traceModel["@id"] = `project/${persistentProject}`;
+    const pair = convertTrace(oldTrace, {[`${name}.clas.abap`]: source}, {model: traceModel, source: file, recipe: "src/dsl/zcl_osd_dsl_dpc.clas.abap"});
+    writeFileSync(traceFile, legacyTrace() ? sidecar : pair.trace);
+    if (!legacyTrace()) writeFileSync(traceFile.replace(/\.json$/, ".meta.json"), pair.meta);
     console.log(`abap profile: ${findings.length} finding(s)`);
     for (const finding of findings) console.log(`${finding.severity} ${finding.line} ${finding.rule}: ${finding.text} (${finding.node})`);
     return {abapFile, traceFile, findings, project};
@@ -54,7 +67,7 @@ export async function renderProject(file, out, {project = `ZDSL${randomBytes(6).
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const [command, file, flag, out] = process.argv.slice(2);
+  const [command, file, flag, out] = traceArgs(process.argv.slice(2));
   if (command !== "render" || !file || flag !== "--out" || !out) {
     console.error(`Usage: node ${basename(process.argv[1])} render <project-file.iwpr.xml> --out <dir>`);
     process.exitCode = 2;

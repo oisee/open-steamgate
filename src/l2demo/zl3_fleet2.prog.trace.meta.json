@@ -1,0 +1,2746 @@
+{
+  "doctor_overlay": ["recipes/l3-doctor/job-tail.tpl"],
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l3",
+  "generator_version": "0.7",
+  "lines": [
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 1
+        },
+        {
+          "invocation": 1,
+          "path": "/report",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/report"},
+          "template": "main",
+          "template_line": 1
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 1,
+      "node": "set/fleet2",
+      "path": "/report",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 1
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/source",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/source"},
+          "template": "main",
+          "template_line": 2
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 2,
+      "node": "set/fleet2",
+      "path": "/source",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 2
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 3
+        },
+        {
+          "invocation": 1,
+          "path": "/set",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/set"},
+          "template": "main",
+          "template_line": 3
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 3,
+      "node": "set/fleet2",
+      "path": "/set",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 3
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 4
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 4
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 4,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 4
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/planned",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/stages", "selector": "/"},
+          "template": "main",
+          "template_line": 6
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 5,
+      "node": "set/fleet2/stages",
+      "path": "/planned",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 24,
+      "template": "main",
+      "template_line": 6
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/planned",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/stages", "selector": "/"},
+          "template": "main",
+          "template_line": 7
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 6,
+      "node": "set/fleet2/stages",
+      "path": "/planned",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 24,
+      "template": "main",
+      "template_line": 7
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/staged",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/stages", "selector": "/"},
+          "template": "main",
+          "template_line": 10
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 7,
+      "node": "set/fleet2/stages",
+      "path": "/staged",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 24,
+      "template": "main",
+      "template_line": 10
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/staged",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/stages", "selector": "/"},
+          "template": "main",
+          "template_line": 11
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 8,
+      "node": "set/fleet2/stages",
+      "path": "/staged",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 24,
+      "template": "main",
+      "template_line": 11
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 14
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 9,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 14
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 15
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 10,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 15
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 17
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 11,
+      "node": "set/fleet2/resilience",
+      "path": "/resilience",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 80,
+      "template": "main",
+      "template_line": 17
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 21
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 12,
+      "node": "set/fleet2/resilience",
+      "path": "/resilience",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 80,
+      "template": "main",
+      "template_line": 21
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 22
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 13,
+      "node": "set/fleet2/resilience",
+      "path": "/resilience",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 80,
+      "template": "main",
+      "template_line": 22
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 24
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 14,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 24
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 25
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 15,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 25
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 26
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 16,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 26
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 27
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 17,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 27
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/planned",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/stages", "selector": "/"},
+          "template": "main",
+          "template_line": 29
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 18,
+      "node": "set/fleet2/stages",
+      "path": "/planned",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 24,
+      "template": "main",
+      "template_line": 29
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 31
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 19,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 31
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/1",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/doctor.tick", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/1/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/doctor.tick", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 20,
+      "node": "set/fleet2/setting/doctor.tick",
+      "path": "/settings/entries/1/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/2",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.glass", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/2/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.glass", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 21,
+      "node": "set/fleet2/setting/budget.glass",
+      "path": "/settings/entries/2/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/3",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.warn", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/3/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.warn", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 22,
+      "node": "set/fleet2/setting/budget.warn",
+      "path": "/settings/entries/3/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/4",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.narrow_at", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/4/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.narrow_at", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 23,
+      "node": "set/fleet2/setting/budget.narrow_at",
+      "path": "/settings/entries/4/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/5",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.per_pile", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/5/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.per_pile", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 24,
+      "node": "set/fleet2/setting/budget.per_pile",
+      "path": "/settings/entries/5/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/6",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/retry.max", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/6/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/retry.max", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 25,
+      "node": "set/fleet2/setting/retry.max",
+      "path": "/settings/entries/6/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/7",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/retry.backoff", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/7/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/retry.backoff", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 26,
+      "node": "set/fleet2/setting/retry.backoff",
+      "path": "/settings/entries/7/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/8",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/stale", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/8/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/stale", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 27,
+      "node": "set/fleet2/setting/stale",
+      "path": "/settings/entries/8/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/9",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/fuses.max_alerts", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/9/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/fuses.max_alerts", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 28,
+      "node": "set/fleet2/setting/fuses.max_alerts",
+      "path": "/settings/entries/9/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/10",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/keep.days", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/10/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/keep.days", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 29,
+      "node": "set/fleet2/setting/keep.days",
+      "path": "/settings/entries/10/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/11",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/simulate.seed", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/11/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/simulate.seed", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 30,
+      "node": "set/fleet2/setting/simulate.seed",
+      "path": "/settings/entries/11/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/12",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/simulate.time_scale", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/12/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/simulate.time_scale", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 31,
+      "node": "set/fleet2/setting/simulate.time_scale",
+      "path": "/settings/entries/12/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/19",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/piles.checks.size", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/19/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/piles.checks.size", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 32,
+      "node": "set/fleet2/setting/piles.checks.size",
+      "path": "/settings/entries/19/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/param/active_status", "selector": "/"},
+          "template": "main",
+          "template_line": 43
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/param/active_status", "selector": "/screen"},
+          "template": "main",
+          "template_line": 43
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/type_name",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/param/active_status", "selector": "/type_name"},
+          "template": "main",
+          "template_line": 43
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 33,
+      "node": "set/fleet2/param/active_status",
+      "path": "/params/1/screen",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 23,
+      "template": "main",
+      "template_line": 43
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 47
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 34,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 47
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 49
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 35,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 49
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 50
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 36,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 50
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 51
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 51
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 37,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 51
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 52
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 38,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 52
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/settings", "selector": "/"},
+          "template": "main",
+          "template_line": 54
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/settings", "selector": "/class"},
+          "template": "main",
+          "template_line": 54
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 39,
+      "node": "set/fleet2/settings",
+      "path": "/settings/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 120,
+      "template": "main",
+      "template_line": 54
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/1",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/doctor.tick", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/1/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/doctor.tick", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/1/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/doctor.tick", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 40,
+      "node": "set/fleet2/setting/doctor.tick",
+      "path": "/settings/entries/1/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/2",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.glass", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/2/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.glass", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/2/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.glass", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 41,
+      "node": "set/fleet2/setting/budget.glass",
+      "path": "/settings/entries/2/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/3",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.warn", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/3/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.warn", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/3/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.warn", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 42,
+      "node": "set/fleet2/setting/budget.warn",
+      "path": "/settings/entries/3/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/4",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.narrow_at", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/4/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.narrow_at", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/4/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.narrow_at", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 43,
+      "node": "set/fleet2/setting/budget.narrow_at",
+      "path": "/settings/entries/4/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/5",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.per_pile", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/5/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.per_pile", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/5/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/budget.per_pile", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 44,
+      "node": "set/fleet2/setting/budget.per_pile",
+      "path": "/settings/entries/5/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/6",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/retry.max", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/6/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/retry.max", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/6/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/retry.max", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 45,
+      "node": "set/fleet2/setting/retry.max",
+      "path": "/settings/entries/6/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/7",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/retry.backoff", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/7/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/retry.backoff", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/7/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/retry.backoff", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 46,
+      "node": "set/fleet2/setting/retry.backoff",
+      "path": "/settings/entries/7/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/8",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/stale", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/8/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/stale", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/8/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/stale", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 47,
+      "node": "set/fleet2/setting/stale",
+      "path": "/settings/entries/8/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/9",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/fuses.max_alerts", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/9/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/fuses.max_alerts", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/9/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/fuses.max_alerts", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 48,
+      "node": "set/fleet2/setting/fuses.max_alerts",
+      "path": "/settings/entries/9/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/10",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/keep.days", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/10/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/keep.days", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/10/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/keep.days", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 49,
+      "node": "set/fleet2/setting/keep.days",
+      "path": "/settings/entries/10/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/11",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/simulate.seed", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/11/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/simulate.seed", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/11/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/simulate.seed", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 50,
+      "node": "set/fleet2/setting/simulate.seed",
+      "path": "/settings/entries/11/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/12",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/simulate.time_scale", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/12/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/simulate.time_scale", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/12/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/simulate.time_scale", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 51,
+      "node": "set/fleet2/setting/simulate.time_scale",
+      "path": "/settings/entries/12/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/19",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/piles.checks.size", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/19/field",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/piles.checks.size", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/19/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/setting/piles.checks.size", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 52,
+      "node": "set/fleet2/setting/piles.checks.size",
+      "path": "/settings/entries/19/field",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 121,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 62
+        },
+        {
+          "invocation": 1,
+          "path": "/with_params",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/params", "selector": "/"},
+          "template": "main",
+          "template_line": 62
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 53,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 62
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 65
+        },
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 65
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 54,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 65
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 66
+        },
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 66
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 55,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 66
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 67
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 56,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 67
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 68
+        },
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 68
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 57,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 68
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 69
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 58,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 69
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 70
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 59,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 70
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 71
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 60,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 71
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 72
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 61,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 72
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 73
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 62,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 73
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 74
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 63,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 74
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 75
+        },
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 75
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 64,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 75
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 76
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 65,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 76
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 77
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 66,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 77
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/schedule",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/schedule", "selector": "/"},
+          "template": "main",
+          "template_line": 78
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 67,
+      "node": "set/fleet2/schedule",
+      "path": "/schedule",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 44,
+      "template": "main",
+      "template_line": 78
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 80
+        },
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 80
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 68,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 80
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 81
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 69,
+      "node": "set/fleet2/resilience",
+      "path": "/resilience",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 80,
+      "template": "main",
+      "template_line": 81
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 82
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 70,
+      "node": "set/fleet2/resilience",
+      "path": "/resilience",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 80,
+      "template": "main",
+      "template_line": 82
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 83
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 71,
+      "node": "set/fleet2/resilience",
+      "path": "/resilience",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 80,
+      "template": "main",
+      "template_line": 83
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 84
+        },
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 84
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 72,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 84
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 85
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 73,
+      "node": "set/fleet2/resilience",
+      "path": "/resilience",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 80,
+      "template": "main",
+      "template_line": 85
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 86
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 74,
+      "node": "set/fleet2/resilience",
+      "path": "/resilience",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 80,
+      "template": "main",
+      "template_line": 86
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 89
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 75,
+      "node": "set/fleet2/piles/release",
+      "path": "/release_event",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 43,
+      "template": "main",
+      "template_line": 89
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 90
+        },
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 90
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 76,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 90
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 91
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 77,
+      "node": "set/fleet2/piles/release",
+      "path": "/release_event",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 43,
+      "template": "main",
+      "template_line": 91
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 92
+        },
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 92
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 78,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 92
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 93
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 79,
+      "node": "set/fleet2/piles/release",
+      "path": "/release_event",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 43,
+      "template": "main",
+      "template_line": 93
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 94
+        },
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 94
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 80,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 94
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 95
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 81,
+      "node": "set/fleet2/piles/release",
+      "path": "/release_event",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 43,
+      "template": "main",
+      "template_line": 95
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 98
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 82,
+      "node": "set/fleet2/resilience",
+      "path": "/resilience",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 80,
+      "template": "main",
+      "template_line": 98
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/resilience",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience", "selector": "/"},
+          "template": "main",
+          "template_line": 99
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 83,
+      "node": "set/fleet2/resilience",
+      "path": "/resilience",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 80,
+      "template": "main",
+      "template_line": 99
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/param/active_status", "selector": "/"},
+          "template": "main",
+          "template_line": 103
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/name",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/param/active_status", "selector": "/name"},
+          "template": "main",
+          "template_line": 103
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/screen",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/param/active_status", "selector": "/screen"},
+          "template": "main",
+          "template_line": 103
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 84,
+      "node": "set/fleet2/param/active_status",
+      "path": "/params/1/name",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 23,
+      "template": "main",
+      "template_line": 103
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 105
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 85,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 105
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 106
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 106
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 86,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 106
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 107
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 87,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 107
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 108
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 88,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 108
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 109
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 89,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 109
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/settings", "selector": "/"},
+          "template": "main",
+          "template_line": 111
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 90,
+      "node": "set/fleet2/settings",
+      "path": "/settings",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 120,
+      "template": "main",
+      "template_line": 111
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/planned",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/stages", "selector": "/"},
+          "template": "main",
+          "template_line": 114
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 91,
+      "node": "set/fleet2/stages",
+      "path": "/planned",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 24,
+      "template": "main",
+      "template_line": 114
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/with_params",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/params", "selector": "/"},
+          "template": "main",
+          "template_line": 117
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 92,
+      "node": "set/fleet2/params",
+      "path": "/with_params",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 22,
+      "template": "main",
+      "template_line": 117
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 119
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 93,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 119
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 120
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 94,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 120
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 1
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 95,
+      "node": "set/fleet2",
+      "path": "/",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 1
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/staged",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/stages", "selector": "/"},
+          "template": "main",
+          "template_line": 129
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 96,
+      "node": "set/fleet2/stages",
+      "path": "/staged",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 24,
+      "template": "main",
+      "template_line": 129
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/staged",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/stages", "selector": "/"},
+          "template": "main",
+          "template_line": 2
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 97,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 2
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/with_params",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/params", "selector": "/"},
+          "template": "main",
+          "template_line": 136
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 98,
+      "node": "set/fleet2/params",
+      "path": "/with_params",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 22,
+      "template": "main",
+      "template_line": 136
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/staged",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/stages", "selector": "/"},
+          "template": "main",
+          "template_line": 138
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 99,
+      "node": "set/fleet2/stages",
+      "path": "/staged",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 24,
+      "template": "main",
+      "template_line": 138
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/staged",
+          "recipe": "recipes/l3-job/template.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/stages", "selector": "/"},
+          "template": "main",
+          "template_line": 139
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 100,
+      "node": "set/fleet2/stages",
+      "path": "/staged",
+      "recipe": "recipes/l3-job/template.tpl",
+      "set_line": 24,
+      "template": "main",
+      "template_line": 139
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 4
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 101,
+      "node": "set/fleet2/piles/release",
+      "path": "/release_event",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 43,
+      "template": "main",
+      "template_line": 4
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 5
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 102,
+      "node": "set/fleet2/piles/release",
+      "path": "/release_event",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 43,
+      "template": "main",
+      "template_line": 5
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 6
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 103,
+      "node": "set/fleet2/piles/release",
+      "path": "/release_event",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 43,
+      "template": "main",
+      "template_line": 6
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 7
+        },
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 7
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 104,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 7
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 8
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 105,
+      "node": "set/fleet2/piles/release",
+      "path": "/release_event",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 43,
+      "template": "main",
+      "template_line": 8
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 9
+        },
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 9
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 106,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 9
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 10
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 107,
+      "node": "set/fleet2/piles/release",
+      "path": "/release_event",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 43,
+      "template": "main",
+      "template_line": 10
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 11
+        },
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 11
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 108,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 11
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/release_event",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/piles/release", "selector": "/"},
+          "template": "main",
+          "template_line": 12
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 109,
+      "node": "set/fleet2/piles/release",
+      "path": "/release_event",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 43,
+      "template": "main",
+      "template_line": 12
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/class"},
+          "template": "main",
+          "template_line": 15
+        },
+        {
+          "invocation": 1,
+          "path": "/daemon",
+          "recipe": "recipes/l3-doctor/job-tail.tpl",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/resilience/doctor", "selector": "/"},
+          "template": "main",
+          "template_line": 15
+        }
+      ],
+      "file": "zl3_fleet2.prog.abap",
+      "line": 110,
+      "node": "set/fleet2",
+      "path": "/class",
+      "recipe": "recipes/l3-doctor/job-tail.tpl",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 15
+    }
+  ],
+  "model": "sha256:204c9c4a972314ea503b6b11cc5e2dc9762525d233afae99ed3ab36e8a31c7ec",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "zl3_fleet2.prog.abap", "hash": "sha256:87d3fafea262ecf28d624b1f26a634f291626d43d88b58aa200a76b5dbedfe41"}
+  ],
+  "overlay": "recipes/l3-governor/job.patch.json",
+  "rules": {
+    "grounded-ship-keeps-only-keepers": {"class": "zcl_l2_grounded_ship_crew", "file": "src/l2demo/grounded_ship_crew.l2.yaml", "model": "sha256:b394b7c481c2078cec32dd098774403af021f9b5992e10060c4df66f30a2ec63"},
+    "maintenance-ship-no-future-voyage": {"class": "zcl_l2_maintenance_ship", "file": "src/l2demo/maintenance_ship.l2.yaml", "model": "sha256:44dac8cf4f02744f207591d59ab67f90ec0108133257850d785acf7c43a0687f"},
+    "ship-busy": {"class": "zcl_l2_ship_busy", "file": "src/l2demo/ship_busy.l2.yaml", "model": "sha256:45ea923b55497387bebe8f844927710b4793719d6598f05beeb5a07536f6be87"},
+    "ship-cargo-limit": {"class": "zcl_l2_ship_cargo_limit", "file": "src/l2demo/ship_cargo_limit.l2.yaml", "model": "sha256:85e96ae3fa817522ecb9141d874a5109bc21e78a8106bf0deb3f2651b338d782"},
+    "ship-in-service-has-a-captain": {"class": "zcl_l2_ship_captain", "file": "src/l2demo/ship_captain.l2.yaml", "model": "sha256:c354a2df3f0f895d4132bc9e3f3fadd07b2f7b04066360d8ba6c7fcabd981d99"},
+    "ship-min-crew": {"class": "zcl_l2_ship_min_crew", "file": "src/l2demo/ship_min_crew.l2.yaml", "model": "sha256:d6bd4b7056cc98985ff457a7c4e5441515492e9316cb4c64a06f2214777204b0"},
+    "ship-too-many-future-voyages": {"class": "zcl_l2_ship_voyage_limit", "file": "src/l2demo/ship_voyage_limit.l2.yaml", "model": "sha256:d5ba08cb38257a35fa27e16091cb1325fe0b3ad00dce9d5b1dfcb24d4e103596"}
+  },
+  "set": "src/l2demo/fleet2.l3.yaml",
+  "template": "recipes/l3-job/template.tpl",
+  "templates": {"recipes/l3-doctor/job-tail.tpl": "sha256:0bf712e34df79c17b83b09dbcefafceb7268833b1c2347c2969d83158e74c65f", "recipes/l3-governor/job.patch.json": "sha256:6a8e22a2266f10557ec70e1f87d33a7860fb95b2b08d983afba2957896b7a45f", "recipes/l3-job/template.tpl": "sha256:49b4fa71f60a882358ce5550a4539a0f5b649d26fe5d119216a8e7902d60712a"}
+}

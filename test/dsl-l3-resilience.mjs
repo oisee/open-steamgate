@@ -1,3 +1,4 @@
+import {readJSONFile} from "./trace-reader.mjs";
 import {l3TableDependencies, l3TableNames} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 5a (docs/dsl-l3.md, "Resilience"): a run that heals itself
@@ -140,7 +141,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
 
     it("the trace: each constant and branch of slice 5a traces to its own manifest line", () => {
       const text = (f) => readFileSync(join(OUT, f), "utf8").split("\n");
-      const trace = (f) => JSON.parse(readFileSync(join(OUT, f.replace(/\.abap$/, ".trace.json")), "utf8"));
+      const trace = (f) => readJSONFile(join(OUT, f.replace(/\.abap$/, ".trace.json")), "utf8");
       const of = (f, re) => trace(f).lines.filter((e) => re.test(text(f)[e.line - 1]));
       const runner = `${RUNNER}.clas.abap`;
       for (const f of [runner, `${REPORT}.prog.abap`]) {
@@ -179,8 +180,11 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
     const exec = (statements) => dialogStep(async () => { for (const s of statements) await client.execute(s); });
     const clearAll = () => exec(TABLES.map((t) => `DELETE FROM ${t}`));
     const stamp = (ms = clock.now()) => new Date(ms).toISOString().replace(/[-:T]/g, "").slice(0, 14);
-    const model = compileSet(SET);
-    const checks = model.rules.filter((r) => !r.filter);
+    let model, checks;
+    before(() => {
+      model = compileSet(SET);
+      checks = model.rules.filter((r) => !r.filter);
+    });
     const log = () => read("SELECT * FROM zosd_l3_alert WHERE set_name = 'fleet2' ORDER BY rule_name, pile_no, alert_seq")
       .map((r) => ({rule: r.rule_name.trim(), pile: Number(r.pile_no), text: String(r.alert_text), run: r.run_id.trim(), date: r.check_date}));
     const content = (rows) => rows.map(({rule, text}) => `${rule}: ${String(text).trimEnd()}`).sort();

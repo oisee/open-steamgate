@@ -1,3 +1,4 @@
+import {readJSONFile, readTraceMap} from "./trace-reader.mjs";
 // The L1 DPC class is byte-identical with the string generator on every
 // project admitted by the MPC bridge, with trace and profile checks.
 import {expect} from "chai";
@@ -190,7 +191,7 @@ functions:
         }
         const dpcName = model.get().dpc.get().toLowerCase();
         expect(files.get(`${dpcName}.clas.abap`), `${path} generate() DPC equals dpc_source_legacy`).to.equal(expected);
-        const shipped = JSON.parse(files.get(`${dpcName}.clas.trace.json`) ?? "{}");
+        const shipped = readTraceMap(files, `${dpcName}.clas.trace.json`);
         expect(shipped.generator, `${path} DPC sidecar shipped`).to.equal("dsl-dpc");
         expect(shipped.lines?.length, `${path} one trace node per DPC line`).to.equal(expected.trimEnd().split("\n").length);
         expect(shipped.lines.every((line) => line.node), `${path} shipped trace nodes`).to.equal(true);
@@ -199,7 +200,7 @@ functions:
       const lines = result.get().lines.array();
       expect(traces.length, `${path} trace count`).to.equal(lines.length);
       const sidecar = JSON.parse((await abap.Classes.ZCL_OSD_DSL_TRACE.sidecar({
-        iv_generator: box("dsl-dpc"), iv_template: box("dpc_class"), io_model: data, is_result: result,
+        iv_legacy: new abap.types.Character(1).set("X"), iv_generator: box("dsl-dpc"), iv_template: box("dpc_class"), io_model: data, is_result: result,
       })).get());
       expect(sidecar.lines.length).to.equal(lines.length);
       expect(sidecar.lines.every((line) => line.node && line.path && line.template_line > 0),
@@ -357,7 +358,7 @@ functions:
     const base = await abap.Classes.ZCL_OSD_DSL_DPC.render_model({io_model: baseModel});
     const baseLines = base.get().lines.array().map((line) => line.get());
     const sidecar = JSON.parse((await abap.Classes.ZCL_OSD_DSL_TRACE.sidecar({
-      iv_generator: box("dsl-dpc"), iv_template: box("dpc_class"), io_model: baseModel, is_result: base,
+      iv_legacy: new abap.types.Character(1).set("X"), iv_generator: box("dsl-dpc"), iv_template: box("dpc_class"), io_model: baseModel, is_result: base,
     })).get());
     // exact counts measured 2026-10-01 (5/1/1/1): a mutation that starts touching more or fewer lines fails
     const changes = [
@@ -393,7 +394,7 @@ functions:
       result = await abap.Classes.ZCL_OSD_TPL.render({iv_template: box(readFileSync("src/dsl/dpc-templates/class.tpl", "utf8")), ii_data: data, it_partials: partials});
     } else result = await abap.Classes.ZCL_OSD_DSL_DPC.render_model({io_model: data});
     const sidecar = JSON.parse((await abap.Classes.ZCL_OSD_DSL_TRACE.sidecar({
-      iv_generator: box("dsl-dpc"), iv_template: box("dpc_class"), io_model: data, is_result: result,
+      iv_legacy: new abap.types.Character(1).set("X"), iv_generator: box("dsl-dpc"), iv_template: box("dpc_class"), io_model: data, is_result: result,
     })).get());
     const lines = result.get().lines.array().map((line) => line.get());
     return {data, result, lines, trace: sidecar.lines, text: (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: result})).get()};
@@ -481,7 +482,7 @@ functions:
     try {
       const {abapFile, traceFile, findings} = await renderProject("test/fixtures/segw/zstg_mapped.iwpr.xml", dir, {project: "ZUTDPCCLI"});
       const source = readFileSync(abapFile, "utf8");
-      const trace = JSON.parse(readFileSync(traceFile, "utf8"));
+      const trace = readJSONFile(traceFile, "utf8");
       expect(source).to.include("/IWBEP/CL_MGW_PUSH_ABS_DATA");
       expect(trace.generator).to.equal("dsl-dpc");
       expect(trace.lines.length).to.equal(source.trimEnd().split("\n").length);

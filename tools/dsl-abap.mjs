@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // L1 declarations from abaplint's registry, SyntaxLogic and expression tree.
+import {legacyTrace} from "./dsl-trace.mjs";
 import {readFileSync, readdirSync, statSync} from "node:fs";
 import {basename, join} from "node:path";
 import {pathToFileURL} from "node:url";
@@ -203,7 +204,7 @@ export function constantsModel(model, className) {
 // A model rendered through ZCL_OSD_TPL: the text, one trace entry per line
 // with the nearest @id on its data path, and, when a profile is named, what
 // ZCL_OSD_DSL_PROFILE finds on the result (with the trace in hand).
-export async function renderRecipe(data, template, {profile, templateText} = {}) {
+export async function renderRecipe(data, template, {profile, templateText, templateOrigins} = {}) {
   await import("../test/start.mjs");
   await import("../output/zcl_osd_tpl.clas.mjs");
   await import("../output/zcl_ajson.clas.mjs");
@@ -211,10 +212,12 @@ export async function renderRecipe(data, template, {profile, templateText} = {})
   const abap = globalThis.abap;
   const box = (value) => new abap.types.String().set(value);
   const json = await abap.Classes.ZCL_AJSON.parse({iv_json: box(JSON.stringify(data))});
+  const original = readFileSync(template, "utf8");
+  const origins = legacyTrace() ? undefined : templateOrigins;
   let result;
   try {
     result = await abap.Classes.ZCL_OSD_TPL.render({
-      iv_template: box(templateText ?? readFileSync(template, "utf8")), ii_data: json,
+      iv_template: box(templateText ?? original), ii_data: json,
     });
   } catch (error) {
     if (error.text?.get) throw new Error(error.text.get(), {cause: error});
@@ -222,8 +225,17 @@ export async function renderRecipe(data, template, {profile, templateText} = {})
   }
   const text = (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: result})).get();
   const trace = result.get().trace.array().map((entry) => ({
-    line: entry.get().line.get(), template_line: entry.get().template_line.get(), path: entry.get().path.get(),
+    contributors: entry.get().contributors.array().map(c => ({invocation:c.get().invocation.get(),template: c.get().template.get(), template_line: c.get().template_line.get(), path: c.get().path.get()})),
+    template: entry.get().template.get(), line: entry.get().line.get(), template_line: entry.get().template_line.get(), path: entry.get().path.get(),
   }));
+  if (origins) for (const entry of trace) {
+    const origin = origins.get(entry.template_line);
+    if (origin) Object.assign(entry,origin);
+    for (const c of entry.contributors) {
+      const origin = origins.get(c.template_line);
+      if (origin) Object.assign(c,origin);
+    }
+  }
   const nodeAt = (path) => {
     const parts = path.split("/").slice(1);
     let current = data, node;

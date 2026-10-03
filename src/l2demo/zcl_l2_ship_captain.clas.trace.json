@@ -1,317 +1,426 @@
 {
- "generator": "dsl-l2",
- "rule": "src/l2demo/ship_captain.l2.yaml",
- "template": "recipes/l2-check/template.tpl",
- "model": "sha256:c354a2df3f0f895d4132bc9e3f3fadd07b2f7b04066360d8ba6c7fcabd981d99",
- "lines": [
-  {
-   "line": 1,
-   "template_line": 1,
-   "path": "/source",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 2,
-   "template_line": 2,
-   "path": "/rule",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 3,
-   "template_line": 3,
-   "path": "/class",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 4,
-   "template_line": 4,
-   "path": "/",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 5,
-   "template_line": 6,
-   "path": "/range/table",
-   "node": "rule/ship-in-service-has-a-captain/range",
-   "rule_line": 10
-  },
-  {
-   "line": 6,
-   "template_line": 13,
-   "path": "/",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 7,
-   "template_line": 14,
-   "path": "/",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 8,
-   "template_line": 16,
-   "path": "/range",
-   "node": "rule/ship-in-service-has-a-captain/range",
-   "rule_line": 10
-  },
-  {
-   "line": 9,
-   "template_line": 23,
-   "path": "/params/1/ref",
-   "node": "rule/ship-in-service-has-a-captain/param/active_status",
-   "rule_line": 8
-  },
-  {
-   "line": 10,
-   "template_line": 26,
-   "path": "/",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 11,
-   "template_line": 42,
-   "path": "/",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 12,
-   "template_line": 43,
-   "path": "/",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 13,
-   "template_line": 44,
-   "path": "/class",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 14,
-   "template_line": 45,
-   "path": "/",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 15,
-   "template_line": 46,
-   "path": "/comment",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 16,
-   "template_line": 48,
-   "path": "/queries/1/type",
-   "node": "rule/ship-in-service-has-a-captain/join",
-   "rule_line": 12
-  },
-  {
-   "line": 17,
-   "template_line": 50,
-   "path": "/queries/1/fields/1/name",
-   "node": "rule/ship-in-service-has-a-captain/join/field/1",
-   "rule_line": 9
-  },
-  {
-   "line": 18,
-   "template_line": 50,
-   "path": "/queries/1/fields/2/name",
-   "node": "rule/ship-in-service-has-a-captain/join/field/2",
-   "rule_line": 15
-  },
-  {
-   "line": 19,
-   "template_line": 52,
-   "path": "/queries/1/type",
-   "node": "rule/ship-in-service-has-a-captain/join",
-   "rule_line": 12
-  },
-  {
-   "line": 20,
-   "template_line": 53,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-in-service-has-a-captain/join",
-   "rule_line": 12
-  },
-  {
-   "line": 21,
-   "template_line": 54,
-   "path": "/queries/1/wa",
-   "node": "rule/ship-in-service-has-a-captain/join",
-   "rule_line": 12
-  },
-  {
-   "line": 22,
-   "template_line": 87,
-   "path": "/",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 23,
-   "template_line": 160,
-   "path": "/queries/1",
-   "node": "rule/ship-in-service-has-a-captain/join",
-   "rule_line": 12
-  },
-  {
-   "line": 24,
-   "template_line": 175,
-   "path": "/queries/1/fields/1/source",
-   "node": "rule/ship-in-service-has-a-captain/join/field/1",
-   "rule_line": 9
-  },
-  {
-   "line": 25,
-   "template_line": 175,
-   "path": "/queries/1/fields/2/source",
-   "node": "rule/ship-in-service-has-a-captain/join/field/2",
-   "rule_line": 15
-  },
-  {
-   "line": 26,
-   "template_line": 179,
-   "path": "/queries/1/from/table",
-   "node": "rule/ship-in-service-has-a-captain/for",
-   "rule_line": 9
-  },
-  {
-   "line": 27,
-   "template_line": 187,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-in-service-has-a-captain/join",
-   "rule_line": 12
-  },
-  {
-   "line": 28,
-   "template_line": 189,
-   "path": "/queries/1/where/1/pre",
-   "node": "rule/ship-in-service-has-a-captain/when/1",
-   "rule_line": 11,
-   "param_rule_line": 8
-  },
-  {
-   "line": 29,
-   "template_line": 189,
-   "path": "/queries/1/where/2/pre",
-   "node": "rule/ship-in-service-has-a-captain/require",
-   "rule_line": 13
-  },
-  {
-   "line": 30,
-   "template_line": 189,
-   "path": "/queries/1/where/3/pre",
-   "node": "rule/ship-in-service-has-a-captain/require/where/1",
-   "rule_line": 14
-  },
-  {
-   "line": 31,
-   "template_line": 189,
-   "path": "/queries/1/where/4/pre",
-   "node": "rule/ship-in-service-has-a-captain/require/where/2",
-   "rule_line": 14
-  },
-  {
-   "line": 32,
-   "template_line": 189,
-   "path": "/queries/1/where/5/pre",
-   "node": "rule/ship-in-service-has-a-captain/require/where/3",
-   "rule_line": 14
-  },
-  {
-   "line": 33,
-   "template_line": 189,
-   "path": "/queries/1/where/6/pre",
-   "node": "rule/ship-in-service-has-a-captain/range",
-   "rule_line": 10
-  },
-  {
-   "line": 34,
-   "template_line": 191,
-   "path": "/queries/1",
-   "node": "rule/ship-in-service-has-a-captain/join",
-   "rule_line": 12
-  },
-  {
-   "line": 35,
-   "template_line": 193,
-   "path": "/queries/1/order/1/source",
-   "node": "rule/ship-in-service-has-a-captain/join/order/1",
-   "rule_line": 9
-  },
-  {
-   "line": 36,
-   "template_line": 304,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-in-service-has-a-captain/join",
-   "rule_line": 12
-  },
-  {
-   "line": 37,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/1/jref",
-   "node": "rule/ship-in-service-has-a-captain/alert/hole/1",
-   "rule_line": 15
-  },
-  {
-   "line": 38,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/2/value",
-   "node": "rule/ship-in-service-has-a-captain/alert/text/1",
-   "rule_line": 15
-  },
-  {
-   "line": 39,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/3/jref",
-   "node": "rule/ship-in-service-has-a-captain/alert/hole/2",
-   "rule_line": 15
-  },
-  {
-   "line": 40,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/4/value",
-   "node": "rule/ship-in-service-has-a-captain/alert/text/2",
-   "rule_line": 15
-  },
-  {
-   "line": 41,
-   "template_line": 385,
-   "path": "/queries/1",
-   "node": "rule/ship-in-service-has-a-captain/join",
-   "rule_line": 12
-  },
-  {
-   "line": 42,
-   "template_line": 387,
-   "path": "/queries/1",
-   "node": "rule/ship-in-service-has-a-captain/join",
-   "rule_line": 12
-  },
-  {
-   "line": 43,
-   "template_line": 439,
-   "path": "/",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  },
-  {
-   "line": 44,
-   "template_line": 505,
-   "path": "/",
-   "node": "rule/ship-in-service-has-a-captain",
-   "rule_line": 4
-  }
- ]
+  "format": "osd-trace/1",
+  "outputs": [
+    {
+      "file": "zcl_l2_ship_captain.clas.abap",
+      "lines": [
+        {
+          "line": 1,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 2,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/rule"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/title"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 3,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/class"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 4,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 5,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/range", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/range", "selector": "/field"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/range", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "lines": [6, 7],
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 8,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/range", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 9,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/param/active_status", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/param/active_status", "selector": "/default"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/param/active_status", "selector": "/ref"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/param/active_status", "selector": "/type_name"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "lines": [10, 12],
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 13,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/class"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 9}
+          ]
+        },
+        {
+          "line": 14,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 10}
+          ]
+        },
+        {
+          "line": 15,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/comment"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 11}
+          ]
+        },
+        {
+          "line": 16,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 17,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/1", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/1", "selector": "/column"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/1", "selector": "/name"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/1", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 18,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/2", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/2", "selector": "/column"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/2", "selector": "/name"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/2", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 19,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 20,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/itab"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 21,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/type"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/wa"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 22,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 12}
+          ]
+        },
+        {
+          "line": 23,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 24,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/1", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/1", "selector": "/name"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/1", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 25,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/2", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/2", "selector": "/name"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/field/2", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 26,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/for", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/for", "selector": "/alias"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/for", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 27,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/itab"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 5}
+          ]
+        },
+        {
+          "line": 28,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/when/1", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/when/1", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/when/1", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/when/1", "selector": "/op"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/when/1", "selector": "/pre"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/when/1", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 29,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require", "selector": "/pre"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require", "selector": "/text"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 30,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/1", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/1", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/1", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/1", "selector": "/op"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/1", "selector": "/pre"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/1", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 31,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/2", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/2", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/2", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/2", "selector": "/op"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/2", "selector": "/pre"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/2", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 32,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/3", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/3", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/3", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/3", "selector": "/op"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/3", "selector": "/post"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/3", "selector": "/pre"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/require/where/3", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 33,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/range", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/range", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/range", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/range", "selector": "/op"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/range", "selector": "/pre"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/range", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 34,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 35,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/order/1", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join/order/1", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 36,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/itab"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/wa"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 7}
+          ]
+        },
+        {
+          "line": 37,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/alert/hole/1", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/alert/hole/1", "selector": "/jref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 38,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/alert/text/1", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/alert/text/1", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 39,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/alert/hole/2", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/alert/hole/2", "selector": "/jref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 40,
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/alert/text/2", "selector": "/"},
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/alert/text/2", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "lines": [41, 42],
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain/join", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 8}
+          ]
+        },
+        {
+          "lines": [43, 44],
+          "sources": [
+            {"file": "src/l2demo/ship_captain.l2.yaml", "node": "rule/ship-in-service-has-a-captain", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 13}
+          ]
+        }
+      ]
+    }
+  ]
 }

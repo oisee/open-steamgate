@@ -1,0 +1,2014 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l2",
+  "generator_version": "0.7",
+  "lines": [
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 1
+        },
+        {
+          "invocation": 1,
+          "path": "/source",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/source"},
+          "template": "main",
+          "template_line": 1
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 1,
+      "node": "rule/ship-max-cargo",
+      "path": "/source",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 1
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/rule",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/rule"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/title",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/title"},
+          "template": "main",
+          "template_line": 2
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 2,
+      "node": "rule/ship-max-cargo",
+      "path": "/rule",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 2
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 3
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/class"},
+          "template": "main",
+          "template_line": 3
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 3,
+      "node": "rule/ship-max-cargo",
+      "path": "/class",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 3
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 4
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 4,
+      "node": "rule/ship-max-cargo",
+      "path": "/",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 4
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/range",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/range", "selector": "/"},
+          "template": "main",
+          "template_line": 6
+        },
+        {
+          "invocation": 1,
+          "path": "/range/field",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/range", "selector": "/field"},
+          "template": "main",
+          "template_line": 6
+        },
+        {
+          "invocation": 1,
+          "path": "/range/table",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/range", "selector": "/table"},
+          "template": "main",
+          "template_line": 6
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 5,
+      "node": "rule/ship-max-cargo/range",
+      "path": "/range/table",
+      "rule_line": 5,
+      "template": "main",
+      "template_line": 6
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 13
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 6,
+      "node": "rule/ship-max-cargo",
+      "path": "/",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 13
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 14
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 7,
+      "node": "rule/ship-max-cargo",
+      "path": "/",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 14
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/range",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/range", "selector": "/"},
+          "template": "main",
+          "template_line": 16
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 8,
+      "node": "rule/ship-max-cargo/range",
+      "path": "/range",
+      "rule_line": 5,
+      "template": "main",
+      "template_line": 16
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 26
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 9,
+      "node": "rule/ship-max-cargo",
+      "path": "/",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 26
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 42
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 10,
+      "node": "rule/ship-max-cargo",
+      "path": "/",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 42
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 43
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 11,
+      "node": "rule/ship-max-cargo",
+      "path": "/",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 43
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 44
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/class"},
+          "template": "main",
+          "template_line": 44
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 12,
+      "node": "rule/ship-max-cargo",
+      "path": "/class",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 44
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 45
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 13,
+      "node": "rule/ship-max-cargo",
+      "path": "/",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 45
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 46
+        },
+        {
+          "invocation": 1,
+          "path": "/comment",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/comment"},
+          "template": "main",
+          "template_line": 46
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 14,
+      "node": "rule/ship-max-cargo",
+      "path": "/comment",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 46
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/"},
+          "template": "main",
+          "template_line": 48
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/type",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/type"},
+          "template": "main",
+          "template_line": 48
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 15,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/type",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 48
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/1", "selector": "/"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1/column",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/1", "selector": "/column"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1/name",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/1", "selector": "/name"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1/table",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/1", "selector": "/table"},
+          "template": "main",
+          "template_line": 50
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 16,
+      "node": "rule/ship-max-cargo/join/field/1",
+      "path": "/queries/1/fields/1/name",
+      "rule_line": 4,
+      "template": "main",
+      "template_line": 50
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/2", "selector": "/"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2/column",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/2", "selector": "/column"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2/name",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/2", "selector": "/name"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2/table",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/2", "selector": "/table"},
+          "template": "main",
+          "template_line": 50
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 17,
+      "node": "rule/ship-max-cargo/join/field/2",
+      "path": "/queries/1/fields/2/name",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 50
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/"},
+          "template": "main",
+          "template_line": 52
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/type",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/type"},
+          "template": "main",
+          "template_line": 52
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 18,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/type",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 52
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/"},
+          "template": "main",
+          "template_line": 53
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/itab",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/itab"},
+          "template": "main",
+          "template_line": 53
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/type",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/type"},
+          "template": "main",
+          "template_line": 53
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 19,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/itab",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 53
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/"},
+          "template": "main",
+          "template_line": 54
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/type",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/type"},
+          "template": "main",
+          "template_line": 54
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/wa",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/wa"},
+          "template": "main",
+          "template_line": 54
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 20,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/wa",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 54
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/"},
+          "template": "main",
+          "template_line": 56
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/type",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/type"},
+          "template": "main",
+          "template_line": 56
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 21,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/type",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 56
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 87
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 22,
+      "node": "rule/ship-max-cargo",
+      "path": "/",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 87
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 99
+        },
+        {
+          "invocation": 1,
+          "path": "/aggregate/accumulator_type",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/accumulator_type"},
+          "template": "main",
+          "template_line": 99
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 23,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/aggregate/accumulator_type",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 99
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 100
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 24,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 100
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 101
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 25,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 101
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 106
+        },
+        {
+          "invocation": 1,
+          "path": "/aggregate/decimals",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/decimals"},
+          "template": "main",
+          "template_line": 106
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 26,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/aggregate/decimals",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 106
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 108
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 27,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 108
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/"},
+          "template": "main",
+          "template_line": 160
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 28,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 160
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/1", "selector": "/"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1/name",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/1", "selector": "/name"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1/source",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/1", "selector": "/source"},
+          "template": "main",
+          "template_line": 175
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 29,
+      "node": "rule/ship-max-cargo/join/field/1",
+      "path": "/queries/1/fields/1/source",
+      "rule_line": 4,
+      "template": "main",
+      "template_line": 175
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/2", "selector": "/"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2/name",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/2", "selector": "/name"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2/source",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/field/2", "selector": "/source"},
+          "template": "main",
+          "template_line": 175
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 30,
+      "node": "rule/ship-max-cargo/join/field/2",
+      "path": "/queries/1/fields/2/source",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 175
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/from",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/for", "selector": "/"},
+          "template": "main",
+          "template_line": 179
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/from/alias",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/for", "selector": "/alias"},
+          "template": "main",
+          "template_line": 179
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/from/table",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/for", "selector": "/table"},
+          "template": "main",
+          "template_line": 179
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 31,
+      "node": "rule/ship-max-cargo/for",
+      "path": "/queries/1/from/table",
+      "rule_line": 4,
+      "template": "main",
+      "template_line": 179
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 182
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/alias",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/alias"},
+          "template": "main",
+          "template_line": 182
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/table",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/table"},
+          "template": "main",
+          "template_line": 182
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 32,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/joins/1/table",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 182
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/on/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/where/1", "selector": "/"},
+          "template": "main",
+          "template_line": 184
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/on/1/lhs",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/where/1", "selector": "/lhs"},
+          "template": "main",
+          "template_line": 184
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/on/1/op",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/where/1", "selector": "/op"},
+          "template": "main",
+          "template_line": 184
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/on/1/sref",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/where/1", "selector": "/sref"},
+          "template": "main",
+          "template_line": 184
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 33,
+      "node": "rule/ship-max-cargo/limit/where/1",
+      "path": "/queries/1/joins/1/on/1/lhs",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 184
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/"},
+          "template": "main",
+          "template_line": 187
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/itab",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/itab"},
+          "template": "main",
+          "template_line": 187
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 34,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/itab",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 187
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/range", "selector": "/"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1/is_cmp",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/range", "selector": "/is_cmp"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1/lhs",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/range", "selector": "/lhs"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1/op",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/range", "selector": "/op"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1/pre",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/range", "selector": "/pre"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1/sref",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/range", "selector": "/sref"},
+          "template": "main",
+          "template_line": 189
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 35,
+      "node": "rule/ship-max-cargo/range",
+      "path": "/queries/1/where/1/pre",
+      "rule_line": 5,
+      "template": "main",
+      "template_line": 189
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/"},
+          "template": "main",
+          "template_line": 191
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 36,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 191
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/order/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/order/1", "selector": "/"},
+          "template": "main",
+          "template_line": 193
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/order/1/source",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join/order/1", "selector": "/source"},
+          "template": "main",
+          "template_line": 193
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 37,
+      "node": "rule/ship-max-cargo/join/order/1",
+      "path": "/queries/1/order/1/source",
+      "rule_line": 4,
+      "template": "main",
+      "template_line": 193
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/itab",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/itab"},
+          "template": "main",
+          "template_line": 302
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/"},
+          "template": "main",
+          "template_line": 302
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/sort_by",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/sort_by"},
+          "template": "main",
+          "template_line": 302
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 38,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/itab",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 302
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/"},
+          "template": "main",
+          "template_line": 304
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/itab",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/itab"},
+          "template": "main",
+          "template_line": 304
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/wa",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/wa"},
+          "template": "main",
+          "template_line": 304
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 39,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/itab",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 304
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/key_change",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/key_change"},
+          "template": "main",
+          "template_line": 314
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 314
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 40,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/key_change",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 314
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 315
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/op",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/op"},
+          "template": "main",
+          "template_line": 315
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/value",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/value"},
+          "template": "main",
+          "template_line": 315
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 41,
+      "node": "rule/ship-max-cargo/limit/more_than",
+      "path": "/queries/1/limit/op",
+      "rule_line": 9,
+      "template": "main",
+      "template_line": 315
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 333
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 42,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 333
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 334
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 43,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 334
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 335
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 44,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 335
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 336
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 45,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 336
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 337
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 46,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 337
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 338
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 47,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 338
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 339
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 48,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 339
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 340
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 49,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 340
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 341
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 50,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 341
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 342
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 51,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 342
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/hole/1", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/1/jref",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/hole/1", "selector": "/jref"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 52,
+      "node": "rule/ship-max-cargo/alert/hole/1",
+      "path": "/queries/1/alert_parts/1/jref",
+      "rule_line": 10,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/2",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/text/1", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/2/value",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/text/1", "selector": "/value"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 53,
+      "node": "rule/ship-max-cargo/alert/text/1",
+      "path": "/queries/1/alert_parts/2/value",
+      "rule_line": 10,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/3",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/max", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/3/jref",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/max", "selector": "/jref"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 54,
+      "node": "rule/ship-max-cargo/alert/max",
+      "path": "/queries/1/alert_parts/3/jref",
+      "rule_line": 10,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/4",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/text/2", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/4/value",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/text/2", "selector": "/value"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 55,
+      "node": "rule/ship-max-cargo/alert/text/2",
+      "path": "/queries/1/alert_parts/4/value",
+      "rule_line": 10,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 361
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 56,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 361
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 362
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 57,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 362
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 363
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 58,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 363
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 364
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 59,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 364
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 365
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 60,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 365
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate/is_max",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/is_max"},
+          "template": "main",
+          "template_line": 375
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate/result_field",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/result_field"},
+          "template": "main",
+          "template_line": 375
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/wa",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/wa"},
+          "template": "main",
+          "template_line": 375
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 61,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/wa",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 375
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate/is_max",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/is_max"},
+          "template": "main",
+          "template_line": 376
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate/result_field",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/result_field"},
+          "template": "main",
+          "template_line": 376
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/wa",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/wa"},
+          "template": "main",
+          "template_line": 376
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 62,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/wa",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 376
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate/is_max",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/is_max"},
+          "template": "main",
+          "template_line": 377
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 63,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate/is_max",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 377
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 379
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 64,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 379
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 380
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/wa",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/wa"},
+          "template": "main",
+          "template_line": 380
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 65,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1/wa",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 380
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/join", "selector": "/"},
+          "template": "main",
+          "template_line": 387
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 66,
+      "node": "rule/ship-max-cargo/join",
+      "path": "/queries/1",
+      "rule_line": 6,
+      "template": "main",
+      "template_line": 387
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 396
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/op",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/op"},
+          "template": "main",
+          "template_line": 396
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/value",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/value"},
+          "template": "main",
+          "template_line": 396
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 67,
+      "node": "rule/ship-max-cargo/limit/more_than",
+      "path": "/queries/1/limit/op",
+      "rule_line": 9,
+      "template": "main",
+      "template_line": 396
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 414
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 68,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 414
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 415
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 69,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 415
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 416
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 70,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 416
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 417
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 71,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 417
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 418
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 72,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 418
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 419
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 73,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 419
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 420
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 74,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 420
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 421
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 75,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 421
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 422
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 76,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 422
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit/aggregate",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/max", "selector": "/"},
+          "template": "main",
+          "template_line": 423
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 77,
+      "node": "rule/ship-max-cargo/limit/max",
+      "path": "/queries/1/limit/aggregate",
+      "rule_line": 7,
+      "template": "main",
+      "template_line": 423
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/1",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/hole/1", "selector": "/"},
+          "template": "main",
+          "template_line": 428
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/1/jref",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/hole/1", "selector": "/jref"},
+          "template": "main",
+          "template_line": 428
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 78,
+      "node": "rule/ship-max-cargo/alert/hole/1",
+      "path": "/queries/1/alert_parts/1/jref",
+      "rule_line": 10,
+      "template": "main",
+      "template_line": 428
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/2",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/text/1", "selector": "/"},
+          "template": "main",
+          "template_line": 428
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/2/value",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/text/1", "selector": "/value"},
+          "template": "main",
+          "template_line": 428
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 79,
+      "node": "rule/ship-max-cargo/alert/text/1",
+      "path": "/queries/1/alert_parts/2/value",
+      "rule_line": 10,
+      "template": "main",
+      "template_line": 428
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/3",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/max", "selector": "/"},
+          "template": "main",
+          "template_line": 428
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/3/jref",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/max", "selector": "/jref"},
+          "template": "main",
+          "template_line": 428
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 80,
+      "node": "rule/ship-max-cargo/alert/max",
+      "path": "/queries/1/alert_parts/3/jref",
+      "rule_line": 10,
+      "template": "main",
+      "template_line": 428
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/4",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/text/2", "selector": "/"},
+          "template": "main",
+          "template_line": 428
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/4/value",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/alert/text/2", "selector": "/value"},
+          "template": "main",
+          "template_line": 428
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 81,
+      "node": "rule/ship-max-cargo/alert/text/2",
+      "path": "/queries/1/alert_parts/4/value",
+      "rule_line": 10,
+      "template": "main",
+      "template_line": 428
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/"},
+          "template": "main",
+          "template_line": 430
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 82,
+      "node": "rule/ship-max-cargo/limit/more_than",
+      "path": "/queries/1/limit",
+      "rule_line": 9,
+      "template": "main",
+      "template_line": 430
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/limit",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo/limit/more_than", "selector": "/"},
+          "template": "main",
+          "template_line": 431
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 83,
+      "node": "rule/ship-max-cargo/limit/more_than",
+      "path": "/queries/1/limit",
+      "rule_line": 9,
+      "template": "main",
+      "template_line": 431
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 439
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 84,
+      "node": "rule/ship-max-cargo",
+      "path": "/",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 439
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_max_cargo.l2.yaml", "node": "rule/ship-max-cargo", "selector": "/"},
+          "template": "main",
+          "template_line": 505
+        }
+      ],
+      "file": "zcl_l2_ship_max_cargo.clas.abap",
+      "line": 85,
+      "node": "rule/ship-max-cargo",
+      "path": "/",
+      "rule_line": 1,
+      "template": "main",
+      "template_line": 505
+    }
+  ],
+  "model": "sha256:d483f71ccc12072af345698b9cd0fd355fa1752136a847190353e49f07ec5e83",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "zcl_l2_ship_max_cargo.clas.abap", "hash": "sha256:51ed870bf4a9a3c335c904fcd73dce0dcd1c634c5ef859ba8fdd47bb0fc990b2"}
+  ],
+  "rule": "src/l2demo/ship_max_cargo.l2.yaml",
+  "template": "recipes/l2-check/template.tpl",
+  "templates": {"recipes/l2-check/template.tpl": "sha256:9e5dc7ba26806efb39c4220085dde8aec6a912b5f85cac3c265637b9cd91f9c1"}
+}

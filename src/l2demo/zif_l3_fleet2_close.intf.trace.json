@@ -1,57 +1,50 @@
 {
- "generator": "dsl-l3",
- "set": "src/l2demo/fleet2.l3.yaml",
- "template": "recipes/l3-ports/iface-autoclose.tpl",
- "model": "sha256:89d438d2236551994a7c2f8d0ebe52971989cec86fd090a098ca34338896e8e1",
- "lines": [
-  {
-   "line": 1,
-   "template_line": 1,
-   "path": "/source",
-   "node": "set/fleet2/port/close",
-   "set_line": 63
-  },
-  {
-   "line": 2,
-   "template_line": 2,
-   "path": "/port",
-   "node": "set/fleet2/port/close",
-   "set_line": 63
-  },
-  {
-   "line": 3,
-   "template_line": 3,
-   "path": "/iface",
-   "node": "set/fleet2/port/close",
-   "set_line": 63
-  },
-  {
-   "line": 4,
-   "template_line": 4,
-   "path": "/",
-   "node": "set/fleet2/port/close",
-   "set_line": 63
-  },
-  {
-   "line": 5,
-   "template_line": 5,
-   "path": "/",
-   "node": "set/fleet2/port/close",
-   "set_line": 63
-  },
-  {
-   "line": 6,
-   "template_line": 6,
-   "path": "/",
-   "node": "set/fleet2/port/close",
-   "set_line": 63
-  },
-  {
-   "line": 7,
-   "template_line": 7,
-   "path": "/",
-   "node": "set/fleet2/port/close",
-   "set_line": 63
-  }
- ]
+  "format": "osd-trace/1",
+  "outputs": [
+    {
+      "file": "zif_l3_fleet2_close.intf.abap",
+      "lines": [
+        {
+          "line": 1,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-autoclose.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 2,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/port"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/set"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-autoclose.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 3,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/iface"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-autoclose.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "lines": [4, 7],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-autoclose.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        }
+      ]
+    }
+  ]
 }

@@ -1,0 +1,2493 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l2",
+  "generator_version": "0.7",
+  "lines": [
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 1
+        },
+        {
+          "invocation": 1,
+          "path": "/source",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/source"},
+          "template": "main",
+          "template_line": 1
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 1,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/source",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 1
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/rule",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/rule"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/title",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/title"},
+          "template": "main",
+          "template_line": 2
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 2,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/rule",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 2
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 3
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/class"},
+          "template": "main",
+          "template_line": 3
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 3,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/class",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 3
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 4
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 4,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 4
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/range",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/"},
+          "template": "main",
+          "template_line": 6
+        },
+        {
+          "invocation": 1,
+          "path": "/range/field",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/field"},
+          "template": "main",
+          "template_line": 6
+        },
+        {
+          "invocation": 1,
+          "path": "/range/table",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/table"},
+          "template": "main",
+          "template_line": 6
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 5,
+      "node": "rule/ship-restricted-status-no-voyage/range",
+      "path": "/range/table",
+      "rule_line": 15,
+      "template": "main",
+      "template_line": 6
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/is_selopt",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/is_selopt"},
+          "template": "main",
+          "template_line": 10
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/selopt_type",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/selopt_type"},
+          "template": "main",
+          "template_line": 10
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/type_name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/type_name"},
+          "template": "main",
+          "template_line": 10
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 6,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/selopt_type",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 10
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/is_selopt",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/is_selopt"},
+          "template": "main",
+          "template_line": 10
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/selopt_type",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/selopt_type"},
+          "template": "main",
+          "template_line": 10
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/type_name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/type_name"},
+          "template": "main",
+          "template_line": 10
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 7,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/selopt_type",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 10
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 13
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 8,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 13
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 14
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 9,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 14
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/range",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/"},
+          "template": "main",
+          "template_line": 16
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 10,
+      "node": "rule/ship-restricted-status-no-voyage/range",
+      "path": "/range",
+      "rule_line": 15,
+      "template": "main",
+      "template_line": 16
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/is_selopt",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/is_selopt"},
+          "template": "main",
+          "template_line": 20
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/ref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/ref"},
+          "template": "main",
+          "template_line": 20
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/selopt_type",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/selopt_type"},
+          "template": "main",
+          "template_line": 20
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 11,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/ref",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 20
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/is_selopt",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/is_selopt"},
+          "template": "main",
+          "template_line": 20
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/ref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/ref"},
+          "template": "main",
+          "template_line": 20
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/selopt_type",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/selopt_type"},
+          "template": "main",
+          "template_line": 20
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 12,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/ref",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 20
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 26
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 13,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 26
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 42
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 14,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 42
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 43
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 15,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 43
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 44
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/class"},
+          "template": "main",
+          "template_line": 44
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 16,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/class",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 44
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 45
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 17,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 45
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 46
+        },
+        {
+          "invocation": 1,
+          "path": "/comment",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/comment"},
+          "template": "main",
+          "template_line": 46
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 18,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/comment",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 46
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+          "template": "main",
+          "template_line": 48
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/type",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/type"},
+          "template": "main",
+          "template_line": 48
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 19,
+      "node": "rule/ship-restricted-status-no-voyage/join",
+      "path": "/queries/1/type",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 48
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1/column",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/column"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1/name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/name"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1/table",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/table"},
+          "template": "main",
+          "template_line": 50
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 20,
+      "node": "rule/ship-restricted-status-no-voyage/join/field/1",
+      "path": "/queries/1/fields/1/name",
+      "rule_line": 14,
+      "template": "main",
+      "template_line": 50
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2/column",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/column"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2/name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/name"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2/table",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/table"},
+          "template": "main",
+          "template_line": 50
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 21,
+      "node": "rule/ship-restricted-status-no-voyage/join/field/2",
+      "path": "/queries/1/fields/2/name",
+      "rule_line": 18,
+      "template": "main",
+      "template_line": 50
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/3",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/3/column",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/column"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/3/name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/name"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/3/table",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/table"},
+          "template": "main",
+          "template_line": 50
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 22,
+      "node": "rule/ship-restricted-status-no-voyage/join/field/3",
+      "path": "/queries/1/fields/3/name",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 50
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/4",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/4/column",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/column"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/4/name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/name"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/4/table",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/table"},
+          "template": "main",
+          "template_line": 50
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 23,
+      "node": "rule/ship-restricted-status-no-voyage/join/field/4",
+      "path": "/queries/1/fields/4/name",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 50
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/5",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/5/column",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/column"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/5/name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/name"},
+          "template": "main",
+          "template_line": 50
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/5/table",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/table"},
+          "template": "main",
+          "template_line": 50
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 24,
+      "node": "rule/ship-restricted-status-no-voyage/join/field/5",
+      "path": "/queries/1/fields/5/name",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 50
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+          "template": "main",
+          "template_line": 52
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/type",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/type"},
+          "template": "main",
+          "template_line": 52
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 25,
+      "node": "rule/ship-restricted-status-no-voyage/join",
+      "path": "/queries/1/type",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 52
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+          "template": "main",
+          "template_line": 53
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/itab",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/itab"},
+          "template": "main",
+          "template_line": 53
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/type",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/type"},
+          "template": "main",
+          "template_line": 53
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 26,
+      "node": "rule/ship-restricted-status-no-voyage/join",
+      "path": "/queries/1/itab",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 53
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+          "template": "main",
+          "template_line": 54
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/type",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/type"},
+          "template": "main",
+          "template_line": 54
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/wa",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/wa"},
+          "template": "main",
+          "template_line": 54
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 27,
+      "node": "rule/ship-restricted-status-no-voyage/join",
+      "path": "/queries/1/wa",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 54
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 87
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 28,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 87
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 113
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/selopt_type",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/selopt_type"},
+          "template": "main",
+          "template_line": 113
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/use",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/use"},
+          "template": "main",
+          "template_line": 113
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 29,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/use",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 113
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 114
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 114
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/use",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/use"},
+          "template": "main",
+          "template_line": 114
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 30,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 114
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 113
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/selopt_type",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/selopt_type"},
+          "template": "main",
+          "template_line": 113
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/use",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/use"},
+          "template": "main",
+          "template_line": 113
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 31,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/use",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 113
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 114
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+          "template": "main",
+          "template_line": 114
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/use",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/use"},
+          "template": "main",
+          "template_line": 114
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 32,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/row",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 114
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 119
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/ref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/ref"},
+          "template": "main",
+          "template_line": 119
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 33,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/ref",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 119
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 120
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/ref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/ref"},
+          "template": "main",
+          "template_line": 120
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/use",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/use"},
+          "template": "main",
+          "template_line": 120
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 34,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/use",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 120
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 121
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 35,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/has_default",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 121
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/"},
+          "template": "main",
+          "template_line": 123
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 123
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 36,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 123
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/"},
+          "template": "main",
+          "template_line": 124
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/1/sign",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/sign"},
+          "template": "main",
+          "template_line": 124
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 124
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 37,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 124
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/"},
+          "template": "main",
+          "template_line": 125
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/1/option",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/option"},
+          "template": "main",
+          "template_line": 125
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 125
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 38,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 125
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/"},
+          "template": "main",
+          "template_line": 126
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/1/low",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/low"},
+          "template": "main",
+          "template_line": 126
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 126
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 39,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 126
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/"},
+          "template": "main",
+          "template_line": 130
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 130
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/use",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/use"},
+          "template": "main",
+          "template_line": 130
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 40,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 130
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/2",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/"},
+          "template": "main",
+          "template_line": 123
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 123
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 41,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 123
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/2",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/"},
+          "template": "main",
+          "template_line": 124
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/2/sign",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/sign"},
+          "template": "main",
+          "template_line": 124
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 124
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 42,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 124
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/2",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/"},
+          "template": "main",
+          "template_line": 125
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/2/option",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/option"},
+          "template": "main",
+          "template_line": 125
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 125
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 43,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 125
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/2",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/"},
+          "template": "main",
+          "template_line": 126
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/2/low",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/low"},
+          "template": "main",
+          "template_line": 126
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 126
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 44,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 126
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/default_rows/2",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/"},
+          "template": "main",
+          "template_line": 130
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+          "template": "main",
+          "template_line": 130
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/use",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/use"},
+          "template": "main",
+          "template_line": 130
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 45,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/row",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 130
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 132
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 46,
+      "node": "rule/ship-restricted-status-no-voyage/param/restricted",
+      "path": "/params/1/has_default",
+      "rule_line": 12,
+      "template": "main",
+      "template_line": 132
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 119
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/ref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/ref"},
+          "template": "main",
+          "template_line": 119
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 47,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/ref",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 119
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 120
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/ref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/ref"},
+          "template": "main",
+          "template_line": 120
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/use",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/use"},
+          "template": "main",
+          "template_line": 120
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 48,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/use",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 120
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 121
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 49,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/has_default",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 121
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/default_rows/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/"},
+          "template": "main",
+          "template_line": 123
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+          "template": "main",
+          "template_line": 123
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 50,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/row",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 123
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/default_rows/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/"},
+          "template": "main",
+          "template_line": 124
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/default_rows/1/sign",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/sign"},
+          "template": "main",
+          "template_line": 124
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+          "template": "main",
+          "template_line": 124
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 51,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/row",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 124
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/default_rows/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/"},
+          "template": "main",
+          "template_line": 125
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/default_rows/1/option",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/option"},
+          "template": "main",
+          "template_line": 125
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+          "template": "main",
+          "template_line": 125
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 52,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/row",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 125
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/default_rows/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/"},
+          "template": "main",
+          "template_line": 126
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/default_rows/1/low",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/low"},
+          "template": "main",
+          "template_line": 126
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+          "template": "main",
+          "template_line": 126
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 53,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/row",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 126
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/default_rows/1/high",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/high"},
+          "template": "main",
+          "template_line": 128
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+          "template": "main",
+          "template_line": 128
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 54,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/row",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 128
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/default_rows/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/"},
+          "template": "main",
+          "template_line": 130
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/row",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+          "template": "main",
+          "template_line": 130
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/use",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/use"},
+          "template": "main",
+          "template_line": 130
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 55,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/row",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 130
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/has_default",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"},
+          "template": "main",
+          "template_line": 132
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 56,
+      "node": "rule/ship-restricted-status-no-voyage/param/exempt",
+      "path": "/params/2/has_default",
+      "rule_line": 13,
+      "template": "main",
+      "template_line": 132
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+          "template": "main",
+          "template_line": 160
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 57,
+      "node": "rule/ship-restricted-status-no-voyage/join",
+      "path": "/queries/1",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 160
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1/name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/name"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/1/source",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/source"},
+          "template": "main",
+          "template_line": 175
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 58,
+      "node": "rule/ship-restricted-status-no-voyage/join/field/1",
+      "path": "/queries/1/fields/1/source",
+      "rule_line": 14,
+      "template": "main",
+      "template_line": 175
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2/name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/name"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/2/source",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/source"},
+          "template": "main",
+          "template_line": 175
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 59,
+      "node": "rule/ship-restricted-status-no-voyage/join/field/2",
+      "path": "/queries/1/fields/2/source",
+      "rule_line": 18,
+      "template": "main",
+      "template_line": 175
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/3",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/3/name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/name"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/3/source",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/source"},
+          "template": "main",
+          "template_line": 175
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 60,
+      "node": "rule/ship-restricted-status-no-voyage/join/field/3",
+      "path": "/queries/1/fields/3/source",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 175
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/4",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/4/name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/name"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/4/source",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/source"},
+          "template": "main",
+          "template_line": 175
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 61,
+      "node": "rule/ship-restricted-status-no-voyage/join/field/4",
+      "path": "/queries/1/fields/4/source",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 175
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/5",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/5/name",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/name"},
+          "template": "main",
+          "template_line": 175
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/fields/5/source",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/source"},
+          "template": "main",
+          "template_line": 175
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 62,
+      "node": "rule/ship-restricted-status-no-voyage/join/field/5",
+      "path": "/queries/1/fields/5/source",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 175
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/from",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/for", "selector": "/"},
+          "template": "main",
+          "template_line": 179
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/from/alias",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/for", "selector": "/alias"},
+          "template": "main",
+          "template_line": 179
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/from/table",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/for", "selector": "/table"},
+          "template": "main",
+          "template_line": 179
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 63,
+      "node": "rule/ship-restricted-status-no-voyage/for",
+      "path": "/queries/1/from/table",
+      "rule_line": 14,
+      "template": "main",
+      "template_line": 179
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid", "selector": "/"},
+          "template": "main",
+          "template_line": 182
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/alias",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid", "selector": "/alias"},
+          "template": "main",
+          "template_line": 182
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/table",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid", "selector": "/table"},
+          "template": "main",
+          "template_line": 182
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 64,
+      "node": "rule/ship-restricted-status-no-voyage/forbid",
+      "path": "/queries/1/joins/1/table",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 182
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/on/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/1", "selector": "/"},
+          "template": "main",
+          "template_line": 184
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/on/1/lhs",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/1", "selector": "/lhs"},
+          "template": "main",
+          "template_line": 184
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/on/1/op",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/1", "selector": "/op"},
+          "template": "main",
+          "template_line": 184
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/joins/1/on/1/sref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/1", "selector": "/sref"},
+          "template": "main",
+          "template_line": 184
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 65,
+      "node": "rule/ship-restricted-status-no-voyage/forbid/where/1",
+      "path": "/queries/1/joins/1/on/1/lhs",
+      "rule_line": 19,
+      "template": "main",
+      "template_line": 184
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+          "template": "main",
+          "template_line": 187
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/itab",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/itab"},
+          "template": "main",
+          "template_line": 187
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 66,
+      "node": "rule/ship-restricted-status-no-voyage/join",
+      "path": "/queries/1/itab",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 187
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1/is_cmp",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/is_cmp"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1/lhs",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/lhs"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1/op",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/op"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1/pre",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/pre"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/1/sref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/sref"},
+          "template": "main",
+          "template_line": 189
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 67,
+      "node": "rule/ship-restricted-status-no-voyage/when/1",
+      "param_rule_line": 12,
+      "path": "/queries/1/where/1/pre",
+      "rule_line": 16,
+      "template": "main",
+      "template_line": 189
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/2",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/2/is_cmp",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/is_cmp"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/2/lhs",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/lhs"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/2/op",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/op"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/2/pre",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/pre"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/2/sref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/sref"},
+          "template": "main",
+          "template_line": 189
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 68,
+      "node": "rule/ship-restricted-status-no-voyage/when/2",
+      "param_rule_line": 13,
+      "path": "/queries/1/where/2/pre",
+      "rule_line": 16,
+      "template": "main",
+      "template_line": 189
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/3",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/3/is_cmp",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/is_cmp"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/3/lhs",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/lhs"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/3/op",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/op"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/3/pre",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/pre"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/3/sref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/sref"},
+          "template": "main",
+          "template_line": 189
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 69,
+      "node": "rule/ship-restricted-status-no-voyage/forbid/where/2",
+      "path": "/queries/1/where/3/pre",
+      "rule_line": 19,
+      "template": "main",
+      "template_line": 189
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/4",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/4/is_cmp",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/is_cmp"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/4/lhs",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/lhs"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/4/op",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/op"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/4/pre",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/pre"},
+          "template": "main",
+          "template_line": 189
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/where/4/sref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/sref"},
+          "template": "main",
+          "template_line": 189
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 70,
+      "node": "rule/ship-restricted-status-no-voyage/range",
+      "path": "/queries/1/where/4/pre",
+      "rule_line": 15,
+      "template": "main",
+      "template_line": 189
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+          "template": "main",
+          "template_line": 191
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 71,
+      "node": "rule/ship-restricted-status-no-voyage/join",
+      "path": "/queries/1",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 191
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/order/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/order/1", "selector": "/"},
+          "template": "main",
+          "template_line": 193
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/order/1/source",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/order/1", "selector": "/source"},
+          "template": "main",
+          "template_line": 193
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 72,
+      "node": "rule/ship-restricted-status-no-voyage/join/order/1",
+      "path": "/queries/1/order/1/source",
+      "rule_line": 14,
+      "template": "main",
+      "template_line": 193
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/order/2",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/order/2", "selector": "/"},
+          "template": "main",
+          "template_line": 193
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/order/2/source",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/order/2", "selector": "/source"},
+          "template": "main",
+          "template_line": 193
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 73,
+      "node": "rule/ship-restricted-status-no-voyage/join/order/2",
+      "path": "/queries/1/order/2/source",
+      "rule_line": 18,
+      "template": "main",
+      "template_line": 193
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+          "template": "main",
+          "template_line": 304
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/itab",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/itab"},
+          "template": "main",
+          "template_line": 304
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/wa",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/wa"},
+          "template": "main",
+          "template_line": 304
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 74,
+      "node": "rule/ship-restricted-status-no-voyage/join",
+      "path": "/queries/1/itab",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 304
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/1", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/1/jref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/1", "selector": "/jref"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 75,
+      "node": "rule/ship-restricted-status-no-voyage/alert/hole/1",
+      "path": "/queries/1/alert_parts/1/jref",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/2",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/1", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/2/value",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/1", "selector": "/value"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 76,
+      "node": "rule/ship-restricted-status-no-voyage/alert/text/1",
+      "path": "/queries/1/alert_parts/2/value",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/3",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/2", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/3/jref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/2", "selector": "/jref"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 77,
+      "node": "rule/ship-restricted-status-no-voyage/alert/hole/2",
+      "path": "/queries/1/alert_parts/3/jref",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/4",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/2", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/4/value",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/2", "selector": "/value"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 78,
+      "node": "rule/ship-restricted-status-no-voyage/alert/text/2",
+      "path": "/queries/1/alert_parts/4/value",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/5",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/3", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/5/jref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/3", "selector": "/jref"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 79,
+      "node": "rule/ship-restricted-status-no-voyage/alert/hole/3",
+      "path": "/queries/1/alert_parts/5/jref",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/6",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/3", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/6/value",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/3", "selector": "/value"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 80,
+      "node": "rule/ship-restricted-status-no-voyage/alert/text/3",
+      "path": "/queries/1/alert_parts/6/value",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/7",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/4", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/7/jref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/4", "selector": "/jref"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 81,
+      "node": "rule/ship-restricted-status-no-voyage/alert/hole/4",
+      "path": "/queries/1/alert_parts/7/jref",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/8",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/4", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/8/value",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/4", "selector": "/value"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 82,
+      "node": "rule/ship-restricted-status-no-voyage/alert/text/4",
+      "path": "/queries/1/alert_parts/8/value",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/9",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/5", "selector": "/"},
+          "template": "main",
+          "template_line": 348
+        },
+        {
+          "invocation": 1,
+          "path": "/queries/1/alert_parts/9/jref",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/5", "selector": "/jref"},
+          "template": "main",
+          "template_line": 348
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 83,
+      "node": "rule/ship-restricted-status-no-voyage/alert/hole/5",
+      "path": "/queries/1/alert_parts/9/jref",
+      "rule_line": 20,
+      "template": "main",
+      "template_line": 348
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+          "template": "main",
+          "template_line": 385
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 84,
+      "node": "rule/ship-restricted-status-no-voyage/join",
+      "path": "/queries/1",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 385
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/queries/1",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+          "template": "main",
+          "template_line": 387
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 85,
+      "node": "rule/ship-restricted-status-no-voyage/join",
+      "path": "/queries/1",
+      "rule_line": 17,
+      "template": "main",
+      "template_line": 387
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 439
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 86,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 439
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+          "template": "main",
+          "template_line": 505
+        }
+      ],
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "line": 87,
+      "node": "rule/ship-restricted-status-no-voyage",
+      "path": "/",
+      "rule_line": 8,
+      "template": "main",
+      "template_line": 505
+    }
+  ],
+  "model": "sha256:18006270e7dcddf8c40bc565abb3af570fa4cd132647d3710090252ae99418cd",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "zcl_l2_ship_restricted.clas.abap", "hash": "sha256:8986994cd94d788cf35882735ce5ba5d904e530978a269d239c18f065d59ed12"}
+  ],
+  "rule": "src/l2demo/ship_restricted_status.l2.yaml",
+  "template": "recipes/l2-check/template.tpl",
+  "templates": {"recipes/l2-check/template.tpl": "sha256:9e5dc7ba26806efb39c4220085dde8aec6a912b5f85cac3c265637b9cd91f9c1"}
+}

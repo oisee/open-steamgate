@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Render or compare SAMC/SAPC XML from an L1 JSON model. SAMC is byte-identical with abapGit's serialisation (A4H capture), BOM included.
+import {convertTrace, legacyTrace, legacyEntries, traceArgs} from "./dsl-trace.mjs";
 import {readFileSync, writeFileSync} from "node:fs";
-import {join} from "node:path";
+import {basename, join} from "node:path";
 import {pathToFileURL} from "node:url";
 import {XMLValidator} from "fast-xml-parser";
 import {renderWithEngine} from "./dsl-build.mjs";
@@ -93,11 +94,14 @@ async function main(args) {
   } else if (rest.length === 0) process.stdout.write(rendered.text);
   else if (rest.length === 2 && rest[0] === "--out") {
     writeFileSync(rest[1], rendered.text);
-    writeFileSync(`${rest[1]}.trace.json`, `${JSON.stringify({generator: "dsl-daemons", template: "template.tpl", model: file, lines: rendered.trace}, null, 2)}\n`);
+    const old = {generator: "dsl-daemons", template: "template.tpl", model: file, lines: rendered.trace};
+    const pair = convertTrace(old, {[basename(rest[1])]: rendered.text}, {model: rendered.model, recipe: `recipes/${rendered.model.kind}-xml/template.tpl`});
+    writeFileSync(`${rest[1]}.trace.json`, legacyTrace() ? `${JSON.stringify({...old,lines:legacyEntries(old.lines)}, null, 2)}\n` : pair.trace);
+    if (!legacyTrace()) writeFileSync(`${rest[1]}.trace.meta.json`, pair.meta);
   } else throw new Error("render accepts only --out <file>");
   return 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.argv.slice(2)).then((code) => { process.exitCode = code; }, (error) => { console.error(error.message); process.exitCode = 2; });
+  main(traceArgs(process.argv.slice(2))).then((code) => { process.exitCode = code; }, (error) => { console.error(error.message); process.exitCode = 2; });
 }

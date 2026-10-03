@@ -1,0 +1,520 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l3",
+  "generator_version": "0.7",
+  "lines": [
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 1
+        },
+        {
+          "invocation": 1,
+          "path": "/source",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/source"},
+          "template": "main",
+          "template_line": 1
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 1,
+      "node": "set/fleet2",
+      "path": "/source",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 1
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/set",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/set"},
+          "template": "main",
+          "template_line": 2
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 2,
+      "node": "set/fleet2",
+      "path": "/set",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 2
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 3
+        },
+        {
+          "invocation": 1,
+          "path": "/exception",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/exception"},
+          "template": "main",
+          "template_line": 3
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 3,
+      "node": "set/fleet2",
+      "path": "/exception",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 3
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 4
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 4,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 4
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 5
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 5,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 5
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 6
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 6,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 6
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 7
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 7,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 7
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 8
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 8,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 8
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 9
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 9,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 9
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 10
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 10,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 10
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 11
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 11,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 11
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 12
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 12,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 12
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 13
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 13,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 13
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 14
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 14,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 14
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 15
+        },
+        {
+          "invocation": 1,
+          "path": "/exception",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/exception"},
+          "template": "main",
+          "template_line": 15
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 15,
+      "node": "set/fleet2",
+      "path": "/exception",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 15
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 16
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 16,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 16
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 17
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 17,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 17
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 18
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 18,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 18
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 19
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 19,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 19
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 20
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 20,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 20
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 21
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 21,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 21
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 22
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 22,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 22
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 23
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 23,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 23
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 24
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 24,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 24
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 25
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 25,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 25
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2", "selector": "/"},
+          "template": "main",
+          "template_line": 26
+        }
+      ],
+      "file": "zcx_l3_fleet2_port.clas.abap",
+      "line": 26,
+      "node": "set/fleet2",
+      "path": "/",
+      "set_line": 19,
+      "template": "main",
+      "template_line": 26
+    }
+  ],
+  "model": "sha256:204c9c4a972314ea503b6b11cc5e2dc9762525d233afae99ed3ab36e8a31c7ec",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "zcx_l3_fleet2_port.clas.abap", "hash": "sha256:60731f66889df242aaa906e3efb94616f6dccfc0b9d6fa3b14f7088c39614929"}
+  ],
+  "rules": {
+    "grounded-ship-keeps-only-keepers": {"class": "zcl_l2_grounded_ship_crew", "file": "src/l2demo/grounded_ship_crew.l2.yaml", "model": "sha256:b394b7c481c2078cec32dd098774403af021f9b5992e10060c4df66f30a2ec63"},
+    "maintenance-ship-no-future-voyage": {"class": "zcl_l2_maintenance_ship", "file": "src/l2demo/maintenance_ship.l2.yaml", "model": "sha256:44dac8cf4f02744f207591d59ab67f90ec0108133257850d785acf7c43a0687f"},
+    "ship-busy": {"class": "zcl_l2_ship_busy", "file": "src/l2demo/ship_busy.l2.yaml", "model": "sha256:45ea923b55497387bebe8f844927710b4793719d6598f05beeb5a07536f6be87"},
+    "ship-cargo-limit": {"class": "zcl_l2_ship_cargo_limit", "file": "src/l2demo/ship_cargo_limit.l2.yaml", "model": "sha256:85e96ae3fa817522ecb9141d874a5109bc21e78a8106bf0deb3f2651b338d782"},
+    "ship-in-service-has-a-captain": {"class": "zcl_l2_ship_captain", "file": "src/l2demo/ship_captain.l2.yaml", "model": "sha256:c354a2df3f0f895d4132bc9e3f3fadd07b2f7b04066360d8ba6c7fcabd981d99"},
+    "ship-min-crew": {"class": "zcl_l2_ship_min_crew", "file": "src/l2demo/ship_min_crew.l2.yaml", "model": "sha256:d6bd4b7056cc98985ff457a7c4e5441515492e9316cb4c64a06f2214777204b0"},
+    "ship-too-many-future-voyages": {"class": "zcl_l2_ship_voyage_limit", "file": "src/l2demo/ship_voyage_limit.l2.yaml", "model": "sha256:d5ba08cb38257a35fa27e16091cb1325fe0b3ad00dce9d5b1dfcb24d4e103596"}
+  },
+  "set": "src/l2demo/fleet2.l3.yaml",
+  "template": "recipes/l3-ports/exception.tpl",
+  "templates": {"recipes/l3-ports/exception.tpl": "sha256:02355dd288d1a64dace6fc9c29e5a74c054caa6e3546b2f4e65293df6d6c17aa"}
+}

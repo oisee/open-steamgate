@@ -70,7 +70,7 @@ describe("osd-inputs", () => {
 
     it("a web page's trace sidecar is no object, so two generated apps in one input are no duplicate", () => {
       for (const app of ["src/cockpit/zrun", "src/cockpit/zrun_s"]) {
-        for (const f of ["Component.js.trace.json", "manifest.json.trace.json", "index.html.trace.json", "i18n.properties.trace.json"]) write(app, f);
+        for (const f of ["Component.js.trace.json", "manifest.json.trace.json", "index.html.trace.json", "i18n.properties.trace.json", "Component.js.trace.meta.json", "manifest.json.trace.meta.json"]) write(app, f);
       }
       write("src/cockpit/zrun", "zcl_two.clas.trace.json");
       write("src/cockpit/zrun_s", "zcl_two.clas.trace.json");

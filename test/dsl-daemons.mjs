@@ -1,3 +1,4 @@
+import {readJSONFile} from "./trace-reader.mjs";
 import {expect} from "chai";
 import {spawnSync} from "node:child_process";
 import {cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
@@ -38,7 +39,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("computes each PROGRAM_ID from its class or report and matches the capture", () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     const output = buildDaemonModel(model);
     const target = readFileSync(samcTarget, "utf8");
     const ids = [...target.matchAll(/<PROGRAM_ID>([^<]+)<\/PROGRAM_ID>/g)].map((match) => match[1]);
@@ -48,7 +49,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("renders an authority whose PROGRAM_ID is absent in the input", async () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     expect(model.authorities[0].program_id).to.equal(undefined);
     const expected = "ZCL_OSD_T_DMN=================CP";
     model.authorities[0].program_id = expected;
@@ -62,7 +63,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("renders report and function group PROGRAM_IDs in bare forms", async () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     model.authorities = [
       {"@id": "report", nr: 1, channelId: "/pc", kind: "report", program: "ZOSD_T_DSUB", activity: "R"},
       {"@id": "group", nr: 2, channelId: "/pc", kind: "function_group", program: "ZIRC", program_id: "SAPLZIRC", activity: "S"},
@@ -75,7 +76,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("defaults a missing authority kind to class and rejects a wrong explicit PROGRAM_ID", () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     delete model.authorities[0].program_id;
     expect(buildDaemonModel(model).authorities[0].program_id).to.equal("ZCL_OSD_T_DMN=================CP");
     model.authorities[0].kind = "report";
@@ -84,7 +85,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("requires nonempty SCOPE and MESSAGE_TYPE_ID", () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     model.channels[0].scope = "";
     expect(() => buildDaemonModel(model)).to.throw(/scope/i);
     model.channels[0].scope = "C";
@@ -93,7 +94,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("renders channels sorted by CHANNEL_ID whatever the input order, authorities keep NR order", async () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     model.channels.reverse();
     const {text} = await renderDaemon(temp("reversed.json", `${JSON.stringify(model)}\n`));
     expect(text).to.equal(readFileSync(samcTarget, "utf8"));
@@ -117,7 +118,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("omits an empty AUTHORITIES table from the SAMC shape", async () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     model.authorities = [];
     model.channels.pop();
     const {text} = await renderDaemon(temp("noauth.json", `${JSON.stringify(model)}\n`));
@@ -128,7 +129,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("omits empty CHANNELS and TEXT, and an initial DESCRIPTION", async () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     model.channels = [];
     model.authorities = [];
     model.description = "";
@@ -146,7 +147,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("omits initial STATEFUL and escapes an apostrophe in SAPC", async () => {
-    const model = JSON.parse(readFileSync(sapc, "utf8"));
+    const model = readJSONFile(sapc, "utf8");
     model.stateful = false;
     model.description = "Alice's channel";
     const {text} = await renderDaemon(temp("stateless.json", `${JSON.stringify(model)}\n`));
@@ -157,7 +158,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("omits an empty SAPC TEXT block", async () => {
-    const model = JSON.parse(readFileSync(sapc, "utf8"));
+    const model = readJSONFile(sapc, "utf8");
     model.lang = "";
     model.description = "";
     const {text} = await renderDaemon(temp("no-sapc-text.json", `${JSON.stringify(model)}\n`));
@@ -168,7 +169,7 @@ describe("DSL daemon channel files", function () {
 
   it("uses iXML entities for all five XML specials in both recipes", async () => {
     for (const [file, tag] of [[samc, "SAMC"], [sapc, "SAPC"]]) {
-      const model = JSON.parse(readFileSync(file, "utf8"));
+      const model = readJSONFile(file, "utf8");
       model.description = `&<>"'`;
       const {text} = await renderDaemon(temp(`${tag}.json`, `${JSON.stringify(model)}\n`));
       expect(text).to.include("<DESCRIPTION>&amp;&lt;&gt;&quot;&apos;</DESCRIPTION>");
@@ -176,7 +177,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("requires an explicit recipe kind and SAMC channels", async () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     delete model.kind;
     let error;
     try { await renderDaemon(temp("no-kind.json", `${JSON.stringify(model)}\n`)); }
@@ -191,7 +192,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("rejects out-of-order authority numbers, row identity mismatches and namespaced classes", () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     model.authorities[0].nr = 2;
     expect(() => buildDaemonModel(model)).to.throw(/nr.*unique ascending/);
     model.authorities[0].nr = 1;
@@ -207,7 +208,7 @@ describe("DSL daemon channel files", function () {
 
   it("a changed channel field changes only the line traced to that channel", async () => {
     const original = await renderDaemon(samc);
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     model.channels[1].scope = "S";
     const changed = await renderDaemon(temp("changed.samc.model.json", `${JSON.stringify(model)}\n`));
     const before = original.text.split("\n");
@@ -218,7 +219,7 @@ describe("DSL daemon channel files", function () {
   });
 
   it("escapes ampersand, angle bracket and quote in descriptions", async () => {
-    const model = JSON.parse(readFileSync(samc, "utf8"));
+    const model = readJSONFile(samc, "utf8");
     model.description = 'A & B < "C"';
     const {text} = await renderDaemon(temp("escaped.samc.model.json", `${JSON.stringify(model)}\n`));
     expect(text).to.include("<DESCRIPTION>A &amp; B &lt; &quot;C&quot;</DESCRIPTION>");
@@ -238,7 +239,7 @@ describe("DSL daemon channel files", function () {
     const run = spawnSync("node", ["tools/dsl-samc.mjs", "render", samc, "--out", out], {encoding: "utf8"});
     expect(run.status, run.error?.message ?? run.stderr).to.equal(0);
     expect(readFileSync(out, "utf8")).to.equal(readFileSync(samcTarget, "utf8"));
-    const sidecar = JSON.parse(readFileSync(`${out}.trace.json`, "utf8"));
+    const sidecar = readJSONFile(`${out}.trace.json`, "utf8");
     expect(sidecar.lines).to.have.length(readFileSync(out, "utf8").trimEnd().split("\n").length);
     expect(sidecar.lines.every((line) => line.node)).to.equal(true);
     expect(sidecar.lines.some((line) => line.node === "samc/ZOSD_T_AMC/ch/pu")).to.equal(true);
@@ -253,7 +254,7 @@ describe("DSL daemon channel files", function () {
     scratch.push(dir);
     cpSync("recipes/samc-xml", join(dir, "copy"), {recursive: true});
     const schemaFile = join(dir, "copy", "schema.json");
-    const schema = JSON.parse(readFileSync(schemaFile, "utf8"));
+    const schema = readJSONFile(schemaFile, "utf8");
     delete schema.object.description;
     writeFileSync(schemaFile, `${JSON.stringify(schema)}\n`);
     const result = await buildRecipe("copy", {dir, check: true});

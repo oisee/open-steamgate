@@ -1,619 +1,894 @@
 {
- "generator": "dsl-l2",
- "rule": "src/l2demo/ship_restricted_status.l2.yaml",
- "template": "recipes/l2-check/template.tpl",
- "model": "sha256:18006270e7dcddf8c40bc565abb3af570fa4cd132647d3710090252ae99418cd",
- "lines": [
-  {
-   "line": 1,
-   "template_line": 1,
-   "path": "/source",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 2,
-   "template_line": 2,
-   "path": "/rule",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 3,
-   "template_line": 3,
-   "path": "/class",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 4,
-   "template_line": 4,
-   "path": "/",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 5,
-   "template_line": 6,
-   "path": "/range/table",
-   "node": "rule/ship-restricted-status-no-voyage/range",
-   "rule_line": 15
-  },
-  {
-   "line": 6,
-   "template_line": 10,
-   "path": "/params/1/selopt_type",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 7,
-   "template_line": 10,
-   "path": "/params/2/selopt_type",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 8,
-   "template_line": 13,
-   "path": "/",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 9,
-   "template_line": 14,
-   "path": "/",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 10,
-   "template_line": 16,
-   "path": "/range",
-   "node": "rule/ship-restricted-status-no-voyage/range",
-   "rule_line": 15
-  },
-  {
-   "line": 11,
-   "template_line": 20,
-   "path": "/params/1/ref",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 12,
-   "template_line": 20,
-   "path": "/params/2/ref",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 13,
-   "template_line": 26,
-   "path": "/",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 14,
-   "template_line": 42,
-   "path": "/",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 15,
-   "template_line": 43,
-   "path": "/",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 16,
-   "template_line": 44,
-   "path": "/class",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 17,
-   "template_line": 45,
-   "path": "/",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 18,
-   "template_line": 46,
-   "path": "/comment",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 19,
-   "template_line": 48,
-   "path": "/queries/1/type",
-   "node": "rule/ship-restricted-status-no-voyage/join",
-   "rule_line": 17
-  },
-  {
-   "line": 20,
-   "template_line": 50,
-   "path": "/queries/1/fields/1/name",
-   "node": "rule/ship-restricted-status-no-voyage/join/field/1",
-   "rule_line": 14
-  },
-  {
-   "line": 21,
-   "template_line": 50,
-   "path": "/queries/1/fields/2/name",
-   "node": "rule/ship-restricted-status-no-voyage/join/field/2",
-   "rule_line": 18
-  },
-  {
-   "line": 22,
-   "template_line": 50,
-   "path": "/queries/1/fields/3/name",
-   "node": "rule/ship-restricted-status-no-voyage/join/field/3",
-   "rule_line": 20
-  },
-  {
-   "line": 23,
-   "template_line": 50,
-   "path": "/queries/1/fields/4/name",
-   "node": "rule/ship-restricted-status-no-voyage/join/field/4",
-   "rule_line": 20
-  },
-  {
-   "line": 24,
-   "template_line": 50,
-   "path": "/queries/1/fields/5/name",
-   "node": "rule/ship-restricted-status-no-voyage/join/field/5",
-   "rule_line": 20
-  },
-  {
-   "line": 25,
-   "template_line": 52,
-   "path": "/queries/1/type",
-   "node": "rule/ship-restricted-status-no-voyage/join",
-   "rule_line": 17
-  },
-  {
-   "line": 26,
-   "template_line": 53,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-restricted-status-no-voyage/join",
-   "rule_line": 17
-  },
-  {
-   "line": 27,
-   "template_line": 54,
-   "path": "/queries/1/wa",
-   "node": "rule/ship-restricted-status-no-voyage/join",
-   "rule_line": 17
-  },
-  {
-   "line": 28,
-   "template_line": 87,
-   "path": "/",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 29,
-   "template_line": 113,
-   "path": "/params/1/use",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 30,
-   "template_line": 114,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 31,
-   "template_line": 113,
-   "path": "/params/2/use",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 32,
-   "template_line": 114,
-   "path": "/params/2/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 33,
-   "template_line": 119,
-   "path": "/params/1/ref",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 34,
-   "template_line": 120,
-   "path": "/params/1/use",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 35,
-   "template_line": 121,
-   "path": "/params/1/has_default",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 36,
-   "template_line": 123,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 37,
-   "template_line": 124,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 38,
-   "template_line": 125,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 39,
-   "template_line": 126,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 40,
-   "template_line": 130,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 41,
-   "template_line": 123,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 42,
-   "template_line": 124,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 43,
-   "template_line": 125,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 44,
-   "template_line": 126,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 45,
-   "template_line": 130,
-   "path": "/params/1/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 46,
-   "template_line": 132,
-   "path": "/params/1/has_default",
-   "node": "rule/ship-restricted-status-no-voyage/param/restricted",
-   "rule_line": 12
-  },
-  {
-   "line": 47,
-   "template_line": 119,
-   "path": "/params/2/ref",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 48,
-   "template_line": 120,
-   "path": "/params/2/use",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 49,
-   "template_line": 121,
-   "path": "/params/2/has_default",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 50,
-   "template_line": 123,
-   "path": "/params/2/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 51,
-   "template_line": 124,
-   "path": "/params/2/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 52,
-   "template_line": 125,
-   "path": "/params/2/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 53,
-   "template_line": 126,
-   "path": "/params/2/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 54,
-   "template_line": 128,
-   "path": "/params/2/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 55,
-   "template_line": 130,
-   "path": "/params/2/row",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 56,
-   "template_line": 132,
-   "path": "/params/2/has_default",
-   "node": "rule/ship-restricted-status-no-voyage/param/exempt",
-   "rule_line": 13
-  },
-  {
-   "line": 57,
-   "template_line": 160,
-   "path": "/queries/1",
-   "node": "rule/ship-restricted-status-no-voyage/join",
-   "rule_line": 17
-  },
-  {
-   "line": 58,
-   "template_line": 175,
-   "path": "/queries/1/fields/1/source",
-   "node": "rule/ship-restricted-status-no-voyage/join/field/1",
-   "rule_line": 14
-  },
-  {
-   "line": 59,
-   "template_line": 175,
-   "path": "/queries/1/fields/2/source",
-   "node": "rule/ship-restricted-status-no-voyage/join/field/2",
-   "rule_line": 18
-  },
-  {
-   "line": 60,
-   "template_line": 175,
-   "path": "/queries/1/fields/3/source",
-   "node": "rule/ship-restricted-status-no-voyage/join/field/3",
-   "rule_line": 20
-  },
-  {
-   "line": 61,
-   "template_line": 175,
-   "path": "/queries/1/fields/4/source",
-   "node": "rule/ship-restricted-status-no-voyage/join/field/4",
-   "rule_line": 20
-  },
-  {
-   "line": 62,
-   "template_line": 175,
-   "path": "/queries/1/fields/5/source",
-   "node": "rule/ship-restricted-status-no-voyage/join/field/5",
-   "rule_line": 20
-  },
-  {
-   "line": 63,
-   "template_line": 179,
-   "path": "/queries/1/from/table",
-   "node": "rule/ship-restricted-status-no-voyage/for",
-   "rule_line": 14
-  },
-  {
-   "line": 64,
-   "template_line": 182,
-   "path": "/queries/1/joins/1/table",
-   "node": "rule/ship-restricted-status-no-voyage/forbid",
-   "rule_line": 17
-  },
-  {
-   "line": 65,
-   "template_line": 184,
-   "path": "/queries/1/joins/1/on/1/lhs",
-   "node": "rule/ship-restricted-status-no-voyage/forbid/where/1",
-   "rule_line": 19
-  },
-  {
-   "line": 66,
-   "template_line": 187,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-restricted-status-no-voyage/join",
-   "rule_line": 17
-  },
-  {
-   "line": 67,
-   "template_line": 189,
-   "path": "/queries/1/where/1/pre",
-   "node": "rule/ship-restricted-status-no-voyage/when/1",
-   "rule_line": 16,
-   "param_rule_line": 12
-  },
-  {
-   "line": 68,
-   "template_line": 189,
-   "path": "/queries/1/where/2/pre",
-   "node": "rule/ship-restricted-status-no-voyage/when/2",
-   "rule_line": 16,
-   "param_rule_line": 13
-  },
-  {
-   "line": 69,
-   "template_line": 189,
-   "path": "/queries/1/where/3/pre",
-   "node": "rule/ship-restricted-status-no-voyage/forbid/where/2",
-   "rule_line": 19
-  },
-  {
-   "line": 70,
-   "template_line": 189,
-   "path": "/queries/1/where/4/pre",
-   "node": "rule/ship-restricted-status-no-voyage/range",
-   "rule_line": 15
-  },
-  {
-   "line": 71,
-   "template_line": 191,
-   "path": "/queries/1",
-   "node": "rule/ship-restricted-status-no-voyage/join",
-   "rule_line": 17
-  },
-  {
-   "line": 72,
-   "template_line": 193,
-   "path": "/queries/1/order/1/source",
-   "node": "rule/ship-restricted-status-no-voyage/join/order/1",
-   "rule_line": 14
-  },
-  {
-   "line": 73,
-   "template_line": 193,
-   "path": "/queries/1/order/2/source",
-   "node": "rule/ship-restricted-status-no-voyage/join/order/2",
-   "rule_line": 18
-  },
-  {
-   "line": 74,
-   "template_line": 304,
-   "path": "/queries/1/itab",
-   "node": "rule/ship-restricted-status-no-voyage/join",
-   "rule_line": 17
-  },
-  {
-   "line": 75,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/1/jref",
-   "node": "rule/ship-restricted-status-no-voyage/alert/hole/1",
-   "rule_line": 20
-  },
-  {
-   "line": 76,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/2/value",
-   "node": "rule/ship-restricted-status-no-voyage/alert/text/1",
-   "rule_line": 20
-  },
-  {
-   "line": 77,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/3/jref",
-   "node": "rule/ship-restricted-status-no-voyage/alert/hole/2",
-   "rule_line": 20
-  },
-  {
-   "line": 78,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/4/value",
-   "node": "rule/ship-restricted-status-no-voyage/alert/text/2",
-   "rule_line": 20
-  },
-  {
-   "line": 79,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/5/jref",
-   "node": "rule/ship-restricted-status-no-voyage/alert/hole/3",
-   "rule_line": 20
-  },
-  {
-   "line": 80,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/6/value",
-   "node": "rule/ship-restricted-status-no-voyage/alert/text/3",
-   "rule_line": 20
-  },
-  {
-   "line": 81,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/7/jref",
-   "node": "rule/ship-restricted-status-no-voyage/alert/hole/4",
-   "rule_line": 20
-  },
-  {
-   "line": 82,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/8/value",
-   "node": "rule/ship-restricted-status-no-voyage/alert/text/4",
-   "rule_line": 20
-  },
-  {
-   "line": 83,
-   "template_line": 348,
-   "path": "/queries/1/alert_parts/9/jref",
-   "node": "rule/ship-restricted-status-no-voyage/alert/hole/5",
-   "rule_line": 20
-  },
-  {
-   "line": 84,
-   "template_line": 385,
-   "path": "/queries/1",
-   "node": "rule/ship-restricted-status-no-voyage/join",
-   "rule_line": 17
-  },
-  {
-   "line": 85,
-   "template_line": 387,
-   "path": "/queries/1",
-   "node": "rule/ship-restricted-status-no-voyage/join",
-   "rule_line": 17
-  },
-  {
-   "line": 86,
-   "template_line": 439,
-   "path": "/",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  },
-  {
-   "line": 87,
-   "template_line": 505,
-   "path": "/",
-   "node": "rule/ship-restricted-status-no-voyage",
-   "rule_line": 8
-  }
- ]
+  "format": "osd-trace/1",
+  "outputs": [
+    {
+      "file": "zcl_l2_ship_restricted.clas.abap",
+      "lines": [
+        {
+          "line": 1,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 2,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/rule"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/title"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 3,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/class"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 4,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 5,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/field"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 6,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/is_selopt"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/selopt_type"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/type_name"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 7,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/is_selopt"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/selopt_type"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/type_name"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "lines": [8, 9],
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 10,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 11,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/is_selopt"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/ref"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/selopt_type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 12,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/is_selopt"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/ref"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/selopt_type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "lines": [13, 15],
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 16,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/class"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 9}
+          ]
+        },
+        {
+          "line": 17,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 10}
+          ]
+        },
+        {
+          "line": 18,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/comment"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 11}
+          ]
+        },
+        {
+          "line": 19,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 20,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/column"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/name"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 21,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/column"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/name"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 22,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/column"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/name"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 23,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/column"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/name"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 24,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/column"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/name"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 25,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 26,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/itab"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/type"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 27,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/type"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/wa"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 28,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 12}
+          ]
+        },
+        {
+          "line": 29,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/selopt_type"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/use"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 30,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/use"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 31,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/selopt_type"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/use"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 32,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/use"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 33,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/ref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 34,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/ref"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/use"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 5}
+          ]
+        },
+        {
+          "line": 35,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 36,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 7}
+          ]
+        },
+        {
+          "line": 37,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/sign"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 8}
+          ]
+        },
+        {
+          "line": 38,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/option"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 9}
+          ]
+        },
+        {
+          "line": 39,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/low"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 10}
+          ]
+        },
+        {
+          "line": 40,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/use"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/1", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 11}
+          ]
+        },
+        {
+          "line": 41,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 12}
+          ]
+        },
+        {
+          "line": 42,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/sign"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 13}
+          ]
+        },
+        {
+          "line": 43,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/option"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 14}
+          ]
+        },
+        {
+          "line": 44,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/low"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 15}
+          ]
+        },
+        {
+          "line": 45,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/use"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted/default/2", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 16}
+          ]
+        },
+        {
+          "line": 46,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/restricted", "selector": "/has_default"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 17}
+          ]
+        },
+        {
+          "line": 47,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/ref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 48,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/ref"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/use"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 5}
+          ]
+        },
+        {
+          "line": 49,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 50,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 7}
+          ]
+        },
+        {
+          "line": 51,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/sign"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 8}
+          ]
+        },
+        {
+          "line": 52,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/option"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 9}
+          ]
+        },
+        {
+          "line": 53,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/low"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 3},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 10}
+          ]
+        },
+        {
+          "line": 54,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/high"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 11}
+          ]
+        },
+        {
+          "line": 55,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/row"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/use"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt/default/1", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 5},
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 12}
+          ]
+        },
+        {
+          "line": 56,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/param/exempt", "selector": "/has_default"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 13}
+          ]
+        },
+        {
+          "line": 57,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 58,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/name"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/1", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 59,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/name"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/2", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 60,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/name"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/3", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 61,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/name"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/4", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 62,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/name"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/field/5", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 63,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/for", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/for", "selector": "/alias"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/for", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 64,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid", "selector": "/alias"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 65,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/1", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/1", "selector": "/op"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/1", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 66,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/itab"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 5}
+          ]
+        },
+        {
+          "line": 67,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/op"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/pre"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/1", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 68,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/op"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/pre"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/when/2", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 69,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/op"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/pre"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/forbid/where/2", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 70,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/is_cmp"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/lhs"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/op"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/pre"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/range", "selector": "/sref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 71,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 72,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/order/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/order/1", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 73,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/order/2", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join/order/2", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 74,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/itab"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/wa"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 7}
+          ]
+        },
+        {
+          "line": 75,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/1", "selector": "/jref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 76,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/1", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/1", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 77,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/2", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/2", "selector": "/jref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 78,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/2", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/2", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 79,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/3", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/3", "selector": "/jref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 80,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/3", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/3", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 81,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/4", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/4", "selector": "/jref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 82,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/4", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/text/4", "selector": "/value"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 83,
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/5", "selector": "/"},
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/alert/hole/5", "selector": "/jref"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "lines": [84, 85],
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage/join", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 8}
+          ]
+        },
+        {
+          "lines": [86, 87],
+          "sources": [
+            {"file": "src/l2demo/ship_restricted_status.l2.yaml", "node": "rule/ship-restricted-status-no-voyage", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 13}
+          ]
+        }
+      ]
+    }
+  ]
 }
