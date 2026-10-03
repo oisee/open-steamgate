@@ -1,5 +1,10 @@
 # Porting the ADT façade to ABAP
 
+[Variant C (2026-10-03)](port-plan.md) scopes completion as an empty
+`PORT_PENDING` document queue. `HOST_ALLOWED` is permanent host orchestration,
+served through the single last HOST catch-all; every orchestration method
+must remain HOST. The earlier every-family ABAP-row goal is superseded.
+
 Working documents for ADR 0007 (the façade in ABAP) and ADR 0008 (locks through ENQ). They were generated on
 2026-10-01 from origin/main `e359bcf5`, so re-check line numbers against the current tree.
 

@@ -1,15 +1,10 @@
-// The done gate of the ADT-on-ABAP port (docs/adt-abap-port/port-plan.md,
-// section 2 "Done gate" and section 4 "What 100% means"): every Express
-// registration of the façade's adtRouter is asked of the ABAP front's own
-// matcher, ZCL_OSD_ADT_ROUTER=>MATCH over =>ROUTES, with a sample instance
-// of its pattern, and must land on an ABAP row -- unless it is listed below.
-//
-// HOST_ALLOWED is every registration not yet ported, as of origin/main when
-// this test was written, grouped by the slice that ports it. Each slice
-// deletes its own block. The check runs both ways: a listed registration
-// that ABAP serves fails ("remove it"), and an unlisted one that ABAP does
-// not serve fails ("port it or list it"). Done is HOST_ALLOWED empty and
-// exactly one HOST row in the table, the catch-all.
+// Variant C done gate (docs/adt-abap-port/port-plan.md): ask the ABAP
+// front's MATCH over ROUTES for every Express registration and method.
+// PORT_PENDING is the document-port queue; each slice deletes its block.
+// Done means PORT_PENDING is empty and the table has one last HOST catch-all.
+// HOST_ALLOWED is the final host-orchestration Map, not a queue. It only
+// grows by a decision of Alice recorded in the plan. Every method must
+// reach HOST; HOST_BY_DESIGN names the catch-all itself.
 import {remoteForTest} from "./helpers/adt-remote.mjs";
 import {expect} from "chai";
 import {mkdtempSync, rmSync} from "node:fs";
@@ -25,14 +20,59 @@ import {abapRunner} from "../tools/adt-abap-front.mjs";
 
 const CATCH_ALL = "* /sap/bc/adt/*";
 
-// Section 4 of the plan: no route family keeps a HOST row; continuations
-// (activation, ABAP Unit, notebook) and host work (parse, SQL, git) sit
-// behind ABAP rows. What stays on the host by design is the catch-all alone.
-const HOST_BY_DESIGN = new Map([
+// Variant C keeps host orchestration behind the catch-all. HOST_BY_DESIGN
+// names the catch-all registration itself, rather than an orchestration route.
+function reasonedMap(entries) {
+  const keys = entries.map(([key]) => key);
+  expect(keys.filter((key, i) => keys.indexOf(key) !== i), "duplicate host entries").to.deep.equal([]);
+  return new Map(entries);
+}
+const HOST_BY_DESIGN = reasonedMap([
   [CATCH_ALL, "the catch-all: a path no row names is the Node façade's 404 (plan section 4)"],
 ]);
 
-const HOST_ALLOWED = [
+const HOST_ALLOWED = reasonedMap([
+  // A4: write path (PUT source, includes)
+  ["PUT /sap/bc/adt/oo/classes/:name/source/main", "source writes and includes: host orchestration (variant C)"],
+  ["PUT /sap/bc/adt/oo/classes/:name/includes/:include", "source writes and includes: host orchestration (variant C)"],
+  ["PUT /sap/bc/adt/oo/classes/:name/includes/:include/source/main", "source writes and includes: host orchestration (variant C)"],
+  ["POST /sap/bc/adt/oo/classes/:name/includes", "source writes and includes: host orchestration (variant C)"],
+  ["PUT /sap/bc/adt/oo/interfaces/:name/source/main", "source writes and includes: host orchestration (variant C)"],
+  ["PUT /sap/bc/adt/programs/programs/:name/source/main", "source writes and includes: host orchestration (variant C)"],
+  ["PUT /sap/bc/adt/ddic/ddl/sources/:name/source/main", "source writes and includes: host orchestration (variant C)"],
+  ["PUT /sap/bc/adt/ddic/srvd/sources/:name/source/main", "source writes and includes: host orchestration (variant C)"],
+  ["PUT /sap/bc/adt/programs/includes/:name/source/main", "source writes and includes: host orchestration (variant C)"],
+  // A5: create and delete
+  ["POST /sap/bc/adt/oo/classes", "object creation and deletion: host orchestration (variant C)"],
+  ["DELETE /sap/bc/adt/oo/classes/:name", "object creation and deletion: host orchestration (variant C)"],
+  ["POST /sap/bc/adt/oo/interfaces", "object creation and deletion: host orchestration (variant C)"],
+  ["DELETE /sap/bc/adt/oo/interfaces/:name", "object creation and deletion: host orchestration (variant C)"],
+  ["POST /sap/bc/adt/programs/programs", "object creation and deletion: host orchestration (variant C)"],
+  ["DELETE /sap/bc/adt/programs/programs/:name", "object creation and deletion: host orchestration (variant C)"],
+  ["POST /sap/bc/adt/ddic/ddl/sources", "object creation and deletion: host orchestration (variant C)"],
+  ["DELETE /sap/bc/adt/ddic/ddl/sources/:name", "object creation and deletion: host orchestration (variant C)"],
+  ["POST /sap/bc/adt/ddic/srvd/sources", "object creation and deletion: host orchestration (variant C)"],
+  ["DELETE /sap/bc/adt/ddic/srvd/sources/:name", "object creation and deletion: host orchestration (variant C)"],
+  ["POST /sap/bc/adt/programs/includes", "object creation and deletion: host orchestration (variant C)"],
+  ["DELETE /sap/bc/adt/programs/includes/:name", "object creation and deletion: host orchestration (variant C)"],
+  ["POST /sap/bc/adt/packages", "object creation and deletion: host orchestration (variant C)"],
+  ["DELETE /sap/bc/adt/packages/:name", "object creation and deletion: host orchestration (variant C)"],
+  // A6 / A7: inactive objects and activation
+  ["GET /sap/bc/adt/activation/inactiveobjects", "inactive objects and activation: host orchestration (variant C)"],
+  ["POST /sap/bc/adt/activation", "inactive objects and activation: host orchestration (variant C)"],
+  // A8b: git
+  ["GET /sap/bc/adt/core/http/git/object", "git state and revisions: host orchestration (variant C)"],
+  ["GET /sap/bc/adt/core/http/git/object/revision", "git state and revisions: host orchestration (variant C)"],
+  // C2b: ABAP Unit test runs
+  ["POST /sap/bc/adt/abapunit/testruns/evaluation", "ABAP Unit runs: host orchestration (variant C)"],
+  ["POST /sap/bc/adt/abapunit/testruns", "ABAP Unit runs: host orchestration (variant C)"],
+  // C3: unit/object/run
+  ["POST /sap/bc/adt/core/http/unit/object/run", "unit/object/run: host orchestration (variant C)"],
+  // C6: notebook
+  ["POST /sap/bc/adt/notebook/abap", "notebook execution: host orchestration (variant C)"],
+]);
+
+const PORT_PENDING = [
   // A1: discovery and debugger/listeners
   "HEAD /sap/bc/adt/core/discovery",
   "GET /sap/bc/adt/core/discovery",
@@ -56,42 +96,11 @@ const HOST_ALLOWED = [
   "GET /sap/public/bc/icf/logoff",
   // A3b: reentrance ticket
   "GET /sap/bc/adt/core/http/reentranceticket",
-  // A4: write path (PUT source, includes)
-  "PUT /sap/bc/adt/oo/classes/:name/source/main",
-  "PUT /sap/bc/adt/oo/classes/:name/includes/:include",
-  "PUT /sap/bc/adt/oo/classes/:name/includes/:include/source/main",
-  "POST /sap/bc/adt/oo/classes/:name/includes",
-  "PUT /sap/bc/adt/oo/interfaces/:name/source/main",
-  "PUT /sap/bc/adt/programs/programs/:name/source/main",
-  "PUT /sap/bc/adt/ddic/ddl/sources/:name/source/main",
-  "PUT /sap/bc/adt/ddic/srvd/sources/:name/source/main",
-  "PUT /sap/bc/adt/programs/includes/:name/source/main",
-  // A5: create and delete
-  "POST /sap/bc/adt/oo/classes",
-  "DELETE /sap/bc/adt/oo/classes/:name",
-  "POST /sap/bc/adt/oo/interfaces",
-  "DELETE /sap/bc/adt/oo/interfaces/:name",
-  "POST /sap/bc/adt/programs/programs",
-  "DELETE /sap/bc/adt/programs/programs/:name",
-  "POST /sap/bc/adt/ddic/ddl/sources",
-  "DELETE /sap/bc/adt/ddic/ddl/sources/:name",
-  "POST /sap/bc/adt/ddic/srvd/sources",
-  "DELETE /sap/bc/adt/ddic/srvd/sources/:name",
-  "POST /sap/bc/adt/programs/includes",
-  "DELETE /sap/bc/adt/programs/includes/:name",
-  "POST /sap/bc/adt/packages",
-  "DELETE /sap/bc/adt/packages/:name",
-  // A6 / A7: inactive objects and activation (continuation behind an ABAP row)
-  "GET /sap/bc/adt/activation/inactiveobjects",
-  "POST /sap/bc/adt/activation",
   // A8a: thin introspection rows
   "GET /sap/bc/adt/core/http/build",
   "GET /sap/bc/adt/core/http/changed",
   "GET /sap/bc/adt/core/http/services",
   "GET /sap/bc/adt/core/http/transactions",
-  // A8b: git
-  "GET /sap/bc/adt/core/http/git/object",
-  "GET /sap/bc/adt/core/http/git/object/revision",
   // A9: xref
   "GET /sap/bc/adt/core/http/xref/readers",
   "GET /sap/bc/adt/core/http/xref/closure",
@@ -129,13 +138,6 @@ const HOST_ALLOWED = [
   "GET /sap/bc/adt/programs/includes/:name/objectstructure",
   "GET /sap/bc/adt/ddic/srvd/sources/:name",
   "GET /sap/bc/adt/programs/includes/:name",
-  // C2b: ABAP Unit test runs (continuation behind an ABAP row)
-  "POST /sap/bc/adt/abapunit/testruns/evaluation",
-  "POST /sap/bc/adt/abapunit/testruns",
-  // C3: unit/object/run (continuation behind an ABAP row)
-  "POST /sap/bc/adt/core/http/unit/object/run",
-  // C6: notebook (continuation behind an ABAP row)
-  "POST /sap/bc/adt/notebook/abap",
 ];
 
 const text = (value) => String(value?.get?.() ?? value ?? "").trimEnd();
@@ -245,6 +247,7 @@ const probeAbap = (p) => p.found && p.row.servedBy === "ABAP" && (!p.sample.star
 const abapServed = (v) => v.probes.every((p) => probeAbap(p) && shape(p.row.pattern) === shape(v.path));
 const anyAbap = (v) => v.probes.some(probeAbap);
 const where = (p) => (p.found ? `${p.row.servedBy} ${p.row.method} ${p.row.pattern}` : "no row");
+const hostServed = (v) => v.probes.every((p) => p.found && p.row.servedBy === "HOST");
 const atCatchAll = (p) => p.found && p.row.servedBy === "HOST" && p.row.pattern === "/sap/bc/adt/*";
 
 /** a request path the pattern matches: each :param a sample, a last * a segment */
@@ -261,7 +264,7 @@ function sampleOf(pattern) {
 }
 
 
-describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP row)", function () {
+describe("ADT on ABAP: the variant C done gate", function () {
   this.timeout(60000);
   let root;
   let walks;
@@ -345,27 +348,36 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
   });
 
   it("the lists are well formed: no duplicates, no overlap, every entry names a registration", () => {
-    expect(HOST_ALLOWED.filter((e, i) => HOST_ALLOWED.indexOf(e) !== i), "duplicates in HOST_ALLOWED").to.deep.equal([]);
-    expect(HOST_ALLOWED.filter((e) => HOST_BY_DESIGN.has(e)), "in both lists").to.deep.equal([]);
+    expect(PORT_PENDING.filter((e, i) => PORT_PENDING.indexOf(e) !== i), "duplicates in PORT_PENDING").to.deep.equal([]);
+    const lists = [PORT_PENDING, [...HOST_ALLOWED.keys()], [...HOST_BY_DESIGN.keys()]];
+    const listed = lists.flat();
+    expect(listed.filter((e, i) => listed.indexOf(e) !== i), "overlap among the three lists").to.deep.equal([]);
     const keys = new Set(regs.map((r) => `${r.method} ${r.path}`));
     expect(keys.size, "a registration twice on the stack").to.equal(regs.length);
     expect(table.filter((r, i) => table.findIndex((o) => o.method === r.method && o.pattern === r.pattern) !== i)
       .map((r) => `${r.method} ${r.pattern}`), "a row twice in ROUTES").to.deep.equal([]);
-    const stale = [...HOST_ALLOWED, ...HOST_BY_DESIGN.keys()].filter((e) => !keys.has(e));
+    const stale = listed.filter((e) => !keys.has(e));
     expect(stale, "entries no adtRouter registration has: remove them").to.deep.equal([]);
   });
 
   it("every registration not listed is served by ABAP, every method of it, by the row of its own pattern", () => {
-    const missing = verdicts.filter((v) => !HOST_ALLOWED.includes(v.key) && !HOST_BY_DESIGN.has(v.key) && !abapServed(v));
+    const missing = verdicts.filter((v) => !PORT_PENDING.includes(v.key) && !HOST_ALLOWED.has(v.key) && !HOST_BY_DESIGN.has(v.key) && !abapServed(v));
     expect(missing.map((v) => `${v.key} (${v.probes.filter((p) => !probeAbap(p) || shape(p.row.pattern) !== shape(v.path))
       .map((p) => `${p.sample} -> ${where(p)}`).join("; ")})`),
     "not served by ABAP: port them, or list them under the slice that will port them").to.deep.equal([]);
   });
 
-  it("no registration in HOST_ALLOWED is served by ABAP, not even for one method", () => {
-    const ported = verdicts.filter((v) => HOST_ALLOWED.includes(v.key) && anyAbap(v));
+  it("no registration in PORT_PENDING is served by ABAP, not even for one method", () => {
+    const ported = verdicts.filter((v) => PORT_PENDING.includes(v.key) && anyAbap(v));
     expect(ported.map((v) => `${v.key} (${v.probes.filter(probeAbap).map((p) => `${p.sample} -> ${where(p)} (${p.row.handler})`).join("; ")})`),
-      "served by ABAP now: remove it from HOST_ALLOWED").to.deep.equal([]);
+      "served by ABAP now: remove it from PORT_PENDING").to.deep.equal([]);
+  });
+
+  it("host orchestration stays on the host (variant C), for every method", () => {
+    const wrong = verdicts.filter((v) => HOST_ALLOWED.has(v.key) && !hostServed(v));
+    expect(wrong.map((v) => `${v.key}: ${HOST_ALLOWED.get(v.key)} (${v.probes.filter((p) => !p.found || p.row.servedBy !== "HOST")
+      .map((p) => `${p.sample} -> ${where(p)}`).join("; ")})`),
+    "orchestration stays on the host (variant C)").to.deep.equal([]);
   });
 
   it("what stays on the host by design reaches the catch-all, for every method", () => {
@@ -376,8 +388,9 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
         .to.deep.equal([]);
     }
     const abap = verdicts.filter(abapServed).length;
-    console.log(`      ADT on ABAP: ${HOST_ALLOWED.length} of ${regs.length} registrations still on the host ` +
-      `(${abap} ABAP, ${HOST_BY_DESIGN.size} host by design)${HOST_ALLOWED.length === 0 ? " -- done" : ""}`);
+    console.log(`      ADT on ABAP: ${PORT_PENDING.length} pending, ${abap} ABAP, ` +
+      `${HOST_ALLOWED.size} host-orchestration, ${HOST_BY_DESIGN.size} host-by-design` +
+      `${PORT_PENDING.length === 0 ? " -- done" : ""}`);
   });
 
   // the gate's own red proofs: what the walk and the probe must refuse
@@ -430,6 +443,16 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
       expect(v.probes.find((p) => p.sample.startsWith("GET ")).row.servedBy).to.equal("ABAP");
       expect(anyAbap(v)).to.equal(true);
       expect(abapServed(v)).to.equal(false);
+    });
+
+    it("a synthetic HOST_ALLOWED entry served by ABAP is refused, even for one method", async () => {
+      const reg = [{method: "*", path: "/sap/bc/adt/core/http/systeminformation"}];
+      const allowed = new Map([["* /sap/bc/adt/core/http/systeminformation", "synthetic orchestration"]]);
+      const [v] = await dialogStep(async () => verdictsOf(reg, await globalThis.abap.Classes.ZCL_OSD_ADT_ROUTER.routes()),
+        "test: the coverage gate's host orchestration probe");
+      expect(allowed.has(v.key)).to.equal(true);
+      expect(anyAbap(v)).to.equal(true);
+      expect(hostServed(v), "orchestration stays on the host (variant C)").to.equal(false);
     });
 
     it("an all() route is asked with every method Express routes, one left out is not ABAP-served", async () => {
