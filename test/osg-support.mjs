@@ -115,7 +115,7 @@ CLASS zcl_helper IMPLEMENTATION. METHOD check. RETURN. ENDMETHOD. ENDCLASS.
   });
   it("produces identical pages at different commits with identical generator content", () => {
     const repo = join(temp, "commits"); mkdirSync(join(repo, "tools"), {recursive: true});
-    for (const file of ["osg-support.mjs", "osd-kernel-compat.mjs", "osd-unit-ci.mjs", "osd-main.mjs"])
+    for (const file of ["osg-support.mjs", "osd-kernel-compat.mjs", "osd-unit-ci.mjs", "osd-main.mjs", "osd-child-process.mjs"])
       cpSync(join(root, "tools", file), join(repo, "tools", file));
     symlinkSync(join(root, "node_modules"), join(repo, "node_modules"), "dir");
     const git = (...args) => execFileSync("git", args, {cwd: repo, encoding: "utf8"});
