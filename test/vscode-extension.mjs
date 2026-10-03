@@ -3020,6 +3020,9 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
       expect(commands.get(external).title).to.match(/in External Browser$/);
     }
     const palette = manifest.contributes.menus.commandPalette;
+    for (const command of ["osd.newSqlNotebook", "osd.openSample", "osd.showRawJobLog"]) {
+      expect(palette.find((m) => m.command === command)?.when, command).to.equal("!isWeb && !osd.web");
+    }
     for (const command of ["osd.openHostDoorExternal", "osd.openServiceRowExternal", "osd.openServiceMetadataExternal"]) {
       expect(palette.find((m) => m.command === command)?.when, command).to.equal("false");
     }
@@ -4077,8 +4080,12 @@ describe("editors/vscode: running parts status and actions", () => {
       await tick();
       expect(item.text).to.equal("OSD jobs: status unavailable");
       controller.launcher.jobWorker.otherWindow = true;
+      controller.launcher.jobWorker.running = false;
+      let queried = false;
+      globalThis.fetch = async url => { queried = url.endsWith("/osd/job-counts"); return {ok: true, json: async () => ({counts: {running: 2, queued: 1}})}; };
       await tick();
-      expect(item.text).to.equal("OSD jobs: other window");
+      expect(queried).to.equal(true);
+      expect(item.text).to.equal("OSD jobs: other window · 2 running, 1 queued");
       for (const [mode, db] of [["off", "file"], ["auto", "sqlite"], ["auto", "duckdb"]]) {
         controller.launcher.jobsWorkerMode = mode;
         controller.launcher.env.STG_DB = db;
@@ -4102,14 +4109,14 @@ describe("editors/vscode: serving generation status", () => {
     try {
       globalThis.fetch = async url => ({ok: true, json: async () => url.endsWith("/osd/dumps") ? [{id: 1}]
         : {generation: "abcdefgh123", databaseIdentity: {engine: "sqlite"}, pid: 123}});
-      const item = statusBar(context);
+      const item = statusBar(context, () => 2);
       // statusBar starts its first asynchronous poll immediately.
       for (let i = 0; i < 20 && !item.tooltip?.includes("OSD kernel:"); i++) {
         await new Promise(resolve => setTimeout(resolve, 5));
       }
       expect(item.text).to.include("OSD generation abcdefgh · SQLite");
       expect(item.text).to.include("$(bug) 1");
-      expect(item.tooltip).to.include("OSD kernel: 0 finding(s)");
+      expect(item.tooltip).to.include("OSD kernel: 2 finding(s)");
       expect(item.command).to.equal("osd.showDumps");
       item.dispose();
     } finally {

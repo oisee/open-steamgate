@@ -2857,7 +2857,7 @@ function setServingAvailability(available) {
 // itself started (docs/vscode-extension.md, "Databases").
 const DB_ENGINE_LABEL = {sqlite: "SQLite", duckdb: "DuckDB", HDB: "HANA", postgres: "PostgreSQL"};
 
-function statusBar(context) {
+function statusBar(context, findingCount = () => kernelFindingCount) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
   item.command = "osd.showDumps";
   item.show();
@@ -2905,7 +2905,7 @@ function statusBar(context) {
         : `nothing answers /osd/serving at ${osd().url} (setting osd.url)`;
       item.backgroundColor = undefined;
     }
-    item.tooltip += `\nOSD kernel: ${kernelFindingCount} finding(s)`;
+    item.tooltip += `\nOSD kernel: ${findingCount()} finding(s)`;
   };
   tick();
   const timer = setInterval(tick, 5000);

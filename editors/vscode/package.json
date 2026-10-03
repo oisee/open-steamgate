@@ -270,6 +270,8 @@
         {"command": "osd.callEntitySetWithDebugger", "when": "!isWeb && !osd.web"},
         {"command": "osd.toggleBreakpoints", "when": "!isWeb && !osd.web"},
         {"command": "osd.newSqlNotebook", "when": "!isWeb && !osd.web"},
+        {"command": "osd.openSample", "when": "!isWeb && !osd.web"},
+        {"command": "osd.showRawJobLog", "when": "!isWeb && !osd.web"},
         {"command": "osd.gettingStarted", "when": "!isWeb && !osd.web"},
         {"command": "osd.quickStart", "when": "!isWeb && !osd.web"},
         {"command": "osd.openSystemOverview", "when": "!isWeb && !osd.web"},

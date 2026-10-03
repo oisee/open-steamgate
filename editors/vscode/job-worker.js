@@ -168,9 +168,9 @@ function jobsSummary(runs, now = Date.now()) {
 function jobsStatusBar(vscode, context, controller) {
   const output = vscode.window.createOutputChannel('OSD jobs');
   const raw = vscode.window.createOutputChannel('OSD jobs raw log');
-  let summaryShown = false, summaryBusy = false;
+  let disposed = false, summaryShown = false, summaryBusy = false;
   const refreshSummary = async () => {
-    if (summaryBusy) return;
+    if (disposed || summaryBusy) return;
     summaryBusy = true;
     const launcher = controller.launcher;
     let summary;
@@ -180,22 +180,24 @@ function jobsStatusBar(vscode, context, controller) {
       } else {
         const answer = await fetch(`http://127.0.0.1:${launcher.port}/osd/batch-runs?limit=200`,
           {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}, signal:AbortSignal.timeout(3000)});
+        if (disposed) return;
         if (!answer.ok) throw Error(`HTTP ${answer.status}`);
         summary = 'OSD jobs — latest 200 runs, newest first\nShow raw job log: command palette or What is running?\n\n' +
           jobsSummary((await answer.json()).runs);
       }
     } catch (error) { summary = `Job summary unavailable: ${error.message}. Use Show raw job log for worker diagnostics.`; }
     finally { summaryBusy = false; }
-    if (controller.launcher !== launcher) return;
+    if (disposed || controller.launcher !== launcher) return;
     output.clear(); output.appendLine(summary);
   };
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 9);
   item.command = 'osd.showRunning';
   context.subscriptions.push(output, raw, item,
     vscode.commands.registerCommand('osd.showJobs', async () => {
-      summaryShown = true; await refreshSummary(); output.show(true);
+      if (disposed) return;
+      summaryShown = true; await refreshSummary(); if (!disposed) output.show(true);
     }),
-    vscode.commands.registerCommand('osd.showRawJobLog', () => raw.show(true)));
+    vscode.commands.registerCommand('osd.showRawJobLog', () => { if (!disposed) raw.show(true); }));
   const sessions = new Set(controller.debugSessions ?? []);
   const isSystemSession = (session) => {
     const port = controller.debuggerState?.systemPort ?? controller.launcher?.inspectPort;
@@ -210,7 +212,7 @@ function jobsStatusBar(vscode, context, controller) {
   let busy = false, misses = 0, firstMiss, lastKnown, observedLauncher;
   const resetMisses = () => { misses = 0; firstMiss = undefined; };
   const tick = async () => {
-    if (busy) return;
+    if (disposed || busy) return;
     busy = true;
     const launcher = controller.launcher;
     if (launcher !== observedLauncher) {
@@ -220,15 +222,21 @@ function jobsStatusBar(vscode, context, controller) {
       if (!workerEnabled(launcher?.jobsWorkerMode, launcher?.env)) { item.hide(); return; }
       item.show();
       item.tooltip = 'Job worker — click for system and worker actions';
-      if (launcher?.jobWorker?.otherWindow) { resetMisses(); lastKnown = undefined; item.text = 'OSD jobs: other window'; item.backgroundColor = undefined; return; }
-      if (!launcher?.jobWorker?.running) { resetMisses(); lastKnown = undefined; item.text = jobsStatus(false); item.backgroundColor = undefined; return; }
+      if (!launcher?.jobWorker?.otherWindow && !launcher?.jobWorker?.running) { resetMisses(); lastKnown = undefined; item.text = jobsStatus(false); item.backgroundColor = undefined; return; }
       const answer = await fetch(`http://127.0.0.1:${launcher.port}/osd/job-counts`,
         {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}, signal:AbortSignal.timeout(3000)});
+      if (disposed) return;
       if (!answer.ok) throw Error(`job counts: HTTP ${answer.status}`);
-      item.text = jobsStatus(true, (await answer.json()).counts);
-      lastKnown = item.text; resetMisses();
-      item.backgroundColor = undefined;
+      const counts = (await answer.json()).counts;
+      if (!disposed && controller.launcher === launcher && workerEnabled(launcher.jobsWorkerMode, launcher.env)) {
+        item.text = launcher.jobWorker.otherWindow
+          ? `OSD jobs: other window · ${counts.running ?? 0} running, ${counts.queued ?? 0} queued`
+          : jobsStatus(launcher.jobWorker.running, counts);
+        lastKnown = item.text; resetMisses();
+        item.backgroundColor = undefined;
+      }
     } catch (error) {
+      if (disposed || controller.launcher !== launcher || !workerEnabled(launcher.jobsWorkerMode, launcher.env)) return;
       const paused = error.name === 'TimeoutError' && debugging();
       // The engine serializes requests: even a normal first classrun can
       // outlast this poll. Require sustained failures before claiming an outage.
@@ -240,7 +248,7 @@ function jobsStatusBar(vscode, context, controller) {
       item.backgroundColor = unavailable ? new vscode.ThemeColor('statusBarItem.errorBackground') : undefined;
       if (unavailable) raw.appendLine(error.message);
     }
-    finally { busy = false; if (summaryShown) await refreshSummary(); }
+    finally { busy = false; if (!disposed && summaryShown) await refreshSummary(); }
   };
   if (vscode.debug?.onDidStartDebugSession) context.subscriptions.push(
     vscode.debug.onDidStartDebugSession(session => sessions.add(session)));
@@ -249,7 +257,7 @@ function jobsStatusBar(vscode, context, controller) {
   controller.jobsOutput = raw;
   const off = controller.onDidChange(tick);
   const timer = setInterval(tick, 2000); tick();
-  context.subscriptions.push({dispose:() => { clearInterval(timer); off.dispose(); }});
+  context.subscriptions.push({dispose:() => { disposed = true; clearInterval(timer); off.dispose(); }});
   return tick;
 }
 module.exports = {JobWorker, workerEnabled, jobsStatus, jobsStatusBar, jobsSummary};

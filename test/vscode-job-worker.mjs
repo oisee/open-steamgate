@@ -182,7 +182,7 @@ describe('VS Code jobs status poll grace and debugging', () => {
     savedClearInterval = globalThis.clearInterval;
     globalThis.setInterval = fn => { tick = fn; return 1; };
     globalThis.clearInterval = () => {};
-    item = {show() {}, dispose() {}};
+    item = {show() {}, hide() {}, dispose() {}};
     messages = [];
     subscriptions = [];
     api = {
@@ -198,7 +198,7 @@ describe('VS Code jobs status poll grace and debugging', () => {
         onDidTerminateDebugSession: fn => { end = fn; return {dispose() {}}; },
       },
     };
-    controller = {launcher: {port: 8080, inspectPort: 9480, env: {}, jobWorker: {running: true}}};
+    controller = {onDidChange() { return {dispose() {}}; }, launcher: {port: 8080, inspectPort: 9480, jobsWorkerMode: 'auto', env: {STG_DB: 'file', STG_DB_PATH: 'jobs.db'}, jobWorker: {running: true}}};
     globalThis.fetch = async () => { throw Error('worker unavailable'); };
   });
   afterEach(() => {
@@ -404,4 +404,83 @@ describe('VS Code readable job summaries', () => {
       expect(channels[0].content).to.include('Jobs unavailable');
     } finally {globalThis.fetch = previous; subscriptions.forEach(s => s.dispose());}
   });
+});
+
+// Deferred fetches deliberately ignore cancellation to exercise late completions.
+describe('VS Code job status request lifecycle', () => {
+  const {jobsStatusBar} = require('../editors/vscode/job-worker.js');
+  let previous, h;
+  beforeEach(() => {
+    previous = globalThis.fetch;
+    const commands = new Map(), subscriptions = [], writes = [], requests = [];
+    let disposed = false;
+    const record = value => { writes.push({value, disposed}); };
+    const channels = [];
+    const api = {StatusBarAlignment:{Left:1}, commands:{registerCommand(id, fn) {commands.set(id, fn); return {dispose(){}};}},
+      window:{createOutputChannel(name) {
+        const channel = {content:'', clear(){record(`${name}: clear`); this.content = '';},
+          appendLine(value){record(`${name}: ${value}`); this.content += value;}, show(){record(`${name}: show`);}, dispose(){}};
+        channels.push(channel); return channel;
+      }, createStatusBarItem(){return {show(){record('show');}, hide(){record('hide');}, dispose(){},
+        set text(value){record(value);}, set tooltip(value){record(value);}};}}};
+    const controller = {launcher:{port:8060,jobsWorkerMode:'auto',env:{STG_DB:'file',STG_DB_PATH:'jobs.db',OSD_BATCH_READ_TOKEN:'fixture'},jobWorker:{running:false}},
+      onDidChange(){return {dispose(){}};}};
+    globalThis.fetch = async url => {requests.push(url); return {ok:true,json:async()=>({counts:{running:0,queued:0},runs:[]})};};
+    const tick = jobsStatusBar(api, {subscriptions}, controller);
+    h = {commands, subscriptions, writes, requests, channels, controller, tick,
+      dispose(){subscriptions.forEach(s => s.dispose()); disposed = true;}};
+  });
+  afterEach(() => {h.dispose(); globalThis.fetch = previous;});
+  for (const endpoint of ['counts', 'summary']) {
+    it(`ignores a pending ${endpoint} response after disposal and starts no further requests`, async () => {
+      await h.commands.get('osd.showJobs')();
+      let resolve;
+      globalThis.fetch = url => {h.requests.push(url); return new Promise(done => {resolve = done;});};
+      h.controller.launcher.jobWorker.running = true;
+      const pending = endpoint === 'counts' ? h.tick() : h.commands.get('osd.showJobs')();
+      expect(resolve).to.be.a('function');
+      h.dispose();
+      const writes = h.writes.length, requests = h.requests.length;
+      resolve({ok:true,json:async()=>({counts:{running:2,queued:1},runs:[]})});
+      await pending;
+      await h.tick();
+      await h.commands.get('osd.showJobs')();
+      h.commands.get('osd.showRawJobLog')();
+      expect(h.writes).to.have.length(writes);
+      expect(h.requests).to.have.length(requests);
+    });
+  }
+  for (const outcome of ['success', 'failure']) {
+    it(`ignores counts ${outcome} from a replaced launcher`, async () => {
+      let resolve, reject;
+      globalThis.fetch = () => new Promise((done, fail) => {resolve = done; reject = fail;});
+      h.controller.launcher.jobWorker.running = true;
+      const pending = h.tick();
+      h.controller.launcher = {...h.controller.launcher, jobWorker:{running:false}};
+      const writes = h.writes.length;
+      if (outcome === 'success') resolve({ok:true,json:async()=>({counts:{running:2,queued:1}})});
+      else reject(Error('old launcher offline'));
+      await pending;
+      expect(h.writes).to.have.length(writes);
+    });
+  }
+  for (const endpoint of ['counts', 'summary']) {
+    for (const failure of [401, 503, 'non-JSON']) {
+      it(`shows readable unavailable messages for ${endpoint} ${failure}`, async () => {
+        globalThis.fetch = async () => failure === 'non-JSON'
+          ? {ok:true,json:async()=>{throw new SyntaxError('Unexpected token < in JSON');}}
+          : {ok:false,status:failure};
+        if (endpoint === 'counts') {
+          h.controller.launcher.jobWorker.running = true;
+          await h.tick();
+          expect(h.writes.map(w => w.value)).to.include('OSD jobs: status unavailable');
+          expect(h.channels[1].content).to.include(failure === 'non-JSON' ? 'JSON' : `HTTP ${failure}`);
+        } else {
+          await h.commands.get('osd.showJobs')();
+          expect(h.channels[0].content).to.include('Job summary unavailable:').and.include('Use Show raw job log');
+          expect(h.channels[0].content).to.include(failure === 'non-JSON' ? 'JSON' : `HTTP ${failure}`);
+        }
+      });
+    }
+  }
 });
