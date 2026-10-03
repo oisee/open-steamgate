@@ -3,8 +3,8 @@
 The JS column is incomplete; remeasurement in progress.
 
 ABAPiti commit: 8cdf57212c23772baf6293cb3d8784181521c8e4.
-open-steamgate generator content: c5ff07122a63. Date: 2026-10-03.
-Generator file: tools/osg-support.mjs (git blob 84e09e27899040c8ba061789a4e340b16e121502).
+open-steamgate generator content: 9a9c20f09824. Date: 2026-10-03.
+Generator file: tools/osg-support.mjs (git blob 811ad4741157e0595ad9918eb6b9df452a1fd82b).
 Generator file: tools/osd-kernel-compat.mjs (git blob 3feb3b0b1099e35cf22af5c2e86613b7888af4fa).
 
 Generated from the ABAPiti corpus; a construct marked runs means its using classes passed their rows, not that the construct is correct or specified.
@@ -28,6 +28,19 @@ Folder run evidence:
 - mono / osgo: all 10 tests SUCCESS
 - qjs / VS Code (OSG-JS): not measured: 30-minute timeout after a successful build with the larger heap and private file-backed SQLite; no class results; exit 124 (1800.45 s; peak RSS 8879396 KiB)
 - qjs / osgo: all 9 tests SUCCESS
+
+Folder run provenance (snapshotted from installed tools; no clock or rendering environment):
+
+| Folder | Runtime | Database backend | Heap setting | Installed versions |
+|---|---|---|---|---|
+| TestOSD_EmitUnitClasses | VS Code (OSG-JS) | --db file (node:sqlite) | --max-old-space-size=12288 MiB | @abaplint/runtime 2.13.93; @abaplint/transpiler 2.13.93; Node v26.9.0; node:sqlite (SQLite) 3.53.4 |
+| TestOSD_EmitUnitClasses | osgo | modernc.org/sqlite | Node default (no --max-old-space-size override) | @abaplint/runtime 2.13.93; @abaplint/transpiler 2.13.93; Go go1.26.0; Node v26.9.0 |
+| int8 | VS Code (OSG-JS) | --db file (node:sqlite) | --max-old-space-size=12288 MiB | @abaplint/runtime 2.13.93; @abaplint/transpiler 2.13.93; Node v26.9.0; node:sqlite (SQLite) 3.53.4 |
+| int8 | osgo | modernc.org/sqlite | Node default (no --max-old-space-size override) | @abaplint/runtime 2.13.93; @abaplint/transpiler 2.13.93; Go go1.26.0; Node v26.9.0 |
+| mono | VS Code (OSG-JS) | --db file (node:sqlite) | --max-old-space-size=12288 MiB | @abaplint/runtime 2.13.93; @abaplint/transpiler 2.13.93; Node v26.9.0; node:sqlite (SQLite) 3.53.4 |
+| mono | osgo | modernc.org/sqlite | Node default (no --max-old-space-size override) | @abaplint/runtime 2.13.93; @abaplint/transpiler 2.13.93; Go go1.26.0; Node v26.9.0 |
+| qjs | VS Code (OSG-JS) | --db file (node:sqlite) | --max-old-space-size=12288 MiB | @abaplint/runtime 2.13.93; @abaplint/transpiler 2.13.93; Node v26.9.0; node:sqlite (SQLite) 3.53.4 |
+| qjs | osgo | modernc.org/sqlite | Node default (no --max-old-space-size override) | @abaplint/runtime 2.13.93; @abaplint/transpiler 2.13.93; Go go1.26.0; Node v26.9.0 |
 
 ## Runs on JS (osgo agrees) (26)
 

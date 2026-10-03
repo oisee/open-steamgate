@@ -217,6 +217,7 @@ else { process.stderr.write("own fatal reason\\nmore stderr\\n"); process.exit(7
         ["FAILED", `runner died: ${fault === "signal" ? "terminated by SIGTERM" : "own fatal reason"}`],
         ["SUCCESS", ""],
       ]);
+      assert.deepEqual(reconcile(ready, result.actual).map((row) => row.source), [undefined, "harness", undefined]);
       assert.equal(result.runDetail.retries, 2);
     }
   } finally {
@@ -305,6 +306,7 @@ process.exit(run.status ?? 1);
         {GOGEN_UNIT_RUNNER: wrapper, GOGEN_UNIT_TEST_FAULT: fault, GOGEN_UNIT_TEST_MARKER: marker});
       assert.equal(run.status, 1, run.stderr || run.stdout);
       assert.deepEqual(run.result.rows.map((row) => row.status), ["FAILED", "FAILED", "FAILED", "FAILED"]);
+      assert.ok(run.result.rows.every((row) => row.source === "harness"));
       const messages = run.result.rows.map((row) => row.message);
       if (fault === "limit") {
         assert.ok(messages.every((msg) => /stdout limit exceeded/.test(msg)), messages.join("\n"));

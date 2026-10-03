@@ -121,7 +121,7 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
     const result = completed(keys, run, resultsFile);
     const failPending = (pending, reason) => {
       for (const key of pending) result.rows.push(...groups.find((g) => g.key === key).methods.map((r) =>
-        ({...r, status: "FAILED", message: `runner died: ${reason}`})));
+        ({...r, source: "harness", status: "FAILED", message: `runner died: ${reason}`})));
     };
     const emptyCheckpoint = result.rows.length === 0 && !result.started;
     let firstRetry = true;
@@ -145,7 +145,7 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
       result.rows.push(...own.rows);
       Object.assign(result.durations, own.durations);
       if (own.pending.length) result.rows.push(...groups.find((g) => g.key === key).methods.map((r) =>
-        ({...r, status: "FAILED", message: `runner died: ${retry.status === 0 && !retry.killReason ? "incomplete result" : died(retry)}`})));
+        ({...r, source: "harness", status: "FAILED", message: `runner died: ${retry.status === 0 && !retry.killReason ? "incomplete result" : died(retry)}`})));
       rmSync(retryDir, {recursive: true, force: true});
       // An empty checkpoint followed by the same initial failure indicates a
       // broken startup, not a class-specific crash. Do not retry every class.
@@ -199,7 +199,7 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
         : ready.some((r) => r.db) ? (seedHeader !== "SQLite format 3\0" ? "invalid SQLite seed image" : "")
           : seedHeader ? "unexpected seed image for a database-free run" : "";
     if (seedError) {
-      for (const r of ready) { r.status = "FAILED"; r.message = `seed image: ${seedError}`; }
+      for (const r of ready) { r.source = "harness"; r.status = "FAILED"; r.message = `seed image: ${seedError}`; }
       rmSync(scratchDir, {recursive: true, force: true});
       return {actual: ready, runDetail};
     }

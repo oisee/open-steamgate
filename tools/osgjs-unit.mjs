@@ -10,6 +10,8 @@ import {stageInput, summarize, printResult, run, kernelWarnings, applyKernelWarn
 const root = resolve(import.meta.dirname, "..");
 // Unit CI uses checkout layers only, regardless of installed or external packs.
 const unitEnv = {OSD_PACKS: "", OSD_WEB_PACKS: ""};
+import {unitProvenance} from "./osd-unit-provenance.mjs";
+
 const help = `Usage: npm run osgjs:unit -- <dir> [--json] [--kernel-strict] [--db sqlite|file] [--class NAME...]
 Reads the immediate directory only (no recursion). Requires a checkout and synced libraries.
 Builds the whole system in a temporary directory; runs only the selected owners.
@@ -57,6 +59,7 @@ export async function main(args = process.argv.slice(2)) {
   const json = args.includes("--json");
   let staging, result, warnings = [];
   const selected = [];
+  let provenance;
   try {
     let directory, database = "sqlite";
     for (let i = 0; i < args.length; i++) {
@@ -73,6 +76,7 @@ export async function main(args = process.argv.slice(2)) {
       else directory = resolve(arg);
     }
     if (!directory) throw new Error("<dir> is required; use --help for usage");
+    provenance = unitProvenance("osgjs", {database});
     const staged = stageInput(directory, selected, "osgjs-unit");
     staging = staged.staging;
     try { warnings = kernelWarnings(staged.input ?? directory); }
@@ -98,9 +102,10 @@ export async function main(args = process.argv.slice(2)) {
       result.overrides = overrides;
     }
   } catch (error) {
-    result = {classes: 0, compiled: 0, rows: [{status: "ERROR", message: error.message}], overrides: []};
+    result = {classes: 0, compiled: 0, rows: [{source: "harness", status: "ERROR", message: error.message}], overrides: []};
   } finally { if (staging) rmSync(staging, {recursive: true, force: true}); }
   result.overrides ??= [];
+  if (provenance) result.provenance = provenance;
   const summary = summarize(applyKernelWarnings(result, warnings, args.includes("--kernel-strict"), selected));
   printResult(summary.result, json);
   return summary.code;

@@ -199,6 +199,15 @@ and omitted owners not measured. Harness crashes, OOM and setup failures before
 any class are not measured with a reason; fails applies only to test results.
 Manifest entries may include `wallSeconds` and `peakRssKiB` (GNU time maximum
 resident set size across the command and its children, including the build).
+Both runners snapshot `provenance` into their JSON: backend, heap override,
+installed runtime/transpiler and database versions, Node, and Go for osgo.
+A manifest's `provenance` can preserve those settings for a crash without JSON
+or an older run; it takes precedence over the result's snapshot. Missing metadata
+is printed as "not recorded". Regeneration reads the snapshots, so changes to
+installed tools or `NODE_OPTIONS` cannot rewrite historical provenance.
+The file backend uses `node:sqlite`, not better-sqlite; its SQLite version comes
+from the installed Node binary. Harness rows carry `source: "harness"`; assertion
+messages never determine provenance.
 Plain `--osgo`/`--osgjs` files give per-class
 evidence only, which is safe for runs restricted with `--class`.
 
@@ -234,43 +243,113 @@ cat > .local/support-work/runs.json <<'JSON'
   {
     "folder": "TestOSD_EmitUnitClasses",
     "runtime": "osgo",
-    "file": "osgo-corpus.json"
+    "file": "osgo-corpus.json",
+    "provenance": {
+      "database": "modernc.org/sqlite",
+      "heap": "Node default (no --max-old-space-size override)",
+      "versions": {
+        "@abaplint/runtime": "2.13.93",
+        "@abaplint/transpiler": "2.13.93",
+        "Node": "v26.9.0",
+        "Go": "go1.26.0"
+      }
+    }
   },
   {
     "folder": "TestOSD_EmitUnitClasses",
     "runtime": "osgjs",
     "file": "osgjs-corpus.json",
     "wallSeconds": 96.27,
-    "peakRssKiB": 2590272
+    "peakRssKiB": 2590272,
+    "provenance": {
+      "database": "--db file (node:sqlite)",
+      "heap": "--max-old-space-size=12288 MiB",
+      "versions": {
+        "@abaplint/runtime": "2.13.93",
+        "@abaplint/transpiler": "2.13.93",
+        "Node": "v26.9.0",
+        "node:sqlite (SQLite)": "3.53.4"
+      }
+    }
   },
   {
     "folder": "int8",
     "runtime": "osgo",
-    "file": "osgo-int8.json"
+    "file": "osgo-int8.json",
+    "provenance": {
+      "database": "modernc.org/sqlite",
+      "heap": "Node default (no --max-old-space-size override)",
+      "versions": {
+        "@abaplint/runtime": "2.13.93",
+        "@abaplint/transpiler": "2.13.93",
+        "Node": "v26.9.0",
+        "Go": "go1.26.0"
+      }
+    }
   },
   {
     "folder": "int8",
     "runtime": "osgjs",
     "file": "osgjs-int8.json",
     "wallSeconds": 23.06,
-    "peakRssKiB": 1371808
+    "peakRssKiB": 1371808,
+    "provenance": {
+      "database": "--db file (node:sqlite)",
+      "heap": "--max-old-space-size=12288 MiB",
+      "versions": {
+        "@abaplint/runtime": "2.13.93",
+        "@abaplint/transpiler": "2.13.93",
+        "Node": "v26.9.0",
+        "node:sqlite (SQLite)": "3.53.4"
+      }
+    }
   },
   {
     "folder": "mono",
     "runtime": "osgo",
-    "file": "osgo-mono.json"
+    "file": "osgo-mono.json",
+    "provenance": {
+      "database": "modernc.org/sqlite",
+      "heap": "Node default (no --max-old-space-size override)",
+      "versions": {
+        "@abaplint/runtime": "2.13.93",
+        "@abaplint/transpiler": "2.13.93",
+        "Node": "v26.9.0",
+        "Go": "go1.26.0"
+      }
+    }
   },
   {
     "folder": "mono",
     "runtime": "osgjs",
     "file": "osgjs-mono.json",
     "wallSeconds": 511.18,
-    "peakRssKiB": 1636204
+    "peakRssKiB": 1636204,
+    "provenance": {
+      "database": "--db file (node:sqlite)",
+      "heap": "--max-old-space-size=12288 MiB",
+      "versions": {
+        "@abaplint/runtime": "2.13.93",
+        "@abaplint/transpiler": "2.13.93",
+        "Node": "v26.9.0",
+        "node:sqlite (SQLite)": "3.53.4"
+      }
+    }
   },
   {
     "folder": "qjs",
     "runtime": "osgo",
-    "file": "osgo-qjs.json"
+    "file": "osgo-qjs.json",
+    "provenance": {
+      "database": "modernc.org/sqlite",
+      "heap": "Node default (no --max-old-space-size override)",
+      "versions": {
+        "@abaplint/runtime": "2.13.93",
+        "@abaplint/transpiler": "2.13.93",
+        "Node": "v26.9.0",
+        "Go": "go1.26.0"
+      }
+    }
   },
   {
     "folder": "qjs",
@@ -278,7 +357,17 @@ cat > .local/support-work/runs.json <<'JSON'
     "file": "osgjs-qjs.json",
     "wallSeconds": 1800.45,
     "peakRssKiB": 8879396,
-    "reason": "30-minute timeout after a successful build with the larger heap and private file-backed SQLite; no class results; exit 124"
+    "reason": "30-minute timeout after a successful build with the larger heap and private file-backed SQLite; no class results; exit 124",
+    "provenance": {
+      "database": "--db file (node:sqlite)",
+      "heap": "--max-old-space-size=12288 MiB",
+      "versions": {
+        "@abaplint/runtime": "2.13.93",
+        "@abaplint/transpiler": "2.13.93",
+        "Node": "v26.9.0",
+        "node:sqlite (SQLite)": "3.53.4"
+      }
+    }
   }
 ]
 JSON

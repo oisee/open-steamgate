@@ -184,7 +184,7 @@ describe("osgo unit CI entry point", function () {
     assert.equal(JSON.parse(run.stdout).totals.success, 1);
   });
   it("classifies infrastructure, skipped methods, and mixed outcomes conservatively", () => {
-    for (const row of [{status: "FAILED", message: "runner: crashed", method: "CHECK"}, {status: "FAILED", message: "runner died: crashed", method: "CHECK"}, {status: "SKIPPED", method: "CHECK"}]) {
+    for (const row of [{source: "harness", status: "FAILED", message: "runner: crashed", method: "CHECK"}, {source: "harness", status: "FAILED", message: "runner died: crashed", method: "CHECK"}, {status: "SKIPPED", method: "CHECK"}]) {
       const result = summarize({rows: [row]}); assert.equal(result.code, 2); assert.equal(result.result.totals.error, 1);
     }
     assert.equal(summarize({rows: [{status: "FAILED", method: "ONE"}, {status: "NOT_COMPILED", method: "TWO"}]}).code, 2);

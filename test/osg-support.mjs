@@ -5,6 +5,11 @@ import {join, resolve} from "node:path";
 import {KERNEL_FORMS, kernelWarnings} from "../tools/osd-kernel-compat.mjs";
 import {generate, inventory, evidence} from "../tools/osg-support.mjs";
 
+import {run as buildCommand} from "../tools/osd-build-command.mjs";
+import {alertOf} from "../tools/osd-unit.mjs";
+import {summarize} from "../tools/osd-unit-ci.mjs";
+import {reconcile} from "../tools/gogen/unit-results.mjs";
+
 const root = resolve(import.meta.dirname, "..");
 describe("generated corpus support evidence", function () {
   this.timeout(15000);
@@ -70,6 +75,41 @@ CLASS zcl_${cls} IMPLEMENTATION. ENDCLASS.
     writeFileSync(file, JSON.stringify({rows: []}));
     assert.ok(generate([dir], paths).report.constructs.every((c) => c.osgo.status === "not measured"));
   });
+  it("retains subprocess signal provenance separately from compiler diagnostics", () => {
+    assert.throws(() => buildCommand(process.execPath, ["-e", "process.kill(process.pid, 'SIGTERM')"], root),
+      (error) => error.signal === "SIGTERM" && error.code === "FAILED");
+    assert.throws(() => buildCommand(process.execPath, ["-e", "console.error('syntax error'); process.exit(1)"], root),
+      (error) => !error.signal && !error.spawnError && error.output.includes("syntax error"));
+  });
+  it("keeps assertion text beginning runner: as a failure through alertOf and both CI paths", () => {
+    class kernel_cx_assert {}
+    const error = Object.assign(new kernel_cx_assert(), {
+      msg: {get: () => "runner: returned incorrect value"},
+      expected: {get: () => "2"}, actual: {get: () => "1"},
+    });
+    const alert = alertOf(error, "CHECK");
+    assert.equal(alert.kind, "failedAssertion");
+    const row = {class: "ZCL_ASSERT", testclass: "LTCL_TEST", method: "CHECK", status: "FAILURE",
+      message: [alert.title, ...alert.details].join("; ")};
+    for (const candidate of [row, {...row, status: "FAILED"}]) {
+      const normalized = summarize({rows: [candidate]});
+      assert.equal(normalized.code, 1);
+      assert.equal(normalized.result.rows[0].status, "FAILURE");
+      const result = evidence([row.class], {rows: new Map([[row.class, normalized.result.rows]])});
+      assert.equal(result.status, "fails");
+      assert.match(result.failures[0].message, /Expected \[2\]; Actual \[1\]/);
+    }
+    // A process failure retains its identity and is still unmeasured after reconciliation.
+    const harness = reconcile([row], [{...row, source: "harness", status: "FAILED", message: "startup crashed"}]);
+    const normalized = summarize({rows: harness});
+    assert.equal(normalized.code, 2);
+    assert.equal(evidence([row.class], {rows: new Map([[row.class, normalized.result.rows]])}).status, "not measured");
+    // Compiler refusal text and real test errors cannot manufacture harness provenance.
+    for (const message of ["runner died: SIGABRT", "seed image: refused", "FATAL ERROR: heap exhaustion"]) {
+      assert.equal(evidence([row.class], {rows: new Map([[row.class, [{...row, message, status: "ERROR"}]]])}).status, "fails");
+      assert.equal(evidence([row.class], {rows: new Map([[row.class, [{class: row.class, message, status: "NOT_COMPILED"}]]])}).status, "refused");
+    }
+  });
   it("marks crashes and setup ERROR JSON as not measured, retaining real test failures", () => {
     const dir = join(root, "tools/testdata-kernel-valid");
     const file = join(temp, "setup.json"), manifest = join(temp, "setup-runs.json");
@@ -78,9 +118,9 @@ CLASS zcl_${cls} IMPLEMENTATION. ENDCLASS.
       wallSeconds: 12.5, peakRssKiB: 1024}]));
     for (const row of [{status: "ERROR", message: "memory access out of bounds"},
       {class: "ZCL_KERNEL_VALID", status: "ERROR", message: "setup failed"},
-      {class: "ZCL_KERNEL_VALID", method: "CHECK", status: "ERROR", message: "runner died: SIGABRT"},
-      {class: "ZCL_KERNEL_VALID", status: "NOT_COMPILED", message: "node tools/osd-transpile.mjs exited SIGABRT"},
-      {class: "ZCL_KERNEL_VALID", status: "NOT_COMPILED", message: "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory"}]) {
+      {source: "harness", class: "ZCL_KERNEL_VALID", method: "CHECK", status: "ERROR", message: "runner died: SIGABRT"},
+      {source: "harness", class: "ZCL_KERNEL_VALID", status: "NOT_COMPILED", message: "node tools/osd-transpile.mjs exited SIGABRT"},
+      {source: "harness", class: "ZCL_KERNEL_VALID", status: "NOT_COMPILED", message: "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory"}]) {
       writeFileSync(file, JSON.stringify({compiled: 0, rows: [row]}));
       const {report, markdown} = generate([dir], paths);
       assert.ok(report.constructs.every((c) => c.osgjs.status === "not measured"));
@@ -105,6 +145,28 @@ CLASS zcl_${cls} IMPLEMENTATION. ENDCLASS.
     assert.ok(crash.report.constructs.every((c) => c.osgjs.status === "not measured"));
     assert.match(crash.markdown, /SIGABRT: heap exhaustion; no JSON/);
     assert.match(crash.markdown, /30 s; peak RSS 2048 KiB/);
+  });
+  it("renders stored backend and tool versions per folder without consulting the rendering environment", () => {
+    const dir = join(root, "tools/testdata-kernel-valid");
+    const file = join(temp, "provenance.json"), manifest = join(temp, "provenance-runs.json");
+    const provenance = {database: "--db file (node:sqlite)", heap: "--max-old-space-size=12288 MiB",
+      versions: {"@abaplint/runtime": "2.13.93", "@abaplint/transpiler": "2.13.93", Node: "v26.9.0", "node:sqlite (SQLite)": "3.53.4"}};
+    writeFileSync(file, JSON.stringify({provenance, rows: [{class: "ZCL_KERNEL_VALID", method: "CHECK", status: "SUCCESS"}]}));
+    writeFileSync(manifest, JSON.stringify([{folder: "testdata-kernel-valid", runtime: "osgjs", file: "provenance.json"},
+      {folder: "testdata-kernel-valid", runtime: "osgo", reason: "no JSON", provenance: {...provenance, database: "modernc.org/sqlite", versions: {...provenance.versions, Go: "go1.26.0"}}}]));
+    const paths = {osgo: [], osgjs: [], runs: [manifest]};
+    const page = generate([dir], paths);
+    assert.deepEqual(page.report.folders[0].provenance.osgjs, provenance);
+    for (const text of ["--db file (node:sqlite)", "--max-old-space-size=12288 MiB", "@abaplint/runtime 2.13.93", "@abaplint/transpiler 2.13.93", "Node v26.9.0", "node:sqlite (SQLite) 3.53.4", "Go go1.26.0"])
+      assert.ok(page.markdown.includes(text), text);
+    const previous = process.env.NODE_OPTIONS;
+    try {
+      process.env.NODE_OPTIONS = "--max-old-space-size=512";
+      assert.equal(generate([dir], paths).markdown, page.markdown);
+    } finally {
+      if (previous === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = previous;
+    }
   });
   it("does not credit omitted test owners or helpers from real --class output declared full-folder", () => {
     const dir = join(root, "test/fixtures/osg-support-selected");
@@ -208,7 +270,7 @@ ENDMETHOD. ENDCLASS.
     assert.equal(evidence(["C", "MISSING"], {rows}).status, "not measured");
     assert.equal(evidence(["C"], {rows}).status, "runs");
     assert.equal(evidence(["D"], {rows: new Map([["D", [{status: "FAILURE", message: "no test ran"}]]])}).status, "not measured");
-    assert.equal(evidence(["D"], {rows: new Map([["D", [{status: "NOT_COMPILED", message: "node exited SIGABRT"}]]])}).status, "not measured");
+    assert.equal(evidence(["D"], {rows: new Map([["D", [{source: "harness", status: "NOT_COMPILED", message: "node exited SIGABRT"}]]])}).status, "not measured");
   });
   it("generates every section from kernel fixtures and checks equal and changed pages via CLI", () => {
     const dirs = ["compat", "valid", "bits"].map((name) => join(root, "tools/testdata-kernel-" + name));

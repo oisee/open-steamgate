@@ -3,7 +3,7 @@ export function reconcile(expected, actual) {
   const got = new Map(actual.map((r) => [key(r), r]));
   return expected.map((r) => {
     const found = got.get(key(r));
-    return found ? {...r, status: found.status, message: found.message}
-      : {...r, status: "FAILED", message: "runner dropped this method"};
+    return found ? {...r, status: found.status, message: found.message, ...(found.source ? {source: found.source} : {})}
+      : {...r, source: "harness", status: "FAILED", message: "runner dropped this method"};
   });
 }

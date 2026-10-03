@@ -104,11 +104,10 @@ export function inventory(directory) {
   } finally { if (staged.staging) rmSync(staged.staging, {recursive: true, force: true}); }
 }
 
-// The build runner may preserve a subprocess crash in NOT_COMPILED rows.
+// Runner-owned provenance wins; legacy setup errors have no test identity.
 const HARNESS_CRASH = /FATAL ERROR:.*(?:heap|allocation|memory)|heap exhaustion|(?:exited|terminated by|runner died:)\s*SIG(?:ABRT|KILL|SEGV)|spawn .*ENOENT/i;
-const unmeasuredRow = (row, result = {}) =>
-  (["ERROR", "FAILURE"].includes(row.status) && ((!row.method && !row.testclass) || result.compiled === 0 || /^(runner:|runner died:|seed image:|skipped due to configuration)/.test(row.message ?? ""))) ||
-  (row.status === "NOT_COMPILED" && HARNESS_CRASH.test(row.message ?? ""));
+const unmeasuredRow = (row) => row.source === "harness" ||
+  (["ERROR", "FAILURE"].includes(row.status) && !row.method && !row.testclass);
 const reasonOf = (message) => String(message ?? "setup failed").split(/\r?\n/).find((line) => HARNESS_CRASH.test(line))
   ?? String(message ?? "setup failed").split(/\r?\n/)[0];
 
@@ -199,6 +198,11 @@ export function generate(directories, paths, options = {}) {
       if (full.length > 1) throw new Error(`duplicate full-folder run: ${folder.name}/${name}`);
       if (!full.length) continue;
       const entry = full[0];
+      const result = entry.file ? JSON.parse(readFileSync(entry.file, "utf8")) : undefined;
+      folder.provenance ??= {};
+      folder.provenance[name] = entry.provenance ?? result?.provenance ?? {
+        database: "not recorded", heap: "not recorded", versions: {},
+      };
       const reason = entry.reason ?? run.harness.get(entry.file);
       if (reason) {
         folder.evidence[name] = `not measured: ${reason}`;
@@ -273,6 +277,13 @@ function render(report) {
     const measurement = folder.measurements?.[name];
     const metrics = measurement ? ` (${measurement.wallSeconds} s; peak RSS ${measurement.peakRssKiB} KiB)` : "";
     out.push(`- ${safe(folder.name)} / ${name === "osgjs" ? "VS Code (OSG-JS)" : name}: ${safe(folder.evidence[name] ?? "not measured: no full-folder run declared; per-class rows retained")}${metrics}`);
+  }
+  out.push("", "Folder run provenance (snapshotted from installed tools; no clock or rendering environment):", "",
+    "| Folder | Runtime | Database backend | Heap setting | Installed versions |", "|---|---|---|---|---|");
+  for (const folder of report.folders) for (const name of ["osgjs", "osgo"]) {
+    const p = folder.provenance?.[name];
+    const versions = p ? Object.entries(p.versions).sort(([a], [b]) => order(a, b)).map(([tool, v]) => `${tool} ${v}`).join("; ") : "not recorded";
+    out.push(`| ${safe(folder.name)} | ${name === "osgjs" ? "VS Code (OSG-JS)" : name} | ${safe(p?.database ?? "not recorded")} | ${safe(p?.heap ?? "not recorded")} | ${safe(versions || "not recorded")} |`);
   }
   const warned = () => {
     out.push("", "## Warned", "", "The shared kernel compatibility scanner knows these forms (including forms absent from this corpus):", "");

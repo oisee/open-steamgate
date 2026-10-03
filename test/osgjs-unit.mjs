@@ -100,6 +100,10 @@ describe("osgjs unit CI entry point", function () {
     const result = parsed(invoke(dir, ["--json", "--db", "file"], {env: {...process.env, NODE_OPTIONS: "--max-old-space-size=5120", OSD_PACKS: join(temp, "packs")}}));
     assert.deepEqual(result.totals, {success: 14, failure: 0, not_compiled: 0, error: 0, tests: 14});
     assert.equal(result.classes, 2); assert.equal(result.compiled, 2);
+    assert.equal(result.provenance.database, "--db file (node:sqlite)");
+    assert.equal(result.provenance.heap, "--max-old-space-size=5120 MiB");
+    assert.equal(result.provenance.versions.Node, process.version);
+    assert.equal(result.provenance.versions["node:sqlite (SQLite)"], process.versions.sqlite);
     assert.equal(fingerprint(dir), before);
   });
   it("rejects 256 characters before any build", () => {
