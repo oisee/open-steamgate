@@ -1,8 +1,18 @@
 # ADT façade in ABAP: port map
 
-Base: origin/main `e359bcf5`, mainly `tools/adt-facade.mjs` (3097 lines) and `tools/adt-session.mjs`. ADR 0007 moves the façade to ABAP. ADR 0008 moves locks to ENQ. Clean-room rule: we port our own JavaScript. The wire and our tests are the contract.
+Base: origin/main `e359bcf5`, mainly `tools/adt-facade.mjs` (3097 lines) and `tools/adt-session.mjs`. ADR 0007 moves the document façade to ABAP under variant C. ADR 0008 moves locks to ENQ. Clean-room rule: we port our own JavaScript. The wire and our tests are the contract.
 
 ## 1. Summary
+
+Variant C (Alice, 2026-10-03) gives ABAP the grammar and document routes.
+The host permanently owns write (A4), create/delete (A5), inactive objects
+and activation (A6/A7), git (A8b), ABAP Unit runs (C2b), unit/object/run
+(C3) and notebook (C6), served by the Node facade through the catch-all.
+No new continuation routes are planned. See [port-plan.md](port-plan.md)
+for the current slices: B2a, B2b, A1, A2, A3a, A3b, A8a, A9 and A10.
+Done means `PORT_PENDING` is empty and the coverage checks still pass;
+`HOST_ALLOWED` is permanent scope, not a port queue. The gate currently
+records 56 pending document registrations and 31 host registrations.
 
 **A destination runs where its resource lives.** With the opt-in
 `OSD_ADT_ONE_RUNTIME=1`, STORE and build/store/supervisor SYSTEM kinds run
@@ -29,11 +39,15 @@ At runtime the per-type loops expand to **142 registrations**:
 - 63 other rows.
 - 1 catch-all.
 
-The ABAP router table must generate exactly these 142 rows. The check is "every registration appears exactly once".
+The 142 registrations describe the Node inventory, not an ABAP row target.
+Every document registration needs its own ABAP pattern for every method;
+host orchestration reaches the single last HOST catch-all permanently.
 
 Express also answers HEAD for every GET automatically. That is one router rule (section 2, step 3), not extra rows.
 
-### Rows per group (all moves below applied)
+### Rows per group (original inventory)
+
+The original grouping and owner proposals below are superseded by variant C (2026-10-03); see [port-plan.md](port-plan.md).
 
 | group | owner | rows | S | M | L |
 |---|---|---|---|---|---|
@@ -44,10 +58,10 @@ Express also answers HEAD for every GET automatically. That is one router rule (
 | D, OSD-private endpoints | unassigned | 9 | 1 | 7 | 1 |
 | **total** | | **84** | **43** | **30** | **11** |
 
-### Proposed moves, each needing one line of confirmation from the receiving owner
+### Original owner proposals (historical)
 
 - **D → SKELETON:** `feeds`, `feeds/variants`, `system/users`. They share `emptyFeed` and identity with `runtime/dumps`.
-- **D → A:** `cts/transportchecks`, `activation/inactiveobjects`. They are part of the write-and-activate flow.
+- **Current split:** `cts/transportchecks` is an ABAP editor document (A2); `activation/inactiveobjects` stays host orchestration (A6).
 - **D → B, needs osg-research's confirmation.** Eleven rows: `virtualfolders/facets`, `virtualfolders/contents` (L), `objecttypes`, `releasestates`, `objectproperties/values`, `packages/settings`, `packages/valuehelps/:what`, `ddic/dataelements/:name`, `ddic/tables/parser/info`, `ddic/tables/:name`, `ddic/tables/:name/source/main`.
   - The CONTEXT scopes B to search, nodestructure, nodepath, source read, object structure and packages. These eleven are "anything else".
   - Reason for the move: they share B's tree tables, `namedItemsDocument` and `tableFieldsOf`.
@@ -59,22 +73,22 @@ Express also answers HEAD for every GET automatically. That is one router rule (
 - ADR 0007 gives "lock / write / unlock" to stoker. The CONTEXT gives locks via ENQ to the skeleton.
 - Proposed resolution, shown in the owner column of every lock row below:
   - **dell** owns the ENQ adapter, the session's handle map, the LOCK/UNLOCK route, and the two functions `lock( )` and `holds( handle, type, name )`.
-  - **stoker** owns every write that calls `holds( )`, and DELETE's call to `holder_of( )`.
+  - **stoker** owns the host write/delete family; it stays in the Node facade under variant C.
 - stoker and dell confirm this in one line each.
 
 **notebook/abap (`:2010`) and oo/classrun (`:1978`).**
-- The CONTEXT assigns both to C (dell), and this map keeps them there.
-- dell decides for C6 whether the notebook is ported or stays host-served (recommended).
-- Until that decision, the route row is marked `served-by HOST` and its tests run through the bridge (section 2, step 13). Section 3 therefore adds no notebook commands.
-- classrun is ported natively (C5).
+- Notebook is permanently host orchestration, C6, owned by stoker under variant C. Its tests run through the catch-all to the Node facade.
+- Classrun is native ABAP (C5, landed).
 
 ### The five hardest routes
+
+The original port difficulty ranking is superseded by variant C (2026-10-03); activation and unit runs stay host-owned. See [port-plan.md](port-plan.md).
 
 1. **POST `activation` (2495).**
    - A cold build takes about 18 s, a warm one about 0.46 s.
    - The build runs inside a dialog step, which holds the work-process lock.
    - The hot swap or recycle hits the process that is running the handler.
-   - It needs an asynchronous host answer.
+   - Under variant C, the Node facade owns the complete activation flow.
 2. **GET `objectstructure` (1910, plus the bare INCL/SRVD alias at 1957).**
    - `structureOf` walks abaplint's AST, and there is no ABAP parser in `src/`.
    - It becomes host PARSE OUTLINE returning rows. The XML is the easy half.
@@ -97,8 +111,8 @@ Express also answers HEAD for every GET automatically. That is one router rule (
    - `/sap/bc/adt` gets a `*.sicf.xml` modelled on `src/rfc/zosd_rfc.sicf.xml`.
    - `/sap/public/bc/icf/logoff` is a second node with the same handler.
    - The handler applies session lookup, CSRF and `X-OSD-Generation` **only under `/sap/bc/adt`**. In the JS, logoff sits outside `router.use(BASE, …)`. It gets no middleware, no token, no cookies and no generation header, and only reads the cookies to find the session to end.
-   - `/osd/not-served` (a second HOST node today, reading `facade.missed`) is served from the ABAP miss registry once the catch-all moves. During the mixed phase it merges both registries.
-   - `src/icf/nodes.json:51` and `test/osd-routes.mjs:176-184` (which asserts `handler === 'adt-facade'` for `/sap/bc/adt`) change together. Each landed group flips its rows. The final step flips the node.
+   - `/osd/not-served` retains miss reporting from both ABAP documents and the Node facade behind the HOST catch-all.
+   - `src/icf/nodes.json:51` and `test/osd-routes.mjs:176-184` (which asserts `handler === 'adt-facade'` for `/sap/bc/adt`) change together. Each document slice adds its ABAP rows; host orchestration stays behind the catch-all.
 2. **Request/response record.**
    - Request: method, path (split first, then percent-decoded, as `zcl_stg_url` does), query, a header list, parsed cookies, the body as xstring, and `fetching` (`x-csrf-token: fetch`, computed on every request, `adt-session.mjs:271`).
    - Response: status, content type, a header **list** (two `Set-Cookie` lines must survive), and a string or xstring body.
@@ -109,10 +123,10 @@ Express also answers HEAD for every GET automatically. That is one router rule (
      - `packages/valuehelps/:what` before `packages/:name`.
      - `ddic/tables/parser/info` before `ddic/tables/:name`.
      - explicit `core/http/*` routes before generic ones.
-     - `{src}/:name/includes` POST before `{src}/:name` POST.
-   - Per-type rows are generated from the type table, all 142, never hand-listed.
+     - Host create and include-create POST patterns remain ordered in the Node facade, outside the ABAP document table.
+   - Per-type document rows are generated from the type table, never hand-listed. Host orchestration has no family rows; it reaches the catch-all.
      - `includes/:include` and `includes/:include/source/main` GET are generated for **all six** source types. They answer an "object" NotFound for non-CLAS, so the miss kind stays `object`, not `resource`.
-     - LOCK/UNLOCK, DELETE and POST create are also generated for **DEVC** (`packages`).
+     - LOCK/UNLOCK document rows also cover **DEVC** (`packages`). DELETE and POST create remain in the Node facade, including DEVC.
    - General rule: **HEAD = the matching GET with the body dropped.** Express does this for every GET. Discovery and the graph also have explicit HEAD rows.
 4. **Error document and exception.**
    - `ZCX_OSD_ADT` carries status, type id, namespace and properties. The handler catches it once.
@@ -177,20 +191,20 @@ Express also answers HEAD for every GET automatically. That is one router rule (
     - ADT_TYPE, INCLUDES, LABELS, SOURCE_PROPERTY_MIME
     - `uri_of( )` and `object_from_uri( )`.
 13. **Mixed-phase bridge and Gate 1 harness.**
-    - On the Node host, every request under BASE enters `ZCL_OSD_ADT_HANDLER` first (slice 3, option B, `docs/adt-abap-port/slice-3-front.md`). The front (`tools/adt-abap-front.mjs`) calls `ANSWER` with the request record in one `dialogStep`, with the request's `ZCL_OSD_ADT_SESSION` from `AbapSessions#sessionFor`. The session (items 5 and 6) is resolved and the CSRF gate run in ABAP. Node's `Sessions` and its middleware are not mounted when the front is. There is no JS route matcher any more.
+    - On the Node host, every request under BASE enters `ZCL_OSD_ADT_HANDLER` first (slice 3, option B, `docs/adt-abap-port/slice-3-front.md`). The front (`tools/adt-abap-front.mjs`) calls `ANSWER` with the request record in one `dialogStep`, with the request's `ZCL_OSD_ADT_SESSION` from `AbapSessions#sessionFor`. The session (items 5 and 6) is resolved and the CSRF gate run in ABAP. Node's `Sessions` and its middleware are not mounted when the front is. ABAP matches document rows first; the Node facade matches requests that reach the HOST catch-all.
     - A row with `served-by HOST` (or a route that answers with a continuation) ends the step with the HOST verdict. The front puts the record's two `Set-Cookie` lines and the token on the response and sets `req.adt` to the session ABAP resolved. Then it runs the continuation after the step; the default continuation is `next()`, the JS router.
     - A failure of the step answers 500 for every request, a HOST row included, because no session was resolved.
     - `STG_ADT_DUMP` capture stays in the Node front, before the handler, so it sees both sides.
       - **OSGo** has no Node front. Its Go front must implement the same JSONL capture before any group is switched to ABAP on OSGo. Otherwise the only record of what Eclipse sent is lost.
       - **Preview:** n/a, because no ADT client reaches a service worker.
-    - `tools/gogen/parity.mjs:447-507` classifies all `/sap/bc/adt` traffic and `test/adt-facade.mjs` as `adt-deferred`. Each landed group narrows `ADT_PATH` to the paths still served by HOST, and the last group removes the category. The parity denominator changes on every landing, so report the old and the new figure side by side.
+    - `tools/gogen/parity.mjs:447-507` classifies all `/sap/bc/adt` traffic and `test/adt-facade.mjs` as `adt-deferred`. Each landed group narrows `ADT_PATH` to the paths still served by HOST, and permanent host orchestration retains its host category. The parity denominator changes on every landing, so report the old and the new figure side by side.
 
 ### Class layout (proposal)
 
 | object | role |
 |---|---|
 | `ZCL_OSD_ADT_HANDLER` | `if_http_extension~handle_request`. Builds the request record, scopes middleware to BASE, calls the router, writes the response. Commits session and handle rows whatever the status. |
-| `ZCL_OSD_ADT_ROUTER` | The 142-row table (method, pattern, handler, advertise key, served-by), HEAD=GET rule, `:param`, catch-all, miss registry. |
+| `ZCL_OSD_ADT_ROUTER` | The document route table (method, pattern, handler, advertise key, served-by), HEAD=GET rule, `:param`, single last HOST catch-all, miss registry. |
 | `ZIF_OSD_ADT_ROUTE` | `handle( request ) RETURNING response`. One class per small family. |
 | `ZCL_OSD_ADT_REQUEST` / `_RESPONSE` | Header list, cookies, `fetching`, Accept helpers, `send_entity( )` (ETag/304), `as_xml_type( )`. |
 | `ZCL_OSD_ADT_SESSION` | open/get/touch/end/sweep, id, token, stateful, user, handle map. Tables `ZOSD_ADT_SESS`, `ZOSD_ADT_HNDL`. |
@@ -262,13 +276,15 @@ Must pass against the skeleton, with the other groups served by HOST behind it:
 
 Cases that **cannot** run against ABAP, because they import JS exports directly:
 - `test/adt-session.mjs` (17 cases): becomes ABAP Unit on `ZCL_OSD_ADT_SESSION` with the same case names.
-- `test/adt-facade.mjs:9`, `:1414-1437` (`unitRunDbEnv`, `unitRunOptions`, `UNIT_RUN_DB_ENV_KEYS`): the allowlist moves into the host UNIT command, so these stay JS tests of the host.
+- `test/adt-facade.mjs:9`, `:1414-1437` (`unitRunDbEnv`, `unitRunOptions`, `UNIT_RUN_DB_ENV_KEYS`): the allowlist stays in host orchestration, so these stay JS tests of the host.
 - `test/adt-facade.mjs:8` (`nodeStructureDocument`): becomes an ABAP Unit case when B5 lands.
 - `test/vscode-extension.mjs:15` (`tableDataDocument`, `countServiceRegistrations`): each becomes an ABAP Unit case when its group lands. The JS export stays until then.
 
 ## 3. Host interfaces
 
-All commands extend the existing `ZOSD_STORE` destination (`tools/osd-store-destination.mjs`). Its existing commands are LIST, READ, WRITE, CHECK, ACTIVATE, HISTORY, REVISION and CAPABILITIES. No parallel seam.
+The original command expansion and unit-run cancellation design in this section are superseded by variant C (2026-10-03); see [port-plan.md](port-plan.md). The table is a historical seam sketch, not a command backlog.
+
+Document capabilities use the existing `ZOSD_STORE` destination (`tools/osd-store-destination.mjs`). Its existing commands are LIST, READ, WRITE, CHECK, ACTIVATE, HISTORY, REVISION and CAPABILITIES. No parallel seam.
 
 - New commands take `IV_JSON` and answer `EV_JSON`.
 - READ and WRITE keep their typed parameters.
@@ -276,7 +292,7 @@ All commands extend the existing `ZOSD_STORE` destination (`tools/osd-store-dest
 
 **Counting rule for this table:** one row is one command name. CREATE and DELETE are two commands. The table has **9 new commands** (OBJECT, CREATE, DELETE, PACKAGE, PARSE, UNIT, JOB, SQLCHECK, SYSTEM) and **6 extended ones** (CAPABILITIES, LIST, HISTORY, REVISION, CHECK, ACTIVATE). READ and WRITE are unchanged. That gives 17 commands on one destination.
 
-The notebook has no row, because it stays host-served (section 1). If dell decides to port it, it needs two more: WRITE with a scratch root, and ACTIVATE that rolls back on failure.
+Notebook stays host-served permanently (C6). It needs no ABAP commands or continuation route. WRITE, CREATE, DELETE, ACTIVATE, UNIT and JOB below are historical orchestration proposals, not port work.
 
 | command | signature sketch | wraps today (JS) | groups |
 |---|---|---|---|
@@ -319,19 +335,18 @@ SYSTEM kinds:
   - the xref SELECTs over WBCROSSGT / WBCROSSGTX (native Open SQL)
   - `services` rows from `ZOSD_SVC` / `ZOSD_PACK` / `ZOSD_SYS` (native)
 
-**Unit-run cancellation seam (`:1363-1366`).**
-- The front that owns the socket knows the client went away. ABAP does not.
-- The front (Node `test/start.mjs`, the Go front on OSGo) puts a request id in a request header (`X-OSD-Request-Id`). The shim passes it through like any header.
-- The ABAP handler passes that id to UNIT.
-- On socket `close` the front calls the host's own job registry: "cancel jobs tagged with request id R". This is a host-internal call, not a destination call.
-- The ABAP poll loop then sees state `cancelled` and returns.
-- Gate tests `adt-devloop :609` and `:688` cover it.
+**Unit-run cancellation (`:1363-1366`).**
+The Node facade owns the socket, execution and cancellation. The existing
+host tests `adt-devloop :609` and `:688` remain; no ABAP UNIT/JOB poll loop
+or cancellation continuation is planned.
 
 ADR 0007 names three host families: store, git and build. This map needs two more: **SYSTEM** and **SQLCHECK** (the DatabaseClient seam). Running SQL is native: ADBC `cl_sql_statement` is in open-abap-core.
 
 ## 4. Groups
 
 ### A: versions, write path, activation (stoker)
+
+The route inventory below includes permanent host orchestration: writes, include creation, object create/delete and inactive objects/activation. Versions, LOCK/UNLOCK and transportchecks are ABAP documents. Slice names follow [port-plan.md](port-plan.md).
 
 Version routes and the types they cover:
 
@@ -349,16 +364,16 @@ Version routes and the types they cover:
 | GET | `ddic/ddl/sources/:name/versions/:stamp/:version/content` | M | stoker | as above | text | adt-versions `:116` |
 | GET | `oo/{classes,interfaces}/:name/includes/:include/versions` | M | stoker | READ, HISTORY | versionsFeed | adt-versions (6 cases) |
 | GET | `…/includes/:include/versions/:stamp/:version/content` | M | stoker | READ, REVISION | text | adt-versions |
-| POST | `{src}` and `packages` | M | stoker | CREATE | 201 + Location | adt-devloop create, 404 package, 409, DEVC round trip |
-| DELETE | `{src}/:name` and `packages/:name` | M | stoker (uses dell's `holder_of`, `release`) | DELETE | lockedByOther, exception | adt-devloop delete, foreign session |
+| POST | `{src}` and `packages` | M | stoker | Node facade (permanent HOST) | 201 + Location | adt-devloop create, 404 package, 409, DEVC round trip |
+| DELETE | `{src}/:name` and `packages/:name` | M | stoker (host orchestration) | Node facade (permanent HOST) | lockedByOther, exception | adt-devloop delete, foreign session |
 | POST | `{src}/:name?_action=LOCK\|UNLOCK` and `packages/:name` | M | **dell** (skeleton row, listed here for completeness) | OBJECT, ENQ | lockResult, lockedByOther | see skeleton |
-| PUT | `{src}/:name/source/main?lockHandle=` | L | stoker (calls dell's `holds`) | OBJECT, READ, WRITE | ETag; 405/409/412 | adt-editor save; adt-devloop `:209-269`, release-during-body, stateless keeps lock |
-| PUT | `oo/classes/:name/includes/:include` | M | stoker | as above | as above | adt-editor include under parent lock |
-| PUT | `oo/classes/:name/includes/:include/source/main` | S | stoker | as above | as above | **none**: add one |
-| POST | `oo/classes/:name/includes?lockHandle=` | M | stoker | READ, WRITE | 201 + Location | adt-devloop test-include create |
-| POST | `activation` | L | stoker | READ, ACTIVATE, JOB | activationSuccess/Failure, X-OSD-* | adt-devloop `:740-860`, `:991`; zosd-test `:443`; adt-notebook `:98` |
+| PUT | `{src}/:name/source/main?lockHandle=` | L | stoker (host orchestration) | Node facade (permanent HOST) | ETag; 405/409/412 | adt-editor save; adt-devloop `:209-269`, release-during-body, stateless keeps lock |
+| PUT | `oo/classes/:name/includes/:include` | M | stoker | Node facade (permanent HOST) | as above | adt-editor include under parent lock |
+| PUT | `oo/classes/:name/includes/:include/source/main` | S | stoker | Node facade (permanent HOST) | as above | **none**: add one |
+| POST | `oo/classes/:name/includes?lockHandle=` | M | stoker | Node facade (permanent HOST) | 201 + Location | adt-devloop test-include create |
+| POST | `activation` | L | stoker | Node facade (permanent HOST) | activationSuccess/Failure, X-OSD-* | adt-devloop `:740-860`, `:991`; zosd-test `:443`; adt-notebook `:98` |
 | POST | `cts/transportchecks` *(from D)* | S | stoker | OBJECT | transportCheck | adt-facade (2) |
-| GET | `activation/inactiveobjects` *(from D)* | S | stoker | — | inline | **none** |
+| GET | `activation/inactiveobjects` *(from D)* | S | stoker | Node facade (permanent HOST) | inline | **none** |
 
 The lock row is not counted in A's 15. It is one of the skeleton's 23.
 
@@ -367,19 +382,12 @@ The lock row is not counted in A's 15. It is one of the skeleton's 23.
 - The test fetches the sibling feed and then follows the entry `src`, which points under `source/main/versions`. That route also exists for DDLS, so the test passes.
 - Keep both URL shapes registered and leave the base as it is.
 
-Order: A1 → (A2 ∥ A3) → A4.
+The original A1-A4 port units and their write/create/activation ordering are superseded by variant C (2026-10-03); see [port-plan.md](port-plan.md).
 
-Dependencies:
-- The skeleton router, type table and errors.
-- A2 and A3 need the ENQ adapter, `holds( )` and `holder_of( )`.
-- `zcl_osd_versions` is the precedent for A1.
-
-| unit | owner | routes | documents | tests |
-|---|---|---|---|---|
-| A1 versions | stoker | 6 version rows | `versionsFeedDocument`, stamp and ISO formatting, A4H constants | `test/adt-versions.mjs` (all) |
-| A2 write | stoker; **deliverable depends on dell's `holds( )`** | 3 PUTs + include create | ETag/If-Match helper (skeleton) | adt-editor writes, adt-devloop lock/write |
-| A3 create / delete | stoker; **uses dell's `holder_of`, `release`** | POST create, DELETE (6 types + DEVC) | CREATABLE templates (host) | adt-devloop create/delete |
-| A4 activate | stoker | activation, transportchecks, inactiveobjects | activationSuccess/Failure, transportCheck | adt-devloop activating, adt-facade transport |
+Versions and LOCK/UNLOCK are already ABAP. Transportchecks belongs to the
+pending A2 editor documents. A4 writes, A5 create/delete and A6/A7 inactive
+objects/activation stay in the Node facade permanently through the
+catch-all, with their existing host tests.
 
 ### B: repository reads (dell: information system, DDIC; stoker: source read, objectstructure)
 
@@ -434,39 +442,32 @@ B4 is last because it waits for PARSE OUTLINE. B8 provides `tableFieldsOf` to C4
 
 ### C: check, ABAP Unit, data preview, run (dell)
 
+C2b testruns/evaluation, C3 unit/object/run and C6 notebook in this inventory are permanent HOST orchestration through the catch-all. Their document bodies also stay in the Node facade.
+
 | method | path | cx | host | documents | tests |
 |---|---|---|---|---|---|
 | GET | `abapunit/metadata` | S | — | inline | none |
 | GET | `core/http/unit/object` | M | PARSE UNIT_PLAN | JSON | adt-devloop `:481` |
-| POST | `core/http/unit/object/run` | L | PARSE, UNIT (request_id), JOB | JSON | adt-devloop `:609`, `:688`; adt-facade `:1414` (host unit test) |
+| POST | `core/http/unit/object/run` | L | Node facade (permanent HOST) | JSON | adt-devloop `:609`, `:688`; adt-facade `:1414` (host unit test) |
 | POST | `oo/classrun/:name` | L | OBJECT, CAPABILITIES (built?) | text | adt-devloop Q6b (5) |
-| POST | `notebook/abap` | L | **served-by HOST** | JSON | adt-notebook, adt-devloop notebook (4), through the bridge |
+| POST | `notebook/abap` | L | Node facade (permanent HOST) | JSON | adt-notebook, adt-devloop notebook (4), through the bridge |
 | GET | `checkruns/reporters` | S | — | inline | none |
 | POST | `checkruns` | L | CHECK (with `db_engine`), READ, PACKAGE | checkReport | adt-devloop `:289-380`; adt-facade `:440`; adt-notebook |
 | POST | `abapsource/occurencemarkers` | S | — | inline | adt-devloop `:703`, `:729` |
-| POST | `abapunit/testruns/evaluation` | M | UNIT, JOB | unitResult | adt-devloop `:427` |
-| POST | `abapunit/testruns` | L | PARSE UNIT_PLAN, UNIT, JOB | unitResult | adt-devloop `:446-740` |
+| POST | `abapunit/testruns/evaluation` | M | Node facade (permanent HOST) | unitResult | adt-devloop `:427` |
+| POST | `abapunit/testruns` | L | Node facade (permanent HOST) | unitResult | adt-devloop `:446-740` |
 | GET | `datapreview/ddic/:name/metadata` | S | READ | tableData | adt-facade `:1243` |
 | POST | `datapreview/ddic` | M | READ; SYSTEM SQL | tableData | adt-facade `:1256-1283`; osd-data; osd-child |
 | GET | `datapreview/cds/:name/metadata` | M | PARSE DDLS | tableData | adt-facade `:1293`, `:1306` |
 | POST | `datapreview/cds` | M | PARSE DDLS; SYSTEM SQL | tableData | adt-facade `:1310-1318` |
 | POST | `datapreview/freestyle` | M | SYSTEM SQLCHECK / SQL | checkReport, tableData | adt-facade `:545-603`; adt-devloop `:871`, `:947` |
 
-Order: C1 → C4 → C2 → C5 → C3 → C6.
+The original C1-C6 unit table and unit-run/notebook port ordering are superseded by variant C (2026-10-03); see [port-plan.md](port-plan.md).
 
-Dependencies:
-- C1 needs CHECK with an overlay and `db_engine`.
-- C4 needs `tableFieldsOf` (B8, or D5 if that move is declined) and PARSE DDLS.
-- C2 and C3 need UNIT, JOB and PARSE UNIT_PLAN. C3 also needs the cancellation seam.
-
-| unit | routes | documents | tests |
-|---|---|---|---|
-| C1 checks | checkruns, reporters | checkReport, `checkObjectsIn`, `decodeContent` | adt-devloop check block, adt-facade `:440` |
-| C2 ABAP Unit (ADT) | testruns, evaluation, occurencemarkers, metadata | unitResult + `frameUri`, v1/v2/junit by Accept | adt-devloop `:400-740` |
-| C3 Workbench unit JSON | unit/object, unit/object/run | JSON; allowlist stays in the host | adt-devloop `:481`, `:609-688` |
-| C4 data preview | 5 datapreview rows | tableData (then delete `web/preview-runtime.mjs:101`) | adt-facade preview, osd-data, osd-child; ABAP Unit for `tableDataDocument` (vscode-extension import) |
-| C5 classrun | oo/classrun | text + dump text | adt-devloop Q6b |
-| C6 notebook | notebook/abap | — | the decision. Recommended: keep served-by HOST, because it rebuilds the module graph the ABAP handler runs in. Its tests run through the bridge. |
+C1 checks, C2a metadata and unit/object plans, C4 data preview and C5
+classrun are landed ABAP documents. Occurrence markers belong to pending
+A2. C2b, C3 and C6 have no ABAP port units; their existing host tests run
+through the catch-all. Notebook ownership is settled: host, C6.
 
 C5 notes:
 - Native port: `CREATE OBJECT TYPE (name)` plus `if_oo_adt_classrun~main` in the request's own step. Verify that the IR supports dynamic CREATE OBJECT.
@@ -480,8 +481,8 @@ C5 notes:
 |---|---|---|---|---|---|
 | GET | `core/http/build` | M | SYSTEM BUILD | JSON shape (null serving, absent system) | osd-child, vscode-warm, osd-binary, protocol-rfc, replay-compare, e2e |
 | GET | `core/http/changed` | S | SYSTEM CHANGED | absent `objects` when not primed | none |
-| GET | `core/http/git/object` | M | OBJECT, HISTORY (limit 0) | 404/500 mapping | e2e only |
-| GET | `core/http/git/object/revision` | M | REVISION (sha) | 404/400 mapping | e2e only |
+| GET | `core/http/git/object` | M | Node facade (A8b) | —; host owns body and refusals | e2e only |
+| GET | `core/http/git/object/revision` | M | Node facade (A8b) | —; host owns body and refusals | e2e only |
 | GET | `core/http/services` | M | SYSTEM SERVICES, OBJECT (file) | status-table rows, helper filtering | adt-devloop `:558`; vscode-extension `~2401` |
 | GET | `core/http/transactions` | M | SYSTEM TRANSACTIONS | wrap only | adt-devloop `:581` |
 | GET | `core/http/segw/entitysets` | M | SYSTEM SEGW_REGISTRATIONS, READ | `entitySetMapFor` regex scan | adt-devloop `:491`, `:501` |
@@ -517,15 +518,17 @@ D depends only on the skeleton and SYSTEM. Open question: is D in 0.6 at all? D 
 
 | group | builders |
 |---|---|
-| A | `versionsFeedDocument` (+ `objectVersions` / `versionSource` over HISTORY/REVISION), `activationSuccessDocument`, `activationFailureDocument`, `transportCheckDocument` + `transportCheckRequest`. CREATABLE templates stay in the host. |
+| A | `versionsFeedDocument` (+ `objectVersions` / `versionSource` over HISTORY/REVISION), `transportCheckDocument` + `transportCheckRequest` (pending A2). Activation documents and CREATABLE templates stay in the host. |
 | B core | `objectStructureDocument` (over PARSE rows), `classDocument`, `classIncludeDocument`, `sourcePropertiesDocument`, `packageDocument` + `packageOf`, `nodeStructureDocument` + `nodesOf` / `classNodesOf` + TREE_*, `nodePathDocument`, `objectReferencesDocument` + `searchObjects` |
 | B proposed | `dataElementDocument`, `tableFieldsOf`, `tableDocument`, `tableSourceDocument`, vfs result (inline today) |
-| C | `checkReportDocument` + `checkObjectsIn` / `decodeContent`, `unitResultDocument` + `frameUri`, `tableDataDocument` (`adt-facade.mjs:272`) |
-| D | JSON only (ajson); `countServiceRegistrations` |
+| C | `checkReportDocument` + `checkObjectsIn` / `decodeContent`, `tableDataDocument` (`adt-facade.mjs:272`). Unit-run results and notebook JSON stay in the host. |
+| D | ABAP introspection JSON (ajson); `countServiceRegistrations`. Git bodies and refusals stay in the host (A8b). |
 
 ## 6. Migration gates (ADR 0007)
 
-**Gate 1:** the group's route-level tests run green in both modes, with no edit to the tests. The JS-export unit cases listed in section 2 are ported to ABAP Unit when their group lands. vsp scenarios run against both hosts with a byte diff. Known A4H differences are fixed in OSG-JS first.
+The original whole-group acceptance matrix below is superseded by variant C (2026-10-03); see [port-plan.md](port-plan.md). It remains a regression reference, including host behavior, not a requirement to port host families.
+
+**Gate 1:** the document slice's route-level tests run green in both modes, with no edit to the tests. The JS-export unit cases listed in section 2 are ported to ABAP Unit when their group lands. vsp scenarios run against both hosts with a byte diff. Known A4H differences are fixed in OSG-JS first.
 
 Every landing also:
 - updates `nodes.json`, `test/osd-routes.mjs` and `/osd/not-served` where they apply
@@ -545,11 +548,9 @@ Every landing also:
    - `zcl_stg_http_handler` rolls back on status ≥ 400, but a session or token issued on a 403 or 404 must persist. The ADT handler catches every refusal in `ANSWER`, so the step ends without an exception and commits the session and handle rows whatever the status. That includes the CSRF refusal of a session that ended (its rows' deletion).
    - On OSGo, state cannot live in statics: tables `ZOSD_ADT_SESS` / `ZOSD_ADT_SHDL` (#464).
    - Touching the session is a write per request. Measured on a running host (stoker, median of the last 100 of 120), a HOST row costs +1.9 to 2.2 ms with the ABAP front (discovery 0.70 ms with `OSD_ADT=js`, 2.91 ms in child mode, 3.09 ms inline). See `slice-3-front.md`.
-2. **Async waits.**
-   - Activation and unit runs hold the work-process FIFO lock for seconds.
-   - The host answers a job id, and ABAP polls with `WAIT UP TO n SECONDS`, which releases the lock while it waits.
-   - Disconnect handling goes through the request-id seam (section 3).
-   - A swap or recycle of the serving process happens after the response, never during it.
+2. **Host orchestration.**
+   - Activation, unit runs and notebook stay in the Node facade after the ABAP front's step ends.
+   - Execution, publication and disconnect cancellation remain host responsibilities. No ABAP polling or new continuation routes are planned.
 3. **ENQ owner.**
    - Each Node request is a new step, so the owner must be **set** to the ADT session id.
    - Expiry and logoff from another request need "release owner X". `DEQUEUE_ALL` releases only the caller's own locks.
@@ -575,11 +576,11 @@ Every landing also:
 13. **Open questions for Alice and the owners:**
     - LOCK/UNLOCK split (dell route + `holds`; stoker writes). Confirm.
     - The 11 proposed B rows: osg-research confirms, or they go to D5.
-    - C6 notebook: keep host-served (recommended), dell to decide.
+    - C6 notebook is settled by variant C: permanently host-served, owned by stoker.
     - Is D in 0.6?
     - Identity escaping in feeds: fix in OSG-JS first, or keep it.
     - Which uncovered rows get tests first: vfs facets, releasestates, objectproperties, packages/settings, feeds, users, abapunit/metadata, checkruns/reporters, inactiveobjects, valuehelps, include PUT `/source/main`, the INCL/SRVD bare path, and `includes/:include` on a non-CLAS type.
-    - ADR 0007 should record five host families (store, git, build, system, SQL check) and 17 destination commands.
+    - ADR 0007 should record the variant C document/orchestration split; the old 17-command sketch is not a port backlog.
 ## Rules decided in S0
 
 **Bulk lists: line format.** Bulk STORE replies travel as raw `EV_SOURCE`,
@@ -633,13 +634,12 @@ their first users or with slice 0a/the front, rather than in the host seam:
 - PACKAGE is one command: `IV_JSON {name, mode: raw | local, user}` gives
   EV_JSON. PACKAGES and SEARCH are separate commands. ET_OBJECT
   never carries names for these commands: CHAR40/CHAR30 would truncate them.
-- Git stays on STORE in the HISTORY/REVISION family (ADR 0007). GIT_STATE
-  and GIT_BLOB are the new commands. The revision route uses
-  `gitObjectRevision`, whose message and lack of rename following differ
-  from `gitObjectRevisionAt`.
+- Git state and revision routes stay in the Node facade permanently (A8b).
+  No GIT_STATE/GIT_BLOB port commands are planned. HISTORY/REVISION remain
+  host capabilities for ABAP version documents.
 - A route may return a non-2xx response with its own non-document body only
-  where Node does: the reentranceticket's text/plain 400s and the notebook's
-  JSON refusals. The route interface contract will record this common rule.
+  where Node does, such as the reentranceticket's text/plain 400s. Notebook
+  JSON refusals remain in host orchestration (C6).
 - Content types are already normalized wire values: the front replays a
   Buffer with `res.set`. Production uses `app etag false`; the diff harness
   will use that too. Harness-only weak ETags and 304s are removed from the
@@ -658,7 +658,7 @@ their first users or with slice 0a/the front, rather than in the host seam:
 
 Acceptance across S0 remains green versions, LOCK and SYSINFO byte diffs,
 TYPES parity, ASCII/7.02 lint and coverage with the initial full allow-list.
-F3 continuation contract: [slice-f3-continuations.md](slice-f3-continuations.md); router rows declare `resume_kind`, dispatched through `ZIF_OSD_ADT_RESUMABLE` in a fresh step. HTTP row ownership is unchanged.
+F3 continuation contract: [slice-f3-continuations.md](slice-f3-continuations.md); router rows declare `resume_kind`, dispatched through `ZIF_OSD_ADT_RESUMABLE` in a fresh step. This is landed infrastructure. Variant C adds no new continuation routes; host orchestration reaches the catch-all.
 
 ## C5 on one runtime B: classrun / F9
 

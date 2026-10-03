@@ -101,7 +101,7 @@ One PR with two codex runs (0a for ABAP, 0b for the host seam) and one critic pa
 - **PARSE is one STORE command:** `IV_JSON {kind: OUTLINE | DDLS | UNIT_PLAN, ...}`. One dispatcher, owned by dell, with the first user landing it. `structureOf`, the `cdsEntityOf` halves and `runner.classes` become exported functions that both Node and PARSE call.
 - **PACKAGE is one command:** `IV_JSON {name, mode: raw | local, user}` gives `EV_JSON`. PACKAGES (OBJECTS) and SEARCH are separate. ET_OBJECT is never used for names (CHAR40/CHAR30 truncation).
 - **Git stays host orchestration under variant C.** The earlier proposed STORE GIT_STATE/GIT_BLOB port is superseded.
-- **Non-document refusals:** a route may return a non-2xx `ty_response` with its own body only when Node does. Known cases: the reentranceticket 400s (text/plain) and the notebook (JSON). This is recorded in `ZIF_OSD_ADT_ROUTE`'s contract; nothing is decided per slice.
+- **Non-document refusals:** a route may return a non-2xx `ty_response` with its own body only when Node does. The reentranceticket 400s use text/plain; notebook JSON refusals remain host-owned (C6). This is recorded in `ZIF_OSD_ADT_ROUTE`'s contract; nothing is decided per slice.
 - **Wire format:**
   - Content types: the front replays a Buffer with `res.set`, so an ABAP `content_type` literal must already be the normalized wire form.
   - ETags: production runs with `app etag false` (`test/start.mjs`, `tools/osd-serve.mjs`). The diff harness is switched to `etag false` as well, so weak-ETag and 304 claims in the specs that come from the harness are dropped. Only strong `ENTITY` tags are part of the contract.
@@ -158,7 +158,7 @@ their implementation notes. Pending rows describe planned work.
 | **B1** | **Landed.** `ZCL_OSD_ADT_RIS_STATIC`: facets, objecttypes, releasestates, objectproperties/values, `packages/settings`, `packages/valuehelps/:what`. Row order: settings before `packages/:name`. | Six statics × GET/HEAD/slash/case; valuehelps case-sensitivity. |
 | **B8a** | **Landed.** typestructure plus `ddic/tables/parser/info` (miss = resource). | Accept dataname variants. |
 | **B8b** | **Landed.** `ZCL_OSD_ADT_DDIC`: DTEL and TABL documents, `tables/:name/source/main`, `TABLE_FIELDS` (resolver hook prepared but not called). | The spec's DTEL and TABL matrix, including the inactive table still showing `active`/epoch and the mixed-case 404. |
-| **B2a** | `ZCL_OSD_ADT_SOURCE` and `ZCL_OSD_ADT_OBJECT`: source/main, both include routes, bare CLAS/PROG/INTF/DDLS documents; 20 generated rows. | Cases (1)-(7) and (12) (Node PUT followed by an ABAP 304); BOM/CRLF/Cyrillic fixture. |
+| **B2a** | `ZCL_OSD_ADT_SOURCE` and `ZCL_OSD_ADT_OBJECT`: source/main, both include routes, bare CLAS/PROG/INTF/DDLS documents; 22 generated rows. | Cases (1)-(7) and (12) (Node PUT followed by an ABAP 304); BOM/CRLF/Cyrillic fixture. |
 | **B2b** | The PARSE dispatcher with kind OUTLINE; `ZCL_OSD_ADT_STRUCTURE`; the INCL/SRVD bare alias. **Precondition in this slice: the host warms the registry (`store.warm`) after write and activation**, so no cold parse runs in a step. | Case (8); case (9) records cold and warm latency; Identifier twins; `xml:base` with the query string. |
 | **B5** | **Landed.** STORE PACKAGE (raw/local); `ZCL_OSD_ADT_PACKAGE` and `ZCL_OSD_ADT_TREE` (nodepath, nodestructure). **Fix the Node nodepath URIError first.** | Fixtures `$ZT_A` vs `$ZTA`, namespaced, library, `$TMP` with two users; the `??` chains; node keys; flat root. |
 | **B6** | **Landed.** Implemented: STORE PACKAGES/SEARCH bulk line replies; ABAP search and VFS filtering/counting/XML; SYSTEM VFS removed. | Live Node diff: maxResults including NaN and huge negatives, `/K`, seed `max*4`, 12-object order and all facet orders. Accepted search 9.24 ms ABAP / 2.14 ms Node; VFS 98.41 ms / 80.65 ms (section 4). |
@@ -207,7 +207,7 @@ The remaining document slices are B2a, B2b, A1, A2, A3a, A3b, A8a,
 A9 and A10. The landed S0 and F1/F2 provide their shared seam and front.
 A3b follows A3a; B2b needs the PARSE OUTLINE seam and registry warm-up.
 A3a remains pending here despite its parked implementation branch.
-Activation, notebook and unit-run ports are outside this critical path.
+Activation, notebook and unit runs stay host-owned permanently; they have no port work.
 The earlier serial chains A6 -> A7 -> C6 and C2b -> C3 are superseded.
 
 One-runtime B5/B6 are the other remaining part of this track. Alice's
