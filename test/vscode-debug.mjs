@@ -219,6 +219,91 @@ ENDCLASS.`;
     }
   });
 
+  it("renders ABAP values through the launch generators in a paused inspector session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-abap-values-"));
+    let child;
+    let exited;
+    let client;
+    try {
+      const runner = join(dir, "values.cjs");
+      const runtime = createRequire(import.meta.url).resolve("@abaplint/runtime");
+      writeFileSync(runner, `const {ABAP} = require(${JSON.stringify(runtime)});
+const t = new ABAP().types;
+const structure = new t.Structure({name: new t.Character(20).set('ABC'), amount: new t.Packed({length: 8, decimals: 2}).set('12.50')});
+const table = new t.Table(structure);
+table.append(structure);
+const reference = new t.DataReference(structure).assign(structure);
+const scalars = [new t.String().set('ABC  '), new t.Integer().set(-42), new t.Integer8().set('9223372036854775807'), new t.Float().set(1.5), new t.Date().set('20261003'), new t.Time().set('123456'), new t.XString().set('ABCDEF'), new t.Hex({length: 4}).set('ABCD'), new t.Packed({length: 16, decimals: 2}).set('12345678901234567890.12')];
+debugger;
+`);
+      const port = await pickInspectorPort();
+      const config = debuggerConfiguration(port, {root: ROOT});
+      child = spawn(process.execPath, [`--inspect-brk=127.0.0.1:${port}`, runner], {cwd: dir, stdio: "ignore"});
+      exited = new Promise((resolve, reject) => {
+        child.once("error", reject);
+        child.once("exit", resolve);
+      });
+      const target = await inspectorTarget(port);
+      const socket = new WebSocket(target.webSocketDebuggerUrl);
+      await new Promise((resolve, reject) => {
+        socket.addEventListener("open", resolve, {once: true});
+        socket.addEventListener("error", reject, {once: true});
+      });
+      client = new InspectorClient(socket);
+      await client.send("Debugger.enable");
+      await client.send("Runtime.runIfWaitingForDebugger");
+      await client.waitFor("Debugger.paused");
+      await client.send("Debugger.resume");
+      const paused = await client.waitFor("Debugger.paused");
+      const evaluate = async (expression) => {
+        const answer = await client.send("Debugger.evaluateOnCallFrame", {callFrameId: paused.callFrames[0].callFrameId, expression});
+        expect(answer.exceptionDetails, JSON.stringify(answer.exceptionDetails)).to.equal(undefined);
+        return answer.result.objectId;
+      };
+      const render = async (objectId) => {
+        const answer = await client.send("Runtime.callFunctionOn", {objectId,
+          functionDeclaration: config.customDescriptionGenerator, arguments: [{value: "default JS"}],
+          returnByValue: true, throwOnSideEffect: true});
+        expect(answer.exceptionDetails, JSON.stringify(answer.exceptionDetails)).to.equal(undefined);
+        return answer.result.value;
+      };
+      const children = async (objectId) => {
+        const answer = await client.send("Runtime.callFunctionOn", {objectId,
+          functionDeclaration: config.customPropertiesGenerator});
+        expect(answer.exceptionDetails, JSON.stringify(answer.exceptionDetails)).to.equal(undefined);
+        const result = await client.send("Runtime.getProperties", {objectId: answer.result.objectId, ownProperties: true});
+        return result.result.filter((property) => property.enumerable);
+      };
+      const structureId = await evaluate("structure");
+      expect(await render(structureId)).to.equal("{…} (structure)");
+      const fields = await children(structureId);
+      expect(fields.map((field) => field.name)).to.deep.equal(["name", "amount"]);
+      expect(await render(fields[0].value.objectId)).to.equal("'ABC' (c20)");
+      expect(await render(fields[1].value.objectId)).to.equal("12.50 (p8,2)");
+      const expectedScalars = ["'ABC  ' (string)", "-42 (i)", "9223372036854775807 (int8)",
+        "1,5000000000000000E+00 (f)", "2026-10-03 (d)", "12:34:56 (t)", "ABCDEF (xstring)",
+        "ABCD0000 (x4)", "12345678901234567890.12 (p16,2)"];
+      for (const [index, expected] of expectedScalars.entries()) {
+        expect(await render(await evaluate(`scalars[${index}]`))).to.equal(expected);
+      }
+      const tableId = await evaluate("table");
+      expect(await render(tableId)).to.equal("[1 rows] (standard table)");
+      expect((await children(tableId)).map((row) => row.name)).to.deep.equal(["1"]);
+      const referenceId = await evaluate("reference");
+      expect(await render(referenceId)).to.equal("-> {…} (structure)");
+      expect((await children(referenceId)).map((field) => field.name)).to.deep.equal(["->"]);
+      await client.send("Debugger.resume");
+      socket.close();
+      client = undefined;
+      expect(await exited).to.equal(0);
+    } finally {
+      if (child?.exitCode === null) child.kill("SIGTERM");
+      client?.socket.close();
+      await exited?.catch(() => {});
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
   it("binds a workspace ABAP Unit breakpoint at a multiline call's executable start", async () => {
     const source = `CLASS ltcl_probe DEFINITION FINAL FOR TESTING.
   PRIVATE SECTION.
