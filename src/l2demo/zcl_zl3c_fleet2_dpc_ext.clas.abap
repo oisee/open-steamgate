@@ -29,6 +29,10 @@ CLASS zcl_zl3c_fleet2_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zl3c_fleet2_
       RETURNING VALUE(rv_criticality) TYPE i.
     METHODS enrich_run
       CHANGING cs_run TYPE zcl_zl3c_fleet2_mpc=>ts_run.
+    METHODS refuse_computed
+      IMPORTING iv_where TYPE string iv_filter TYPE string it_options TYPE /iwbep/t_mgw_select_option
+                iv_fields TYPE string iv_properties TYPE string
+      RAISING /iwbep/cx_mgw_busi_exception.
     METHODS parameter
       IMPORTING it_params TYPE /iwbep/t_mgw_name_value_pair iv_name TYPE string
       RETURNING VALUE(rv_value) TYPE string.
@@ -146,6 +150,44 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
       cs_run-hide_snapshot = abap_true.
     ENDIF.
   ENDMETHOD.
+  METHOD refuse_computed.
+    " a computed field is filled after the read: a filter on it would be ignored
+    " and the count and the paging would be wrong, so it is refused in words
+    DATA lv_where TYPE string.
+    DATA lv_name TYPE string.
+    DATA lv_field TYPE string.
+    DATA lv_property TYPE string.
+    DATA lt_names TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lt_fields TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA ls_option TYPE /iwbep/s_mgw_select_option.
+    SPLIT iv_properties AT space INTO TABLE lt_names.
+    DELETE lt_names WHERE table_line IS INITIAL.
+    LOOP AT it_options INTO ls_option.
+      READ TABLE lt_names TRANSPORTING NO FIELDS WITH KEY table_line = ls_option-property.
+      IF sy-subrc = 0.
+        lv_name = ls_option-property.
+      ENDIF.
+    ENDLOOP.
+    IF lv_name IS INITIAL.
+      " a filter that is no select option (an OR across properties): the names it
+      " uses, as fields or as properties, never the values in quotes
+      CONCATENATE iv_where iv_filter INTO lv_where SEPARATED BY space.
+      REPLACE ALL OCCURRENCES OF REGEX `'[^']*'` IN lv_where WITH ``.
+      SPLIT iv_fields AT space INTO TABLE lt_fields.
+      DELETE lt_fields WHERE table_line IS INITIAL.
+      " the fields come in the order of the properties: the answer names the property
+      LOOP AT lt_fields INTO lv_field.
+        READ TABLE lt_names INTO lv_property INDEX sy-tabix.
+        IF lv_where CS lv_field OR lv_where CS lv_property.
+          lv_name = lv_property.
+        ENDIF.
+      ENDLOOP.
+    ENDIF.
+    IF lv_name IS NOT INITIAL.
+      RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+        EXPORTING message_unlimited = |{ lv_name } is computed after the read and cannot be filtered on|.
+    ENDIF.
+  ENDMETHOD.
   METHOD tallyset_get_entityset.
     " the piles of one run by status, in a fixed order: the pile bar
     DATA lt_piles TYPE STANDARD TABLE OF zosd_l3_pile WITH DEFAULT KEY.
@@ -157,7 +199,15 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA ls_filter TYPE /iwbep/s_mgw_select_option.
     DATA ls_range LIKE LINE OF ls_filter-select_options.
     DATA lv_run TYPE string.
+    DATA lv_computed_fields TYPE string.
+    DATA lv_computed_props TYPE string.
+    DATA lo_computed_filter TYPE REF TO /iwbep/if_mgw_req_filter.
     FIELD-SYMBOLS <ls_tally> TYPE zcl_zl3c_fleet2_mpc=>ts_tally.
+    CONCATENATE lv_computed_fields 'STATUS PILES STATUS_CRIT' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_props 'Status Piles StatusCriticality' INTO lv_computed_props SEPARATED BY space.
+    lo_computed_filter = io_tech_request_context->get_filter( ).
+    refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
+      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
     LOOP AT it_filter_select_options INTO ls_filter WHERE property = 'RunId'.
       LOOP AT ls_filter-select_options INTO ls_range.
@@ -191,6 +241,14 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
   METHOD statusvhset_get_entityset.
     " the statuses a run shows, for the fixed value list of the run filter
     DATA ls_status TYPE zcl_zl3c_fleet2_mpc=>ts_statusvh.
+    DATA lv_computed_fields TYPE string.
+    DATA lv_computed_props TYPE string.
+    DATA lo_computed_filter TYPE REF TO /iwbep/if_mgw_req_filter.
+    CONCATENATE lv_computed_fields 'STATUS TEXT' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_props 'Status Text' INTO lv_computed_props SEPARATED BY space.
+    lo_computed_filter = io_tech_request_context->get_filter( ).
+    refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
+      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     ls_status-status = 'OPEN'.
     ls_status-text = 'Open: the first stage runs'.
     APPEND ls_status TO et_entityset.
@@ -232,6 +290,9 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
+    DATA lv_computed_fields TYPE string.
+    DATA lv_computed_props TYPE string.
+    DATA lo_computed_filter TYPE REF TO /iwbep/if_mgw_req_filter.
     DATA lt_stages TYPE STANDARD TABLE OF zosd_l3_stage WITH DEFAULT KEY.
     DATA ls_stage TYPE zosd_l3_stage.
     DATA ls_run LIKE LINE OF et_entityset.
@@ -243,6 +304,19 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lt_run_id TYPE RANGE OF zosd_l3_run-run_id.
     DATA lt_status TYPE RANGE OF zosd_l3_run-status.
     DATA lt_started TYPE RANGE OF zosd_l3_run-started.
+    CONCATENATE lv_computed_fields 'TITLE RUN_LABEL RUN_MODE TWIN IS_OPEN' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'PILES PILES_FINAL PILES_DONE PILES_RUNNING PILES_FAILED' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'PILES_HELD PCT_FINAL STATUS_CRIT CAN_CONTINUE CAN_RESUME' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'RESERVED GLASS WARN_LEVEL NARROW_LEVEL HIDE_STAGE' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'HIDE_PILE HIDE_BUDGET HIDE_EVENT HIDE_DOCTOR HIDE_SNAPSHOT' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_props 'Title RunLabel Mode Twin Open' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'Piles PilesFinal PilesDone PilesRunning PilesFailed' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'PilesHeld PctFinal StatusCriticality CanContinue CanResume' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'Reserved Glass WarnLevel NarrowLevel HideStage' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'HidePile HideBudget HideEvent HideDoctor HideSnapshot' INTO lv_computed_props SEPARATED BY space.
+    lo_computed_filter = io_tech_request_context->get_filter( ).
+    refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
+      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     " the set first: a dynamic condition starts with a column on a system
     " ('1 = 1' parses here and not there), and the OData filter only joins
     " when there is one
@@ -352,7 +426,15 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
+    DATA lv_computed_fields TYPE string.
+    DATA lv_computed_props TYPE string.
+    DATA lo_computed_filter TYPE REF TO /iwbep/if_mgw_req_filter.
     FIELD-SYMBOLS <ls_row> LIKE LINE OF et_entityset.
+    CONCATENATE lv_computed_fields 'STATUS_CRIT' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_props 'StatusCriticality' INTO lv_computed_props SEPARATED BY space.
+    lo_computed_filter = io_tech_request_context->get_filter( ).
+    refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
+      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     " the set first: a dynamic condition starts with a column on a system
     " ('1 = 1' parses here and not there), and the OData filter only joins
     " when there is one
@@ -397,7 +479,15 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
+    DATA lv_computed_fields TYPE string.
+    DATA lv_computed_props TYPE string.
+    DATA lo_computed_filter TYPE REF TO /iwbep/if_mgw_req_filter.
     FIELD-SYMBOLS <ls_row> LIKE LINE OF et_entityset.
+    CONCATENATE lv_computed_fields 'STATUS_CRIT CAN_RELEASE' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_props 'StatusCriticality CanRelease' INTO lv_computed_props SEPARATED BY space.
+    lo_computed_filter = io_tech_request_context->get_filter( ).
+    refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
+      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     " the set first: a dynamic condition starts with a column on a system
     " ('1 = 1' parses here and not there), and the OData filter only joins
     " when there is one
@@ -451,7 +541,15 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
     DATA lv_count TYPE i.
+    DATA lv_computed_fields TYPE string.
+    DATA lv_computed_props TYPE string.
+    DATA lo_computed_filter TYPE REF TO /iwbep/if_mgw_req_filter.
     FIELD-SYMBOLS <ls_row> LIKE LINE OF et_entityset.
+    CONCATENATE lv_computed_fields 'STATE_CRIT' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_props 'StateCriticality' INTO lv_computed_props SEPARATED BY space.
+    lo_computed_filter = io_tech_request_context->get_filter( ).
+    refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
+      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     " the set first: a dynamic condition starts with a column on a system
     " ('1 = 1' parses here and not there), and the OData filter only joins
     " when there is one

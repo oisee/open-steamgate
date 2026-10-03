@@ -10,7 +10,7 @@ import {cockpitPages} from "./dsl-l3-cockpit-pages.mjs";
 
 const abapText = (s) => `'${String(s).replaceAll("'", "''")}'`;
 function cockpitUiRoot(service) {
-  return {hides: service.entities.find((e) => e.name === "Run").hides, tally_text: abapText(service.tally.statuses.join(" ")),
+  return {...service.extra, hides: service.entities.find((e) => e.name === "Run").hides, tally_text: abapText(service.tally.statuses.join(" ")),
     criticality: Object.entries(service.tally.criticality).map(([value, list]) => ({value, statuses: list.map(abapText).join(" OR ")})),
     run_statuses: service.statuses.map(([status, text]) => ({status: abapText(status), text: abapText(text)}))};
 }

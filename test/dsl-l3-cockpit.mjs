@@ -120,6 +120,11 @@ describe("DSL L3 run cockpit", function () {
       expect(doc.annotations[`${name}/${p}`]?.label, `${name}/${p}`).equal(spec.label);
     }
     expect(doc.entities.Run.properties.CheckDate.label).equal("Check date");
+    for (const [name, p] of [["Run", "Open"], ["Run", "Title"], ["Run", "PilesDone"], ["Pile", "CanRelease"], ["Stage", "StatusCriticality"], ["Budget", "StateCriticality"]]) {
+      expect(doc.entities[name].properties[p], `${name}/${p}`).include({filterable: false, sortable: false});
+    }
+    expect(doc.entities.Run.properties.CheckDate.filterable).not.equal(false);
+    expect(doc.entities.Tally.properties.RunId.filterable).equal(true);
     const ann = compile(yaml.dump(doc, {lineWidth: -1, noRefs: true})).classes["zcl_zl3c_fleet2_mpc_ann.clas.abap"], UI = "com.sap.vocabularies.UI.v1.";
     for (const target of [`@${UI}DataPoint#Status`, `@${UI}Chart#Final`, `@${UI}Chart#Budget`, `to_Tally/@${UI}Chart#Tally`]) {
       expect(ann).include(`set_annotation_path( '${target}' )`);
@@ -145,6 +150,43 @@ describe("DSL L3 run cockpit", function () {
     for (const [name, text] of Object.entries({...compiled.files, ...compiled.classes, ...compiled.ext})) texts.push([name, text]);
     const long = texts.flatMap(([f, text]) => text.split(/\r?\n/).map((l, i) => [f, i + 1, l.length]).filter(([, , n]) => n >= 255));
     expect(long).deep.equal([]);
+  });
+  // Live.js in a stub UI5: controls that remember, timers that can be counted
+  function liveModule(source = readFileSync("recipes/l3-cockpit/Live.js", "utf8")) {
+    const timers = new Map(); let next = 1, Live;
+    class Control {
+      constructor(id, props = {}) {Object.assign(this, {id, props, state: !!props.state, text: "", destroyed: false});}
+      setState(v) {this.state = v; return this;} getState() {return this.state;}
+      setText(t) {this.text = t; return this;}
+      destroy() {this.destroyed = true;}
+    }
+    const context = {Promise, Date, document: {visibilityState: "visible"},
+      setTimeout: (f) => {const id = next++; timers.set(id, f); return id;}, clearTimeout: (id) => {timers.delete(id);},
+      sap: {ui: {define: (deps, factory) => {Live = factory(Control, Control, Control, Control);}}}};
+    vm.runInNewContext(source, context);
+    return {Live, timers};
+  }
+  it("Live: a page destroyed while a refresh is in flight schedules nothing and writes nothing", async () => {
+    const run = async (source) => {
+      const {Live, timers} = liveModule(source);
+      let release, reads = 0;
+      const live = new Live({id: (n) => n, text: (k) => k, final: () => false,
+        refresh: () => {reads++; return new Promise((r) => {release = r;});}});
+      live.set(true);
+      expect(timers.size, "one timer while on").equal(1);
+      const [[id, fire]] = [...timers]; timers.delete(id); fire();
+      expect(reads).equal(1);
+      live.destroy();
+      release();
+      await new Promise((r) => setTimeout(r, 10));
+      return {timers: timers.size, reads, stamp: live.stamp.text};
+    };
+    expect(await run()).deep.equal({timers: 0, reads: 1, stamp: ""});
+    // the same without the destroyed guard: the late answer schedules the next read
+    const unguarded = readFileSync("recipes/l3-cockpit/Live.js", "utf8").replace("this.destroyed = true;", "");
+    let failed = false;
+    try {expect(await run(unguarded)).deep.equal({timers: 0, reads: 1, stamp: ""});} catch {failed = true;}
+    expect(failed, "mutant: destroy without the flag").equal(true);
   });
   it("plots piles, stage planning and event capacities at their actual timestamps", () => {
     const rows = [{StageNo: 1, Status: "DONE", Ended: "20261001000002"}, {StageNo: 1, Status: "HELD", Ended: "20261001000003"}, {StageNo: 2, Status: "DONE", Ended: "20261001000005"}];
@@ -313,6 +355,38 @@ describe("DSL L3 run cockpit", function () {
       await drain();
       expect(await get(`RunSet('${p.RunId}')`)).include({Open: false, CanResume: false, Piles: 7, PilesDone: 7});
       expect(await count()).equal(0);
+    });
+    // a computed field is filled after the read: $metadata says it cannot be filtered or sorted
+    // on, and a filter on it is refused in words rather than ignored (count and paging included)
+    async function refusesComputedFilters() {
+      const r = await action("StartRun", {CheckDate: "20261001", Mode: "S"});
+      const status = async (path) => {const x = await fetch(`${BASE}/${path}`); return [x.status, x.status === 200 ? null : (await x.json()).error.message.value];};
+      for (const [path, name] of [["RunSet?$filter=Open eq true", "Open"], ["RunSet/$count?$filter=Open eq false", "Open"],
+        ["RunSet?$filter=substringof('fleet2', Title)", "Title"], ["RunSet?$filter=Status eq 'DONE' or PilesDone gt 3", "PilesDone"], ["RunSet?$top=1&$filter=PilesDone gt 3", "PilesDone"],
+        ["PileSet?$filter=CanRelease eq true", "CanRelease"], ["StageSet?$filter=StatusCriticality eq 3", "StatusCriticality"],
+        ["BudgetSet?$filter=StateCriticality eq 1", "StateCriticality"], [`TallySet?$filter=RunId eq '${r.RunId}' and Piles gt 1`, "Piles"]]) {
+        const [code, message] = await status(path);
+        expect(code, path).equal(400);
+        expect(message, path).equal(`${name} is computed after the read and cannot be filtered on`);
+      }
+      // the list report's own filters, and a value that spells a computed field, still work
+      expect((await get("RunSet?$filter=Status eq 'GLASS'")).results).length(0);
+      expect((await get("RunSet?$filter=CheckDate eq datetime'2026-10-01T00:00:00' and Status eq 'DONE'")).results.map((x) => x.RunId)).include(r.RunId);
+      expect((await get(`TallySet?$filter=RunId eq '${r.RunId}'`)).results.map((t) => t.Status)).deep.equal(["DONE"]);
+      expect((await get(`PileSet?$filter=RunId eq '${r.RunId}' and Status eq 'DONE'`)).results).length(7);
+      const metadata = await (await fetch(`${BASE}/$metadata`)).text();
+      expect(metadata).match(/<Property Name="Open" [^>]*sap:sortable="false" sap:filterable="false"/);
+      expect(metadata).match(/<Property Name="CheckDate" [^>]*sap:sortable="true" sap:filterable="true"/);
+    }
+    it("refuses a filter on a computed field in words and keeps the real filters", refusesComputedFilters);
+    it("mutant: a DPC that ignores computed filters turns the refusal oracle red", async () => {
+      const real = abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT, original = readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8");
+      const source = original.replace("    IF lv_name IS NOT INITIAL.\n      RAISE EXCEPTION", "    IF lv_name = 'never'.\n      RAISE EXCEPTION");
+      expect(source).not.equal(original);
+      abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT = await loadCockpitMutant("zcl_cockpit_refuse_mut", source.replaceAll("zcl_zl3c_fleet2_dpc_ext", "zcl_cockpit_refuse_mut"), join(dir, "refuse-mutant"));
+      let failed = false;
+      try {await refusesComputedFilters();} catch {failed = true;} finally {abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT = real;}
+      expect(failed).equal(true);
     });
     it("retains history from stage plans, orders newest first and filters the derived run state", async () => {
       await exec([

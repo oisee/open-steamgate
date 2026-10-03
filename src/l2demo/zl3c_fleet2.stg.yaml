@@ -38,126 +38,176 @@ entities:
         field: TITLE
         label: Run
         readonly: true
+        sortable: false
+        filterable: false
       RunLabel:
         type: String(40)
         field: RUN_LABEL
         label: Run
         readonly: true
+        sortable: false
+        filterable: false
       Mode:
         type: String(1)
         field: RUN_MODE
         label: Mode
         readonly: true
+        sortable: false
+        filterable: false
       Twin:
         type: Boolean
         field: TWIN
         label: Twin
         readonly: true
+        sortable: false
+        filterable: false
       Open:
         type: Boolean
         field: IS_OPEN
         label: Open
         readonly: true
+        sortable: false
+        filterable: false
       Piles:
         type: Int32
         field: PILES
         label: Piles
         readonly: true
+        sortable: false
+        filterable: false
       PilesFinal:
         type: Int32
         field: PILES_FINAL
         label: Piles final
         readonly: true
+        sortable: false
+        filterable: false
       PilesDone:
         type: Int32
         field: PILES_DONE
         label: Piles done
         readonly: true
+        sortable: false
+        filterable: false
       PilesRunning:
         type: Int32
         field: PILES_RUNNING
         label: Piles running
         readonly: true
+        sortable: false
+        filterable: false
       PilesFailed:
         type: Int32
         field: PILES_FAILED
         label: Piles failed
         readonly: true
+        sortable: false
+        filterable: false
       PilesHeld:
         type: Int32
         field: PILES_HELD
         label: Piles held
         readonly: true
+        sortable: false
+        filterable: false
       PctFinal:
         type: Int32
         field: PCT_FINAL
         label: Piles final (%)
         readonly: true
+        sortable: false
+        filterable: false
       StatusCriticality:
         type: Byte
         field: STATUS_CRIT
         label: Status criticality
         readonly: true
+        sortable: false
+        filterable: false
       CanContinue:
         type: Boolean
         field: CAN_CONTINUE
         label: Can continue past glass
         readonly: true
+        sortable: false
+        filterable: false
       CanResume:
         type: Boolean
         field: CAN_RESUME
         label: Can resume
         readonly: true
+        sortable: false
+        filterable: false
       Reserved:
         type: Int32
         field: RESERVED
         label: Budget reserved
         readonly: true
+        sortable: false
+        filterable: false
       Glass:
         type: Int32
         field: GLASS
         label: Glass
         readonly: true
+        sortable: false
+        filterable: false
       WarnLevel:
         type: Int32
         field: WARN_LEVEL
         label: Warn level
         readonly: true
+        sortable: false
+        filterable: false
       NarrowLevel:
         type: Int32
         field: NARROW_LEVEL
         label: Narrow level
         readonly: true
+        sortable: false
+        filterable: false
       HideStage:
         type: Boolean
         field: HIDE_STAGE
         label: No stage rows
         readonly: true
+        sortable: false
+        filterable: false
       HidePile:
         type: Boolean
         field: HIDE_PILE
         label: No pile rows
         readonly: true
+        sortable: false
+        filterable: false
       HideBudget:
         type: Boolean
         field: HIDE_BUDGET
         label: No budget rows
         readonly: true
+        sortable: false
+        filterable: false
       HideEvent:
         type: Boolean
         field: HIDE_EVENT
         label: No event rows
         readonly: true
+        sortable: false
+        filterable: false
       HideDoctor:
         type: Boolean
         field: HIDE_DOCTOR
         label: No doctor rows
         readonly: true
+        sortable: false
+        filterable: false
       HideSnapshot:
         type: Boolean
         field: HIDE_SNAPSHOT
         label: No snapshot rows
         readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false
@@ -222,6 +272,8 @@ entities:
         field: STATUS_CRIT
         label: Criticality
         readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false
@@ -347,11 +399,15 @@ entities:
         field: STATUS_CRIT
         label: Criticality
         readonly: true
+        sortable: false
+        filterable: false
       CanRelease:
         type: Boolean
         field: CAN_RELEASE
         label: Can be released
         readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false
@@ -428,6 +484,8 @@ entities:
         field: STATE_CRIT
         label: Criticality
         readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false
@@ -782,21 +840,29 @@ entities:
         field: RUN_ID
         label: Run ID
         readonly: true
+        sortable: false
+        filterable: true
       Status:
         type: String(12)
         field: STATUS
         label: Status
         readonly: true
+        sortable: false
+        filterable: false
       Piles:
         type: Int32
         field: PILES
         label: Piles
         readonly: true
+        sortable: false
+        filterable: false
       StatusCriticality:
         type: Byte
         field: STATUS_CRIT
         label: Criticality
         readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false
@@ -812,11 +878,15 @@ entities:
         field: STATUS
         label: Status
         readonly: true
+        sortable: false
+        filterable: false
       Text:
         type: String(60)
         field: TEXT
         label: Meaning
         readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false

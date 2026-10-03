@@ -25,7 +25,9 @@ export const RUN_STATUSES = [["OPEN", "Open: the first stage runs"], ["WAITING",
 // the order of the segments of the pile bar
 export const TALLY = ["DONE", "RUNNING", "PLANNED", "HELD", "GLASS", "FAILED", "FUSED"];
 const SECTIONS = {Stage: "Stages", Pile: "Piles", Budget: "Budget", Event: "Budget events", Doctor: "Doctor journal", Snapshot: "Settings of the run"};
-const own = (type, label, field) => ({type, field, label, readonly: true});
+// a computed field is filled after the read, so it can be neither filtered nor sorted on:
+// $metadata says so, and the DPC refuses such a filter in words (refuse_computed)
+const own = (type, label, field) => ({type, field, label, readonly: true, sortable: false, filterable: false});
 export function cockpitUi(m, {doc, entities}) {
   const facets = entities.filter((e) => !["Run", "Setting", "Change"].includes(e.name));
   for (const [name, e] of Object.entries(doc.entities)) {
@@ -61,7 +63,7 @@ export function cockpitUi(m, {doc, entities}) {
   Object.assign(entities.find((e) => e.name === "Run"), {has_crit: true, crit: "status_crit", crit_of: "status",
     hides: facets.map((f) => ({table: f.table, field: `hide_${f.name.toLowerCase()}`}))});
   // the pile bar: one row per status of a run's piles
-  doc.entities.Tally = {set: "TallySet", keys: ["RunId", "Status"], properties: {RunId: own("String(32)", "Run ID", "RUN_ID"),
+  doc.entities.Tally = {set: "TallySet", keys: ["RunId", "Status"], properties: {RunId: {...own("String(32)", "Run ID", "RUN_ID"), filterable: true},
     Status: own("String(12)", "Status", "STATUS"), Piles: own("Int32", "Piles", "PILES"), StatusCriticality: own("Byte", "Criticality", "STATUS_CRIT")},
   creatable: false, updatable: false, deletable: false, operations: ["Q"]};
   doc.associations.RunToTally = {from: "Run", to: "Tally", cardinality: "1:N", constraint: {RunId: "RunId"}, navigation: {Run: "to_Tally"}};
@@ -101,5 +103,14 @@ export function cockpitUi(m, {doc, entities}) {
       if (typeof spec === "object" && spec.label) doc.annotations[`${name}/${p}`] = {label: spec.label, ...doc.annotations[`${name}/${p}`]};
     }
   }
-  return {doc, entities, tally: {statuses: TALLY, criticality: CRITICALITY}, statuses: RUN_STATUSES};
+  // what each entity set refuses to filter on: its computed fields, by property and by ABAP field
+  const refuse = (name) => {
+    const props = Object.entries(doc.entities[name].properties).filter(([, p]) => p.filterable === false);
+    // ABAP literals of a few names each: a generated line stays well under 255 characters
+    const chunks = (names) => Array.from({length: Math.ceil(names.length / 5)}, (_, i) => ({text: `'${names.slice(i * 5, i * 5 + 5).join(" ")}'`}));
+    return {prop_chunks: chunks(props.map(([p]) => p)), field_chunks: chunks(props.map(([, p]) => p.field))};
+  };
+  for (const e of entities) if (["Run", "Stage", "Pile", "Budget"].includes(e.name)) Object.assign(e, {has_computed: true}, refuse(e.name));
+  const extra = {tally_refuse: refuse("Tally"), statusvh_refuse: refuse("StatusVH")};
+  return {doc, entities, extra, tally: {statuses: TALLY, criticality: CRITICALITY}, statuses: RUN_STATUSES};
 }

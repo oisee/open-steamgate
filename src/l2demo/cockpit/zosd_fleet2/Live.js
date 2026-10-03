@@ -15,6 +15,9 @@ sap.ui.define(["sap/m/Button", "sap/m/Switch", "sap/m/Label", "sap/m/Text"], fun
     this.spec = spec;
     this.timer = null;
     this.busy = false;
+    // a destroyed Live reads nothing more: a refresh still in flight when its page goes
+    // finishes into nothing, and nothing schedules the next one
+    this.destroyed = false;
     this.button = new Button(spec.id("liveRefresh"), {icon: "sap-icon://refresh", text: spec.text("refresh"),
       tooltip: spec.text("refresh"), press: function () {self.now();}});
     this.stamp = new Text(spec.id("liveStamp"), {text: ""});
@@ -30,7 +33,7 @@ sap.ui.define(["sap/m/Button", "sap/m/Switch", "sap/m/Label", "sap/m/Text"], fun
   Live.INTERVAL = INTERVAL;
   Live.prototype.isOn = function () {return !!(this.toggle && this.toggle.getState());};
   Live.prototype.set = function (on) {
-    if (!this.toggle) return;
+    if (!this.toggle || this.destroyed) return;
     this.toggle.setState(!!on);
     clearTimeout(this.timer);
     if (on) this.schedule();
@@ -38,30 +41,37 @@ sap.ui.define(["sap/m/Button", "sap/m/Switch", "sap/m/Label", "sap/m/Text"], fun
   Live.prototype.schedule = function () {
     var self = this;
     clearTimeout(this.timer);
+    this.timer = null;
+    if (this.destroyed) return;
     this.timer = setTimeout(function () {self.tick();}, INTERVAL);
   };
   Live.prototype.tick = function () {
-    if (!this.isOn()) return;
+    this.timer = null;
+    if (this.destroyed || !this.isOn()) return;
     // a hidden tab reads nothing; it looks again in one interval
     if (document.visibilityState === "hidden") {this.schedule(); return;}
     var self = this;
-    this.now().then(function () {if (self.isOn()) self.schedule();});
+    this.now().then(function () {if (!self.destroyed && self.isOn()) self.schedule();});
   };
   // one refresh now; while one runs, a second press waits for it
   Live.prototype.now = function () {
     var self = this;
+    if (this.destroyed) return Promise.resolve();
     if (this.busy) return this.busy;
     this.busy = Promise.resolve(this.spec.refresh()).catch(function () {}).then(function () {
       self.busy = false;
+      if (self.destroyed) return;
       self.mark();
       if (self.isOn() && self.spec.final && self.spec.final()) self.set(false);
     });
     return this.busy;
   };
   // "updated hh:mm:ss": when the page last read what it shows
-  Live.prototype.mark = function () {this.stamp.setText(this.spec.text("updated") + " " + clock(new Date()));};
+  Live.prototype.mark = function () {if (!this.destroyed) this.stamp.setText(this.spec.text("updated") + " " + clock(new Date()));};
   Live.prototype.destroy = function () {
+    this.destroyed = true;
     clearTimeout(this.timer);
+    this.timer = null;
     this.controls.forEach(function (c) {c.destroy();});
   };
   return Live;

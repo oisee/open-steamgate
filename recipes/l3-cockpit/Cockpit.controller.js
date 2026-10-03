@@ -104,7 +104,7 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
       var self = this, model = this.getView().getModel(), id = this.run && this.run.RunId;
       if (!id) return Promise.resolve();
       var header = new Promise(function (resolve) {
-        model.read("/RunSet('" + id + "')", {success: function (r) {if (self.run && self.run.RunId === r.RunId) {self.run = r; self.attend();} resolve();}, error: resolve});
+        model.read("/RunSet('" + id + "')", {success: function (r) {if (!self.live.destroyed && self.run && self.run.RunId === r.RunId) {self.run = r; self.attend();} resolve();}, error: resolve});
       });
       this.extensionAPI.refresh();
       return Promise.all([header, this.refresh()]);
