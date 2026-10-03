@@ -1,54 +1,89 @@
 "use strict";
 
-// Serialized into js-debug's function sources: keep this function self-contained.
-// No imports, debuggee globals, mutations, or runtime instanceof dependencies.
-function abapDebugDescription(defaultValue) {
+// These helpers are serialized into both generators, never captured as closures.
+function inspection() {
+  const data = (object, key) => {
+    if ((typeof object !== "object" && typeof object !== "function") || object === null) return undefined;
+    const descriptor = Object.getOwnPropertyDescriptor(object, key);
+    return descriptor && "value" in descriptor ? descriptor.value : undefined;
+  };
+  const constructor = (value) => data(Object.getPrototypeOf(value), "constructor");
+  const kind = (value) => {
+    if (!value || typeof value !== "object") return undefined;
+    const prototype = Object.getPrototypeOf(value);
+    const ctor = data(prototype, "constructor");
+    if (data(ctor, "prototype") !== prototype) return undefined;
+    if (data(ctor, "INTERNAL_TYPE") === "CLAS") return "class";
+    const name = data(ctor, "name");
+    const field = name === "FieldSymbol" || name === "DataReference" ? "pointer" : "value";
+    const descriptor = Object.getOwnPropertyDescriptor(value, field);
+    if (!descriptor || !("value" in descriptor)) return undefined;
+    // Reject accessor-backed and instance-method lookalikes. Classification never
+    // calls a method, including on objects bearing a runtime constructor name.
+    for (const key of ["get", "getPointer", "getQualifiedName", "getArrayLength", "constructor"]) {
+      const own = Object.getOwnPropertyDescriptor(value, key);
+      if (own && (!("value" in own) || key === "constructor")) return undefined;
+      const method = Object.getOwnPropertyDescriptor(prototype, key);
+      if (method && !("value" in method)) return undefined;
+    }
+    const raw = descriptor.value;
+    if (["Character", "String", "Date", "Time", "Hex", "XString"].includes(name)) return typeof raw === "string" ? name : undefined;
+    if (["Integer", "Float"].includes(name)) return typeof raw === "number" ? name : undefined;
+    if (["Integer8", "Packed"].includes(name)) return typeof raw === "bigint" ? name : undefined;
+    if (["Structure", "Table", "HashedTable", "ABAPObject", "FieldSymbol", "DataReference"].includes(name)) return name;
+    return undefined;
+  };
+  return {data, kind, constructor};
+}
+
+function abapDebugDescription(defaultValue, helpers) {
   "use strict";
   try {
-    // RegExp operations update V8's shared match state and are rejected by
-    // js-debug's side-effect-free child previews. Use string operations only.
+    const {data, kind, constructor} = helpers;
+    // Avoid RegExp operations: V8 rejects their shared match-state mutation in
+    // js-debug's side-effect-free child previews.
     const quote = (value) => "'" + value.split("'").join("''").split("\r").join("\\r").split("\n").join("\\n").split("\t").join("\\t") + "'";
     const trimChar = (value) => {
       let end = value.length;
       while (end > 0 && value[end - 1] === " ") end--;
       return value.slice(0, end);
     };
-    const kind = (value) => value && typeof value.getQualifiedName === "function" &&
-      (typeof value.get === "function" || typeof value.getPointer === "function" || typeof value.getArrayLength === "function") ? value.constructor?.name :
-      value && value.constructor?.name === "DataReference" && typeof value.getPointer === "function" ? "DataReference" : undefined;
     const describe = (value, seen = []) => {
       const name = kind(value);
+      const raw = data(value, "value");
       if (name === "FieldSymbol" || name === "DataReference") {
         if (seen.includes(value) || seen.length >= 8) return "-> … (reference cycle/limit)";
-        const target = value.getPointer();
+        const target = data(value, "pointer");
         if (target === undefined) return name === "FieldSymbol" ? "-> unassigned (field symbol)" : "-> initial (data reference)";
         const text = describe(target, [...seen, value]);
         return text === undefined ? "-> (" + (name === "FieldSymbol" ? "field symbol" : "data reference") + ")" : "-> " + text;
       }
       switch (name) {
-        case "Character": return quote(trimChar(value.get())) + " (c" + value.getLength() + ")";
-        case "String": return quote(value.get()) + " (string)";
-        case "Integer": return value.get() + " (i)";
-        case "Integer8": return value.get().toString() + " (int8)";
-        case "Packed": return value.toFixed(value.getDecimals()) + " (p" + value.getLength() + "," + value.getDecimals() + ")";
-        case "Float": return value.get() + " (f)";
-        case "Date": return value.get().slice(0, 4) + "-" + value.get().slice(4, 6) + "-" + value.get().slice(6, 8) + " (d)";
-        case "Time": return value.get().slice(0, 2) + ":" + value.get().slice(2, 4) + ":" + value.get().slice(4, 6) + " (t)";
-        case "XString": return value.get().toUpperCase() + " (xstring)";
-        case "Hex": return value.get().toUpperCase() + " (x" + value.getLength() + ")";
+        case "Character": return quote(trimChar(raw)) + " (c" + data(value, "length") + ")";
+        case "String": return quote(raw) + " (string)";
+        case "Integer": return raw + " (i)";
+        case "Integer8": return raw.toString() + " (int8)";
+        case "Packed": {
+          const decimals = data(value, "decimals");
+          if (!Number.isInteger(decimals) || decimals < 0 || decimals > 100) return undefined;
+          const negative = raw < 0n;
+          const digits = (negative ? -raw : raw).toString().padStart(decimals + 1, "0");
+          return (negative ? "-" : "") + (decimals ? digits.slice(0, -decimals) + "." + digits.slice(-decimals) : digits) + " (p" + data(value, "length") + "," + decimals + ")";
+        }
+        case "Float": {
+          const parts = raw.toExponential(16).split("e");
+          return parts[0].split(".").join(",") + "E" + parts[1][0] + parts[1].slice(1).padStart(2, "0") + " (f)";
+        }
+        case "Date": return raw.slice(0, 4) + "-" + raw.slice(4, 6) + "-" + raw.slice(6, 8) + " (d)";
+        case "Time": return raw.slice(0, 2) + ":" + raw.slice(2, 4) + ":" + raw.slice(4, 6) + " (t)";
+        case "XString": return raw.toUpperCase() + " (xstring)";
+        case "Hex": return raw.toUpperCase() + " (x" + data(value, "length") + ")";
         case "Structure": return "{…} (structure)";
-        case "Table":
-        case "HashedTable": {
-          const type = name === "HashedTable" ? "hashed" : value.getOptions()?.primaryKey?.type === "SORTED" ? "sorted" : "standard";
-          return "[" + value.getArrayLength() + " rows] (" + type + " table)";
-        }
-        case "ABAPObject": {
-          const object = value.get();
-          return object === undefined ? "initial (object)" : (object.constructor?.INTERNAL_NAME || value.getQualifiedName() || object.constructor?.name || "object") + " (object)";
-        }
-        default:
-          if (value?.constructor?.INTERNAL_TYPE === "CLAS") return value.constructor.INTERNAL_NAME + " (object)";
-          return undefined;
+        case "Table": return "[" + data(raw, "length") + " rows] (" + (data(data(data(value, "options"), "primaryKey"), "type") === "SORTED" ? "sorted" : "standard") + " table)";
+        case "HashedTable": return "[" + Object.keys(raw).length + " rows] (hashed table)";
+        case "ABAPObject": return raw === undefined ? "initial (object)" : (data(constructor(raw), "INTERNAL_NAME") || data(value, "qualifiedName") || "object") + " (object)";
+        case "class": return data(constructor(value), "INTERNAL_NAME") + " (object)";
+        default: return undefined;
       }
     };
     const description = describe(this);
@@ -58,63 +93,54 @@ function abapDebugDescription(defaultValue) {
   }
 }
 
-// descriptionSource is inserted at build time, not a closure in the debuggee.
-function propertiesBody(descriptionSource) {
-  return `function () {
+function abapDebugProperties(helpers) {
   "use strict";
   try {
-    const kind = (value) => value && typeof value.getQualifiedName === "function" &&
-      (typeof value.get === "function" || typeof value.getPointer === "function" || typeof value.getArrayLength === "function") ? value.constructor?.name :
-      value && value.constructor?.name === "DataReference" && typeof value.getPointer === "function" ? "DataReference" : undefined;
-    if ((${descriptionSource}).call(this, undefined) === undefined) return this;
+    const {data, kind} = helpers;
     const name = kind(this);
-    if (name === "Structure") return this.get();
+    if (name === undefined) return this;
+    if (name === "Structure") return data(this, "value");
     if (name === "FieldSymbol" || name === "DataReference") {
-      const target = this.getPointer();
+      const target = data(this, "pointer");
       return target === undefined ? {} : {"->": target};
     }
     if (name === "Table" || name === "HashedTable") {
       const result = Object.create(null);
-      // HashedTable.array() copies every row. Read its backing store lazily instead.
-      const rows = this.value;
+      const rows = data(this, "value");
       let count = 0;
       for (const key in rows) {
-        if (!Object.prototype.hasOwnProperty.call(rows, key)) continue;
-        result[++count] = rows[key];
+        const row = Object.getOwnPropertyDescriptor(rows, key);
+        if (!row || !("value" in row)) continue;
+        result[++count] = row.value;
         if (count === 100) break;
       }
-      const remaining = this.getArrayLength() - count;
+      const remaining = (name === "Table" ? data(rows, "length") : Object.keys(rows).length) - count;
       if (remaining > 0) result["…more"] = remaining + " more rows (first 100 shown)";
-      if (this.header !== undefined) result["header"] = this.header;
+      if (data(this, "header") !== undefined) result.header = data(this, "header");
       return result;
     }
-    if (name === "ABAPObject" || this?.constructor?.INTERNAL_TYPE === "CLAS") {
-      const object = name === "ABAPObject" ? this.get() : this;
+    if (name === "ABAPObject" || name === "class") {
+      const object = name === "ABAPObject" ? data(this, "value") : this;
       const result = Object.create(null);
-      if (!object) return result;
-      // FRIENDS_ACCESS_INSTANCE exposes private ABAP attributes, including inherited
-      // ones. Copy data descriptors only; never invoke application getters/methods.
       const copy = (source) => {
         for (let cursor = source; cursor && cursor !== Object.prototype; cursor = Object.getPrototypeOf(cursor)) {
           for (const key of Object.keys(cursor)) {
             if (["me", "INTERNAL_ID", "FRIENDS_ACCESS_INSTANCE", "SUPER"].includes(key) || Object.prototype.hasOwnProperty.call(result, key)) continue;
-            const descriptor = Object.getOwnPropertyDescriptor(cursor, key);
-            if (descriptor && "value" in descriptor && kind(descriptor.value)) result[key] = descriptor.value;
+            const value = data(cursor, key);
+            if (kind(value)) result[key] = value;
           }
         }
       };
       copy(object);
-      copy(object.FRIENDS_ACCESS_INSTANCE);
+      copy(data(object, "FRIENDS_ACCESS_INSTANCE"));
       return result;
     }
-    return {}; // Scalars expand without runtime implementation fields.
+    return {};
   } catch {
     return this;
   }
 }
-`;
-}
 
-const customDescriptionGenerator = abapDebugDescription.toString();
-const customPropertiesGenerator = propertiesBody(customDescriptionGenerator);
+const customDescriptionGenerator = `function (defaultValue) { "use strict"; return (${abapDebugDescription}).call(this, defaultValue, (${inspection})()); }`;
+const customPropertiesGenerator = `function () { "use strict"; return (${abapDebugProperties}).call(this, (${inspection})()); }`;
 module.exports = {customDescriptionGenerator, customPropertiesGenerator};

@@ -111,8 +111,44 @@ describe("VS Code ABAP values (serialized js-debug generators)", () => {
     }
     const broken = new t.Character(2);
     broken.get = () => {throw Error("broken");};
-    expect(describeValue(broken)).to.equal("default JS");
-    expect(props(broken)).to.equal(broken);
+    expect(describeValue(broken)).to.equal("'' (c2)");
+    expect(props(broken)).to.deep.equal({});
+  });
+  it("never invokes unknown getters, lookalike methods or ABAP application accessors", () => {
+    let calls = 0;
+    const target = new t.Character(4).set("SAFE");
+    const mutate = () => {calls++; target.set("BAD"); return () => 42;};
+    const unknown = {};
+    for (const key of ["get", "getQualifiedName", "constructor"]) Object.defineProperty(unknown, key, {get: mutate});
+    class Character {
+      getQualifiedName() {return "fake";}
+      get() {mutate(); return "fake";}
+    }
+    const accessor = new Character();
+    Object.defineProperty(accessor, "value", {get: mutate});
+    for (const value of [unknown, new Character(), accessor]) {
+      expect(describeValue(value)).to.equal("default JS");
+      expect(props(value)).to.equal(value);
+    }
+    class Demo {
+      static INTERNAL_TYPE = "CLAS";
+      static INTERNAL_NAME = "DEMO";
+      count = target;
+      get FRIENDS_ACCESS_INSTANCE() {return mutate();}
+      get dangerous() {return mutate();}
+    }
+    expect(Object.keys(props(new Demo()))).to.deep.equal(["count"]);
+    expect(calls).to.equal(0);
+    expect(target.get()).to.equal("SAFE");
+  });
+  it("reads runtime data without executing overridden methods or formatting during expansion", () => {
+    let calls = 0;
+    const value = new t.Character(4).set("SAFE");
+    value.get = () => {calls++; value.set("BAD"); return "BAD";};
+    expect(describeValue(value)).to.equal("'SAFE' (c4)");
+    expect(props(value)).to.deep.equal({});
+    expect(calls).to.equal(0);
+    expect(Object.getOwnPropertyDescriptor(value, "value").value).to.equal("SAFE");
   });
   it("installs both executable generators for system and ABAP Unit sessions", () => {
     for (const target of ["system", "unit"]) {
