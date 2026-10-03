@@ -1,5 +1,5 @@
 // Local TH_WPINFO subset: configurable background capacity, idle minus active jobs.
-// The system's kernel provides the complete WPLIST instead.
+// The system's kernel fills the TABLES parameter WPLIST, of type WPINFO (A4H 2026-10-03).
 import {BatchRuns} from './osd-batch-runs.mjs';
 export function installCapacity(abap, jobs) {
   // a runtime set up without function modules (some suites' minimal setups) has nothing to answer

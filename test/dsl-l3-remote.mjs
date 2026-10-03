@@ -90,6 +90,11 @@ describe('DSL L3 remote alert seam', function () {
   it('generates RFC-able DDIC parameters and a remote-enabled, callable function group',()=>{
     const r=model.remote, xml=files[`${r.group}.fugr.xml`];
     expect(xml).to.include('<REMOTE_CALL>R</REMOTE_CALL>');
+    // abapGit needs the source and the attributes of every program the group's INCLUDES name
+    const includes=[...xml.matchAll(/<SOBJ_NAME>([^<]+)<\/SOBJ_NAME>/g)].map((m)=>m[1].toLowerCase());
+    expect(includes).to.deep.equal([`sapl${r.group}`,`l${r.group}top`]);
+    for(const inc of includes) for(const ext of ['abap','xml']) expect(files[`${r.group}.fugr.${inc}.${ext}`],`${inc}.${ext}`).to.be.a('string');
+    expect(files[`${r.group}.fugr.sapl${r.group}.xml`]).to.include('<SUBC>F</SUBC>');
     for(const name of [r.header,r.row,r.receipt]) expect(flat(files[`${name}.tabl.xml`]),name).to.equal(true);
     const fm=functionModules(['src/l2demo']).find((f)=>f.name===r.function);
     expect(fm).to.include({remote:true,implemented:true,exposed:true});

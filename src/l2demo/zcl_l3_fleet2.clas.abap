@@ -3644,8 +3644,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     " its own RUNNING piles hold; a set lane count (piles.lanes) caps that number,
     " and it is never below one, so a system whose background processes are all
     " busy with other work still runs the set, one pile at a time.
-    DATA lt_wp TYPE STANDARD TABLE OF wplist WITH DEFAULT KEY.
-    DATA ls_wp TYPE wplist.
+    DATA lt_wp TYPE STANDARD TABLE OF wpinfo WITH DEFAULT KEY.
+    DATA ls_wp TYPE wpinfo.
     DATA lv_free TYPE i.
     DATA lv_running TYPE i.
     DATA lv_cap TYPE i.

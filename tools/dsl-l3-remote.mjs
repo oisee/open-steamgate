@@ -76,6 +76,12 @@ export async function renderRemote(model, {classXml}) {
   files[`${r.group}.fugr.xml`] = `<?xml version="1.0" encoding="utf-8"?>\n<abapGit version="v1.0.0" serializer="LCL_OBJECT_FUGR" serializer_version="v1.0.0">\n <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>\n  <AREAT>Generated L3 remote alert receiver</AREAT>\n  <INCLUDES><SOBJ_NAME>SAPL${r.group.toUpperCase()}</SOBJ_NAME><SOBJ_NAME>L${r.group.toUpperCase()}TOP</SOBJ_NAME></INCLUDES>\n  <FUNCTIONS><item><FUNCNAME>${r.function}</FUNCNAME><REMOTE_CALL>R</REMOTE_CALL><SHORT_TEXT>Receive alert pile</SHORT_TEXT>\n   <IMPORT>\n    ${param('RSIMP','IS_HEADER',r.header)}\n    ${param('RSIMP','IT_ROWS',r.rows)}\n   </IMPORT>\n   <EXPORT>${param('RSEXP','ES_RESULT',r.receipt)}</EXPORT>\n   <EXCEPTION><RSEXC><EXCEPTION>SNAPSHOT_MISMATCH</EXCEPTION></RSEXC></EXCEPTION>\n  </item></FUNCTIONS>\n </asx:values></asx:abap>\n</abapGit>\n`;
   files[`${r.group}.fugr.sapl${r.group}.abap`] = `INCLUDE l${r.group}top.\n`;
   files[`${r.group}.fugr.l${r.group}top.abap`] = `FUNCTION-POOL ${r.group}.\n`;
+  // abapGit refuses a function group whose main program or TOP include has no
+  // attributes file ("File not found: <group>.fugr.sapl<group>.xml", A4H 2026-10-03);
+  // the main program is a function pool (SUBC F), the TOP an include (SUBC I).
+  const progdir = (name,subc)=>`<?xml version="1.0" encoding="utf-8"?>\n<abapGit version="v1.0.0" serializer="LCL_OBJECT_PROG" serializer_version="v1.0.0">\n <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">\n  <asx:values>\n   <PROGDIR><NAME>${name.toUpperCase()}</NAME><SUBC>${subc}</SUBC><FIXPT>X</FIXPT><UCCHECK>X</UCCHECK></PROGDIR>\n  </asx:values>\n </asx:abap>\n</abapGit>\n`;
+  files[`${r.group}.fugr.sapl${r.group}.xml`] = progdir(`sapl${r.group}`,'F');
+  files[`${r.group}.fugr.l${r.group}top.xml`] = progdir(`l${r.group}top`,'I');
   for (const [name,tpl] of [[`${r.class}.clas.abap`,'client'],[`${r.group}.fugr.${r.function.toLowerCase()}.abap`,'module']]) {
     const rendered = await renderRecipe({...model, ...r},`recipes/l3-remote/${tpl}.tpl`,{profile:'abap'});
     const error = rendered.findings.find((f)=>f.severity==='E');

@@ -1,6 +1,6 @@
 FUNCTION th_wpinfo.
 * Clean-room local host capacity; the kernel supplies this on a system.
-  DATA ls_wp TYPE wplist.
+  DATA ls_wp TYPE wpinfo.
   DATA lv_free TYPE i VALUE 4.
   DATA lv_busy TYPE i.
   WHILE lv_free > 0.

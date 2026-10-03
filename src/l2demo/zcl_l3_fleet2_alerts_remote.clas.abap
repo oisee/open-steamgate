@@ -16,7 +16,8 @@ CLASS zcl_l3_fleet2_alerts_remote IMPLEMENTATION.
     DATA ls_stage TYPE zosd_l3_stage.
     DATA ls_link TYPE zl3_fleet2_rlink.
     DATA lv_dest TYPE string.
-    DATA lv_msg TYPE string.
+    " MESSAGE of a classic RFC exception takes a flat character field, not a string (A4H 2026-10-03)
+    DATA lv_msg TYPE c LENGTH 255.
     DATA ls_settings TYPE zcl_l3_fleet2_conf=>ty_state.
     CLEAR: answer, failure_text.
     SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
