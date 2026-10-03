@@ -19,7 +19,7 @@ export class RemoteSessions extends AbapSessions {
     this.runtime.adtContexts.set(context, {callback});
     try {
       const response = await remoteStep(this.runtime,
-        {view: {sessionCall: method, args: sessionJSON(args)}, identity: this.identity, context});
+        {method, args: sessionJSON(args), identity: this.identity, context}, "/osd/adt-sessions");
       const result = await stepJSON(response);
       if (!response.ok) throw new Error(result.error?.message ?? "ADT session call failed");
       return result.value === null ? undefined : sessionValue(result.value);
@@ -34,9 +34,21 @@ export class RemoteSessions extends AbapSessions {
   whileHeld(session, handle, type, name, work) {
     return this.call("whileHeld", [session, handle, type, name], async () => { await work(); return {}; });
   }
-  deleteObject(session, type, name, store) {
-    return this.call("deleteObject", [session, type, name], ({action, type, name}) =>
-      action === "find" ? store.find(type, name) ?? null : store.delete(type, name));
+  async deleteObject(session, type, name, store) {
+    let deleted = false;
+    try {
+      return await this.call("deleteObject", [session, type, name], async ({action, type, name}) => {
+        if (action === "find") return store.find(type, name) ?? null;
+        const gone = await store.delete(type, name);
+        deleted = true;
+        return gone;
+      });
+    } catch (error) {
+      // The filesystem delete survives a child-step rollback. Release in
+      // a fresh step, after call() has removed the failed callback context.
+      if (deleted) await this.release(type, name).catch(() => undefined);
+      throw error;
+    }
   }
   release(type, name) { return this.call("release", [type, name]); }
 }
