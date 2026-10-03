@@ -27,7 +27,7 @@
 //                       same request (status, the ABAP's headers, the body)
 import {createHash} from "node:crypto";
 import {readFileSync} from "node:fs";
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "../osd-child-process.mjs";
 import {existsSync, mkdirSync, statSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {emitGo} from "./emit-go.mjs";

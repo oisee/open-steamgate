@@ -1,6 +1,6 @@
 // ABAP Unit on gogen. Test includes are compiled only for selected owners.
 // Results are JSON rows: {class, testclass, method, status, message}.
-import {spawnSync} from "node:child_process";
+import {spawnSync} from "../osd-child-process.mjs";
 import {appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {availableParallelism} from "node:os";
 import {dirname, join, resolve} from "node:path";

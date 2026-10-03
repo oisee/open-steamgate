@@ -11,7 +11,7 @@
 // method is one body, because what we need to know is how many bodies we
 // would fail to translate, not how enthusiastic an author was.
 import {readFileSync, readdirSync, mkdirSync} from "node:fs";
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "./osd-child-process.mjs";
 import {join} from "node:path";
 import {teachingPackages} from "./sqlscript/corpus-config.mjs";
 

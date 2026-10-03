@@ -17,7 +17,7 @@
 // open-abap-gui by size and time, the abaplint versions, the Go toolchain).
 // The same source runs the kept command without a build.
 import {createHash} from "node:crypto";
-import {spawnSync} from "node:child_process";
+import {spawnSync} from "./osd-child-process.mjs";
 import {closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
 import {compiled, toolCommand} from "./osd-host.mjs";

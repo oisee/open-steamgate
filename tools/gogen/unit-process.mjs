@@ -1,5 +1,5 @@
 // Process scheduling and crash recovery for the ABAP Unit runner.
-import {spawn, spawnSync} from "node:child_process";
+import {spawn, spawnSync} from "../osd-child-process.mjs";
 import {existsSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, unlinkSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {performance} from "node:perf_hooks";

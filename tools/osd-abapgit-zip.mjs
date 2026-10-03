@@ -22,7 +22,7 @@
 // `src/package.devc.xml`, and every object beside it.
 import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {basename, join, relative, resolve} from "node:path";
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "./osd-child-process.mjs";
 import {deflateRawSync} from "node:zlib";
 import {compileFile} from "./stg-compile.mjs";
 import {buildApp} from "./osd-bsp-app.mjs";

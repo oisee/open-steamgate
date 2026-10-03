@@ -12,7 +12,7 @@
 // and the copy is the pinned content. The licence approval of a pinned ref
 // is repo tooling too (docker/image/license-assumptions.mjs,
 // checkLockLicences), never imported from here.
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "./osd-child-process.mjs";
 import {existsSync, readdirSync, readFileSync, realpathSync, statSync} from "node:fs";
 import {join} from "node:path";
 import {librariesFromLock, readLock} from "./osd-lock.mjs";

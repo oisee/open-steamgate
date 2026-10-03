@@ -12,7 +12,7 @@
 // -cover` per package (slow: it runs the tests). The McCabe count is the
 // same for both languages: 1 plus each branch (if, loop, case, catch, ?:,
 // && || ??).
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "./osd-child-process.mjs";
 import {readFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";

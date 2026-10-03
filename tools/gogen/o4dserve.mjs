@@ -7,7 +7,7 @@
 //
 // Both answer the demo channel with the compiled ABAP and pass every other
 // request to an OSG server, so the page and its media are that server's.
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "../osd-child-process.mjs";
 import {copyFileSync, mkdirSync, readdirSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";

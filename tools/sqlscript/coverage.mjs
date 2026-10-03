@@ -13,7 +13,7 @@
 //
 //   node tools/sqlscript/coverage.mjs [.local/a4h-export] [--ddic <folder>]...
 import {readFileSync, readdirSync, mkdirSync, rmSync} from "node:fs";
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "../osd-child-process.mjs";
 import {basename, join} from "node:path";
 import {lex, LexError} from "./lexer.mjs";
 import {parse, ParseError} from "./combi.mjs";

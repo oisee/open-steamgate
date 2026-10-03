@@ -25,7 +25,7 @@
 //     one), a README.md of at least three lines, and does not depend on
 //     osg/gogen/abap -- unless it is on the exemption lists, which only shrink.
 // It runs at pre-push (.githooks/pre-push) and in CI (size-budget.yml).
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "./osd-child-process.mjs";
 import {existsSync, readFileSync, readdirSync, statSync, writeFileSync} from "node:fs";
 import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";

@@ -12,7 +12,7 @@
 // holds a package.json + package-lock.json pinned to the closure of ABAP-FS
 // 2.10.3's pnpm-lock.yaml (42 packages, every integrity equal); `npm ci` puts
 // it into .local/conformance/abapfs/deps on first use.
-import {spawn, spawnSync} from "node:child_process";
+import {spawn, spawnSync} from "./osd-child-process.mjs";
 import {closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readlinkSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
 import {createRequire} from "node:module";

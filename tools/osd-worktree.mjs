@@ -14,7 +14,7 @@
 // never moves. Everything OSD needs beyond the tracked files is shared by
 // symlink rather than copied, because a second node_modules and a second
 // clone of open-abap-core would cost gigabytes to isolate nothing.
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "./osd-child-process.mjs";
 import {existsSync, mkdirSync, symlinkSync, lstatSync} from "node:fs";
 import {basename,join, relative, resolve} from "node:path";
 

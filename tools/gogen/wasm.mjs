@@ -9,7 +9,7 @@
 // by page.route on http://localhost:4719 (intercepted, nothing listens),
 // with COOP/COEP, so the page is cross-origin isolated (localhost is a
 // secure context) and performance.now() is coarsened to 5 µs, not 100 µs.
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "../osd-child-process.mjs";
 import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {dirname, join, resolve} from "node:path";

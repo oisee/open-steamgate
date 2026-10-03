@@ -58,7 +58,7 @@
 // suites, in one job slot of its own.
 //
 // Writes <out>/parity.json and <out>/parity.md (default .local/parity/).
-import {spawn, spawnSync} from "node:child_process";
+import {spawn, spawnSync} from "../osd-child-process.mjs";
 import {createHash} from "node:crypto";
 import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, createWriteStream} from "node:fs";
 import {availableParallelism} from "node:os";

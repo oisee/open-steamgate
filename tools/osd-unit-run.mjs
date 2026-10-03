@@ -24,7 +24,7 @@
 // names the runtime reported. A class in the tree that never appears is
 // named and the run fails. Nothing here checks whether a test PASSED: the
 // runtime already does that, loudly.
-import {spawn} from "node:child_process";
+import {spawn} from "./osd-child-process.mjs";
 import {readdirSync, readFileSync, existsSync, statSync, mkdtempSync, openSync, closeSync, rmSync} from "node:fs";
 import {basename, join} from "node:path";
 import {tmpdir} from "node:os";

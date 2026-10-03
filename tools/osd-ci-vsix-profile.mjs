@@ -1,7 +1,7 @@
 // Decide when CI needs the expensive install/repackage VSIX tests.
 // Menu and command changes in the extension manifest use the ordinary suite;
 // package identity and payload changes need the full packaging check.
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "./osd-child-process.mjs";
 import {SEED_DIRS, SEED_FILES, shipsTestPath} from "../scripts/build-vsix.mjs";
 
 const packagingPaths = [

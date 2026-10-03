@@ -8,7 +8,7 @@
 // The key never leaves .local/, which is not this repository's git. A
 // certificate committed to a public repository is a certificate anybody can
 // impersonate, and it costs one command to make another.
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "./osd-child-process.mjs";
 import {existsSync, mkdirSync, readFileSync} from "node:fs";
 import {networkInterfaces} from "node:os";
 import {basename,join} from "node:path";

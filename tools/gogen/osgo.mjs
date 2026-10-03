@@ -11,7 +11,7 @@
 // zz_generated.go (the classes), zz_db.json (tables and seed rows) and
 // zz_boot.go (what boots, which SICF nodes are mounted, the launchpad tiles
 // and the pack folders, as read from the checkout now).
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "../osd-child-process.mjs";
 import {existsSync, writeFileSync} from "node:fs";
 import {join, relative} from "node:path";
 import {columnRegistry, compileProgram} from "./frontend.mjs";

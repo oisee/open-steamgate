@@ -17,7 +17,7 @@
 // server on the same port. That last one is not hypothetical -- a check
 // against the usual port has passed here against a deployment that had
 // nothing to do with the build under test.
-import {spawn} from "node:child_process";
+import {spawn} from "./osd-child-process.mjs";
 import {readFileSync, existsSync, readdirSync} from "node:fs";
 import {basename, dirname, join} from "node:path";
 import {runsAs} from "./osd-main.mjs";

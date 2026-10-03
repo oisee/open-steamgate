@@ -39,7 +39,7 @@
 //   node tools/osd-ddic-reserved.mjs [paths...]
 //
 // Exit 0 clean, 1 with findings, 2 when it could not do its job.
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "./osd-child-process.mjs";
 import {existsSync, readFileSync, readdirSync, statSync} from "node:fs";
 import {basename, join, relative, resolve} from "node:path";
 import {fileURLToPath} from "node:url";

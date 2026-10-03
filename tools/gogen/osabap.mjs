@@ -2,7 +2,7 @@
 // Build one classic ABAP report as a small native command. The report's
 // selection screen is its command-line contract; the Go host is deliberately
 // separate from OSGo's HTTP/OData/database host.
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "../osd-child-process.mjs";
 import {copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
 import {compileProgram} from "./frontend.mjs";

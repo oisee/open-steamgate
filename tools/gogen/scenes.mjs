@@ -8,7 +8,7 @@
 // the recording's own compact shape, and the two are compared number by
 // number within a relative 1e-9 -- the same tolerance o4d-record uses,
 // because the two sides print floats with 17 and 15 digits.
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "../osd-child-process.mjs";
 import {mkdirSync, readFileSync, rmSync, statSync, writeFileSync, existsSync} from "node:fs";
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";

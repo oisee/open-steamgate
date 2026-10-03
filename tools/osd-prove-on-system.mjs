@@ -61,7 +61,7 @@
 // Missing evidence is never a pass (no status, no class-check entry, a unit
 // result that is not vsp's JSON, a snippet result without its end row, no test
 // method run on the system): each fails the run.
-import {spawn} from "node:child_process";
+import {spawn} from "./osd-child-process.mjs";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, resolve} from "node:path";

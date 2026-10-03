@@ -13,7 +13,7 @@ import {convertFiles, enrichTrace, legacyTrace, readTraceFile, traceArgs} from "
 //   node tools/dsl-l3.mjs explain <set>/<rule>/<model hash>/<date>/<pile>/<seq> [--set <set.l3.yaml>]... [--db <sqlite file>]
 import {ruleVersion} from "./dsl-trace-history.mjs";
 export {ruleVersion};
-import {spawnSync} from "node:child_process";
+import {spawnSync} from "./osd-child-process.mjs";
 import {createHash} from "node:crypto";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";

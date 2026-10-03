@@ -9,7 +9,7 @@
 // ZC_STG_FLIGHTCUBE: the grand total, the chart per airline, the table per
 // airline/month/status, a filtered breakdown. Reported: load time, median
 // and best of 5 runs per query after one warm-up.
-import {spawn} from "node:child_process";
+import {spawn} from "./osd-child-process.mjs";
 import {fileURLToPath} from "node:url";
 // the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
 const PORT = process.env.STG_PORT ?? 3030;

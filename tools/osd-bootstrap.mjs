@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {spawnSync} from "node:child_process";
+import {spawnSync} from "./osd-child-process.mjs";
 import {existsSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {librariesFromLock} from "./osd-lock.mjs";

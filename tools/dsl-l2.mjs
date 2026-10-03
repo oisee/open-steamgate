@@ -12,7 +12,7 @@ import {convertFiles, enrichTrace, legacyTrace, readTraceFile, readTrace, traceA
 // FAILSAFE schema, so every scalar stays the text written (a key `0012` is not
 // the number 12). js-yaml keeps no positions, so a small line index over the
 // file's own text gives each key and list item its line (`lineIndex`).
-import {spawnSync} from "node:child_process";
+import {spawnSync} from "./osd-child-process.mjs";
 import {createHash} from "node:crypto";
 import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";

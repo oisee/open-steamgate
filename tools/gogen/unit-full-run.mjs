@@ -1,7 +1,7 @@
 // Re-run the binaries of an isolated full inventory, one owner at a time.
 // Only classes with a built binary enter this measurement; the inventory
 // JSON names every skipped class and method.
-import {spawnSync} from "node:child_process";
+import {spawnSync} from "../osd-child-process.mjs";
 import {existsSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import {home} from "./home.mjs";

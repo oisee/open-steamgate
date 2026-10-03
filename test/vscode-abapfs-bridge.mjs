@@ -5,6 +5,9 @@ import {mkdtempSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import express from "express";
+import {spawnSync as probe} from "node:child_process";
+import {spawnSync, execFileSync, spawn, execFile} from "../tools/osd-child-process.mjs";
+import {UnitRun} from "../tools/osd-unit.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 const {registerAbapFsBridge, startCredentials, EXTENSION_ID} = createRequire(import.meta.url)("../editors/vscode/abapfs-bridge.js");
 class Emitter {
@@ -39,6 +42,48 @@ function fixture(api, answer, saved = new Map()) {
 }
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 describe("ABAP-FS local bridge", () => {
+  it("consumes the boundary credential once and retains it for subsequent routers", () => {
+    const result = probe(process.execPath, ["--input-type=module", "-e", `
+      import {adtRouter} from "./tools/adt-facade.mjs";
+      if (process.env.OSD_ADT_TOKEN !== undefined) throw Error("credential retained in environment");
+      for (let i = 0; i < 2; i++) {
+        const made = adtRouter({watch: false, data: {}});
+        const req = {headers: {authorization: "Bearer fixture-token"}, rawHeaders: [], socket: {remoteAddress: "127.0.0.1"}};
+        let passed = false;
+        made.middleware.find(m => m.id === "local-logon").fn(req, {
+          status() { throw Error("credential lost"); }
+        }, () => { passed = true; });
+        if (!passed || !req.headers.authorization.startsWith("Basic ")) throw Error("credential lost");
+      }
+    `], {env: {...process.env, OSD_ADT_TOKEN: "fixture-token"}, encoding: "utf8"});
+    expect(result.status, result.stderr).to.equal(0);
+  });
+  it("scrubs inherited and explicit child environments for synchronous and asynchronous launches", async () => {
+    const previous = process.env.OSD_ADT_TOKEN;
+    process.env.OSD_ADT_TOKEN = "fixture-token";
+    const script = 'process.stdout.write(String(process.env.OSD_ADT_TOKEN))';
+    try {
+      for (const options of [{}, {env: {...process.env}}]) {
+        expect(spawnSync(process.execPath, ["-e", script], {...options, encoding: "utf8"}).stdout).to.equal("undefined");
+        expect(execFileSync(process.execPath, ["-e", script], {...options, encoding: "utf8"})).to.equal("undefined");
+        const child = spawn(process.execPath, ["-e", script], options);
+        let out = ""; child.stdout.on("data", d => { out += d; });
+        await new Promise((resolve, reject) => { child.on("error", reject); child.on("close", resolve); });
+        expect(out).to.equal("undefined");
+        const output = await new Promise((resolve, reject) => execFile(process.execPath, ["-e", script], options,
+          (error, stdout) => error ? reject(error) : resolve(stdout)));
+        expect(output).to.equal("undefined");
+      }
+      // Exercise the real detached Unit/debug launch with a probe as its host.
+      const self = process.env.OSD_SELF;
+      process.env.OSD_SELF = JSON.stringify([process.execPath, "-e", 'process.stdout.write(JSON.stringify({token: process.env.OSD_ADT_TOKEN ?? null}))']);
+      try {
+        const runner = new UnitRun({root: process.cwd()});
+        expect(await runner.runDetached("CLAS", "EXAMPLE", {plan: {classes: []}, inspectPort: 0 + 32000 + Number(process.env.INSTANCE ?? 80)})).to.deep.equal({token: null});
+      } finally { if (self === undefined) delete process.env.OSD_SELF; else process.env.OSD_SELF = self; }
+      expect(process.env.OSD_ADT_TOKEN).to.equal("fixture-token");
+    } finally { if (previous === undefined) delete process.env.OSD_ADT_TOKEN; else process.env.OSD_ADT_TOKEN = previous; }
+  });
   it("publishes one connection only while running, rotates credentials, and disposes", async () => {
     let provider, changes = 0;
     const f = fixture({version: 2, registerConnectionProvider: (p) => {

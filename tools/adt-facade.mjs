@@ -1,5 +1,9 @@
 import {segwRegistrationsOf} from "./osd-store-destination.mjs";
 import {xrefFact} from "./adt-xref-facts.mjs";
+// Consume the serving credential before any runtime, job or build starts.
+const boundaryToken = process.env.OSD_ADT_TOKEN;
+delete process.env.OSD_ADT_TOKEN;
+
 import {renderCell, cellType} from "./adt-datapreview-cells.mjs";
 // The ADT façade of OSD: `/sap/bc/adt/**` answered by a local system that
 // has no system behind it. A client that speaks ADT to a real ABAP server
@@ -21,7 +25,7 @@ import {renderCell, cellType} from "./adt-datapreview-cells.mjs";
 // from the object store, table contents from its data layer. The store never
 // parses HTTP. That seam is the contract between this session and the one
 // that owns the store.
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "./osd-child-process.mjs";
 import express from "express";
 import {readFileSync, appendFileSync} from "node:fs";
 import {dirname, join, relative} from "node:path";
@@ -801,7 +805,7 @@ export function adtRouter(options = {}) {
   };
   // Before sessions, captures and the ABAP front. Basic/anonymous local logon
   // stays unchanged; presenting a Bearer credential always requires validation.
-  const localToken = options.localToken ?? process.env.OSD_ADT_TOKEN;
+  const localToken = options.localToken ?? boundaryToken;
   pass("local-logon", BASE, (req, res, next) => {
     const header = String(req.headers.authorization ?? "");
     if (!/^Bearer(?:\s|$)/i.test(header)) return next();

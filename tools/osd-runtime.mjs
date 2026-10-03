@@ -21,7 +21,7 @@
 // worktrees, which is what a branch under test would be.
 import {randomBytes} from "node:crypto";
 import {attachStoreIPC} from "./osd-store-ipc.mjs";
-import {spawn} from "node:child_process";
+import {spawn} from "./osd-child-process.mjs";
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {fileURLToPath} from "node:url";

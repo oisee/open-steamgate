@@ -6,7 +6,7 @@
 //
 // The script loader of the pack reads SMW0; the harness does its few lines
 // (drop CR, split lines, tab to blank, CONDENSE, skip empty and # lines).
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "../osd-child-process.mjs";
 import {copyFileSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";

@@ -10,7 +10,7 @@
 // on a system; a disagreement between them and both backends is a question
 // for A4H, not an answer.
 import {createRequire} from "node:module";
-import {execFileSync} from "node:child_process";
+import {execFileSync} from "../osd-child-process.mjs";
 import {mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";

@@ -30,7 +30,7 @@ import {createHash} from "node:crypto";
 // tool exists to prevent.
 import {fileURLToPath} from "node:url";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFileSync } from "./osd-child-process.mjs";
 import { resolve, join, relative } from "node:path";
 
 const PRIVATE_V4 =
