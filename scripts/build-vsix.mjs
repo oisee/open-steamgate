@@ -357,6 +357,11 @@ export function copySeedTree(seedRoot, selectedPacks) {
   for (const dir of ["src", "webapp", "tools", "data"]) {
     copyReal(join(ROOT, dir), join(seedRoot, dir));
   }
+  // These unit-test includes use the session double excluded below. Keep the
+  // product classes, but omit their checkout-only tests from both seed formats.
+  for (const name of ["sessions", "logoff"]) {
+    rmSync(join(seedRoot, "src", "adt", `zcl_osd_adt_${name}.clas.testclasses.abap`), {force: true});
+  }
   mkdirSync(join(seedRoot, "packs"), {recursive: true});
   for (const pack of selectedPacks) {
     copyReal(pack.dir, join(seedRoot, "packs", pack.name));
@@ -503,7 +508,12 @@ function prebuildGeneration(seedRoot, env) {
   const buildEnv = forPublishing({...env});
   delete buildEnv.OSD_PACKS;
   delete buildEnv.OSD_WARM;
-  execFileSync(process.execPath, ["tools/osd-build.mjs"], {cwd: seedRoot, env: buildEnv, stdio: ["ignore", "pipe", "inherit"]});
+  try {
+    execFileSync(process.execPath, ["tools/osd-build.mjs"], {cwd: seedRoot, env: buildEnv, stdio: ["ignore", "pipe", "pipe"]});
+  } catch (error) {
+    // osd-build reports its failure on stdout and child diagnostics on stderr.
+    throw new Error(`build-vsix: prebuilt generation failed: ${error.message}\n${error.stdout?.toString() ?? ""}\n${error.stderr?.toString() ?? ""}`, {cause: error});
+  }
   const live = realpathSync(join(seedRoot, "build", "live"));
   const local = generationTmpProblem(live);
   if (local !== undefined) throw new Error(local);
