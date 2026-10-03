@@ -170,6 +170,27 @@ export class JobDestination {
     }
   }
 
+  async #abortJob(db, jobname, count) {
+    const who = identity(this.env);
+    const name = jobname.trim().toUpperCase();
+    if (!name || name.length > 32 || !/^[0-9]{6}[0-9A-Z]{2}$/.test(count)) return "BAD_KEY";
+    try {
+      const snapshot = readJobSnapshot({sourceDb: resolve(db.path), jobName: name, jobCount: count,
+        caller: {client: who.client, user: who.user, sid: who.sid}, root: this.root, env: this.env});
+      if (!snapshot) return "NOT_FOUND";
+      if (snapshot.state !== "RUNNING") return "NOT_RUNNING";
+      const id = snapshot.intentId;
+      if (!id) return "UNAVAILABLE";
+      const runId = `${id.slice(0,8)}-${id.slice(8,12)}-${id.slice(12,16)}-${id.slice(16,20)}-${id.slice(20)}`;
+      const store = new BatchRuns(this.root, this.env);
+      try { store.interruptQueued(runId); } finally { store.close(); }
+      return "";
+    } catch (error) {
+      if (error?.code === "JOB_READ_FORBIDDEN") return "FORBIDDEN";
+      return "UNAVAILABLE";
+    }
+  }
+
   async call(_name, signature) {
     const token = currentStepToken();
     if (token === undefined) throw new Error("JOB_* requires a dialog step");
@@ -186,8 +207,12 @@ export class JobDestination {
     if (this.env.STG_DB !== "file" || !db?.path || db.path === ":memory:") {
       if (command === "STATUS") statusFill(signature, {EV_ERROR_CODE: "UNAVAILABLE"});
       else if (command === "READ_JOB") readFill(signature, {EV_ERROR_CODE: "UNAVAILABLE"});
-      else if (command === "DELETE") fill(signature, {EV_ERROR_CODE: "UNAVAILABLE"});
+      else if (command === "DELETE" || command === "ABORT_JOB") fill(signature, {EV_ERROR_CODE: "UNAVAILABLE"});
       else fill(signature, {EV_ERROR: "JOB_* requires a durable STG_DB=file business database"});
+      return;
+    }
+    if (command === "ABORT_JOB") {
+      fill(signature, {EV_ERROR_CODE: await this.#abortJob(db, jobname, count)});
       return;
     }
     if (command === "DELETE") {

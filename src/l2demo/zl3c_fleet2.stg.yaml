@@ -208,6 +208,13 @@ entities:
         readonly: true
         sortable: false
         filterable: false
+      HideRunStat:
+        type: Boolean
+        field: HIDE_RUNSTAT
+        label: No runstat rows
+        readonly: true
+        sortable: false
+        filterable: false
       HideSnapshot:
         type: Boolean
         field: HIDE_SNAPSHOT
@@ -652,6 +659,65 @@ entities:
     operations:
       - R
       - Q
+  RunStat:
+    set: RunStatSet
+    source:
+      table: ZOSD_L3_RUNSTAT
+    keys:
+      - SetName
+      - RunId
+    properties:
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        label: Set
+        readonly: true
+      RunId:
+        type: String(32)
+        field: RUN_ID
+        label: Run ID
+        readonly: true
+      PilesDone:
+        type: Int32
+        field: PILES_DONE
+        label: Piles done
+        readonly: true
+      PilesFailed:
+        type: Int32
+        field: PILES_FAILED
+        label: Piles failed
+        readonly: true
+      PilesRunning:
+        type: Int32
+        field: PILES_RUNNING
+        label: Piles running
+        readonly: true
+      PilesHeld:
+        type: Int32
+        field: PILES_HELD
+        label: Piles held
+        readonly: true
+      MeanSecs:
+        type: Decimal(15,3)
+        field: MEAN_SECS
+        label: Mean secs
+        readonly: true
+      MedianSecs:
+        type: Decimal(15,3)
+        field: MEDIAN_SECS
+        label: Median secs
+        readonly: true
+      UpdatedAt:
+        type: DateTime
+        field: UPDATED_AT
+        label: Updated at
+        readonly: true
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
+      - Q
   Setting:
     set: SettingSet
     source:
@@ -949,6 +1015,18 @@ functions:
       entity: Answer
       multiplicity: '1'
     parameters: {}
+  StartDaemon:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters: {}
+  StopDaemon:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters: {}
   SetKill:
     method: POST
     returns:
@@ -1039,6 +1117,14 @@ associations:
       RunId: RunId
     navigation:
       Run: to_Doctor
+  RunToRunStat:
+    from: Run
+    to: RunStat
+    cardinality: 1:N
+    constraint:
+      RunId: RunId
+    navigation:
+      Run: to_RunStat
   RunToSnapshot:
     from: Run
     to: Snapshot
@@ -1144,6 +1230,10 @@ annotations:
         label: Doctor journal
         lineItem: to_Doctor
         hidden: HideDoctor
+      - id: RunStat
+        label: RunStat
+        lineItem: to_RunStat
+        hidden: HideRunStat
       - id: Snapshot
         label: Settings of the run
         lineItem: to_Snapshot
@@ -1235,6 +1325,24 @@ annotations:
         label: Rule
       - value: PileNo
         label: Pile
+  RunStat:
+    lineItem:
+      - value: RunId
+        label: Run ID
+      - value: PilesDone
+        label: Piles done
+      - value: PilesFailed
+        label: Piles failed
+      - value: PilesRunning
+        label: Piles running
+      - value: PilesHeld
+        label: Piles held
+      - value: MeanSecs
+        label: Mean secs
+      - value: MedianSecs
+        label: Median secs
+      - value: UpdatedAt
+        label: Updated at
   Setting:
     lineItem:
       - value: ParamName
@@ -1380,6 +1488,8 @@ annotations:
     label: No event rows
   Run/HideDoctor:
     label: No doctor rows
+  Run/HideRunStat:
+    label: No runstat rows
   Run/HideSnapshot:
     label: No snapshot rows
   Stage/RunId:
@@ -1524,6 +1634,24 @@ annotations:
     label: Reason
   Doctor/Acted:
     label: When
+  RunStat/SetName:
+    label: Set
+  RunStat/RunId:
+    label: Run ID
+  RunStat/PilesDone:
+    label: Piles done
+  RunStat/PilesFailed:
+    label: Piles failed
+  RunStat/PilesRunning:
+    label: Piles running
+  RunStat/PilesHeld:
+    label: Piles held
+  RunStat/MeanSecs:
+    label: Mean secs
+  RunStat/MedianSecs:
+    label: Median secs
+  RunStat/UpdatedAt:
+    label: Updated at
   Setting/SetName:
     label: Set
   Setting/ParamName:

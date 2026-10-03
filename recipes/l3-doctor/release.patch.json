@@ -1,0 +1,53 @@
+[
+  {
+    "before": [
+      "    CLASS-METHODS count_runs.\n"
+    ],
+    "after": [
+      "    CLASS-METHODS count_runs.\n{{#release_event}}\n    CLASS-METHODS release_events.\n{{/release_event}}\n"
+    ]
+  },
+  {
+    "before": [
+      "        strtimmed = 'X'\n      IMPORTING\n        job_was_released = lv_released"
+    ],
+    "after": [
+      "{{^release_event}}\n        strtimmed = 'X'\n{{/release_event}}\n{{#release_event}}\n        event_id = 'ZOSD_L3_RELEASE'\n        event_param = lv_release_param\n{{/release_event}}\n      IMPORTING\n        job_was_released = lv_released"
+    ]
+  },
+  {
+    "before": [
+      "    cs_pile-job_count = lv_jobcount.\n    save_pile( cs_pile )."
+    ],
+    "after": [
+      "    cs_pile-job_count = lv_jobcount.\n{{#release_event}}\n    DATA lv_release_param TYPE c LENGTH 64.\n    lv_release_param = |{ lv_jobname }/{ lv_jobcount }|.\n    cs_pile-reason = 'EVENT-WAIT'.\n{{/release_event}}\n    save_pile( cs_pile )."
+    ]
+  },
+  {
+    "before": [
+      "    IF ls_guard-state = 'NARROW'.\n      SELECT COUNT(*) FROM zosd_l3_pile INTO lv_chains"
+    ],
+    "after": [
+      "{{^release_event}}\n    IF ls_guard-state = 'NARROW'.\n      SELECT COUNT(*) FROM zosd_l3_pile INTO lv_chains"
+    ],
+    "governor": true
+  },
+  {
+    "before": [
+      "    UPDATE zosd_l3_pile SET reason = 'GOV-CLAIM'"
+    ],
+    "after": [
+      "{{/release_event}}\n    UPDATE zosd_l3_pile SET reason = 'GOV-CLAIM'"
+    ],
+    "governor": true
+  },
+  {
+    "governor": true,
+    "before": [
+      "            AND ( status = 'RUNNING' OR ( status = 'PLANNED' AND ( job_count <> '' OR reason = 'GOV-CLAIM' ) ) ).\n"
+    ],
+    "after": [
+      "            AND ( status = 'RUNNING' OR ( status = 'PLANNED' AND ( reason = 'EVENT-SENT' OR reason = 'GOV-CLAIM' ) ) ).\n"
+    ]
+  }
+]

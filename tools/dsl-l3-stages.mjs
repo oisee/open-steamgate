@@ -23,7 +23,7 @@ const INT4 = {built_in: "INT4"};
 // the rule entries each lists, with the manifest path of every entry.
 export function readStages(doc, {line, fail}) {
   for (const key of ["rules", "piles"]) {
-    if (doc[key] !== undefined) fail(line(key), `${key}: and stages: do not go together; with stages: every stage lists its own rules and piles`);
+    if (doc[key] !== undefined && !(key === "piles" && typeof doc.piles === "object" && !Array.isArray(doc.piles) && Object.keys(doc.piles).every((k) => ["release", "lanes"].includes(k)))) fail(line(key), `${key}: and stages: do not go together; with stages: every stage lists its own rules and piles`);
   }
   if (!Array.isArray(doc.stages) || !doc.stages.length) fail(line("stages"), "stages is a list of {stage, filter, worklist, piles, rules}");
   if (doc.stages.length > MAX_STAGES) fail(line("stages"), `a set has at most ${MAX_STAGES} stages (the stage is one digit of the job names L3_<SET>_<s><nn>)`);

@@ -1,3 +1,4 @@
+import {jobDoctor, jobDoctorModel, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 3b (docs/dsl-l3.md, "Stages, filters and a schedule"): a set
 // in ordered stages. A filter stage's rules (L2 keys: true) fill a worklist,
 // ZOSD_L3_WORK, and a later stage piles over that worklist only; stage n+1
@@ -223,10 +224,15 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
       expect(runner.join("\n")).to.include("zcl_l2_ship_busy=>keys( iv_date = iv_date it_range = lt_range_1 ).");
     });
 
-    it("the runner ends no unit of work (SUBMIT, in mode P, is its one such statement); the job report commits a DONE pile before the gate", () => {
+    it("the runner ends no unit of work; reports commit before advancing a gate and notifying the daemon", async () => {
       expect(unitFindings(readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8"), `${RUNNER}.clas.abap`, {writes: true, jobs: true})).to.deep.equal([]);
       const report = readFileSync(join(OUT, `${REPORT}.prog.abap`), "utf8");
-      expect(report).to.match(/IF ls_rule-status = 'DONE'\.\n.*\n    COMMIT WORK\.\n    zcl_l3_fleet2=>advance\(/);
+      const tail = report.slice(report.indexOf('  WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.'));
+      expect(tail).to.match(/COMMIT WORK\.\n  IF ls_rule-status = 'DONE'\.\n    zcl_l3_fleet2=>advance\(/);
+      expect(tail.indexOf('COMMIT WORK.')).to.be.lessThan(tail.indexOf('=>advance('));
+      expect(tail.indexOf('=>advance(')).to.be.lessThan(tail.indexOf('=>pile_done('));
+      const {files} = await renderSet(jobDoctorModel("fleet2"));
+      expect(files[`${REPORT}.prog.abap`]).to.match(/IF ls_rule-status = 'DONE'\.\n.*\n    COMMIT WORK\.\n    zcl_l3_fleet2=>advance\(/);
       expect(report).to.include("PARAMETERS p_mode TYPE c LENGTH 1 DEFAULT 'R'.");
       expect(report).to.include("    GET TIME.\n    ls_result = zcl_l3_fleet2=>run( iv_date = sy-datum iv_mode = zcl_l3_fleet2=>c_parallel ).");
     });
@@ -328,8 +334,8 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
         `INSERT INTO ${table} (mandt, ${COLUMNS[table].join(", ")}) VALUES ('123', ${row.map((v) => `'${v}'`).join(", ")})`));
       await exec([...Object.keys(FLEET).map((t) => `DELETE FROM ${t}`), ...inserts]);
     });
-    let classesBefore;
-    before(() => { classesBefore = {...globalThis.abap.Classes}; });
+    let classesBefore, jobMode;
+    before(async () => { classesBefore = {...globalThis.abap.Classes}; jobMode = await jobDoctor("fleet2", join(scratch,"job-doctor")); });
     after(() => {
       const classes = globalThis.abap.Classes;
       for (const key of Object.keys(classes)) if (!(key in classesBefore)) delete classes[key];
@@ -566,12 +572,12 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
       mkdirSync(out, {recursive: true});
       const {Transpiler, core} = modulesOf(process.cwd());
       const reg = new core.Registry();
-      const text = readFileSync(join(OUT, `${real}.clas.abap`), "utf8").replace(new RegExp(`\\b${real}\\b`, "g"), name);
+      const text = (jobMode.files[`${real}.clas.abap`] ?? readFileSync(join(OUT, `${real}.clas.abap`), "utf8")).replace(new RegExp(`\\b${real}\\b`, "g"), name);
       const edited = edit(text);
       expect(edited, `${name} differs from ${real}`).to.not.equal(text);
       const files = {[`${name}.clas.abap`]: edited, [`${name}.clas.xml`]: readFileSync(join(OUT, `${real}.clas.xml`), "utf8").replace(real.toUpperCase(), name.toUpperCase())};
       for (const [f, t] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(t, f, core)));
-      const deps = [...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
+      const deps = [...daemonDependencies(),...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
         "gen/gui/zcl_osd_batch_report.clas.abap", "src/jobs/zcl_osd_submit_semantics.clas.abap", "src/jobs/zcl_osd_submit_ranges.clas.abap",
         ".local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),

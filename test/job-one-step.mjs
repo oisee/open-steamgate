@@ -1275,6 +1275,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
     try {
       const base = {
         intentId: intent.intent_id.trim(), sourceDb: intent.source_db.trim(),
+        sourceInstance: intent.source_instance.trim(),
         client: intent.mandt.trim(), sysid: intent.sysid.trim(),
         jobname: intent.jobname.trim(), jobcount: intent.jobcount.trim(),
         owner: intent.owner.trim(), program: intent.program.trim(), generation: intent.generation.trim(),
@@ -1335,6 +1336,7 @@ describe("one-step standard JOB_* facade and committed outbox", function () {
         expect(() => reopened.stepOutput(run.id, 1)).to.throw(/digest check/);
       } finally { reopened.close(); }
       const base = {intentId: committed.intent_id.trim(), sourceDb: committed.source_db.trim(),
+        sourceInstance: committed.source_instance.trim(),
         client: committed.mandt.trim(), sysid: committed.sysid.trim(),
         jobname: committed.jobname.trim(), jobcount: committed.jobcount.trim(), owner: committed.owner.trim(),
         program: "ZGG_EX_001", generation: committed.generation.trim(),

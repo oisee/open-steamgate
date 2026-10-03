@@ -8,6 +8,7 @@ import yaml from 'js-yaml';
 import {compileSet,renderSet} from './dsl-l3.mjs';
 import {profileRun,stampSeconds} from './dsl-l3-profile.mjs';
 import {loadGenerated} from './dsl-l3-load.mjs';
+import {daemonHost} from './osd-daemon-host.mjs';
 import {dialogStep} from './osd-dialog-step.mjs';
 import {manualClock,installAbapClock} from './osd-job-scheduler.mjs';
 import {BatchRuns,workQueuedBatch} from './osd-batch-runs.mjs';
@@ -22,7 +23,8 @@ export async function driveClock(clock, work) {
   let seen;
   while (!done) {
     await new Promise((r) => setTimeout(r,1));
-    const next = clock.pending()[0];
+    // A watcher tick is not a reason to move time while the job is doing SQL.
+    const next = clock.pending({waitOnly:true})[0];
     if (next === undefined || done) { seen = undefined; continue; }
     if (next !== seen) { seen = next; continue; }
     seen = undefined;
@@ -42,9 +44,11 @@ export async function replayJobs(model, clock, store, {bind = 'work=replay,close
   if (result.get().status.get().trim() !== 'SUBMITTED') throw new Error(`replay start: ${result.get().status.get()}`);
   const db = abap.context.databaseConnections.DEFAULT.db;
   for (let pass = 0; pass < passes; pass++) {
+    await daemonHost(abap)?.idle();
     await drainJobOutbox(store);
     for (;;) {
       const job = await driveClock(clock,() => workQueuedBatch(process.cwd(),store));
+      await daemonHost(abap)?.idle();
       if (!['completed','failed','step','running'].includes(job.kind)) {
         if ((await drainJobOutbox(store)).imported) continue;
         break;
@@ -116,6 +120,7 @@ export async function whatif(file,{run,db,profile:profileFile,settings = {}}) {
       const close = model.ports.find((p) => p.is_autoclose);
       const bind = `work=replay${close?.variants.some((v) => v.is_replay) ? `,${close.name}=replay` : ''}`;
       results.push(await replayJobs(model,clock,store,{bind, date:profile.source?.piles?.[0]?.check_date ?? '20991001'}));
+      await daemonHost(abap)?.close();
       restoreClock(); restoreClock = undefined;
       store.close(); store = undefined;
       await client.disconnect(); client = undefined;
@@ -125,6 +130,7 @@ export async function whatif(file,{run,db,profile:profileFile,settings = {}}) {
       piles_failed:variant.piles_failed-baseline.piles_failed, alerts_open:variant.alerts_open-baseline.alerts_open,
       glass:`${baseline.glass} -> ${variant.glass}`}};
   } finally {
+    await daemonHost(globalThis.abap)?.close();
     restoreClock?.(); store?.close(); await client?.disconnect();
     for (const key of Object.keys(process.env)) if (!(key in beforeEnv)) delete process.env[key];
     Object.assign(process.env,beforeEnv);

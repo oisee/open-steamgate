@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_FUGR" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
+ <AREAT>Clean room local background work process capacity</AREAT>
+ <INCLUDES><SOBJ_NAME>SAPLZOSD_CAPACITY</SOBJ_NAME></INCLUDES>
+ <FUNCTIONS><item><FUNCNAME>TH_WPINFO</FUNCNAME><SHORT_TEXT>Local background capacity</SHORT_TEXT>
+ <TABLES><RSTBL><PARAMETER>WPLIST</PARAMETER><DBSTRUCT>WPLIST</DBSTRUCT></RSTBL></TABLES>
+ </item></FUNCTIONS></asx:values></asx:abap>
+</abapGit>

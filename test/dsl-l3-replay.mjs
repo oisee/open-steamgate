@@ -9,7 +9,7 @@ import {compileSet,renderSet} from '../tools/dsl-l3.mjs';
 import {profileRun,observations} from '../tools/dsl-l3-profile.mjs';
 import {configOf,draw,sinkSafety} from '../tools/dsl-l3-sim.mjs';
 import {loadGenerated} from '../tools/dsl-l3-load.mjs';
-import {replayJobs,whatif} from '../tools/dsl-l3-whatif.mjs';
+import {driveClock,replayJobs,whatif} from '../tools/dsl-l3-whatif.mjs';
 import {manualClock,installAbapClock} from '../tools/osd-job-scheduler.mjs';
 import {dialogStep} from '../tools/osd-dialog-step.mjs';
 import {BatchRuns} from '../tools/osd-batch-runs.mjs';
@@ -72,6 +72,18 @@ describe('DSL L3 replay: a twin of one night', function () {
   });
   const empirical = () => { const d = doc(); d.simulate.profile = sourceProfile; return compileSet(manifest(d,'profile')); };
 
+  it('the replay clock advances waits, without letting watcher ticks race ordinary async work', async () => {
+    const clock = manualClock(0), ticks = [];
+    const tick = () => { ticks.push(clock.now()); clock.setTimer(tick,10); };
+    clock.setTimer(tick,10);
+    await driveClock(clock, async () => {
+      await new Promise((r) => setTimeout(r,30));
+      expect(clock.now(), 'SQL work does not advance simulated time').to.equal(0);
+      await new Promise((r) => clock.setTimer(r,25,{wait:true}));
+    });
+    expect(clock.now()).to.equal(25);
+    expect(ticks).to.deep.equal([10,20]);
+  });
   it('profiles a 5d sim night deterministically, retaining retries, exact attempt rows and settings', () => {
     const p = profileRun(model,{run:sourceProfile.run,db:dbPath});
     expect(p).to.deep.equal(sourceProfile);

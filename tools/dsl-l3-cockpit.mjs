@@ -55,7 +55,7 @@ export async function renderCockpit(model) {
   const error = ext.findings.find((f) => f.severity === "E");
   if (error) throw new Error(`cockpit DPC line ${error.line}: ${error.text}`);
   const files = {[`${c.project.toLowerCase()}.stg.yaml`]: source, [`${root.class}.clas.xml`]: result.ext[`${root.class}.clas.xml`],
-    [`${root.class}.clas.abap`]: ext.text, ...await cockpitPages(model)};
+    [`${root.class}.clas.abap`]: ext.text, ...await cockpitPages({...model, daemon: undefined, settings: model.settings ? {...model.settings, entries: model.settings.entries.filter((e) => e.name !== "doctor.tick")} : undefined})};
   const objects = Object.entries({...result.files, ...result.classes, ...result.ext}).map(([name, text]) =>
     `  ${JSON.stringify(name)}: [\n` + text.trimEnd().split("\n").map((_, i) =>
       "   " + JSON.stringify({line: i + 1, template_line: i + 1, node: c["@id"], set_line: c.set_line})).join(",\n") + "\n  ]");

@@ -150,6 +150,7 @@ CLASS ltcl_proof IMPLEMENTATION.
     FIELD-SYMBOLS <ls_answer> TYPE zcl_zl3c_fleet2_mpc=>ts_answer.
     CREATE OBJECT lo_dpc.
     lv_expected = zcl_l3_fleet2=>cockpit_schedule_status( ).
+    lv_expected = lv_expected && ' / ' && zcl_l3_fleet2=>daemon_status( ).
     lo_dpc->/iwbep/if_mgw_appl_srv_runtime~execute_action(
       EXPORTING iv_action_name = 'ScheduleStatus' it_parameter = lt_params IMPORTING er_data = lr_answer ).
     ASSIGN lr_answer->* TO <ls_answer>.
@@ -1433,7 +1434,6 @@ CLASS ltcl_proof IMPLEMENTATION.
     " row it logged is a SIM row under a sim256: hash
     DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
     DATA lt_report TYPE zcl_l3_fleet2=>tt_doctor.
-    DATA ls_report LIKE LINE OF lt_report.
     DATA ls_lock TYPE zosd_l3_run.
     DATA lt_piles TYPE STANDARD TABLE OF zosd_l3_pile WITH DEFAULT KEY.
     DATA ls_pile TYPE zosd_l3_pile.
@@ -1491,9 +1491,6 @@ CLASS ltcl_proof IMPLEMENTATION.
     DO.
       lt_report = zcl_l3_fleet2=>doctor( ).
       COMMIT WORK.
-      LOOP AT lt_report INTO ls_report WHERE run_id = ls_result-run_id AND doc_action = 'RESUBMIT'.
-        lv_resubmits = lv_resubmits + 1.
-      ENDLOOP.
       SELECT SINGLE * FROM zosd_l3_run INTO ls_lock
         WHERE set_name = zcl_l3_fleet2=>c_set
           AND check_date = zcl_l3_fleet_proof=>c_check_date.
@@ -1515,6 +1512,9 @@ CLASS ltcl_proof IMPLEMENTATION.
     SELECT SINGLE run_bind FROM zosd_l3_stage INTO lv_text
       WHERE run_id = ls_result-run_id AND stage_no = 1.
     cl_abap_unit_assert=>assert_equals( act = lv_text exp = 'work=sim' msg = 'the run records the binding it started with' ).
+    " count durable actions, including retries claimed by the daemon
+    SELECT COUNT( * ) FROM zosd_l3_doctor INTO lv_resubmits
+      WHERE run_id = ls_result-run_id AND doc_action = 'RESUBMIT'.
     IF lv_resubmits < 1.
       cl_abap_unit_assert=>fail( msg = 'no pile dumped and was submitted again' ).
     ENDIF.

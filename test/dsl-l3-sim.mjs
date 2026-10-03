@@ -1,3 +1,4 @@
+import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 5d (docs/dsl-l3.md, "Simulated twin: the work as a port"):
 // the work of a pile is the port work, and iv_bind = 'work=sim' runs the same
 // generated runner with a simulated twin in place of the L2 checks. The twin
@@ -528,8 +529,8 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       clock = manualClock(START);
       restoreClock = installAbapClock(abap, clock);
     });
-    let classesBefore;
-    before(() => { classesBefore = {...globalThis.abap.Classes}; });
+    let classesBefore, jobMode;
+    before(async () => { classesBefore = {...globalThis.abap.Classes}; jobMode = await jobDoctor("fleet2", join(scratch,"job-doctor")); });
     after(() => {
       const classes = globalThis.abap.Classes;
       for (const key of Object.keys(classes)) if (!(key in classesBefore)) delete classes[key];
@@ -570,7 +571,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       expect(own, `${name} is a class of its own`).to.not.equal(text);
       const files = {[`${name}.clas.abap`]: own, [`${name}.clas.xml`]: readFileSync(join(OUT, `${real}.clas.xml`), "utf8").replace(real.toUpperCase(), name.toUpperCase())};
       for (const [f, t] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(t, f, core)));
-      const deps = [...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
+      const deps = [...daemonDependencies(),...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
         "gen/gui/zcl_osd_batch_report.clas.abap", "src/jobs/zcl_osd_submit_semantics.clas.abap", "src/jobs/zcl_osd_submit_ranges.clas.abap",
         ".local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),
@@ -604,7 +605,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       expect(text, `the class holds ${JSON.stringify(from)}`).to.include(from);
       return text.replace(from, to);
     };
-    const committed = (cls) => readFileSync(join(OUT, `${cls}.clas.abap`), "utf8");
+    const committed = (cls) => jobMode.files[`${cls}.clas.abap`] ?? readFileSync(join(OUT, `${cls}.clas.abap`), "utf8");
     // A configuration of the twin other than the committed one: the set with
     // its simulate: block replaced, compiled and rendered, and its sim class
     // transpiled alone and answering for the committed one while `work` runs

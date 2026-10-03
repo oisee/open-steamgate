@@ -33,6 +33,10 @@ export function cockpitActions(m) {
   if (m.resilience) for (const [name, method, params, args] of [["Resume", "resume", {RunId: "String(32)"}, "iv_run = lv_run"], ["Doctor", "doctor", {}, ""]]) {
     actions.push({name, method, params, call: `lt_report = ${m.class}=>${method}( ${args} ).\n        LOOP AT lt_report INTO ls_report.\n          ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.\n        ENDLOOP.`});
   }
+  if (m.daemon) {
+    boolean("StartDaemon", "start_daemon", {}, "");
+    boolean("StopDaemon", "stop_daemon", {}, "");
+  }
   if (m.killable) {
     boolean("SetKill", "set_kill", {Reason: "String(80)"}, "iv_reason = lv_reason", true, "the reason is empty or over 80 characters");
     boolean("ClearKill", "clear_kill", {Reason: "String(80)"}, "iv_reason = lv_reason", true, "the reason is empty or over 80 characters");
@@ -48,7 +52,7 @@ export function cockpitActions(m) {
     // (this runtime converted it silently), so the cockpit words it
     actions.push({name: "Unschedule", method: "unschedule", params: {}, call: `ls_unschedule = ${m.class}=>unschedule( ).\n        ls_answer-answer = |deleted { ls_unschedule-deleted }, refused { ls_unschedule-refused }|.`});
     actions.push({name: "ScheduleStatus", method: "cockpit_schedule_status", params: {}, get: true,
-      call: `ls_answer-answer = ${m.class}=>cockpit_schedule_status( ).`});
+      call: `ls_answer-answer = ${m.class}=>cockpit_schedule_status( ).${m.daemon ? `\n        ls_answer-answer = ls_answer-answer && ' / ' && ${m.class}=>daemon_status( ).` : ""}`});
   }
   return actions;
 }
@@ -58,6 +62,7 @@ export function cockpitService(m, {tableSource = (table) => readFileSync(`src/ds
   const tables = [["Run", "run"], ["Stage", "stage"], ["Pile", "pile"]];
   if (m.governor) tables.push(["Budget", "budget"], ["Event", "event"]);
   if (m.resilience) tables.push(["Doctor", "doctor"]);
+  if (m.autodoctor) tables.push(["RunStat", "runstat"]);
   if (m.settings) tables.push(["Setting", "conf"], ["Change", "conf_log"], ["Snapshot", "run_conf"]);
   for (const [name, suffix] of tables) {
     const table = `zosd_l3_${suffix}`, xml = tableSource(table);
@@ -65,7 +70,7 @@ export function cockpitService(m, {tableSource = (table) => readFileSync(`src/ds
     const keys = [], properties = {}, columns = [];
     for (const field of fields) {
       const raw = tag(field, "FIELDNAME"), prop = pascal(raw), type = tag(field, "DATATYPE"), len = +tag(field, "LENG");
-      const timestamp = type === "DEC" && len === 15 && ["STARTED", "ENDED", "OPENED", "ACTED", "CHANGED_AT"].includes(raw);
+      const timestamp = type === "DEC" && len === 15 && ["STARTED", "ENDED", "OPENED", "ACTED", "CHANGED_AT", "UPDATED_AT"].includes(raw);
       const edm = timestamp || type === "DATS" ? "DateTime" : /^INT/.test(type) ? "Int32" : type === "DEC" ? `Decimal(${len},${+tag(field, "DECIMALS") || 0})` : type === "STRG" ? "String" : `String(${len})`;
       properties[prop] = {type: edm, field: raw, label: prop, readonly: true};
       columns.push({field: raw.toLowerCase(), property: prop});

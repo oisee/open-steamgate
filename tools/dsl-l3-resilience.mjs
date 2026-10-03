@@ -7,7 +7,7 @@
 // of the manifest. tools/dsl-l3.mjs calls this; it knows the set language and
 // nothing of any domain.
 
-export const RESILIENCE_KEYS = ["retry", "stale", "fuses", "dry_run", "keep"];
+export const RESILIENCE_KEYS = ["retry", "stale", "fuses", "dry_run", "keep", "doctor"];
 // the generic tables the runner knows: the kill switch and the doctor's audit
 export const KILL_TABLE = "ZOSD_L3_KILL";
 export const DOCTOR_TABLE = "ZOSD_L3_DOCTOR";
@@ -59,6 +59,27 @@ export function compileResilience(doc, {id, set, line, fail, staged, sink, sched
     stale.job = {name: `L3_${set.toUpperCase()}_DOC`, "name@type": CHAR(32), field, count: String(count), "count@type": INT4, word: `${count} ${unit}`};
   }
 
+  const doctorSpec = map(spec.doctor ?? {}, "resilience/doctor", "{as: [daemon, event, job], tick, every}");
+  for (const key of Object.keys(doctorSpec)) if (!["as", "tick", "every"].includes(key)) fail(line(`resilience/doctor/${key}`), `unknown doctor key ${key}`);
+  const mechanisms = doctorSpec.as ?? ["daemon"];
+  if (!Array.isArray(mechanisms) || !mechanisms.length || mechanisms.some((m) => !["daemon", "event", "job"].includes(m)) || new Set(mechanisms).size !== mechanisms.length) {
+    fail(line("resilience/doctor/as"), "doctor.as is a nonempty list of distinct daemon, event, job mechanisms");
+  }
+  if (!mechanisms.includes("daemon") && !mechanisms.includes("job")) {
+    fail(line("resilience/doctor/as"), "doctor.as needs daemon or job to catch a silent live job");
+  }
+  const doctor = node("doctor", {mechanisms,
+    tick: whole(doctorSpec.tick ?? "10", {min: 1, max: 3600, at: line("resilience/doctor/tick"), fail, what: "doctor.tick"}),
+    every: whole(doctorSpec.every ?? "15", {min: 1, max: 99, at: line("resilience/doctor/every"), fail, what: "doctor.every (minutes)"}),
+    daemon: mechanisms.includes("daemon"), event: mechanisms.includes("event"), job: mechanisms.includes("job"),
+    daemon_class: `zcl_l3_${set}_dmn`, doctor_report: `zl3_${set}_doc`, daemon_class_upper: `ZCL_L3_${set.toUpperCase()}_DMN`, doctor_report_upper: `ZL3_${set.toUpperCase()}_DOC`, name: `L3_${set.toUpperCase()}_DMN`});
+  doctor.autonomous = doctor.daemon || doctor.event || !schedule;
+  doctor.arm_job = doctor.job && doctor.autonomous;
+  doctor.wake_retry = doctor.event && !doctor.daemon && !doctor.job;
+  doctor.explicit_every = doctorSpec.every !== undefined;
+  // An explicit job-only manifest retains the old recipe bytes by default.
+  if (doctorSpec.every !== undefined && stale.job) Object.assign(stale.job, {field: "prdmins", count: doctor.every, word: `${doctor.every} minutes`});
+
   // fuses: {max_alerts, kill}
   const fuseSpec = map(spec.fuses ?? {}, "resilience/fuses", "{max_alerts, kill}");
   for (const key of Object.keys(fuseSpec)) if (!["max_alerts", "kill"].includes(key)) fail(line(`resilience/fuses/${key}`), `unknown key ${key} in fuses (max_alerts, kill)`);
@@ -84,12 +105,15 @@ export function compileResilience(doc, {id, set, line, fail, staged, sink, sched
   for (const key of Object.keys(keepSpec)) if (key !== "days") fail(line(`resilience/keep/${key}`), `unknown key ${key} in keep (days)`);
   const keep = node("keep", {days: whole(keepSpec.days, {min: 1, max: 9999, at: line(keepSpec.days === undefined ? "resilience/keep" : "resilience/keep/days"), fail, what: "keep.days"}), "days@type": INT4});
 
-  return {"@id": `${id}/resilience`, set_line: line("resilience"), retry, stale, fuses, dry_run: dryRun, keep,
+  return {"@id": `${id}/resilience`, set_line: line("resilience"), retry, stale, fuses, dry_run: dryRun, keep, doctor,
     sink_iface: sink.iface, ...(schedule ? {scheduled: {"@id": `${id}/resilience/stale`, set_line: stale.set_line}} : {})};
 }
 
 // The model's view of a resilience node: the node itself, and the two fuses
 // at the root, so a template section names the one manifest line it needs.
 export const resilienceNodes = (resilience) => (resilience ? {resilience,
+  ...(resilience.doctor.autonomous ? {autodoctor: resilience.doctor} : {}),
+  ...(resilience.doctor.daemon ? {daemon: resilience.doctor} : {}),
+  ...(resilience.doctor.event ? {doctor_event: resilience.doctor} : {}),
   ...(resilience.fuses.max_alerts ? {fused: resilience.fuses.max_alerts} : {}),
   ...(resilience.fuses.kill ? {killable: resilience.fuses.kill} : {})} : {});

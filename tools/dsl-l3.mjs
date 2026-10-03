@@ -25,6 +25,7 @@ import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
 import {compileSchedule, compileStages, explainStage, readStages, worklistVariants} from "./dsl-l3-stages.mjs";
 import {compileResilience, resilienceNodes} from "./dsl-l3-resilience.mjs";
 import {compileGovernor, governorTemplate} from "./dsl-l3-governor.mjs";
+import {doctorOverlay, renderDoctor} from "./dsl-l3-doctor-overlay.mjs";
 import {replayOverlay} from "./dsl-l3-replay-overlay.mjs";
 import {compileReplay} from "./dsl-l3-replay.mjs";
 import {compileCockpit, renderCockpit, cockpitRunnerTemplate} from "./dsl-l3-cockpit.mjs";
@@ -415,7 +416,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   // of a source port cut into piles of `size`; a rule is piled when its L2
   // range: is that key on that table
   let piles;
-  if (doc.piles !== undefined) {
+  if (doc.piles !== undefined && !stageDocs) {
     const spec = asMap(doc.piles, "piles", "a mapping with source and size");
     for (const key of Object.keys(spec)) if (!["source", "size"].includes(key)) fail(line(`piles/${key}`), `unknown key ${key} in piles (source, size)`);
     const source = ports.find((p) => p.name === spec.source && p.is_source);
@@ -443,6 +444,16 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   const schedule = compileSchedule(doc, {id, set, line, fail, staged: Boolean(staged)});
   // resilience: (docs/dsl-l3.md, "Resilience"): retries, the doctor, fuses, dry run, retention
   const resilience = compileResilience(doc, {id, set, line, fail, staged: Boolean(staged), sink: sinks[0], schedule});
+  let releaseEvent;
+  if (stageDocs && doc.piles !== undefined) {
+    const spec = asMap(doc.piles, "piles", "{release: submit|event, lanes}");
+    if (!["submit", "event"].includes(spec.release)) fail(line("piles/release"), "piles.release is submit or event");
+    if (spec.lanes !== undefined && (!/^[1-9][0-9]{0,3}$/.test(String(spec.lanes)) || +spec.lanes > 9999)) fail(line("piles/lanes"), "piles.lanes is 1..9999");
+    if (spec.release === "event") {
+      if (!resilience?.doctor.daemon) fail(line("piles/release"), "event release needs a daemon doctor");
+      releaseEvent = {"@id": `${id}/piles/release`, set_line: line("piles/release"), lanes: String(spec.lanes ?? "0"), automatic: spec.lanes === undefined};
+    }
+  }
   const SET = set.toUpperCase();
   const stageOf = (r) => staged?.stages[r.s];
   // a piled rule's range traces to its range: line in the rule file
@@ -472,8 +483,9 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     ...(staged ? {stage_no: stageOf(r).no, "stage_no@type": {built_in: "INT4"}, ...(stageOf(r).filter ? {filter: true, worklist: stageOf(r).worklist.name, "worklist@type": CHAR(16)} : {check: true})} : {}),
   });
   const model = {
+    ...(releaseEvent ? {release_event: releaseEvent} : {}),
     "@id": id, set_line: line("set"),
-    set, "set@type": CHAR(WIDTH.set), title, class: className, report, source: rulePath(file, out),
+    set, set_upper: SET, "set@type": CHAR(WIDTH.set), title, class: className, report, source: rulePath(file, out),
     jobs: `L3_${SET}_*`, "jobs@type": CHAR(WIDTH.jobname),
     date: {"@id": `${id}/date`, set_line: line("date"), today: date === "today"},
     ports_class: `zcl_l3_${set}_ports`, exception: `zcx_l3_${set}_port`,
@@ -525,6 +537,7 @@ function sidecar(model, template, rendered) {
   return JSON.stringify({
     generator: "dsl-l3", set: model.source, template,
     ...(model.governor && [SET_TEMPLATE, JOB_TEMPLATE].includes(template) ? {overlay: `recipes/l3-governor/${template === SET_TEMPLATE ? "runner" : "job"}.patch.json`} : {}),
+    ...(model.autodoctor && [SET_TEMPLATE, JOB_TEMPLATE].includes(template) ? {doctor_overlay: template === JOB_TEMPLATE ? ["recipes/l3-doctor/job-tail.tpl"] : ["recipes/l3-doctor/runner.patch.json", "recipes/l3-doctor/runner.tpl", ...(model.release_event ? ["recipes/l3-doctor/release.patch.json"] : [])]} : {}),
     ...(rendered.simOverlays?.length ? {sim_overlay: rendered.simOverlays} : {}),
     ...(rendered.replayOverlays?.length ? {replay_overlay: rendered.replayOverlays} : {}),
     model: `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`,
@@ -585,12 +598,13 @@ function overlaid(model, template, patches) {
   if (model.simulate && model.governor && patches.governed) files.push(`${OVERLAY.simulate}/${patches.governed}`);
   // the cockpit's audited entry points go on last, over whatever the set already has
   if (model.cockpit && patches.cockpit) files.push(`${OVERLAY.cockpit}/${patches.cockpit}`);
-  if (!files.length) return undefined;
+  if (!files.length && !model.autodoctor && !model.resilience?.doctor.explicit_every) return undefined;
   let text = readFileSync(template, "utf8");
   for (const file of files) text = governorTemplate(text, JSON.parse(readFileSync(file, "utf8")));
   if (model.replay && patches.simulate) {
     text = replayOverlay(text, template === PORT_TEMPLATES.factory ? "factory" : "runner");
   }
+  text = doctorOverlay(model, text, template === JOB_TEMPLATE ? "job" : template === SET_TEMPLATE ? "runner" : "port");
   return {templateText: text, replay: model.replay && patches.simulate ? ["recipes/l3-replay/overlay.json"] : [], sim: files.filter((f) => f.startsWith(OVERLAY.simulate))};
 }
 async function renderWith(model, template, patches) {
@@ -622,6 +636,9 @@ export async function renderSet(model) {
     if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
   }
   const results = [[`${model.class}.clas.abap`, runner], [`${model.report}.prog.abap`, job], ...extra.results];
+  const doctor = await renderDoctor(model, {renderRecipe, sidecar, progXml, classXml});
+  results.push(...doctor.results);
+  Object.assign(extra.files, doctor.files);
   if (model.settings) {
     for (const [name, template, kind] of [[model.settings.class, "recipes/l3-settings/class.tpl", "clas"],
       [model.settings.report, "recipes/l3-settings/report.tpl", "prog"]]) {
@@ -658,7 +675,8 @@ export async function renderSet(model) {
       [`${model.report}.prog.xml`]: progXml(model),
       [`${model.report}.prog.trace.json`]: sidecar(model, JOB_TEMPLATE, job),
     },
-    findings: [...runner.findings.map((f) => ({...f, file: `${model.class}.clas.abap`})),
+    findings: [...results.filter(([name]) => /_(dmn\.clas|doc\.prog)\.abap$/.test(name)).flatMap(([name, r]) => r.findings.map((f) => ({...f, file: name}))),
+      ...runner.findings.map((f) => ({...f, file: `${model.class}.clas.abap`})),
       ...job.findings.map((f) => ({...f, file: `${model.report}.prog.abap`})),
       ...extra.results.flatMap(([name, r]) => r.findings.map((f) => ({...f, file: name}))),
       ...(model.settings ? results.slice(-2).flatMap(([name, r]) => r.findings.map((f) => ({...f, file: name}))) : [])],

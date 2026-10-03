@@ -119,7 +119,7 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
       }
       // none of them takes a selection field of the pile job (a job step carries at most 20)
       expect(model.settings.entries.filter((e) => e.chaos).map((e) => e.name)).to.have.length(6);
-      expect(model.settings.entries.filter((e) => !e.chaos).map((e) => e.screen)).to.deep.equal(Array.from({length: 12}, (_, i) => `s_${i + 1}`));
+      expect(model.settings.entries.filter((e) => !e.chaos).map((e) => e.screen)).to.deep.equal(Array.from({length: 13}, (_, i) => `s_${i + 1}`));
       expect(model.settings.chaos_outcomes.map((e) => e.name)).to.deep.equal(["simulate.dump", "simulate.hang", "simulate.slow"]);
       // a manifest narrows an override: never more than 30 per cent dumps from the cockpit
       const narrowed = compileSet(manifest([["    fuses.max_alerts: {min: 1, max: 100000}\n", "    fuses.max_alerts: {min: 1, max: 100000}\n    simulate.dump: {min: -1, max: 300}\n"]]));
@@ -149,10 +149,17 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
     it("a set without profiles and chaos settings renders the bytes it rendered before the slice", async function () {
       if (git(["cat-file", "-e", `${BEFORE}:${SET}`]).status !== 0) this.skip();
       // the manifest as it was: no profiles, none of the six settings
-      const before = SET_TEXT.replace(PROFILES, "").replace(/^  # Chaos profiles[^\n]*\n(  #[^\n]*\n)*/m, "").replace(/, simulate\.(profile|dump|hang|slow|hits_mean|autoclose)/g, "");
-      expect(before, "the set before the slice").to.equal(git(["show", `${BEFORE}:${SET}`]).stdout.replace(/^# Slice 5d/m, "# Slice 5d"));
+      // Restore the pre-chaos manifest and explicitly retain its scheduled job doctor.
+      // Normalize only the three explicit 5e additions; all other live manifest bytes stay in the oracle.
+      const slice6c = SET_TEXT.replace("  doctor: {as: [daemon], tick: 10}\n", "").replace("[doctor.tick, ", "[")
+        .replace("# takes over a silent pile or gate after 15 minutes; the daemon doctor is\n# armed by every parallel run;",
+          "# takes over a lock, a pile or a gate left for 15 minutes and runs as a job of\n# the schedule;");
+      expect(slice6c, "only the doctor's additions since 6c").to.equal(git(["show", `8f032a432:${SET}`]).stdout);
+      const before = slice6c.replace(PROFILES, "").replace(/^  # Chaos profiles[^\n]*\n(  #[^\n]*\n)*/m, "")
+        .replace(/, simulate\.(profile|dump|hang|slow|hits_mean|autoclose)/g, "");
+      expect(before, "the set before the slice").to.equal(git(["show", `${BEFORE}:${SET}`]).stdout);
       const file = join(OUT, `zz_chaos_${process.pid}.l3.yaml`);
-      writeFileSync(file, before);
+      writeFileSync(file, before.replace("resilience:\n", "resilience:\n  doctor: {as: [job]}\n"));
       try {
         const model = compileSet(file);
         const {files} = await renderSet(model);

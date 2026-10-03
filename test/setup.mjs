@@ -381,6 +381,8 @@ async function setupDatabase(abap, schemas, insert) {
   if (globalThis.process?.versions?.node && abap.Classes?.CL_AMC_CHANNEL_MANAGER) {
     const {installAmc} = await import("../tools/osd-amc.mjs");
     installAmc(abap);
+    const {installDaemons} = await import("../tools/osd-daemon-host.mjs");
+    installDaemons(abap);
   }
   // the lock server (tools/osd-enq-host.mjs): ENQUEUE_<obj> / DEQUEUE_<obj>,
   // DEQUEUE_ALL, ENQUEUE_READ, COMMIT/ROLLBACK WORK and the end of a step;
@@ -475,6 +477,8 @@ async function setupDatabase(abap, schemas, insert) {
   const {JobDestination} = await import(/* webpackIgnore: true */ "../tools/osd-job-port.mjs");
   const jobs = new JobDestination(process.cwd(), process.env);
   abap.context.RFCDestinations["JOBS"] = jobs;
+  const {installCapacity} = await import(/* webpackIgnore: true */ "../tools/osd-capacity-host.mjs");
+  installCapacity(abap, jobs);
   abap.context.osdGeneration = jobs.generation;
   // AMDP: a method whose body is SQLScript has been rewritten by
   // tools/amdp-gen.mjs into CALL FUNCTION ... DESTINATION 'AMDP', and this is

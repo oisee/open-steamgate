@@ -11,6 +11,7 @@ import {buildApp} from "../tools/osd-bsp-app.mjs";
 import {admit, loadManifest, unitFor} from "../tools/osd-deploy-manifest.mjs";
 import {compileCockpit} from "../tools/dsl-l3-cockpit.mjs";
 import {cockpitActions, cockpitService} from "../tools/dsl-l3-cockpit-service.mjs";
+import {daemonHost} from "../tools/osd-daemon-host.mjs";
 import {loadCockpitMutant} from "./helpers/dsl-cockpit-mutant.mjs";
 const SET = "src/l2demo/fleet2.l3.yaml", SERVICE = "ZL3C_FLEET2_SRV";
 const BASE = `http://localhost:${process.env.STG_PORT ?? 3030}/sap/opu/odata/sap/${SERVICE}`;
@@ -39,7 +40,8 @@ describe("DSL L3 run cockpit", function () {
   });
   it("the service compiler owns the base classes, annotations, read-only flags and all functions", () => {
     const compiled = compile(readFileSync("src/l2demo/zl3c_fleet2.stg.yaml", "utf8"));
-    expect(compiled.model.functions).length(12);
+    expect(compiled.model.functions).length(14);
+    expect(compiled.model.entities.some((e) => e.name === "RunStat")).equal(true);
     expect(compiled.model.entities.every((e) => !e.creatable && !e.updatable && !e.deletable)).equal(true);
     expect(compiled.classes["zcl_zl3c_fleet2_mpc_ann.clas.abap"]).include("to_Pile/@com.sap.vocabularies.UI.v1.LineItem");
     const lines = readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8").trimEnd().split("\n");
@@ -214,7 +216,7 @@ describe("DSL L3 run cockpit", function () {
   });
   describe("Gateway, file DB, real runners and jobs", () => {
     let server, dir, dbPath, prior, context, abap, client, dialogStep, store, drainJobOutbox, workQueuedBatch, clock;
-    const tables = ["alert", "pile", "run", "stage", "work", "doctor", "kill", "conf", "conf_log", "run_conf", "budget", "event", "object"].map((t) => `zosd_l3_${t}`);
+    const tables = ["alert", "pile", "run", "stage", "work", "doctor", "kill", "conf", "conf_log", "run_conf", "budget", "event", "object", "runstat", "watch"].map((t) => `zosd_l3_${t}`);
     const sources = ["ship", "voy", "crew", "cargo"].map((t) => `zosd_l2_${t}`);
     const read = (sql, ...args) => {const db = new DatabaseSync(dbPath); try {return db.prepare(sql).all(...args).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, trim(v)])));} finally {db.close();}};
     const exec = (sqls) => dialogStep(async () => {for (const sql of sqls) await client.execute(sql);});
@@ -237,16 +239,18 @@ describe("DSL L3 run cockpit", function () {
       server = start.startServer(true);
     });
     beforeEach(async () => {
+      await daemonHost(abap).close();
       await exec([...tables, ...sources].map((t) => `DELETE FROM ${t}`));
       await exec(["INSERT INTO zosd_l2_ship (mandt, ship_id, name, status) VALUES ('123','S001','Maintenance','M'), ('123','S002','Active','A')",
         "INSERT INTO zosd_l2_voy (mandt, voyage_id, ship_id, dep_date) VALUES ('123','V00001','S001','20261005'), ('123','V00002','S002','20261005')"]);
     });
-    after(async () => {await drain().catch(() => {}); await server?.close(); store?.close(); clock?.(); await client?.disconnect();
+    after(async () => {await drain().catch(() => {}); await daemonHost(abap).close(); await server?.close(); store?.close(); clock?.(); await client?.disconnect();
       if (context) Object.assign(abap.context, context);
       for (const [k, v] of Object.entries(prior ?? {})) {if (v === undefined) delete process.env[k]; else process.env[k] = v;}
       if (dir) rmSync(dir, {recursive: true, force: true});});
     it("entity sets enforce their fixed set filter, keys and navigation; writes are 405", async () => {
       const r = await action("StartRun", {CheckDate: "20261001", Mode: "S"}); expect(r.Answer).equal("DONE");
+      await action("Doctor");
       await action("SetSetting", {Param: "budget.glass", Value: "20", Note: "isolation fixture"});
       await action("SetKill", {Reason: "isolation fixture"});
       // A successful synchronous run need not emit a governor event.
@@ -462,6 +466,15 @@ describe("DSL L3 run cockpit", function () {
       expect((await get(`EventSet?$filter=RunId eq '${r.RunId}'`)).results.some((e) => e.Kind === "RELEASE" && e.Reason === "reviewed pile")).equal(true);
       await action("Resume", {RunId: r.RunId}); await drain();
     });
+    it("daemon start/stop actions expose state and DoctorSet audit", async () => {
+      await action("StartRun", {CheckDate: "20261001", Mode: "P"});
+      expect((await action("StartDaemon")).Answer).equal("OK");
+      expect((await action("ScheduleStatus")).Answer).include("RUNNING since");
+      expect((await action("StopDaemon")).Answer).equal("OK");
+      await daemonHost(abap).idle();
+      expect((await get("DoctorSet")).results.map((r)=>r.DocAction)).include("DMN-START").and.include("DMN-STOP");
+      expect((await action("ScheduleStatus")).Answer).include("STOPPED since");
+    });
     it("kill, doctor and schedule actions return the runner answers and audit", async () => {
       expect((await action("SetKill", {Reason: "stop work"})).Answer).equal("OK");
       expect((await action("StartRun", {CheckDate: "20261001", Mode: "S"})).Answer).equal("KILLED");
@@ -471,9 +484,10 @@ describe("DSL L3 run cockpit", function () {
       const scheduled = await action("Schedule"); expect(scheduled.Answer).match(/\d+/);
       await drainJobOutbox(store);
       const waiting = (await action("ScheduleStatus")).Answer;
-      expect(waiting.split(" / ").every((s) => s.startsWith("SCHEDULED ")), waiting).equal(true);
+      expect(waiting.split(" / ")[0], waiting).match(/^SCHEDULED /);
+      expect(waiting).include("UNSCHEDULED").and.include("since");
       expect((await action("Unschedule")).Answer).match(/^deleted [1-9][0-9]*, refused 0$/);
-      expect((await action("ScheduleStatus")).Answer).equal("UNSCHEDULED / UNSCHEDULED");
+      expect((await action("ScheduleStatus")).Answer).match(/^UNSCHEDULED \/ UNSCHEDULED \/.* since /);
     });
     it("mutants: each computed field of the run page turns its oracle red", async () => {
       const real = abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT, original = readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8");
