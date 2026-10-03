@@ -110,7 +110,7 @@ describe("the suite list against the tree", () => {
 describe("suite sharding", () => {
   it("partitions the real list into four disjoint shards", () => {
     const files = loadSuites().files;
-    const seconds = JSON.parse(readFileSync("test/suites.timings.json", "utf8"));
+    const seconds = JSON.parse(readFileSync("test/suites-timings.json", "utf8"));
     const all = assignShards(files, seconds, 4).flatMap((shard) => shard.files);
     expect(all.slice().sort()).to.deep.equal(files.slice().sort());
     expect(new Set(all).size).to.equal(files.length);
@@ -356,7 +356,7 @@ describe("early-stop CLI regressions", () => {
           copyFileSync(join("tools", file), join(dir, "tools", file));
         symlinkSync(resolve("node_modules"), join(dir, "node_modules"), "dir");
         writeFileSync(join(dir, "test", "suites.d", "fixtures.json"), JSON.stringify({files: ["test/a.mjs", "test/z.mjs"]}));
-        writeFileSync(join(dir, "test", "suites.timings.json"), "{}");
+        writeFileSync(join(dir, "test", "suites-timings.json"), "{}");
         writeFileSync(join(dir, "test", "a.mjs"), `import {existsSync, writeFileSync} from "node:fs";
           const marker = new URL("./marker", import.meta.url);
           describe("early", () => { it("transient", () => {

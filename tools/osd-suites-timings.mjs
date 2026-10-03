@@ -23,7 +23,7 @@ export function mergeTimings(previous, artifacts) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [output, ...inputs] = process.argv.slice(2);
-  if (!output || !inputs.length) throw new Error('usage: node tools/osd-suites-timings.mjs test/suites.timings.json <artifact.json> ...');
+  if (!output || !inputs.length) throw new Error('usage: node tools/osd-suites-timings.mjs test/suites-timings.json <artifact.json> ...');
   const previous = JSON.parse(readFileSync(output, 'utf8'));
   const artifacts = inputs.map((file) => JSON.parse(readFileSync(file, 'utf8')));
   writeFileSync(output, JSON.stringify(mergeTimings(previous, artifacts), null, 2) + '\n');

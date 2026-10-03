@@ -298,7 +298,7 @@ try {
   if (groupName && (shardSpec || listSpec)) throw new Error("choose --group or --shard/--list-shard");
   if (groupName && !Object.hasOwn(groups, groupName)) throw new Error(`unknown suite group ${groupName}`);
   const shard = parseShard(shardSpec ?? listSpec ?? "1/1");
-  const weights = JSON.parse(readFileSync(fileURLToPath(new URL("../test/suites.timings.json", import.meta.url)), "utf8"));
+  const weights = JSON.parse(readFileSync(fileURLToPath(new URL("../test/suites-timings.json", import.meta.url)), "utf8"));
   const selected = groupName ? groups[groupName] : assignShards(files, weights, shard.count)[shard.index].files;
   if (listSpec) {
     for (const file of selected) console.log(file);

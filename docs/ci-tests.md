@@ -56,7 +56,7 @@ The tar preserves `build/live` and `output` symlinks and executable bits, which 
 
 Each feature fragment in `test/suites.d/*.json` has a `files` array; `vscode.json` also lists `test/vscode-vsix-packaging.mjs` under `groups.packaging`. `loadSuites()` in `tools/osd-suites.mjs` merges fragments and sorts both ordinary and grouped suite paths alphabetically before returning `{files, groups}` to the runner and Go parity. This intentionally changes execution order once. CI will surface hidden order dependencies, including ones like the earlier `apc-timers`/`adt-facade` trap. `node tools/osd-suites.mjs` and all `--shard i/4` runs select only `files` and print the groups omitted. `node tools/osd-suites.mjs --group packaging` runs exactly the packaging file. The list drift check covers both arrays, while `--list-shard i/4` remains the ordinary file list.
 
-To add another group, add its test file under `groups.<name>` in `test/suites.d/*.json`, give it a measured weight in `test/suites.timings.json`, and add a CI job or step that runs `--group <name>` with an explicit gate. Every new `test/*.mjs` suite must appear in `files` or a group. Use the prefix placement table in `test/suites.d/README.md`; `node tools/osd-suites.mjs --check` reports a suggested fragment for each unlisted suite.
+To add another group, add its test file under `groups.<name>` in `test/suites.d/*.json`, give it a measured weight in `test/suites-timings.json`, and add a CI job or step that runs `--group <name>` with an explicit gate. Every new `test/*.mjs` suite must appear in `files` or a group. Use the prefix placement table in `test/suites.d/README.md`; `node tools/osd-suites.mjs --check` reports a suggested fragment for each unlisted suite.
 
 ## Build and browser caches
 
@@ -67,7 +67,7 @@ The `tests` and `preview` browser jobs share `~/.cache/ms-playwright` through a 
 ## Balanced shards and visible retries (2026-10-03)
 
 `--shard i/4` assigns whole files longest first to the least-loaded shard using
-`test/suites.timings.json` (file → seconds). Ties use path/shard index; missing
+`test/suites-timings.json` (file → seconds). Ties use path/shard index; missing
 or invalid weights get the median (one second for an empty seed). Files execute
 alphabetically in one process, preserving the existing loader order. There is
 no `test/suites.json` or co-process/order constraint in the fragments. The
@@ -88,10 +88,10 @@ Each shard uploads `suite-results-<index>-attempt-<attempt>` with first-run `tim
 
 ```sh
 gh run download <run-id> --pattern 'suite-results-*' --dir <download-dir>
-node tools/osd-suites-timings.mjs test/suites.timings.json <download-dir>/suite-results-*/timings.json
+node tools/osd-suites-timings.mjs test/suites-timings.json <download-dir>/suite-results-*/timings.json
 ```
 
-When a shard approaches 20 minutes, refresh `test/suites.timings.json` from CI artifacts with `tools/osd-suites-timings.mjs`.
+When a shard approaches 20 minutes, refresh `test/suites-timings.json` from CI artifacts with `tools/osd-suites-timings.mjs`.
 
 Partial downloads preserve unmeasured weights; multiple samples use their median.
 Retries never replace first-run weights. Local runs can write the same artifacts
