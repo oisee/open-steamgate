@@ -10,9 +10,11 @@ import {stageInput, summarize, printResult, run, kernelWarnings, applyKernelWarn
 const root = resolve(import.meta.dirname, "..");
 // Unit CI uses checkout layers only, regardless of installed or external packs.
 const unitEnv = {OSD_PACKS: "", OSD_WEB_PACKS: ""};
-const help = `Usage: npm run osgjs:unit -- <dir> [--json] [--kernel-strict] [--class NAME...]
+const help = `Usage: npm run osgjs:unit -- <dir> [--json] [--kernel-strict] [--db sqlite|file] [--class NAME...]
 Reads the immediate directory only (no recursion). Requires a checkout and synced libraries.
 Builds the whole system in a temporary directory; runs only the selected owners.
+--db file uses a private file-backed SQLite, removed after the run (default: sqlite / sql.js).
+NODE_OPTIONS=--max-old-space-size=12288 raises the heap limit for scanning, building and running large folders.
 Kernel compatibility warnings preserve compiler diagnostics and exit codes; --kernel-strict reports ERROR (exit 2).
 Exit codes: 0 all SUCCESS, 1 FAILURE, 2 NOT_COMPILED/ERROR/SKIPPED, 3 no tests.`;
 
@@ -56,11 +58,14 @@ export async function main(args = process.argv.slice(2)) {
   let staging, result, warnings = [];
   const selected = [];
   try {
-    let directory;
+    let directory, database = "sqlite";
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
       if (arg === "--json" || arg === "--kernel-strict") continue;
-      if (arg === "--class") {
+      if (arg === "--db") {
+        database = args[++i];
+        if (!["sqlite", "file"].includes(database)) throw new Error("--db must be sqlite or file");
+      } else if (arg === "--class") {
         const start = selected.length;
         while (args[i + 1] && !args[i + 1].startsWith("--")) selected.push(args[++i].replaceAll("#", "/").toUpperCase());
         if (selected.length === start) throw new Error("--class needs at least one name (put <dir> first)");
@@ -81,7 +86,8 @@ export async function main(args = process.argv.slice(2)) {
       for (const o of overrides) console.error(`Override ${o.object}: ${o.hidden} hidden by ${o.input}`);
       const home = isolatedSystem(staging, staged.input);
       const child = await run([process.execPath, join(home, "tools/osgjs-unit-run.mjs"), staged.input, ...staged.chosen], home, {
-        ...unitEnv, OSD_LAYERS: "", STG_DB: "sqlite", STG_DB_PATH: "",
+        ...unitEnv, OSD_LAYERS: "", STG_DB: database,
+        STG_DB_PATH: database === "file" ? join(staging, "unit.sqlite") : "",
       });
       if (child.stderr) process.stderr.write(child.stderr);
       if (child.signal) throw new Error(`unit runner terminated by ${child.signal}`);

@@ -97,7 +97,7 @@ describe("osgjs unit CI entry point", function () {
     mkdirSync(join(pack, "src"));
     fixture(join(pack, "src"), "zcl_osgjs_pack", "DATA x TYPE i. x = .");
     writeFileSync(join(pack, "src/zcl_osgjs_pack.clas.xml"), metadata("ZCL_OSGJS_PACK"));
-    const result = parsed(invoke(dir, ["--json"], {env: {...process.env, OSD_PACKS: join(temp, "packs")}}));
+    const result = parsed(invoke(dir, ["--json", "--db", "file"], {env: {...process.env, NODE_OPTIONS: "--max-old-space-size=5120", OSD_PACKS: join(temp, "packs")}}));
     assert.deepEqual(result.totals, {success: 14, failure: 0, not_compiled: 0, error: 0, tests: 14});
     assert.equal(result.classes, 2); assert.equal(result.compiled, 2);
     assert.equal(fingerprint(dir), before);
@@ -114,8 +114,10 @@ describe("osgjs unit CI entry point", function () {
     fixture(input); writeFileSync(join(input, "zcl_osgjs_ci.clas.testclasses.abap"), "");
     assert.equal(parsed(invoke(input, ["--json"]), 3).totals.tests, 0);
   });
-  it("shares one build for success, failure, dumps, line boundary and lifecycle cases", () => {
-    fixture(input);
+  it("shares one file-backed build for success, failure, dumps, line boundary and lifecycle cases", () => {
+    fixture(input, "zcl_osgjs_ci", `cl_abap_unit_assert=>assert_equals( act = 1 exp = 1 ).
+WRITE '@KERNEL if (!abap.context.databaseConnections.DEFAULT.path?.endsWith("unit.sqlite")) throw new Error("expected private SQLite file");'.
+WRITE '@KERNEL if (!process.env.NODE_OPTIONS.includes("5120")) throw new Error("heap option lost");'.`);
     const file = join(input, "zcl_osgjs_ci.clas.testclasses.abap");
     writeFileSync(file, "*" + "x".repeat(254) + "\r\n" + readFileSync(file, "utf8"));
     writeFileSync(join(input, "zcl_osgjs_ci.clas.xml"), metadata("ZCL_OSGJS_CI").replace("<FIXPT>X</FIXPT>", "<FIXPT></FIXPT>"));
@@ -159,7 +161,10 @@ describe("osgjs unit CI entry point", function () {
         .replace("CLASS ltcl_test IMPLEMENTATION.", `CLASS ltcl_test IMPLEMENTATION. METHOD ${hook}. ${body} ENDMETHOD.`));
     }
     const before = fingerprint(input);
-    const result = parsed(invoke(input, ["--json"], {cwd: temp}), 2);
+    const foreign = join(temp, "must-not-open.sqlite");
+    const result = parsed(invoke(input, ["--json", "--db", "file"], {cwd: temp,
+      env: {...process.env, NODE_OPTIONS: "--max-old-space-size=5120", STG_DB_PATH: foreign}}), 2);
+    assert.equal(existsSync(foreign), false, "inherited database path never opened");
     assert.deepEqual(result.totals, {success: 4, failure: 2, not_compiled: 0, error: 2, tests: 7});
     const rows = (name) => result.rows.filter((row) => row.class === name);
     assert.equal(rows("ZCL_OSGJS_CI")[0].status, "SUCCESS");
@@ -206,7 +211,7 @@ describe("osgjs unit CI entry point", function () {
     assert.equal(fingerprint(input), before);
   });
   it("returns parseable ERROR JSON on invalid arguments", () => {
-    for (const args of [["--class", "MISSING"], ["--class"], ["--unknown"]])
+    for (const args of [["--class", "MISSING"], ["--class"], ["--unknown"], ["--db", "invalid"], ["--db"]])
       assert.equal(parsed(invoke(input, ["--json", ...args]), 2).totals.error, 1);
   });
 });

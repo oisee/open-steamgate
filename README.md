@@ -160,6 +160,25 @@ content packs (including `OSD_PACKS`), runs the generators and transpiles
 the **whole tree** (roughly 20 seconds for transpilation), then runs ABAP Unit
 only for the selected owners, including class and instance lifecycle hooks.
 The pinned transpiler lacks the `only` option needed for a smaller build.
+For large generated folders, use Node with a larger heap and a private SQLite
+file instead of in-memory sql.js:
+
+```sh
+NODE_OPTIONS=--max-old-space-size=12288 npm run osgjs:unit -- ./generated --db file --json
+```
+
+`--db sqlite` (the default) uses sql.js; `--db file` creates its database in the
+invocation's staging directory and removes it on completion. Inherited
+`STG_DB_PATH` cannot select another database. `NODE_OPTIONS` reaches the scanner,
+transpiler, generators and Unit child; choose a heap limit that fits the host.
+ABAPiti's public [osd-up.sh](https://github.com/oisee/abapiti/blob/8cdf57212c23772baf6293cb3d8784181521c8e4/.github/ci/osd-up.sh)
+runs the pinned JS binary with a private
+`STG_DB_PATH`, and [osd-m1.sh](https://github.com/oisee/abapiti/blob/8cdf57212c23772baf6293cb3d8784181521c8e4/.github/ci/osd-m1.sh)
+deploys generated classes through ADT. Its workflow
+uses the binary, not a Node heap flag; this checkout runner mirrors that file
+isolation and documents the extra heap needed to build a large folder at once.
+The recorded measurements use Node v26.9.0, the checkout's existing local
+runtime/transpiler 2.13.93 build and its resolved core 2.120.59.
 Each invocation owns its output and database; parallel runs leave the input
 folder, `output/` and `build/live` untouched. The Go command additionally accepts
 `--jobs N` (default 4) and needs Go 1.26.
@@ -175,8 +194,12 @@ Declare full-folder runs using `--runs <manifest.json>`; each array entry has
 that manifest), or `reason` for a crash without class results. Full-folder runs
 covering every test owner with all rows SUCCESS credit helper classes as
 exercised by their tests; partial
-runs with failures leave helpers fails/unknown; missing test owners leave helpers
-and omitted owners with no evidence. Plain `--osgo`/`--osgjs` files give per-class
+runs with failures leave helpers not measured; missing test owners leave helpers
+and omitted owners not measured. Harness crashes, OOM and setup failures before
+any class are not measured with a reason; fails applies only to test results.
+Manifest entries may include `wallSeconds` and `peakRssKiB` (GNU time maximum
+resident set size across the command and its children, including the build).
+Plain `--osgo`/`--osgjs` files give per-class
 evidence only, which is safe for runs restricted with `--class`.
 
 Editors can import `kernelWarnings` and `KERNEL_FORMS` from
@@ -188,7 +211,8 @@ the code to run. `osg.kernelStrict: "refuse"` opts into refusal, matching the
 unit runners' `--kernel-strict` mode.
 
 ```sh
-mkdir -p .local/support-work/go-cache .local/support-work/go-tmp
+mkdir -p .local/support-work/go-cache .local/support-work/go-tmp .local/support-work/go-path
+export GOPATH="$PWD/.local/support-work/go-path" GOMODCACHE="$PWD/.local/support-work/go-mod"
 export GOTOOLCHAIN=go1.26.0 GOFLAGS=-buildvcs=false
 export GOCACHE="$PWD/.local/support-work/go-cache" GOTMPDIR="$PWD/.local/support-work/go-tmp"
 export ABAPITI_TEST_OUT="$PWD/.local/support-work/corpus"
@@ -196,23 +220,66 @@ OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'cd .local/abapiti-src && go te
 cp .local/support-work/corpus/TestOSD_EmitUnitClasses/split/*.abap .local/support-work/corpus/TestOSD_EmitUnitClasses/
 rm -r .local/support-work/corpus/TestOSD_EmitUnitClasses/split
 OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'timeout 1200 npm run -s osgo:unit -- .local/support-work/corpus/TestOSD_EmitUnitClasses --json > .local/support-work/osgo-corpus.json'
-OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'timeout 1200 npm run -s osgjs:unit -- .local/support-work/corpus/TestOSD_EmitUnitClasses --json > .local/support-work/osgjs-corpus.json'
+OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c '/usr/bin/time -f "wallSeconds=%e peakRssKiB=%M exit=%x" -o .local/support-work/osgjs-corpus.time timeout 1800 env NODE_OPTIONS=--max-old-space-size=12288 node tools/osgjs-unit.mjs .local/support-work/corpus/TestOSD_EmitUnitClasses --db file --json > .local/support-work/osgjs-corpus.json 2> .local/support-work/osgjs-corpus.err'
 npm run osg:support -- .local/support-work/corpus/TestOSD_EmitUnitClasses --osgo .local/support-work/osgo-corpus.json --osgjs .local/support-work/osgjs-corpus.json --out docs/osg-support.md --json .local/support-work/support.json
 # Append extra input folders and partial or successful --osgo/--osgjs files.
 # To credit helpers, create a full-folder manifest (paths relative to this JSON):
 # Run each extra folder on both runtimes with the same commands and timeout,
 # writing osgo-{int8,mono,qjs}.json and osgjs-{int8,mono,qjs}.json.
-# The committed page uses the following recorded results (retain crash reasons):
+# When remeasuring, update wallSeconds/peakRssKiB from each .time file.
+# If a run has no JSON or only setup ERROR rows, retain its crash/setup reason.
+# The committed page uses the following full-folder result files:
 cat > .local/support-work/runs.json <<'JSON'
 [
-  {"folder":"TestOSD_EmitUnitClasses","runtime":"osgo","file":"osgo-corpus.json"},
-  {"folder":"TestOSD_EmitUnitClasses","runtime":"osgjs","reason":"memory access out of bounds (73 s; no class results)"},
-  {"folder":"int8","runtime":"osgo","file":"osgo-int8.json"},
-  {"folder":"int8","runtime":"osgjs","file":"osgjs-int8.json"},
-  {"folder":"mono","runtime":"osgo","file":"osgo-mono.json"},
-  {"folder":"mono","runtime":"osgjs","file":"osgjs-mono.json"},
-  {"folder":"qjs","runtime":"osgo","file":"osgo-qjs.json"},
-  {"folder":"qjs","runtime":"osgjs","reason":"SIGABRT: heap exhaustion (439 s; no class results)"}
+  {
+    "folder": "TestOSD_EmitUnitClasses",
+    "runtime": "osgo",
+    "file": "osgo-corpus.json"
+  },
+  {
+    "folder": "TestOSD_EmitUnitClasses",
+    "runtime": "osgjs",
+    "file": "osgjs-corpus.json",
+    "wallSeconds": 96.27,
+    "peakRssKiB": 2590272
+  },
+  {
+    "folder": "int8",
+    "runtime": "osgo",
+    "file": "osgo-int8.json"
+  },
+  {
+    "folder": "int8",
+    "runtime": "osgjs",
+    "file": "osgjs-int8.json",
+    "wallSeconds": 23.06,
+    "peakRssKiB": 1371808
+  },
+  {
+    "folder": "mono",
+    "runtime": "osgo",
+    "file": "osgo-mono.json"
+  },
+  {
+    "folder": "mono",
+    "runtime": "osgjs",
+    "file": "osgjs-mono.json",
+    "wallSeconds": 511.18,
+    "peakRssKiB": 1636204
+  },
+  {
+    "folder": "qjs",
+    "runtime": "osgo",
+    "file": "osgo-qjs.json"
+  },
+  {
+    "folder": "qjs",
+    "runtime": "osgjs",
+    "file": "osgjs-qjs.json",
+    "wallSeconds": 1800.45,
+    "peakRssKiB": 8879396,
+    "reason": "30-minute timeout after a successful build with the larger heap and private file-backed SQLite; no class results; exit 124"
+  }
 ]
 JSON
 # Exact command for the committed page:

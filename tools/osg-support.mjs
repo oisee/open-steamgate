@@ -104,13 +104,27 @@ export function inventory(directory) {
   } finally { if (staged.staging) rmSync(staged.staging, {recursive: true, force: true}); }
 }
 
+// The build runner may preserve a subprocess crash in NOT_COMPILED rows.
+const HARNESS_CRASH = /FATAL ERROR:.*(?:heap|allocation|memory)|heap exhaustion|(?:exited|terminated by|runner died:)\s*SIG(?:ABRT|KILL|SEGV)|spawn .*ENOENT/i;
+const unmeasuredRow = (row, result = {}) =>
+  (["ERROR", "FAILURE"].includes(row.status) && ((!row.method && !row.testclass) || result.compiled === 0 || /^(runner:|runner died:|seed image:|skipped due to configuration)/.test(row.message ?? ""))) ||
+  (row.status === "NOT_COMPILED" && HARNESS_CRASH.test(row.message ?? ""));
+const reasonOf = (message) => String(message ?? "setup failed").split(/\r?\n/).find((line) => HARNESS_CRASH.test(line))
+  ?? String(message ?? "setup failed").split(/\r?\n/)[0];
+
 function readRuns(paths, folderRuns = []) {
-  const rows = new Map(), helpers = new Map();
+  const rows = new Map(), helpers = new Map(), unmeasured = new Map(), harness = new Map();
   paths = [...paths, ...folderRuns.filter((r) => r.file).map((r) => r.file)];
   for (const path of [...new Set(paths)].sort(order)) {
     const result = JSON.parse(readFileSync(path, "utf8"));
     if (!Array.isArray(result.rows)) throw new Error(`run JSON has no rows: ${basename(path)}`);
+    const setup = result.rows.filter((r) => unmeasuredRow(r, result));
+    if (setup.length) harness.set(path, [...new Set(setup.map((r) => reasonOf(r.message)))].join("; "));
     for (const row of result.rows) {
+      if (setup.includes(row)) {
+        if (row.class) unmeasured.set(row.class.replaceAll("#", "/").toUpperCase(), reasonOf(row.message));
+        continue;
+      }
       if (!row.class || !["SUCCESS", "FAILURE", "ERROR", "NOT_COMPILED"].includes(row.status))
         throw new Error(`invalid run row: ${basename(path)}`);
       const cls = row.class.replaceAll("#", "/").toUpperCase();
@@ -118,7 +132,7 @@ function readRuns(paths, folderRuns = []) {
       rows.get(cls).push(row);
     }
   }
-  return {rows, helpers, folderRuns};
+  return {rows, helpers, unmeasured, harness, folderRuns};
 }
 
 export function evidence(classes, run) {
@@ -128,25 +142,35 @@ export function evidence(classes, run) {
     if (!rows?.length) {
       const helper = run.helpers?.get(cls);
       if (helper?.status === "runs") reasons.push({class: cls, reason: helper.reason});
-      else if (helper) failures.push({class: cls, status: "unknown", message: helper.reason});
-      else missing.push(cls);
+      else {
+        missing.push(cls);
+        const reason = helper?.reason ?? run.unmeasured?.get(cls);
+        if (reason) reasons.push({class: cls, reason});
+      }
       continue;
     }
+    const incomplete = run.unmeasured?.get(cls);
+    if (incomplete) { missing.push(cls); reasons.push({class: cls, reason: incomplete}); }
     for (const row of rows) {
-      if (row.status === "FAILURE" || row.status === "ERROR") failures.push({class: cls, status: row.status, message: String(row.message ?? "").split(/\r?\n/)[0]});
+      if (unmeasuredRow(row)) {
+        missing.push(cls); reasons.push({class: cls, reason: reasonOf(row.message)});
+        continue;
+      }
+      if ((row.status === "FAILURE" || row.status === "ERROR") && (row.method || row.testclass)) failures.push({class: cls, status: row.status, message: String(row.message ?? "").split(/\r?\n/)[0]});
       if (row.status === "NOT_COMPILED") refusals.push({class: cls, message: String(row.message ?? "").split(/\r?\n/)[0]});
     }
   }
   // A failure takes precedence, but retain all refusals and missing owners too.
-  return {status: failures.length ? "fails" : refusals.length ? "refused" : missing.length ? "no evidence" : "runs",
+  return {status: failures.length ? "fails" : refusals.length ? "refused" : missing.length ? "not measured" : "runs",
     failures, refusals, missing, reasons};
 }
 const git = (cwd, format) => execFileSync("git", ["log", "-1", `--format=${format}`], {cwd, encoding: "utf8"}).trim();
 const safe = (value) => String(value).replaceAll("|", "\\|").replace(/[\r\n]/g, " ");
-const sectionOf = (r) => r.osgo.status === "fails" || r.osgjs.status === "fails" ? "fails"
-  : r.osgo.status === "refused" || r.osgjs.status === "refused" ? "refused"
-  : r.osgo.status === "runs" && r.osgjs.status === "runs" ? "both"
-  : r.osgo.status === "runs" || r.osgjs.status === "runs" ? "one" : "none";
+const sectionOf = (r) => r.osgjs.status === "runs"
+  ? r.osgo.status === "runs" ? "both" : "js"
+  : r.osgjs.status === "fails" ? "fails"
+  : r.osgjs.status === "not measured" ? "none"
+  : r.osgo.status === "runs" ? "go" : "none";
 
 export function generate(directories, paths, options = {}) {
   // Explicit full-folder provenance prevents a --class subset from crediting helpers.
@@ -159,7 +183,7 @@ export function generate(directories, paths, options = {}) {
       return {...r, file: r.file ? resolve(dirname(file), r.file) : undefined};
     });
   });
-  const runs = Object.fromEntries(["osgo", "osgjs"].map((name) =>
+  const runs = Object.fromEntries(["osgjs", "osgo"].map((name) =>
     [name, readRuns(paths[name], folderRuns.filter((r) => r.runtime === name))]));
   const merged = new Map(), folders = [], warnings = new Map(), owners = new Set(), classLines = new Map();
   for (const directory of [...directories].sort(order)) {
@@ -175,21 +199,32 @@ export function generate(directories, paths, options = {}) {
       if (full.length > 1) throw new Error(`duplicate full-folder run: ${folder.name}/${name}`);
       if (!full.length) continue;
       const entry = full[0];
-      if (!entry.file) { folder.evidence[name] = `no evidence: ${entry.reason}`; continue; }
+      const reason = entry.reason ?? run.harness.get(entry.file);
+      if (reason) {
+        folder.evidence[name] = `not measured: ${reason}`;
+        for (const cls of inv.classes) run.unmeasured.set(cls, reason);
+      }
+      if (entry.wallSeconds !== undefined || entry.peakRssKiB !== undefined) {
+        folder.measurements ??= {};
+        folder.measurements[name] = {wallSeconds: entry.wallSeconds, peakRssKiB: entry.peakRssKiB};
+      }
+      if (!entry.file) continue;
       const rows = JSON.parse(readFileSync(entry.file, "utf8")).rows;
-      if (rows.some((r) => !inv.classes.includes(r.class.replaceAll("#", "/").toUpperCase())))
+      if (rows.some((r) => r.class && !inv.classes.includes(r.class.replaceAll("#", "/").toUpperCase())))
         throw new Error(`run contains class outside folder: ${folder.name}/${name}`);
+      if (reason) continue;
       const tests = rows.filter((r) => r.method).length;
       const covered = new Set(rows.map((r) => r.class.replaceAll("#", "/").toUpperCase()));
       const missingOwners = inv.testOwners.filter((cls) => !covered.has(cls));
       const passed = tests > 0 && !missingOwners.length && rows.every((r) => r.status === "SUCCESS");
-      folder.evidence[name] = missingOwners.length ? `partial run; missing test owners: ${missingOwners.join(", ")}; helpers have no evidence`
-        : passed ? `all ${tests} tests SUCCESS` : "partial run; class rows retained; helpers fail/unknown";
+      folder.evidence[name] = !tests ? "not measured: no executed tests; compiler diagnostics retained" : missingOwners.length ? `partial run; missing test owners: ${missingOwners.join(", ")}; helpers not measured`
+        : passed ? `all ${tests} tests SUCCESS`
+          : `full run: ${rows.filter((r) => r.method && r.status === "SUCCESS").length}/${tests} tests SUCCESS; ${rows.filter((r) => r.status === "FAILURE").length} FAILURE, ${rows.filter((r) => r.status === "ERROR").length} ERROR; helpers not measured`;
       if (missingOwners.length) continue;
       if (tests || rows.length) for (const cls of inv.classes) {
         if (inv.testOwners.includes(cls) || covered.has(cls)) continue;
         run.helpers.set(cls, {status: passed ? "runs" : "unknown", reason: passed
-          ? `exercised by ${tests} tests in the same run` : "fails/unknown: some rows in the same run did not succeed"});
+          ? `exercised by ${tests} tests in the same run` : "not measured: some rows in the same run did not succeed"});
       }
     }
     folders.push(folder);
@@ -224,17 +259,21 @@ export function generate(directories, paths, options = {}) {
 }
 
 function render(report) {
-  const out = ["# OSG support evidence", "", `ABAPiti commit: ${report.abapiti}.`,
+  const incomplete = report.folders.some((f) => !f.evidence.osgjs || f.evidence.osgjs.startsWith("not measured:") || f.evidence.osgjs.includes("missing test owners"));
+  const out = ["# OSG support evidence", "", ...(incomplete ? ["The JS column is incomplete; remeasurement in progress.", ""] : []), `ABAPiti commit: ${report.abapiti}.`,
     `open-steamgate generator content: ${report.openSteamgate}. Date: ${report.date}.`,
     ...report.generatorFiles.map(({file, blob}) => `Generator file: ${file} (git blob ${blob}).`), "",
     "Generated from the ABAPiti corpus; a construct marked runs means its using classes passed their rows, not that the construct is correct or specified.", "",
-    "Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. In a declared full-folder run where every test owner has rows and every row is SUCCESS, helpers without Unit rows count as runs: exercised by the tests in the same run. In partial runs, passing classes retain their results; omitted test owners and helpers in runs missing owners have no evidence, while helpers in complete runs with failures are fails/unknown. A crash without class results is no evidence.", "",
+    "Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. In a declared full-folder run where every test owner has rows and every row is SUCCESS, helpers without Unit rows count as runs: exercised by the tests in the same run. In partial runs, passing classes retain their results; omitted test owners and helpers in incomplete or failing runs are not measured. A harness crash, heap exhaustion or setup failure before any class is not measured, with its reason; fails applies only to FAILURE/ERROR test results.", "",
     "Folders: " + report.folders.map((f) => `${safe(f.name)} (${f.classes} classes, ${f.lines} lines)`).join("; ") + ".", "",
     "| Runtime | Classes with evidence | Lines in classes with evidence | Tests |", "|---|---:|---:|---:|"];
-  for (const [name, r] of Object.entries(report.runtime)) out.push(`| ${name} | ${r.classes} | ${r.lines} | ${r.tests} |`);
+  for (const [name, r] of Object.entries(report.runtime)) out.push(`| ${name === "osgjs" ? "VS Code (OSG-JS)" : name} | ${r.classes} | ${r.lines} | ${r.tests} |`);
   out.push("", "Folder run evidence:", "");
-  for (const folder of report.folders) for (const name of ["osgo", "osgjs"])
-    out.push(`- ${safe(folder.name)} / ${name}: ${safe(folder.evidence[name] ?? "per-class rows only; no full-folder run declared")}`);
+  for (const folder of report.folders) for (const name of ["osgjs", "osgo"]) {
+    const measurement = folder.measurements?.[name];
+    const metrics = measurement ? ` (${measurement.wallSeconds} s; peak RSS ${measurement.peakRssKiB} KiB)` : "";
+    out.push(`- ${safe(folder.name)} / ${name === "osgjs" ? "VS Code (OSG-JS)" : name}: ${safe(folder.evidence[name] ?? "not measured: no full-folder run declared; per-class rows retained")}${metrics}`);
+  }
   const warned = () => {
     out.push("", "## Warned", "", "The shared kernel compatibility scanner knows these forms (including forms absent from this corpus):", "");
     for (const {anchor, title} of report.knownWarnings) out.push(`<a id="${anchor}"></a>`, `- ${title}`, "");
@@ -242,18 +281,18 @@ function render(report) {
     for (const w of report.warnings) out.push(`| ${safe(w.form)} | ${w.count} |`);
     if (!report.warnings.length) out.push("| None | 0 |");
   };
-  for (const [section, title] of [["both", "Runs on both"], ["one", "Runs on one only"], ["fails", "Fails"], ["refused", "Refused"], ["none", "Seen but no evidence"]]) {
-    if (section === "none") warned();
+  for (const [section, title] of [["both", "Runs on JS (osgo agrees)"], ["js", "JS only"], ["go", "osgo only"], ["fails", "Fails on JS"], ["none", "Not measured on JS"]]) {
     const rows = report.constructs.filter((r) => sectionOf(r) === section);
-    out.push("", `## ${title} (${rows.length})`, "", "| Construct | Occurrences | Classes | Lines | osgo | osgjs |", "|---|---:|---:|---:|---|---|");
+    out.push("", `## ${title} (${rows.length})`, "", "| Construct | Occurrences | Classes | Lines | VS Code (OSG-JS) | osgo |", "|---|---:|---:|---:|---|---|");
     const describe = (e) => [e.status,
       ...e.failures.map((f) => `${f.class}: ${f.status}${f.message ? ": " + f.message : ""}`),
       ...e.reasons.map((f) => `${f.class}: ${f.reason}`),
       ...e.refusals.map((f) => `${f.class}: ${f.message}`),
       ...(e.missing.length ? [`missing: ${e.missing.join(", ")}`] : [])].map(safe).join("; ");
-    for (const r of rows) out.push(`| ${safe(r.kind + ": " + r.name)} | ${r.count} | ${r.classes.length} | ${r.lines} | ${describe(r.osgo)} | ${describe(r.osgjs)} |`);
+    for (const r of rows) out.push(`| ${safe(r.kind + ": " + r.name)} | ${r.count} | ${r.classes.length} | ${r.lines} | ${describe(r.osgjs)} | ${describe(r.osgo)} |`);
     if (!rows.length) out.push("| None | | | | | |");
   }
+  warned();
   return out.join("\n") + "\n";
 }
 
