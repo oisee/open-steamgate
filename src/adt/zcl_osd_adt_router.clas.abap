@@ -156,6 +156,17 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
                        iv_handler = `ZCL_OSD_ADT_VERSIONS` CHANGING ct_routes = rt_routes ).
       ENDIF.
     ENDLOOP.
+*   B2b: structure rows and its bare aliases, separate from source B2a.
+    lt_types = zcl_osd_adt_types=>sources( ).
+    LOOP AT lt_types INTO ls_type.
+      lv_pattern = c_base && `/` && ls_type-collection && `/:name`.
+      add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern && `/objectstructure`
+        iv_handler = `ZCL_OSD_ADT_STRUCTURE` CHANGING ct_routes = rt_routes ).
+      IF ls_type-type = `INCL` OR ls_type-type = `SRVD`.
+        add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern
+          iv_handler = `ZCL_OSD_ADT_STRUCTURE` CHANGING ct_routes = rt_routes ).
+      ENDIF.
+    ENDLOOP.
     IF zcl_osd_adt_host=>one_runtime( ) = abap_true.
       add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/datapreview/freestyle`
                      iv_handler = `ZCL_OSD_ADT_FREESTYLE` CHANGING ct_routes = rt_routes ).

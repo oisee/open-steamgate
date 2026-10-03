@@ -129,15 +129,6 @@ const PORT_PENDING = [
   "GET /sap/bc/adt/programs/includes/:name/source/main",
   "GET /sap/bc/adt/programs/includes/:name/includes/:include",
   "GET /sap/bc/adt/programs/includes/:name/includes/:include/source/main",
-  // B2b: object structure and the INCL/SRVD bare alias
-  "GET /sap/bc/adt/oo/classes/:name/objectstructure",
-  "GET /sap/bc/adt/oo/interfaces/:name/objectstructure",
-  "GET /sap/bc/adt/programs/programs/:name/objectstructure",
-  "GET /sap/bc/adt/ddic/ddl/sources/:name/objectstructure",
-  "GET /sap/bc/adt/ddic/srvd/sources/:name/objectstructure",
-  "GET /sap/bc/adt/programs/includes/:name/objectstructure",
-  "GET /sap/bc/adt/ddic/srvd/sources/:name",
-  "GET /sap/bc/adt/programs/includes/:name",
 ];
 
 const text = (value) => String(value?.get?.() ?? value ?? "").trimEnd();
