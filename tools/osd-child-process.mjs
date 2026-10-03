@@ -1,4 +1,4 @@
-// Every tool child gets an independent environment without the HTTP credential.
+// Children of the serving runtime get an environment without the HTTP credential.
 import * as childProcess from "node:child_process";
 
 export function childEnv(env = process.env) {

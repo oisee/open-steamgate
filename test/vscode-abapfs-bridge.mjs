@@ -1,9 +1,10 @@
 import {expect} from "chai";
 import {createRequire} from "node:module";
 import {EventEmitter as NodeEmitter} from "node:events";
-import {mkdtempSync, readFileSync, rmSync} from "node:fs";
+import {mkdtempSync, readdirSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
+import {fileURLToPath} from "node:url";
 import express from "express";
 import {spawnSync as probe} from "node:child_process";
 import {spawnSync, execFileSync, spawn, execFile} from "../tools/osd-child-process.mjs";
@@ -49,6 +50,28 @@ function fixture(api, answer, saved = new Map()) {
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 describe("ABAP-FS local bridge", () => {
   after(() => { for (const dir of createdDirs) rmSync(dir, {recursive: true, force: true}); });
+  it("limits the scrubbed child-process helper to deliberate serving-runtime uses", () => {
+    const allowed = [
+      "adt-facade.mjs", // HTTP boundary and its Git children.
+      "osd-git-history.mjs", // Git children of ADT version/history requests.
+      "osd-runtime.mjs", // Serving supervisor's runtime children.
+      "osd-unit.mjs", // Unit/debug children launched by the serving runtime.
+      "osd-warm.mjs", // Warm verification children launched by the serving runtime.
+    ];
+    const users = [];
+    function scan(dir, prefix = "") {
+      for (const entry of readdirSync(dir, {withFileTypes: true})) {
+        const name = prefix + entry.name;
+        if (entry.isDirectory()) scan(join(dir, entry.name), name + "/");
+        else if (/\.(?:mjs|cjs|js)$/.test(entry.name)
+          && /\b(?:import|export)\b[^;]*["'][^"']*osd-child-process\.mjs["']|\brequire\s*\(\s*["'][^"']*osd-child-process\.mjs["']/.test(readFileSync(join(dir, entry.name), "utf8"))) {
+          users.push(name);
+        }
+      }
+    }
+    scan(fileURLToPath(new URL("../tools/", import.meta.url)));
+    expect(users.sort(), "new helper imports need an explicit allow-list entry and reason").to.deep.equal(allowed);
+  });
   it("consumes the boundary credential once and retains it for subsequent routers", () => {
     const result = probe(process.execPath, ["--input-type=module", "-e", `
       import {adtRouter} from "./tools/adt-facade.mjs";

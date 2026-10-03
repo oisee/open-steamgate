@@ -25,6 +25,7 @@ import {renderCell, cellType} from "./adt-datapreview-cells.mjs";
 // from the object store, table contents from its data layer. The store never
 // parses HTTP. That seam is the contract between this session and the one
 // that owns the store.
+// The HTTP boundary holds the per-start credential and launches Git children.
 import {execFileSync} from "./osd-child-process.mjs";
 import express from "express";
 import {readFileSync, appendFileSync} from "node:fs";
