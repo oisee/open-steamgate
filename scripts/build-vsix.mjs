@@ -613,6 +613,28 @@ export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = f
   return {seedId, modules, selectedPacks, generation};
 }
 
+/** Ship the unchanged scanner independently of the compressed system seed.
+ * Only Rearranger and its core dependency closure are needed, not the compiler.
+ * Read from the staged seed so the core is the same copy used by the transpiler. */
+export function stageKernelScanner(seedRoot, extensionDir) {
+  const runtime = join(extensionDir, "kernel-runtime");
+  copyReal(join(seedRoot, "tools", "osd-kernel-compat.mjs"), join(runtime, "tools", "osd-kernel-compat.mjs"));
+  const transpiler = "node_modules/@abaplint/transpiler";
+  for (const file of ["package.json", "LICENSE", "build/src/rearranger.js"]) {
+    if (existsSync(join(seedRoot, transpiler, file))) copyReal(join(seedRoot, transpiler, file), join(runtime, transpiler, file));
+  }
+  const copied = new Set();
+  const copyDependency = (name) => {
+    if (copied.has(name)) return;
+    copied.add(name);
+    const source = join(seedRoot, "node_modules", name);
+    copyReal(source, join(runtime, "node_modules", name));
+    const metadata = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
+    for (const dependency of Object.keys(metadata.dependencies ?? {})) copyDependency(dependency);
+  };
+  copyDependency("@abaplint/core");
+}
+
 // ---- the extension itself -------------------------------------------------
 
 function copyExtensionFiles(extensionDir, profile) {
@@ -756,6 +778,7 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   // shape use it, since the build costs ~20 s per package.
   const {seedId, modules, selectedPacks, generation} = await stageSystemSeed(seedRoot, env,
     {prebuild: env.OSD_VSIX_PREBUILT !== "0"});
+  stageKernelScanner(seedRoot, extensionDir);
   log(generation === undefined ? "generation: none prebuilt, a first start builds cold"
     : `generation: ${generation} prebuilt, a first start reuses it`);
   const notices = writeThirdPartyNotices(seedRoot, join(extensionDir, "THIRD-PARTY-NOTICES.md"), ROOT);

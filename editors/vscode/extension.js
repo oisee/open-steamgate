@@ -8,6 +8,9 @@
 
 const {jobsStatusBar} = require("./job-worker");
 const vscode = require("vscode");
+const {registerKernelDiagnostics} = require("./kernel-diagnostics.js");
+let kernelDiagnostics;
+let kernelFindingCount = 0;
 const path = require("node:path");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
@@ -2430,6 +2433,7 @@ async function testServiceClosure(item, output) {
   let failures = 0;
   for (const name of names) {
     try {
+      if (kernelDiagnostics && !(await kernelDiagnostics.allow(undefined, {type: "CLAS", name}))) { failures += 1; continue; }
       const run = await osd().run({type: "CLAS", name});
       const results = outcomes(run);
       methods += results.length;
@@ -2665,6 +2669,15 @@ function activate(context) {
   context.subscriptions.push(systemOutput);
   const controller = new SystemController(context, systemOutput);
   activeController = controller;
+  kernelDiagnostics = registerKernelDiagnostics(vscode, context, output, {
+    onCount: (count) => { kernelFindingCount = count; },
+    resolveFile: async (object) => {
+      const filename = `${object.name.toLowerCase().replaceAll("/", "#")}.${object.type.toLowerCase()}.abap`;
+      const files = await vscode.workspace.findFiles(`**/${filename}`, EXCLUDE);
+      return files[0]?.fsPath ?? [...(controller.runningSources()?.files.values() ?? [])]
+        .find((file) => path.basename(file).toLowerCase() === filename);
+    },
+  });
   context.subscriptions.push(statusBar(context));
   jobsStatusBar(vscode, context, controller);
   breakpointToggleStatusBar(context);
@@ -2866,6 +2879,7 @@ function statusBar(context) {
         : `nothing answers /osd/serving at ${osd().url} (setting osd.url)`;
       item.backgroundColor = undefined;
     }
+    item.tooltip += `\nOSD kernel: ${kernelFindingCount} finding(s)`;
   };
   tick();
   const timer = setInterval(tick, 5000);
@@ -3139,6 +3153,7 @@ async function run(output, classrunOutput, forceDebugger = false) {
     return;
   }
   const {editor, object} = current;
+  if (kernelDiagnostics && !(await kernelDiagnostics.allow(editor.document.fileName))) return;
   const hasUnitTests = fs.existsSync(fileOf(path.dirname(editor.document.fileName), object, "testclasses"));
   // Q6b: read straight off the buffer VS Code already has, not necessarily
   // saved -- the same "the editor's own text" Ctrl+F2 already does for a
@@ -3328,6 +3343,7 @@ async function resetTaxiData() {
 
 async function classrunObject(name, classrunOutput, withDebugger = false, file,
   {attach = requireDebugSystem, controller = activeController, client = osd} = {}) {
+  if (kernelDiagnostics && !(await kernelDiagnostics.allow(file, {type: "CLAS", name}))) return;
   if (withDebugger && !(await attach(classrunOutput, "Classrun"))) return;
   // A wait that gives up says so and runs anyway, as 0.4 did: an unattended
   // run must never end with nothing sent and nothing said (osg-demo, 0.5.1467).
@@ -3636,6 +3652,7 @@ function registerEntitySetCommands(context, output, classrunOutput, controller) 
 
 async function callEntitySet({service, set, kind, file, withDebugger = false}, output, controller = activeController) {
   const source = file ?? vscode.window.activeTextEditor?.document?.fileName;
+  if (kernelDiagnostics && !(await kernelDiagnostics.allow(source))) return;
   // Never a prompt that waits for an answer: an unattended run (a test, a
   // screenshot suite) has nobody to click it. The breakpoint is matched by
   // path, real path or the running copy of the ABAP object (lib.js
@@ -4214,6 +4231,11 @@ function testExplorer(context, output, {
       const methods = leaves(sel.item);
       methods.forEach((m) => run.started(m));
       try {
+        const source = fileOf(dir, object, "main");
+        if (kernelDiagnostics && !(await kernelDiagnostics.allow(source))) {
+          methods.forEach((m) => run.errored(m, new vscode.TestMessage("Kernel strict mode refused this object; see osd output for the finding and support link.")));
+          return;
+        }
         const inspectPort = useDebugger ? await pickUnitInspectorPort() : undefined;
         if (cancelled()) {
           methods.forEach((m) => run.skipped(m));
