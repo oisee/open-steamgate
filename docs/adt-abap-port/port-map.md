@@ -121,9 +121,12 @@ Express weak ETags, matching production (S0 wire rule); discovery has no strong
 ETag and GET with an unmatched If-None-Match tag remains 200. The listener matrix warms up through an
 unknown HOST path and fetches a valid token before POST and DELETE.
 
-The S0 `test/adt-abap-coverage.mjs` / `HOST_ALLOWED` gate is absent at this
-slice's base. A1's diff cases assert ABAP ownership of every new row, so silent
-delegation cannot pass. No catch-all or neighbouring family is ported here.
+Under variant C, A1 is a ported document slice: its seven rows leave
+`PORT_PENDING`, and discovery stays ABAP permanently. The coverage gate and
+A1's diff cases require ABAP ownership of every row, so silent delegation
+cannot pass. No catch-all or neighbouring family is ported here.
+
+HEAD fallback correctly passes GET to the handler: current GET-only handlers are method-equivalent (Express selects GET while retaining `req.method = HEAD` and drops the body); method-sensitive discovery has explicit HEAD rows before GET.
 
 ## 2. The skeleton (dell, 0.6 must)
 
