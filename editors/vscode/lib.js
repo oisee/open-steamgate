@@ -8,6 +8,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const {pathToFileURL, fileURLToPath} = require("node:url");
 const {packNameOf} = require("./launcher.js");
+const {customDescriptionGenerator, customPropertiesGenerator} = require("./abap-debug-view.js");
 
 // Quick start's choices live here rather than in the command handler so a
 // future preset can add a row without duplicating its settings in UI code.
@@ -204,7 +205,8 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
     outFiles: [`${outputRoot}/**/*.mjs`],
     pauseForSourceMap: true,
     ...(Object.keys(sourceMapPathOverrides).length ? {sourceMapPathOverrides} : {}),
-    customDescriptionGenerator: "this && this.get ? (this.getQualifiedName && this.getQualifiedName() ? this.getQualifiedName() + ' ' : '') + JSON.stringify(this.get()) : undefined",
+    customDescriptionGenerator,
+    customPropertiesGenerator,
   };
 }
 

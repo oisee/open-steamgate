@@ -453,6 +453,9 @@ export function copySeedTree(seedRoot, selectedPacks) {
       copyReal(source, dest);
     }
   }
+  for (const name of ["@abaplint/core", "@nodable/entities"]) {
+    stageDependencyLicense(join(seedRoot, "node_modules", name), name);
+  }
   log(`node_modules: ${modules.length} packages traced from package-lock.json`);
 
   // These are dependency distribution maps. The ABAP debugger's maps are
@@ -613,6 +616,53 @@ export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = f
   return {seedId, modules, selectedPacks, generation};
 }
 
+// These npm distributions omit their repository licences.
+// Upstream text: https://github.com/abaplint/abaplint/blob/main/LICENSE
+// Entities: https://github.com/nodable/val-parsers/blob/main/LICENSE
+// Keep the grants in the seed (for notices) and in the standalone scanner.
+function stageDependencyLicense(dir, name) {
+  if (readdirSync(dir).some((file) => /^licen[cs]e(?:\..*)?$/i.test(file))) return;
+  const fallback = {"@abaplint/core": "abaplint-core", "@nodable/entities": "nodable-entities"}[name];
+  if (!fallback) throw new Error(`build-vsix: missing licence text for ${name}`);
+  copyReal(join(ROOT, `scripts/licenses/${fallback}.LICENSE.txt`), join(dir, "LICENSE.txt"));
+}
+
+/** Ship the unchanged scanner independently of the compressed system seed.
+ * Only Rearranger and its core dependency closure are needed, not the compiler.
+ * Read from the staged seed so the core is the same copy used by the transpiler. */
+export function stageKernelScanner(seedRoot, extensionDir) {
+  const runtime = join(extensionDir, "kernel-runtime");
+  copyReal(join(seedRoot, "tools", "osd-kernel-compat.mjs"), join(runtime, "tools", "osd-kernel-compat.mjs"));
+  const transpiler = "node_modules/@abaplint/transpiler";
+  for (const file of ["package.json", "LICENSE", "build/src/rearranger.js"]) {
+    if (existsSync(join(seedRoot, transpiler, file))) copyReal(join(seedRoot, transpiler, file), join(runtime, transpiler, file === "LICENSE" ? "LICENSE.txt" : file));
+  }
+  const copied = new Set();
+  const copyDependency = (name) => {
+    if (copied.has(name)) return;
+    copied.add(name);
+    const source = join(seedRoot, "node_modules", name);
+    copyReal(source, join(runtime, "node_modules", name));
+    stageDependencyLicense(join(runtime, "node_modules", name), name);
+    const metadata = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
+    for (const dependency of Object.keys(metadata.dependencies ?? {})) copyDependency(dependency);
+  };
+  copyDependency("@abaplint/core");
+  // Every plain VSIX entry needs an extension for OPC content typing. These
+  // dependency licences were safe inside the tar; here they are .txt assets.
+  const typeLicenses = (dir) => {
+    for (const entry of readdirSync(dir, {withFileTypes: true})) {
+      const file = join(dir, entry.name);
+      if (entry.isDirectory()) typeLicenses(file);
+      else if (entry.name === "LICENSE") {
+        cpSync(file, `${file}.txt`);
+        rmSync(file);
+      }
+    }
+  };
+  typeLicenses(runtime);
+}
+
 // ---- the extension itself -------------------------------------------------
 
 function copyExtensionFiles(extensionDir, profile) {
@@ -756,6 +806,7 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   // shape use it, since the build costs ~20 s per package.
   const {seedId, modules, selectedPacks, generation} = await stageSystemSeed(seedRoot, env,
     {prebuild: env.OSD_VSIX_PREBUILT !== "0"});
+  stageKernelScanner(seedRoot, extensionDir);
   log(generation === undefined ? "generation: none prebuilt, a first start builds cold"
     : `generation: ${generation} prebuilt, a first start reuses it`);
   const notices = writeThirdPartyNotices(seedRoot, join(extensionDir, "THIRD-PARTY-NOTICES.md"), ROOT);

@@ -1,5 +1,7 @@
 A local ABAP application server inside VS Code. No SAP or ADT connection needed.
 
+SAP kernel rejections now appear as red squiggles while typing, with a Problems link to the support section. `osg.kernelStrict` defaults to `error` and allows runs; choose `warning`, `off`, or `refuse` (also stops object runs and tests). Desktop VSIX installs include the scanner and its dependencies.
+
 # open-steamgate
 
 Start a bundled ABAP runtime, explore its OData services, run ABAP Unit, and open local Fiori apps. The extension carries its own system seed and builds it on first start.
@@ -24,6 +26,40 @@ VS Code 1.101 or newer is required. The system runs locally on desktop or in a R
 - Run ABAP Unit in Test Explorer; check, activate, and run ABAP files with familiar keys.
 - Open local OData and Fiori apps, inspect short dumps, use SQL notebooks, and debug ABAP through VS Code's Node debugger.
 - Add an abapGit-style workspace layer over the bundled source.
+
+## ABAP values in the debugger
+
+When stopped on an ABAP line, Variables, Watch and hover show ABAP values:
+`'ABC' (c20)`, `12.50 (p8,2)`, `42 (i)`, `9223372036854775807 (int8)`,
+`2026-10-03 (d)`, `12:34:56 (t)`, and `ABCDEF (xstring)`. Character values
+omit trailing padding; strings preserve it. Float values use scientific notation with a locale-independent decimal point, and fixed hex includes its byte length (`ABCD0000 (x4)`).
+
+Expand `{…} (structure)` to see its declared lowercase components. Tables
+show `[3 rows] (standard table)` (or sorted) and expand to rows `1`,
+`2`, `3`. Field symbols and data references show `->` followed by the target
+value and expand through a `->` child. Unassigned/initial references say so.
+Objects show their class name and expand to ABAP attributes, including private
+attributes exposed by the transpiler.
+
+The view shows the first 100 standard/sorted table rows, with a `…more` count
+for the rest; that node does not load more rows. Hashed tables show a summary
+without enumerating rows: the installed runtime has no bounded iterator or
+maintained count. Text and hex previews stop after 256 storage characters.
+CHAR previews omit trailing padding, so the projected view is not an exact
+padded-storage display; inspecting never changes that storage. CASTING field
+symbols use their declared type for supported hex/character reinterpretations. Reference previews stop after eight links or a cycle.
+Dates use ISO order rather than a user-specific SAP date format. Float fixtures
+are derived from SAP's [scientific type-f formatting rules](https://help.sap.com/doc/abapdocu_816_index_htm/8.16/en-US/ABENWRITE_FORMATS.html),
+with a fixed decimal point; they are not captured SAP debugger output or a
+claim of exact parity across debugger versions and locales. Bundled constructors
+must have their runtime names restored by `bin/osd.mjs`; the tests bundle the
+runtime and execute that exact startup block. Unknown values
+and failed formatting keep VS Code's default rendering. The view uses the
+built-in Node debugger's [custom generator options](https://github.com/microsoft/vscode-js-debug/blob/main/OPTIONS.md),
+which js-debug currently marks deprecated. It applies to desktop system and
+ABAP Unit sessions started by the extension; it does not change Watch expression
+syntax or provide a browser debugger. Custom child properties are for inspection;
+edit ABAP values in source rather than using Set Value on the projected children.
 
 ## Current limits
 
