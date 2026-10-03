@@ -16,12 +16,18 @@ class Emitter {
   fire() { this.bus.emit("change"); }
   dispose() { this.bus.removeAllListeners(); }
 }
+const storageDirs = new WeakMap();
+const createdDirs = [];
 function fixture(api, answer, saved = new Map()) {
+  if (!storageDirs.has(saved)) {
+    const dir = mkdtempSync(join(tmpdir(), "osd-bridge-"));
+    storageDirs.set(saved, dir); createdDirs.push(dir);
+  }
   const events = new Emitter();
   const controller = {onDidChange: events.event};
   let remote = {other: {url: "http://localhost", username: "EXAMPLE"}};
   const messages = [], writes = [];
-  const context = {subscriptions: [], globalState: {
+  const context = {globalStorageUri: {fsPath: storageDirs.get(saved)}, subscriptions: [], globalState: {
     get: (key, fallback) => saved.get(key) ?? fallback,
     update: async (key, value) => saved.set(key, value),
   }};
@@ -42,6 +48,7 @@ function fixture(api, answer, saved = new Map()) {
 }
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 describe("ABAP-FS local bridge", () => {
+  after(() => { for (const dir of createdDirs) rmSync(dir, {recursive: true, force: true}); });
   it("consumes the boundary credential once and retains it for subsequent routers", () => {
     const result = probe(process.execPath, ["--input-type=module", "-e", `
       import {adtRouter} from "./tools/adt-facade.mjs";
@@ -133,6 +140,36 @@ describe("ABAP-FS local bridge", () => {
       expect(again.messages).to.deep.equal([]);
     });
   }
+  it("rechecks dismissal for windows registered before either starts", async () => {
+    const saved = new Map();
+    const first = fixture({}, "Not now", saved), second = fixture({}, "Add", saved);
+    await registerAbapFsBridge(first.vscode, first.context, first.controller);
+    await registerAbapFsBridge(second.vscode, second.context, second.controller);
+    first.start(); await settled();
+    second.start(); await settled();
+    expect(first.messages).to.have.length(1);
+    expect(second.messages).to.deep.equal([]); expect(second.writes).to.deep.equal([]);
+  });
+  it("claims concurrent offers across windows with stale independent globalState caches before awaiting the answer", async () => {
+    const first = fixture({}, "Not now"), second = fixture({}, "Add");
+    second.context.globalStorageUri = first.context.globalStorageUri;
+    let persist, answer;
+    first.context.globalState.update = () => new Promise(resolve => { persist = resolve; });
+    first.vscode.window.showInformationMessage = async (...args) => {
+      first.messages.push(args); return new Promise(resolve => { answer = resolve; });
+    };
+    await registerAbapFsBridge(first.vscode, first.context, first.controller);
+    await registerAbapFsBridge(second.vscode, second.context, second.controller);
+    first.start(); second.start(); await settled();
+    expect(second.messages).to.deep.equal([]);
+    persist(); await settled();
+    expect(first.messages).to.have.length(1); expect(second.messages).to.deep.equal([]);
+    answer("Not now"); await settled();
+    // A fresh activation with another stale cache also respects the claim.
+    const third = fixture({}, "Add"); third.context.globalStorageUri = first.context.globalStorageUri;
+    await registerAbapFsBridge(third.vscode, third.context, third.controller); third.start(); await settled();
+    expect(third.messages).to.deep.equal([]);
+  });
   it("merges the legacy connection only with user settings, preserving workspace secrets and overrides", async () => {
     const f = fixture({}, "Add");
     const globalValue = {shared: {url: "http://user.example", username: "USER"}};

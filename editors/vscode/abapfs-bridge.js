@@ -1,5 +1,7 @@
 "use strict";
 
+const {mkdirSync, openSync, closeSync} = require("node:fs");
+const {join} = require("node:path");
 const {randomBytes} = require("node:crypto");
 const EXTENSION_ID = "murbani.vscode-abap-remote-fs";
 const OFFER_KEY = "osd.abapfs.local.offered";
@@ -24,7 +26,7 @@ async function registerAbapFsBridge(vscode, context, controller) {
   let connections = [];
   let current;
   let disposed = false;
-  let offered = context.globalState.get(OFFER_KEY, false);
+  let offered = false;
   const provider = api?.version === 2 && typeof api.registerConnectionProvider === "function";
   const refresh = () => {
     const launcher = controller.launcher;
@@ -44,7 +46,15 @@ async function registerAbapFsBridge(vscode, context, controller) {
       offered = true;
       // Remember even dismissal or Not now, before another lifecycle event.
       void (async () => {
+        // Memento caches can lag in another extension host. An exclusive file
+        // in shared global storage makes the once-only claim atomic across windows.
+        if (context.globalState.get(OFFER_KEY, false)) return;
+        const storage = context.globalStorageUri.fsPath;
+        mkdirSync(storage, {recursive: true});
+        try { closeSync(openSync(join(storage, `${OFFER_KEY}.claim`), "wx")); }
+        catch (error) { if (error.code === "EEXIST") return; throw error; }
         await context.globalState.update(OFFER_KEY, true);
+        if (disposed) return;
         const choice = await vscode.window.showInformationMessage(
           'Add "OSD (local)" to ABAP-FS? Any password works locally.', "Add", "Not now");
         if (choice !== "Add" || disposed) return;
