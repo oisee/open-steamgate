@@ -344,3 +344,64 @@ describe('VS Code jobs status poll grace and debugging', () => {
   });
 
 });
+
+describe('VS Code readable job summaries', () => {
+  const {jobsSummary, jobsStatusBar} = require('../editors/vscode/job-worker.js');
+  it('formats terminal, active and pending states, names, times and available counts newest first', () => {
+    const start = '2026-01-01T12:00:00.000Z';
+    const lines = jobsSummary([
+      {program:'ZOLD', state:'COMPLETED', startedAt:start, endedAt:'2026-01-01T12:01:05Z', outputBytes:0,
+        steps:[{state:'COMPLETED'}, {state:'DONE'}]},
+      {jobName:'Book job', program:'ZREPORT', state:'RUNNING', startedAt:'2026-01-01T12:02:00Z'},
+      {program:'ZQUEUE', state:'QUEUED', queuedAt:'2026-01-01T12:03:00Z'},
+    ], Date.parse('2026-01-01T12:02:10Z')).split('\n');
+    expect(lines[0]).to.equal('ZQUEUE | QUEUED | Start: not started | Duration: — | Queued: 2026-01-01 12:03:00 UTC');
+    expect(lines[1]).to.equal('Book job | RUNNING | Start: 2026-01-01 12:02:00 UTC | Duration: 10s');
+    expect(lines[2]).to.equal('ZOLD | DONE | Start: 2026-01-01 12:00:00 UTC | Duration: 1m 5s | 2/2 steps done, 0 output bytes');
+  });
+  it('marks failures with a single-line reason and preserves DONE, GLASS, HELD and WAITING', () => {
+    for (const state of ['DONE','GLASS','HELD','WAITING']) {
+      expect(jobsSummary([{program:'ZBOOK',state}])).to.equal(`ZBOOK | ${state} | Start: not started | Duration: —`);
+    }
+    expect(jobsSummary([{jobName:'Book\njob',state:'FAILED',detail:'Bad\ninput',id:'private-id',outputSha256:'private-hash'}]))
+      .to.equal('! Book job | FAILED | Start: not started | Duration: — | Reason: Bad input');
+    expect(jobsSummary([{program:'ZBOOK',state:'INTERRUPTED',resultStatus:'WORKER_STOPPED'}])).to.include('! ZBOOK | INTERRUPTED').and.include('Reason: WORKER_STOPPED');
+    expect(jobsSummary([{state:'FAILED'}])).to.include('Reason: No reason recorded');
+    expect(jobsSummary([])).to.equal('No jobs recorded.');
+  });
+  it('opens a current snapshot by default and keeps the exact raw stream reachable explicitly', async () => {
+    const channels = [], commands = new Map(), subscriptions = [];
+    const vscode = {StatusBarAlignment:{Left:1}, commands:{registerCommand(id, fn) { commands.set(id, fn); return {dispose(){}}; }},
+      window:{createOutputChannel(name) {
+        const channel = {name, content:'', shown:0, append(s){this.content += s;}, appendLine(s){this.content += s + '\n';},
+          clear(){this.content = '';}, show(){this.shown++;}, dispose(){}};
+        channels.push(channel); return channel;
+      }, createStatusBarItem(){return {show(){},hide(){},dispose(){}};}}};
+    const controller = {launcher:{port:8060,jobsWorkerMode:'auto',env:{STG_DB:'file',STG_DB_PATH:'jobs.db',OSD_BATCH_READ_TOKEN:'fixture'}},
+      onDidChange(){return {dispose(){}};}};
+    const previous = globalThis.fetch;
+    let request;
+    try {
+      globalThis.fetch = async (url, options) => {request = {url,options}; return {ok:true,json:async()=>({runs:[{program:'ZBOOK',state:'RUNNING',startedAt:'2026-01-01T12:00:00Z'}]})};};
+      jobsStatusBar(vscode,{subscriptions},controller);
+      const raw = '{"kind":"completed","run":{"id":"raw-id"}}\n';
+      controller.jobsOutput.append(raw);
+      await commands.get('osd.showJobs')();
+      expect(channels[0].shown).to.equal(1);
+      expect(channels[0].content).to.include('ZBOOK | RUNNING').and.not.include('raw-id');
+      expect(request.url).to.equal('http://127.0.0.1:8060/osd/batch-runs?limit=200');
+      expect(request.options.headers.Authorization).to.equal('Bearer fixture');
+      expect(channels[1].shown).to.equal(0);
+      commands.get('osd.showRawJobLog')();
+      expect(channels[1].shown).to.equal(1);
+      expect(channels[1].content).to.equal(raw);
+      globalThis.fetch = async () => {throw Error('offline');};
+      await commands.get('osd.showJobs')();
+      expect(channels[0].content).to.include('Job summary unavailable: offline');
+      expect(channels[1].content).to.equal(raw);
+      controller.launcher = undefined;
+      await commands.get('osd.showJobs')();
+      expect(channels[0].content).to.include('Jobs unavailable');
+    } finally {globalThis.fetch = previous; subscriptions.forEach(s => s.dispose());}
+  });
+});

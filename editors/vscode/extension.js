@@ -2526,6 +2526,9 @@ function runningParts(controller) {
       detail: other || worker?.running ? "Show jobs" : state === "running" ? "Start worker" : state === "stopped" ? "Start system" : "Show overview",
       command: other || worker?.running ? "osd.showJobs" : state === "running" ? "osd.startJobWorker" : state === "stopped" ? "osd.start" : "osd.openSystemOverview"});
   }
+  if (workerEnabled(launcher?.jobsWorkerMode, launcher?.env)) {
+    items.push({label: "Show raw job log", detail: "Worker JSON events and diagnostics", command: "osd.showRawJobLog"});
+  }
   items.push({label: "Open sample", detail: "Choose a notebook or hello class", command: "osd.openSample"});
   items.push({label: "System overview", detail: "Show overview", command: "osd.openSystemOverview"});
   return items;

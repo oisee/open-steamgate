@@ -4035,6 +4035,9 @@ describe("editors/vscode: running parts status and actions", () => {
       }
     }
     expect(starts).to.equal(1);
+    expect(runningParts(controller).find(i => i.label === "Show raw job log")?.command).to.equal("osd.showRawJobLog");
+    expect(JSON.parse(readFileSync(new URL("../editors/vscode/package.json", import.meta.url), "utf8")).contributes.commands
+      .find(i => i.command === "osd.showRawJobLog")?.title).to.equal("OSD: Show raw job log");
     controller.launcher.jobWorker.otherWindow = true;
     expect(runningParts(controller)[1]).to.include({description: "running in another window", command: "osd.showJobs"});
     controller.launcher.jobsWorkerMode = "off";

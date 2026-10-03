@@ -138,11 +138,64 @@ function jobsStatus(running, counts = {}) {
   return !running ? 'OSD jobs: worker stopped' : counts.running || counts.queued
     ? `OSD jobs: running ${counts.running ?? 0}, queued ${counts.queued ?? 0}` : 'OSD jobs: idle';
 }
+// Render only reader-facing fields; identities, hashes and selection values stay raw.
+function jobsSummary(runs, now = Date.now()) {
+  const text = value => String(value ?? '').replace(/\s+/g, ' ').trim();
+  const time = value => Number.isFinite(Date.parse(value))
+    ? new Date(value).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') : 'unknown';
+  const duration = run => {
+    const start = Date.parse(run.startedAt);
+    const end = run.endedAt ? Date.parse(run.endedAt) : run.state === 'RUNNING' ? now : NaN;
+    if (!Number.isFinite(start) || !Number.isFinite(end)) return '—';
+    const seconds = Math.max(0, Math.floor((end - start) / 1000));
+    return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  };
+  const ordered = [...runs].sort((a, b) =>
+    (Date.parse(b.queuedAt || b.startedAt) || 0) - (Date.parse(a.queuedAt || a.startedAt) || 0));
+  return ordered.map(run => {
+    const state = run.state === 'COMPLETED' ? 'DONE' : text(run.state) || 'UNKNOWN';
+    const failed = state === 'FAILED' || state === 'INTERRUPTED';
+    const counts = [];
+    if (run.steps?.length) counts.push(`${run.steps.filter(step => ['DONE', 'COMPLETED'].includes(step.state)).length}/${run.steps.length} steps done`);
+    if (Number.isFinite(run.outputBytes)) counts.push(`${run.outputBytes} output bytes`);
+    const reason = failed ? ` | Reason: ${text(run.detail) || text(run.resultStatus) || 'No reason recorded'}` : '';
+    return `${failed ? '! ' : ''}${text(run.jobName) || text(run.program) || 'Unnamed job'} | ${state} | ` +
+      `Start: ${run.startedAt ? time(run.startedAt) : 'not started'} | Duration: ${duration(run)}` +
+      (run.queuedAt ? ` | Queued: ${time(run.queuedAt)}` : '') +
+      (counts.length ? ` | ${counts.join(', ')}` : '') + reason;
+  }).join('\n') || 'No jobs recorded.';
+}
 function jobsStatusBar(vscode, context, controller) {
   const output = vscode.window.createOutputChannel('OSD jobs');
+  const raw = vscode.window.createOutputChannel('OSD jobs raw log');
+  let summaryShown = false, summaryBusy = false;
+  const refreshSummary = async () => {
+    if (summaryBusy) return;
+    summaryBusy = true;
+    const launcher = controller.launcher;
+    let summary;
+    try {
+      if (!workerEnabled(launcher?.jobsWorkerMode, launcher?.env)) {
+        summary = 'Jobs unavailable: enable the worker with a file SQLite database.';
+      } else {
+        const answer = await fetch(`http://127.0.0.1:${launcher.port}/osd/batch-runs?limit=200`,
+          {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}, signal:AbortSignal.timeout(3000)});
+        if (!answer.ok) throw Error(`HTTP ${answer.status}`);
+        summary = 'OSD jobs — latest 200 runs, newest first\nShow raw job log: command palette or What is running?\n\n' +
+          jobsSummary((await answer.json()).runs);
+      }
+    } catch (error) { summary = `Job summary unavailable: ${error.message}. Use Show raw job log for worker diagnostics.`; }
+    finally { summaryBusy = false; }
+    if (controller.launcher !== launcher) return;
+    output.clear(); output.appendLine(summary);
+  };
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 9);
   item.command = 'osd.showRunning';
-  context.subscriptions.push(output, item, vscode.commands.registerCommand('osd.showJobs', () => output.show(true)));
+  context.subscriptions.push(output, raw, item,
+    vscode.commands.registerCommand('osd.showJobs', async () => {
+      summaryShown = true; await refreshSummary(); output.show(true);
+    }),
+    vscode.commands.registerCommand('osd.showRawJobLog', () => raw.show(true)));
   const sessions = new Set(controller.debugSessions ?? []);
   const isSystemSession = (session) => {
     const port = controller.debuggerState?.systemPort ?? controller.launcher?.inspectPort;
@@ -185,21 +238,21 @@ function jobsStatusBar(vscode, context, controller) {
       item.text = paused ? 'OSD jobs: paused (debugger)'
         : unavailable ? 'OSD jobs: status unavailable' : lastKnown ?? 'OSD jobs: busy';
       item.backgroundColor = unavailable ? new vscode.ThemeColor('statusBarItem.errorBackground') : undefined;
-      if (unavailable) output.appendLine(error.message);
+      if (unavailable) raw.appendLine(error.message);
     }
-    finally { busy = false; }
+    finally { busy = false; if (summaryShown) await refreshSummary(); }
   };
   if (vscode.debug?.onDidStartDebugSession) context.subscriptions.push(
     vscode.debug.onDidStartDebugSession(session => sessions.add(session)));
   if (vscode.debug?.onDidTerminateDebugSession) context.subscriptions.push(
     vscode.debug.onDidTerminateDebugSession(session => { sessions.delete(session); tick(); }));
-  controller.jobsOutput = output;
+  controller.jobsOutput = raw;
   const off = controller.onDidChange(tick);
   const timer = setInterval(tick, 2000); tick();
   context.subscriptions.push({dispose:() => { clearInterval(timer); off.dispose(); }});
   return tick;
 }
-module.exports = {JobWorker, workerEnabled, jobsStatus, jobsStatusBar};
+module.exports = {JobWorker, workerEnabled, jobsStatus, jobsStatusBar, jobsSummary};
 if (require.main === module && process.argv[2] === '--guard') {
   const [pidText, grace, script] = process.argv.slice(3);
   const pid = Number(pidText);

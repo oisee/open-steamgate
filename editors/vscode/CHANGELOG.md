@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Activation now sends `method=activate`; a server from this release answers activation without it with 400 "Parameter method could not be found.", as an SAP system does. The extension and its bundled server update together.
+- Show readable job summaries by default, with newest runs first, durations, counts and failure reasons. Keep worker JSON behind **Show raw job log**.
+
 - Add **OSD: Open sample** in the command palette, walkthrough, and status actions: bundled notebooks plus the osg-demo hello class when present, with an offer to start the system.
 
 - Label system state, serving generation, and job worker status separately. System and jobs status clicks offer state-specific start actions and the overview; hide jobs when disabled or unsupported.
