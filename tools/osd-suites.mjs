@@ -191,7 +191,7 @@ export function runWithRetries(files, run, {group} = {}) {
     const file = retryFiles[0];
     const retry = run(retryFiles, "retry");
     result.retries.push({...retry, file});
-    const vanished = [];
+    const refused = [];
     if (complete(retry, retryFiles)) {
       for (const file of retryFiles) {
         // Compare paths as arrays: flattened titles can collide. Consume matches
@@ -199,13 +199,21 @@ export function runWithRetries(files, run, {group} = {}) {
         const remaining = [...retry.tests[file]];
         for (const original of first.tests[file]) {
           const at = remaining.findIndex((test) => JSON.stringify(test.titlePath) === JSON.stringify(original.titlePath));
-          if (at < 0) vanished.push({file, title: original.titlePath.join(" > ")});
-          else remaining.splice(at, 1);
+          if (at < 0) refused.push({file, title: original.titlePath.join(" > "), reason: "vanished test"});
+          else {
+            remaining.splice(at, 1);
+            // Every matching instance must pass when duplicate paths make the
+            // original failing instance ambiguous.
+            const notPassed = original.outcome === "failed" && retry.tests[file].find((test) =>
+              JSON.stringify(test.titlePath) === JSON.stringify(original.titlePath) && test.outcome !== "passed");
+            if (notPassed) refused.push({file, title: original.titlePath.join(" > "),
+              reason: `previously failing test became ${notPassed.outcome ?? "unexecuted"}`});
+          }
         }
       }
     }
-    for (const missing of vanished) result.lines.push(`- recovery refused: \`${clean(missing.file)}\` — vanished test: ${clean(missing.title)}`);
-    if (passed(retry, retryFiles) && vanished.length === 0) {
+    for (const test of refused) result.lines.push(`- recovery refused: \`${clean(test.file)}\` — ${test.reason}: ${clean(test.title)}`);
+    if (passed(retry, retryFiles) && refused.length === 0) {
       for (const file of group ? failedFiles : retryFiles) {
         const title = failures.find((failure) => failure.file === file).title;
         recovered++;

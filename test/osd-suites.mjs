@@ -281,6 +281,21 @@ describe("fail closed regressions", () => {
       expect(result.lines.join("\n")).not.to.contain("passed once");
     });
   }
+  for (const group of [undefined, "shared"]) {
+    it(`rejects a previously failing test that turns pending on ${group ? "group" : "isolated"} retry`, () => {
+      const {result, reports} = fixtureRun(`import {existsSync, writeFileSync} from "node:fs";
+        const marker = new URL("./marker", import.meta.url);
+        describe("pending recovery", () => { it("must pass", function () {
+          if (existsSync(marker)) this.skip();
+          writeFileSync(marker, "failed"); throw Error("first");
+        }); });`, {group});
+      expect(reports).to.have.length(2);
+      expect(Object.values(reports[1].fileTests)[0]).to.deep.equal({registered: 1, passed: 0, pending: 1, failed: 0});
+      expect(result.status).to.equal(1);
+      expect(result.lines.join("\n")).to.contain("pending").and.contain("must pass");
+      expect(result.lines.join("\n")).not.to.contain("passed once");
+    });
+  }
   it("prevents test-level retries from silently recovering", () => {
     const {result} = fixtureRun('let attempts = 0; describe("retry fixture", function () { this.retries(2); it("recovers internally", function () { this.retries(2); if (++attempts < 3) throw Error("retry"); }); });');
     expect(result.status).to.equal(1);
