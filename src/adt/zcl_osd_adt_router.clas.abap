@@ -154,7 +154,7 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
                        iv_handler = `ZCL_OSD_ADT_VERSIONS` CHANGING ct_routes = rt_routes ).
       ENDIF.
     ENDLOOP.
-*   The reduced parent kernel has no application generation.
+*   Only ADT on one runtime can bind the serving generation and DUMP.
     lv_classrun_by = c_host.
     IF zcl_osd_kernel_guard=>has_generation( ) = abap_true.
       lv_classrun_by = c_abap.

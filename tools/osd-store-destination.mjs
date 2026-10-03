@@ -95,8 +95,13 @@ export function withSystem(answers, work, {store, deferActivate, oneRuntime} = {
 }
 
 export const currentSystemAnswers = () => systemCalls?.getStore()?.answers;
+export const oneRuntimeEnabled = () => (typeof process !== "undefined" && process.env?.OSD_ADT_ONE_RUNTIME === "1")
+  || systemCalls?.getStore()?.oneRuntime === true;
 
 export class StoreDestination {
+  // Read the current request binding, never cache it on the destination.
+  oneRuntimeEnabled() { return oneRuntimeEnabled(); }
+
   /**
    * @param {object} options
    * @param {object} [options.store] the ObjectStore, or nothing where there
@@ -265,7 +270,7 @@ export class StoreDestination {
   }
 
   async #system(kind, name, json) {
-    if (SYSTEM_KINDS.includes(kind) === false && !((process.env.OSD_ADT_ONE_RUNTIME === "1" || systemCalls?.getStore()?.oneRuntime === true) && (PARENT_SYSTEM_KINDS.has(kind) || CHILD_SYSTEM_KINDS.has(kind)))) {
+    if (SYSTEM_KINDS.includes(kind) === false && !(oneRuntimeEnabled() && (PARENT_SYSTEM_KINDS.has(kind) || CHILD_SYSTEM_KINDS.has(kind)))) {
       return {EV_ERROR: `unknown SYSTEM kind ${kind || "(none)"}`};
     }
     const bound = systemCalls?.getStore();

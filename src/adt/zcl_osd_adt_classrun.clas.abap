@@ -94,6 +94,7 @@ CLASS zcl_osd_adt_classrun IMPLEMENTATION.
         zcl_osd_kernel_guard=>call_classrun( EXPORTING iv_name = iv_name io_out = lo_out
           IMPORTING ev_failed = lv_failed ev_name = lv_error
             ev_message = rs_run-message ev_stack = lv_stack ).
+*       On SAP the @KERNEL guard is a comment; keep class-based errors here.
       CATCH cx_root INTO lx_root.
         lv_failed = abap_true.
         rs_run-message = lx_root->get_text( ).

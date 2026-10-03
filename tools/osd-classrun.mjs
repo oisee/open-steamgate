@@ -26,6 +26,7 @@ import {dialogStep} from "./osd-dialog-step.mjs";
 import {dumpOf} from "./osd-where.mjs";
 import {persistDump} from "./osd-dumps.mjs";
 import {NotFound} from "./osd-store.mjs";
+import {oneRuntimeEnabled} from "./osd-store-destination.mjs";
 
 // the same shape osd-tran-registry.mjs already reads a contract by: a plain
 // scan of the main source rather than a parse, which is enough to answer
@@ -116,12 +117,17 @@ export async function runClassrun(root, name, options = {}) {
   // inside it: a wrong request (no such module, not a classrun class) is a
   // 400/503 to answer, not a runtime dump to record and roll back
   const file = join(outputDir, `${name.toLowerCase()}.clas.mjs`);
-  if (!existsSync(file)) {
+  let module;
+  try {
+    module = await importFresh(file);
+  } catch (error) {
+    // Preserve main's switch-off 500 and the WSL retry. Only one-runtime
+    // classrun deliberately uses the ABAP route's 503 NOT_BUILT refusal.
+    if (error?.code !== "ERR_MODULE_NOT_FOUND" || !oneRuntimeEnabled()) throw error;
     const missing = new Error(`${name} is not built: activate it first`);
     missing.code = "NOT_BUILT";
     throw missing;
   }
-  const module = await importFresh(file);
   const [Local] = Object.values(module);
   if (Local === undefined) {
     throw new Error(`${name} is not exported by its own module`);

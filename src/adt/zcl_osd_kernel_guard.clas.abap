@@ -13,11 +13,12 @@ ENDCLASS.
 CLASS zcl_osd_kernel_guard IMPLEMENTATION.
   METHOD has_generation.
     rv_available = abap_true.
-    WRITE '@KERNEL if (globalThis.__osdAdtKernel !== undefined) rv_available.set(" ");'.
+    WRITE '@KERNEL if (globalThis.__osdAdtKernel !== undefined || !((typeof process !== "undefined" && process.env?.OSD_ADT_ONE_RUNTIME === "1") || abap.context.RFCDestinations.STORE?.oneRuntimeEnabled?.() === true)) rv_available.set(" ");'.
   ENDMETHOD.
   METHOD call_classrun.
     DATA lo_run TYPE REF TO if_oo_adt_classrun.
     CLEAR: ev_failed, ev_name, ev_message, ev_stack.
+*   Catch host failures in MAIN as console output, matching Node runClassrun.
     WRITE '@KERNEL try {'.
     CREATE OBJECT lo_run TYPE (iv_name).
     lo_run->main( io_out ).
