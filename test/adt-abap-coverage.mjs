@@ -94,29 +94,6 @@ const PORT_PENDING = [
   "GET /sap/bc/adt/core/http/xref/closure",
   // A10: segw entity sets
   "GET /sap/bc/adt/core/http/segw/entitysets",
-  // B2a: source read and bare object documents
-  "GET /sap/bc/adt/oo/classes/:name/source/main",
-  "GET /sap/bc/adt/oo/classes/:name/includes/:include",
-  "GET /sap/bc/adt/oo/classes/:name/includes/:include/source/main",
-  "GET /sap/bc/adt/oo/classes/:name",
-  "GET /sap/bc/adt/oo/interfaces/:name/source/main",
-  "GET /sap/bc/adt/oo/interfaces/:name/includes/:include",
-  "GET /sap/bc/adt/oo/interfaces/:name/includes/:include/source/main",
-  "GET /sap/bc/adt/oo/interfaces/:name",
-  "GET /sap/bc/adt/programs/programs/:name/source/main",
-  "GET /sap/bc/adt/programs/programs/:name/includes/:include",
-  "GET /sap/bc/adt/programs/programs/:name/includes/:include/source/main",
-  "GET /sap/bc/adt/programs/programs/:name",
-  "GET /sap/bc/adt/ddic/ddl/sources/:name/source/main",
-  "GET /sap/bc/adt/ddic/ddl/sources/:name/includes/:include",
-  "GET /sap/bc/adt/ddic/ddl/sources/:name/includes/:include/source/main",
-  "GET /sap/bc/adt/ddic/ddl/sources/:name",
-  "GET /sap/bc/adt/ddic/srvd/sources/:name/source/main",
-  "GET /sap/bc/adt/ddic/srvd/sources/:name/includes/:include",
-  "GET /sap/bc/adt/ddic/srvd/sources/:name/includes/:include/source/main",
-  "GET /sap/bc/adt/programs/includes/:name/source/main",
-  "GET /sap/bc/adt/programs/includes/:name/includes/:include",
-  "GET /sap/bc/adt/programs/includes/:name/includes/:include/source/main",
 ];
 
 const text = (value) => String(value?.get?.() ?? value ?? "").trimEnd();

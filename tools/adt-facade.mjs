@@ -729,7 +729,7 @@ export function adtRouter(options = {}) {
   // which resolves the session, gates and answers or hands over; locks go
   // to ENQ (adt-enq.mjs)
   if (options.abap !== undefined) pass("abap-front", [BASE, "/sap/public/bc/icf/logoff"], abapFront({...options.abap, served: options.abapServed, refuse, store, facadeOptions: options,
-    miss: (req, kind) => record(req, kind, undefined, (req.originalUrl ?? req.url).split("?")[0]),
+    miss: (req, kind, detail) => record(req, kind, detail, (req.originalUrl ?? req.url).split("?")[0]),
     generation: () => liveHash(store.root),
     sessions, ...abapSession(sessions, (kind, name) => {
       if (kind === "IDENTITY") return identity;

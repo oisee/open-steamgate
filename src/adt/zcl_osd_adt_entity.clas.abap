@@ -37,8 +37,8 @@ CLASS zcl_osd_adt_entity IMPLEMENTATION.
     lv_tag = tag( iv_body ).
     rs_response-status = 200.
     rs_response-content_type = iv_type.
-    IF iv_charset = abap_true.
-      rs_response-content_type = iv_type && `; charset=utf-8`.
+    IF iv_charset = abap_true AND iv_type NS `charset=`.
+      rs_response-content_type = to_lower( iv_type ) && `; charset=utf-8`.
     ENDIF.
     rs_response-body = iv_body.
     ls_header-name = `ETag`.
@@ -54,6 +54,7 @@ CLASS zcl_osd_adt_entity IMPLEMENTATION.
     LOOP AT lt_candidates INTO lv_candidate.
       IF normalized( lv_candidate ) = lv_tag.
         rs_response-status = 304.
+        rs_response-content_type = iv_type.
         CLEAR rs_response-body.
         RETURN.
       ENDIF.

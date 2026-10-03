@@ -995,14 +995,15 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
         served.length = 0;
         const actual = answered(await sequence(ported));
         expect(actual).to.deep.equal(expected);
-        // ABAP answers discovery, LOCK/UNLOCK and A3a session poll, DELETE and logoff.
+        // ABAP answers discovery, LOCK/UNLOCK, A3a session poll, DELETE and logoff, and B2a source GET.
         const posts = served.filter((s) => s.includes("_action="));
         expect(posts.length, "LOCK and UNLOCK reached the front").to.be.greaterThan(0);
         expect(posts.every((s) => s.startsWith("ABAP ")), posts.join("\n")).to.equal(true);
         const byAbap = served.filter((s) => s.startsWith("ABAP "));
         expect(byAbap.every((s) => s === "ABAP HEAD /sap/bc/adt/core/discovery"
           || (s.startsWith("ABAP POST ") && s.includes("/source/") === false)
-          || s.includes("/core/http/sessions") || s.includes("/sap/public/bc/icf/logoff")), byAbap.join("\n")).to.equal(true);
+          || s.includes("/core/http/sessions") || s.includes("/sap/public/bc/icf/logoff")
+          || (s.startsWith("ABAP GET ") && s.endsWith("/source/main"))), byAbap.join("\n")).to.equal(true);
         // a handle is a UUID on both sides
         for (const answer of [...expected, ...actual]) {
           if (answer.handle !== undefined && answer.handle !== "") expect(answer.handle).to.equal("<handle>");

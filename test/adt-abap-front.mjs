@@ -133,7 +133,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
       expect(entered).to.deep.equal(paths.map(([method, path]) => `${method} ${BASE}${path.split("?")[0]}`));
       expect(served).to.deep.equal([
         `ABAP GET ${BASE}/core/discovery`, `ABAP GET ${BASE}/core/http/systeminformation`,
-        `ABAP GET ${BASE}/debugger/listeners`, `HOST GET ${BASE}/oo/classes/${LOCKED}/source/main`,
+        `ABAP GET ${BASE}/debugger/listeners`, `ABAP GET ${BASE}/oo/classes/${LOCKED}/source/main`,
         `HOST GET ${BASE}/no/such/resource`, `ABAP POST ${BASE}/oo/classes/${LOCKED}`]);
     } finally {
       await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
