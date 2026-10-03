@@ -143,21 +143,42 @@ function jobsStatusBar(vscode, context, controller) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 9);
   item.command = 'osd.showJobs'; item.show();
   context.subscriptions.push(output, item, vscode.commands.registerCommand('osd.showJobs', () => output.show(true)));
+  const sessions = new Set(controller.debugSessions ?? []);
+  const isSystemSession = (session) => {
+    const port = controller.debuggerState?.systemPort ?? controller.launcher?.inspectPort;
+    if (!port) return false;
+    for (let current = session; current; current = current.parentSession) {
+      if (current.name === `OSD: ABAP (${port})` ||
+          (current.configuration?.request === 'attach' && current.configuration.port === port)) return true;
+    }
+    return false;
+  };
+  const debugging = () => [vscode.debug?.activeDebugSession, ...sessions].some(isSystemSession);
   let busy = false;
   const tick = async () => {
     if (busy) return;
     busy = true;
     const launcher = controller.launcher;
     try {
-      if (launcher?.jobWorker?.otherWindow) { item.text = 'OSD jobs: jobs handled by another window'; return; }
-      if (!launcher?.jobWorker?.running) { item.text = jobsStatus(false); return; }
+      if (launcher?.jobWorker?.otherWindow) { item.text = 'OSD jobs: jobs handled by another window'; item.backgroundColor = undefined; return; }
+      if (!launcher?.jobWorker?.running) { item.text = jobsStatus(false); item.backgroundColor = undefined; return; }
       const answer = await fetch(`http://127.0.0.1:${launcher.port}/osd/job-counts`,
         {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}, signal:AbortSignal.timeout(3000)});
       if (!answer.ok) throw Error(`job counts: HTTP ${answer.status}`);
       item.text = jobsStatus(true, (await answer.json()).counts);
-    } catch (error) { item.text = 'OSD jobs: status unavailable'; output.appendLine(error.message); }
+      item.backgroundColor = undefined;
+    } catch (error) {
+      const paused = debugging();
+      item.text = paused ? 'OSD jobs: paused (debugger)' : 'OSD jobs: status unavailable';
+      item.backgroundColor = paused ? undefined : new vscode.ThemeColor('statusBarItem.errorBackground');
+      if (!paused) output.appendLine(error.message);
+    }
     finally { busy = false; }
   };
+  if (vscode.debug?.onDidStartDebugSession) context.subscriptions.push(
+    vscode.debug.onDidStartDebugSession(session => sessions.add(session)));
+  if (vscode.debug?.onDidTerminateDebugSession) context.subscriptions.push(
+    vscode.debug.onDidTerminateDebugSession(session => { sessions.delete(session); tick(); }));
   controller.jobsOutput = output;
   const timer = setInterval(tick, 2000); tick();
   context.subscriptions.push({dispose:() => clearInterval(timer)});

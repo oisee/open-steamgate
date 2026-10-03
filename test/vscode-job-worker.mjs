@@ -171,3 +171,94 @@ describe('VS Code job worker supervision', function () {
     finally { if (alive(host.pid)) process.kill(host.pid,'SIGKILL'); if (pid && alive(pid)) process.kill(pid,'SIGKILL'); }
   });
 });
+
+
+describe('VS Code jobs status while debugging', () => {
+  let savedFetch, savedInterval, savedClearInterval, tick, start, end, item, subscriptions, api, controller, messages;
+  beforeEach(() => {
+    savedFetch = globalThis.fetch;
+    savedInterval = globalThis.setInterval;
+    savedClearInterval = globalThis.clearInterval;
+    globalThis.setInterval = fn => { tick = fn; return 1; };
+    globalThis.clearInterval = () => {};
+    item = {show() {}, dispose() {}};
+    messages = [];
+    subscriptions = [];
+    api = {
+      StatusBarAlignment: {Left: 1},
+      ThemeColor: class { constructor(id) { this.id = id; } },
+      window: {
+        createOutputChannel: () => ({appendLine: message => messages.push(message), show() {}, dispose() {}}),
+        createStatusBarItem: () => item,
+      },
+      commands: {registerCommand: () => ({dispose() {}})},
+      debug: {
+        onDidStartDebugSession: fn => { start = fn; return {dispose() {}}; },
+        onDidTerminateDebugSession: fn => { end = fn; return {dispose() {}}; },
+      },
+    };
+    controller = {launcher: {port: 8080, inspectPort: 9480, env: {}, jobWorker: {running: true}}};
+    globalThis.fetch = async () => { throw Error('worker unavailable'); };
+  });
+  afterEach(() => {
+    for (const subscription of subscriptions) subscription.dispose();
+    globalThis.fetch = savedFetch;
+    globalThis.setInterval = savedInterval;
+    globalThis.clearInterval = savedClearInterval;
+  });
+  const install = async () => {
+    require('../editors/vscode/job-worker.js').jobsStatusBar(api, {subscriptions}, controller);
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  it('shows a neutral failure for an already active system session and recovers after termination', async () => {
+    const session = {name: 'OSD: ABAP (9480)'};
+    api.debug.activeDebugSession = session;
+    await install();
+    expect(item.text).to.equal('OSD jobs: paused (debugger)');
+    expect(item.backgroundColor).to.equal(undefined);
+    expect(messages).to.deep.equal([]);
+    globalThis.fetch = async () => ({ok: true, json: async () => ({counts: {running: 0, queued: 0}})});
+    api.debug.activeDebugSession = undefined;
+    end(session);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(item.text).to.equal('OSD jobs: idle');
+    expect(item.backgroundColor).to.equal(undefined);
+  });
+  it('tracks system sessions even when another session is focused; timeout and HTTP errors are neutral', async () => {
+    await install();
+    expect(item.backgroundColor.id).to.equal('statusBarItem.errorBackground');
+    const session = {name: 'custom attach', configuration: {request: 'attach', port: 9480}};
+    start(session);
+    api.debug.activeDebugSession = {name: 'unrelated'};
+    globalThis.fetch = async (_url, options) => {
+      expect(options.signal).to.be.instanceOf(AbortSignal);
+      throw new DOMException('timed out', 'TimeoutError');
+    };
+    await tick();
+    expect(item.text).to.equal('OSD jobs: paused (debugger)');
+    expect(item.backgroundColor).to.equal(undefined);
+    globalThis.fetch = async () => ({ok: false, status: 503});
+    await tick();
+    expect(item.text).to.equal('OSD jobs: paused (debugger)');
+    end(session);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(item.text).to.equal('OSD jobs: status unavailable');
+    expect(item.backgroundColor.id).to.equal('statusBarItem.errorBackground');
+  });
+  it('keeps failures red outside this system and clears the background on success or worker stop', async () => {
+    api.debug.activeDebugSession = {name: 'OSD: ABAP (9481)'};
+    await install();
+    expect(item.text).to.equal('OSD jobs: status unavailable');
+    expect(item.backgroundColor.id).to.equal('statusBarItem.errorBackground');
+    globalThis.fetch = async () => ({ok: true, json: async () => ({counts: {running: 2, queued: 1}})});
+    await tick();
+    expect(item.text).to.equal('OSD jobs: running 2, queued 1');
+    expect(item.backgroundColor).to.equal(undefined);
+    globalThis.fetch = async () => { throw Error('failed'); };
+    await tick();
+    controller.launcher.jobWorker.running = false;
+    await tick();
+    expect(item.text).to.equal('OSD jobs: worker stopped');
+    expect(item.backgroundColor).to.equal(undefined);
+  });
+});
