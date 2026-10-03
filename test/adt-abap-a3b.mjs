@@ -37,7 +37,8 @@ describe("A3b reentrance live Node byte diff",function () {
     if(r.status === 307) {
       expect(r.headers.get("etag")).to.equal(null);
       ticket=new URL(location).searchParams.get("reentrance-ticket");expect(ticket).to.match(/^[A-Za-z0-9_-]{32}$/);
-      if(!path.includes("_=")) expect(+new URL(location).searchParams.get("_")).to.be.within(start,Date.now());
+      // GET TIME STAMP into TIMESTAMPL is imprecise by up to ~2 ms on the runtime (ANORMALIES: ANOMALY-2026-10-03-timestampl-float-ms)
+      if(!path.includes("_=")) expect(+new URL(location).searchParams.get("_")).to.be.within(start - 2,Date.now() + 2);
     }
     const mask=(s) => {if(s === null) return s;return s.replaceAll(ticket ?? "<no-ticket>","<ticket>").replace(/([?&]|&amp;)_=[0-9]{13}(?=&|#|$|<)/g,"$1_=<time>");};
     const headers=Object.fromEntries(["content-type","content-length","etag","vary","location"].map((h) => [h,mask(r.headers.get(h))]));
