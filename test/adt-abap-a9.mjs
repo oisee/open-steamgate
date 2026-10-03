@@ -115,6 +115,24 @@ for (const remote of [false, true]) describe(`A9 ${remote ? "OSD_ADT_ONE_RUNTIME
       await diff(`${route}?type=CLAS&name=ZCL_A9_ROOT`);
     });
   }
+  for (const table of ["wbcrossgt", "wbcrossgtx"]) it(`${table} ordered UNION cap parity with 5001 readers`, async () => {
+    const rows = Array.from({length:5001}, (_, i) =>
+      `('TY','${"ZCL_A9_ROOT".padEnd(120)}','${("ZCAP" + String(i).padStart(5,"0")).padEnd(40)}')`);
+    try {
+      await execute(`INSERT INTO ${table} (otype,name,include) VALUES ` + rows.join(","));
+      await execute("PRAGMA reverse_unordered_selects=ON");
+      const readers = await diff("readers?type=CLAS&name=ZCL_A9_ROOT");
+      expect(readers.counts.readers).to.equal(5000);
+      expect(readers.readers[0].name).to.equal("ZCAP00000");
+      expect(readers.readers.at(-1).name).to.equal("ZCAP04999");
+      const closure = await diff("closure?type=CLAS&name=ZCL_A9_ROOT");
+      expect(closure.closure.map(o => o.name)).to.include("ZCAP00000");
+      expect(closure.closure.map(o => o.name)).not.to.include("ZCAP05000");
+    } finally {
+      await execute("PRAGMA reverse_unordered_selects=OFF");
+      await execute(`DELETE FROM ${table} WHERE name = 'ZCL_A9_ROOT' AND include LIKE 'ZCAP%'`);
+    }
+  });
   it("closure cycle, test classification and cap seam", async () => {
     const result=await diff("closure?type=CLAS&name=ZCL_A9_ROOT");
     expect(result.source).to.equal("xref");expect(result.tests).to.deep.equal(["ZCL_A9_B"]);
