@@ -31,6 +31,13 @@ import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
 import {objectOf} from "./osd-inputs.mjs";
 import {basename, join} from "node:path";
 
+// Shared fresh registration facts; route and SYSTEM use the same layer walk.
+export async function segwRegistrationsOf(store) {
+  const {segwRegistrations} = await import(/* webpackIgnore: true */ "./segw-registry.mjs");
+  const {generatorFoldersOf} = await import(/* webpackIgnore: true */ "./osd-packs.mjs");
+  return segwRegistrations(generatorFoldersOf(store.root).map((f) => join(store.root, f)));
+}
+
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
@@ -86,7 +93,7 @@ const PARSE_KINDS = {
 // object), SESSION (does the request's session hold state) and LOCK_HOLDER
 // (IV_NAME "TYPE NAME": is the holder a live session; a dead one is ended).
 // They go when the session moves into ABAP.
-const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER"];
+const SYSTEM_KINDS = ["SEGW_REGISTRATIONS", "IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER"];
 let systemCalls;
 try {
   if (typeof process !== "undefined" && process.versions?.node !== undefined) {

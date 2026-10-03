@@ -92,8 +92,6 @@ const PORT_PENDING = [
   // A9: xref
   "GET /sap/bc/adt/core/http/xref/readers",
   "GET /sap/bc/adt/core/http/xref/closure",
-  // A10: segw entity sets
-  "GET /sap/bc/adt/core/http/segw/entitysets",
 ];
 
 const text = (value) => String(value?.get?.() ?? value ?? "").trimEnd();

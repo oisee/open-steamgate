@@ -1,3 +1,4 @@
+import {segwRegistrationsOf} from "./osd-store-destination.mjs";
 import {renderCell, cellType} from "./adt-datapreview-cells.mjs";
 // The ADT façade of OSD: `/sap/bc/adt/**` answered by a local system that
 // has no system behind it. A client that speaks ADT to a real ABAP server
@@ -731,8 +732,9 @@ export function adtRouter(options = {}) {
   if (options.abap !== undefined) pass("abap-front", [BASE, "/sap/public/bc/icf/logoff"], abapFront({...options.abap, served: options.abapServed, refuse, store, facadeOptions: options,
     miss: (req, kind, detail) => record(req, kind, detail, (req.originalUrl ?? req.url).split("?")[0]),
     generation: () => liveHash(store.root),
-    sessions, ...abapSession(sessions, (kind, name) => {
+    sessions, ...abapSession(sessions, async (kind, name) => {
       if (kind === "IDENTITY") return identity;
+      if (kind === "SEGW_REGISTRATIONS") return segwRegistrationsOf(store);
       return undefined;
     })}));
 
@@ -1245,14 +1247,13 @@ export function adtRouter(options = {}) {
   // registry itself is built (tools/segw-registry.mjs, tools/osd-status.mjs
   // servicesOf): a class not registered as a service's DPC, or whose model
   // has no MPC, is 404 rather than a guess.
-  router.get(`${BASE}/core/http/segw/entitysets`, (req, res) => {
+  router.get(`${BASE}/core/http/segw/entitysets`, (req, res) => answer(res, async () => {
     const name = String(req.query.class ?? "").toUpperCase();
     if (name === "") {
       refuse(res, 400, "ExceptionInvalidRequest", "class is required");
       return;
     }
-    const folders = generatorFoldersOf(store.root).map((f) => join(store.root, f));
-    const registrations = segwRegistrations(folders);
+    const registrations = await segwRegistrationsOf(store);
     const readSource = (className) => {
       try {
         return store.read("CLAS", className).source;
@@ -1266,7 +1267,7 @@ export function adtRouter(options = {}) {
       return;
     }
     res.type("application/json; charset=utf-8").send(JSON.stringify(map));
-  });
+  }));
 
   // Q3 "Readers" (docs/vscode-extension.md): who references a CLAS or INTF,
   // for a CodeLens above its `CLASS ... DEFINITION` / `INTERFACE` line. The
