@@ -1,7 +1,6 @@
 // Full inline generation, the real ADT router, and main's actual Node runner.
 import assert from "node:assert/strict";
 import express from "express";
-import {execFileSync} from "node:child_process";
 import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
@@ -14,9 +13,9 @@ import {dialogStep} from "../../tools/osd-dialog-step.mjs";
 import {withSystem} from "../../tools/osd-store-destination.mjs";
 import {runClassrun} from "../../tools/osd-classrun.mjs";
 
-// Pin the pre-C5 main implementation, not a second instance of this branch.
-const baseline = "cc6b0287a9803494caae8b1eeb363fbfe3a75f58";
-const source = execFileSync("git", ["show", `${baseline}:tools/osd-classrun.mjs`], {encoding: "utf8"})
+// Pin the pre-C5 main implementation (cc6b0287), not a second instance of this
+// branch: a frozen copy, because CI's shallow checkout has no history to show.
+const source = readFileSync("test/fixtures/c5/main-classrun.mjs.txt", "utf8")
   .replace(/from "(\.\/[^\"]+)"/g, (_, file) => `from "${pathToFileURL(resolve("tools", file)).href}"`);
 const root = mkdtempSync(join(tmpdir(), "osd-c5-inline-off-"));
 writeFileSync(join(root, "main-classrun.mjs"), source);
@@ -74,8 +73,8 @@ try {
     }
     // The missing-module message names its importing module, which differs
     // for the extracted main oracle. Compare status and retry for that case.
-    if (!name.endsWith("UNBUILT")) assert.deepEqual(answers[1], answers[0], `main ${baseline}: ${name}`);
-    assert.equal(answers[0].status, status, `actual main ${baseline} status`);
+    if (!name.endsWith("UNBUILT")) assert.deepEqual(answers[1], answers[0], `main cc6b0287: ${name}`);
+    assert.equal(answers[0].status, status, `actual main cc6b0287 status`);
     assert.equal(answers[1].status, status);
     assert.deepEqual(served, ["HOST"]);
   }
