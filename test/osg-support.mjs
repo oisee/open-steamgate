@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {execFileSync, spawnSync} from "node:child_process";
-import {cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {KERNEL_FORMS, kernelWarnings} from "../tools/osd-kernel-compat.mjs";
 import {generate, inventory, evidence} from "../tools/osg-support.mjs";
@@ -94,12 +94,16 @@ CLASS zcl_helper IMPLEMENTATION. METHOD check. RETURN. ENDMETHOD. ENDCLASS.
     assert.ok(!markdown.includes("exercised by 6 tests"));
     assert.equal(evidence(["ZCL_ABAPITI_INT8X"], {rows: new Map([["ZCL_ABAPITI_INT8X", selected.rows]])}).status, "runs");
   });
-  it("uses the last generator/scanner commit and accepts explicit revision and date", () => {
+  it("uses generator blob hashes and the external corpus date, with explicit overrides", () => {
     const dir = join(root, "tools/testdata-kernel-valid"), paths = {osgo: [], osgjs: []};
-    const [revision, date] = execFileSync("git", ["log", "-1", "--format=%H%n%cs", "--",
-      "tools/osg-support.mjs", "tools/osd-kernel-compat.mjs"], {cwd: root, encoding: "utf8"}).trim().split("\n");
     const defaults = generate([dir], paths).report;
-    assert.equal(defaults.openSteamgate, revision); assert.equal(defaults.date, date);
+    assert.match(defaults.openSteamgate, /^[a-f0-9]{12}$/);
+    assert.deepEqual(defaults.generatorFiles.map(({file}) => file),
+      ["tools/osg-support.mjs", "tools/osd-kernel-compat.mjs"]);
+    for (const {file, blob} of defaults.generatorFiles)
+      assert.equal(blob, execFileSync("git", ["hash-object", "--no-filters", file], {cwd: root, encoding: "utf8"}).trim());
+    assert.equal(defaults.date, existsSync(join(root, ".local/abapiti-src"))
+      ? execFileSync("git", ["log", "-1", "--format=%cs"], {cwd: join(root, ".local/abapiti-src"), encoding: "utf8"}).trim() : "unavailable");
     const file = join(temp, "explicit.md");
     const args = ["tools/osg-support.mjs", dir, "--osg-rev", "1234567", "--date", "2026-09-30"];
     const cli = (more) => spawnSync(process.execPath, [...args, ...more], {cwd: root, encoding: "utf8"});
@@ -108,6 +112,29 @@ CLASS zcl_helper IMPLEMENTATION. METHOD check. RETURN. ENDMETHOD. ENDCLASS.
     assert.equal(cli(["--check", file]).status, 0);
     assert.equal(cli(["--osg-rev", "HEAD"]).status, 2);
     assert.equal(cli(["--date", "2026-02-30"]).status, 2);
+  });
+  it("produces identical pages at different commits with identical generator content", () => {
+    const repo = join(temp, "commits"); mkdirSync(join(repo, "tools"), {recursive: true});
+    for (const file of ["osg-support.mjs", "osd-kernel-compat.mjs", "osd-unit-ci.mjs", "osd-main.mjs"])
+      cpSync(join(root, "tools", file), join(repo, "tools", file));
+    symlinkSync(join(root, "node_modules"), join(repo, "node_modules"), "dir");
+    const git = (...args) => execFileSync("git", args, {cwd: repo, encoding: "utf8"});
+    git("init", "-q"); git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.invalid");
+    git("add", "tools"); git("commit", "-q", "-m", "First generator commit");
+    const first = git("rev-parse", "HEAD");
+    const args = [join(repo, "tools/osg-support.mjs"), join(root, "tools/testdata-kernel-valid")];
+    const cli = (...more) => spawnSync(process.execPath, [...args, ...more], {cwd: repo, encoding: "utf8"});
+    const page = join(repo, "page.md");
+    const before = cli("--out", page); assert.equal(before.status, 0, before.stderr);
+    git("commit", "-q", "--allow-empty", "-m", "Different commit, same generator");
+    assert.notEqual(git("rev-parse", "HEAD"), first);
+    const after = cli(); assert.equal(after.status, 0, after.stderr);
+    assert.equal(after.stdout, readFileSync(page, "utf8"));
+    const check = cli("--check", page); assert.equal(check.status, 0, check.stderr);
+    // Content changes must invalidate provenance even without a new commit.
+    const scanner = join(repo, "tools/osd-kernel-compat.mjs");
+    writeFileSync(scanner, readFileSync(scanner, "utf8") + "\n// Changed scanner content.\n");
+    assert.equal(cli("--check", page).status, 1);
   });
   it("resolves statement, builtin, elementary declaration and assignment types without guessing", () => {
     const dir = join(temp, "types"); mkdirSync(dir);

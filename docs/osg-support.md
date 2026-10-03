@@ -1,7 +1,9 @@
 # OSG support evidence
 
 ABAPiti commit: 8cdf57212c23772baf6293cb3d8784181521c8e4.
-open-steamgate commit: b12172002afb27045fab3143f2e3e59e3c349176. Date: 2026-10-03.
+open-steamgate generator content: f59a398c365f. Date: 2026-10-03.
+Generator file: tools/osg-support.mjs (git blob 948c3ed44b40b9871b5be9586ad5168744c9ae52).
+Generator file: tools/osd-kernel-compat.mjs (git blob 3feb3b0b1099e35cf22af5c2e86613b7888af4fa).
 
 Generated from the ABAPiti corpus; a construct marked runs means its using classes passed their rows, not that the construct is correct or specified.
 

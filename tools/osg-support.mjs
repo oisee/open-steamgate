@@ -1,4 +1,5 @@
 // Corpus evidence, deliberately distinct from a language specification.
+import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
 import {execFileSync} from "node:child_process";
 import {readFileSync, readdirSync, writeFileSync, existsSync} from "node:fs";
@@ -210,10 +211,13 @@ export function generate(directories, paths, options = {}) {
     tests: [...owners].flatMap((cls) => run.rows.get(cls) ?? []).filter((r) => r.method).length,
   }]));
   const abapiti = join(root, ".local/abapiti-src");
-  const [revision, date] = execFileSync("git", ["log", "-1", "--format=%H%n%cs", "--",
-    "tools/osg-support.mjs", "tools/osd-kernel-compat.mjs"], {cwd: root, encoding: "utf8"}).trim().split("\n");
+  const generatorFiles = ["tools/osg-support.mjs", "tools/osd-kernel-compat.mjs"].map((file) => ({
+    file, blob: execFileSync("git", ["hash-object", "--no-filters", file], {cwd: root, encoding: "utf8"}).trim(),
+  }));
+  const revision = createHash("sha256").update(generatorFiles.map(({file, blob}) => `${file}:${blob}\n`).join("")).digest("hex").slice(0, 12);
+  const date = existsSync(abapiti) ? git(abapiti, "%cs") : "unavailable";
   const report = {abapiti: existsSync(abapiti) ? git(abapiti, "%H") : "unavailable",
-    openSteamgate: options["osg-rev"] ?? revision, date: options.date ?? date, folders: folders.sort((a, b) => order(a.name, b.name)), runtime,
+    openSteamgate: options["osg-rev"] ?? revision, generatorFiles, date: options.date ?? date, folders: folders.sort((a, b) => order(a.name, b.name)), runtime,
     constructs, warnings: [...warnings].sort(([a], [b]) => order(a, b)).map(([form, count]) => ({form, count})),
     knownWarnings: KERNEL_FORMS.map(({form, anchor, title}) => ({form, anchor, title}))};
   return {report, markdown: render(report)};
@@ -221,7 +225,8 @@ export function generate(directories, paths, options = {}) {
 
 function render(report) {
   const out = ["# OSG support evidence", "", `ABAPiti commit: ${report.abapiti}.`,
-    `open-steamgate commit: ${report.openSteamgate}. Date: ${report.date}.`, "",
+    `open-steamgate generator content: ${report.openSteamgate}. Date: ${report.date}.`,
+    ...report.generatorFiles.map(({file, blob}) => `Generator file: ${file} (git blob ${blob}).`), "",
     "Generated from the ABAPiti corpus; a construct marked runs means its using classes passed their rows, not that the construct is correct or specified.", "",
     "Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. In a declared full-folder run where every test owner has rows and every row is SUCCESS, helpers without Unit rows count as runs: exercised by the tests in the same run. In partial runs, passing classes retain their results; omitted test owners and helpers in runs missing owners have no evidence, while helpers in complete runs with failures are fails/unknown. A crash without class results is no evidence.", "",
     "Folders: " + report.folders.map((f) => `${safe(f.name)} (${f.classes} classes, ${f.lines} lines)`).join("; ") + ".", "",
@@ -254,7 +259,7 @@ function render(report) {
 
 export function main(args = process.argv.slice(2)) {
   if (args.includes("--help")) {
-    console.log("Usage: npm run osg:support -- <dir>... [--osgo <json>]... [--osgjs <json>]... [--out <file.md>] [--json <file>] [--check <file.md>] [--runs <manifest.json>] [--osg-rev <sha>] [--date <yyyy-mm-dd>]"); return 0;
+    console.log("Usage: npm run osg:support -- <dir>... [--osgo <json>]... [--osgjs <json>]... [--out <file.md>] [--json <file>] [--check <file.md>] [--runs <manifest.json>] [--osg-rev <hex-id>] [--date <yyyy-mm-dd>]"); return 0;
   }
   try {
     const directories = [], paths = {osgo: [], osgjs: [], runs: []}, options = {};
@@ -269,7 +274,7 @@ export function main(args = process.argv.slice(2)) {
       else directories.push(resolve(arg));
     }
     if (!directories.length) throw new Error("at least one input directory is required");
-    if (options["osg-rev"] && !/^[a-f0-9]{7,40}$/i.test(options["osg-rev"])) throw new Error("--osg-rev needs a commit SHA");
+    if (options["osg-rev"] && !/^[a-f0-9]{7,40}$/i.test(options["osg-rev"])) throw new Error("--osg-rev needs a hexadecimal revision id");
     if (options.date && (!/^\d{4}-\d{2}-\d{2}$/.test(options.date) ||
       new Date(options.date).toISOString().slice(0, 10) !== options.date)) throw new Error("--date needs yyyy-mm-dd");
     const {report, markdown} = generate(directories, paths, options);

@@ -220,10 +220,12 @@ npm run osg:support -- .local/support-work/corpus/TestOSD_EmitUnitClasses .local
 # Replace --out with --check docs/osg-support.md to compare without writing.
 ```
 
-The header defaults to the last commit touching `tools/osg-support.mjs` or
-`tools/osd-kernel-compat.mjs` and that commit's date, so committing the page
-does not invalidate `--check`. To pin historical metadata explicitly, append
-`--osg-rev <commit-sha> --date <yyyy-mm-dd>` to the same generation/check command.
+The header identifies generator content by combining the git blob hashes of
+`tools/osg-support.mjs` and `tools/osd-kernel-compat.mjs` into a short SHA-256 id,
+and lists both files and their blob hashes. The default date comes from the
+external ABAPiti commit, which is immutable; rebasing or squash-merging OSG
+therefore leaves the page and its exact `--check` comparison unchanged.
+To override metadata explicitly, append `--osg-rev <hex-id> --date <yyyy-mm-dd>`.
 
 ## Architecture
 
