@@ -24,8 +24,9 @@ const fingerprint = (path) => {
   return hash.digest("hex");
 };
 const invoke = (dir, args = [], options = {}) => {
-  const run = spawnSync(process.execPath, [join(root, "tools/osgjs-unit.mjs"), dir, ...args],
-    {cwd: root, encoding: "utf8", timeout: 240000, maxBuffer: 8e6, ...options});
+  const {execArgv = [], ...spawnOptions} = options;
+  const run = spawnSync(process.execPath, [...execArgv, join(root, "tools/osgjs-unit.mjs"), dir, ...args],
+    {cwd: root, encoding: "utf8", timeout: 240000, maxBuffer: 8e6, ...spawnOptions});
   assert.equal(run.error, undefined, run.stderr);
   return run;
 };
@@ -97,11 +98,19 @@ describe("osgjs unit CI entry point", function () {
     mkdirSync(join(pack, "src"));
     fixture(join(pack, "src"), "zcl_osgjs_pack", "DATA x TYPE i. x = .");
     writeFileSync(join(pack, "src/zcl_osgjs_pack.clas.xml"), metadata("ZCL_OSGJS_PACK"));
-    const result = parsed(invoke(dir, ["--json", "--db", "file"], {env: {...process.env, NODE_OPTIONS: "--max-old-space-size=5120", OSD_PACKS: join(temp, "packs")}}));
+    const heapFile = join(temp, "child-heap.json"), preload = join(temp, "heap-probe.mjs");
+    writeFileSync(preload, `import {writeFileSync} from 'node:fs';
+import {getHeapStatistics} from 'node:v8';
+if (process.argv[1]?.endsWith('/osgjs-unit-run.mjs')) writeFileSync(${JSON.stringify(heapFile)}, JSON.stringify(getHeapStatistics().heap_size_limit));
+`);
+    const result = parsed(invoke(dir, ["--json", "--db", "file"], {execArgv: ["--max-old-space-size=4096", "--max-old-space-size=5120", "--import", preload], env: {...process.env, NODE_OPTIONS: "--max-old-space-size=2048 --max-old-space-size=3072", OSD_PACKS: join(temp, "packs")}}));
     assert.deepEqual(result.totals, {success: 14, failure: 0, not_compiled: 0, error: 0, tests: 14});
     assert.equal(result.classes, 2); assert.equal(result.compiled, 2);
     assert.equal(result.provenance.database, "--db file (node:sqlite)");
     assert.equal(result.provenance.heap, "--max-old-space-size=5120 MiB");
+    const reference = spawnSync(process.execPath, ["--max-old-space-size=5120", "-e", "console.log(require('node:v8').getHeapStatistics().heap_size_limit)"], {encoding: "utf8"});
+    assert.equal(reference.status, 0, reference.stderr);
+    assert.equal(JSON.parse(readFileSync(heapFile, "utf8")), Number(reference.stdout), "measurement child uses the recorded heap override");
     assert.equal(result.provenance.versions.Node, process.version);
     assert.equal(result.provenance.versions["node:sqlite (SQLite)"], process.versions.sqlite);
     assert.equal(fingerprint(dir), before);

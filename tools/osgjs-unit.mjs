@@ -16,7 +16,7 @@ const help = `Usage: npm run osgjs:unit -- <dir> [--json] [--kernel-strict] [--d
 Reads the immediate directory only (no recursion). Requires a checkout and synced libraries.
 Builds the whole system in a temporary directory; runs only the selected owners.
 --db file uses a private file-backed SQLite, removed after the run (default: sqlite / sql.js).
-NODE_OPTIONS=--max-old-space-size=12288 raises the heap limit for scanning, building and running large folders.
+NODE_OPTIONS=--max-old-space-size=12288 (or node --max-old-space-size=12288) raises the heap limit for scanning, building and running large folders.
 Kernel compatibility warnings preserve compiler diagnostics and exit codes; --kernel-strict reports ERROR (exit 2).
 Exit codes: 0 all SUCCESS, 1 FAILURE, 2 NOT_COMPILED/ERROR/SKIPPED, 3 no tests.`;
 
@@ -89,7 +89,7 @@ export async function main(args = process.argv.slice(2)) {
       const {overrides} = unitInputs({home: root, config, extraInputs: [staged.input], env: {...process.env, ...unitEnv}});
       for (const o of overrides) console.error(`Override ${o.object}: ${o.hidden} hidden by ${o.input}`);
       const home = isolatedSystem(staging, staged.input);
-      const child = await run([process.execPath, join(home, "tools/osgjs-unit-run.mjs"), staged.input, ...staged.chosen], home, {
+      const child = await run([process.execPath, ...process.execArgv, join(home, "tools/osgjs-unit-run.mjs"), staged.input, ...staged.chosen], home, {
         ...unitEnv, OSD_LAYERS: "", STG_DB: database,
         STG_DB_PATH: database === "file" ? join(staging, "unit.sqlite") : "",
       });

@@ -8,7 +8,7 @@ import {performance} from "node:perf_hooks";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo, referencedClasses} from "./emit-go.mjs";
-import {reconcile} from "./unit-results.mjs";
+import {reconcile, killedGoTool, markBuildFailure} from "./unit-results.mjs";
 import {home} from "./home.mjs";
 import {cacheLocation, frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
 import {unitInputs} from "./unit-inputs.mjs";
@@ -510,14 +510,13 @@ for (let attempt = 0; attempt < 100; attempt++) {
   if (process.env.GOGEN_GO_BUILD_X) appendFileSync(join(runDir, "go-build-x.log"), build.stderr ?? "");
   timingMs.goBuild += Math.round(performance.now() - buildStarted);
   if (build.status === 0) break;
-  if (!program || !stubGoErrors(build.stderr ?? "")) break;
+  if (build.signal || build.error || killedGoTool(build.stderr) || !program || !stubGoErrors(build.stderr ?? "")) break;
   const emitRetryStarted = performance.now();
   writeGeneratedGo(join(goDir, "cmd", "unit"));
   timingMs.emit += Math.round(performance.now() - emitRetryStarted);
 }
 if (build.status !== 0) {
-  const message = (build.stderr || build.error?.message || "go build failed").trim().split("\n").slice(0, 12).join("\n");
-  for (const r of ready) { r.status = "NOT_COMPILED"; if (build.signal || build.error) r.source = "harness"; r.message = message; }
+  markBuildFailure(ready, build);
   updateCompiledCount();
   console.log(JSON.stringify({...summary, rows}));
   process.exit(2);

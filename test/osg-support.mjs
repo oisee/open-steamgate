@@ -8,7 +8,9 @@ import {generate, inventory, evidence} from "../tools/osg-support.mjs";
 import {run as buildCommand} from "../tools/osd-build-command.mjs";
 import {alertOf} from "../tools/osd-unit.mjs";
 import {summarize} from "../tools/osd-unit-ci.mjs";
-import {reconcile} from "../tools/gogen/unit-results.mjs";
+import {reconcile, killedGoTool, markBuildFailure} from "../tools/gogen/unit-results.mjs";
+
+import {unitProvenance} from "../tools/osd-unit-provenance.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 describe("generated corpus support evidence", function () {
@@ -74,6 +76,42 @@ CLASS zcl_${cls} IMPLEMENTATION. ENDCLASS.
     assert.ok(generate([dir], {osgo: [file], osgjs: []}).report.constructs.every((c) => c.osgo.missing.includes("ZCL_HELPER")));
     writeFileSync(file, JSON.stringify({rows: []}));
     assert.ok(generate([dir], paths).report.constructs.every((c) => c.osgo.status === "not measured"));
+  });
+  it("marks a killed Go toolchain subprocess as unmeasured with captured build stderr", () => {
+    const stderr = readFileSync(join(root, "test/fixtures/go-build-killed/stderr.txt"), "utf8");
+    const row = {class: "OWNER", status: "READY"};
+    markBuildFailure([row], {status: 1, stderr});
+    assert.equal(row.source, "harness");
+    assert.equal(row.status, "NOT_COMPILED");
+    assert.equal(evidence([row.class], {rows: new Map([[row.class, [row]]])}).status, "not measured");
+    assert.equal(killedGoTool(stderr.replaceAll("signal: killed", "signal: terminated")), true);
+    for (const diagnostic of [
+      "owner.clas.abap:42: compile: signal: killed",
+      "generated.go:42: compile: signal: killed",
+      "owner.clas.abap: /opt/go/pkg/tool/linux_amd64/compile: signal: killed",
+      "generated.go: /opt/go/pkg/tool/linux_amd64/compile: signal: killed",
+      "example.invalid/pkg: undefined: signal: killed",
+      'example.invalid/pkg: /opt/go/pkg/tool/linux_amd64/compile: undefined: "signal: killed"',
+    ]) {
+      const refused = {class: "OWNER", status: "READY"};
+      markBuildFailure([refused], {status: 1, stderr: diagnostic});
+      assert.equal(refused.source, undefined, diagnostic);
+      assert.equal(evidence([refused.class], {rows: new Map([[refused.class, [refused]]])}).status, "refused");
+    }
+  });
+  it("records the last Node heap override with command-line precedence over NODE_OPTIONS", () => {
+    const options = process.env.NODE_OPTIONS, argv = process.execArgv;
+    try {
+      process.env.NODE_OPTIONS = "--max-old-space-size=1024 --max_old_space_size=2048";
+      process.execArgv = [];
+      assert.equal(unitProvenance("osgjs").heap, "--max-old-space-size=2048 MiB");
+      process.execArgv = ["--max-old-space-size=3072", "--max_old_space_size", "4096"];
+      assert.equal(unitProvenance("osgjs").heap, "--max-old-space-size=4096 MiB");
+    } finally {
+      process.execArgv = argv;
+      if (options === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = options;
+    }
   });
   it("retains subprocess signal provenance separately from compiler diagnostics", () => {
     assert.throws(() => buildCommand(process.execPath, ["-e", "process.kill(process.pid, 'SIGTERM')"], root),

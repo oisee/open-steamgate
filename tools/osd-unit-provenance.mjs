@@ -29,7 +29,7 @@ export function unitProvenance(runtime, {database = "sqlite", heap} = {}) {
     versions.Go = execFileSync("go", ["version"], {cwd: resolve(import.meta.dirname, "gogen/go"), encoding: "utf8"}).trim().split(" ")[2];
   } else if (database === "file") versions["node:sqlite (SQLite)"] = process.versions.sqlite;
   else versions["sql.js"] = version("sql.js");
-  const heapArg = [...process.execArgv, process.env.NODE_OPTIONS ?? ""].join(" ").match(/--max[-_]old[-_]space[-_]size(?:=|\s+)(\d+)/);
+  const heapArg = [...[process.env.NODE_OPTIONS ?? "", ...process.execArgv].join(" ").matchAll(/--max[-_]old[-_]space[-_]size(?:=|\s+)(\d+)/g)].at(-1);
   return {database: runtime === "osgo" ? "modernc.org/sqlite" : database === "file" ? "--db file (node:sqlite)" : "sql.js (default)",
     heap: heap ?? (heapArg ? `--max-old-space-size=${heapArg[1]} MiB` : "Node default (no --max-old-space-size override)"), versions};
 }
