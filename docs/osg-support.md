@@ -1,11 +1,11 @@
 # OSG support evidence
 
 ABAPiti commit: 8cdf57212c23772baf6293cb3d8784181521c8e4.
-open-steamgate commit: ad3ec2b5bec0b7b8df4aa7cbcc94186626146ab5. Date: 2026-10-03.
+open-steamgate commit: b12172002afb27045fab3143f2e3e59e3c349176. Date: 2026-10-03.
 
 Generated from the ABAPiti corpus; a construct marked runs means its using classes passed their rows, not that the construct is correct or specified.
 
-Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. In a declared full-folder run where every row is SUCCESS, helpers without Unit rows count as runs: exercised by the tests in the same run. In partial runs, passing classes retain their results and helpers are fails/unknown. A crash without class results is no evidence.
+Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. In a declared full-folder run where every test owner has rows and every row is SUCCESS, helpers without Unit rows count as runs: exercised by the tests in the same run. In partial runs, passing classes retain their results; omitted test owners and helpers in runs missing owners have no evidence, while helpers in complete runs with failures are fails/unknown. A crash without class results is no evidence.
 
 Folders: TestOSD_EmitUnitClasses (48 classes, 91056 lines); int8 (2 classes, 124 lines); mono (1 classes, 5371 lines); qjs (15 classes, 251768 lines).
 
