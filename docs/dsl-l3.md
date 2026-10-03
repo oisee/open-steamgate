@@ -1273,7 +1273,7 @@ PLANNED and `EVENT-SENT`) against the lanes in force, computed in `lanes( )`:
   with other work still runs the set, one pile at a time, instead of waiting for
   a free process forever.
 
-Measured on the sandbox (2026-10-03), `TH_WPINFO` answers one `WPLIST` row per
+Measured on the sandbox (2026-10-03), `TH_WPINFO` answers one row of its TABLES parameter `WPLIST` (type `WPINFO`) per
 work process: background processes have `WP_TYP = 'BGD'`, an idle one
 `WP_STATUS = 'Waiting'` (dialog `DIA`, update `UPD`/`UP2`, spool `SPO`). The
 filter also accepts `BTC` and `Wait`, the values of older kernels; a filter on
