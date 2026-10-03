@@ -82,8 +82,6 @@ const PORT_PENDING = [
   "GET /sap/bc/adt/gw/errorlog",
   "POST /sap/bc/adt/cts/transportchecks",
   "POST /sap/bc/adt/abapsource/occurencemarkers",
-  // A3b: reentrance ticket
-  "GET /sap/bc/adt/core/http/reentranceticket",
   // A9: xref
   "GET /sap/bc/adt/core/http/xref/readers",
   "GET /sap/bc/adt/core/http/xref/closure",

@@ -3599,3 +3599,23 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Regression-test location: `test/sqlite-heap-execute.mjs`; replacing the local client with the pinned adapter makes the large INSERT case fail.
 - Upstream version containing a fix: `unknown`
 - Validation: selected owner 7/7 SUCCESS in 82.37 s; full folder 48 class sources / 26 Unit owners, 4,077 SUCCESS, zero FAILURE/NOT_COMPILED/ERROR in 86.26 s. Including two setups and seed, the full run executes 430 SQL calls / 21,911,412 bytes. Peak full-run RSS 2,607,208 KiB includes compilation. Focused regression/batching/anomaly checks: 22 passing.
+
+### ANOMALY-2026-10-03-adt-long-timestamp-subtract — Long timestamp subtraction dumps
+
+- Status: `workaround`
+- Discovery date: `2026-10-03`
+- Affected API: `CL_ABAP_TSTMP=>SUBTRACT` in the locked open-abap-core substrate,
+  with `GET TIME STAMP FIELD` into `TIMESTAMPL` and a long epoch timestamp.
+- Reproducer: A3b reentrance's default `_` case in `test/adt-abap-a3b.mjs`;
+  the first implementation passed both long timestamps directly to SUBTRACT.
+- Exact command: `OSD_HEAVY_RANGE=90-99 tools/osd-heavy.sh npx mocha test/adt-abap-a3b.mjs test/xml-wellformed.mjs`.
+- Expected arithmetic: milliseconds since 1970, within the request's time window.
+  This expectation is a numeric contract, not a new SAP-system measurement.
+- Actual open-abap behaviour: `The number NaN cannot be converted to a BigInt
+  because it is not an integer`; the ADT front answered 500.
+- Smallest safe workaround: calculate UTC epoch milliseconds from date and
+  time differences, adding the first three fractional digits as text. The
+  route uses ABAP arithmetic and adds no host clock command or kernel code.
+- Regression: `test/adt-abap-a3b.mjs`, `default clock`.
+- Upstream: not reported; isolated while building A3b, outside this slice's
+  substrate-change scope. Upstream fix version: unknown.
