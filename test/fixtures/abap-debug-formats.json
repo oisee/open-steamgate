@@ -1,0 +1,10 @@
+{
+  "source": "https://help.sap.com/doc/abapdocu_816_index_htm/8.16/en-US/ABENWRITE_FORMATS.html",
+  "scope": "Scientific type-f formatting rule; locale-independent period, 16 fractional places. Independent derived fixtures, not SAP debugger captures or a universal GUI locale claim.",
+  "float": [
+    {"input": 1.5, "expected": "1.5000000000000000E+00 (f)"},
+    {"input": -0.125, "expected": "-1.2500000000000000E-01 (f)"},
+    {"input": 0, "expected": "0.0000000000000000E+00 (f)"},
+    {"input": 1024, "expected": "1.0240000000000000E+03 (f)"}
+  ]
+}

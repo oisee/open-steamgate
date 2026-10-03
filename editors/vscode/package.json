@@ -25,6 +25,7 @@
     "workspaceContains:**/*.http",
     "onLanguage:http",
     "workspaceContains:**/*.abap",
+    "onLanguage:abap",
     "workspaceContains:**/.abapgit.xml",
     "onNotebook:osd-sql-notebook",
     "onCommand:osd.newSqlNotebook",
@@ -44,6 +45,7 @@
     "configuration": {
       "title": "osd",
       "properties": {
+        "osg.kernelStrict": {"type": "string", "enum": ["error", "warning", "off", "refuse"], "default": "error", "description": "Report SAP kernel rejections while typing. Error and warning allow execution; refuse also stops object runs and tests."},
         "osd.url": {
           "type": "string",
           "default": "http://localhost:3030",

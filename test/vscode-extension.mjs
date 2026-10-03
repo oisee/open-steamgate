@@ -1383,7 +1383,7 @@ describe("editors/vscode: the extension's logic", function () {
     // JSON.parse keeps the last value of a duplicate key, so inspect the
     // declarations in the source before that information is lost.
     const properties = source.slice(source.indexOf('"properties": {'), source.indexOf('"notebooks": ['));
-    const keys = [...properties.matchAll(/^\s*"(osd\.[^"]+)":\s*\{/gm)].map((match) => match[1]);
+    const keys = [...properties.matchAll(/^\s*"((?:osd|osg)\.[^"]+)":\s*\{/gm)].map((match) => match[1]);
     expect(keys).to.have.lengthOf(Object.keys(manifest.contributes.configuration.properties).length);
     expect(new Set(keys).size).to.equal(keys.length);
     const commands = manifest.contributes.commands.map(({command}) => command);
