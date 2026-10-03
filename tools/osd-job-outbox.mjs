@@ -58,6 +58,7 @@ export async function drainJobOutbox(store, {env = process.env, afterRead, after
         jobname: value(row, "jobname"), jobcount: value(row, "jobcount"),
         owner: value(row, "owner"), program: value(row, "program"),
         generation: value(row, "generation"),
+        ...(sourceInstanceOnDisk ? {sourceInstance: sourceInstanceOnDisk} : {}),
         steps: row.steps.map((step) => ({number: Number(value(step, "step_no")), program: value(step, "program"),
           input: jobInputJson(step.input_json)})),
         stepCount: Number(value(row, "step_count")),

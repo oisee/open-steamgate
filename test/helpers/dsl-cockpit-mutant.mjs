@@ -19,7 +19,7 @@ export async function loadCockpitMutant(name, source, out) {
   for (const dir of ["src/l2demo", "src/dsl", "src/jobs", "src/sadl", "src/gateway", "gen/stg/zl3c_fleet2",
     ".local/lars/open-abap-core/src", ".local/lars/open-abap-odata/src"]) deps(dir);
   const config = JSON.parse(readFileSync("abap_transpile.json", "utf8"));
-  const result = await new Transpiler({...config.options, unknownTypes: "runtimeError", ignoreSourceMap: true, skip: []}).run(reg);
+  const result = await new Transpiler({...config.options, unknownTypes: "runtimeError", ignoreSourceMap: true, skip: [], only: (object) => object.getName().toUpperCase() === name.toUpperCase()}).run(reg);
   mkdirSync(out, {recursive: true});
   for (const obj of result.objects) {
     const code = obj.chunk.getCode().replace(/import\("\.\/([^"]+)"\)/g, (_, file) => `import("${pathToFileURL(join(process.cwd(), "output", file)).href}")`);

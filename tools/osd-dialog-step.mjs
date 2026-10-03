@@ -1,5 +1,6 @@
 import {selectSQLiteOne} from './adt-single-select.mjs';
 
+import {inDaemon} from "./osd-daemon-host.mjs";
 // The end of a dialog step, for every host that runs the ABAP.
 //
 // An AS ABAP commits the database implicitly when a request's work is done
@@ -343,6 +344,7 @@ function installWait() {
   if (statements === undefined || statements.wait === undefined || statements.wait.osdStep === true) return;
   const original = statements.wait.bind(statements);
   const wait = async (options) => {
+    if (inDaemon()) throw new Error("DAEMON_ILLEGAL_STATEMENT: WAIT");
     if (!mine()) return original(options);
     const token = holder;
     const subrc = (value) => globalThis.abap.builtin.sy.get().subrc.set(value);

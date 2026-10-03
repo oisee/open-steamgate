@@ -25,7 +25,7 @@ describe("job-owned named tail event", () => {
   const parent = () => intent("VOYAGE", {tailEvent: {id: "VOYAGE_DONE", param: "RUN_17", sourceInstance: instance}});
   const child = (seq) => intent("READY", {namedEvent: {
     id: "VOYAGE_DONE", param: "RUN_17", sourceInstance: instance, seq}});
-  const count = () => store.db.prepare("SELECT count(*) AS n FROM batch_named_events").get().n;
+  const count = () => store.db.prepare("SELECT count(*) AS n FROM batch_named_events WHERE event_id = 'VOYAGE_DONE'").get().n;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "osd-tail-after-commit-"));
     env = {OSD_OPERATIONS_DB: join(dir, "operations.sqlite")};

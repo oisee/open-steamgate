@@ -3,6 +3,7 @@
 CLASS zcl_l3_fleet2_conf DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_values,
+             doctor_tick TYPE i,
              budget_glass TYPE i,
              budget_warn TYPE i,
              budget_narrow_at TYPE i,
@@ -76,6 +77,11 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
   METHOD specs.
     DATA ls_spec TYPE zosd_l3_conf.
     ls_spec-set_name = 'fleet2'.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'doctor.tick'.
+    ls_spec-dsl_value = '10'.
+    APPEND ls_spec TO rt_specs.
     CLEAR ls_spec.
     ls_spec-set_name = 'fleet2'.
     ls_spec-param_name = 'budget.glass'.
@@ -169,6 +175,7 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD defaults.
+    rs_vals-doctor_tick = '10'.
     rs_vals-budget_glass = '10'.
     rs_vals-budget_warn = '7000'.
     rs_vals-budget_narrow_at = '8000'.
@@ -195,6 +202,15 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     DATA lv_number TYPE p LENGTH 16 DECIMALS 0.
     ls_def = defaults( ).
     rs_vals = is_vals.
+    lv_number = is_vals-doctor_tick.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'doctor.tick' iv_value = lv_text ) = abap_false.
+      rs_vals-doctor_tick = ls_def-doctor_tick.
+    ENDIF.
     lv_number = is_vals-budget_glass.
     lv_text = abs( lv_number ).
     CONDENSE lv_text.
@@ -486,6 +502,19 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     lv_text = iv_value.
     rv_ok = abap_false.
     CASE iv_param.
+      WHEN 'doctor.tick'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < 1 OR lv_number > 3600.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
       WHEN 'budget.glass'.
         IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
@@ -850,6 +879,8 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
       ls_row-param_val = lv_effective.
       APPEND ls_row TO rs_state-rows.
       CASE ls_row-param_name.
+        WHEN 'doctor.tick'.
+          rs_state-vals-doctor_tick = lv_effective.
         WHEN 'budget.glass'.
           rs_state-vals-budget_glass = lv_effective.
         WHEN 'budget.warn'.

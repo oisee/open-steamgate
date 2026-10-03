@@ -134,7 +134,7 @@ export class BatchRuns {
           this.db.exec(`ALTER TABLE batch_runs ADD COLUMN ${column} ${column === "wait_seq" ? "INTEGER" : "TEXT"}`);
         }
       }
-      for (const column of ["tail_event_id", "tail_event_param"]) {
+      for (const column of ["tail_event_id", "tail_event_param", "job_end_instance"]) {
         if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((item) => item.name === column)) {
           this.db.exec(`ALTER TABLE batch_runs ADD COLUMN ${column} TEXT`);
         }
@@ -218,7 +218,6 @@ export class BatchRuns {
       this.db.prepare("UPDATE batch_runs SET state = 'QUEUED' WHERE id = ? AND state = 'WAITING'").run(child.id);
     }
     if (run.tail_event_id) {
-      if (!run.source_instance) throw new Error(`tail event ${id} has no source instance`);
       const seq = this.#nextSignalSeq();
       const event = {sourceDb: run.source_db, sourceInstance: run.source_instance,
         client: run.source_client, sysid: run.source_sysid, owner: run.source_owner,
@@ -234,6 +233,38 @@ export class BatchRuns {
         AND (after_named_param = '' OR after_named_param = ?)`)
         .all(run.source_db, run.source_instance, run.source_client, run.source_sysid,
           run.source_owner, run.tail_event_id, seq, run.tail_event_param);
+      for (const child of namedWaiting) {
+        const ready = this.db.prepare(`UPDATE batch_run_steps SET state = 'READY'
+          WHERE run_id = ? AND step_no = 1 AND state = 'PENDING'`).run(child.id).changes;
+        if (child.step_count < 1 || ready !== 1) throw new Error(`waiting job ${child.id} has no first pending step`);
+        this.db.prepare("UPDATE batch_runs SET state = 'QUEUED' WHERE id = ? AND state = 'WAITING'").run(child.id);
+      }
+    }
+  }
+
+  #emitJobEnd(id, at) {
+    const run = this.db.prepare(`SELECT source_db, source_client, source_sysid, source_owner,
+      job_name, job_count, source_instance, job_end_instance FROM batch_runs WHERE id = ?`).get(id);
+    if (!run?.source_db) return;
+    run.source_instance = run.job_end_instance ?? run.source_instance;
+    const eventId = "SAP_END_OF_JOB";
+    const eventParam = run.job_name.padEnd(32, " ") + run.job_count;
+    if (run.source_instance) {
+      const seq = this.#nextSignalSeq();
+      const event = {sourceDb: run.source_db, sourceInstance: run.source_instance,
+        client: run.source_client, sysid: run.source_sysid, owner: run.source_owner,
+        id: eventId, param: eventParam, seq};
+      const digest = createHash("sha256").update(JSON.stringify({version: 1, ...event})).digest("hex");
+      this.db.prepare(`INSERT INTO batch_named_events VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(createHash("sha256").update(`SAP_END_OF_JOB:${id}`).digest("hex").slice(0, 32), digest, run.source_db, run.source_instance,
+          run.source_client, run.source_sysid, run.source_owner, eventId,
+          eventParam, seq, at);
+      const namedWaiting = this.db.prepare(`SELECT id, step_count FROM batch_runs WHERE state = 'WAITING'
+        AND source_db = ? AND source_instance = ? AND source_client = ? AND source_sysid = ?
+        AND source_owner = ? AND after_named_id = ? AND wait_seq < ?
+        AND (after_named_param = '' OR after_named_param = ?)`)
+        .all(run.source_db, run.source_instance, run.source_client, run.source_sysid,
+          run.source_owner, eventId, seq, eventParam);
       for (const child of namedWaiting) {
         const ready = this.db.prepare(`UPDATE batch_run_steps SET state = 'READY'
           WHERE run_id = ? AND step_no = 1 AND state = 'PENDING'`).run(child.id).changes;
@@ -292,6 +323,7 @@ export class BatchRuns {
       throw new TypeError("invalid outbox step count or first report");
     }
     const sourceDb = resolve(String(intent.sourceDb ?? ""));
+    if (intent.sourceInstance !== undefined && !/^[0-9a-f]{32}$/.test(intent.sourceInstance)) throw new TypeError("invalid job source instance");
     const after = intent.afterEvent;
     const named = intent.namedEvent;
     const tail = intent.tailEvent;
@@ -320,20 +352,25 @@ export class BatchRuns {
         (after.jobname === intent.jobname && after.jobcount === intent.jobcount))) {
       throw new TypeError("invalid predecessor job event");
     }
+    if (intent.sourceInstance && [named?.sourceInstance, tail?.sourceInstance].some((i) => i && i !== intent.sourceInstance)) throw new TypeError("inconsistent job source instance");
     const {schedule, chainPred} = timedIntent(intent, steps, after, named);
     const base = {sourceDb, client: intent.client, sysid: intent.sysid,
       jobname: intent.jobname, jobcount: intent.jobcount, owner: intent.owner,
-      program, generation: intent.generation};
-    const payload = schedule ? scheduledPayload(base, steps, schedule, chainPred, tail) : tail ? JSON.stringify({version: 6, ...base, steps, afterEvent: after, namedEvent: named, tailEvent: tail}) :
+      program, generation: intent.generation, ...(intent.sourceInstance ? {sourceInstance: intent.sourceInstance} : {})};
+    const payloadFor = (base) => schedule ? scheduledPayload(base, steps, schedule, chainPred, tail) : tail ? JSON.stringify({version: 6, ...base, steps, afterEvent: after, namedEvent: named, tailEvent: tail}) :
       named ? JSON.stringify({version: 5, ...base, steps, namedEvent: named}) :
       after ? JSON.stringify({version: after.intentId ? 4 : 3, ...base, steps, afterEvent: after}) :
       steps ? JSON.stringify({version: 2, ...base, steps}) : JSON.stringify(base);
+    const payload = payloadFor(base);
     const digest = createHash("sha256").update(payload).digest("hex");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const old = this.db.prepare("SELECT payload_sha256, run_id FROM batch_imports WHERE intent_id = ?").get(id);
       if (old) {
-        if (old.payload_sha256 !== digest || old.run_id !== runId) throw new Error(`outbox intent ${id} changed after import`);
+        const priorEnd = this.db.prepare("SELECT job_end_instance FROM batch_runs WHERE id = ?").get(runId)?.job_end_instance;
+        const priorBase = {...base};delete priorBase.sourceInstance;
+        const legacyDuplicate = intent.sourceInstance && !priorEnd && old.payload_sha256 === createHash("sha256").update(payloadFor(priorBase)).digest("hex");
+        if ((old.payload_sha256 !== digest && !legacyDuplicate) || old.run_id !== runId) throw new Error(`outbox intent ${id} changed after import`);
         this.db.exec("COMMIT");
         return {kind: "duplicate", run: this.get(runId)};
       }
@@ -367,6 +404,7 @@ export class BatchRuns {
           named?.sourceInstance ?? tail?.sourceInstance ?? null, named?.seq ?? null,
           named?.id ?? null, named?.param ?? null, tail?.id ?? null, tail?.param ?? null,
           ...timedColumns(schedule, chainPred));
+      if (intent.sourceInstance) this.db.prepare("UPDATE batch_runs SET job_end_instance = ? WHERE id = ?").run(intent.sourceInstance, runId);
       this.db.prepare("INSERT INTO batch_imports (intent_id, payload_sha256, run_id) VALUES (?, ?, ?)")
         .run(id, digest, runId);
       if (steps) {
@@ -518,6 +556,7 @@ export class BatchRuns {
         WHERE run_id = ? AND state IN ('READY', 'PENDING')`).run(endedAt, id);
       this.#appendJobLog(id, activeStep[0]?.step_no ?? 1, "STEP_INTERRUPTED", endedAt);
       this.#appendJobLog(id, null, "JOB_INTERRUPTED", endedAt);
+      this.#emitJobEnd(id, endedAt);
       this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     return this.get(id);
@@ -562,6 +601,7 @@ export class BatchRuns {
         this.#appendJobLog(id, 1, success ? "STEP_COMPLETED" : "STEP_FAILED", endedAt);
         this.#appendJobLog(id, null, success ? "JOB_COMPLETED" : "JOB_FAILED", endedAt);
         if (success) this.#emitCompletion(id, endedAt);
+        this.#emitJobEnd(id, endedAt);
       }
       this.db.exec("COMMIT");
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
@@ -583,6 +623,7 @@ export class BatchRuns {
       if (queued) {
         this.#appendJobLog(id, 1, "STEP_FAILED", endedAt);
         this.#appendJobLog(id, null, "JOB_FAILED", endedAt);
+        this.#emitJobEnd(id, endedAt);
       }
       this.db.exec("COMMIT");
     } catch (failure) { this.db.exec("ROLLBACK"); throw failure; }
@@ -633,6 +674,7 @@ export class BatchRuns {
         this.#appendJobLog(id, number, success ? "STEP_COMPLETED" : "STEP_FAILED", now);
         this.#appendJobLog(id, null, success ? "JOB_COMPLETED" : "JOB_FAILED", now);
         if (success) this.#emitCompletion(id, now);
+        this.#emitJobEnd(id, now);
         const parent = join(this.artifacts, `${id}.json`);
         const parentTemp = join(this.artifacts, `.${id}.${process.pid}.tmp`);
         writeFileSync(parentTemp, body, {mode: 0o600, flag: "wx"});

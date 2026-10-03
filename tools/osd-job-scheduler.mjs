@@ -1,3 +1,4 @@
+import {daemonHost} from "./osd-daemon-host.mjs";
 // The time scheduler of the JOB_* facade: releases a timed job at its start
 // time, makes a periodic job's successor when the instance is released, and
 // runs what is queued -- every run an ABAP entry through the dialog step
@@ -180,6 +181,7 @@ export function manualClock(start) {
 export function installAbapClock(abap, clock) {
   const original = abap.statements.getTime;
   const restoreWait = setWaitClock(clock);
+  const restoreDaemons = daemonHost(abap)?.setClock(clock);
   abap.statements.getTime = (options = {}) => {
     const sy = options.sy ?? abap.builtin.sy;
     const stamp = msStamp(clock.now());
@@ -195,6 +197,7 @@ export function installAbapClock(abap, clock) {
   abap.statements.getTime({sy: abap.builtin.sy});
   return () => {
     restoreWait();
+    restoreDaemons?.();
     abap.statements.getTime = original;
     original({sy: abap.builtin.sy});
   };
@@ -328,6 +331,7 @@ export class JobScheduler {
     this.store.importIntent({intentId, sourceDb: run.source_db, client: run.source_client,
       sysid: run.source_sysid, jobname: run.job_name, jobcount, owner: run.source_owner,
       program: run.program, generation: run.generation,
+      ...(run.job_end_instance ? {sourceInstance: run.job_end_instance} : {}),
       steps: full.steps.map((step) => ({number: step.number, program: step.program, input: step.input})),
       schedule, chainPred: run.id,
       ...(run.tail_event_id ? {tailEvent: {id: run.tail_event_id, param: run.tail_event_param ?? "",

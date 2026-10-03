@@ -1,0 +1,80 @@
+{
+ "generator": "dsl-l3",
+ "set": "src/l2demo/fleet2.l3.yaml",
+ "template": "recipes/l3-doctor/report.tpl",
+ "model": "sha256:c319da24f9bdf0264d68ecea2f8926bcbe4ca2886f37beb3d76e8825912d604c",
+ "rules": {
+  "ship-busy": {
+   "file": "src/l2demo/ship_busy.l2.yaml",
+   "class": "zcl_l2_ship_busy",
+   "model": "sha256:45ea923b55497387bebe8f844927710b4793719d6598f05beeb5a07536f6be87"
+  },
+  "maintenance-ship-no-future-voyage": {
+   "file": "src/l2demo/maintenance_ship.l2.yaml",
+   "class": "zcl_l2_maintenance_ship",
+   "model": "sha256:44dac8cf4f02744f207591d59ab67f90ec0108133257850d785acf7c43a0687f"
+  },
+  "grounded-ship-keeps-only-keepers": {
+   "file": "src/l2demo/grounded_ship_crew.l2.yaml",
+   "class": "zcl_l2_grounded_ship_crew",
+   "model": "sha256:b394b7c481c2078cec32dd098774403af021f9b5992e10060c4df66f30a2ec63"
+  },
+  "ship-in-service-has-a-captain": {
+   "file": "src/l2demo/ship_captain.l2.yaml",
+   "class": "zcl_l2_ship_captain",
+   "model": "sha256:c354a2df3f0f895d4132bc9e3f3fadd07b2f7b04066360d8ba6c7fcabd981d99"
+  },
+  "ship-too-many-future-voyages": {
+   "file": "src/l2demo/ship_voyage_limit.l2.yaml",
+   "class": "zcl_l2_ship_voyage_limit",
+   "model": "sha256:d5ba08cb38257a35fa27e16091cb1325fe0b3ad00dce9d5b1dfcb24d4e103596"
+  },
+  "ship-min-crew": {
+   "file": "src/l2demo/ship_min_crew.l2.yaml",
+   "class": "zcl_l2_ship_min_crew",
+   "model": "sha256:d6bd4b7056cc98985ff457a7c4e5441515492e9316cb4c64a06f2214777204b0"
+  },
+  "ship-cargo-limit": {
+   "file": "src/l2demo/ship_cargo_limit.l2.yaml",
+   "class": "zcl_l2_ship_cargo_limit",
+   "model": "sha256:85e96ae3fa817522ecb9141d874a5109bc21e78a8106bf0deb3f2651b338d782"
+  }
+ },
+ "lines": [
+  {
+   "line": 1,
+   "template_line": 1,
+   "path": "/autodoctor/doctor_report",
+   "node": "set/fleet2/resilience/doctor",
+   "set_line": 72
+  },
+  {
+   "line": 2,
+   "template_line": 2,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 3,
+   "template_line": 3,
+   "path": "/",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 4,
+   "template_line": 4,
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 5,
+   "template_line": 5,
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 15
+  }
+ ]
+}

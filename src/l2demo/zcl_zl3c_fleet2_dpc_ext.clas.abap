@@ -19,6 +19,8 @@ CLASS zcl_zl3c_fleet2_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zl3c_fleet2_
     METHODS eventset_get_entity REDEFINITION.
     METHODS doctorset_get_entityset REDEFINITION.
     METHODS doctorset_get_entity REDEFINITION.
+    METHODS runstatset_get_entityset REDEFINITION.
+    METHODS runstatset_get_entity REDEFINITION.
     METHODS settingset_get_entityset REDEFINITION.
     METHODS settingset_get_entity REDEFINITION.
     METHODS changeset_get_entityset REDEFINITION.
@@ -723,6 +725,45 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
         AND run_id = lv_run_id
         AND seq = lv_seq.
   ENDMETHOD.
+  METHOD runstatset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
+    ENDIF.
+    IF it_navigation_path IS NOT INITIAL.
+      lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+      REPLACE ALL OCCURRENCES OF '''' IN lv_run WITH ''''''.
+      lv_where = |{ lv_where } AND RUN_ID = '{ lv_run }'|.
+    ENDIF.
+    SELECT * FROM zosd_l3_runstat INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE (lv_where).
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD runstatset_get_entity.
+    DATA lv_set_name TYPE zosd_l3_runstat-set_name.
+    DATA lv_run_id TYPE zosd_l3_runstat-run_id.
+    lv_set_name = parameter( it_params = it_key_tab iv_name = 'SetName' ).
+    lv_run_id = parameter( it_params = it_key_tab iv_name = 'RunId' ).
+    SELECT SINGLE * FROM zosd_l3_runstat INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND set_name = lv_set_name
+        AND run_id = lv_run_id.
+  ENDMETHOD.
   METHOD settingset_get_entityset.
     DATA lv_where TYPE string.
     DATA lv_filter TYPE string.
@@ -901,6 +942,20 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
             LOOP AT lt_report INTO ls_report.
               ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.
             ENDLOOP.
+          WHEN 'StartDaemon'.
+            lv_ok = zcl_l3_fleet2=>start_daemon(  ).
+            IF lv_ok = abap_true.
+              ls_answer-answer = 'OK'.
+            ELSE.
+              ls_answer-answer = 'REFUSED: StartDaemon: the runner declined it'.
+            ENDIF.
+          WHEN 'StopDaemon'.
+            lv_ok = zcl_l3_fleet2=>stop_daemon(  ).
+            IF lv_ok = abap_true.
+              ls_answer-answer = 'OK'.
+            ELSE.
+              ls_answer-answer = 'REFUSED: StopDaemon: the runner declined it'.
+            ENDIF.
           WHEN 'SetKill'.
             lv_ok = zcl_l3_fleet2=>set_kill( iv_reason = lv_reason ).
             IF lv_ok = abap_true.
@@ -936,6 +991,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
             ls_answer-answer = |deleted { ls_unschedule-deleted }, refused { ls_unschedule-refused }|.
           WHEN 'ScheduleStatus'.
             ls_answer-answer = zcl_l3_fleet2=>cockpit_schedule_status( ).
+            ls_answer-answer = ls_answer-answer && ' / ' && zcl_l3_fleet2=>daemon_status( ).
           WHEN OTHERS.
             RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
               EXPORTING method = iv_action_name.

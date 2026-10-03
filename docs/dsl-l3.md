@@ -1075,10 +1075,147 @@ status = 'OPEN' AND opened = <read>`; the advance is `OPEN` to `DONE`; the relea
 and `resume( )` run in the caller's LUW and commit nothing themselves (the runner still holds no
 COMMIT; its job report commits at the end of its step).
 
-**Its schedule.** A set with `schedule:` also schedules the doctor: `schedule( )` opens a second
+**Legacy job-only schedule.** With `doctor: {as: [job]}`, a set with `schedule:` also schedules the doctor: `schedule( )` opens a second
 periodic job, `L3_<SET>_DOC`, the report with `P_MODE = 'H'`, from now, every `stale` seconds
 rounded to minutes (`PRDMINS`; past 99 minutes, hours, `PRDHOURS`), unless an instance of it already
 waits; `unschedule( )` deletes the waiting instance of both jobs and answers how many it deleted.
+
+### Autonomous doctor (slice 5e)
+
+A parallel run now arms its own watcher; it does not depend on the daily driver
+having run `schedule( )`. The default is one daemon per set. Configure cooperating
+mechanisms in the manifest:
+
+```yaml
+resilience:
+  doctor: {as: [daemon], tick: 10, every: 15}
+  # as: [event, job] is the fallback without daemon support
+  retry: {max: 2, backoff: 60}
+  stale: 900
+  keep: {days: 30}
+piles: {release: event, lanes: 3}  # optional set-wide policy on a staged set
+settings:
+  tunable: [doctor.tick, piles.lanes]
+```
+
+`as` is a nonempty list of distinct `daemon`, `event`, `job` values. `tick` is
+1..3600 seconds (default 10); `every` is 1..99 minutes (default 15). Unknown keys,
+duplicate mechanisms and invalid numbers are refused at their YAML lines.
+`doctor.tick` is available to `settings.tunable`; it is loaded again at every arm,
+not frozen in the run snapshot. Explicit `piles.lanes` can also be tuned. Omitting
+`lanes` uses three quarters of the free background processes, rounded down;
+zero free lanes release nothing. The local `TH_WPINFO` subset uses
+`OSD_BG_WORKERS` (default 4) minus active local jobs; the system supplies its
+kernel work-process list. The filter uses `WPLIST-WP_TYP = 'BTC'` and
+`WPLIST-WP_STATUS = 'Wait'`; the lead should verify those values on deployment.
+
+**Daemon support needs ABAP 7.52 or later.** The recipes still emit 7.02 syntax,
+7-bit ASCII and lines shorter than 255 characters. On a 7.02 system choose
+`[event, job]`; the generator then emits no daemon subclass or client-manager
+calls. `[job]` with a daily schedule keeps the existing periodic-doctor and pile
+report recipe bytes. With cooperating mechanisms, or without a daily schedule,
+`run( )` also arms the periodic safety net, independently of the daily driver.
+
+`ZCL_L3_<SET>_DMN` implements all nine daemon callbacks and
+`IF_ABAP_TIMER_HANDLER`. `run( )` in mode P and `resume( )` call the runner's
+`start_daemon( )`. The runner checks the kernel list by class and name before
+starting; `ZOSD_L3_WATCH`, keyed by client and set, supplies the shared lock for
+concurrent starts. The runner class pool owns **all** client-manager calls
+(start, lookup, attach, stop), including those invoked from a pile report: P6's
+creator-program restriction therefore does not depend on the report's program.
+`DoctorSet` includes `DMN-START` and `DMN-STOP` rows. The daemon stops itself on its
+next pass when the set has no HELD run. Manual `StartDaemon` and `StopDaemon`
+service actions use the same entry points.
+
+A timer or a PCP message queues a dispatcher step through the generated
+`ZL3_<SET>_DOC` report. This is a deliberate extra background job per pass, with
+one outstanding pass job per set: the measured daemon prohibition on `SUBMIT`
+means a callback cannot run the existing runner's retry/advance path directly.
+The callback uses `JOB_OPEN`, `JOB_SUBMIT` (no variant, the doctor report has no
+parameters), and immediate `JOB_CLOSE`; the report calls `doctor( )`, releases
+waiting pile events when configured, and commits at its normal step boundary.
+**`JOB_SUBMIT` from a daemon callback has not been measured on the system.** The
+lead must probe this specific call: if its standard implementation internally
+executes the forbidden `SUBMIT`, dispatch must instead use the measured-allowed
+`CALL FUNCTION ... STARTING NEW TASK` seam. Local tests enforce the prohibition
+on a direct `SUBMIT` or `WAIT` in a callback; they do not prove SAP's FM internals.
+A busy background pool can consequently delay a pass beyond its timer tick.
+
+The shared doctor immediately marks an aborted/finished/gone job's unfinished
+pile FAILED, without the stale timeout. A still-running job whose RUNNING pile
+has been silent past `stale` is FAILED with `JOB-SILENT`. Retries retain their
+backoff, retry budget and conditional `UPDATE` claims; manual `Doctor` uses the
+same path. Final autonomous runs are collected and released immediately, so
+there is no stale-lock delay before self-stop. The default pile report tail is
+only `COMMIT WORK` followed by the runner's `pile_done( run, pile )`; gate
+advancement and counting belong to the doctor. Returned HELD/FUSED/KILLED states
+also commit and notify. A simulated dump never reaches the tail and is detected
+by the timer (or the kernel job-end event).
+
+**Event mechanism:** one doctor job waits for **each pile job** on
+`SAP_END_OF_JOB`. Its `EVENTPARM` is the job name in the first 32 characters,
+blank padded, followed by the eight-character job count. The watcher is armed
+before the pile job is closed. The lead measured this event for both finished
+and aborted jobs on 2026-10-02; the local job facade now emits it for both terminal
+outcomes too. No `BP_EVENT_RAISE` is needed in the pile tail. This is the measured
+system-event interpretation of `event`, rather than a custom success-tail event
+that cannot run after a dump. It costs one waiting doctor job per pile job;
+retries arm a new watcher for the new job count. Event-only sets arrange a
+one-off wake job for pending retry backoff; `[event, job]` also has the periodic
+safety net for lost plans or callers. Operators must account for this job count.
+
+**Release by event:** default `release: submit` keeps immediate submission.
+For `release: event`, every stage plans its jobs waiting on `ZOSD_L3_RELEASE`,
+parameter `<jobname>/<jobcount>` (the name includes the set and pile; the count
+isolates retries and overlapping runs). Define this customer event in SM64 on
+the system before using it. The dispatcher conditionally claims `EVENT-WAIT`
+piles as `EVENT-SENT` and calls `BP_EVENT_RAISE` at most up to the free lane count.
+The shared watcher row serializes lane claims across runs of the same set. HELD
+piles are not released; GLASS and the kill switch block releases; NARROW has at
+most one active chain. Next-stage jobs use the same release path. The event's
+local delivery is commit-bound through the existing job outbox. A failed raise
+puts its conditional claim back to `EVENT-WAIT`.
+
+`ZOSD_L3_RUNSTAT` has one row per client, set and run: DONE/FAILED (including
+FUSED)/RUNNING/HELD pile counts, mean and median seconds of DONE piles, and
+`UPDATED_AT`. Planned piles are outside those four counts. The median averages
+the middle two durations for an even count. `RunStatSet` is read-only and scoped
+to the set, as are the existing cockpit entities. The synchronous `Doctor`
+action updates it too. `ScheduleStatus` adds watcher state, started time, last
+pass, number of piles marked FAILED, and next armed tick from `ZOSD_L3_WATCH`.
+No UI controls are added by this slice.
+
+Exact calls for the lead's probe (the fleet2 names are public demo names):
+
+```abap
+cl_abap_daemon_client_manager=>get_daemon_info(
+  i_class_name = 'ZCL_L3_FLEET2_DMN' ).
+cl_abap_daemon_client_manager=>start(
+  EXPORTING i_class_name = 'ZCL_L3_FLEET2_DMN'
+            i_name = 'L3_FLEET2_DMN'
+  IMPORTING e_setup_mode = lv_setup e_instance_id = lv_id ).
+lo_handle = cl_abap_daemon_client_manager=>attach( ls_info-instance_id ).
+lo_message = cl_ac_message_type_pcp=>create( ).
+lo_message->set_field( i_name = 'cmd' i_value = 'pile done' ).
+lo_message->set_field( i_name = 'run' i_value = iv_run ).
+lo_message->set_field( i_name = 'pile' i_value = lv_pile ).
+lo_handle->send( lo_message ).
+lo_timer = cl_abap_timer_manager=>get_timer_manager( ).
+lo_timer->start_timer( i_timer_handler = me i_timeout = lv_millis ).
+mo_context->stop( ).
+cl_abap_daemon_client_manager=>stop( ls_info-instance_id ).
+```
+
+The checkout at #489 contained the measurement documents but no daemon
+client/base facade, and the pinned timer manager raised
+`session_type_not_supported`. This slice adds a clean-room **subset** of those
+contracts and a local host for the generated watcher. It serializes callbacks
+as committing dialog steps, restricts lookup/attach to the creator program,
+uses the injectable clock, and re-arms after errors. It is a single-process
+host; daemon messages do not cross independently launched Node processes.
+General daemon session statics, activation restart semantics and AMC delivery
+are outside this subset. No SAP objects from `src/daemons` or `src/capacity`
+are included in the deployment unit; the system supplies those contracts.
 
 ### Fuses
 

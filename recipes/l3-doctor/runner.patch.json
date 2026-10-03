@@ -1,0 +1,50 @@
+[
+  {
+    "before": [
+      "  PRIVATE SECTION.\n"
+    ],
+    "after": [
+      "{{#autodoctor}}\n    CLASS-METHODS count_runs.\n{{#wake_retry}}\n    CLASS-METHODS arm_retry.\n{{/wake_retry}}\n{{#arm_job}}\n    CLASS-METHODS arm_doctor_job.\n{{/arm_job}}\n    CLASS-METHODS watcher_pass RETURNING VALUE(rv_open) TYPE abap_bool.\n    CLASS-METHODS watcher_audit IMPORTING iv_action TYPE csequence.\n{{/autodoctor}}\n{{#daemon}}\n    CLASS-METHODS start_daemon RETURNING VALUE(rv_ok) TYPE abap_bool.\n    CLASS-METHODS stop_daemon RETURNING VALUE(rv_ok) TYPE abap_bool.\n    CLASS-METHODS daemon_status RETURNING VALUE(rv_status) TYPE string.\n    CLASS-METHODS pile_done IMPORTING iv_run TYPE csequence iv_pile TYPE i.\n    CLASS-METHODS arm_tick.\n    CLASS-METHODS doctor_tick RETURNING VALUE(rv_secs) TYPE i.\n{{/daemon}}\n  PRIVATE SECTION.\n"
+    ]
+  },
+  {
+    "before": [
+      "    CALL FUNCTION 'JOB_CLOSE'\n      EXPORTING\n        jobname = lv_jobname\n        jobcount = lv_jobcount\n        strtimmed = 'X'\n"
+    ],
+    "after": [
+      "{{#doctor_event}}\n    DATA lv_watchname TYPE tbtcjob-jobname.\n    DATA lv_watchcount TYPE tbtcjob-jobcount.\n    DATA lv_eventparm TYPE c LENGTH 64.\n    lv_watchname = 'L3_{{set_upper}}_END'.\n    lv_eventparm(32) = lv_jobname.\n    lv_eventparm+32(8) = lv_jobcount.\n    CALL FUNCTION 'JOB_OPEN' EXPORTING jobname = lv_watchname\n      IMPORTING jobcount = lv_watchcount EXCEPTIONS OTHERS = 1.\n    IF sy-subrc = 0.\n      CALL FUNCTION 'JOB_SUBMIT' EXPORTING jobname = lv_watchname jobcount = lv_watchcount\n        report = '{{autodoctor.doctor_report_upper}}' authcknam = sy-uname EXCEPTIONS OTHERS = 1.\n      IF sy-subrc = 0.\n        CALL FUNCTION 'JOB_CLOSE' EXPORTING jobname = lv_watchname jobcount = lv_watchcount\n          event_id = 'SAP_END_OF_JOB' event_param = lv_eventparm EXCEPTIONS OTHERS = 1.\n      ENDIF.\n    ENDIF.\n{{/doctor_event}}\n    CALL FUNCTION 'JOB_CLOSE'\n      EXPORTING\n        jobname = lv_jobname\n        jobcount = lv_jobcount\n        strtimmed = 'X'\n"
+    ]
+  },
+  {
+    "before": [
+      "{{/with_params}}\n          CHANGING ct_report = rt_report ).\n  ENDMETHOD.\n\n"
+    ],
+    "after": [
+      "{{/with_params}}\n          CHANGING ct_report = rt_report ).\n{{#daemon}}\n    start_daemon( ).\n{{/daemon}}\n  ENDMETHOD.\n\n"
+    ]
+  },
+  {
+    "before": [
+      "      IF ls_lock-started > lv_stale.\n        CONTINUE.\n      ENDIF.\n"
+    ],
+    "after": [
+      "{{^autodoctor}}\n      IF ls_lock-started > lv_stale.\n        CONTINUE.\n      ENDIF.\n{{/autodoctor}}\n"
+    ]
+  },
+  {
+    "before": [
+      "        ELSEIF lv_finished = 'X' OR lv_aborted = 'X'.\n          lv_reason = 'JOB-ENDED'.\n        ENDIF.\n      ENDIF.\n"
+    ],
+    "after": [
+      "        ELSEIF lv_finished = 'X' OR lv_aborted = 'X'.\n          lv_reason = 'JOB-ENDED'.\n{{#autodoctor}}\n        ELSEIF lv_running = 'X' AND ls_pile-status = 'RUNNING' AND ls_pile-started <= lv_stale.\n          lv_reason = 'JOB-SILENT'.\n{{/autodoctor}}\n        ENDIF.\n      ENDIF.\n"
+    ]
+  },
+  {
+    "before": [
+      "    APPEND LINES OF lt_purged TO rt_report.\n  ENDMETHOD."
+    ],
+    "after": [
+      "    APPEND LINES OF lt_purged TO rt_report.\n{{#autodoctor}}\n{{#release_event}}\n    release_events( ).\n{{/release_event}}\n    count_runs( ).\n{{/autodoctor}}\n  ENDMETHOD."
+    ]
+  }
+]

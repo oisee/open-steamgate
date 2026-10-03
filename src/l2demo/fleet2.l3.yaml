@@ -4,8 +4,8 @@
 # the deep rules there; a schedule runs the set every day at 02:00 system time.
 # Slice 5a (docs/dsl-l3.md, "Resilience"): a failed or vanished pile is
 # retried twice, a minute after it failed and doubled per attempt; the doctor
-# takes over a lock, a pile or a gate left for 15 minutes and runs as a job of
-# the schedule; a rule stops writing past 500 alerts in a run; a row of
+# takes over a silent pile or gate after 15 minutes; the daemon doctor is
+# armed by every parallel run; a rule stops writing past 500 alerts in a run; a row of
 # ZOSD_L3_KILL stops the set; final runs' plans go after 30 days.
 # Slice 5d (docs/dsl-l3.md, "Simulated twin: the work as a port"): the work
 # of a pile is the port work; iv_bind = 'work=sim' runs the same runner with a
@@ -69,6 +69,7 @@ bindings:
   close: none
   work: real
 resilience:
+  doctor: {as: [daemon], tick: 10}
   retry: {max: 2, backoff: 60}
   stale: 900
   fuses:
@@ -108,7 +109,7 @@ simulate:
     stuck: {outcome: {ok: 0.7, hang: 0.3}}
     random: {outcome: {ok: 0.25, dump: 0.25, hang: 0.25, slow: 0.25}}
 settings:
-  tunable: [budget.glass, budget.warn, budget.narrow_at, budget.per_pile, retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, simulate.seed, simulate.time_scale, simulate.profile, simulate.dump, simulate.hang, simulate.slow, simulate.hits_mean, simulate.autoclose, piles.checks.size]
+  tunable: [doctor.tick, budget.glass, budget.warn, budget.narrow_at, budget.per_pile, retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, simulate.seed, simulate.time_scale, simulate.profile, simulate.dump, simulate.hang, simulate.slow, simulate.hits_mean, simulate.autoclose, piles.checks.size]
   bounds:
     fuses.max_alerts: {min: 1, max: 100000}
 cockpit: {app: zosd_fleet2, service: ZL3C_FLEET2_SRV, title: Fleet run cockpit}

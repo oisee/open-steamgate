@@ -5,7 +5,7 @@
  "sim_overlay": [
   "recipes/l3-sim/factory.patch.json"
  ],
- "model": "sha256:cc6e82b1fb5cda2c8c4a84262be0ed424edd1978f5ef98a76dcf528fc6e03fd3",
+ "model": "sha256:c319da24f9bdf0264d68ecea2f8926bcbe4ca2886f37beb3d76e8825912d604c",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",
@@ -672,7 +672,7 @@
    "template_line": 90,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 91,
@@ -1400,112 +1400,112 @@
    "template_line": 151,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 195,
    "template_line": 152,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 196,
    "template_line": 153,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 197,
    "template_line": 154,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 198,
    "template_line": 155,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 199,
    "template_line": 156,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 200,
    "template_line": 167,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 201,
    "template_line": 168,
    "path": "/simulate/exception",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 202,
    "template_line": 169,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 203,
    "template_line": 170,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 204,
    "template_line": 171,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 205,
    "template_line": 173,
    "path": "/simulate/sim_only/1/port",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 206,
    "template_line": 174,
    "path": "/simulate/exception",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 207,
    "template_line": 175,
    "path": "/simulate/sim_only/1/port",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 208,
    "template_line": 176,
    "path": "/simulate/sim_only/1",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 209,
    "template_line": 178,
    "path": "/simulate",
    "node": "set/fleet2/simulate",
-   "set_line": 82
+   "set_line": 83
   },
   {
    "line": 210,

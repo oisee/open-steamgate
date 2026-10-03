@@ -183,6 +183,10 @@ function operationsSnapshot(db, identity, sourceDb, caller, outbox, currentSourc
     }
     throw new JobSnapshotError("JOB_LEGACY_UNSUPPORTED", "imported run needs the multistep operations migration");
   }
+  if (run.job_end_instance) {
+    if (!/^[0-9a-f]{32}$/.test(run.job_end_instance) || run.job_end_instance !== currentSourceInstance) fail("invalid job-end source instance");
+    base.sourceInstance = run.job_end_instance;
+  }
   const rows = db.prepare("SELECT * FROM batch_run_steps WHERE run_id = ? ORDER BY step_no").all(id);
   const legacy = run.step_count === 0 && rows.length === 0;
   if (!value(run, "program") || (!legacy &&
