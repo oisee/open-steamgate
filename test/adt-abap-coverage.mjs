@@ -90,10 +90,6 @@ const PORT_PENDING = [
   "GET /sap/bc/adt/gw/errorlog",
   "POST /sap/bc/adt/cts/transportchecks",
   "POST /sap/bc/adt/abapsource/occurencemarkers",
-  // A3a: sessions and logoff
-  "GET /sap/bc/adt/core/http/sessions",
-  "DELETE /sap/bc/adt/core/http/sessions/:id",
-  "GET /sap/public/bc/icf/logoff",
   // A3b: reentrance ticket
   "GET /sap/bc/adt/core/http/reentranceticket",
   // A8a: thin introspection rows
@@ -274,7 +270,9 @@ describe("ADT on ABAP: the variant C done gate", function () {
       const made = adtRouter({...base, ...extra});
       walks[name] = {...walk(made.router, made.middleware), reported: made.middleware.map((m) => m.id)};
     }
-    regs = walks.abap.registrations;
+    // The Node oracle retains every endpoint. Ported session routes have no
+    // Node fallback in an ABAP mount, but must still be checked by this gate.
+    regs = walks.node.registrations;
     // The port gate asks the one-runtime table: C5 reads the request's
     // oneRuntime binding, C4 the STORE destination's localSystem. Switch-off
     // HOST is tested separately (C5's inline and reduced kernels, c4-runtime).
@@ -318,9 +316,14 @@ describe("ADT on ABAP: the variant C done gate", function () {
   });
   after(() => { if (root !== undefined) rmSync(root, {recursive: true, force: true}); });
 
-  it("every layer that is not a route is known middleware, and the registrations do not depend on the mount", () => {
+  it("every middleware layer is known and only ported session fallbacks disappear in ABAP mounts", () => {
     const expected = {node: ["sessions", "generation"], dump: ["sessions", "generation", "dump"],
       abap: ["generation", "abap-front"], "dump+abap": ["generation", "dump", "abap-front"]};
+    const retired = new Set([
+      "GET /sap/bc/adt/core/http/sessions",
+      "DELETE /sap/bc/adt/core/http/sessions/:id",
+      "GET /sap/public/bc/icf/logoff",
+    ]);
     const keys = (w) => w.registrations.map((r) => `${r.method} ${r.path}`);
     for (const [name, w] of Object.entries(walks)) {
       expect(w.unclassified, `${name}: use layers that are not the middleware adtRouter mounted`).to.deep.equal([]);
@@ -328,7 +331,8 @@ describe("ADT on ABAP: the variant C done gate", function () {
       // each reported layer found on the stack exactly once, and only those
       expect(w.middleware, `${name}: middleware on the stack`).to.deep.equal(w.reported);
       expect(w.middleware, `${name}: middleware for this mount`).to.deep.equal(expected[name]);
-      expect(keys(w), `${name}: registrations`).to.deep.equal(keys(walks.abap));
+      const expectedKeys = keys(walks.node).filter(key => !name.includes("abap") || !retired.has(key));
+      expect(keys(w), `${name}: registrations`).to.deep.equal(expectedKeys);
     }
   });
 

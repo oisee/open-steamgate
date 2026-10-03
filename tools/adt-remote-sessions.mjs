@@ -35,7 +35,6 @@ export class RemoteSessions extends AbapSessions {
     } finally { this.runtime.adtContexts.delete(context); }
   }
   get(id) { return this.call("get", [id]); }
-  end(id) { return this.call("end", [id]); }
   holderOf(type, name) { return this.call("holderOf", [type, name]); }
   holds(session, handle, type, name) { return this.call("holds", [session, handle, type, name]); }
   lock(session, type, name) { return this.call("lock", [session, type, name]); }

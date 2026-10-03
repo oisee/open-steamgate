@@ -35,6 +35,13 @@ in `adt-facade.mjs` and `adt-abap-front.mjs` are byte-unchanged from main
 still own their HOST_ALLOWED entries: B3 moves no route to ABAP and has no
 coverage block to delete. Their future ports will remove compatibility calls.
 
+A3a now serves poll, session DELETE and logoff in ABAP. The compatibility
+adapter and session door no longer forward `end`; the remote request door's
+transitional HOST logoff block is removed. B3 race tests end sessions through
+the ABAP logoff route, including while a parent delete callback holds the FIFO.
+The session door rejects `end` even with its formerly valid argument count.
+The remaining B3 operations and internal doors stay in place for Node callers.
+
 ## Verification
 
 All commands ran through `OSD_HEAVY_RANGE=80-89 tools/osd-heavy.sh`:

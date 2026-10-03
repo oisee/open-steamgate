@@ -14,6 +14,7 @@
 import {remoteForTest} from "./helpers/adt-remote.mjs";
 import {expect} from "chai";
 import express from "express";
+import {createHash} from "node:crypto";
 import {request as httpRequest} from "node:http";
 import {execFileSync} from "node:child_process";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
@@ -28,6 +29,7 @@ import {AbapSessions} from "../tools/adt-abap-sessions.mjs";
 import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
+import {Data} from "../tools/osd-data.mjs";
 import {SESSION_COOKIE} from "../tools/adt-session.mjs";
 
 const output = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
@@ -554,10 +556,16 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     const POLL = "/sap/bc/adt/core/http/sessions";
     const OFF = "/sap/public/bc/icf/logoff";
     const hash = (id) => createHash("sha256").update(id).digest("hex").slice(0, 32).toUpperCase();
-    const count = async () => dialogStep(async () => {
-      const rows = await globalThis.abap.context.databaseConnections.DEFAULT.select({select: "SELECT * FROM zosd_adt_sess"});
-      return rows.rows.length;
-    });
+    const count = async () => {
+      if (remoteRuntime !== undefined) {
+        const result = await new Data({runtime: remoteRuntime}).query("SELECT COUNT(*) AS total FROM zosd_adt_sess");
+        return Number(result.rows[0].total);
+      }
+      return dialogStep(async () => {
+        const rows = await globalThis.abap.context.databaseConnections.DEFAULT.select({select: "SELECT * FROM zosd_adt_sess"});
+        return rows.rows.length;
+      });
+    };
     const wire = async (server, method, path, headers = {}, by) => {
       served.length = 0;
       const res = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {method, headers});

@@ -35,7 +35,6 @@ import {serveSandboxConfig} from "./osd-sandbox-config.mjs";
 import {mountPortableCells} from "./sqlscript-to-procedure-ir.mjs";
 import {batchMonitorHandler} from "./osd-batch-monitor.mjs";
 import {identity} from "./osd-identity.mjs";
-import {parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {abapSession} from "./adt-enq.mjs";
 import {answerOf, abapServes, resumeOf, resumeRecord} from "./adt-abap-front.mjs";
 import {sessionsDoor} from "./osd-adt-sessions-door.mjs";
@@ -321,13 +320,6 @@ hostNodes["adt-step"] = (a, node) => a.post(node.path, async (req, res) => {
         const session = await sessions.sessionFor(request);
         const answer = await answerOf(globalThis.abap.Classes.ZCL_OSD_ADT_HANDLER,
           {...input.view, body: Buffer.from(input.bodyHex ?? "", "hex")}, session);
-        // Until A3a, delegated logoff still ends its session in this same
-        // FIFO turn, before a queued LOCK can resolve the old token.
-        if (input.view.path === "/sap/public/bc/icf/logoff" && ["GET", "HEAD"].includes(input.view.method)
-          && answer.servedBy === "HOST" && answer.continuation === undefined) {
-          const id = sessionIdOf(parseCookies(request.headers.cookie));
-          if (id) await sessions.end(id);
-        }
         return answer;
       }, `ADT ${input.view.method} ${input.view.path}`)));
     const adt = request.adt === undefined ? undefined : {...request.adt, sessions: undefined,

@@ -6,7 +6,7 @@ import {sessionJSON, sessionValue} from "./adt-remote-sessions.mjs";
 import {dialogStep} from "./osd-dialog-step.mjs";
 import {withStoreIPC} from "./osd-store-ipc.mjs";
 
-const ARITY = {get: 1, end: 1, holderOf: 2, holds: 4, lock: 3,
+const ARITY = {get: 1, holderOf: 2, holds: 4, lock: 3,
   unlock: 2, release: 2, whileHeld: 4, deleteObject: 3};
 export function sessionsDoor(identity) {
   return async (req, res) => {
