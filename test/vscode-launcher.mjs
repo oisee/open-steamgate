@@ -1523,8 +1523,57 @@ describe("layerContributions: DDIC counts", function () {
 // the debugger on demand: the launcher asks the running system's door to
 // open its inspector on a port it picks, and closes only what it opened
 describe("editors/vscode/launcher.js: the inspector on demand", function () {
+  this.timeout(25000);
   let server;
-  afterEach(() => server && new Promise((resolve) => server.close(resolve)));
+  let sockets;
+  let launchers;
+  let operations;
+  beforeEach(() => {
+    server = undefined;
+    sockets = new Set();
+    launchers = [];
+    operations = [];
+  });
+
+  function bounded(promise, waitingFor, timeoutMs = 3000) {
+    let timer;
+    const result = Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`timed out waiting for ${waitingFor} after ${timeoutMs} ms`)), timeoutMs);
+    })]).finally(() => clearTimeout(timer));
+    operations.push(promise);
+    // Teardown also observes waits whose caller failed before awaiting them.
+    result.catch(() => {});
+    return result;
+  }
+
+  async function listen() {
+    const listening = new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.on("connection", (socket) => {
+        sockets.add(socket);
+        socket.once("close", () => sockets.delete(socket));
+      });
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    await bounded(listening, "inspector stub to listen");
+  }
+
+  function makeLauncher(storageDir = tmpdir()) {
+    const launcher = new Launcher({osdHome: process.cwd(), storageDir});
+    launchers.push(launcher);
+    return launcher;
+  }
+
+  afterEach(async () => {
+    for (const launcher of launchers) launcher.state = "stopped";
+    if (server) {
+      const closed = new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      // Active responses and keep-alive sockets must not hold the hook open.
+      for (const socket of sockets) socket.destroy();
+      await bounded(closed, "inspector stub and its connections to close");
+    }
+    await bounded(Promise.allSettled(operations), "inspector operations to settle");
+  });
 
   for (const early of ["pending", "recovering"]) {
     it(`waits for readiness and the requested endpoint after a ${early} answer`, async () => {
@@ -1555,18 +1604,18 @@ describe("editors/vscode/launcher.js: the inspector on demand", function () {
           res.end(JSON.stringify(answer));
         });
       });
-      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-      const launcher = new Launcher({osdHome: process.cwd(), storageDir: tmpdir()});
+      await listen();
+      const launcher = makeLauncher();
       launcher.state = "running";
       launcher.port = server.address().port;
       let settled = false;
-      const opening = launcher.openInspector().then((port) => { settled = true; return port; });
+      const opening = bounded(launcher.openInspector().then((port) => { settled = true; return port; }), "requested inspector endpoint");
       // The old implementation returns at POST, before either poll.
-      await Promise.race([opening, servingRead]);
+      await bounded(Promise.race([opening, servingRead]), "first serving readiness poll");
       expect(settled, "not attachable while booting").to.equal(false);
       expect(launcher.inspectorOpen).not.to.equal(true);
       ready = true;
-      await Promise.race([opening, inspectorRead]);
+      await bounded(Promise.race([opening, inspectorRead]), "first inspector endpoint poll");
       expect(settled, "a different endpoint is not the requested inspector").to.equal(false);
       confirmed = true;
       expect(await opening).to.equal(requested);
@@ -1587,11 +1636,11 @@ describe("editors/vscode/launcher.js: the inspector on demand", function () {
           : {ready: false}));
       });
     });
-    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const launcher = new Launcher({osdHome: process.cwd(), storageDir: tmpdir()});
+    await listen();
+    const launcher = makeLauncher();
     launcher.state = "running";
     launcher.port = server.address().port;
-    await rejects(launcher.openInspector(), /not ready within 15000 ms/);
+    await bounded(rejects(launcher.openInspector(), /not ready within 15000 ms/), "recovery readiness deadline", 18000);
     expect(launcher.inspectorOpen).not.to.equal(true);
   });
 
@@ -1609,35 +1658,35 @@ describe("editors/vscode/launcher.js: the inspector on demand", function () {
         res.end(JSON.stringify(refuse === undefined ? {open: body.open, port: body.port} : {error: refuse}));
       });
     });
-    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await listen();
     const storageDir = mkdtempSync(join(tmpdir(), "osd-inspector-launcher-"));
     try {
-      const launcher = new Launcher({osdHome: process.cwd(), storageDir});
-      await rejects(launcher.openInspector(), /not running: start it first/);
+      const launcher = makeLauncher(storageDir);
+      await bounded(rejects(launcher.openInspector(), /not running: start it first/), "not-running rejection");
       launcher.state = "running";
       launcher.port = server.address().port;
-      const port = await launcher.openInspector();
+      const port = await bounded(launcher.openInspector(), "inspector open answer");
       expect(port).to.be.within(1, 65535);
       expect(launcher.inspectorOpen).to.equal(true);
-      expect(await launcher.openInspector(), "open already: no second request").to.equal(port);
+      expect(await bounded(launcher.openInspector(), "already-open inspector"), "open already: no second request").to.equal(port);
       // two asks at once (a breakpoint and a start's own attach) are one open
       launcher.inspectorOpen = false;
-      const both = await Promise.all([launcher.openInspector(), launcher.openInspector()]);
+      const both = await bounded(Promise.all([launcher.openInspector(), launcher.openInspector()]), "concurrent inspector opens");
       expect(both).to.deep.equal([port, port]);
       expect(requests.filter(([, , body]) => body.open === true), "one POST for both").to.have.length(2);
-      expect(await launcher.closeInspector()).to.equal(true);
+      expect(await bounded(launcher.closeInspector(), "inspector close answer")).to.equal(true);
       expect(requests).to.deep.equal([
         ["POST", "/osd/inspector", {open: true, port}],
         ["POST", "/osd/inspector", {open: true, port}],
         ["POST", "/osd/inspector", {open: false}],
       ]);
       refuse = "a debugger needs one work process";
-      await rejects(launcher.openInspector(), /a debugger needs one work process/);
+      await bounded(rejects(launcher.openInspector(), /a debugger needs one work process/), "inspector refusal");
       expect(launcher.inspectorOpen).to.equal(false);
       // a system started with its inspector (osd.debug, OSD_INSPECT=1) keeps it
       launcher.debug = true;
       launcher.inspectorOpen = true;
-      expect(await launcher.closeInspector()).to.equal(false);
+      expect(await bounded(launcher.closeInspector(), "inspector close answer")).to.equal(false);
       expect(requests).to.have.length(4);
     } finally {
       rmSync(storageDir, {recursive: true, force: true});
