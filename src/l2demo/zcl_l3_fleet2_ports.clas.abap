@@ -88,6 +88,7 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
     DATA lv_replay_port TYPE string.
     DATA lv_hand_port TYPE string.
     DATA lv_work TYPE string.
+    DATA lv_sink TYPE string.
     DATA lv_planner_port TYPE string.
     SPLIT iv_bind AT ',' INTO TABLE lt_parts.
     LOOP AT lt_parts INTO lv_part.
@@ -137,6 +138,9 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
     lv_variant = variant( iv_port = 'alerts' iv_bind = iv_bind ).
     lv_known = abap_false.
     IF lv_variant = 'log'.
+      lv_known = abap_true.
+    ENDIF.
+    IF lv_variant = 'remote'.
       lv_known = abap_true.
     ENDIF.
     IF lv_variant = 'dummy'.
@@ -197,6 +201,12 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
     " port answers by chance and is bound only beside work=sim
     lv_work = variant( iv_port = 'work' iv_bind = iv_bind ).
     IF lv_work = 'sim'.
+      lv_sink = variant( iv_port = 'alerts' iv_bind = iv_bind ).
+      IF lv_sink = 'remote'.
+        RAISE EXCEPTION TYPE zcx_l3_fleet2_port
+          EXPORTING iv_port = 'alerts' iv_variant = lv_sink
+                    iv_reason = 'a simulated run writes to a production sink only when simulate.allow_sink names it'.
+      ENDIF.
       IF lv_replay_port IS NOT INITIAL.
         RAISE EXCEPTION TYPE zcx_l3_fleet2_port
           EXPORTING iv_port = 'work' iv_variant = lv_work
@@ -248,6 +258,8 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
     CASE iv_variant.
       WHEN 'log'.
         CREATE OBJECT ri_port TYPE zcl_l3_fleet2_alerts_log.
+      WHEN 'remote'.
+        CREATE OBJECT ri_port TYPE zcl_l3_fleet2_alerts_remote.
       WHEN 'dummy'.
         CREATE OBJECT ri_port TYPE zcl_l3_fleet2_alerts_dummy.
       WHEN 'capture'.

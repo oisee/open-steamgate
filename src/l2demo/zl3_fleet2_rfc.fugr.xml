@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0" serializer="LCL_OBJECT_FUGR" serializer_version="v1.0.0">
+ <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
+  <AREAT>Generated L3 remote alert receiver</AREAT>
+  <INCLUDES><SOBJ_NAME>SAPLZL3_FLEET2_RFC</SOBJ_NAME><SOBJ_NAME>LZL3_FLEET2_RFCTOP</SOBJ_NAME></INCLUDES>
+  <FUNCTIONS><item><FUNCNAME>Z_L3_FLEET2_ALERTS</FUNCNAME><REMOTE_CALL>R</REMOTE_CALL><SHORT_TEXT>Receive alert pile</SHORT_TEXT>
+   <IMPORT>
+    <RSIMP><PARAMETER>IS_HEADER</PARAMETER><TYP>ZL3_FLEET2_RHEAD</TYP></RSIMP>
+    <RSIMP><PARAMETER>IT_ROWS</PARAMETER><TYP>ZL3_FLEET2_RROWS</TYP></RSIMP>
+   </IMPORT>
+   <EXPORT><RSEXP><PARAMETER>ES_RESULT</PARAMETER><TYP>ZL3_FLEET2_RCPT</TYP></RSEXP></EXPORT>
+   <EXCEPTION><RSEXC><EXCEPTION>SNAPSHOT_MISMATCH</EXCEPTION></RSEXC></EXCEPTION>
+  </item></FUNCTIONS>
+ </asx:values></asx:abap>
+</abapGit>

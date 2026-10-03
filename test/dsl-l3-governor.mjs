@@ -49,13 +49,14 @@ describe("DSL L3 slice 5c-1: governor", function () {
     const text = readFileSync("src/l2demo/zcl_l3_fleet2.clas.abap", "utf8").split("\n");
     const trace = JSON.parse(readFileSync("src/l2demo/zcl_l3_fleet2.clas.trace.json", "utf8"));
     const line = readFileSync(SET, "utf8").split("\n").findIndex((l) => l === "governor:") + 1;
+    const remoteLine = readFileSync(SET, "utf8").split("\n").findIndex((l) => l.includes("remote: {function:")) + 1;
     for (const re of [/METHOD budget_/, /METHOD break_glass/, /METHOD continue_glass/, /METHOD release_pile/,
       /reserved = reserved [+-]/, /iv_key_offset =/, /state = 'NARROW'/,
       /budget_state\(/, /status = 'HELD' OR .*status = 'GLASS'/, /LOOP.*status <> 'HELD'/,
       /RAISE EXCEPTION.*(?:governor|alert lacks)/, /li_autoclose =/]) {
       const matches = trace.lines.filter((t) => re.test(text[t.line - 1]));
       expect(matches.length, String(re)).above(0);
-      for (const t of matches) expect(t.set_line, text[t.line - 1]).to.equal(line);
+      for (const t of matches) expect(t.set_line, text[t.line - 1]).to.equal(t.node.endsWith("/variant/remote") ? remoteLine : line);
     }
     const factory = readFileSync("src/l2demo/zcl_l3_fleet2_ports.clas.abap", "utf8").split("\n");
     const factoryTrace = JSON.parse(readFileSync("src/l2demo/zcl_l3_fleet2_ports.clas.trace.json", "utf8"));

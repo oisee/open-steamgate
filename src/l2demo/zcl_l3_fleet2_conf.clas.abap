@@ -23,6 +23,7 @@ CLASS zcl_l3_fleet2_conf DEFINITION PUBLIC FINAL CREATE PUBLIC.
              simulate_autoclose TYPE i,
              piles_checks_size TYPE i,
              piles_lanes TYPE i,
+             remote_destination TYPE c LENGTH 40,
            END OF ty_values.
     TYPES tt_conf TYPE STANDARD TABLE OF zosd_l3_conf WITH DEFAULT KEY.
     TYPES: BEGIN OF ty_state,
@@ -178,6 +179,11 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     ls_spec-param_name = 'piles.lanes'.
     ls_spec-dsl_value = '0'.
     APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'remote.destination'.
+    ls_spec-dsl_value = 'NONE'.
+    APPEND ls_spec TO rt_specs.
   ENDMETHOD.
 
   METHOD defaults.
@@ -201,6 +207,7 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     rs_vals-simulate_autoclose = '-1'.
     rs_vals-piles_checks_size = '2'.
     rs_vals-piles_lanes = '0'.
+    rs_vals-remote_destination = 'NONE'.
   ENDMETHOD.
 
   METHOD sane.
@@ -383,6 +390,10 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     ENDIF.
     IF valid( iv_param = 'piles.lanes' iv_value = lv_text ) = abap_false.
       rs_vals-piles_lanes = ls_def-piles_lanes.
+    ENDIF.
+    lv_text = is_vals-remote_destination.
+    IF valid( iv_param = 'remote.destination' iv_value = lv_text ) = abap_false.
+      rs_vals-remote_destination = ls_def-remote_destination.
     ENDIF.
   ENDMETHOD.
 
@@ -775,6 +786,11 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
           RETURN.
         ENDIF.
         rv_ok = abap_true.
+      WHEN 'remote.destination'.
+        IF strlen( lv_text ) < 1 OR strlen( lv_text ) > 40.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
     ENDCASE.
   ENDMETHOD.
 
@@ -948,6 +964,8 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
           rs_state-vals-piles_checks_size = lv_effective.
         WHEN 'piles.lanes'.
           rs_state-vals-piles_lanes = lv_effective.
+        WHEN 'remote.destination'.
+          rs_state-vals-remote_destination = lv_effective.
       ENDCASE.
     ENDLOOP.
   ENDMETHOD.

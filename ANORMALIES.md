@@ -3519,3 +3519,17 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
 - Workaround: construct the whitespace character set explicitly in C5; keep the word boundary explicit for 7.02 as well.
 - Regression: C5 source decision ABAP Unit and the source parity cases in `test/adt-abap-c5.mjs`.
 - Upstream: needs an issue; no upstream change made in this slice.
+
+### ANOMALY-2026-10-03-local-rfc-dump - NONE did not raise SYSTEM_FAILURE
+
+Observed locally while generating the L3 remote alert sink: `localClient()` let
+an unhandled module dump escape `CALL FUNCTION ... DESTINATION 'NONE'
+... EXCEPTIONS system_failure = 1`, leaving the pile without an RFC outcome.
+The local destination now translates a dumping module to classic SYSTEM_FAILURE
+for the pinned transpiler's call-site catch. Direct callers that supply an
+exception map receive its numeric subrc. The destination proxy preserves this
+contract when the Gateway library re-registers NONE while constructing a DPC;
+declared classic exceptions keep their
+names when the transpiler supplies no map. No SAP measurement was made for
+this slice. `test/dsl-l3-remote.mjs` exercises a copied dumping ABAP module,
+SNAPSHOT_MISMATCH and the doctor retry.

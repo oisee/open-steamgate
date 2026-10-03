@@ -1715,7 +1715,7 @@ output between the markers.
 flowchart LR
   n_set_fleet2(["fleet2: The fleet in two stages, busy ships first, then the deep checks"])
   n_set_fleet2_port_ships>"ships (source ZOSD_L2_SHIP)<br/>bound: table<br/>other: capture, worklist"]
-  n_set_fleet2_port_alerts>"alerts (sink ZOSD_L3_ALERT)<br/>bound: log<br/>other: dummy, capture"]
+  n_set_fleet2_port_alerts>"alerts (sink ZOSD_L3_ALERT)<br/>bound: log<br/>other: remote, dummy, capture"]
   n_set_fleet2_port_close>"close (autoclose)<br/>bound: none<br/>other: capture, maintenance, sim"]
   n_set_fleet2_port_work>"work (work)<br/>bound: real<br/>other: sim"]
   n_set_fleet2_stage_candidates_gate{{"gate 1 to 2"}}
@@ -2804,3 +2804,93 @@ snapshot for its checks stage. `test/dsl-l3-snapshot.mjs` checks the canonical
 bytes, read order, technical re-keying, reuse, exclusions, run/settings and
 explain traces, stale identities, handshake audits, validation and the
 STRIPPED output, with copies of the generated runner used for mutations.
+
+## Remote alert sink (DSL seam)
+
+The optional `remote` alert variant generates both ends of a synchronous RFC
+call. Fleet2 keeps `alerts: log` as its default; choose `iv_bind =
+'alerts=remote'` to send detection results through `Z_L3_FLEET2_ALERTS` in
+function group `ZL3_FLEET2_RFC`. Its declaration is:
+
+```yaml
+ports:
+  alerts:
+    # kind, table, group and seq as for the log
+    variants:
+      log: generated
+      remote: {function: Z_L3_FLEET2_ALERTS, destination: remote.destination, group: ZL3_FLEET2_RFC}
+settings:
+  tunable: [remote.destination]  # alongside the set's other settings
+```
+
+A literal destination such as `NONE` also works. `remote.destination` defaults
+to `NONE` and reads the detecting system's setting at each send, so an operator
+can repair a destination before retrying. OSG's `NONE` uses the same session,
+connection and LUW as the detector: the receiving module's COMMIT also commits
+pending local work. It supplies no real isolation. SL.0's loopback transport
+will provide independent sessions; this slice does not implement it. Avoid
+remote/NONE while a source adapter has temporarily replaced persistent input.
+
+The generated `RHEAD` structure carries set, detecting run, model hash, S/P
+mode, rule, pile and attempt, snapshot ID, full hash and count, and the rule's
+alert-key layout and trace. `RROW` is derived from the alert log's DDIC row,
+with its deep alert text replaced by CHAR(1024). The client refuses longer
+text as `RFC-PAYLOAD` before conversion. `RROWS` is its standard table type.
+All module parameters are DDIC structures or a DDIC table of flat scalars.
+The function group's abapGit XML has `REMOTE_CALL = R`. The existing RFC
+channel discovers it by name without a route-specific adapter:
+`POST /sap/bc/osd/rfc/call/Z_L3_FLEET2_ALERTS`, with `IMPORTING.IS_HEADER`
+and `IMPORTING.IT_ROWS`, returns `EXPORTING.ES_RESULT`.
+
+The module checks persisted snapshot identity before any alert write. A
+mismatch commits the existing `SNAP-MISMATCH` doctor audit and raises classic
+`SNAPSHOT_MISMATCH`. The detector maps system failure, communication failure,
+snapshot mismatch and other classic exceptions to `RFC-SYSFAIL`, `RFC-COMM`,
+`SNAP-MISMATCH` and `RFC-OTHER`; its pile becomes FAILED with that reason,
+visible to the existing doctor retry policy. The local RFC client preserves
+classic exception names for the pinned transpiler's call-site catch and
+converts an unhandled module dump to SYSTEM_FAILURE.
+
+The receiver reuses the generated runner's write path, explicitly bound to its
+own log and its own default closing adapter. It loads its own settings and
+owns its own budget, fuse and received pile rows, under a fresh run ID. The
+detector does no reservation or closing for these rows. The empty local
+budget remains as the runner's orchestration guard. The receiver's budget can
+be continued using its run reference; a held received pile can be released
+there with a raised cap and an audited reason. Remote refusals keep the
+detecting run open. After a receiver-side continuation or release, explicitly
+Resume the detecting run to send its held/glass piles again; the receiver
+continues to enforce its own policy. Receiving stage rows describe
+the work that has arrived, rather than a second detection plan. They make the
+receiving run visible to its cockpit without copying the orchestrator.
+
+`RCPT` atomically claims `(set, detecting run, rule, pile, attempt)` before
+writing. Rule is included because pile numbers repeat across rules. Its DONE
+receipt, alert writes and budget changes commit together. A duplicate returns
+the receipt without rewriting log rows or reserving again, including a retry
+after a lost reply. Refusals do not retain a DONE receipt. The existing
+synchronous first attempt is numbered zero; that exact identity crosses the
+seam. `RLINK` retains the receiving run reference on both sides. Explain
+prints the link and the cockpit service exposes read-only `RunSet.RemoteRun`.
+No application UI changes are required. Receipts and links are durable;
+retention of this additional ledger is not implemented in this slice.
+
+For a real second system, install the receiver function group, generated DDIC,
+runner and its local log/closing dependencies (included in deploy unit
+`l3demo`), and install the matching READY snapshot identity there before
+sending. Snapshot values are not transferred or fabricated by this call. Set
+`remote.destination` to an SM59 RFC destination with the receiving host,
+logon and client; configure receiver settings and closing bindings there.
+OSG can use a configured live/replay destination; no real second-system logon
+or SAP call was used for this proof. The transport is synchronous; a durable
+outbox, tRFC/qRFC, SL.0 isolation, and the SL.5 two-package split remain future
+landscape work. To run the twin through this production sink, explicitly
+include `remote` in `simulate.allow_sink` in the chosen manifest/profile.
+
+`test/dsl-l3-remote.mjs` covers flat typing, the remote flag, local-log parity,
+run links, receiver budget ownership, audited mismatches, dump and link-loss
+outcomes, doctor retries, duplicate calls, the HTTP channel and line-numbered
+validation. Copies of the signature, remote flag, module handshake and runner
+receipt gate demonstrate that their contract assertions fail when removed;
+a copied dumping module exercises SYSTEM_FAILURE without changing tracked
+source.

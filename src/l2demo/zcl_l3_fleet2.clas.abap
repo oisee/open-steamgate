@@ -14,7 +14,7 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
              model_hash TYPE zosd_l3_alert-model_hash,
              jobname TYPE tbtcjob-jobname,
              jobcount TYPE tbtcjob-jobcount,
-             status TYPE c LENGTH 12,
+             status TYPE c LENGTH 16,
              alerts TYPE i,
              failed TYPE i,
              budget_alerts TYPE i,
@@ -231,6 +231,8 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS pile_done IMPORTING iv_run TYPE csequence iv_pile TYPE i.
     CLASS-METHODS arm_tick.
     CLASS-METHODS doctor_tick RETURNING VALUE(rv_secs) TYPE i.
+    CLASS-METHODS remote_receive IMPORTING is_header TYPE zl3_fleet2_rhead it_rows TYPE zl3_fleet2_rrows
+      RETURNING VALUE(rs_result) TYPE zl3_fleet2_rcpt.
   PRIVATE SECTION.
     CLASS-METHODS budget_start IMPORTING iv_run TYPE csequence.
     CLASS-METHODS budget_counts IMPORTING iv_run TYPE csequence CHANGING ct_rules TYPE tt_rule.
@@ -1563,6 +1565,30 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ls_group-model_hash = cs_rule-model_hash.
     ls_group-check_date = iv_date.
     ls_group-pile_no = iv_pile.
+    IF zcl_l3_fleet2_ports=>variant( iv_port = 'alerts' iv_bind = iv_bind ) = 'remote'.
+      zcl_l3_fleet2_alerts_remote=>header-set_name = c_set.
+      zcl_l3_fleet2_alerts_remote=>header-run_id = iv_run.
+      zcl_l3_fleet2_alerts_remote=>header-rule_name = cs_rule-rule.
+      zcl_l3_fleet2_alerts_remote=>header-model_hash = cs_rule-model_hash.
+      zcl_l3_fleet2_alerts_remote=>header-check_date = iv_date.
+      zcl_l3_fleet2_alerts_remote=>header-pile_no = iv_pile.
+      zcl_l3_fleet2_alerts_remote=>header-rule_no = iv_rule_no.
+      zcl_l3_fleet2_alerts_remote=>header-stage_no = cs_rule-stage_no.
+      zcl_l3_fleet2_alerts_remote=>header-key_offset = iv_key_offset.
+      zcl_l3_fleet2_alerts_remote=>header-key_length = iv_key_length.
+      zcl_l3_fleet2_alerts_remote=>header-rule_class = iv_class.
+      zcl_l3_fleet2_alerts_remote=>header-rule_file = iv_file.
+      zcl_l3_fleet2_alerts_remote=>header-rule_line = iv_line.
+      li_sink = zcl_l3_fleet2_ports=>get_alerts( 'remote' ).
+      lv_count = li_sink->put( it_rows = lt_rows is_group = ls_group ).
+      cs_rule-status = zcl_l3_fleet2_alerts_remote=>answer-status.
+      cs_rule-alerts = zcl_l3_fleet2_alerts_remote=>answer-alerts.
+      cs_rule-closed = zcl_l3_fleet2_alerts_remote=>answer-closed.
+      cs_rule-open_alerts = zcl_l3_fleet2_alerts_remote=>answer-open_alerts.
+      cs_rule-budget_alerts = zcl_l3_fleet2_alerts_remote=>answer-budget_alerts.
+      cs_rule-failed = lines( lt_rows ) - lv_count.
+      RETURN.
+    ENDIF.
     " the fuse: the alerts the rule's DONE piles of this run wrote, and this
     " pile's: past c_max_alerts this pile writes nothing (its group's older
     " rows stay), and the rule is FUSED and never finalised in this run
@@ -1712,6 +1738,14 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD release.
+    DATA lt_remote_pending TYPE tt_pile.
+    IF zcl_l3_fleet2_ports=>variant( iv_port = 'alerts' iv_bind = sim_bind( iv_run ) ) = 'remote'.
+      SELECT * FROM zosd_l3_pile INTO TABLE lt_remote_pending WHERE set_name = c_set AND run_id = iv_run
+        AND ( status = 'FAILED' OR status = 'HELD' OR status = 'GLASS' ).
+      IF lt_remote_pending IS NOT INITIAL.
+        RETURN.
+      ENDIF.
+    ENDIF.
     IF budget_state( iv_run ) = 'GLASS'.
       RETURN.
     ENDIF.
@@ -1846,6 +1880,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       WITH s_11 = gs_settings-vals-simulate_seed
       WITH s_12 = gs_settings-vals-simulate_time_scale
       WITH s_13 = gs_settings-vals-piles_checks_size
+      WITH s_14 = gs_settings-vals-remote_destination
       WITH p_active = is_params-active_status
       VIA JOB lv_jobname NUMBER lv_jobcount
       AND RETURN.
@@ -2324,6 +2359,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
                      iv_audit = abap_false
            CHANGING ct_report = rt_report ).
       RETURN.
+    ENDIF.
+    IF zcl_l3_fleet2_ports=>variant( iv_port = 'alerts' iv_bind = sim_bind( iv_run ) ) = 'remote'.
+      " An explicit resume may ask again; the receiver still owns permission to write.
+      UPDATE zosd_l3_pile SET status = 'PLANNED' job_count = '' job_name = '' reason = 'REMOTE-RETRY'
+        WHERE set_name = c_set AND run_id = iv_run AND ( status = 'GLASS' OR status = 'HELD' ).
+      UPDATE zosd_l3_stage SET status = 'OPEN' WHERE set_name = c_set AND run_id = iv_run AND status = 'PARTIAL'.
     ENDIF.
     heal( EXPORTING iv_run = ls_lock-run_id
                     iv_date = ls_lock-check_date
@@ -3122,6 +3163,22 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
   METHOD budget_counts.
     DATA lv_rule TYPE i.
     FIELD-SYMBOLS <ls_rule> TYPE ty_rule.
+    DATA ls_remote_link TYPE zl3_fleet2_rlink.
+    DATA lt_remote_piles TYPE tt_pile.
+    DATA ls_remote_pile TYPE zosd_l3_pile.
+    SELECT SINGLE * FROM zl3_fleet2_rlink INTO ls_remote_link WHERE set_name = c_set AND run_id = iv_run.
+    IF sy-subrc = 0.
+      SELECT * FROM zosd_l3_pile INTO TABLE lt_remote_piles WHERE set_name = c_set AND run_id = iv_run AND status = 'DONE'.
+      LOOP AT ct_rules ASSIGNING <ls_rule>.
+        CLEAR: <ls_rule>-budget_alerts, <ls_rule>-closed, <ls_rule>-open_alerts.
+        LOOP AT lt_remote_piles INTO ls_remote_pile WHERE rule_name = <ls_rule>-rule.
+          <ls_rule>-closed = <ls_rule>-closed + ls_remote_pile-closed.
+          <ls_rule>-open_alerts = <ls_rule>-open_alerts + ls_remote_pile-open_alerts.
+        ENDLOOP.
+        <ls_rule>-budget_alerts = <ls_rule>-closed + <ls_rule>-open_alerts.
+      ENDLOOP.
+      RETURN.
+    ENDIF.
     LOOP AT ct_rules ASSIGNING <ls_rule>.
       CLEAR: <ls_rule>-budget_alerts, <ls_rule>-closed, <ls_rule>-open_alerts.
       CASE <ls_rule>-rule.
@@ -3329,6 +3386,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ENDIF.
     SELECT SINGLE status FROM zosd_l3_run INTO lv_reason
       WHERE set_name = c_set AND check_date = ls_pile-check_date AND run_id = iv_run.
+    IF sy-subrc <> 0.
+      SELECT SINGLE remote_run FROM zl3_fleet2_rlink INTO lv_reason WHERE set_name = c_set AND remote_run = iv_run.
+      IF sy-subrc = 0.
+        lv_reason = 'HELD'.
+      ENDIF.
+    ENDIF.
     IF lv_reason = 'RELEASED'.
       lv_locked = lock( iv_run = iv_run iv_date = ls_pile-check_date ).
       IF lv_locked = abap_false.
@@ -3840,5 +3903,120 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         RETURN.
       ENDIF.
     ENDDO.
+  ENDMETHOD.
+  METHOD remote_receive.
+    DATA ls_link TYPE zl3_fleet2_rlink.
+    DATA ls_claim TYPE zl3_fleet2_rcpt.
+    DATA ls_wire TYPE zl3_fleet2_rrow.
+    DATA ls_saved TYPE zcl_l3_fleet2_conf=>ty_state.
+    DATA lv_saved_run TYPE string.
+    DATA ls_rule TYPE ty_rule.
+    DATA lt_alerts TYPE string_table.
+    DATA ls_snap TYPE zosd_l3_run_snap.
+    DATA ls_plan TYPE zosd_l3_pile.
+    DATA ls_gate TYPE zosd_l3_stage.
+    DATA lt_plan TYPE tt_pile.
+    IF is_header-set_name <> c_set OR is_header-run_id IS INITIAL OR is_header-attempt < 0.
+      rs_result-status = 'RFC-PAYLOAD'.
+      RETURN.
+    ENDIF.
+    ls_claim-set_name = c_set.
+    ls_claim-run_id = is_header-run_id.
+    ls_claim-rule_name = is_header-rule_name.
+    ls_claim-pile_no = is_header-pile_no.
+    ls_claim-attempt = is_header-attempt.
+    " Unique INSERT serializes duplicate calls; the receipt and writes share a LUW.
+    INSERT zl3_fleet2_rcpt FROM ls_claim.
+    IF sy-subrc <> 0.
+      SELECT SINGLE * FROM zl3_fleet2_rcpt INTO rs_result
+        WHERE set_name = c_set AND run_id = is_header-run_id AND rule_name = is_header-rule_name
+          AND pile_no = is_header-pile_no AND attempt = is_header-attempt.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE * FROM zl3_fleet2_rlink INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id.
+    IF sy-subrc <> 0.
+      ls_link-set_name = c_set.
+      ls_link-run_id = is_header-run_id.
+      TRY.
+          ls_link-remote_run = cl_system_uuid=>create_uuid_c32_static( ).
+        CATCH cx_uuid_error.
+          RAISE EXCEPTION TYPE zcx_l3_fleet2_port EXPORTING iv_reason = 'receiver UUID unavailable'.
+      ENDTRY.
+      INSERT zl3_fleet2_rlink FROM ls_link.
+      IF sy-subrc <> 0.
+        SELECT SINGLE * FROM zl3_fleet2_rlink INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id.
+      ENDIF.
+    ENDIF.
+    ls_saved = gs_settings.
+    lv_saved_run = gv_settings_run.
+    gs_settings = zcl_l3_fleet2_conf=>load( iv_write = abap_false ).
+    gv_settings_run = ls_link-remote_run.
+    budget_start( ls_link-remote_run ).
+    ls_snap-set_name = c_set.
+    ls_snap-run_id = ls_link-remote_run.
+    ls_snap-stage_no = is_header-stage_no.
+    ls_snap-snap_id = is_header-snap_id.
+    ls_snap-content_hash = is_header-content_hash.
+    ls_snap-row_count = is_header-row_count.
+    INSERT zosd_l3_run_snap FROM ls_snap.
+    SELECT SINGLE * FROM zosd_l3_pile INTO ls_plan
+      WHERE set_name = c_set AND run_id = ls_link-remote_run AND rule_name = is_header-rule_name AND pile_no = is_header-pile_no.
+    ls_plan-set_name = c_set.
+    ls_plan-run_id = ls_link-remote_run.
+    ls_plan-rule_name = is_header-rule_name.
+    ls_plan-model_hash = is_header-model_hash.
+    ls_plan-check_date = is_header-check_date.
+    ls_plan-stage_no = is_header-stage_no.
+    ls_plan-pile_no = is_header-pile_no.
+    ls_plan-attempt = is_header-attempt.
+    ls_plan-status = 'RUNNING'.
+    GET TIME STAMP FIELD ls_plan-started.
+    MODIFY zosd_l3_pile FROM ls_plan.
+    LOOP AT it_rows INTO ls_wire.
+      APPEND ls_wire-alert_text TO lt_alerts.
+    ENDLOOP.
+    ls_rule-rule = is_header-rule_name.
+    ls_rule-model_hash = is_header-model_hash.
+    ls_rule-stage_no = is_header-stage_no.
+    write( EXPORTING iv_run = ls_link-remote_run iv_date = is_header-check_date iv_pile = is_header-pile_no
+      iv_class = is_header-rule_class iv_file = is_header-rule_file iv_line = is_header-rule_line
+      it_alerts = lt_alerts iv_key_offset = is_header-key_offset iv_key_length = is_header-key_length
+      iv_rule_no = is_header-rule_no iv_bind = 'alerts=log'
+      CHANGING cs_rule = ls_rule ).
+    ls_plan-status = ls_rule-status.
+    ls_plan-alerts = ls_rule-alerts.
+    ls_plan-closed = ls_rule-closed.
+    ls_plan-open_alerts = ls_rule-open_alerts.
+    GET TIME STAMP FIELD ls_plan-ended.
+    MODIFY zosd_l3_pile FROM ls_plan.
+    ls_gate-set_name = c_set.
+    ls_gate-run_id = ls_link-remote_run.
+    ls_gate-check_date = is_header-check_date.
+    ls_gate-stage_no = is_header-stage_no.
+    ls_gate-stage_name = 'receiving'.
+    ls_gate-run_bind = 'alerts=log,work=real'.
+    ls_gate-status = 'DONE'.
+    SELECT * FROM zosd_l3_pile INTO TABLE lt_plan WHERE set_name = c_set AND run_id = ls_link-remote_run
+      AND stage_no = is_header-stage_no AND status <> 'DONE'.
+    IF lt_plan IS NOT INITIAL.
+      ls_gate-status = 'PARTIAL'.
+    ENDIF.
+    GET TIME STAMP FIELD ls_gate-ended.
+    MODIFY zosd_l3_stage FROM ls_gate.
+    gs_settings = ls_saved.
+    gv_settings_run = lv_saved_run.
+    rs_result = ls_claim.
+    rs_result-remote_run = ls_link-remote_run.
+    rs_result-status = ls_rule-status.
+    rs_result-alerts = ls_rule-alerts.
+    rs_result-closed = ls_rule-closed.
+    rs_result-open_alerts = ls_rule-open_alerts.
+    rs_result-budget_alerts = ls_rule-budget_alerts.
+    IF ls_rule-status = 'DONE'.
+      MODIFY zl3_fleet2_rcpt FROM rs_result.
+    ELSE.
+      DELETE FROM zl3_fleet2_rcpt WHERE set_name = c_set AND run_id = is_header-run_id
+        AND rule_name = is_header-rule_name AND pile_no = is_header-pile_no AND attempt = is_header-attempt.
+    ENDIF.
   ENDMETHOD.
 ENDCLASS.

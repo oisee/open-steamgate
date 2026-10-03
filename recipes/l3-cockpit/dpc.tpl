@@ -60,6 +60,10 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_preliminary TYPE btch0000-char1.
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = {{set | literal}} AND run_id = cs_run-run_id.
+{{#remote}}
+    SELECT SINGLE remote_run FROM {{link}} INTO cs_run-remote_run
+      WHERE set_name = {{set | literal}} AND run_id = cs_run-run_id.
+{{/remote}}
     cs_run-run_mode = 'S'.
     cs_run-piles = lines( lt_piles ).
     LOOP AT lt_piles INTO ls_pile.

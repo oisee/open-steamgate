@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-doctor/daemon.tpl",
- "model": "sha256:973f08be27e25b050890c09a41c873a7fad872c1dd982c1bd1423f50f979e698",
+ "model": "sha256:506f6e31dea7182257e1ff36048747c1d33c7f6b52ef59431eba0565d2d52417",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",
@@ -46,7 +46,7 @@
    "template_line": 1,
    "path": "/daemon/daemon_class",
    "node": "set/fleet2/resilience/doctor",
-   "set_line": 80
+   "set_line": 81
   },
   {
    "line": 2,
@@ -165,7 +165,7 @@
    "template_line": 18,
    "path": "/daemon/daemon_class",
    "node": "set/fleet2/resilience/doctor",
-   "set_line": 80
+   "set_line": 81
   },
   {
    "line": 19,

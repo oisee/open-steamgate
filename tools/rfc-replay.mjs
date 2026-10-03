@@ -344,15 +344,34 @@ export function isLocal(name, abap = globalThis.abap) {
   return localFunctionModules(abap)[name.trimEnd().toUpperCase()] !== undefined;
 }
 
+// Destination clients may receive an exception map, or the pinned transpiler
+// may catch classic exceptions at the call site. Support both contracts.
+function localFailure(error, signature) {
+  const exceptions = upperKeys(signature.exceptions);
+  const classic = error?.classic?.toUpperCase();
+  const code = classic ? (exceptions[classic] ?? exceptions.OTHERS) : exceptions.SYSTEM_FAILURE;
+  if (code !== undefined) {
+    globalThis.abap.builtin.sy.get().subrc.set(code);
+    return;
+  }
+  if (classic) throw error;
+  throw new globalThis.abap.ClassicError({classic: 'system_failure'});
+}
+
 /** the function modules of this process, what DESTINATION 'NONE' means */
 export function localClient() {
   return {
     call: async (name, signature) => {
-      const fm = localFunctionModules()[name.trimEnd().toUpperCase()];
-      if (fm === undefined) {
-        throw await new globalThis.abap.Classes["CX_SY_DYN_CALL_ILLEGAL_FUNC"]().constructor_();
+      try {
+        const fm = localFunctionModules()[name.trimEnd().toUpperCase()];
+        if (fm === undefined) {
+          throw await new globalThis.abap.Classes["CX_SY_DYN_CALL_ILLEGAL_FUNC"]().constructor_();
+        }
+        await fm(signature);
+        globalThis.abap.builtin.sy.get().subrc.set(0);
+      } catch (error) {
+        localFailure(error, signature);
       }
-      await fm(signature);
     },
   };
 }
@@ -483,6 +502,20 @@ export async function installRfcDestinations(abap, options = {}) {
         replays.set(name, new RfcReplayClient({folder, destination: name, trace: options.trace}));
       }
       return replays.get(name);
+    },
+    // The Gateway library re-registers NONE when constructing a DPC. Keep
+    // the same failure contract for that local adapter as for the host's.
+    set: (target, key, value) => {
+      const name = typeof key === "string" ? key.toUpperCase() : key;
+      if ((name === "NONE" || name === "") && value?.call) {
+        const adapter = value;
+        value = {call: async (fm, signature) => {
+          try { await adapter.call(fm, signature); }
+          catch (error) { localFailure(error, signature); }
+        }};
+      }
+      target[name] = value;
+      return true;
     },
     has: () => true,
   });

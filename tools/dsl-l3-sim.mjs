@@ -159,7 +159,7 @@ export const precedence = (sets, rule, stage, name) => sets.rules[rule]?.[name] 
 export function sinkSafety({bindings, sink, allow}) {
   const work = bindings[WORK_PORT];
   const bound = sink.variants.find((v) => v.name === bindings[sink.name]);
-  if (["sim", "replay"].includes(work) && bound && (bound.is_log || bound.hand) && !allow.includes(bound.name)) return bound.name;
+  if (["sim", "replay"].includes(work) && bound && (bound.is_log || bound.is_remote || bound.hand) && !allow.includes(bound.name)) return bound.name;
   return undefined;
 }
 
@@ -302,7 +302,7 @@ export function compileSimulate(doc, model, all, {line, fail, bindings}) {
   // a stage's sim_keys reads the stage's source port; a copy of it here, so those lines trace to simulate:
   for (const stage of model.stages) if (stage.piles) stage.piles.sim = {"@id": id, set_line: at, no: stage.no, ports_class: model.ports_class, source: {...stage.piles.source}};
   const work = model.ports.find((p) => p.name === WORK_PORT);
-  const production = sink.variants.filter((v) => v.is_log || v.hand);
+  const production = sink.variants.filter((v) => v.is_log || v.is_remote || v.hand);
   const simOnly = model.ports.filter((p) => p.variants.some((v) => v.sim_only)).map((p) => ({port: p.name, "port@type": CHAR(30)}));
   const blocked = production.filter((v) => !allow.includes(v.name)).map((v) => ({name: v.name, "name@type": CHAR(30)}));
   const sim = {"@id": id, set_line: at, seed, scale, ports_class: model.ports_class, exception: model.exception, runner: model.class,

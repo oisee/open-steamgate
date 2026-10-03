@@ -126,7 +126,7 @@ describe('DSL L3 input snapshots', function () {
     await dialogStep(()=>cls().run({iv_date:new abap.types.Date().set('20261003'),iv_dry_run:new abap.types.Character(1).set('X')}));
     for(const table of ['zosd_l3_snap','zosd_l3_snapk','zosd_l3_run_snap','zosd_l3_run_conf']) expect(read(`SELECT * FROM ${table}`),table).to.have.length(0);
     const manifest=join(dir,'dry-no-settings.l3.yaml');
-    writeFileSync(manifest,text.replace(/^settings:\n(  .*\n|    .*\n)+/m,'').replace(/^  profiles:\n(    .*\n)+/m,'')
+    writeFileSync(manifest,text.replace(/^      remote:.*\n/m,'').replace(/^settings:\n(  .*\n|    .*\n)+/m,'').replace(/^  profiles:\n(    .*\n)+/m,'')
       .replace(/rule: ([a-z_]+\.l2\.yaml)/g,(_,file)=>`rule: ${join(process.cwd(),'src/l2demo',file)}`));
     const withoutSettings=compileSet(manifest);
     const rendered=await renderSet(withoutSettings), original=cls();

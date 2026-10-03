@@ -49,6 +49,7 @@ export function compileSettings(doc, model, {line, fail}) {
   if (!bounds || typeof bounds !== "object" || Array.isArray(bounds)) fail(line("settings/bounds"), "settings.bounds is a mapping");
   const available = new Map();
   const lossy_reasons = new Map();
+  if (model.remote) available.set("remote.destination", {defaultValue: "NONE", kind: "C", min: 1, max: 40});
   for (const [name, value, min, max] of numeric) {
     const defaultValue = value(model);
     if (defaultValue !== undefined) available.set(name, {defaultValue: String(defaultValue), min, max, kind: "N"});
