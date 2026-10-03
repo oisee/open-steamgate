@@ -639,7 +639,7 @@ entities:
         label: Pile
         readonly: true
       DocAction:
-        type: String(12)
+        type: String(16)
         field: DOC_ACTION
         label: Doctor action
         readonly: true
@@ -652,6 +652,36 @@ entities:
         type: DateTime
         field: ACTED
         label: When
+        readonly: true
+      ExpectedId:
+        type: String(32)
+        field: EXPECTED_ID
+        label: Expected id
+        readonly: true
+      ExpectedHash:
+        type: String(64)
+        field: EXPECTED_HASH
+        label: Expected hash
+        readonly: true
+      ExpectedCount:
+        type: Int32
+        field: EXPECTED_COUNT
+        label: Expected count
+        readonly: true
+      StoredId:
+        type: String(32)
+        field: STORED_ID
+        label: Stored id
+        readonly: true
+      StoredHash:
+        type: String(64)
+        field: STORED_HASH
+        label: Stored hash
+        readonly: true
+      StoredCount:
+        type: Int32
+        field: STORED_COUNT
+        label: Stored count
         readonly: true
     creatable: false
     updatable: false
@@ -836,7 +866,7 @@ entities:
       - R
       - Q
   Snapshot:
-    set: SnapshotSet
+    set: ConfSnapSet
     source:
       table: ZOSD_L3_RUN_CONF
     keys:
@@ -882,6 +912,21 @@ entities:
         type: DateTime
         field: CHANGED_AT
         label: Changed at
+        readonly: true
+      SnapId:
+        type: String(32)
+        field: SNAP_ID
+        label: Snap id
+        readonly: true
+      ContentHash:
+        type: String(64)
+        field: CONTENT_HASH
+        label: Content hash
+        readonly: true
+      RowCount:
+        type: Int32
+        field: ROW_COUNT
+        label: Row count
         readonly: true
     creatable: false
     updatable: false
@@ -971,6 +1016,54 @@ entities:
     updatable: false
     deletable: false
     operations:
+      - Q
+  InputSnapshot:
+    set: SnapshotSet
+    source:
+      table: ZOSD_L3_SNAP
+    keys:
+      - SnapId
+    properties:
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        readonly: true
+        label: Set
+      SnapName:
+        type: String(16)
+        field: SNAP_NAME
+        readonly: true
+        label: Snap name
+      SnapId:
+        type: String(32)
+        field: SNAP_ID
+        readonly: true
+        label: Snap id
+      ContentHash:
+        type: String(64)
+        field: CONTENT_HASH
+        readonly: true
+        label: Content hash
+      State:
+        type: String(8)
+        field: STATE
+        readonly: true
+        label: State
+      RowCount:
+        type: Int32
+        field: ROW_COUNT
+        readonly: true
+        label: Row count
+      Created:
+        type: DateTime
+        field: CREATED
+        readonly: true
+        label: Created
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
       - Q
 functions:
   StartRun:
@@ -1634,6 +1727,18 @@ annotations:
     label: Reason
   Doctor/Acted:
     label: When
+  Doctor/ExpectedId:
+    label: Expected id
+  Doctor/ExpectedHash:
+    label: Expected hash
+  Doctor/ExpectedCount:
+    label: Expected count
+  Doctor/StoredId:
+    label: Stored id
+  Doctor/StoredHash:
+    label: Stored hash
+  Doctor/StoredCount:
+    label: Stored count
   RunStat/SetName:
     label: Set
   RunStat/RunId:
@@ -1704,6 +1809,12 @@ annotations:
     label: Changed by
   Snapshot/ChangedAt:
     label: Changed at
+  Snapshot/SnapId:
+    label: Snap id
+  Snapshot/ContentHash:
+    label: Content hash
+  Snapshot/RowCount:
+    label: Row count
   Tally/RunId:
     label: Run ID
   Tally/Status:
@@ -1716,3 +1827,17 @@ annotations:
     label: Status
   StatusVH/Text:
     label: Meaning
+  InputSnapshot/SetName:
+    label: Set
+  InputSnapshot/SnapName:
+    label: Snap name
+  InputSnapshot/SnapId:
+    label: Snap id
+  InputSnapshot/ContentHash:
+    label: Content hash
+  InputSnapshot/State:
+    label: State
+  InputSnapshot/RowCount:
+    label: Row count
+  InputSnapshot/Created:
+    label: Created

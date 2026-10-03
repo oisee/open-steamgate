@@ -29,6 +29,7 @@ import {doctorOverlay, renderDoctor} from "./dsl-l3-doctor-overlay.mjs";
 import {replayOverlay} from "./dsl-l3-replay-overlay.mjs";
 import {compileReplay} from "./dsl-l3-replay.mjs";
 import {compileCockpit, renderCockpit, cockpitRunnerTemplate} from "./dsl-l3-cockpit.mjs";
+import {compileSnapshots, snapshotOverlay} from "./dsl-l3-snapshot.mjs";
 import {compileSettings} from "./dsl-l3-settings.mjs";
 import {CHAOS_SETTINGS, compileSimulate, POISSON1, simPorts, simVariant, WORK_PORT} from "./dsl-l3-sim.mjs";
 import {docDrift, graphJson, graphMermaid, graphOf} from "./dsl-l3-graph.mjs";
@@ -134,7 +135,7 @@ export function classShape(text, name, className) {
   return shape.line === undefined ? undefined : shape;
 }
 
-const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience", "settings", "governor", "simulate", "cockpit"];
+const KEYS = ["set", "title", "class", "report", "date", "rules", "stages", "params", "piles", "ports", "bindings", "schedule", "resilience", "settings", "governor", "simulate", "cockpit", "snapshots", "input"];
 const PORT_KEYS = ["kind", "table", "key", "group", "seq", "variants"];
 const PORT_NAME = /^[a-z][a-z0-9_]{0,11}$/;
 const RULE_KEYS = ["rule", "enabled"];
@@ -505,6 +506,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   if (doc.governor !== undefined) model.governor = compileGovernor(doc, model, all, {line, fail});
   if (doc.simulate !== undefined) model.simulate = compileSimulate(doc, model, all, {line, fail, bindings: bindingDocs});
   if (doc.simulate?.profile !== undefined) compileReplay(doc.simulate, model.simulate, model, {file, line, fail});
+  compileSnapshots(doc, model, {line, fail, columnsOf});
   if (doc.settings !== undefined) model.settings = compileSettings(doc, model, {line, fail});
   // a tunable seed is the run's: the chance autoclose reads it from the run's snapshot
   if (model.simulate && model.settings?.simulate_seed) model.simulate.seed_conf = {"@id": model.simulate["@id"], set_line: model.simulate.set_line, conf: model.settings.class};
@@ -540,6 +542,7 @@ function sidecar(model, template, rendered) {
     ...(model.autodoctor && [SET_TEMPLATE, JOB_TEMPLATE].includes(template) ? {doctor_overlay: template === JOB_TEMPLATE ? ["recipes/l3-doctor/job-tail.tpl"] : ["recipes/l3-doctor/runner.patch.json", "recipes/l3-doctor/runner.tpl", ...(model.release_event ? ["recipes/l3-doctor/release.patch.json"] : [])]} : {}),
     ...(rendered.simOverlays?.length ? {sim_overlay: rendered.simOverlays} : {}),
     ...(rendered.replayOverlays?.length ? {replay_overlay: rendered.replayOverlays} : {}),
+    ...(model.snapshots && template === SET_TEMPLATE ? {snapshot_overlay: ["recipes/l3-snapshot/public.tpl", "recipes/l3-snapshot/run.tpl", "recipes/l3-snapshot/methods.tpl"]} : {}),
     model: `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`,
     ...(model.rules ? {rules: Object.fromEntries(model.rules.map((r) => [r.name, {file: r.file, class: r.check_class, model: r.hash}]))} : {}),
     lines: rendered.trace.map((entry) => ({line: entry.line, template_line: entry.template_line, path: entry.path,
@@ -609,7 +612,8 @@ function overlaid(model, template, patches) {
 }
 async function renderWith(model, template, patches) {
   const {renderRecipe} = await import("./dsl-abap.mjs");
-  const over = overlaid(model, template, patches);
+  let over = overlaid(model, template, patches);
+  if (model.snapshots && template === SET_TEMPLATE) over = {...(over ?? {sim: [], replay: []}), templateText: snapshotOverlay(model, over?.templateText ?? readFileSync(template, "utf8"))};
   const result = await renderRecipe(model, template, {profile: "abap", ...(over ? {templateText: over.templateText} : {})});
   return over?.sim.length ? {...result, simOverlays: over.sim, replayOverlays: over.replay} : result;
 }
@@ -821,7 +825,7 @@ function alertRow(db, key) {
         AND check_date = ? AND pile_no = ? AND alert_seq = ?`).get(key.set, key.rule, `sha256:${key.hash}%`, key.date, key.pile, key.seq);
       // the plan row of the alert's pile, by its run (an older database has no plan table)
       let pile;
-      let settings = [], events = [], budget;
+      let settings = [], events = [], budget, snapshots = [];
       try {
         pile = alert && handle.prepare(`SELECT * FROM zosd_l3_pile WHERE set_name = ? AND run_id = ? AND rule_name = ? AND pile_no = ?`)
           .get(key.set, alert.run_id, key.rule, key.pile);
@@ -836,7 +840,10 @@ function alertRow(db, key) {
           budget = handle.prepare(`SELECT * FROM zosd_l3_budget WHERE run_id = ? AND set_name = ?`).get(alert.run_id, key.set);
         }
       } catch { events = []; }
-      return alert && {...alert, pile, settings, events, budget};
+      try {
+        if (alert) snapshots = handle.prepare(`SELECT * FROM zosd_l3_run_snap WHERE set_name = ? AND run_id = ? ORDER BY stage_no`).all(key.set, alert.run_id);
+      } catch { snapshots = []; }
+      return alert && {...alert, pile, settings, events, budget, snapshots};
     } finally { handle.close(); }
   });
 }
@@ -875,6 +882,7 @@ export async function explainAlert(key, {sets = setFiles(), db, row} = {}) {
   const out = [
     `alert   ${k.set}/${k.rule}/sha256:${k.hash.slice(0, 12)}.../${k.date}/${k.pile}/${k.seq}`,
     ...(alertRowFound ? [`text    ${String(alertRowFound.alert_text).trimEnd()}`, `run     ${String(alertRowFound.run_id).trim()} at ${alertRowFound.run_ts}`] : []),
+    ...(alertRowFound?.snapshots ?? []).map((s) => `snapshot ${String(s.snap_name).trim()}: id ${String(s.snap_id).trim()}, SHA256 ${String(s.content_hash).trim()}, rows ${s.row_count}, stage ${s.stage_no}`),
     ...(alertRowFound?.settings?.length ? ["settings effective for this run:", ...alertRowFound.settings.map((s) =>
       `  ${String(s.param_name).trim()} = ${String(s.param_val).trim()} (${String(s.origin).trim()}, DSL ${String(s.dsl_value).trim()}${String(s.origin).trim() === "USER" ? `; ${String(s.changed_by).trim()} at ${s.changed_at}` : ""})`)] : []),
     ...(alertRowFound?.budget ? [`governor ${String(alertRowFound.budget.state).trim()}: open ${alertRowFound.budget.reserved}, glass ${alertRowFound.budget.glass}, consumed ${alertRowFound.budget.consumed}, refunded ${alertRowFound.budget.refunded}`,

@@ -2592,3 +2592,79 @@ is ZOSD_L3_STAGE-RUN_BIND (CHAR 255), and optional Work becomes `work=sim`
 or `work=real` through the existing `iv_bind` argument. Contract tests cover
 both seams without importing twin code. Full simulated-run validation waits
 for the lead's rebase onto 5d.
+
+## Input snapshots (G10)
+
+A run can name the reference input whose identity accompanies its alerts:
+
+```yaml
+snapshots:
+  ships_ref:
+    source: ships           # a source port, or a DDIC table name
+    key: [ship_id]          # unique business key, in declared order
+    fields: [ship_id, name, status]  # default: all non-client DDIC fields
+    canonical: sorted-by-key
+stages:
+  - stage: checks
+    input: ships_ref
+    # piles and rules as before
+```
+
+A set can also declare `input: ships_ref`; that identity uses stage number 0.
+Stage inputs are captured at run start, after the source rows have been
+installed and before detection. They identify that run's reference input,
+including a stage that opens later. The side table `ZOSD_L3_RUN_SNAP` preserves
+run ID, stage number, snapshot ID, content hash and count across later runs.
+Capture is insert-only for a run/stage pair. Dry runs skip input capture,
+including sets with resilience but no settings. The settings snapshot rows also
+carry the first declared input identity; every stage identity remains in the
+side table. Explain follows an alert's run ID into that table and prints the
+snapshot ID, full hash, count and stage. A later edit of the source does not
+replace the run's recorded identity. This slice records identity and key
+membership; it does not replay old reference row values into detection.
+
+`snapshot( iv_name )` reads the named source port's binding (or its table),
+then builds or reuses `ZOSD_L3_SNAP`, with a UUID, creation time, row count,
+64 lower-case hex SHA-256 digits and state READY. `ZOSD_L3_SNAPK` holds the
+SHA-256 of each declared key's serialization. An unknown snapshot returns an initial result; duplicate business keys
+raise the set's port exception. A run refuses an initial capture. A unique
+set/name/hash table key also prevents duplicate snapshots during concurrent
+capture. The run capture uses the installed
+table rows so a non-live adapter is not read twice. `iv_installed` is the
+runner's internal option; callers normally omit it. `it_exclude` is a list
+of key hashes: matching rows are omitted before hashing and counting.
+
+The exact serialization rule is: sort rows ascending by the declared key
+fields using ABAP SORT; for each row, visit `fields` in manifest order.
+Convert each scalar to its ABAP string-template external form, without a
+locale-dependent WRITE conversion. Character padding is removed by the
+string template; numeric, date and time values use their template form.
+Encode each value as `<decimal character length>:<value>`, concatenate the
+encoded values, then append `;` after each row. There is no header, newline,
+or trailing whitespace. SHA-256 hashes the UTF-8 bytes of that string; the
+empty input hashes the empty string. A key uses the same length-prefixed
+values in declared key order, without the row `;`. Length prefixes make `:`
+and `;` inside values unambiguous. The client field is never included.
+Technical identifiers are absent only when `fields` omits them and `key`
+names a stable business key; changing a declared content field changes the
+hash. Scalar character, integer and fixed decimal types are supported;
+other DDIC types are rejected with the manifest line.
+
+`check_snapshot( is_expected, iv_run )` returns true only when a READY snapshot of
+this set has the same ID, full content hash and count. It checks persisted
+identity, without rereading live content. A mismatch inserts a DOCTOR row
+with `DOC_ACTION = SNAP-MISMATCH`, full expected/stored IDs, hashes and counts.
+The optional `iv_run` ties the audit to the caller's run, with a new sequence
+number for each mismatch. Without it, the audit gets its own UUID.
+An unknown ID has an initial stored side. The future RFC seam can use this
+method as its precondition. Failed checks never create an alert.
+
+The cockpit service exposes the data snapshots through read-only
+`SnapshotSet`. The existing settings snapshot navigation remains
+`to_Snapshot`, with entity set `ConfSnapSet` in snapshot-enabled sets.
+No application source changes are required. Sets without `snapshots` keep
+their generated output byte-identical. Fleet2 captures the ship reference
+snapshot for its checks stage. `test/dsl-l3-snapshot.mjs` checks the canonical
+bytes, read order, technical re-keying, reuse, exclusions, run/settings and
+explain traces, stale identities, handshake audits, validation and the
+STRIPPED output, with copies of the generated runner used for mutations.

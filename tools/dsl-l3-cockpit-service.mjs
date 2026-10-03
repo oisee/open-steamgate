@@ -1,6 +1,6 @@
 // Model and action-to-runner contract, independent of any particular set.
 import {readFileSync} from "node:fs";
-import {cockpitUi} from "./dsl-l3-cockpit-ui.mjs";
+import {cockpitUi, words} from "./dsl-l3-cockpit-ui.mjs";
 const pascal = (s) => s.toLowerCase().split("_").map((p) => p[0].toUpperCase() + p.slice(1)).join("");
 const tag = (s, n) => s.match(new RegExp(`<${n}>([\\s\\S]*?)</${n}>`))?.[1];
 const visible = {
@@ -66,10 +66,12 @@ export function cockpitService(m, {tableSource = (table) => readFileSync(`src/ds
   if (m.settings) tables.push(["Setting", "conf"], ["Change", "conf_log"], ["Snapshot", "run_conf"]);
   for (const [name, suffix] of tables) {
     const table = `zosd_l3_${suffix}`, xml = tableSource(table);
-    const fields = [...xml.matchAll(/<DD03P>([\s\S]*?)<\/DD03P>/g)].map((x) => x[1]).filter((x) => tag(x, "FIELDNAME") !== "MANDT");
+    let fields = [...xml.matchAll(/<DD03P>([\s\S]*?)<\/DD03P>/g)].map((x) => x[1]).filter((x) => tag(x, "FIELDNAME") !== "MANDT");
+    if (!m.snapshots) fields = fields.filter((f) => !/^(EXPECTED_|STORED_)/.test(tag(f, "FIELDNAME"))
+      && !(suffix === "run_conf" && ["SNAP_ID", "CONTENT_HASH", "ROW_COUNT"].includes(tag(f, "FIELDNAME"))));
     const keys = [], properties = {}, columns = [];
     for (const field of fields) {
-      const raw = tag(field, "FIELDNAME"), prop = pascal(raw), type = tag(field, "DATATYPE"), len = +tag(field, "LENG");
+      const raw = tag(field, "FIELDNAME"), prop = pascal(raw), type = tag(field, "DATATYPE"), len = raw === "DOC_ACTION" && !m.snapshots ? 12 : +tag(field, "LENG");
       const timestamp = type === "DEC" && len === 15 && ["STARTED", "ENDED", "OPENED", "ACTED", "CHANGED_AT", "UPDATED_AT"].includes(raw);
       const edm = timestamp || type === "DATS" ? "DateTime" : /^INT/.test(type) ? "Int32" : type === "DEC" ? `Decimal(${len},${+tag(field, "DECIMALS") || 0})` : type === "STRG" ? "String" : `String(${len})`;
       properties[prop] = {type: edm, field: raw, label: prop, readonly: true};
@@ -97,6 +99,23 @@ export function cockpitService(m, {tableSource = (table) => readFileSync(`src/ds
   for (const a of cockpitActions(m)) doc.functions[a.name] = {method: a.get ? "GET" : "POST", returns: {entity: "Answer", multiplicity: "1"}, parameters: a.params};
   doc.annotations.Run = {...doc.annotations.Run, header: {typeName: "Run", typeNamePlural: "Runs", title: "RunId", description: "Status"},
     selectionFields: ["CheckDate", "Status"], facets: entities.filter((e) => !["Run", "Setting", "Change"].includes(e.name)).map((e) => ({id: e.name, label: e.name, lineItem: `to_${e.name}`}))};
-  // the run page's words, computed fields, charts and value lists (slice 6a)
-  return cockpitUi(m, {doc, entities});
+  // Input snapshots have a service-only read surface: existing UI facets stay put.
+  const result = cockpitUi(m, {doc, entities});
+  if (m.snapshots) {
+    if (doc.entities.Snapshot) doc.entities.Snapshot.set = "ConfSnapSet";
+    doc.entities.InputSnapshot = {set: "SnapshotSet", source: {table: "ZOSD_L3_SNAP"}, keys: ["SnapId"],
+      properties: Object.fromEntries([["SetName", 16], ["SnapName", 16], ["SnapId", 32], ["ContentHash", 64], ["State", 8]]
+        .map(([p, n]) => [p, {type: `String(${n})`, field: p.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase(), readonly: true}])
+        .concat([["RowCount", {type: "Int32", field: "ROW_COUNT", readonly: true}], ["Created", {type: "DateTime", field: "CREATED", readonly: true}]])),
+      creatable: false, updatable: false, deletable: false, operations: ["R", "Q"]};
+    for (const [prop, spec] of Object.entries(doc.entities.InputSnapshot.properties)) {
+      spec.label = words(prop);
+      doc.annotations[`InputSnapshot/${prop}`] = {label: spec.label};
+    }
+    entities.push({name: "InputSnapshot", table: "zosd_l3_snap", method: "snapshotset",
+      keys: [{field: "snap_id", property: "SnapId", last: true}], columns: [], has_run: false});
+    // The settings entity retains its navigation identity and gets a distinct set.
+    if (m.settings) entities.find((e) => e.name === "Snapshot").method = "confsnapset";
+  }
+  return result;
 }

@@ -1,3 +1,4 @@
+import {l3TableDependencies} from "./dsl-l3-tables.mjs";
 import {readFileSync, readdirSync, mkdirSync, writeFileSync} from "node:fs";
 import {join, basename} from "node:path";
 import {pathToFileURL} from "node:url";
@@ -7,6 +8,10 @@ export async function loadCockpitMutant(name, source, out) {
   reg.addFile(new core.MemoryFile(`${name}.clas.abap`, source));
   reg.addFile(new core.MemoryFile(`${name}.clas.xml`, readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.xml", "utf8").replaceAll("ZCL_ZL3C_FLEET2_DPC_EXT", name.toUpperCase())));
   const seen = new Set();
+  for (const path of l3TableDependencies()) {
+    seen.add(basename(path));
+    reg.addDependency(new core.MemoryFile(basename(path), readFileSync(path, "utf8")));
+  }
   function deps(dir) {
     for (const e of readdirSync(dir, {withFileTypes: true})) {
       const path = join(dir, e.name);

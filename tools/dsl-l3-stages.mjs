@@ -7,7 +7,7 @@
 // periodic background job. tools/dsl-l3.mjs calls these; they know the set
 // language, nothing of any domain.
 
-export const STAGE_KEYS = ["stage", "filter", "worklist", "piles", "rules"];
+export const STAGE_KEYS = ["stage", "filter", "worklist", "piles", "rules", "input"];
 export const STAGE_NAME = /^[a-z][a-z0-9_]{0,12}$/;
 export const MAX_STAGES = 9;
 // the worklist table and the gate table, generic for every set

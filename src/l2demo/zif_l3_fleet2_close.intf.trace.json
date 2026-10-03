@@ -2,56 +2,56 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-ports/iface-autoclose.tpl",
- "model": "sha256:866965e086ecbff491111141f03f252912f5af31051bc2dea08d568d61695263",
+ "model": "sha256:c98de2242511eb073fc229a5f608bc5f19101443327b7cf926934ee2e108927a",
  "lines": [
   {
    "line": 1,
    "template_line": 1,
    "path": "/source",
    "node": "set/fleet2/port/close",
-   "set_line": 54
+   "set_line": 57
   },
   {
    "line": 2,
    "template_line": 2,
    "path": "/port",
    "node": "set/fleet2/port/close",
-   "set_line": 54
+   "set_line": 57
   },
   {
    "line": 3,
    "template_line": 3,
    "path": "/iface",
    "node": "set/fleet2/port/close",
-   "set_line": 54
+   "set_line": 57
   },
   {
    "line": 4,
    "template_line": 4,
    "path": "/",
    "node": "set/fleet2/port/close",
-   "set_line": 54
+   "set_line": 57
   },
   {
    "line": 5,
    "template_line": 5,
    "path": "/",
    "node": "set/fleet2/port/close",
-   "set_line": 54
+   "set_line": 57
   },
   {
    "line": 6,
    "template_line": 6,
    "path": "/",
    "node": "set/fleet2/port/close",
-   "set_line": 54
+   "set_line": 57
   },
   {
    "line": 7,
    "template_line": 7,
    "path": "/",
    "node": "set/fleet2/port/close",
-   "set_line": 54
+   "set_line": 57
   }
  ]
 }

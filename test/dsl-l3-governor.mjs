@@ -1,3 +1,4 @@
+import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // Slice 5c-1: exercise generated ABAP, actual SQL admissions, and job chains.
 import {expect} from "chai";
@@ -490,7 +491,7 @@ describe("DSL L3 slice 5c-1: governor", function () {
       loaded.set(name.toUpperCase(), {source: join(out, `${name}.clas.abap`), module: pathToFileURL(join(out, `${name}.clas.mjs`)).href});
       const files = {[`${name}.clas.abap`]: edited, [`${name}.clas.xml`]: readFileSync(join(OUT, `${real}.clas.xml`), "utf8").replace(real.toUpperCase(), name.toUpperCase())};
       for (const [f, t] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(t, f, core)));
-      const deps = [...daemonDependencies(),...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
+      const deps = [...daemonDependencies(),...l3TableDependencies(), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
         "gen/gui/zcl_osd_batch_report.clas.abap", "src/jobs/zcl_osd_submit_semantics.clas.abap", "src/jobs/zcl_osd_submit_ranges.clas.abap",
         ".local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),

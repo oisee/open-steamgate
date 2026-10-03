@@ -1,3 +1,4 @@
+import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 // DSL L3 settings: application-data defaults, tuning, read-once runs and trace.
 import {expect} from "chai";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
@@ -97,7 +98,7 @@ describe("DSL L3 slice 5b: settings", function () {
       expect(dry).to.include("gv_dry = abap_true.");
       const run = runner.slice(runner.indexOf("  METHOD run."), runner.indexOf("  METHOD plan."));
       expect(run).to.include("IF lv_dry = abap_true.\n      gs_settings = zcl_l3_fleet2_conf=>load( iv_write = abap_false ).");
-      expect(run).to.include("IF lv_dry = abap_false.\n      zcl_l3_fleet2_conf=>snapshot(");
+      expect(run).to.match(/IF lv_dry = abap_false\.\n\s+zcl_l3_fleet2_conf=>snapshot\(/);
     } finally { rmSync(dir, {recursive: true, force: true}); }
   });
   it("renders the unstaged piles.size through the same settings structure", async () => {
@@ -152,7 +153,7 @@ describe("DSL L3 slice 5b: settings", function () {
       reg.addFile(new core.MemoryFile(`${name}.clas.abap`, source));
       reg.addFile(new core.MemoryFile(`${name}.clas.xml`, readFileSync(`src/l2demo/${real}.clas.xml`, "utf8")
         .replaceAll(real.toUpperCase(), name.toUpperCase())));
-      for (const dep of ["src/dsl/zosd_l3_conf.tabl.xml", "src/dsl/zosd_l3_conf_log.tabl.xml", "src/dsl/zosd_l3_run_conf.tabl.xml",
+      for (const dep of [...l3TableDependencies(),
         ".local/lars/open-abap-core/src/ddic/ttyp/string_table.ttyp.xml",
         ".local/lars/open-abap-core/src/ddic/dtel/mandt.dtel.xml",
         ]) {
