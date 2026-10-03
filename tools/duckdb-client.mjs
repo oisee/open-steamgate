@@ -4,6 +4,7 @@
 // for the ABAP LUW, subrc/dbcnt from the affected-row count, rows as plain
 // objects with the runtime's lowercase column names.
 import {DuckDBInstance} from "@duckdb/node-api";
+import {resolve} from "node:path";
 import {bindValue} from "./abap-types.mjs";
 import {trimLiterals} from "./sql-literals.mjs";
 import {osqlSemanticsError} from "./osql-error.mjs";
@@ -31,7 +32,16 @@ export class DuckDBDatabaseClient {
   }
 
   async connect() {
-    this.instance = await DuckDBInstance.create(this.path);
+    // initializeABAP can open the same file again in one process. Separate
+    // engines can overwrite each other's checkpoints; the native cache gives
+    // every connection to that file one engine. In-memory clients stay private.
+    // create("") also means private memory; resolving it would open cwd.
+    // Null and undefined retain the constructor's :memory: default.
+    this.instance = this.path === "" || this.path === ":memory:"
+      ? await DuckDBInstance.create(this.path)
+      // Resolve literal filenames before caching: ':memory:name' otherwise
+      // means shared named memory to the cache, unlike create().
+      : await DuckDBInstance.fromCache(resolve(this.path));
     this.connection = await this.instance.connect();
     // Match the SQLite and HANA clients: sy-dbsys is a fact about the
     // connection that actually opened, not a label supplied by status or

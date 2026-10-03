@@ -1,7 +1,8 @@
 import {expect} from "chai";
 import {mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, relative} from "node:path";
+import {DuckDBInstance} from "@duckdb/node-api";
 import {createRequire} from "node:module";
 import {HanaDatabaseClient} from "../tools/hana-client.mjs";
 import {DuckDBDatabaseClient} from "../tools/duckdb-client.mjs";
@@ -110,6 +111,116 @@ describe("database identity", () => {
         .to.deep.equal(["ZVDB_100_VEC"]);
     } finally {
       await client.disconnect();
+    }
+  });
+
+  it("DuckDB clients for one file share committed writes and survive separate closes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-duckdb-shared-"));
+    const path = join(root, "shared.duckdb");
+    const first = new DuckDBDatabaseClient({path});
+    const second = new DuckDBDatabaseClient({path});
+    const reopened = new DuckDBDatabaseClient({path});
+    try {
+      await first.connect();
+      await first.execute("CREATE TABLE shared_rows (id INTEGER PRIMARY KEY)");
+      await first.execute("INSERT INTO shared_rows VALUES (1)");
+      await first.execute("CHECKPOINT");
+      await second.connect();
+      await first.modifying("INSERT INTO shared_rows VALUES (2)");
+      await first.commit();
+      expect(await second.query("SELECT id FROM shared_rows ORDER BY id"))
+        .to.deep.equal([{id: 1}, {id: 2}]);
+      await first.disconnect();
+      await second.modifying("INSERT INTO shared_rows VALUES (3)");
+      await second.disconnect();
+      await reopened.connect();
+      expect(await reopened.query("SELECT id FROM shared_rows ORDER BY id"))
+        .to.deep.equal([{id: 1}, {id: 2}, {id: 3}]);
+    } finally {
+      await reopened.disconnect();
+      await second.disconnect();
+      await first.disconnect();
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  for (const [label, input] of [
+    ["omitted", {}], ["empty", {path: ""}], ["undefined", {path: undefined}],
+    ["null", {path: null}], [":memory:", {path: ":memory:"}],
+  ]) {
+    it(`DuckDB ${label} paths open independent in-memory databases`, async () => {
+      const first = new DuckDBDatabaseClient(input);
+      const second = new DuckDBDatabaseClient(input);
+      const reopened = new DuckDBDatabaseClient(input);
+      try {
+        await first.connect();
+        await second.connect();
+        await first.execute("CREATE TABLE zstg_demo (id INTEGER)");
+        expect(await first.hasSchema()).to.equal(true);
+        expect(await second.hasSchema()).to.equal(false);
+        await first.disconnect();
+        await reopened.connect();
+        expect(await reopened.hasSchema()).to.equal(false);
+      } finally {
+        await reopened.disconnect();
+        await second.disconnect();
+        await first.disconnect();
+      }
+    });
+  }
+
+  it("DuckDB relative and absolute paths share one persistent database", async () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-duckdb-path-"));
+    const path = join(root, "shared.duckdb");
+    const first = new DuckDBDatabaseClient({path: relative(process.cwd(), path)});
+    const second = new DuckDBDatabaseClient({path});
+    try {
+      await first.connect();
+      await second.connect();
+      await first.execute("CREATE TABLE zstg_demo (id INTEGER)");
+      expect(await second.hasSchema()).to.equal(true);
+      await first.disconnect();
+      expect(await second.hasSchema()).to.equal(true);
+    } finally {
+      await second.disconnect();
+      await first.disconnect();
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("DuckDB :memory:-prefixed filenames retain create's literal persistent meaning", async () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-duckdb-literal-"));
+    const cwd = process.cwd();
+    const path = join(root, ":memory:review");
+    const literal = new DuckDBDatabaseClient({path: ":memory:review"});
+    const absolute = new DuckDBDatabaseClient({path});
+    let instance;
+    let connection;
+    try {
+      // Make a file with the old API, then open its relative literal name.
+      instance = await DuckDBInstance.create(path);
+      connection = await instance.connect();
+      await connection.run("CREATE TABLE zstg_demo (id INTEGER)");
+      await connection.run("INSERT INTO zstg_demo VALUES (1)");
+      connection.closeSync();
+      connection = undefined;
+      instance.closeSync();
+      instance = undefined;
+      process.chdir(root);
+      await literal.connect();
+      expect(await literal.query("SELECT id FROM zstg_demo")).to.deep.equal([{id: 1}]);
+      await literal.execute("INSERT INTO zstg_demo VALUES (2)");
+      await literal.disconnect();
+      await absolute.connect();
+      expect(await absolute.query("SELECT id FROM zstg_demo ORDER BY id"))
+        .to.deep.equal([{id: 1}, {id: 2}]);
+    } finally {
+      process.chdir(cwd);
+      connection?.closeSync();
+      instance?.closeSync();
+      await absolute.disconnect();
+      await literal.disconnect();
+      rmSync(root, {recursive: true, force: true});
     }
   });
 
