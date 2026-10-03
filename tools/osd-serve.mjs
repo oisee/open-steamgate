@@ -38,7 +38,6 @@ import {identity} from "./osd-identity.mjs";
 import {parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {abapSession} from "./adt-enq.mjs";
 import {answerOf, abapServes, resumeOf, resumeRecord} from "./adt-abap-front.mjs";
-import {sessionJSON, sessionValue} from "./adt-remote-sessions.mjs";
 import {sessionsDoor} from "./osd-adt-sessions-door.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
 import {StoreIPCClient, withStoreIPC} from "./osd-store-ipc.mjs";
@@ -208,7 +207,7 @@ const guardAdtDoor = (req, res, next) => {
 };
 app.use("/osd/adt-step", guardAdtDoor, express.raw({type: "application/json", limit: "34mb"}));
 app.use("/osd/adt-sessions", guardAdtDoor, express.raw({type: "application/json", limit: "1mb"}));
-app.use("/osd/adt-resume", guardAdtDoor, express.raw({type: "application/json", limit: "1mb"}));
+app.use("/osd/adt-resume", guardAdtDoor, express.raw({type: "application/json", limit: "16mb"}));
 app.use(express.raw({type: "*/*", limit: "16mb"}));
 mountPortableCells(app, () => globalThis.abap.context.databaseConnections.DEFAULT,
   (work) => exclusive(work, "SQLScript notebook cell"));

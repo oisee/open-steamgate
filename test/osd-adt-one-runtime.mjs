@@ -6,7 +6,7 @@ import {join} from "node:path";
 import {EventEmitter, once} from "node:events";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {RemoteSessions} from "../tools/adt-remote-sessions.mjs";
-import {abapFront, abapRunner, registerContinuation} from "../tools/adt-abap-front.mjs";
+import {abapFront, abapRunner, registerContinuation, resume} from "../tools/adt-abap-front.mjs";
 import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
@@ -409,7 +409,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     } finally { Object.assign(store, overrides); }
   });
 
-  for (const scenario of ["recycle", "ended", "terminal"]) {
+  for (const scenario of ["recycle", "ended", "terminal", "rollback", "system", "large", "activation"]) {
     it(`B4 RESUME preserves F3 after ${scenario}`, async () => {
       const install = async () => {
         const response = await fetch(runtime.url + "/osd/classrun", {method: "POST",
@@ -417,36 +417,83 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
         expect((await response.json()).ok).to.equal(true);
       };
       store.write("PROG", "ZF3_STORE", "before");
-      const payload = JSON.stringify({source: "after recycle", marker: 42});
+      const payload = scenario === "large" ? "x".repeat(2 * 1024 * 1024) : JSON.stringify({source: "after recycle", marker: 42});
+      let lockHandle, sessionId;
+      const overrides = {activate: store.activate, publish: store.publish, completeActivation: store.completeActivation};
+      if (scenario === "activation") {
+        store.activate = () => ({active: true, issues: []});
+        store.publish = async () => ({ok: false, transpile: {error: "B4 deferred build failed"}});
+        store.completeActivation = () => true;
+      }
+      const systemCalls = [];
       let oldPid;
-      const stop = registerContinuation("f3-write", async ({req, resume}) => {
+      const stop = registerContinuation("b4-write", async ({req, resume}) => {
         oldPid = runtime.child.pid;
         if (scenario === "ended") await req.adt.sessions.end(req.adt.session.id);
-        if (scenario === "recycle") { await runtime.recycle(); await install(); }
-        await resume(scenario === "terminal" ? "terminal" : payload);
+        sessionId = req.adt.session.id;
+        if (scenario === "system") {
+          const system = req.osdFacade.front.system;
+          req.osdFacade.front = {...req.osdFacade.front, system: (kind, name, request, json) => {
+            if (kind !== "BUILD") return system(kind, name, request, json);
+            systemCalls.push([kind, name, json]); return {forwarded: json};
+          }};
+        }
+        if (scenario === "recycle") {
+          await runtime.recycle(); await install();
+        }
+        await resume(({terminal: "terminal", rollback: "raise-adt", system: "system-json", activation: "activate"})[scenario] ?? payload);
       });
       const logs = [], originalError = console.error;
       console.error = (...args) => { logs.push(args.join(" ")); originalError(...args); };
       try {
+        let headers = {"x-sap-adt-sessiontype": "stateful", "x-unused-header": "omit from resume"};
+        if (scenario === "recycle") {
+          const login = await logon();
+          headers = login.headers;
+          const locked = await request(remote, "POST", BASE + "/programs/programs/zosd_remote?_action=LOCK", headers);
+          expect(locked.status, locked.body).to.equal(200);
+          lockHandle = /<LOCK_HANDLE>([^<]+)/.exec(locked.body)[1];
+        }
         await install();
-        const answer = await request(remote, "GET", BASE + "/f3", {"x-sap-adt-sessiontype": "stateful"});
+        const answer = await request(remote, "GET", BASE + "/f3?kind=b4-write", headers);
         if (scenario === "recycle") {
           expect(runtime.child.pid).to.not.equal(oldPid);
           expect(answer.status, answer.body).to.equal(200);
-          expect(answer.body).to.equal(`finished through RESUME: f3-write;${payload}`);
+          expect(answer.body).to.equal(`finished through RESUME: b4-write;${payload}`);
           expect(store.read("PROG", "ZF3_STORE").source).to.equal(payload);
+          const holder = await nodeSessions.holderOf("PROG", "ZOSD_REMOTE");
+          expect(holder.handle).to.equal(lockHandle);
+          expect(holder.session.id).to.equal(sessionId);
         } else if (scenario === "ended") {
           expect(answer.status).to.equal(403);
           expect(answer.body).to.equal("CSRF token validation failed");
           expect(answer.token).to.equal("Required");
           expect(logs.some(line => line.includes("session ended before RESUME"))).to.equal(true);
           expect(store.read("PROG", "ZF3_STORE").source).to.equal("before");
+        } else if (scenario === "rollback") {
+          expect(answer.status).to.equal(404);
+          expect(answer.body).to.contain("resume refusal");
+          expect(store.read("PROG", "ZF3_STORE").source).to.equal("before");
+          const rows = await new Data({runtime}).query("SELECT k1 FROM zosd_prb WHERE k1 = 'B4-RESUME'");
+          expect(rows.rows).to.deep.equal([]);
+        } else if (scenario === "system") {
+          expect(answer.status, answer.body).to.equal(200);
+          expect(JSON.parse(answer.body)).to.deep.equal({forwarded: '{ "probe": true }'});
+          expect(systemCalls).to.deep.equal([["BUILD", "probe", '{ "probe": true }']]);
+        } else if (scenario === "large") {
+          expect(answer.status, answer.body.slice(0, 100)).to.equal(200);
+          expect(answer.body).to.equal(`finished through RESUME: b4-write;${payload}`);
+          expect(store.read("PROG", "ZF3_STORE").source).to.equal(payload);
+        } else if (scenario === "activation") {
+          expect(answer.status, answer.body).to.equal(200);
+          expect(answer.body).to.contain('activationExecuted="false"');
+          expect(answer.body).to.contain("B4 deferred build failed");
         } else {
           expect(answer.status).to.equal(500);
           expect(answer.body).to.equal(exceptionDocument("ExceptionInternalError",
-            'continuation "f3-write": RESUME returned a continuation', {namespace: "org.open-steamgate.osd"}));
+            'continuation "b4-write": RESUME returned a continuation', {namespace: "org.open-steamgate.osd"}));
         }
-      } finally { stop(); console.error = originalError; await runtime.recycle(); }
+      } finally { stop(); console.error = originalError; Object.assign(store, overrides); await runtime.recycle(); }
     });
   }
 
@@ -472,7 +519,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
 
   it("the RESUME door validates payloads and limits its body", async () => {
     for (const [body, status] of [["{}", 400], [JSON.stringify({kind: "x", json: "{}", headers: [], sessionId: 1}), 400],
-      [JSON.stringify({kind: "x", json: "x".repeat(1024 * 1024), headers: {}}), 413]]) {
+      [JSON.stringify({kind: "x", json: "x".repeat(16 * 1024 * 1024), headers: {}}), 413]]) {
       const response = await fetch(runtime.url + "/osd/adt-resume", {method: "POST",
         headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body});
       expect(response.status).to.equal(status);
@@ -500,6 +547,19 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
 
 describe("B4 switched-off door", function () {
   this.timeout(60000);
+  it("inline RESUME strips and records the same miss markers as ANSWER", async () => {
+    const misses = [];
+    const req = {method: "GET", headers: {}, osdFacade: {step: work => work(), front: {
+      miss: (request, value) => misses.push([request, value]),
+      resume: () => ({status: 404, headers: [["X-OSD-Miss", "object"], ["x-osd-miss", "resource"], ["x-owner", "fixture"]],
+        body: Buffer.from("missing"), contentType: "text/plain"}),
+    }}};
+    const headers = [];
+    const res = {status: () => res, set: () => res, append: (name, value) => { headers.push([name, value]); }, send: () => res};
+    await resume(req, res, "b4-write", "{}");
+    expect(misses).to.deep.equal([[req, "object"], [req, "resource"]]);
+    expect(headers).to.deep.equal([["x-owner", "fixture"]]);
+  });
   it("refuses RESUME before JSON or key checks", async () => {
     const runtime = new ServingRuntime({root: process.cwd(), env: {OSD_ADT_ONE_RUNTIME: "0", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
     try {
@@ -534,8 +594,8 @@ describe("STORE IPC lifecycle", () => {
 });
 
 describe("remote activation publication", () => {
-  for (const failure of ["publish", "promotion"]) {
-    it(`waits for ${failure} failure and returns the ADT failure document`, async () => {
+  for (const entry of ["ANSWER", "RESUME"]) for (const failure of ["publish", "promotion"]) {
+    it(`${entry} waits for ${failure} failure and returns the ADT failure document`, async () => {
       const child = new EventEmitter();
       child.connected = true;
       const context = 1;
@@ -550,7 +610,9 @@ describe("remote activation publication", () => {
       attachStoreIPC(child, runtime);
       const original = globalThis.fetch;
       child.send = () => child.emit("message", {type: "store-step-ended", step: 1, ok: true});
-      globalThis.fetch = async () => {
+      globalThis.fetch = async (url, options) => {
+        if (entry === "RESUME") expect(JSON.parse(options.body).headers).to.deep.equal({cookie: "test", authorization: "test",
+          "x-csrf-token": "test", "x-sap-adt-sessiontype": "stateful"});
         child.emit("message", {type: "store-request", id: 1, context, step: 1,
           parameters: {IV_COMMAND: "ACTIVATE", IV_TYPE: "PROG", IV_NAME: "ZTEST"}});
         await entered;
@@ -558,8 +620,15 @@ describe("remote activation publication", () => {
       };
       try {
         let settled = false;
-        const answer = abapRunner({remote: runtime}).execute({body: Buffer.alloc(0), method: "POST", path: BASE + "/activation"}, {},
-          {sessions: {identity: {}}, system: () => undefined}).then(r => { settled = true; return r; });
+        const runner = abapRunner({remote: runtime});
+        const req = {method: "POST", headers: {cookie: "test", authorization: "test", "x-csrf-token": "test",
+          "x-sap-adt-sessiontype": "stateful", "content-length": "9999999", "x-unused": "omit"},
+          osdFacade: {front: {...runner, sessions: {identity: {}}, system: () => undefined}}};
+        const res = {status: () => res, set: () => res, append: () => res, send: () => res};
+        const answer = (entry === "ANSWER"
+          ? runner.execute({body: Buffer.alloc(0), method: "POST", path: BASE + "/activation"}, {},
+            {sessions: {identity: {}}, system: () => undefined})
+          : resume(req, res, "b4-write", "activate")).then(r => { settled = true; return r; });
         await entered;
         await new Promise(r => setTimeout(r, 20));
         expect(settled, "response must wait for publication").to.equal(false);
