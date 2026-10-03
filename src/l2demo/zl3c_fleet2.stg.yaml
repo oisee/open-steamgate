@@ -110,10 +110,17 @@ entities:
         readonly: true
         sortable: false
         filterable: false
+      PilesOrphaned:
+        type: Int32
+        field: PILES_ORPHANED
+        label: Piles running without a live job
+        readonly: true
+        sortable: false
+        filterable: false
       PctFinal:
         type: Int32
         field: PCT_FINAL
-        label: Piles final (%)
+        label: Piles done (%)
         readonly: true
         sortable: false
         filterable: false
@@ -863,6 +870,13 @@ entities:
         readonly: true
         sortable: false
         filterable: false
+      Label:
+        type: String(24)
+        field: LABEL
+        label: Piles of the status
+        readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false
@@ -1058,18 +1072,18 @@ annotations:
         label: Status
         criticality: StatusCriticality
       - value: PctFinal
-        label: Piles final (%)
+        label: Piles done (%)
       - value: Started
         label: Started
     headerFacets:
       - id: StatusPoint
-        label: Status
+        label: Run status
         target: '@UI.DataPoint#Status'
       - id: FinalChart
-        label: Piles final
+        label: Piles done of planned
         target: '@UI.Chart#Final'
       - id: BudgetChart
-        label: Budget
+        label: 'Budget: reserved of the glass'
         target: '@UI.Chart#Budget'
       - id: TallyChart
         label: Piles by status
@@ -1077,11 +1091,11 @@ annotations:
     dataPoints:
       Status:
         value: Status
-        title: Status
+        title: Run status
         criticality: StatusCriticality
       Final:
-        value: PilesFinal
-        title: Piles final
+        value: PilesDone
+        title: Piles done
         targetValue: Piles
       Budget:
         value: Reserved
@@ -1095,11 +1109,11 @@ annotations:
     charts:
       Final:
         type: Donut
-        title: Piles final
+        title: Piles done
         measures:
-          - PilesFinal
+          - PilesDone
         measureAttributes:
-          - measure: PilesFinal
+          - measure: PilesDone
             dataPoint: Final
       Budget:
         type: Bullet
@@ -1288,6 +1302,9 @@ annotations:
         measureAttributes:
           - measure: Piles
             dataPoint: Tally
+  Tally/Piles:
+    label: Piles
+    text: Label
   Run/Status:
     label: Status
     valueListFixed: true
@@ -1335,8 +1352,10 @@ annotations:
     label: Piles failed
   Run/PilesHeld:
     label: Piles held
+  Run/PilesOrphaned:
+    label: Piles running without a live job
   Run/PctFinal:
-    label: Piles final (%)
+    label: Piles done (%)
   Run/StatusCriticality:
     label: Status criticality
   Run/CanContinue:
@@ -1561,10 +1580,10 @@ annotations:
     label: Run ID
   Tally/Status:
     label: Status
-  Tally/Piles:
-    label: Piles
   Tally/StatusCriticality:
     label: Criticality
+  Tally/Label:
+    label: Piles of the status
   StatusVH/Status:
     label: Status
   StatusVH/Text:

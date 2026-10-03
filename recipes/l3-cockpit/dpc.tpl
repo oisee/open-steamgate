@@ -1,6 +1,10 @@
 * Generated run cockpit of {{set}}; do not edit.
 CLASS {{class}} DEFINITION PUBLIC INHERITING FROM {{base}} CREATE PUBLIC.
   PUBLIC SECTION.
+    " a name as a whole identifier in a filter text (static: the test asks it directly)
+    CLASS-METHODS names
+      IMPORTING iv_text TYPE string iv_name TYPE string
+      RETURNING VALUE(rv_found) TYPE abap_bool.
     METHODS /iwbep/if_mgw_appl_srv_runtime~execute_action REDEFINITION.
   PROTECTED SECTION.
 {{#entities}}
@@ -17,6 +21,7 @@ CLASS {{class}} DEFINITION PUBLIC INHERITING FROM {{base}} CREATE PUBLIC.
       CHANGING cs_run TYPE {{mpc}}=>ts_run.
     METHODS refuse_computed
       IMPORTING iv_where TYPE string iv_filter TYPE string it_options TYPE /iwbep/t_mgw_select_option
+                it_order TYPE /iwbep/t_mgw_sorting_order
                 iv_fields TYPE string iv_properties TYPE string
       RAISING /iwbep/cx_mgw_busi_exception.
     METHODS parameter
@@ -47,11 +52,38 @@ CLASS {{class}} IMPLEMENTATION.
 {{/governed}}
     DATA lv_date TYPE string.
     DATA lv_count TYPE i.
+    DATA lv_aborted TYPE btch0000-char1.
+    DATA lv_finished TYPE btch0000-char1.
+    DATA lv_running TYPE btch0000-char1.
+    DATA lv_ready TYPE btch0000-char1.
+    DATA lv_scheduled TYPE btch0000-char1.
+    DATA lv_preliminary TYPE btch0000-char1.
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = {{set | literal}} AND run_id = cs_run-run_id.
     cs_run-run_mode = 'S'.
     cs_run-piles = lines( lt_piles ).
     LOOP AT lt_piles INTO ls_pile.
+      " a pile RUNNING in a job that is over or gone: only the doctor fails it; the
+      " page says so meanwhile (read only, and only for this run's RUNNING piles)
+      IF ls_pile-status = 'RUNNING' AND ls_pile-job_count IS NOT INITIAL.
+        CLEAR: lv_aborted, lv_finished, lv_running, lv_ready, lv_scheduled, lv_preliminary.
+        CALL FUNCTION 'SHOW_JOBSTATE'
+          EXPORTING
+            jobname = ls_pile-job_name
+            jobcount = ls_pile-job_count
+          IMPORTING
+            aborted = lv_aborted
+            finished = lv_finished
+            preliminary = lv_preliminary
+            ready = lv_ready
+            running = lv_running
+            scheduled = lv_scheduled
+          EXCEPTIONS
+            OTHERS = 1.
+        IF sy-subrc <> 0 OR lv_finished = 'X' OR lv_aborted = 'X'.
+          cs_run-piles_orphaned = cs_run-piles_orphaned + 1.
+        ENDIF.
+      ENDIF.
       CASE ls_pile-status.
         WHEN 'DONE'.
           cs_run-piles_done = cs_run-piles_done + 1.
@@ -69,7 +101,8 @@ CLASS {{class}} IMPLEMENTATION.
     ENDLOOP.
     cs_run-piles_final = cs_run-piles_done + cs_run-piles_failed.
     IF cs_run-piles > 0.
-      cs_run-pct_final = cs_run-piles_final * 100 / cs_run-piles.
+      " done of planned: a failed pile is final and not done
+      cs_run-pct_final = cs_run-piles_done * 100 / cs_run-piles.
     ENDIF.
     SELECT SINGLE * FROM zosd_l3_stage INTO ls_stage
       WHERE set_name = {{set | literal}} AND run_id = cs_run-run_id AND stage_no = 1.
@@ -125,6 +158,7 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lt_names TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
     DATA lt_fields TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
     DATA ls_option TYPE /iwbep/s_mgw_select_option.
+    DATA ls_order TYPE /iwbep/s_mgw_sorting_order.
     SPLIT iv_properties AT space INTO TABLE lt_names.
     DELETE lt_names WHERE table_line IS INITIAL.
     LOOP AT it_options INTO ls_option.
@@ -143,7 +177,7 @@ CLASS {{class}} IMPLEMENTATION.
       " the fields come in the order of the properties: the answer names the property
       LOOP AT lt_fields INTO lv_field.
         READ TABLE lt_names INTO lv_property INDEX sy-tabix.
-        IF lv_where CS lv_field OR lv_where CS lv_property.
+        IF names( iv_text = lv_where iv_name = lv_field ) = abap_true OR names( iv_text = lv_where iv_name = lv_property ) = abap_true.
           lv_name = lv_property.
         ENDIF.
       ENDLOOP.
@@ -151,6 +185,23 @@ CLASS {{class}} IMPLEMENTATION.
     IF lv_name IS NOT INITIAL.
       RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
         EXPORTING message_unlimited = |{ lv_name } is computed after the read and cannot be filtered on|.
+    ENDIF.
+    " a sort on it would be ignored as well: the rows keep their own order before paging
+    LOOP AT it_order INTO ls_order.
+      READ TABLE lt_names TRANSPORTING NO FIELDS WITH KEY table_line = ls_order-property.
+      IF sy-subrc = 0.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+          EXPORTING message_unlimited = |{ ls_order-property } is computed after the read and cannot be sorted on|.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+  METHOD names.
+    " a whole identifier: PILES is not part of PILES_DONE, Open not of OpenAlerts
+    DATA lv_regex TYPE string.
+    CONCATENATE '(^|[^A-Za-z0-9_])' iv_name '($|[^A-Za-z0-9_])' INTO lv_regex.
+    FIND FIRST OCCURRENCE OF REGEX lv_regex IN iv_text.
+    IF sy-subrc = 0.
+      rv_found = abap_true.
     ENDIF.
   ENDMETHOD.
   METHOD tallyset_get_entityset.
@@ -176,7 +227,7 @@ CLASS {{class}} IMPLEMENTATION.
 {{/tally_refuse.prop_chunks}}
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
-      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
+      it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
     LOOP AT it_filter_select_options INTO ls_filter WHERE property = 'RunId'.
       LOOP AT ls_filter-select_options INTO ls_range.
@@ -192,9 +243,14 @@ CLASS {{class}} IMPLEMENTATION.
         ls_tally-run_id = lv_run.
         ls_tally-status = ls_pile-status.
         ls_tally-status_crit = criticality( ls_pile-status ).
+        " in the bar only FAILED is red: piles at the glass wait for a person
+        IF ls_pile-status = 'GLASS'.
+          ls_tally-status_crit = 2.
+        ENDIF.
         APPEND ls_tally TO lt_counts ASSIGNING <ls_tally>.
       ENDIF.
       <ls_tally>-piles = <ls_tally>-piles + 1.
+      <ls_tally>-label = |{ <ls_tally>-status } { <ls_tally>-piles }|.
     ENDLOOP.
     SPLIT {{tally_text}} AT space INTO TABLE lt_order.
     LOOP AT lt_order INTO lv_status.
@@ -221,7 +277,7 @@ CLASS {{class}} IMPLEMENTATION.
 {{/statusvh_refuse.prop_chunks}}
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
-      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
+      it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
 {{#run_statuses}}
     ls_status-status = {{status}}.
     ls_status-text = {{text}}.
@@ -275,7 +331,7 @@ CLASS {{class}} IMPLEMENTATION.
 {{/prop_chunks}}
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
-      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
+      it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
 {{/has_computed}}
     " the set first: a dynamic condition starts with a column on a system
     " ('1 = 1' parses here and not there), and the OData filter only joins

@@ -1,6 +1,10 @@
 * Generated run cockpit of fleet2; do not edit.
 CLASS zcl_zl3c_fleet2_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zl3c_fleet2_dpc CREATE PUBLIC.
   PUBLIC SECTION.
+    " a name as a whole identifier in a filter text (static: the test asks it directly)
+    CLASS-METHODS names
+      IMPORTING iv_text TYPE string iv_name TYPE string
+      RETURNING VALUE(rv_found) TYPE abap_bool.
     METHODS /iwbep/if_mgw_appl_srv_runtime~execute_action REDEFINITION.
   PROTECTED SECTION.
     METHODS runset_get_entityset REDEFINITION.
@@ -31,6 +35,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zl3c_fleet2_
       CHANGING cs_run TYPE zcl_zl3c_fleet2_mpc=>ts_run.
     METHODS refuse_computed
       IMPORTING iv_where TYPE string iv_filter TYPE string it_options TYPE /iwbep/t_mgw_select_option
+                it_order TYPE /iwbep/t_mgw_sorting_order
                 iv_fields TYPE string iv_properties TYPE string
       RAISING /iwbep/cx_mgw_busi_exception.
     METHODS parameter
@@ -61,11 +66,38 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA ls_budget TYPE zosd_l3_budget.
     DATA lv_date TYPE string.
     DATA lv_count TYPE i.
+    DATA lv_aborted TYPE btch0000-char1.
+    DATA lv_finished TYPE btch0000-char1.
+    DATA lv_running TYPE btch0000-char1.
+    DATA lv_ready TYPE btch0000-char1.
+    DATA lv_scheduled TYPE btch0000-char1.
+    DATA lv_preliminary TYPE btch0000-char1.
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = 'fleet2' AND run_id = cs_run-run_id.
     cs_run-run_mode = 'S'.
     cs_run-piles = lines( lt_piles ).
     LOOP AT lt_piles INTO ls_pile.
+      " a pile RUNNING in a job that is over or gone: only the doctor fails it; the
+      " page says so meanwhile (read only, and only for this run's RUNNING piles)
+      IF ls_pile-status = 'RUNNING' AND ls_pile-job_count IS NOT INITIAL.
+        CLEAR: lv_aborted, lv_finished, lv_running, lv_ready, lv_scheduled, lv_preliminary.
+        CALL FUNCTION 'SHOW_JOBSTATE'
+          EXPORTING
+            jobname = ls_pile-job_name
+            jobcount = ls_pile-job_count
+          IMPORTING
+            aborted = lv_aborted
+            finished = lv_finished
+            preliminary = lv_preliminary
+            ready = lv_ready
+            running = lv_running
+            scheduled = lv_scheduled
+          EXCEPTIONS
+            OTHERS = 1.
+        IF sy-subrc <> 0 OR lv_finished = 'X' OR lv_aborted = 'X'.
+          cs_run-piles_orphaned = cs_run-piles_orphaned + 1.
+        ENDIF.
+      ENDIF.
       CASE ls_pile-status.
         WHEN 'DONE'.
           cs_run-piles_done = cs_run-piles_done + 1.
@@ -83,7 +115,8 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     ENDLOOP.
     cs_run-piles_final = cs_run-piles_done + cs_run-piles_failed.
     IF cs_run-piles > 0.
-      cs_run-pct_final = cs_run-piles_final * 100 / cs_run-piles.
+      " done of planned: a failed pile is final and not done
+      cs_run-pct_final = cs_run-piles_done * 100 / cs_run-piles.
     ENDIF.
     SELECT SINGLE * FROM zosd_l3_stage INTO ls_stage
       WHERE set_name = 'fleet2' AND run_id = cs_run-run_id AND stage_no = 1.
@@ -160,6 +193,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lt_names TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
     DATA lt_fields TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
     DATA ls_option TYPE /iwbep/s_mgw_select_option.
+    DATA ls_order TYPE /iwbep/s_mgw_sorting_order.
     SPLIT iv_properties AT space INTO TABLE lt_names.
     DELETE lt_names WHERE table_line IS INITIAL.
     LOOP AT it_options INTO ls_option.
@@ -178,7 +212,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
       " the fields come in the order of the properties: the answer names the property
       LOOP AT lt_fields INTO lv_field.
         READ TABLE lt_names INTO lv_property INDEX sy-tabix.
-        IF lv_where CS lv_field OR lv_where CS lv_property.
+        IF names( iv_text = lv_where iv_name = lv_field ) = abap_true OR names( iv_text = lv_where iv_name = lv_property ) = abap_true.
           lv_name = lv_property.
         ENDIF.
       ENDLOOP.
@@ -186,6 +220,23 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     IF lv_name IS NOT INITIAL.
       RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
         EXPORTING message_unlimited = |{ lv_name } is computed after the read and cannot be filtered on|.
+    ENDIF.
+    " a sort on it would be ignored as well: the rows keep their own order before paging
+    LOOP AT it_order INTO ls_order.
+      READ TABLE lt_names TRANSPORTING NO FIELDS WITH KEY table_line = ls_order-property.
+      IF sy-subrc = 0.
+        RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
+          EXPORTING message_unlimited = |{ ls_order-property } is computed after the read and cannot be sorted on|.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
+  METHOD names.
+    " a whole identifier: PILES is not part of PILES_DONE, Open not of OpenAlerts
+    DATA lv_regex TYPE string.
+    CONCATENATE '(^|[^A-Za-z0-9_])' iv_name '($|[^A-Za-z0-9_])' INTO lv_regex.
+    FIND FIRST OCCURRENCE OF REGEX lv_regex IN iv_text.
+    IF sy-subrc = 0.
+      rv_found = abap_true.
     ENDIF.
   ENDMETHOD.
   METHOD tallyset_get_entityset.
@@ -203,11 +254,11 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lv_computed_props TYPE string.
     DATA lo_computed_filter TYPE REF TO /iwbep/if_mgw_req_filter.
     FIELD-SYMBOLS <ls_tally> TYPE zcl_zl3c_fleet2_mpc=>ts_tally.
-    CONCATENATE lv_computed_fields 'STATUS PILES STATUS_CRIT' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_props 'Status Piles StatusCriticality' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'STATUS PILES STATUS_CRIT LABEL' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_props 'Status Piles StatusCriticality Label' INTO lv_computed_props SEPARATED BY space.
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
-      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
+      it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     lv_run = parameter( it_params = it_key_tab iv_name = 'RunId' ).
     LOOP AT it_filter_select_options INTO ls_filter WHERE property = 'RunId'.
       LOOP AT ls_filter-select_options INTO ls_range.
@@ -223,9 +274,14 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
         ls_tally-run_id = lv_run.
         ls_tally-status = ls_pile-status.
         ls_tally-status_crit = criticality( ls_pile-status ).
+        " in the bar only FAILED is red: piles at the glass wait for a person
+        IF ls_pile-status = 'GLASS'.
+          ls_tally-status_crit = 2.
+        ENDIF.
         APPEND ls_tally TO lt_counts ASSIGNING <ls_tally>.
       ENDIF.
       <ls_tally>-piles = <ls_tally>-piles + 1.
+      <ls_tally>-label = |{ <ls_tally>-status } { <ls_tally>-piles }|.
     ENDLOOP.
     SPLIT 'DONE RUNNING PLANNED HELD GLASS FAILED FUSED' AT space INTO TABLE lt_order.
     LOOP AT lt_order INTO lv_status.
@@ -248,7 +304,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     CONCATENATE lv_computed_props 'Status Text' INTO lv_computed_props SEPARATED BY space.
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
-      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
+      it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     ls_status-status = 'OPEN'.
     ls_status-text = 'Open: the first stage runs'.
     APPEND ls_status TO et_entityset.
@@ -306,17 +362,19 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lt_started TYPE RANGE OF zosd_l3_run-started.
     CONCATENATE lv_computed_fields 'TITLE RUN_LABEL RUN_MODE TWIN IS_OPEN' INTO lv_computed_fields SEPARATED BY space.
     CONCATENATE lv_computed_fields 'PILES PILES_FINAL PILES_DONE PILES_RUNNING PILES_FAILED' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_fields 'PILES_HELD PCT_FINAL STATUS_CRIT CAN_CONTINUE CAN_RESUME' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_fields 'RESERVED GLASS WARN_LEVEL NARROW_LEVEL HIDE_STAGE' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_fields 'HIDE_PILE HIDE_BUDGET HIDE_EVENT HIDE_DOCTOR HIDE_SNAPSHOT' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'PILES_HELD PILES_ORPHANED PCT_FINAL STATUS_CRIT CAN_CONTINUE' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'CAN_RESUME RESERVED GLASS WARN_LEVEL NARROW_LEVEL' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'HIDE_STAGE HIDE_PILE HIDE_BUDGET HIDE_EVENT HIDE_DOCTOR' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'HIDE_SNAPSHOT' INTO lv_computed_fields SEPARATED BY space.
     CONCATENATE lv_computed_props 'Title RunLabel Mode Twin Open' INTO lv_computed_props SEPARATED BY space.
     CONCATENATE lv_computed_props 'Piles PilesFinal PilesDone PilesRunning PilesFailed' INTO lv_computed_props SEPARATED BY space.
-    CONCATENATE lv_computed_props 'PilesHeld PctFinal StatusCriticality CanContinue CanResume' INTO lv_computed_props SEPARATED BY space.
-    CONCATENATE lv_computed_props 'Reserved Glass WarnLevel NarrowLevel HideStage' INTO lv_computed_props SEPARATED BY space.
-    CONCATENATE lv_computed_props 'HidePile HideBudget HideEvent HideDoctor HideSnapshot' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'PilesHeld PilesOrphaned PctFinal StatusCriticality CanContinue' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'CanResume Reserved Glass WarnLevel NarrowLevel' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'HideStage HidePile HideBudget HideEvent HideDoctor' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'HideSnapshot' INTO lv_computed_props SEPARATED BY space.
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
-      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
+      it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     " the set first: a dynamic condition starts with a column on a system
     " ('1 = 1' parses here and not there), and the OData filter only joins
     " when there is one
@@ -434,7 +492,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     CONCATENATE lv_computed_props 'StatusCriticality' INTO lv_computed_props SEPARATED BY space.
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
-      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
+      it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     " the set first: a dynamic condition starts with a column on a system
     " ('1 = 1' parses here and not there), and the OData filter only joins
     " when there is one
@@ -487,7 +545,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     CONCATENATE lv_computed_props 'StatusCriticality CanRelease' INTO lv_computed_props SEPARATED BY space.
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
-      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
+      it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     " the set first: a dynamic condition starts with a column on a system
     " ('1 = 1' parses here and not there), and the OData filter only joins
     " when there is one
@@ -549,7 +607,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     CONCATENATE lv_computed_props 'StateCriticality' INTO lv_computed_props SEPARATED BY space.
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
-      it_options = it_filter_select_options iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
+      it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
     " the set first: a dynamic condition starts with a column on a system
     " ('1 = 1' parses here and not there), and the OData filter only joins
     " when there is one

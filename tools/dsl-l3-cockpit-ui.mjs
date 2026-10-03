@@ -48,7 +48,8 @@ export function cockpitUi(m, {doc, entities}) {
     Piles: own("Int32", "Piles", "PILES"), PilesFinal: own("Int32", "Piles final", "PILES_FINAL"),
     PilesDone: own("Int32", "Piles done", "PILES_DONE"), PilesRunning: own("Int32", "Piles running", "PILES_RUNNING"),
     PilesFailed: own("Int32", "Piles failed", "PILES_FAILED"), PilesHeld: own("Int32", "Piles held", "PILES_HELD"),
-    PctFinal: own("Int32", "Piles final (%)", "PCT_FINAL"), StatusCriticality: own("Byte", "Status criticality", "STATUS_CRIT"),
+    PilesOrphaned: own("Int32", "Piles running without a live job", "PILES_ORPHANED"),
+    PctFinal: own("Int32", "Piles done (%)", "PCT_FINAL"), StatusCriticality: own("Byte", "Status criticality", "STATUS_CRIT"),
     CanContinue: own("Boolean", "Can continue past glass", "CAN_CONTINUE"), CanResume: own("Boolean", "Can resume", "CAN_RESUME")});
   if (m.governor) Object.assign(run, {Reserved: own("Int32", "Budget reserved", "RESERVED"), Glass: own("Int32", "Glass", "GLASS"),
     WarnLevel: own("Int32", "Warn level", "WARN_LEVEL"), NarrowLevel: own("Int32", "Narrow level", "NARROW_LEVEL")});
@@ -64,7 +65,8 @@ export function cockpitUi(m, {doc, entities}) {
     hides: facets.map((f) => ({table: f.table, field: `hide_${f.name.toLowerCase()}`}))});
   // the pile bar: one row per status of a run's piles
   doc.entities.Tally = {set: "TallySet", keys: ["RunId", "Status"], properties: {RunId: {...own("String(32)", "Run ID", "RUN_ID"), filterable: true},
-    Status: own("String(12)", "Status", "STATUS"), Piles: own("Int32", "Piles", "PILES"), StatusCriticality: own("Byte", "Criticality", "STATUS_CRIT")},
+    Status: own("String(12)", "Status", "STATUS"), Piles: own("Int32", "Piles", "PILES"), StatusCriticality: own("Byte", "Criticality", "STATUS_CRIT"),
+    Label: own("String(24)", "Piles of the status", "LABEL")},
   creatable: false, updatable: false, deletable: false, operations: ["Q"]};
   doc.associations.RunToTally = {from: "Run", to: "Tally", cardinality: "1:N", constraint: {RunId: "RunId"}, navigation: {Run: "to_Tally"}};
   doc.entities.StatusVH = {set: "StatusVHSet", keys: ["Status"], properties: {Status: own("String(12)", "Status", "STATUS"), Text: own("String(60)", "Meaning", "TEXT")},
@@ -73,16 +75,17 @@ export function cockpitUi(m, {doc, entities}) {
   doc.annotations.Run = {
     header: {typeName: "Run", typeNamePlural: "Runs", title: "Title", description: "RunId"},
     selectionFields: ["CheckDate", "Status"],
-    lineItem: [{value: "RunLabel", label: "Run"}, status("StatusCriticality"), {value: "PctFinal", label: "Piles final (%)"}, {value: "Started", label: "Started"}],
-    headerFacets: [{id: "StatusPoint", label: "Status", target: "@UI.DataPoint#Status"},
-      {id: "FinalChart", label: "Piles final", target: "@UI.Chart#Final"},
-      ...(m.governor ? [{id: "BudgetChart", label: "Budget", target: "@UI.Chart#Budget"}] : []),
+    lineItem: [{value: "RunLabel", label: "Run"}, status("StatusCriticality"), {value: "PctFinal", label: "Piles done (%)"}, {value: "Started", label: "Started"}],
+    // whose state each one is: the run's status, the piles done of planned, the budget
+    headerFacets: [{id: "StatusPoint", label: "Run status", target: "@UI.DataPoint#Status"},
+      {id: "FinalChart", label: "Piles done of planned", target: "@UI.Chart#Final"},
+      ...(m.governor ? [{id: "BudgetChart", label: "Budget: reserved of the glass", target: "@UI.Chart#Budget"}] : []),
       {id: "TallyChart", label: "Piles by status", target: "to_Tally/@UI.Chart#Tally"}],
-    dataPoints: {Status: {value: "Status", title: "Status", criticality: "StatusCriticality"},
-      Final: {value: "PilesFinal", title: "Piles final", targetValue: "Piles"},
+    dataPoints: {Status: {value: "Status", title: "Run status", criticality: "StatusCriticality"},
+      Final: {value: "PilesDone", title: "Piles done", targetValue: "Piles"},
       ...(m.governor ? {Budget: {value: "Reserved", title: "Budget reserved", minimumValue: 0, maximumValue: "Glass",
         criticalityCalculation: {improvementDirection: "Minimize", toleranceRangeHighValue: "WarnLevel", deviationRangeHighValue: "NarrowLevel"}}} : {})},
-    charts: {Final: {type: "Donut", title: "Piles final", measures: ["PilesFinal"], measureAttributes: [{measure: "PilesFinal", dataPoint: "Final"}]},
+    charts: {Final: {type: "Donut", title: "Piles done", measures: ["PilesDone"], measureAttributes: [{measure: "PilesDone", dataPoint: "Final"}]},
       ...(m.governor ? {Budget: {type: "Bullet", title: "Budget", measures: ["Reserved"], measureAttributes: [{measure: "Reserved", dataPoint: "Budget"}]}} : {})},
     facets: facets.map((e) => ({id: e.name, label: SECTIONS[e.name] ?? e.name, lineItem: `to_${e.name}`, hidden: `Hide${e.name}`}))};
   for (const name of ["Stage", "Pile"]) doc.annotations[name].lineItem = doc.annotations[name].lineItem.map((c) => c.value === "Status" ? status("StatusCriticality") : c);
@@ -91,7 +94,9 @@ export function cockpitUi(m, {doc, entities}) {
     if (a.lineItem) a.lineItem = a.lineItem.map((c) => ({...c, label: doc.entities[name].properties[c.value]?.label ?? words(c.value)}));
   }
   doc.annotations.Tally = {dataPoints: {Tally: {value: "Piles", title: "Piles", criticality: "StatusCriticality"}},
+    // each segment says its status and count (Common.Text of the measure)
     charts: {Tally: {type: "BarStacked", title: "Piles by status", dimensions: ["Status"], measures: ["Piles"], measureAttributes: [{measure: "Piles", dataPoint: "Tally"}]}}};
+  doc.annotations["Tally/Piles"] = {text: "Label"};
   doc.annotations["Run/Status"] = {valueListFixed: true, valueList: {label: "Status", collection: "StatusVHSet", search: false,
     parameters: [{inOut: {Status: "Status"}}, {displayOnly: "Text"}]}};
   doc.annotations.StatusVH = {lineItem: [{value: "Status", label: "Status"}, {value: "Text", label: "Meaning"}]};

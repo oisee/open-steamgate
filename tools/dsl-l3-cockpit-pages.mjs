@@ -4,7 +4,8 @@ import {renderRecipe} from "./dsl-abap.mjs";
 import {cockpitActions} from "./dsl-l3-cockpit-service.mjs";
 // Two apps per set: "Runs <set>" (list report and run page, what is about one run) and
 // "Set <set>" (settings with their audit, schedule, kill switch, doctor).
-const RUN_ACTIONS = ["StartRun", "ContinueGlass", "Resume", "ReleasePile"];
+// the doctor is on both: the run page asks it for piles whose job is over, the Set app runs it on its own
+const RUN_ACTIONS = ["StartRun", "ContinueGlass", "Resume", "ReleasePile", "Doctor"];
 const RUNS_FILES = ["index.html", "Component.js", "manifest.json", "Cockpit.controller.js", "Cockpit.fragment.xml", "List.controller.js",
   "StartRun.fragment.xml", "i18n.properties"];
 const SET_FILES = ["index.html", "Component.js", "manifest.json", "Set.view.xml", "Set.controller.js", "i18n.properties"];
@@ -19,22 +20,47 @@ export async function cockpitPages(m) {
   const settings = (m.settings?.entries ?? []).map(({name, default: value, min, max, values}) => ({name, default: value, min, max,
     ...(values ? {values: values.split(/,\s*/)} : {})}));
   const json = (v) => JSON.stringify(v, null, 1).replaceAll("\n", "\n  ");
-  const runs = {service: c.service, actions: actions.filter((a) => RUN_ACTIONS.includes(a.name)), governor: !!m.governor, simulate: !!m.simulate};
-  const set = {service: c.service, actions: actions.filter((a) => !RUN_ACTIONS.includes(a.name)), settings};
+  const runs = {service: c.service, set: m.set, actions: actions.filter((a) => RUN_ACTIONS.includes(a.name)), governor: !!m.governor, simulate: !!m.simulate};
+  const set = {service: c.service, actions: actions.filter((a) => a.name === "Doctor" || !RUN_ACTIONS.includes(a.name)),
+    settings: settings.map((x) => ({...x, about: about(x)}))};
   const root = {...c, set: m.set, set_title: `Set ${m.set}`, config: json(runs), title_json: JSON.stringify(c.title), manifest: JSON.stringify(manifest(m), null, 2)};
   for (const name of RUNS_FILES) files[`cockpit/${c.app}/${published(name)}`] = (await renderRecipe(root, `recipes/l3-cockpit/${name}`)).text;
-  for (const name of ["Series.js", "Live.js"]) files[`cockpit/${c.app}/${name}`] = readFileSync(`recipes/l3-cockpit/${name}`, "utf8");
+  for (const name of ["Series.js", "Live.js", "Words.js"]) files[`cockpit/${c.app}/${name}`] = readFileSync(`recipes/l3-cockpit/${name}`, "utf8");
   const openRuns = `/sap/opu/odata/sap/${c.service}/RunSet/$count?$filter=${OPEN.replaceAll(" ", "%20")}`;
   files[`cockpit/${c.app}/cockpit.json`] = JSON.stringify({app: c.app, title: `Runs ${m.set}`, service: c.service,
-    files: [...RUNS_FILES.map(published), "Series.js", "Live.js"],
+    files: [...RUNS_FILES.map(published), "Series.js", "Live.js", "Words.js"],
     tile: {type: "dynamic", subtitle: c.title, icon: "sap-icon://process", serviceUrl: openRuns, serviceRefreshInterval: "30", numberUnit: "open"}}, null, 2) + "\n";
   const setRoot = {...root, config: json(set), manifest: JSON.stringify(setManifest(m), null, 2)};
   for (const name of SET_FILES) files[`cockpit/${c.set_app}/${published(name)}`] = (await renderRecipe(setRoot, `recipes/l3-cockpit/set/${name}`)).text;
-  files[`cockpit/${c.set_app}/Live.js`] = readFileSync("recipes/l3-cockpit/Live.js", "utf8");
+  for (const name of ["Live.js", "Words.js"]) files[`cockpit/${c.set_app}/${name}`] = readFileSync(`recipes/l3-cockpit/${name}`, "utf8");
   files[`cockpit/${c.set_app}/cockpit.json`] = JSON.stringify({app: c.set_app, title: `Set ${m.set}`, service: c.service,
-    files: [...SET_FILES.map(published), "Live.js"],
+    files: [...SET_FILES.map(published), "Live.js", "Words.js"],
     tile: {subtitle: "Settings, schedule, kill switch, doctor", icon: "sap-icon://action-settings"}}, null, 2) + "\n";
   return files;
+}
+// one line per setting, what it means and in which unit (shown in the Set app)
+const ABOUT = {
+  "budget.glass": "alerts the budget allows before the run stops at the glass",
+  "budget.warn": "share of the glass in basis points at which the budget warns, 7000 = 70 %",
+  "budget.narrow_at": "share of the glass in basis points from which piles are narrowed, 8000 = 80 %",
+  "budget.per_pile": "alerts one pile may reserve; a pile that needs more is held",
+  "retry.max": "how often a failed pile is sent again",
+  "retry.backoff": "seconds before the first retry, doubled per attempt",
+  "stale": "seconds after which the doctor takes over a lock, a pile or a gate",
+  "fuses.max_alerts": "alerts a rule may write in one run before it stops writing",
+  "keep.days": "days the plans of a final run are kept",
+  "simulate.seed": "seed of the twin's draws: the same seed, the same night",
+  "simulate.time_scale": "wall time per simulated time in millionths, 10000 = 0.01 (40 s take 0.4 s)",
+  "simulate.profile": "chaos profile of the twin",
+  "simulate.dump": "share of piles that dump, per mille; -1 = from the profile",
+  "simulate.hang": "share of piles that hang, per mille; -1 = from the profile",
+  "simulate.slow": "share of piles that run slow, per mille; -1 = from the profile",
+  "simulate.hits_mean": "mean alerts of a pile; -1 = from the profile",
+  "simulate.autoclose": "chance an alert is closed by the chance autoclose, per mille; -1 = from the profile",
+};
+function about({name}) {
+  const stage = /^piles\.(.+)\.size$/.exec(name);
+  return ABOUT[name] ?? (stage ? `keys per pile in stage ${stage[1]}` : name === "piles.size" ? "keys per pile" : "");
 }
 function setManifest(m) {
   const id = `l3.${m.set}.set`;

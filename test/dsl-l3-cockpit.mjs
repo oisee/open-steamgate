@@ -369,6 +369,13 @@ describe("DSL L3 run cockpit", function () {
         expect(code, path).equal(400);
         expect(message, path).equal(`${name} is computed after the read and cannot be filtered on`);
       }
+      for (const [path, name] of [["RunSet?$orderby=PilesDone desc&$top=1", "PilesDone"], ["PileSet?$orderby=CanRelease", "CanRelease"],
+        ["StageSet?$orderby=StatusCriticality desc", "StatusCriticality"], ["BudgetSet?$orderby=StateCriticality", "StateCriticality"]]) {
+        const [code, message] = await status(path);
+        expect(code, path).equal(400);
+        expect(message, path).equal(`${name} is computed after the read and cannot be sorted on`);
+      }
+      expect((await get("RunSet?$orderby=Started desc&$top=1")).results).length(1);
       // the list report's own filters, and a value that spells a computed field, still work
       expect((await get("RunSet?$filter=Status eq 'GLASS'")).results).length(0);
       expect((await get("RunSet?$filter=CheckDate eq datetime'2026-10-01T00:00:00' and Status eq 'DONE'")).results.map((x) => x.RunId)).include(r.RunId);
@@ -379,6 +386,21 @@ describe("DSL L3 run cockpit", function () {
       expect(metadata).match(/<Property Name="CheckDate" [^>]*sap:sortable="true" sap:filterable="true"/);
     }
     it("refuses a filter on a computed field in words and keeps the real filters", refusesComputedFilters);
+    it("matches a computed name as a whole identifier, never inside a longer one", async () => {
+      const box = (v) => new abap.types.String().set(v);
+      const names = async (text, name) => (await abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT.names({iv_text: box(text), iv_name: box(name)})).get().trim();
+      expect(await names("( PILES_DONE > 3 )", "PILES_DONE")).equal("X");
+      expect(await names("OPEN_ALERTS > 0", "OPEN")).equal("");
+      expect(await names("(OpenAlerts gt 0)", "Open")).equal("");
+      expect(await names("Open eq true", "Open")).equal("X");
+      expect(await names("PILES_DONE > 3", "PILES")).equal("");
+      // mutant: a substring match finds OPEN in OPEN_ALERTS
+      const original = readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8");
+      const cs = original.replace("    FIND FIRST OCCURRENCE OF REGEX lv_regex IN iv_text.\n    IF sy-subrc = 0.", "    IF iv_text CS iv_name.");
+      expect(cs).not.equal(original);
+      const mutant = await loadCockpitMutant("zcl_cockpit_names_mut", cs.replaceAll("zcl_zl3c_fleet2_dpc_ext", "zcl_cockpit_names_mut"), join(dir, "names-mutant"));
+      expect((await mutant.names({iv_text: box("OPEN_ALERTS > 0"), iv_name: box("OPEN")})).get(), "mutant").equal("X");
+    });
     it("mutant: a DPC that ignores computed filters turns the refusal oracle red", async () => {
       const real = abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT, original = readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8");
       const source = original.replace("    IF lv_name IS NOT INITIAL.\n      RAISE EXCEPTION", "    IF lv_name = 'never'.\n      RAISE EXCEPTION");
@@ -406,7 +428,7 @@ describe("DSL L3 run cockpit", function () {
       const glass = await get(`RunSet('${r.RunId}')`);
       expect(glass).include({Status: "GLASS", StatusCriticality: 1, Open: true, CanContinue: true, CanResume: false, Glass: 1});
       expect(glass.PilesHeld).above(0);
-      expect((await get(`RunSet('${r.RunId}')/to_Tally`)).results.find((t) => t.Status === "GLASS")).include({StatusCriticality: 1});
+      expect((await get(`RunSet('${r.RunId}')/to_Tally`)).results.find((t) => t.Status === "GLASS")).include({StatusCriticality: 2});  // in the bar only FAILED is red
       expect((await action("Resume", {RunId: r.RunId})).Answer).include("GLASS");
       expect((await action("ContinueGlass", {RunId: r.RunId, NewGlass: 100, Reason: ""})).Answer).match(/^REFUSED: ContinueGlass: /);
       expect((await action("ContinueGlass", {RunId: r.RunId, NewGlass: 100, Reason: "staff available"})).Answer).equal("OK");
@@ -459,7 +481,9 @@ describe("DSL L3 run cockpit", function () {
       await exec(["INSERT INTO zosd_l3_run (mandt,set_name,check_date,run_id,status,started) VALUES ('','fleet2','20261003','MUTRUN','HELD',20261003000000)",
         "INSERT INTO zosd_l3_stage (mandt,run_id,stage_no,set_name,check_date,stage_name,status,opened) VALUES ('','MUTRUN',1,'fleet2','20261003','candidates','OPEN',20261003000000)",
         "INSERT INTO zosd_l3_stage (mandt,run_id,stage_no,set_name,check_date,stage_name,status) VALUES ('','MUTRUN',2,'fleet2','20261003','checks','WAITING')",
-        "INSERT INTO zosd_l3_pile (mandt,run_id,rule_name,pile_no,set_name,stage_no,status,check_date) VALUES ('','MUTRUN','x',1,'fleet2',1,'DONE','20261003'), ('','MUTRUN','x',2,'fleet2',1,'HELD','20261003')",
+        "INSERT INTO zosd_l3_pile (mandt,run_id,rule_name,pile_no,set_name,stage_no,status,check_date) VALUES ('','MUTRUN','x',1,'fleet2',1,'DONE','20261003'), ('','MUTRUN','x',2,'fleet2',1,'HELD','20261003'), ('','MUTRUN','x',4,'fleet2',1,'FAILED','20261003')",
+        // a pile RUNNING in a job that is gone: the doctor's case, shown before the doctor runs
+        "INSERT INTO zosd_l3_pile (mandt,run_id,rule_name,pile_no,set_name,stage_no,status,check_date,job_name,job_count) VALUES ('','MUTRUN','x',3,'fleet2',1,'RUNNING','20261003','L3_GONE','99999999')",
         "INSERT INTO zosd_l3_budget (mandt,run_id,set_name,state,glass,reserved,warn_at,narrow_at) VALUES ('','MUTRUN','fleet2','GLASS',10,5,7000,8000)"]);
       const pile = async (status) => (await get(`PileSet?$filter=RunId eq 'MUTRUN' and Status eq '${status}'`)).results[0];
       const oracles = {
@@ -468,7 +492,9 @@ describe("DSL L3 run cockpit", function () {
         hidden: async () => expect((await get("RunSet('MUTRUN')")).HideEvent).equal(true),
         release: async () => expect((await pile("HELD")).CanRelease).equal(true),
         criticality: async () => expect((await pile("DONE")).StatusCriticality).equal(3),
-        tally: async () => expect((await get("RunSet('MUTRUN')/to_Tally")).results.map((t) => t.Status)).deep.equal(["DONE", "HELD"]),
+        tally: async () => expect((await get("RunSet('MUTRUN')/to_Tally")).results.map((t) => [t.Status, t.Label])).deep.equal([["DONE", "DONE 1"], ["RUNNING", "RUNNING 1"], ["HELD", "HELD 1"], ["FAILED", "FAILED 1"]]),
+        orphaned: async () => expect((await get("RunSet('MUTRUN')")).PilesOrphaned).equal(1),
+        done: async () => expect((await get("RunSet('MUTRUN')")).PctFinal).equal(25),
         levels: async () => expect((await get("RunSet('MUTRUN')")).WarnLevel).equal(7),
       };
       for (const oracle of Object.values(oracles)) await oracle();
@@ -479,6 +505,8 @@ describe("DSL L3 run cockpit", function () {
         ["release", original.replaceAll("can_release = abap_true.", "can_release = abap_false.")],
         ["criticality", original.replace("rv_criticality = 3.", "rv_criticality = 0.")],
         ["tally", original.replace("        DELETE lt_counts WHERE status = lv_status.\n", "")],
+        ["orphaned", original.replace("cs_run-piles_orphaned = cs_run-piles_orphaned + 1.", "CLEAR cs_run-piles_orphaned.")],
+        ["done", original.replace("cs_run-pct_final = cs_run-piles_done * 100 / cs_run-piles.", "cs_run-pct_final = cs_run-piles_final * 100 / cs_run-piles.")],
         ["levels", original.replace("cs_run-warn_level = ls_budget-glass * ls_budget-warn_at / 10000.", "cs_run-warn_level = ls_budget-glass.")],
       ];
       for (const [name, text] of variants) {

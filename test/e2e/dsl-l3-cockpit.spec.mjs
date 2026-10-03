@@ -63,6 +63,9 @@ test("the start dialog: a date picker, the mode as a choice, the twin as a switc
   await expect(dialog.getByText("Background jobs carry the piles")).toBeVisible();
   // fleet2 has simulate:, so the twin is offered
   await expect(dialog.locator('[id$="--startSim"]')).toBeVisible();
+  // and the switch says under which chaos profile, and where it is changed
+  await expect(dialog).toContainText("Twin (sim), profile default");
+  await expect(dialog).toContainText("change the profile in Set fleet2");
   await dialog.getByRole("button", {name: "Cancel"}).click();
   const now = await startFromDialog(page, day(2026, 10, 4), "Now");
   await expect(now.getByText("The piles run in this request")).toBeVisible();
@@ -70,6 +73,9 @@ test("the start dialog: a date picker, the mode as a choice, the twin as a switc
   await expect(now).toBeHidden();
   await expect(page).toHaveURL(/RunSet\('[0-9A-F]{32}'\)/);
   await expect(page.getByText("fleet2 / 2026-10-04").first()).toBeVisible();
+  // whose state is which: the run's status in the header, the budget's in the progress table
+  await expect(page.getByText("Run status", {exact: true}).first()).toBeVisible();
+  await expect(op(page, "cockpitProgress")).toContainText("Budget state");
   const said = op(page, "cockpitAnswer");
   await expect(said).toContainText("Finished:");
   await expect(said).not.toContainText("{");
@@ -95,6 +101,22 @@ test("Live refreshes a run's piles to DONE without a reload, then turns itself o
   await page.goto(`${runsApp}#/RunSet('${id}')`);
   const live = op(page, "liveSwitch").locator(".sapMSwt");
   await expect(live).toHaveClass(/sapMSwtOn/);
+  // the switch says ON where it is on, and Live reads on its own: the stamp moves without a click
+  await expect(op(page, "liveSwitch")).toHaveAttribute("aria-checked", "true");
+  await expect(op(page, "liveSwitch").locator(".sapMSwtLabelOn")).toBeVisible();
+  const stamp = op(page, "liveStamp");
+  const first = await stamp.innerText();
+  await expect.poll(() => stamp.innerText(), {timeout: 15_000}).not.toBe(first);
+  // off: it stops reading; on again: it reads again
+  await live.click();
+  await expect(live).not.toHaveClass(/sapMSwtOn/);
+  await page.waitForTimeout(500);
+  const stopped = await stamp.innerText();
+  await page.waitForTimeout(7_000);
+  await expect(stamp).toHaveText(stopped);
+  await live.click();
+  await expect(live).toHaveClass(/sapMSwtOn/);
+  await expect.poll(() => stamp.innerText(), {timeout: 15_000}).not.toBe(stopped);
   const progress = op(page, "cockpitProgress");
   await expect(progress).toContainText("PLANNED");
   await expect(progress).not.toContainText("DONE");
@@ -131,12 +153,48 @@ test("Continue past glass is hidden without GLASS and shown with it, with the at
     await op(page, "attentionGo").click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toContainText("New glass");
+    // a status in red is a status, not an input in error
+    await expect(page.getByText("Invalid entry")).toHaveCount(0);
     await dialog.locator("input").last().fill("browser continues");
-    await dialog.getByRole("button", {name: "Confirm action"}).click();
+    await dialog.getByRole("button", {name: "Continue past glass"}).click();
     await expect(op(page, "cockpitAnswer")).toContainText("Done.");
     await expect(page.getByRole("button", {name: "Continue past glass"})).toHaveCount(0, {timeout: 30_000});
   } finally {
     await reset(request, "budget.glass");
+  }
+});
+
+test("a pile RUNNING in a job that is over: the run page says so and runs the doctor, then Resume in words", async ({page, request}) => {
+  test.skip(!shared, "needs STG_DB=file and STG_DB_PATH, so the job worker reads the same rows");
+  startWorker();
+  // storm: the twin's candidates stage dumps, and a dumped job leaves its pile RUNNING
+  await setting(request, "simulate.profile", "storm", "browser storm fixture");
+  try {
+    const started = (await (await request.post(`${service}/StartRun?CheckDate='20260928'&Mode='P'&Work='sim'`)).json()).d;
+    expect(started.Answer).toContain("SUBMITTED");
+    await expect.poll(async () => (await run(request, started.RunId)).PilesOrphaned, {timeout: 60_000}).toBeGreaterThan(0);
+    await page.goto(`${runsApp}#/RunSet('${started.RunId}')`);
+    const attention = op(page, "attentionBox");
+    await expect(attention).toContainText("RUNNING without a live job");
+    await expect(op(page, "attentionGo")).toHaveText("Run doctor");
+    await op(page, "attentionGo").click();
+    const dialog = page.getByRole("dialog", {name: "Run the doctor"});
+    await dialog.getByRole("button", {name: "Run doctor"}).click();
+    await expect(op(page, "cockpitAnswer")).toContainText(/pile\(s\) failed \(their job (ended|is gone)\)/);
+    await expect(op(page, "cockpitAnswer")).not.toContainText("JOB-");
+    await expect.poll(async () => (await run(request, started.RunId)).PilesFailed, {timeout: 30_000}).toBeGreaterThan(0);
+    // the failed piles: Resume, named by the run and the count, with a button that says Resume
+    await expect(attention).toContainText("failed", {timeout: 30_000});
+    await op(page, "attentionGo").click();
+    const resume = page.getByRole("dialog", {name: /^Resume: retry \d+ failed pile\(s\) of fleet2 \/ 2026-09-28$/});
+    await expect(resume).toBeVisible();
+    await expect(resume).not.toContainText(started.RunId);
+    await expect(resume.getByRole("button", {name: "Confirm action"})).toHaveCount(0);
+    await resume.getByRole("button", {name: "Resume", exact: true}).click();
+    await expect(op(page, "cockpitAnswer")).toContainText(/pile\(s\) sent again/);
+    await expect(op(page, "cockpitAnswer")).not.toContainText("RESUBMIT");
+  } finally {
+    await reset(request, "simulate.profile");
   }
 });
 
@@ -166,7 +224,7 @@ test("Release is offered only on a HELD row", async ({page, request}) => {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toContainText(held[0].RuleName);
     await dialog.locator("input").last().fill("browser reviewed pile");
-    await dialog.getByRole("button", {name: "Confirm action"}).click();
+    await dialog.getByRole("button", {name: "Release held pile"}).click();
     await expect(op(page, "cockpitAnswer")).toContainText("Done.");
     const events = (await (await request.get(`${service}/EventSet?$filter=RunId eq '${started.RunId}'`)).json()).d.results;
     expect(events.some((e) => e.Kind === "RELEASE" && e.Reason === "browser reviewed pile")).toBe(true);
@@ -198,6 +256,9 @@ test("the Set app changes a setting with a note, refuses one without, and shows 
   await page.goto(setApp);
   await expect(page.getByText("Set fleet2", {exact: true}).first()).toBeVisible();
   for (const tab of ["Settings", "Schedule", "Kill switch", "Doctor"]) await expect(page.getByRole("tab", {name: tab})).toBeVisible();
+  // every setting says what it means, in which unit
+  await expect(page.locator("[id$=--settings] .sapMListTblRow").filter({hasText: "budget.narrow_at"})).toContainText("share of the glass in basis points from which piles are narrowed, 8000 = 80 %");
+  await expect(page.locator("[id$=--settings] .sapMListTblRow").filter({hasText: "simulate.dump"})).toContainText("-1 = from the profile");
   const row = page.locator(".sapMListTblRow").filter({hasText: "budget.glass"}).first();
   await row.getByRole("button", {name: "Change"}).click();
   const dialog = page.getByRole("dialog");

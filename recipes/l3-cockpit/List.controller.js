@@ -53,7 +53,20 @@ function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit, 
         : Fragment.load({id: view.getId(), name: "l3.{{set}}.StartRun", controller: this}).then(function (dialog) {
           self.startDialog = dialog; view.addDependent(dialog); return dialog;
         });
-      return opened.then(function (dialog) {dialog.open(); self.startDateChanged();});
+      data.twinText = this.text("twin");
+      return opened.then(function (dialog) {dialog.open(); self.startDateChanged(); self.twinProfile();});
+    },
+    // the twin runs under the set's chaos profile: the switch says which, and where it is changed
+    twinProfile: function () {
+      var self = this, model = this.startModel;
+      if (!config.simulate) return Promise.resolve();
+      return new Promise(function (resolve) {
+        self.getView().getModel().read("/SettingSet", {urlParameters: {$filter: "ParamName eq 'simulate.profile'"},
+          success: function (r) {
+            if (r.results.length) model.setProperty("/twinText", self.text("twinProfile").replace("{0}", r.results[0].ParamVal).replace("{1}", config.set));
+            resolve();
+          }, error: function () {resolve();}});
+      });
     },
     // a run for that date that still holds its lock is named before the start, not after
     startDateChanged: function () {

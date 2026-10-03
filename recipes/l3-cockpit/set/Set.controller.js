@@ -1,7 +1,7 @@
 sap.ui.define(["sap/ui/core/mvc/Controller", "sap/ui/model/json/JSONModel", "sap/ui/core/format/DateFormat", "sap/m/Dialog", "sap/m/Button",
   "sap/m/Input", "sap/m/Label", "sap/m/Text", "sap/m/VBox", "sap/m/MessageBox", "sap/m/MessageToast", "sap/m/Select", "sap/ui/core/Item",
-  "l3/{{set}}/set/Live"],
-function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text, VBox, MessageBox, MessageToast, Select, Item, Live) {
+  "l3/{{set}}/set/Live", "l3/{{set}}/set/Words"],
+function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text, VBox, MessageBox, MessageToast, Select, Item, Live, Words) {
   "use strict";
   // what the set can do, from its DSL (actions, settings with bounds)
   var config = {{config}};
@@ -40,7 +40,7 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
         reads.push(this.read("SettingSet").then(function (rows) {
           data.setProperty("/settings", rows.map(function (r) {
             var def = config.settings.find(function (s) {return s.name === r.ParamName;}) || {};
-            return Object.assign({}, r, {values: def.values, bounds: def.values ? def.values.join(", ") : def.min + " .. " + def.max, changed: r.Origin === "DSL" ? self.text("fromDsl") : r.ChangedBy + ", " + when(r.ChangedAt)});
+            return Object.assign({}, r, {values: def.values, about: def.about, bounds: def.values ? def.values.join(", ") : def.min + " .. " + def.max, changed: r.Origin === "DSL" ? self.text("fromDsl") : r.ChangedBy + ", " + when(r.ChangedAt)});
           }));
         }));
         reads.push(this.read("ChangeSet").then(function (rows) {
@@ -80,7 +80,7 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
         return false;
       }
       if (answer === "OK") MessageToast.show(this.text("done"));
-      else strip.setType("Information").setText(answer).setVisible(true);
+      else strip.setType("Information").setText(Words(answer, this.getOwnerComponent().getModel("i18n").getResourceBundle())).setVisible(true);
       return true;
     },
     run: function (name, params) {

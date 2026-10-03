@@ -2270,8 +2270,19 @@ step (slice 6a, after Alice found the first cockpit unreadable on a system):
   header actions shown only when the run's state allows them
   (`applicablePath` on `CanContinue` / `CanResume`); *Release held pile* is a
   pile-table action enabled only for a selected HELD pile (`CanRelease`). A
-  *Needs attention* strip appears only for a run at the glass, with held or
-  failed piles, with the one emphasized action that moves it on. A section
+  *Needs attention* strip appears only for a run at the glass, with piles
+  RUNNING in a job that is over or gone (*Run doctor*: the doctor of the set
+  fails them and sends again what may be retried; the page itself never
+  changes a pile, it reads the job state of this run's RUNNING piles with
+  `SHOW_JOBSTATE` when the run is read), with held piles or with failed ones
+  (*Resume*, its dialog naming the run and how many piles it retries), with
+  the one emphasized action that moves it on. The header says whose state is
+  which (*Run status*, *Piles done* of planned, the budget reserved of the
+  glass); the bar's segments carry their status and count, and only FAILED is
+  red in it. Answers are words: the doctor's and Resume's `CODE:REASON` lines
+  are counted and said (`2 pile(s) sent again`, `1 pile(s) failed (their job
+  ended)`, `Words.js`). A status in its criticality colour does not announce
+  itself to a screen reader as an invalid entry. A section
   with no rows is hidden (`UI.Hidden` on its facet). The progress table and
   the pile durations (collapsible, growing) stay as the first section, the
   accessible fallback of the charts.
@@ -2281,7 +2292,10 @@ step (slice 6a, after Alice found the first cockpit unreadable on a system):
   Reset with a required note, the change log), the schedule (status, Schedule
   and Unschedule jobs), the kill switch (its state from its last audited
   change, Set and Clear with a reason) and the doctor (Run doctor, its
-  journal).
+  journal). Every setting says in one line what it means and in which unit
+  (from the page generator), and one with a value list (the twin's chaos
+  profile) is chosen from it. The start dialog's twin switch names the
+  current profile and where it is changed.
 
 **Live** (`Live.js`) is the one refresh of both apps: a Refresh button, and on
 the run page a *Live* switch that reads the run, its tables and the progress
@@ -2300,7 +2314,11 @@ and narrow levels, `StatusCriticality`, `CanContinue`, `CanResume`, one
 fixed run statuses. Those four entities declare their own structure; the
 DPC extension fills the fields (`enrich_run`, `criticality`). A run's filter is
 applied to the rows the run shows (its status is derived from the stages), not
-as SQL. Fiori Elements V2 knows criticality 0 to 3 only, so RUNNING is
+as SQL. A computed field is filled after the read, so it is
+`sap:filterable` and `sap:sortable` false, and a `$filter` or `$orderby` on
+it (as select options or not) is a 400 that says so before anything is
+read, counted or paged (`refuse_computed`; names match as whole
+identifiers). Fiori Elements V2 knows criticality 0 to 3 only, so RUNNING is
 neutral, not blue.
 
 Each app's generated `cockpit.json` registers its folder at `/app/<app>`,
