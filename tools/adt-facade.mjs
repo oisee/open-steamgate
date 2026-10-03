@@ -26,7 +26,7 @@ import express from "express";
 import {readFileSync, appendFileSync} from "node:fs";
 import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
-import {randomUUID, randomBytes, createHash} from "node:crypto";
+import {randomUUID, randomBytes, createHash, timingSafeEqual} from "node:crypto";
 import {Sessions, refuseToken} from "./adt-session.mjs";
 import {virtualFoldersDocument} from "./adt-vfs.mjs";
 import {answered, refuse} from "./adt-refusal.mjs";
@@ -799,6 +799,27 @@ export function adtRouter(options = {}) {
     middleware.push({id, path, fn});
     router.use(path, fn);
   };
+  // Before sessions, captures and the ABAP front. Basic/anonymous local logon
+  // stays unchanged; presenting a Bearer credential always requires validation.
+  const localToken = options.localToken ?? process.env.OSD_ADT_TOKEN;
+  pass("local-logon", BASE, (req, res, next) => {
+    const header = String(req.headers.authorization ?? "");
+    if (!/^Bearer(?:\s|$)/i.test(header)) return next();
+    const supplied = /^Bearer ([A-Za-z0-9_-]+)$/i.exec(header)?.[1];
+    const peer = req.socket.remoteAddress;
+    const loopback = peer === "::1" || /^127\./.test(peer ?? "") || /^::ffff:127\./i.test(peer ?? "");
+    const digest = (value) => createHash("sha256").update(value).digest();
+    if (!localToken || !supplied || !loopback || !timingSafeEqual(digest(supplied), digest(localToken))) {
+      return res.status(401).set("WWW-Authenticate", 'Bearer realm="OSD local"').send("Unauthorized");
+    }
+    // Existing Node and ABAP session parsers read the user from Basic. Replace
+    // the verified credential with that identity; no token reaches ABAP/captures.
+    req.headers.authorization = `Basic ${Buffer.from(`${identity.userName}:`).toString("base64")}`;
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      if (req.rawHeaders[i].toLowerCase() === "authorization") req.rawHeaders[i + 1] = req.headers.authorization;
+    }
+    next();
+  });
   if (options.abap === undefined) pass("sessions", BASE, sessions.middleware());
   // every answer names the generation of the system it describes
   pass("generation", BASE, (req, res, next) => {
