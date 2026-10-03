@@ -25,7 +25,7 @@
 // gives them two buttons: one name over a cheap and an expensive operation
 // is a button people stop pressing.
 import {withoutHostPaths} from "./osd-build-issues.mjs";
-import {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "./osd-store-ipc.mjs";
+import {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "./osd-system-kinds.mjs";
 import {given, givenText, fill} from "./osd-destination.mjs";
 import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
 import {objectOf} from "./osd-inputs.mjs";

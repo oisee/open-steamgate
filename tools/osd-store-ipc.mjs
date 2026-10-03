@@ -5,8 +5,8 @@ import {fill, givenText} from "./osd-destination.mjs";
 import {toJson} from "./rfc-replay.mjs";
 import {currentStepToken, onEveryStep} from "./osd-dialog-step.mjs";
 
-export const PARENT_SYSTEM_KINDS = new Set(["BUILD", "CHANGED", "GIT", "SERVING", "SUPERVISOR", "WARM"]);
-export const CHILD_SYSTEM_KINDS = new Set(["SQL", "SQLCHECK", "CLASSRUN", "DUMP", "XREF", "SERVICES", "TRANSACTIONS"]);
+import {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "./osd-system-kinds.mjs";
+export {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS};
 const calls = new AsyncLocalStorage();
 export const withStoreIPC = (context, work) => calls.run(context, work);
 
