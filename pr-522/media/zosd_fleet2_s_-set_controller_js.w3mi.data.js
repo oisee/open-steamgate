@@ -1,7 +1,7 @@
 sap.ui.define(["sap/ui/core/mvc/Controller", "sap/ui/model/json/JSONModel", "sap/ui/core/format/DateFormat", "sap/m/Dialog", "sap/m/Button",
   "sap/m/Input", "sap/m/Label", "sap/m/Text", "sap/m/VBox", "sap/m/MessageBox", "sap/m/MessageToast", "sap/m/Select", "sap/ui/core/Item",
-  "l3/fleet2/set/Live"],
-function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text, VBox, MessageBox, MessageToast, Select, Item, Live) {
+  "l3/fleet2/set/Live", "l3/fleet2/set/Words"],
+function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text, VBox, MessageBox, MessageToast, Select, Item, Live, Words) {
   "use strict";
   // what the set can do, from its DSL (actions, settings with bounds)
   var config = {
@@ -59,67 +59,78 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
      "name": "budget.glass",
      "default": "10",
      "min": "1",
-     "max": "2147483647"
+     "max": "2147483647",
+     "about": "alerts the budget allows before the run stops at the glass"
     },
     {
      "name": "budget.warn",
      "default": "7000",
      "min": "1",
-     "max": "10000"
+     "max": "10000",
+     "about": "share of the glass in basis points at which the budget warns, 7000 = 70 %"
     },
     {
      "name": "budget.narrow_at",
      "default": "8000",
      "min": "1",
-     "max": "10000"
+     "max": "10000",
+     "about": "share of the glass in basis points from which piles are narrowed, 8000 = 80 %"
     },
     {
      "name": "budget.per_pile",
      "default": "50",
      "min": "0",
-     "max": "2147483647"
+     "max": "2147483647",
+     "about": "alerts one pile may reserve; a pile that needs more is held"
     },
     {
      "name": "retry.max",
      "default": "2",
      "min": "0",
-     "max": "99"
+     "max": "99",
+     "about": "how often a failed pile is sent again"
     },
     {
      "name": "retry.backoff",
      "default": "60",
      "min": "0",
-     "max": "86400"
+     "max": "86400",
+     "about": "seconds before the first retry, doubled per attempt"
     },
     {
      "name": "stale",
      "default": "900",
      "min": "60",
-     "max": "356400"
+     "max": "356400",
+     "about": "seconds after which the doctor takes over a lock, a pile or a gate"
     },
     {
      "name": "fuses.max_alerts",
      "default": "500",
      "min": "1",
-     "max": "100000"
+     "max": "100000",
+     "about": "alerts a rule may write in one run before it stops writing"
     },
     {
      "name": "keep.days",
      "default": "30",
      "min": "1",
-     "max": "9999"
+     "max": "9999",
+     "about": "days the plans of a final run are kept"
     },
     {
      "name": "simulate.seed",
      "default": "42",
      "min": "1",
-     "max": "2147483646"
+     "max": "2147483646",
+     "about": "seed of the twin's draws: the same seed, the same night"
     },
     {
      "name": "simulate.time_scale",
      "default": "10000",
      "min": "0",
-     "max": "1000000"
+     "max": "1000000",
+     "about": "wall time per simulated time in millionths, 10000 = 0.01 (40 s take 0.4 s)"
     },
     {
      "name": "simulate.profile",
@@ -134,43 +145,50 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
       "flood",
       "stuck",
       "random"
-     ]
+     ],
+     "about": "chaos profile of the twin"
     },
     {
      "name": "simulate.dump",
      "default": "-1",
      "min": "-1",
-     "max": "1000"
+     "max": "1000",
+     "about": "share of piles that dump, per mille; -1 = from the profile"
     },
     {
      "name": "simulate.hang",
      "default": "-1",
      "min": "-1",
-     "max": "1000"
+     "max": "1000",
+     "about": "share of piles that hang, per mille; -1 = from the profile"
     },
     {
      "name": "simulate.slow",
      "default": "-1",
      "min": "-1",
-     "max": "1000"
+     "max": "1000",
+     "about": "share of piles that run slow, per mille; -1 = from the profile"
     },
     {
      "name": "simulate.hits_mean",
      "default": "-1",
      "min": "-1",
-     "max": "100"
+     "max": "100",
+     "about": "mean alerts of a pile; -1 = from the profile"
     },
     {
      "name": "simulate.autoclose",
      "default": "-1",
      "min": "-1",
-     "max": "1000"
+     "max": "1000",
+     "about": "chance an alert is closed by the chance autoclose, per mille; -1 = from the profile"
     },
     {
      "name": "piles.checks.size",
      "default": "2",
      "min": "1",
-     "max": "2147483647"
+     "max": "2147483647",
+     "about": "keys per pile in stage checks"
     }
    ]
   };
@@ -209,7 +227,7 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
         reads.push(this.read("SettingSet").then(function (rows) {
           data.setProperty("/settings", rows.map(function (r) {
             var def = config.settings.find(function (s) {return s.name === r.ParamName;}) || {};
-            return Object.assign({}, r, {values: def.values, bounds: def.values ? def.values.join(", ") : def.min + " .. " + def.max, changed: r.Origin === "DSL" ? self.text("fromDsl") : r.ChangedBy + ", " + when(r.ChangedAt)});
+            return Object.assign({}, r, {values: def.values, about: def.about, bounds: def.values ? def.values.join(", ") : def.min + " .. " + def.max, changed: r.Origin === "DSL" ? self.text("fromDsl") : r.ChangedBy + ", " + when(r.ChangedAt)});
           }));
         }));
         reads.push(this.read("ChangeSet").then(function (rows) {
@@ -249,7 +267,7 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
         return false;
       }
       if (answer === "OK") MessageToast.show(this.text("done"));
-      else strip.setType("Information").setText(answer).setVisible(true);
+      else strip.setType("Information").setText(Words(answer, this.getOwnerComponent().getModel("i18n").getResourceBundle())).setVisible(true);
       return true;
     },
     run: function (name, params) {

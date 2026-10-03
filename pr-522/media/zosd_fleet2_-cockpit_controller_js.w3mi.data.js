@@ -1,9 +1,31 @@
 sap.ui.define(["sap/m/Button", "sap/m/Dialog", "sap/m/Input", "sap/m/Label", "sap/m/VBox", "sap/m/HBox", "sap/m/Text",
-  "sap/m/MessageStrip", "sap/ui/model/json/JSONModel", "l3/fleet2/Series", "l3/fleet2/Live"],
-function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONModel, Series, Live) {
+  "sap/m/MessageStrip", "sap/m/ObjectStatus", "sap/ui/model/json/JSONModel", "l3/fleet2/Series", "l3/fleet2/Live", "l3/fleet2/Words"],
+function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, ObjectStatus, JSONModel, Series, Live, Words) {
   "use strict";
+  // a status in its criticality colour is no input: its screen-reader text must not say
+  // "Invalid entry" (the value-state text of an Error); only this app's statuses
+  // a control of this app: its owner component (a table row's clone has one too) is this app's
+  var ours = function (control) {
+    if (control.getId().indexOf("l3.fleet2::") >= 0) return true;
+    try {
+      var Component = sap.ui.require("sap/ui/core/Component"), owner = Component && Component.get(Component.getOwnerIdFor(control));
+      var app = owner && (owner.getAppComponent ? owner.getAppComponent() : owner);
+      return !!app && app.getMetadata().getComponentName() === "l3.fleet2";
+    } catch (e) {
+      return false;
+    }
+  };
+  if (!ObjectStatus.prototype.l3Quiet) {
+    var init = ObjectStatus.prototype.init;
+    ObjectStatus.prototype.init = function () {
+      if (init) init.apply(this, arguments);
+      if (ours(this)) this.setStateAnnouncementText("");
+    };
+    ObjectStatus.prototype.l3Quiet = true;
+  }
   var config = {
    "service": "ZL3C_FLEET2_SRV",
+   "set": "fleet2",
    "actions": [
     {
      "name": "StartRun",
@@ -40,6 +62,11 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
       "RunId": "String(32)"
      },
      "reason": false
+    },
+    {
+     "name": "Doctor",
+     "params": {},
+     "reason": false
     }
    ],
    "governor": true,
@@ -57,15 +84,7 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
       return text;
     },
     // the runner's answer in words: a known first word gets its sentence, the rest stays as said
-    human: function (answer) {
-      var text = typeof answer === "string" ? answer : answer && answer.Answer !== undefined ? answer.Answer : "";
-      var word = text.split(":")[0].trim(), bundle = this.app().getModel("cockpitI18n").getResourceBundle();
-      if (/^[A-Z][A-Z-]*$/.test(word) && bundle.hasText("answer" + word)) {
-        var rest = text.slice(word.length).replace(/^:\s*/, "");
-        return bundle.getText("answer" + word) + (rest ? " " + rest : "");
-      }
-      return text;
-    },
+    human: function (answer) {return Words(answer, this.app().getModel("cockpitI18n").getResourceBundle());},
     onInit: function () {
       this.initTexts();
       this.extensionAPI.attachPageDataLoaded(this.loaded.bind(this));
@@ -100,11 +119,13 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
     attend: function () {
       var run = this.run || {}, self = this, what = null;
       if (run.Status === "GLASS" && action("ContinueGlass")) what = ["attentionGlass", "ContinueGlass", "Error"];
+      // a pile RUNNING in a job that is over: only the doctor fails it and sends it again
+      else if (+run.PilesOrphaned > 0 && action("Doctor")) what = ["attentionOrphaned", "Doctor", "Error"];
       else if (+run.PilesHeld > 0 && action("ReleasePile")) what = ["attentionHeld", "ReleasePile", "Warning"];
       else if (+run.PilesFailed > 0 && run.CanResume && action("Resume")) what = ["attentionFailed", "Resume", "Error"];
       this.attention.setVisible(!!what);
       if (!what) return;
-      this.attentionText.setType(what[2]).setText(this.text("attention") + ": " + this.text(what[0]).replace("{0}", run.PilesHeld).replace("{1}", run.PilesFailed));
+      this.attentionText.setType(what[2]).setText(this.text("attention") + ": " + this.text(what[0]).replace("{0}", run.PilesHeld).replace("{1}", run.PilesFailed).replace("{2}", run.PilesOrphaned));
       this.attentionGo.setText(this.text(what[1]));
       this.attentionGo.detachPress(this.attendPress, this);
       this.attendPress = function () {
@@ -114,7 +135,16 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
       this.attentionGo.attachPress(this.attendPress, this);
     },
     askContinueGlass: function () {var run = this.run || {}; this.ask(action("ContinueGlass"), {RunId: run.RunId, NewGlass: String(Math.max(+run.Glass * 2, +run.Glass + 1))});},
-    askResume: function () {this.ask(action("Resume"), {RunId: (this.run || {}).RunId});},
+    askResume: function () {
+      var run = this.run || {};
+      this.ask(action("Resume"), {RunId: run.RunId}, {title: this.text("resumeTitle").replace("{0}", run.PilesFailed || 0).replace("{1}", run.Title),
+        intro: this.text("resumeIntro")});
+    },
+    // the doctor of the set, asked from the run page that shows what it would heal
+    askDoctor: function () {
+      var run = this.run || {};
+      this.ask(action("Doctor"), {}, {title: this.text("doctorTitle"), intro: this.text("doctorIntro").replace("{0}", run.PilesOrphaned || 0)});
+    },
     // the selected pile of the pile table, or the first held one when the attention strip asks
     askReleasePile: function () {
       var run = this.run || {}, self = this, pile = null;
@@ -169,7 +199,7 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
         Object.keys(counts).sort().forEach(function (k) {line(k, counts[k]);});
         var budget = rows[3] && rows[3][0];
         if (budget) {
-          line(self.text("reserved"), budget.Reserved); line(self.text("glass"), budget.Glass); line("State", budget.State);
+          line(self.text("reserved"), budget.Reserved); line(self.text("glass"), budget.Glass); line(self.text("budgetState"), budget.State);
         }
         if (!progress.getModel("prog")) progress.setModel(new JSONModel({rows: []}), "prog");
         progress.getModel("prog").setData({rows: lines});
@@ -189,10 +219,17 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
     },
     answer: function (answer) {this.byId("cockpitAnswer").setText(this.human(answer)).setVisible(true);},
     // a function import's dialog: what the page already knows is shown as text, the rest is asked
-    ask: function (action, known) {
-      var self = this, inputs = {}, fixed = known || {}, box = new VBox({width: "28rem"});
+    // the dialog's button says the action; the run is named by its title, never its ID
+    ask: function (action, known, how) {
+      var self = this, inputs = {}, fixed = known || {}, opts = how || {}, box = new VBox({width: "28rem"});
       box.addStyleClass("sapUiSmallMargin");
+      if (opts.intro) box.addItem(new Text({text: opts.intro}).addStyleClass("sapUiSmallMarginBottom"));
       Object.keys(action.params).forEach(function (p) {
+        if (p === "RunId" && fixed.RunId !== undefined) {
+          inputs[p] = {getValue: function () {return fixed[p];}};
+          if (!opts.title) box.addItem(new Label({text: self.text("run")})).addItem(new Text({text: (self.run || {}).Title || fixed[p]}));
+          return;
+        }
         box.addItem(new Label({text: self.text(p), required: p === "Reason" || p === "Note"}));
         if (fixed[p] !== undefined && p !== "PerPile" && p !== "NewGlass") {
           box.addItem(new Text({text: fixed[p]}));
@@ -202,7 +239,7 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
         inputs[p] = new Input({value: fixed[p] !== undefined ? fixed[p] : /Int32/.test(action.params[p]) ? "0" : ""});
         box.addItem(inputs[p]);
       });
-      var dialog = new Dialog({title: this.text(action.name), content: box, beginButton: new Button({text: this.text("confirm"), press: function () {
+      var dialog = new Dialog({title: opts.title || this.text(action.name), content: box, beginButton: new Button({text: this.text(action.name), type: "Emphasized", press: function () {
         var params = {};
         Object.keys(inputs).forEach(function (p) {params[p] = inputs[p].getValue();});
         if (action.reason && !(params.Reason || params.Note || "").trim()) {self.answer(self.text("reasonRequired")); return;}

@@ -22,7 +22,7 @@
                 <items>
                   <ColumnListItem>
                     <cells>
-                      <Text text="{set>ParamName}"/>
+                      <ObjectIdentifier title="{set>ParamName}" text="{set>about}"/>
                       <ObjectStatus text="{set>ParamVal}" state="{= ${set>Origin} === 'DSL' ? 'None' : 'Information' }"/>
                       <Text text="{set>DslValue}"/>
                       <Text text="{set>bounds}"/>

@@ -9,7 +9,8 @@
     "Set.view.xml",
     "Set.controller.js",
     "i18n/i18n.properties",
-    "Live.js"
+    "Live.js",
+    "Words.js"
   ],
   "tile": {
     "subtitle": "Settings, schedule, kill switch, doctor",

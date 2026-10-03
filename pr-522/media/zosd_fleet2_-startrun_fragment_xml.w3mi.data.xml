@@ -13,7 +13,7 @@
       <Text id="startModeHint" class="sapUiTinyMarginTop" text="{= ${start>/mode} === 'P' ? ${cockpitI18n>modeJobsHint} : ${cockpitI18n>modeNowHint} }"/>
       <HBox visible="{start>/simulate}" alignItems="Center" class="sapUiSmallMarginTop">
         <Switch id="startSim" state="{start>/sim}"/>
-        <Label text="{cockpitI18n>twin}" labelFor="startSim" class="sapUiTinyMarginBegin"/>
+        <Label text="{start>/twinText}" labelFor="startSim" class="sapUiTinyMarginBegin" wrapping="true"/>
       </HBox>
       <MessageStrip id="startOpen" type="Warning" showIcon="true" class="sapUiSmallMarginTop" visible="{= !!${start>/open} }" text="{start>/open}"/>
     </VBox>

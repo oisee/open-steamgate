@@ -153,6 +153,12 @@
    "template_line": 25,
    "node": "set/fleet2/cockpit",
    "set_line": 114
+  },
+  {
+   "line": 26,
+   "template_line": 26,
+   "node": "set/fleet2/cockpit",
+   "set_line": 114
   }
  ]
 }

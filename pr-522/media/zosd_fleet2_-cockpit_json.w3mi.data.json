@@ -12,7 +12,8 @@
     "StartRun.fragment.xml",
     "i18n/i18n.properties",
     "Series.js",
-    "Live.js"
+    "Live.js",
+    "Words.js"
   ],
   "tile": {
     "type": "dynamic",
