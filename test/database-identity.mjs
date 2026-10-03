@@ -113,6 +113,51 @@ describe("database identity", () => {
     }
   });
 
+  it("DuckDB clients for one file share committed writes and survive separate closes", async () => {
+    const root = mkdtempSync(join(tmpdir(), "osd-duckdb-shared-"));
+    const path = join(root, "shared.duckdb");
+    const first = new DuckDBDatabaseClient({path});
+    const second = new DuckDBDatabaseClient({path});
+    const reopened = new DuckDBDatabaseClient({path});
+    try {
+      await first.connect();
+      await first.execute("CREATE TABLE shared_rows (id INTEGER PRIMARY KEY)");
+      await first.execute("INSERT INTO shared_rows VALUES (1)");
+      await first.execute("CHECKPOINT");
+      await second.connect();
+      await first.modifying("INSERT INTO shared_rows VALUES (2)");
+      await first.commit();
+      expect(await second.query("SELECT id FROM shared_rows ORDER BY id"))
+        .to.deep.equal([{id: 1}, {id: 2}]);
+      await first.disconnect();
+      await second.modifying("INSERT INTO shared_rows VALUES (3)");
+      await second.disconnect();
+      await reopened.connect();
+      expect(await reopened.query("SELECT id FROM shared_rows ORDER BY id"))
+        .to.deep.equal([{id: 1}, {id: 2}, {id: 3}]);
+    } finally {
+      await reopened.disconnect();
+      await second.disconnect();
+      await first.disconnect();
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
+
+  it("DuckDB in-memory clients have independent databases", async () => {
+    const first = new DuckDBDatabaseClient();
+    const second = new DuckDBDatabaseClient();
+    try {
+      await first.connect();
+      await second.connect();
+      await first.execute("CREATE TABLE zstg_demo (id INTEGER)");
+      expect(await first.hasSchema()).to.equal(true);
+      expect(await second.hasSchema()).to.equal(false);
+    } finally {
+      await second.disconnect();
+      await first.disconnect();
+    }
+  });
+
   it("tracks the file SQLite connection lifecycle", async () => {
     const root = mkdtempSync(join(tmpdir(), "osd-sqlite-identity-"));
     const before = globalThis.abap;

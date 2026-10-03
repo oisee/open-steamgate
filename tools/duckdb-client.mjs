@@ -31,7 +31,12 @@ export class DuckDBDatabaseClient {
   }
 
   async connect() {
-    this.instance = await DuckDBInstance.create(this.path);
+    // initializeABAP can open the same file again in one process. Separate
+    // engines can overwrite each other's checkpoints; the native cache gives
+    // every connection to that file one engine. In-memory clients stay private.
+    this.instance = this.path === ":memory:"
+      ? await DuckDBInstance.create(this.path)
+      : await DuckDBInstance.fromCache(this.path);
     this.connection = await this.instance.connect();
     // Match the SQLite and HANA clients: sy-dbsys is a fact about the
     // connection that actually opened, not a label supplied by status or
