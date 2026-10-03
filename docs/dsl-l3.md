@@ -2683,8 +2683,8 @@ The Playwright server explicitly opts into this pack for the browser fixture.
 
 Runner exceptions return HTTP 200 with `Answer = REFUSED: <exception text>`,
 including invalid work variants and simulated dumps in mode S. A SUBMITTED
-answer explains that jobs need the separate worker and gives its command;
-the service does not inspect host processes.
+answer names the extension worker when `OSD_JOB_WORKER=extension`; other
+hosts still give the standalone worker command.
 
 Trace sidecars cover every generated web/YAML/extension line. A consolidated
 `<project>.service.trace.json` maps every compiler-owned object line to the
@@ -2693,8 +2693,17 @@ runner additions use opt-in overlays, keeping the old recipes byte-stable.
 
 Open it locally after generating and building (`node tools/dsl-l3.mjs build
 src/l2demo/fleet2.l3.yaml --out src/l2demo`, then `npm run transpile`). Run
-these two commands in separate terminals from the repository root. Both
-hosts use the same file database; the worker drains submitted jobs.
+**osd: Start system** in the desktop VS Code extension to start both the
+server and its supervised job worker. The default `osd.database.system=sqlite`
+already uses a persistent file; `osd.jobs.worker=auto` runs the worker with
+the server's database, packs and identity. The **OSD jobs** status bar shows
+running and queued counts; click it for the worker output. `off` disables it.
+The current JOB_* runtime requires file SQLite; other backend choices do
+not yet implement that facade.
+
+For standalone development outside the extension, run these two commands
+in separate terminals from the repository root. Both hosts must use the
+same database, operations store, packs and identity:
 
 ```sh
 OSD_PACKS=demo/cockpit-fleet STG_SERVE=child STG_DB=file STG_DB_PATH=.local/db/cockpit.sqlite node test/run.mjs

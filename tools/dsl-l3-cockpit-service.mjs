@@ -14,7 +14,7 @@ const visible = {
 export function cockpitActions(m) {
   const actions = [
     {name: "StartRun", method: "run", params: {CheckDate: "String(8)", Mode: "String(1)"}, run: true,
-      call: `ls_run = ${m.class}=>run( iv_date = lv_date iv_mode = lv_mode ).\n        ls_answer-run_id = ls_run-run_id.\n        ls_answer-answer = ls_run-status.\n        IF ls_run-status = 'SUBMITTED'.\n          ls_answer-answer = ls_answer-answer && ': background jobs carry the piles (on open-steamgate they need node tools/osd-batch-runs.mjs worker)'.\n        ENDIF.`},
+      call: `ls_run = ${m.class}=>run( iv_date = lv_date iv_mode = lv_mode ).\n        ls_answer-run_id = ls_run-run_id.\n        ls_answer-answer = ls_run-status.\n        IF ls_run-status = 'SUBMITTED'.\n          ls_answer-answer = ls_answer-answer && ': background jobs carry the piles (on open-steamgate they need node tools/osd-batch-runs.mjs worker)'.\n          WRITE '@KERNEL if (typeof process !== "undefined" && process.env.OSD_JOB_WORKER === "extension") ls_answer.get().answer.set("SUBMITTED: background jobs carry the piles (OSD extension worker)");'.\n        ENDIF.`},
   ];
   if (m.simulate) {
     actions[0].params.Work = "String(4)";
