@@ -198,9 +198,28 @@ function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series) {
      "max": "2147483647"
     }
    ],
-   "governor": true
+   "governor": true,
+   "simulate": true
   };
+  // a run that still holds its lock may change; a final one does not
+  var settled = ["DONE", "PARTIAL", "FAILED", "NOT-RUN", "SKIPPED", "KILLED"];
   return {
+    isOpen: function (run) {return !!run && settled.indexOf(run.Status) < 0;},
+    errorText: function (e) {
+      var text = e && (e.responseText || e.message) || "";
+      try {text = JSON.parse(text).error.message.value;} catch (ignored) {/* not a Gateway error body */}
+      return text;
+    },
+    // the runner's answer in words: a known first word gets its sentence, the rest stays as said
+    human: function (answer) {
+      var text = typeof answer === "string" ? answer : answer && answer.Answer !== undefined ? answer.Answer : "";
+      var word = text.split(":")[0].trim(), bundle = this.app().getModel("cockpitI18n").getResourceBundle();
+      if (/^[A-Z][A-Z-]*$/.test(word) && bundle.hasText("answer" + word)) {
+        var rest = text.slice(word.length).replace(/^:\s*/, "");
+        return bundle.getText("answer" + word) + (rest ? " " + rest : "");
+      }
+      return text;
+    },
     onInit: function () {
       this.initTexts();
       this.extensionAPI.attachPageDataLoaded(this.loaded.bind(this));
@@ -208,13 +227,26 @@ function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series) {
     },
     onExit: function () {clearTimeout(this.timer);},
     app: function () {var owner = this.getOwnerComponent(); return owner.getAppComponent ? owner.getAppComponent() : owner;},
+    // what the start dialog was answered, kept on the app so the run's page shows it again
+    memo: function () {
+      var app = this.app();
+      if (!app.getModel("cockpit")) app.setModel(new JSONModel({answers: {}}), "cockpit");
+      return app.getModel("cockpit");
+    },
     initTexts: function () {this.getView().setModel(this.app().getModel("cockpitI18n"), "cockpitI18n");},
     text: function (key) {return this.app().getModel("cockpitI18n").getResourceBundle().getText(key);},
     loaded: function () {
       clearTimeout(this.timer);
       var bar = this.byId("cockpitActions"), self = this;
       bar.destroyItems();
-      config.actions.forEach(function (action) {bar.addItem(new Button({text: self.text(action.name), press: function () {self.ask(action);}}));});
+      config.actions.forEach(function (action) {
+        if (action.name !== "StartRun") bar.addItem(new Button({text: self.text(action.name), press: function () {self.ask(action);}}));
+      });
+      // the answer the start dialog got for this run, in words
+      var context = this.getView().getBindingContext(), run = context && context.getObject();
+      var said = run && this.memo().getProperty("/answers/" + run.RunId);
+      if (said) this.answer(said);
+      else this.byId("cockpitAnswer").setVisible(false);
       this.refresh();
     },
     read: function (set, filter) {
@@ -276,7 +308,7 @@ function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series) {
       }
       if (config.actions.some(function (a) {return a.name === "Schedule";})) this.getView().getModel().callFunction("/ScheduleStatus", {method: "GET", success: function (r) {self.byId("cockpitSchedule").setText(r.Answer);}});
     },
-    answer: function (answer) {this.byId("cockpitAnswer").setText(typeof answer === "string" ? answer : answer && answer.Answer !== undefined ? answer.Answer : JSON.stringify(answer)).setVisible(true);},
+    answer: function (answer) {this.byId("cockpitAnswer").setText(this.human(answer)).setVisible(true);},
     ask: function (action) {
       var self = this, inputs = {}, box = new VBox({width: "28rem"}), context = this.getView().getBindingContext();
       var run = context && context.getObject();

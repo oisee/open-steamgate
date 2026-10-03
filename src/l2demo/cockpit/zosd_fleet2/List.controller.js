@@ -1,4 +1,6 @@
-sap.ui.define(["sap/m/MessageStrip", "l3/fleet2/Cockpit.controller"], function (MessageStrip, Cockpit) {
+sap.ui.define(["sap/ui/core/Fragment", "sap/m/MessageToast", "sap/m/MessageBox", "sap/m/MessageStrip", "sap/ui/model/json/JSONModel",
+  "l3/fleet2/Cockpit.controller"],
+function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit) {
   "use strict";
   var config = {
    "service": "ZL3C_FLEET2_SRV",
@@ -196,8 +198,11 @@ sap.ui.define(["sap/m/MessageStrip", "l3/fleet2/Cockpit.controller"], function (
      "max": "2147483647"
     }
    ],
-   "governor": true
+   "governor": true,
+   "simulate": true
   };
+  var pad = function (n) {return (n < 10 ? "0" : "") + n;};
+  var today = function () {var d = new Date(); return "" + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate());};
   var methods = {
     onInit: function () {
       this.initTexts();
@@ -209,15 +214,81 @@ sap.ui.define(["sap/m/MessageStrip", "l3/fleet2/Cockpit.controller"], function (
       if (pages.length) {this.page = pages[0]; this.page.getHeader().addContent(this.strip);}
     },
     app: Cockpit.app,
+    memo: Cockpit.memo,
     initTexts: Cockpit.initTexts,
     text: Cockpit.text,
+    human: Cockpit.human,
     ask: Cockpit.ask,
     answer: function (answer) {
-      this.strip.setText(typeof answer === "string" ? answer : JSON.stringify(answer)).setVisible(true);
+      this.strip.setText(this.human(answer)).setVisible(true);
       if (this.page) this.page.setHeaderExpanded(true);
     },
-    refresh: function () {this.getView().getModel().refresh(true);}
+    refresh: function () {this.getView().getModel().refresh(true);},
+    // the start dialog: a date, how the piles run, the twin when the set has one
+    askStartRun: function () {
+      var self = this, view = this.getView();
+      var data = {date: today(), mode: "P", simulate: !!config.simulate, sim: false, open: "", busy: false};
+      if (!this.startModel) {this.startModel = new JSONModel(); view.setModel(this.startModel, "start");}
+      this.startModel.setData(data);
+      var opened = this.startDialog ? Promise.resolve(this.startDialog)
+        : Fragment.load({id: view.getId(), name: "l3.fleet2.StartRun", controller: this}).then(function (dialog) {
+          self.startDialog = dialog; view.addDependent(dialog); return dialog;
+        });
+      return opened.then(function (dialog) {dialog.open(); self.startDateChanged();});
+    },
+    // a run for that date that still holds its lock is named before the start, not after
+    startDateChanged: function () {
+      var self = this, model = this.startModel, date = model.getProperty("/date");
+      model.setProperty("/open", "");
+      if (!/^\d{8}$/.test(date || "")) return Promise.resolve();
+      var iso = date.slice(0, 4) + "-" + date.slice(4, 6) + "-" + date.slice(6, 8);
+      return new Promise(function (resolve) {
+        self.getView().getModel().read("/RunSet", {urlParameters: {$filter: "CheckDate eq datetime'" + iso + "T00:00:00'"},
+          success: function (r) {
+            var open = r.results.filter(Cockpit.isOpen);
+            if (model.getProperty("/date") === date && open.length) {
+              model.setProperty("/open", self.text("startOpen").replace("{0}", open[0].Status));
+            }
+            resolve();
+          }, error: function () {resolve();}});
+      });
+    },
+    startCancel: function () {this.startDialog.close();},
+    startClosed: function () {this.startModel.setProperty("/busy", false);},
+    startGo: function () {
+      var self = this, model = this.startModel, data = model.getData();
+      if (!/^\d{8}$/.test(data.date || "")) {MessageBox.error(this.text("startNoDate")); return;}
+      var params = {CheckDate: data.date, Mode: data.mode};
+      if (config.simulate) params.Work = data.sim ? "sim" : "";
+      model.setProperty("/busy", true);
+      this.getView().getModel().callFunction("/StartRun", {method: "POST", urlParameters: params,
+        success: function (r) {
+          model.setProperty("/busy", false);
+          var answer = r && r.Answer !== undefined ? r.Answer : "";
+          if (/^REFUSED:/.test(answer)) {
+            MessageBox.error(answer.replace(/^REFUSED:\s*/, ""), {title: self.text("startRefused")});
+            return;
+          }
+          self.startDialog.close();
+          self.memo().setProperty("/answers/" + r.RunId, answer);
+          MessageToast.show(self.text("runStarted"));
+          if (!r.RunId) {self.answer(answer); return;}
+          self.open(r.RunId);
+        },
+        error: function (e) {
+          model.setProperty("/busy", false);
+          MessageBox.error(Cockpit.errorText(e), {title: self.text("startRefused")});
+        }});
+    },
+    // the new run's object page, after the list knows the run
+    open: function (runId) {
+      var self = this, model = this.getView().getModel();
+      model.createBindingContext("/RunSet('" + runId + "')", null, {}, function (context) {
+        if (context) self.extensionAPI.getNavigationController().navigateInternal(context);
+        else self.refresh();
+      });
+    }
   };
-  config.actions.forEach(function (a) {methods["ask" + a.name] = function () {this.ask(a);};});
+  config.actions.forEach(function (a) {if (a.name !== "StartRun") methods["ask" + a.name] = function () {this.ask(a);};});
   return methods;
 });

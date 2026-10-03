@@ -5,13 +5,15 @@ import {cockpitActions} from "./dsl-l3-cockpit-service.mjs";
 export async function cockpitPages(m) {
   const c = m.cockpit, prefix = `cockpit/${c.app}`, files = {};
   const conf = {service: c.service, actions: cockpitActions(m).filter((a) => !a.get).map(({name, params, reason}) => ({name, params, reason: !!reason})),
-    settings: (m.settings?.entries ?? []).map(({name, default: value, min, max}) => ({name, default: value, min, max})), governor: !!m.governor};
+    settings: (m.settings?.entries ?? []).map(({name, default: value, min, max}) => ({name, default: value, min, max})), governor: !!m.governor,
+    simulate: !!m.simulate};
   const root = {...c, list_actions: conf.actions.filter((a) => ["StartRun", "Doctor", "Schedule", "Unschedule"].includes(a.name)), set: m.set, config: JSON.stringify(conf, null, 1).replaceAll("\n", "\n  "), title_json: JSON.stringify(c.title),
     manifest: JSON.stringify(manifest(m), null, 2)};
-  for (const name of ["index.html", "Component.js", "manifest.json", "Cockpit.controller.js", "Cockpit.fragment.xml", "List.controller.js", "i18n.properties"]) {
+  for (const name of ["index.html", "Component.js", "manifest.json", "Cockpit.controller.js", "Cockpit.fragment.xml", "List.controller.js",
+    "StartRun.fragment.xml", "i18n.properties"]) {
     files[`${prefix}/${name === "i18n.properties" ? "i18n/i18n.properties" : name}`] = (await renderRecipe(root, `recipes/l3-cockpit/${name}`)).text;
   }
-  files[`${prefix}/Series.js`] = readFileSync("recipes/l3-cockpit/Series.js", "utf8");
+  for (const name of ["Series.js", "Live.js"]) files[`${prefix}/${name}`] = readFileSync(`recipes/l3-cockpit/${name}`, "utf8");
   files[`${prefix}/cockpit.json`] = JSON.stringify({app: c.app, title: c.title, service: c.service}, null, 2) + "\n";
   return files;
 }

@@ -45,11 +45,26 @@ test("run cockpit: list, object facets, confirmed runner action and refusal", as
   await inputs.nth(2).fill("browser out of bounds");
   await dialog.getByRole("button", {name: "Confirm action"}).click();
   await expect(answer).toContainText("REFUSED: SetSetting: ");
-  // The list toolbar can start the first run in an empty installation.
+  // The list toolbar starts a run through its own dialog: a date picker, the
+  // mode as a choice, the twin as a switch; the new run's page opens with the
+  // answer in words, never the raw response object.
   await page.goto("/app/zosd_fleet2/index.html");
-  await expect(page.getByRole("button", {name: "Start run", exact: true})).toBeVisible();
   await page.getByRole("button", {name: "Start run", exact: true}).click();
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", {name: "Confirm action"}).click();
-  await expect(page.locator('[id$="--listCockpitAnswer"]')).toContainText('"Answer":');
+  const start = page.getByRole("dialog", {name: "Start a run"});
+  await expect(start).toBeVisible();
+  await expect(start.locator('[id$="--startDate"]')).toHaveClass(/sapMDP/);
+  await expect(start.getByRole("option", {name: "In jobs"})).toHaveAttribute("aria-selected", "true");
+  await expect(start.locator('[id$="--startSim"]')).toBeVisible();
+  await start.locator('[id$="--startDate-inner"]').fill(new Date(2026, 9, 4).toLocaleDateString("en-US", {month: "short", day: "numeric", year: "numeric"}));
+  await start.locator('[id$="--startDate-inner"]').press("Enter");
+  await start.getByRole("option", {name: "Now"}).click();
+  await expect(start).toContainText("The piles run in this request");
+  await start.getByRole("button", {name: "Start", exact: true}).click();
+  await expect(start).toBeHidden();
+  await expect(page).toHaveURL(/RunSet\('[0-9A-F]{32}'\)/);
+  const said = page.locator('[id$="--cockpitAnswer"]');
+  await expect(said).toContainText("Finished: every stage is done.");
+  await expect(said).not.toContainText("{");
+  const started = (await (await request.get(service + "/RunSet")).json()).d.results.filter((r) => r.CheckDate === "/Date(1791072000000)/");
+  expect(started.length).toBe(1);
 });
