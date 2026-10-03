@@ -28,7 +28,6 @@
 // ExceptionInternalError in our namespace -- for every request, a HOST row
 // included: no session was resolved, so nothing may go past the gate.
 import {withoutHostPaths} from "./osd-build-issues.mjs";
-import {activationFailureDocument} from "./adt-documents.mjs";
 import {remoteStep, stepJSON} from "./adt-remote-step.mjs";
 import {withSystem} from "./osd-store-destination.mjs";
 
@@ -210,6 +209,9 @@ export function abapRunner({handler, step, stale, remote}) {
           const publications = await Promise.all(runtime.adtContexts.get(context).publications ?? []);
           const failed = publications.filter(p => p.EV_ACTIVE !== "X");
           if (failed.length) {
+            // lazy: adt-documents pulls @abaplint/core and the store, which the
+            // serving child must not load at boot (test/setup.mjs keeps it out)
+            const {activationFailureDocument} = await import("./adt-documents.mjs");
             const entries = failed.flatMap(p => p.failureEntries ?? [{type: p.type ?? "PROG", name: p.name ?? "",
               issues: [{message: withoutHostPaths(String(p.EV_NOTE), options.store?.root ?? runtime.root)
                 .split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}],

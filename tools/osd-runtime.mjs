@@ -463,7 +463,8 @@ export class ServingRuntime {
         this.env.NODE_OPTIONS ?? process.env.NODE_OPTIONS,
         inspectPort ? `--inspect=127.0.0.1:${inspectPort} --enable-source-maps` : undefined,
       ].filter((s) => s !== undefined && s !== "").join(" ");
-      this.adtStepKey = randomBytes(32).toString("hex");
+      const oneRuntime = process.env.OSD_ADT_ONE_RUNTIME === "1" || this.env.OSD_ADT_ONE_RUNTIME === "1";
+      this.adtStepKey = oneRuntime ? randomBytes(32).toString("hex") : undefined;
       const child = spawn(this.command[0], this.command.slice(1), {
         cwd: this.root,
         env: {
@@ -474,7 +475,7 @@ export class ServingRuntime {
           ...(this.wanted === undefined ? {} : {OSD_SERVE_PORT: String(this.wanted)}),
           ...(this.database === undefined ? {} : {STG_DB_PATH: this.database}),
           ...this.env,
-          OSD_ADT_STEP_KEY: this.adtStepKey,
+          ...(this.adtStepKey === undefined ? {} : {OSD_ADT_STEP_KEY: this.adtStepKey}),
           OSD_GENERATION: generation,
           OSD_ADT_CARRY: carryEnabled ? "1" : "0",
           ...(nodeOptions === "" ? {} : {NODE_OPTIONS: nodeOptions}),
