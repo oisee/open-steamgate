@@ -37,7 +37,14 @@ const output = (file) => import(new URL(`../output/${file}`, import.meta.url).hr
 const SYSINFO = "/sap/bc/adt/core/http/systeminformation";
 
 // what the ABAP serves today; the gate grows with every route that moves
+const DISCOVERY_PATHS = [
+  "/sap/bc/adt/core/discovery", "/sap/bc/adt/discovery",
+  "/SAP/BC/ADT/Core/Discovery", "/SAP/bc/ADT/Discovery/",
+  "/sap/bc/adt/core/discovery/", "/sap/bc/adt/discovery/",
+];
 const PORTED = [
+  ...DISCOVERY_PATHS.flatMap((path) => [["GET", path], ["HEAD", path]]),
+  ["GET", "/sap/bc/adt/debugger/listeners"],
   ["GET", SYSINFO],
   ["HEAD", SYSINFO],
   ["GET", "/sap/bc/adt/compatibility/graph"],
@@ -49,12 +56,9 @@ const PORTED = [
 
 // still the Node façade's: the front must hand them over untouched
 const DELEGATED = [
-  ["GET", "/sap/bc/adt/discovery"],
-  ["HEAD", "/sap/bc/adt/core/discovery"],
   // refused by the CSRF gate, which is the handler's now (slice 3): ABAP
   // answers it, with the bytes of the Node middleware's refusal
   ["POST", SYSINFO, "ABAP"],
-  ["GET", "/sap/bc/adt/debugger/listeners"],
   ["GET", "/sap/bc/adt/no/such/resource"],
   ["GET", `${SYSINFO}/extra`],
 ];
@@ -65,7 +69,7 @@ async function listen(app) {
   });
 }
 
-async function call(server, method, path, headers, complete = false) {
+async function call(server, method, path, headers, {complete = false, cookies = false} = {}) {
   const response = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {method, headers});
   let sessionHeaders = {};
   if (complete) {
@@ -81,12 +85,15 @@ async function call(server, method, path, headers, complete = false) {
       cookies: cookies.map((line) => line.replace(/=([0-9a-f]{24});/, "=<session>;"))};
   }
   return {
-    ...sessionHeaders,
     status: response.status,
     type: response.headers.get("content-type"),
     length: response.headers.get("content-length"),
     etag: response.headers.get("etag"),
     history: response.headers.get("x-osd-history"),
+    location: response.headers.get("location"),
+    ...sessionHeaders,
+    ...(cookies && !complete ? {cookies: response.headers.getSetCookie().map((cookie) =>
+      cookie.replace(/=[0-9a-f]{24};/, "=<session>;"))} : {}),
     body: Buffer.from(await response.arrayBuffer()).toString("utf8"),
   };
 }
@@ -267,8 +274,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
           const shared = store();
           const node = await mount({store: shared});
           const ported = await mount(withAbap({store: shared}));
-          const expected = await call(node, method, path, undefined, true);
-          const actual = await call(ported, method, path, undefined, true);
+          const expected = await call(node, method, path, undefined, {complete: true});
+          const actual = await call(ported, method, path, undefined, {complete: true});
           expect(actual).to.deep.equal(expected);
           expect(actual.status).to.equal(200);
           expect(actual.etag).to.equal(null);
@@ -302,8 +309,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       const node = await mount({store: shared});
       const ported = await mount(withAbap({store: shared}));
       const path = `/sap/bc/adt/packages/valuehelps/${what}?name=ignored&name=again`;
-      const expected = await call(node, "GET", path, undefined, true);
-      expect(await call(ported, "GET", path, undefined, true)).to.deep.equal(expected);
+      const expected = await call(node, "GET", path, undefined, {complete: true});
+      expect(await call(ported, "GET", path, undefined, {complete: true})).to.deep.equal(expected);
       expect(served).to.deep.equal([`ABAP GET ${path}`]);
       expect(expected.body.includes("Standard ABAP"))
         .to.equal(["abaplanguageversions", "%61baplanguageversions"].includes(what));
@@ -316,10 +323,90 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     const ported = await mount(withAbap({store: shared}));
     for (const [method, path] of PORTED) {
       served.length = 0;
-      const expected = await call(node, method, path);
-      const actual = await call(ported, method, path);
+      const expected = await call(node, method, path, undefined, {cookies: true});
+      const actual = await call(ported, method, path, undefined, {cookies: true});
       expect(actual, `${method} ${path}`).to.deep.equal(expected);
       expect(served, `${method} ${path}`).to.deep.equal([`ABAP ${method} ${path}`]);
+    }
+  });
+
+  it("A1 has seven explicit ABAP rows, and HEAD precedes GET on both discovery paths", async () => {
+    const router = globalThis.abap.Classes.ZCL_OSD_ADT_ROUTER;
+    const rows = (await router.routes()).array().map((row) => Object.fromEntries(
+      Object.entries(row.get()).map(([key, value]) => [key, value.get()])));
+    const a1 = rows.filter((row) => ["ZCL_OSD_ADT_DISCOVERY", "ZCL_OSD_ADT_LISTENERS"].includes(row.handler));
+    expect(a1).to.have.length(7);
+    expect(a1.every((row) => row.served_by === "ABAP")).to.equal(true);
+    for (const path of ["/sap/bc/adt/core/discovery", "/sap/bc/adt/discovery"]) {
+      expect(a1.filter((row) => row.pattern === path).map((row) => row.method)).to.deep.equal(["HEAD", "GET"]);
+    }
+  });
+
+  it("discovery HEAD fetch keeps the token and two cookies, with no length or tag", async () => {
+    const shared = store();
+    const node = await mount({store: shared});
+    const ported = await mount(withAbap({store: shared}));
+    for (const path of DISCOVERY_PATHS) {
+      const responses = [];
+      served.length = 0;
+      for (const server of [node, ported]) {
+        const res = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {
+          method: "HEAD", headers: {"x-csrf-token": "fetch"},
+        });
+        expect(res.headers.get("x-csrf-token"), path).to.match(/^[A-Za-z0-9_-]{24}$/);
+        const cookies = res.headers.getSetCookie();
+        expect(cookies, path).to.have.length(2);
+        const id = /sap-contextid=([0-9a-f]{24});/.exec(cookies[0])?.[1];
+        expect(id, path).to.be.a("string");
+        responses.push({status: res.status, type: res.headers.get("content-type"),
+          length: res.headers.get("content-length"), etag: res.headers.get("etag"),
+          location: res.headers.get("location"), body: await res.text(),
+          cookies: cookies.map((cookie) => cookie.replace(id, "<session>"))});
+      }
+      expect(responses[1], path).to.deep.equal(responses[0]);
+      expect(responses[1]).to.include({status: 200, type: "application/atomsvc+xml", length: null, etag: null, body: ""});
+      expect(served).to.deep.equal([`ABAP HEAD ${path}`]);
+    }
+  });
+
+  it("discovery ignores If-None-Match without Express weak tags", async () => {
+    const shared = store();
+    const node = await mount({store: shared});
+    const ported = await mount(withAbap({store: shared}));
+    for (const path of DISCOVERY_PATHS) {
+      const headers = {"if-none-match": 'W/"a1-absent"'};
+      served.length = 0;
+      const expected = await call(node, "GET", path, headers);
+      expect(await call(ported, "GET", path, headers), path).to.deep.equal(expected);
+      expect(expected.status).to.equal(200);
+      expect(expected.etag).to.equal(null);
+      expect(served).to.deep.equal([`ABAP GET ${path}`]);
+    }
+  });
+
+  it("listeners: three methods by three path variants are empty untyped ABAP 200s", async () => {
+    const shared = store();
+    const node = await mount({store: shared});
+    const ported = await mount(withAbap({store: shared}));
+    const headers = [];
+    for (const server of [node, ported]) {
+      // The warm-up deliberately stays HOST, even after discovery moves.
+      const res = await fetch(`http://127.0.0.1:${server.address().port}/sap/bc/adt/no/such/resource`, {
+        headers: {"x-csrf-token": "fetch"},
+      });
+      await res.text();
+      headers.push({cookie: res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; "),
+        "x-csrf-token": res.headers.get("x-csrf-token")});
+    }
+    for (const method of ["GET", "POST", "DELETE"]) {
+      for (const path of ["/sap/bc/adt/debugger/listeners", "/SAP/BC/ADT/Debugger/Listeners", "/sap/bc/adt/debugger/listeners/"]) {
+        served.length = 0;
+        const expected = await call(node, method, path, headers[0], {cookies: true});
+        const actual = await call(ported, method, path, headers[1], {cookies: true});
+        expect(actual, `${method} ${path}`).to.deep.equal(expected);
+        expect(actual).to.include({status: 200, type: null, etag: null, body: ""});
+        expect(served).to.deep.equal([`ABAP ${method} ${path}`]);
+      }
     }
   });
 
@@ -908,12 +995,13 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
         served.length = 0;
         const actual = answered(await sequence(ported));
         expect(actual).to.deep.equal(expected);
-        // ABAP answers LOCK/UNLOCK and A3a session poll, DELETE and logoff.
+        // ABAP answers discovery, LOCK/UNLOCK and A3a session poll, DELETE and logoff.
         const posts = served.filter((s) => s.includes("_action="));
         expect(posts.length, "LOCK and UNLOCK reached the front").to.be.greaterThan(0);
         expect(posts.every((s) => s.startsWith("ABAP ")), posts.join("\n")).to.equal(true);
         const byAbap = served.filter((s) => s.startsWith("ABAP "));
-        expect(byAbap.every((s) => (s.startsWith("ABAP POST ") && s.includes("/source/") === false)
+        expect(byAbap.every((s) => s === "ABAP HEAD /sap/bc/adt/core/discovery"
+          || (s.startsWith("ABAP POST ") && s.includes("/source/") === false)
           || s.includes("/core/http/sessions") || s.includes("/sap/public/bc/icf/logoff")), byAbap.join("\n")).to.equal(true);
         // a handle is a UUID on both sides
         for (const answer of [...expected, ...actual]) {

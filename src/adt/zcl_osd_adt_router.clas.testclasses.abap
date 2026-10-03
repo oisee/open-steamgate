@@ -13,11 +13,13 @@ CLASS ltcl_match DEFINITION FOR TESTING DURATION SHORT RISK LEVEL HARMLESS FINAL
     METHODS the_first_row_wins FOR TESTING RAISING cx_static_check.
     METHODS head_falls_back_to_get FOR TESTING RAISING cx_static_check.
     METHODS head_row_wins_over_get FOR TESTING RAISING cx_static_check.
+    METHODS head_dispatch_keeps_get_body FOR TESTING RAISING cx_static_check.
     METHODS case_and_slash FOR TESTING RAISING cx_static_check.
     METHODS a_param_is_never_empty FOR TESTING RAISING cx_static_check.
     METHODS the_rest_is_the_hosts FOR TESTING RAISING cx_static_check.
     METHODS a_host_row_is_not_served FOR TESTING RAISING cx_static_check.
     METHODS settings_shadow FOR TESTING.
+    METHODS discovery_rows FOR TESTING RAISING cx_static_check.
     METHODS versions_rows FOR TESTING RAISING cx_static_check.
 ENDCLASS.
 
@@ -35,6 +37,25 @@ CLASS ltcl_match IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( act = ls_route-served_by exp = zcl_osd_adt_router=>c_abap ).
     cl_abap_unit_assert=>assert_equals( act = ls_route-pattern exp = `/sap/bc/adt/packages/:name` ).
   ENDMETHOD.
+  METHOD discovery_rows.
+    DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
+    DATA ls_route TYPE zcl_osd_adt_router=>ty_route.
+    DATA lt_paths TYPE string_table.
+    DATA lv_path TYPE string.
+    DATA lv_found TYPE abap_bool.
+    lt_routes = zcl_osd_adt_router=>routes( ).
+    APPEND `/sap/bc/adt/core/discovery` TO lt_paths.
+    APPEND `/sap/bc/adt/discovery` TO lt_paths.
+    LOOP AT lt_paths INTO lv_path.
+      zcl_osd_adt_router=>match( EXPORTING it_routes = lt_routes iv_method = `HEAD` iv_path = lv_path
+                                IMPORTING ev_found = lv_found es_route = ls_route ).
+      cl_abap_unit_assert=>assert_true( lv_found ).
+      cl_abap_unit_assert=>assert_equals( act = ls_route-method exp = `HEAD` ).
+      cl_abap_unit_assert=>assert_equals( act = ls_route-handler exp = `ZCL_OSD_ADT_DISCOVERY` ).
+      cl_abap_unit_assert=>assert_equals( act = ls_route-served_by exp = zcl_osd_adt_router=>c_abap ).
+    ENDLOOP.
+  ENDMETHOD.
+
   METHOD versions_rows.
     DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
     DATA ls_route TYPE zcl_osd_adt_router=>ty_route.
@@ -118,6 +139,21 @@ CLASS ltcl_match IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals(
       act = find( iv_method = `GET` iv_path = `/sap/bc/adt/packages/valuehelps/softwarecomponents` )-handler
       exp = `VALUEHELPS` ).
+  ENDMETHOD.
+
+  METHOD head_dispatch_keeps_get_body.
+    DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
+    DATA ls_request TYPE zif_osd_adt_route=>ty_request.
+    DATA ls_result TYPE zcl_osd_adt_router=>ty_result.
+    lt_routes = zcl_osd_adt_router=>routes( ).
+    DELETE lt_routes WHERE method = `HEAD` AND handler = `ZCL_OSD_ADT_DISCOVERY`.
+    ls_request-method = `HEAD`.
+    ls_request-path = `/sap/bc/adt/core/discovery`.
+    ls_result = zcl_osd_adt_router=>dispatch( is_request = ls_request it_routes = lt_routes ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-served_by exp = zcl_osd_adt_router=>c_abap ).
+    cl_abap_unit_assert=>assert_equals( act = ls_result-response-body exp = zcl_osd_adt_discovery=>document( ) ).
+    cl_abap_unit_assert=>assert_equals(
+      act = ls_result-response-content_type exp = `application/atomsvc+xml; charset=utf-8` ).
   ENDMETHOD.
 
   METHOD head_falls_back_to_get.

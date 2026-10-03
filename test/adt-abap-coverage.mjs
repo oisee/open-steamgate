@@ -73,14 +73,6 @@ const HOST_ALLOWED = reasonedMap([
 ]);
 
 const PORT_PENDING = [
-  // A1: discovery and debugger/listeners
-  "HEAD /sap/bc/adt/core/discovery",
-  "GET /sap/bc/adt/core/discovery",
-  "HEAD /sap/bc/adt/discovery",
-  "GET /sap/bc/adt/discovery",
-  "GET /sap/bc/adt/debugger/listeners",
-  "POST /sap/bc/adt/debugger/listeners",
-  "DELETE /sap/bc/adt/debugger/listeners",
   // A2: feeds, system/users, transport check, occurrence markers
   "GET /sap/bc/adt/feeds",
   "GET /sap/bc/adt/feeds/variants",

@@ -84,6 +84,21 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     DATA lv_pattern TYPE string.
     DATA lv_classrun_by TYPE string.
 
+    add( EXPORTING iv_method = `HEAD` iv_pattern = `/sap/bc/adt/core/discovery` iv_handler = `ZCL_OSD_ADT_DISCOVERY`
+         CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/discovery` iv_handler = `ZCL_OSD_ADT_DISCOVERY`
+         CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `HEAD` iv_pattern = `/sap/bc/adt/discovery` iv_handler = `ZCL_OSD_ADT_DISCOVERY`
+         CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/discovery` iv_handler = `ZCL_OSD_ADT_DISCOVERY`
+         CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/debugger/listeners` iv_handler = `ZCL_OSD_ADT_LISTENERS`
+         CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/debugger/listeners` iv_handler = `ZCL_OSD_ADT_LISTENERS`
+         CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `DELETE` iv_pattern = `/sap/bc/adt/debugger/listeners` iv_handler = `ZCL_OSD_ADT_LISTENERS`
+         CHANGING ct_routes = rt_routes ).
+
     add( EXPORTING iv_method = `HEAD` iv_pattern = `/sap/bc/adt/compatibility/graph` iv_handler = `ZCL_OSD_ADT_GRAPH`
          CHANGING ct_routes = rt_routes ).
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/compatibility/graph` iv_handler = `ZCL_OSD_ADT_GRAPH`
@@ -305,6 +320,10 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
       <ls_param>-value = zcl_osd_adt_uri=>decode_segment( <ls_param>-value ).
     ENDLOOP.
 
+*   A HEAD falling back to GET keeps the GET answer for HTTP body suppression.
+    IF is_request-method = `HEAD` AND ls_route-method = `GET`.
+      ls_request-method = `GET`.
+    ENDIF.
     ls_request-pattern = ls_route-pattern.
     CREATE OBJECT li_route TYPE (ls_route-handler).
     rs_result-served_by = c_abap.
