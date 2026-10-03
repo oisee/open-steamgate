@@ -1,5 +1,7 @@
 A local ABAP application server inside VS Code. No SAP or ADT connection needed.
 
+SAP kernel rejections now appear as red squiggles while typing, with a Problems link to the support section. `osg.kernelStrict` defaults to `error` and allows runs; choose `warning`, `off`, or `refuse` (also stops object runs and tests). Desktop VSIX installs include the scanner and its dependencies.
+
 # open-steamgate
 
 Start a bundled ABAP runtime, explore its OData services, run ABAP Unit, and open local Fiori apps. The extension carries its own system seed and builds it on first start.

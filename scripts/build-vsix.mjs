@@ -621,7 +621,7 @@ export function stageKernelScanner(seedRoot, extensionDir) {
   copyReal(join(seedRoot, "tools", "osd-kernel-compat.mjs"), join(runtime, "tools", "osd-kernel-compat.mjs"));
   const transpiler = "node_modules/@abaplint/transpiler";
   for (const file of ["package.json", "LICENSE", "build/src/rearranger.js"]) {
-    if (existsSync(join(seedRoot, transpiler, file))) copyReal(join(seedRoot, transpiler, file), join(runtime, transpiler, file));
+    if (existsSync(join(seedRoot, transpiler, file))) copyReal(join(seedRoot, transpiler, file), join(runtime, transpiler, file === "LICENSE" ? "LICENSE.txt" : file));
   }
   const copied = new Set();
   const copyDependency = (name) => {
@@ -633,6 +633,19 @@ export function stageKernelScanner(seedRoot, extensionDir) {
     for (const dependency of Object.keys(metadata.dependencies ?? {})) copyDependency(dependency);
   };
   copyDependency("@abaplint/core");
+  // Every plain VSIX entry needs an extension for OPC content typing. These
+  // dependency licences were safe inside the tar; here they are .txt assets.
+  const typeLicenses = (dir) => {
+    for (const entry of readdirSync(dir, {withFileTypes: true})) {
+      const file = join(dir, entry.name);
+      if (entry.isDirectory()) typeLicenses(file);
+      else if (entry.name === "LICENSE") {
+        cpSync(file, `${file}.txt`);
+        rmSync(file);
+      }
+    }
+  };
+  typeLicenses(runtime);
 }
 
 // ---- the extension itself -------------------------------------------------

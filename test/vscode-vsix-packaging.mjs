@@ -45,6 +45,14 @@ describe("packaging changed seed content", function () {
 
       const firstExtension = join(firstUnzip, "extension");
       const secondExtension = join(secondUnzip, "extension");
+      // Exercise the actual archive outside the checkout, before seed extraction.
+      const {scanObject} = createRequire(import.meta.url)(join(firstExtension, "kernel-diagnostics.js"));
+      const bufferFile = join(scratch, "zkernel.prog.abap");
+      writeFileSync(bufferFile, "REPORT zkernel.");
+      const kernel = await scanObject(bufferFile, [{file: bufferFile, source:
+        "REPORT zkernel.\nDATA n TYPE i.\nDATA x TYPE x.\nDATA xs TYPE xstring.\nx = n BIT-AND n.\nxs+0(1) = x."}]);
+      expect(kernel.map((finding) => finding.form)).to.deep.equal(["BIT-AND on i", "offset/length write on xstring"]);
+      expect(existsSync(join(firstExtension, "osd", "node_modules"))).to.equal(false);
       const firstLauncher = createRequire(import.meta.url)(join(firstExtension, "launcher.js"));
       const secondLauncher = createRequire(import.meta.url)(join(secondExtension, "launcher.js"));
       const firstSeed = join(firstExtension, "osd");

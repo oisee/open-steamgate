@@ -2272,13 +2272,13 @@ async function openTransactionProgram(source, output) {
 function clickTransaction(item, output) {
   if (!item?.transaction) return;
   if (item.collapsibleState === vscode.TreeItemCollapsibleState.None) {
-    if (item.transaction.runnable) return openWebguiTransaction(item.transaction.tcode, output);
+    if (item.transaction.runnable) return openWebguiTransaction(item.transaction.tcode, output, undefined, {type: item.transaction.className ? "CLAS" : "PROG", name: item.transaction.className || item.transaction.program});
     return showTransactionDetails(item, output);
   }
   const classified = classifyTransactionClick(transactionClicks, item.transaction.tcode, Date.now());
   transactionClicks = classified.clicks;
   if (classified.action === "double") {
-    if (item.transaction.runnable) return openWebguiTransaction(item.transaction.tcode, output);
+    if (item.transaction.runnable) return openWebguiTransaction(item.transaction.tcode, output, undefined, {type: item.transaction.className ? "CLAS" : "PROG", name: item.transaction.className || item.transaction.program});
     return;
   }
   showTransactionDetails(item, output);
@@ -2723,10 +2723,10 @@ function activate(context) {
   // gui-reports spike: "Open in VS Code" for a converted report, the same
   // action F8 (RUN_TABLE.PROG) reaches, placed as a lens above its own
   // REPORT line rather than asked for by name.
-  context.subscriptions.push(vscode.commands.registerCommand("osd.openWebguiTransaction", (args) => openWebguiTransaction(args?.tcode, output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openWebguiTransaction", (args) => openWebguiTransaction(args?.tcode, output, args?.file)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.clickTransaction", (item) => clickTransaction(item, output)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.runTransaction", (item) =>
-    item?.transaction?.runnable ? openWebguiTransaction(item.transaction.tcode, output) : undefined));
+    item?.transaction?.runnable ? openWebguiTransaction(item.transaction.tcode, output, undefined, {type: item.transaction.className ? "CLAS" : "PROG", name: item.transaction.className || item.transaction.program}) : undefined));
   context.subscriptions.push(progLensProvider());
 
   // Q3 "Readers" (docs/vscode-extension.md): a lens "read by N · tests M ·
@@ -3264,7 +3264,8 @@ async function runReportInTerminal(name, editor, output) {
 // port first if that remote needs it, and is a no-op when nothing is
 // remote at all -- so this asks it rather than assuming osd's configured
 // URL already is the right one.
-async function openWebguiTransaction(tcode, output) {
+async function openWebguiTransaction(tcode, output, file, object) {
+  if (kernelDiagnostics && !(await kernelDiagnostics.allow(file, object?.name ? object : undefined))) return;
   const baseUri = vscode.Uri.parse(osd().url);
   await runWebguiPanel(tcode, baseUri, webguiPanels, {
     createPanel: (name) => vscode.window.createWebviewPanel("osdWebgui", `Easy Access: ${name}`, vscode.ViewColumn.Beside, {
@@ -3630,7 +3631,7 @@ function progLensProvider() {
       return [new vscode.CodeLens(range, {
         title: lens.title,
         command: "osd.openWebguiTransaction",
-        arguments: [{tcode: lens.tcode}],
+        arguments: [{tcode: lens.tcode, file: document.fileName}],
       })];
     },
   };
