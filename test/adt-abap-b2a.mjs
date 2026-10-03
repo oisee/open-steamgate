@@ -18,6 +18,12 @@ const base = "/sap/bc/adt/";
 const collections = ["oo/classes", "oo/interfaces", "programs/programs", "ddic/ddl/sources", "ddic/srvd/sources", "programs/includes"];
 const names = ["zcl_read", "zif_read", "zread", "zddl_read", "zsrv_read", "zinc_read"];
 const source = '\uFEFF* Привет 😀\u0000\r\nREPORT zread.\r\n* no final newline';
+const reportBoundaries = [
+  ["CR", "zreport_cr", "* c\rREPORT z."],
+  ["U+2028", "zreport_ls", "* c\u2028REPORT z."],
+  ["U+2029", "zreport_ps", "* c\u2029REPORT z."],
+  ["leading Unicode spaces", "zreport_spaces", "\u00a0\uFEFF\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u3000REPORT z."],
+];
 const stripQuery = (s) => s.replace(/\?$/, "");
 const xmlAccept = "application/vnd.sap.adt.oo.classes.includes.v2+xml";
 
@@ -68,6 +74,9 @@ function mutants(store) {
   if (red === "report-space") wrap(abap.Classes.ZCL_OSD_ADT_OBJECT,"report_source",(r,args) => {
     if (/^[\uFEFF\u00a0]/.test(args.iv_source.get())) r.set(""); return r;
   });
+  if (red === "report-lf-only") wrap(abap.Classes.ZCL_OSD_ADT_OBJECT,"report_source",(r,args) => {
+    r.set(args.iv_source.get().split("\n").some(line => /^report\b/i.test(line.trim())) ? "X" : ""); return r;
+  });
   if (red === "host") wrap(abap.Classes.ZCL_OSD_ADT_ROUTER,"routes",r => {
     for (const row of r.array()) if (["ZCL_OSD_ADT_SOURCE","ZCL_OSD_ADT_OBJECT"].includes(row.get().handler.get())) row.get().served_by.set("HOST"); return r;
   });
@@ -115,6 +124,7 @@ describe("ADT B2a source reads and bare documents: live Node byte diff", functio
     file(names[0],".clas.locals_def.abap","* definitions\r\n"); file(names[0],".clas.testclasses.abap","");
     file("/DEMO/ZREAD",".clas.abap",source); file("zcl_plain",".clas.abap",source);
     for(const [name,text] of [["zreport","REPORT z."],["zbom","\uFEFFreport z."],["znbsp","\u00a0report z."],["zreports","reports z."],["zcomment","* report z."],["zline","* comment\r\n\tRePoRt-z."]]) file(name,".prog.abap",text);
+    for(const [,name,text] of reportBoundaries) file(name,".prog.abap",text);
     for(const [name,text] of [["zentity","define\r\nroot\tview\nentity zentity as select from t {}"],["zclassic","define view zclassic as select from t {}"],["zboundary","redefine view entity2"],["zpunct","define,view entity"]]) file(name,".ddls.asddls",text);
     file("ztf_source",".ddls.asddls","define table function ZTF_ENTITY returns { id: abap.int4; } implemented by method zcl_read=>run;");
     store=new ObjectStore({root,libs:[],roots:[{path:"src",package:"$TMP",writable:true}]});
@@ -210,6 +220,18 @@ describe("ADT B2a source reads and bare documents: live Node byte diff", functio
     const r=await diff(base+collections[2]+"/"+name), body=r.body.toString();
     expect(body.includes('programType="executableProgram"')).to.equal(!["zreports","zcomment"].includes(name));
     expect(body).to.include('changedAt="1970-01-01T00:00:00Z"').and.include('version="active"');
+  });
+  for(const [label,name] of reportBoundaries) it(`PROG report scan ${label} is executable and byte-equal`,async () => {
+    const r=await diff(base+collections[2]+"/"+name); expect(r.status).to.equal(200);
+    expect(r.body.toString()).to.include('programType="executableProgram"');
+  });
+  it("version content matching ETag keeps explicit charset on 304",async () => {
+    const path=base+collections[0]+"/"+names[0]+"/source/main/versions/19700101101123/00000/content";
+    const first=await diff(path); expect(first.status).to.equal(200);
+    expect(first.headers["content-type"]).to.equal("text/plain; charset=utf-8");
+    expect(first.headers.etag).to.match(/^[0-9a-f]{32}$/);
+    const r=await diff(path,"GET",{"if-none-match":first.headers.etag}); expect(r.status).to.equal(304);
+    expect(r.headers["content-type"]).to.equal("text/plain; charset=utf-8"); expect(r.body.length).to.equal(0);
   });
   for(const name of ["zentity","zclassic","zboundary","zpunct"]) it(`DDLS view entity tokenizer ${name}`,async () => {
     const r=await diff(base+collections[3]+"/"+name); expect(r.body.toString().includes('ddl:source_type="view entity"')).to.equal(name === "zentity");

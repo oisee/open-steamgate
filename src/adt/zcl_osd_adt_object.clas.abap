@@ -194,7 +194,20 @@ CLASS zcl_osd_adt_object IMPLEMENTATION.
   METHOD report_source.
     DATA lt_lines TYPE string_table.
     DATA lv_line TYPE string.
-    SPLIT iv_source AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
+    DATA lv_source TYPE string.
+    DATA lv_breaks TYPE string.
+    DATA lv_break TYPE string.
+    DATA lv_off TYPE i.
+*   JavaScript multiline anchors recognize CR, LF, LS and PS.
+*   TRIM below already uses the complete JavaScript whitespace set.
+    lv_source = iv_source.
+    lv_breaks = cl_abap_codepage=>convert_from( '0DE280A8E280A9' ).
+    DO strlen( lv_breaks ) TIMES.
+      lv_off = sy-index - 1.
+      lv_break = lv_breaks+lv_off(1).
+      REPLACE ALL OCCURRENCES OF lv_break IN lv_source WITH cl_abap_char_utilities=>newline.
+    ENDDO.
+    SPLIT lv_source AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
     LOOP AT lt_lines INTO lv_line.
       lv_line = to_lower( zcl_osd_adt_js=>trim( lv_line ) ).
       IF strlen( lv_line ) >= 6 AND lv_line(6) = `report`.
