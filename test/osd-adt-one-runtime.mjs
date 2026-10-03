@@ -6,7 +6,8 @@ import {join} from "node:path";
 import {EventEmitter} from "node:events";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {RemoteSessions} from "../tools/adt-remote-sessions.mjs";
-import {abapFront, abapRunner} from "../tools/adt-abap-front.mjs";
+import {abapFront, abapRunner, registerContinuation} from "../tools/adt-abap-front.mjs";
+import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
 import {attachStoreIPC, StoreIPCClient, PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "../tools/osd-store-ipc.mjs";
@@ -324,6 +325,43 @@ describe("one-runtime SYSTEM kind gate", () => {
 });
 
 describe("remote ADT body transport", () => {
+  it("refuses serving-child RESUME until B4 without calling the parent's ABAP handler", async () => {
+    const originalFetch = globalThis.fetch;
+    const handler = globalThis.abap.Classes.ZCL_OSD_ADT_HANDLER;
+    const originalResume = handler.resume;
+    let parentCalls = 0, refusalCode, childCalls = 0;
+    const stop = registerContinuation("remote-resume", async ({resume}) => {
+      try { await resume({done: true}); }
+      catch (error) { refusalCode = error.code; throw error; }
+    });
+    const runner = abapRunner({remote: {url: "http://unused", ensure: async () => {}}});
+    const app = express();
+    app.use(adtRouter({store: {}, data: {}, watch: false, logMisses: false, abap: runner}).router);
+    const server = await listen(app);
+    handler.resume = async (...args) => { parentCalls++; return originalResume.apply(handler, args); };
+    globalThis.fetch = async (url, init) => {
+      if (!String(url).startsWith("http://unused/")) return originalFetch(url, init);
+      childCalls++;
+      return new Response(JSON.stringify({record: {status: 500, headers: [], contentType: "application/xml",
+        body: "child continuation", servedBy: "HOST", continuation: {kind: "remote-resume", payload: "{}"}}}),
+      {headers: {"content-type": "application/json"}});
+    };
+    try {
+      const res = await originalFetch(`http://127.0.0.1:${server.address().port}${BASE}/remote-resume`);
+      const body = await res.text();
+      expect(childCalls).to.equal(1);
+      expect(parentCalls, "parent ZCL_OSD_ADT_HANDLER=>RESUME must not run").to.equal(0);
+      expect(res.status).to.equal(500);
+      expect(res.headers.get("content-type")).to.equal("application/xml; charset=utf-8");
+      expect(body).to.equal(exceptionDocument("ExceptionInternalError",
+        'continuation "remote-resume": RESUME in the serving child is slice B4', {namespace: "org.open-steamgate.osd"}));
+      expect(refusalCode).to.equal("ADT_RESUME_REMOTE");
+    } finally {
+      globalThis.fetch = originalFetch; handler.resume = originalResume; stop();
+      await new Promise(r => server.close(r));
+    }
+  });
+
   it("keeps HOST bodies in the parent and hexes only ABAP bodies", async () => {
     const original = globalThis.fetch;
     try {

@@ -42,6 +42,12 @@ CLASS zcl_osd_adt_handler DEFINITION PUBLIC CREATE PUBLIC.
       EXPORTING es_response  TYPE zif_osd_adt_route=>ty_response
                 ev_served_by TYPE string.
 
+    "! Re-entry after host work. The host supplies the fresh dialog step.
+    CLASS-METHODS resume
+      IMPORTING iv_kind TYPE string
+                iv_json TYPE string
+      RETURNING VALUE(rs_response) TYPE zif_osd_adt_route=>ty_response.
+
     "! The transaction boundary for route work. No route commits itself.
     "! Called once per request by the handler; never call it from inside a
     "! route, because the inner COMMIT would persist the outer route's work.
@@ -198,6 +204,41 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
         AND zcl_osd_adt_csrf=>unsafe( is_request-method ) = abap_false.
       io_session->end( ls_session-id ).
     ENDIF.
+  ENDMETHOD.
+
+  METHOD resume.
+    DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
+    DATA ls_route TYPE zcl_osd_adt_router=>ty_route.
+    DATA li_route TYPE REF TO zif_osd_adt_resumable.
+    DATA lx_adt TYPE REF TO zcx_osd_adt.
+    DATA lx_root TYPE REF TO cx_root.
+    DATA lv_text TYPE string.
+
+    lt_routes = gt_routes.
+    IF lt_routes IS INITIAL.
+      lt_routes = zcl_osd_adt_router=>routes( ).
+    ENDIF.
+    COMMIT WORK.
+    TRY.
+        IF iv_kind IS NOT INITIAL.
+          LOOP AT lt_routes INTO ls_route WHERE resume_kind = iv_kind.
+            CREATE OBJECT li_route TYPE (ls_route-handler).
+            rs_response = li_route->resume( iv_kind = iv_kind iv_json = iv_json ).
+            RETURN.
+          ENDLOOP.
+        ENDIF.
+        lv_text = |no ABAP continuation { iv_kind } is registered|.
+        lx_adt = zcx_osd_adt=>internal( lv_text ).
+        RAISE EXCEPTION lx_adt.
+      CATCH zcx_osd_adt INTO lx_adt.
+        ROLLBACK WORK.
+        rs_response = refusal( lx_adt ).
+      CATCH cx_root INTO lx_root.
+        ROLLBACK WORK.
+        lv_text = lx_root->get_text( ).
+        lx_adt = zcx_osd_adt=>internal( lv_text ).
+        rs_response = refusal( lx_adt ).
+    ENDTRY.
   ENDMETHOD.
 
   METHOD fence.

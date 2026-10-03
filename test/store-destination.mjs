@@ -16,7 +16,7 @@ import {expect} from "chai";
 import {mkdirSync, writeFileSync, rmSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import {ObjectStore} from "../tools/osd-store.mjs";
-import {StoreDestination} from "../tools/osd-store-destination.mjs";
+import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
 import {box, rows, answerOf} from "./helpers/destination.mjs";
 
 // **In `src/`, not under `test/fixtures/`.** The probe has to be an object of
@@ -387,5 +387,34 @@ describe("where there is no tree, the answer says so", () => {
     await call(destination, {IV_COMMAND: "LIST", iv_filter: "ZCL_STG_DISPATCHER"});
     await call(destination, {IV_COMMAND: "LIST", iv_filter: "ZCL_STG_DISPATCHER"});
     expect(opened).to.equal(1);
+  });
+});
+
+
+describe("request-bound STORE commands", () => {
+  it("writes, checks, lists and completes activation on each bound store", async () => {
+    const destination = new StoreDestination({store: () => { throw new Error("default store must not open"); }});
+    for (const name of ["ZONE", "ZTWO"]) {
+      let source, built;
+      const calls = [];
+      const entry = {type: "PROG", name, writable: true};
+      const store = {
+        root: process.cwd(),
+        write: (type, object, value) => { source = value; return entry; },
+        check: () => { calls.push(["check", source]); return {issues: []}; },
+        list: () => [entry], find: () => entry, stateOf: () => ({version: "inactive"}),
+        activate: () => { calls.push(["activate", source]); return {active: true, issues: []}; },
+        publish: async () => { calls.push(["publish", source]); built = {[name]: "hash"}; return {ok: true, transpile: {built}}; },
+        completeActivation: (result, hashes) => { expect(hashes).to.equal(built); calls.push(["complete", source]); return true; },
+      };
+      await withSystem(() => {}, async () => {
+        const args = {IV_TYPE: "PROG", IV_NAME: name};
+        expect((await call(destination, {...args, IV_COMMAND: "WRITE", IV_SOURCE: name})).EV_ERROR).to.equal("");
+        expect((await call(destination, {...args, IV_COMMAND: "CHECK"})).EV_ACTIVE).to.equal("X");
+        expect((await call(destination, {IV_COMMAND: "LIST"})).ET_OBJECT.map((r) => r.NAME)).to.deep.equal([name]);
+        expect((await call(destination, {...args, IV_COMMAND: "ACTIVATE"})).EV_ACTIVE).to.equal("X");
+      }, {store});
+      expect(calls).to.deep.equal(["check", "activate", "publish", "complete"].map((command) => [command, name]));
+    }
   });
 });

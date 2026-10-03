@@ -656,6 +656,7 @@ their first users or with slice 0a/the front, rather than in the host seam:
 
 Acceptance across S0 remains green versions, LOCK and SYSINFO byte diffs,
 TYPES parity, ASCII/7.02 lint and coverage with the initial full allow-list.
+F3 continuation contract: [slice-f3-continuations.md](slice-f3-continuations.md); router rows declare `resume_kind`, dispatched through `ZIF_OSD_ADT_RESUMABLE` in a fresh step. HTTP row ownership is unchanged.
 
 ## C5 on one runtime B: classrun / F9
 

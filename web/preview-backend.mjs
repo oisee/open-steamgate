@@ -6,6 +6,7 @@
 // ZCL_STG_HTTP_HANDLER. This module does the same with the service worker in
 // the role of express and sql.js compiled to JavaScript in the role of the
 // database file. The pattern is larshp/hithub's web/preview-backend.mjs (MIT).
+import {previewAdtAnswer} from "./preview-continuations.mjs";
 import {dialogStep, exclusive} from "../tools/osd-dialog-step.mjs";
 import {ensureDemoData} from "../tools/osd-demo-data.mjs";
 import {realNow} from "./preview-runtime.mjs";
@@ -167,6 +168,12 @@ async function invoke({method, path, search = "", headers = {}, body}) {
   };
   const service = serviceFor(path);
   if (service === undefined) return {status: 404, headers: responseHeaders, body: data};
+  // The service worker shares this entry. Host continuations still answer
+  // today's 500 for every kind; see preview-continuations.mjs for the stub.
+  if (String(service.handler).toUpperCase() === "ZCL_OSD_ADT_HANDLER") {
+    return dialogStep(() => previewAdtAnswer(abap.Classes.ZCL_OSD_ADT_HANDLER,
+      {method, path, search, headers, body}), "preview ADT");
+  }
   // a read of the status service takes the snapshot that answers it, which is
   // what keeps snap_at honest; it costs a few object reads and nothing else
   // pays for it
