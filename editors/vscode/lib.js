@@ -136,7 +136,7 @@ function packSourceMappings({root, storageDir, layers = []} = {}) {
 /** The Node attach configuration used by the extension and by
  *  docs/debugging-abap.md. `restart` lets vscode-js-debug reconnect when
  *  the supervised ABAP process recycles on the same inspector port. */
-function debuggerConfiguration(port, {target = "system", restart = true, root, storageDir, layers = []} = {}) {
+function debuggerConfiguration(port, {target = "system", restart = true, root, storageDir, layers = [], skipFiles = []} = {}) {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error(`invalid inspector port: ${port}`);
   }
@@ -201,7 +201,7 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
     timeout: 30000,
     resolveSourceMapLocations: [...new Set([`${buildRoot}/**`, `${realBuildRoot}/**`, ...realStores.map((store) => `${store}/**`)])]
       .concat("!**/node_modules/**"),
-    skipFiles: ["<node_internals>/**", `${modulesRoot}/@abaplint/runtime/**`],
+    skipFiles: [...new Set([...skipFiles, "<node_internals>/**", `${modulesRoot}/@abaplint/runtime/**`])],
     outFiles: [`${outputRoot}/**/*.mjs`],
     pauseForSourceMap: true,
     ...(Object.keys(sourceMapPathOverrides).length ? {sourceMapPathOverrides} : {}),

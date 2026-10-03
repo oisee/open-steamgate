@@ -288,9 +288,18 @@ debugger;
       };
       const children = async (objectId) => {
         const answer = await client.send("Runtime.callFunctionOn", {objectId,
-          functionDeclaration: config.customPropertiesGenerator});
+          functionDeclaration: config.customPropertiesGenerator, throwOnSideEffect: true});
         expect(answer.exceptionDetails, JSON.stringify(answer.exceptionDetails)).to.equal(undefined);
-        const result = await client.send("Runtime.getProperties", {objectId: answer.result.objectId, ownProperties: true});
+        const bagId = answer.result.objectId;
+        // js-debug requests own data properties and inherited accessors separately.
+        const result = await client.send("Runtime.getProperties", {objectId: bagId, ownProperties: true});
+        const accessors = await client.send("Runtime.getProperties", {objectId: bagId, ownProperties: false, accessorPropertiesOnly: true});
+        for (const response of [result, accessors]) {
+          expect(response.exceptionDetails).to.equal(undefined);
+          const names = [...response.result, ...(response.internalProperties ?? [])].map((property) => property.name);
+          expect(names).not.to.include("[[Prototype]]");
+          expect(names).not.to.include("__proto__");
+        }
         return result.result.filter((property) => property.enumerable);
       };
       const structureId = await evaluate("structure");
@@ -311,7 +320,9 @@ debugger;
         "-0.05 (p8,2)", "0.00 (p8,2)", "ABCDEF00 (x4)", "'" + "x".repeat(256) + "…' (string)",
         "AB".repeat(128) + "… (x130)"];
       for (const [index, expected] of expectedExtras.entries()) {
-        expect(await render(await evaluate(`extraCases[${index}]`)), `extra description ${index}`).to.equal(expected);
+        const id = await evaluate(`extraCases[${index}]`);
+        expect(await render(id), `extra description ${index}`).to.equal(expected);
+        await children(id);
       }
       const castingId = await evaluate("casting");
       expect(await render(castingId)).to.equal("-> 000000000000F83F (x8)");

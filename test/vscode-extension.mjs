@@ -203,6 +203,13 @@ describe("editors/vscode: the extension's logic", function () {
     expect(config.resolveSourceMapLocations).to.deep.equal(["${workspaceFolder}/build/**", "!**/node_modules/**"]);
     expect(config.outFiles).to.deep.equal(["${workspaceFolder}/build/live/output/**/*.mjs"]);
     expect(config.pauseForSourceMap).to.equal(true);
+    expect(config.skipFiles).to.include("<node_internals>/**");
+    const userSkips = ["**/custom/**", "<node_internals>/**"];
+    for (const target of ["system", "unit"]) {
+      const merged = debuggerConfiguration(9342, {target, skipFiles: userSkips});
+      expect(merged.skipFiles).to.deep.equal(["**/custom/**", "<node_internals>/**", "${workspaceFolder}/node_modules/@abaplint/runtime/**"]);
+    }
+    expect(userSkips).to.deep.equal(["**/custom/**", "<node_internals>/**"]);
     expect(debuggerConfiguration(9342, {target: "unit", restart: false}))
       .to.include({name: "OSD: ABAP Unit (9342)", restart: false, continueOnAttach: true});
     const externalRoot = debuggerConfiguration(9343, {root: "C:\\workspace\\osd"});
@@ -1372,7 +1379,18 @@ describe("editors/vscode: the extension's logic", function () {
     for (const walkthrough of walkthroughs) {
       expect(walkthrough.steps[0].id).to.equal("quickStart");
       for (const step of walkthrough.steps) {
-        expect(readFileSync(path.join(ROOT, "editors/vscode", step.media.markdown), "utf8")).not.to.equal("");
+        const media = readFileSync(path.join(ROOT, "editors/vscode", step.media.markdown), "utf8");
+        expect(media).not.to.equal("");
+        // Media can disappear with both sidebars open. Every action offered
+        // there must also be reachable in the always-visible step description.
+        for (const link of media.matchAll(/\[[^\]]+\]\((command:osd\.[^)]+)\)/g)) {
+          expect(step.description, `${step.id}: ${link[1]}`).to.contain(`](${link[1]})`);
+        }
+        if (step.id === "quickStart") {
+          expect(step.description).to.contain("[Start with the defaults](command:osd.quickStart)");
+          expect(media).to.contain("[Start with the defaults](command:osd.quickStart)");
+        }
+        if (step.id === "startSystem") expect(step.description).to.contain("](command:osd.start)");
       }
     }
   });
