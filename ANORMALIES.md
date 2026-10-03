@@ -3580,3 +3580,22 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Smallest safe workaround: use byte operands and replace whole xstrings before deployment; enable `--kernel-strict` to make compatibility warnings ERROR rows (exit 2).
 - Upstream: none; intentional local policy, no refusal added to either runtime.
 - Regression tests: `test/kernel-compat.mjs`, `tools/testdata-kernel-compat/`, `tools/testdata-kernel-bits/`, `tools/testdata-kernel-valid/`; both runners report warnings in JSON, row alerts and stderr.
+
+### ANOMALY-2026-10-03-sqlite-execute-stack - large setup INSERT overflows sql.js stack
+
+- Status: `workaround`
+- Discovery date: `2026-10-03`
+- Affected versions: `@abaplint/database-sqlite` 2.13.83 with `sql.js` 1.14.2.
+- Affected ABAP statement, runtime API or adapter: `SQLiteDatabaseClient.execute(string)` during generated source-repository INSERTs in `setupDatabase`; sql.js `Database.run()`.
+- Expected SAP behaviour: storing source-repository rows completes database setup without a client-side WASM stack limit.
+- Actual open-abap behaviour: `execute(string)` calls sql.js `run()`, whose Emscripten string argument is allocated on the WASM stack. A 5,467,880-byte INSERT crashes with `memory access out of bounds`; the fresh module's stack pointer is 5,318,048. This is a single-statement stack overflow, not heap exhaustion or a leak across statements.
+- Impact on open-steamgate: large staged source trees crash SQLite database setup before any selected Unit class runs, including when only one class is selected.
+- Measurement: the generated ABAPiti folder's DDL has 162 statements / 55,675 bytes; batched generated inserts have 23 statements / 10,882,730 bytes. Statement 176 fails, after 175 statements / 3,321,536 bytes. The same INSERT fails alone after DDL in a fresh database and succeeds with `exec()`, producing a 6,635,520-byte database export.
+- Small working folder: 162 DDL statements / 55,675 bytes and 23 generated INSERTs / 8,316,328 bytes; largest INSERT 3,006,977 bytes. The runner initializes twice: including seed, 430 SQL calls / 16,778,608 bytes; its one test passes in 24.78 s.
+- Minimal ABAP reproducer: none required; `test/sqlite-heap-execute.mjs` isolates the adapter with a single INSERT carrying a source literal larger than 6 MiB.
+- Exact command used to run it: `OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh npx mocha test/sqlite-heap-execute.mjs`.
+- Smallest safe workaround: `tools/sqlite-heap-client.mjs` overrides only execute, using sql.js `exec()` (heap allocation with cleanup) rather than `run()`. `test/setup.mjs` uses it for both Node and preview SQLite. SQL strings and statement arrays retain their order and error behavior.
+- Upstream issue: needs an issue in abaplint/transpiler (`packages/database-sqlite`); unsent draft in gitignored `.local/jssql-upstream.md`. No dependency files changed; upstream filing is not authorized.
+- Regression-test location: `test/sqlite-heap-execute.mjs`; replacing the local client with the pinned adapter makes the large INSERT case fail.
+- Upstream version containing a fix: `unknown`
+- Validation: selected owner 7/7 SUCCESS in 82.37 s; full folder 48 class sources / 26 Unit owners, 4,077 SUCCESS, zero FAILURE/NOT_COMPILED/ERROR in 86.26 s. Including two setups and seed, the full run executes 430 SQL calls / 21,911,412 bytes. Peak full-run RSS 2,607,208 KiB includes compilation. Focused regression/batching/anomaly checks: 22 passing.
