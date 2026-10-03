@@ -140,8 +140,6 @@ const HOST_ALLOWED = [
   "POST /sap/bc/adt/datapreview/ddic",
   "GET /sap/bc/adt/datapreview/cds/:name/metadata",
   "POST /sap/bc/adt/datapreview/cds",
-  // C5: classrun
-  "POST /sap/bc/adt/oo/classrun/:name",
   // C6: notebook (continuation behind an ABAP row)
   "POST /sap/bc/adt/notebook/abap",
 ];

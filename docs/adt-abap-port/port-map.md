@@ -656,3 +656,53 @@ their first users or with slice 0a/the front, rather than in the host seam:
 
 Acceptance across S0 remains green versions, LOCK and SYSINFO byte diffs,
 TYPES parity, ASCII/7.02 lint and coverage with the initial full allow-list.
+
+## C5 on one runtime B: classrun / F9
+
+`POST /sap/bc/adt/oo/classrun/:name` is `ZCL_OSD_ADT_CLASSRUN` in the
+serving child with `OSD_ADT_ONE_RUNTIME=1`. OBJECT and READ use the facade's
+bound source store over IPC. Source interface refusal remains 400; a class
+absent from the compiled generation is 503 with the existing NOT_BUILT
+message. The reduced parent kernel marks this row HOST, using the runtime
+sentinel through `ZCL_OSD_KERNEL_GUARD=>HAS_GENERATION`; it never attempts to
+instantiate application classes. The Node route and `/osd/classrun` remain
+available with the switch off. Inline hosts with a complete generation may
+execute the route, but this slice only claims production dump parity for
+the serving-child configuration.
+
+`ZCL_OSD_KERNEL_GUARD=>CALL_CLASSRUN` is a runtime error boundary around
+construction and MAIN, not a STORE capability. Its @KERNEL try/catch carries
+plain JavaScript errors (including ASSERT-todo) as console runtime errors;
+ABAP class-based exceptions are handled as well. Partial console output
+survives. The response requests rollback, which the handler FENCE performs;
+the route performs no COMMIT or ROLLBACK.
+
+No STORE command is added. Existing SYSTEM DUMP accepts IV_JSON with
+`operation: "record"`, `name`, `message`, `stack`, and `request`, and returns
+EV_JSON with `where` and `frames`. Other DUMP queries retain the child ring
+listing. Recording uses the serving child's existing dump ring and queues
+persistDump outside the current step context, so the independent dump write
+survives FENCE rollback and does not deadlock the FIFO. No parent database
+or parent dump adapter is introduced. Go parity is deferred: osgo does not
+mount ADT, and the route calls `ZCL_OSD_ADT_HOST=>REQUIRE( 'SYSTEM' )` before
+execution. Go has no new logic or binding.
+
+`test/adt-abap-c5.mjs` covers cases 1-14, constructor errors, host refusals,
+and guard/rollback/router red proofs. It also mounts live Node and remote
+ABAP facades over one store and serving child, compares response bytes and
+asserts ABAP provenance. Its isolated switch-off helper loads the actual
+reduced parent kernel, proves the user class absent, and checks HOST parity
+for output (200) and NOT_BUILT (503), plus the classrun door (200). URL
+provenance comparisons strip an empty trailing query on both sides for
+Node 22. The C5 block is removed from HOST_ALLOWED.
+
+Notebook/C6, generalized inline dump recording, and the separate B4/B5
+runtime work remain outside C5.
+
+Measured on main `cc6b0287` (Node 26): 164 target-suite tests passed
+(C5, adt-abap-diff, adt-abap-coverage, xml-wellformed, store-destination).
+After the final explicit DUMP operation change, all 37 C5 tests passed
+again. Focused ABAP Unit: one route method and two guard methods passed.
+Lint: zero errors and no warnings in the changed ADT classes; 72 warnings
+elsewhere. All new ABAP is 7-bit ASCII and both test-bearing class XML files
+carry WITH_UNIT_TESTS. No full suite, push, or SAP-system call was made.
