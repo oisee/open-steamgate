@@ -97,9 +97,6 @@ const PORT_PENDING = [
   "GET /sap/bc/adt/core/http/changed",
   "GET /sap/bc/adt/core/http/services",
   "GET /sap/bc/adt/core/http/transactions",
-  // A9: xref
-  "GET /sap/bc/adt/core/http/xref/readers",
-  "GET /sap/bc/adt/core/http/xref/closure",
   // A10: segw entity sets
   "GET /sap/bc/adt/core/http/segw/entitysets",
   // B2a: source read and bare object documents

@@ -25,7 +25,7 @@
 // gives them two buttons: one name over a cheap and an expensive operation
 // is a button people stop pressing.
 import {withoutHostPaths} from "./osd-build-issues.mjs";
-import {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "./osd-system-kinds.mjs";
+import {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS, SOURCE_SYSTEM_KINDS} from "./osd-system-kinds.mjs";
 import {given, givenText, fill} from "./osd-destination.mjs";
 import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
 import {objectOf} from "./osd-inputs.mjs";
@@ -86,7 +86,7 @@ const PARSE_KINDS = {
 // object), SESSION (does the request's session hold state) and LOCK_HOLDER
 // (IV_NAME "TYPE NAME": is the holder a live session; a dead one is ended).
 // They go when the session moves into ABAP.
-const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER"];
+const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER", ...SOURCE_SYSTEM_KINDS];
 let systemCalls;
 try {
   if (typeof process !== "undefined" && process.versions?.node !== undefined) {
@@ -291,7 +291,11 @@ export class StoreDestination {
       return {EV_ERROR: `nothing answers SYSTEM ${kind} for this call: it is bound per ADT facade instance (withSystem)`};
     }
     try {
-      const value = await bound.answers(kind, name, json);
+      let value;
+      if (["OBJECT_TYPES", "TESTCLASSES", "SERVICE_ROWS", "SEGW_REGISTRATIONS"].includes(kind) && bound.store) {
+        const {xrefFact} = await import(/* webpackIgnore: true */ "./adt-xref-facts.mjs");
+        value = xrefFact(bound.store, kind, JSON.parse(json || "{}"));
+      } else value = await bound.answers(kind, name, json);
       if (value === undefined) return {EV_ERROR: `SYSTEM ${kind} has no answer here`};
       return typeof value?.raw === "string" ? {EV_SOURCE: value.raw} : {EV_JSON: JSON.stringify(value)};
     } catch (error) {
