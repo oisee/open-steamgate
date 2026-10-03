@@ -45,6 +45,7 @@ export function compileSettings(doc, model, {line, fail}) {
   const bounds = spec.bounds ?? {};
   if (!bounds || typeof bounds !== "object" || Array.isArray(bounds)) fail(line("settings/bounds"), "settings.bounds is a mapping");
   const available = new Map();
+  const lossy_reasons = new Map();
   for (const [name, value, min, max] of numeric) {
     const defaultValue = value(model);
     if (defaultValue !== undefined) available.set(name, {defaultValue: String(defaultValue), min, max, kind: "N"});
@@ -65,6 +66,9 @@ export function compileSettings(doc, model, {line, fail}) {
       const text = rows.map((r) => r.low).join(",");
       const built = type?.built_in;
       if (!type || !characterTypes.has(built) || text.length > 40) continue;
+      // the list must round-trip: a value with the separator or a blank (or a blank value) would come back as other rows
+      const lossy = rows.find((r) => !new RegExp(`^${listElement(type)}$`).test(r.low));
+      if (lossy) { lossy_reasons.set(`params.${p.name}`, `the default of ${p.name} holds ${JSON.stringify(lossy.low)}, which a list of values cannot carry (a value is not blank and has no comma or blank); keep the parameter out of settings.tunable`); continue; }
       available.set(`params.${p.name}`, {defaultValue: text, kind: "C", min: 0, max: 40, list: true, element: listElement(type), built, rangeOf: p.type_name});
       continue;
     }
@@ -85,6 +89,7 @@ export function compileSettings(doc, model, {line, fail}) {
   let screenNo = 0;
   const entries = spec.tunable.map((name, i) => {
     const at = line(`settings/tunable/${i}`);
+    if (lossy_reasons.has(name)) fail(at, lossy_reasons.get(name));
     if (typeof name !== "string" || !available.has(name)) fail(at, `unknown or unavailable tunable ${JSON.stringify(name)}; available: ${[...available.keys()].join(", ")}`);
     if (seen.has(name)) fail(at, `tunable ${name} is listed twice`);
     seen.add(name);

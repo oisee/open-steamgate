@@ -147,6 +147,16 @@ describe("DSL L3: a range set parameter", function () {
         /^range set parameter r{25} is at most 24 characters/, new RegExp(`^  ${"r".repeat(25)}:`));
     });
 
+    it("a tunable list must round-trip: a default with the separator or a blank value is refused in words, at the manifest line", () => {
+      const EX = "  exempt: {type: ZOSD_L2_SHIP-SHIP_ID, range: true, default: [{sign: I, option: BT, low: S900, high: S999}]}\n";
+      for (const value of ["\"A,B\"", "\"\"", "\"A B\""]) {
+        refusedAt(manifest([EX, `  exempt: {type: ZOSD_L2_SHIP-SHIP_ID, range: true, default: [${value}]}\n`], ["tunable: [params.restricted]", "tunable: [params.restricted, params.exempt]"]),
+          /^the default of exempt holds .*which a list of values cannot carry/, /^  tunable:/);
+      }
+      // the same defaults are fine as the API's rows when not tunable
+      expect(() => compileSet(manifest([EX, "  exempt: {type: ZOSD_L2_SHIP-SHIP_ID, range: true, default: [\"A,B\"]}\n"]))).to.not.throw();
+    });
+
     it("a default with a BT or an E row stays the manifest's: the operator tunes a list of values only", () => {
       for (const [tag, rows] of [["bt", "[{sign: I, option: BT, low: A, high: D}]"], ["e", "[M, {sign: E, option: EQ, low: D}]"]]) {
         refusedAt(manifest([RANGE, `  restricted: {type: ZOSD_L2_SHIP-STATUS, range: true, default: ${rows}}\n`]),
@@ -171,6 +181,10 @@ describe("DSL L3: a range set parameter", function () {
         [{sign: "#", option: "EQ", low: "", high: ""}], [{sign: "#", option: "", low: "A", high: ""}], [{sign: "#", option: "", low: "", high: "B"}]]) {
         expect(() => jobInput(row(bad)), JSON.stringify(bad)).to.throw(/Invalid job input range/);
       }
+      for (const odd of [{option: "\t"}, {option: "\n"}, {option: " ".repeat(300)}, {low: " "}, {high: "\t"}, {option: " "}]) {
+        expect(() => jobInput(row([{sign: "#", option: "", low: "", high: "", ...odd}])), JSON.stringify(odd)).to.throw(/Invalid job input range/);
+      }
+      expect(jobInput(row([{sign: "#", option: "  ", low: "", high: ""}]))).to.have.length(1);
       expect(jobInput(row([{sign: "E", option: "BT", low: "A", high: "C"}]))[0].ranges).to.deep.equal([{sign: "E", option: "BT", low: "A", high: "C"}]);
     });
   });

@@ -556,7 +556,9 @@ Generated, each line traced to the parameter's `params:` entry:
 
 **Tuning.** A range is tunable (`settings.tunable: [params.<name>]`) as **a list of values**, the
 form a settings row (`PARAM_VAL`, CHAR 40) holds: `M,D`, each value an `I EQ` row. A default with a
-`BT` or an `E` row, or more than 40 characters of list, is not tunable (the compiler says the name
+`BT` or an `E` row, or more than 40 characters of list, is not tunable; one with a value that does not
+round-trip through the list (a comma or a blank in it, or a blank value, which would come back as other rows)
+is refused at the manifest line when it is listed in `tunable`, in words (the compiler says the name
 is unavailable); the manifest's full rows stay the default and the API's (`is_params`). The value is
 checked like every setting: elements of the type's length with no comma and no blank, `A,D` valid,
 `M;D`, `MM`, `A, D`, `,A`, `A,` refused without a change; an empty list is valid and means every

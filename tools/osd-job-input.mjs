@@ -31,7 +31,8 @@ export function jobInput(input) {
       && Object.keys(range).map((key) => key.toUpperCase()).sort().join(",") === "HIGH,LOW,OPTION,SIGN"
       && ["SIGN", "OPTION", "LOW", "HIGH"].every((key) => {
         const value = range[Object.keys(range).find((name) => name.toUpperCase() === key)];
-        return key === "SIGN" ? value === "#" : typeof value === "string" && value.trim() === "";
+        // exactly the facade's row: option empty or two blanks, low and high empty (no tab, no newline, no long blank string)
+        return key === "SIGN" ? value === "#" : key === "OPTION" ? value === "" || value === "  " : value === "";
       });
     if (rawRanges.length === 1 && sentinel(rawRanges[0])) return {name: upper, value, ranges: [{sign: "#", option: "  ", low: "", high: ""}]};
     const ranges = rawRanges.map((range) => {
