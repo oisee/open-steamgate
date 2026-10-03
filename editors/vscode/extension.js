@@ -8,7 +8,7 @@
 
 const {jobsStatusBar} = require("./job-worker");
 const vscode = require("vscode");
-const {registerKernelDiagnostics} = require("./kernel-diagnostics.js");
+const {registerKernelDiagnostics, resolveKernelObjectFile} = require("./kernel-diagnostics.js");
 let kernelDiagnostics;
 let kernelFindingCount = 0;
 const path = require("node:path");
@@ -2671,12 +2671,11 @@ function activate(context) {
   activeController = controller;
   kernelDiagnostics = registerKernelDiagnostics(vscode, context, output, {
     onCount: (count) => { kernelFindingCount = count; },
-    resolveFile: async (object) => {
-      const filename = `${object.name.toLowerCase().replaceAll("/", "#")}.${object.type.toLowerCase()}.abap`;
-      const files = await vscode.workspace.findFiles(`**/${filename}`, EXCLUDE);
-      return files[0]?.fsPath ?? [...(controller.runningSources()?.files.values() ?? [])]
-        .find((file) => path.basename(file).toLowerCase() === filename);
-    },
+    resolveFile: (object) => resolveKernelObjectFile(object, {
+      running: controller.runningSources(),
+      home: controller.launcher?.osdHome ?? osdHomeOf(),
+      layers: controller.launcher?.layers ?? detectWorkspaceLayers(workspaceFoldersFor(osdHomeOf())),
+    }),
   });
   context.subscriptions.push(statusBar(context));
   jobsStatusBar(vscode, context, controller);

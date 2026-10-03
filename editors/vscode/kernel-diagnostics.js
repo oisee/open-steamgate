@@ -39,6 +39,20 @@ function scanObject(file, buffers, {scanner, timeout = 5000, env = process.env} 
   });
 }
 
+async function resolveKernelObjectFile(object, {running, home, layers: userLayers = []} = {}) {
+  const filename = `${object.name.toLowerCase().replaceAll("/", "#")}.${object.type.toLowerCase()}.abap`;
+  const selected = [...(running?.files.values() ?? [])].find((file) => path.basename(file).toLowerCase() === filename);
+  if (selected) return selected;
+  if (!home) return undefined;
+  const {pathToFileURL} = require("node:url");
+  const {layers, filesIn} = await import(pathToFileURL(path.join(home, "tools/osd-inputs.mjs")).href);
+  const resolved = layers(home, undefined, {...process.env, OSD_LAYERS: userLayers.map((layer) => typeof layer === "string" ? layer : layer.srcDir).join(path.delimiter)});
+  const owner = resolved.owner.get(`${object.type.toUpperCase()} ${object.name.toUpperCase()}`);
+  if (!owner) return undefined;
+  return filesIn(home, owner).filter(({name}) => name.toLowerCase() === filename)
+    .map(({file}) => path.resolve(home, file))[0];
+}
+
 function registerKernelDiagnostics(vscode, context, output, {scan = scanObject, delay = 400, onCount = () => {}, resolveFile} = {}) {
   const collection = vscode.languages.createDiagnosticCollection("osd-kernel");
   const timers = new Map(), revisions = new Map(), counts = new Map();
@@ -119,4 +133,4 @@ function registerKernelDiagnostics(vscode, context, output, {scan = scanObject, 
   for (const doc of vscode.workspace.textDocuments) schedule(doc);
   return api;
 }
-module.exports = {supportUrl, toDiagnostics, scanObject, registerKernelDiagnostics};
+module.exports = {supportUrl, toDiagnostics, scanObject, registerKernelDiagnostics, resolveKernelObjectFile};

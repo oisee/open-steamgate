@@ -1,11 +1,11 @@
 import {expect} from "chai";
 import {createRequire} from "node:module";
-import {mkdtempSync, writeFileSync, rmSync} from "node:fs";
+import {mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 import {stageKernelScanner} from "../scripts/build-vsix.mjs";
-const {toDiagnostics, scanObject, registerKernelDiagnostics} = createRequire(import.meta.url)("../editors/vscode/kernel-diagnostics.js");
+const {toDiagnostics, scanObject, registerKernelDiagnostics, resolveKernelObjectFile} = createRequire(import.meta.url)("../editors/vscode/kernel-diagnostics.js");
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const finding = {file: "zcheck.prog.abap", line: 3, kind: "kernel-reject", form: "BIT-AND on i", message: "BIT-AND on i: rejected on a SAP system", supportAnchor: "docs/osg-support.md#kernel-bit-and-operand-not-x"};
@@ -30,6 +30,32 @@ function register(f, scan) {
 }
 describe("VS Code kernel strict diagnostics", function () {
   this.timeout(15000);
+  it("refuses the running duplicate and uses the later input layer in the selected home", async () => {
+    const home = mkdtempSync(path.join(tmpdir(), "osd-kernel-duplicates-"));
+    const f = fixture(); f.vscode.workspace.textDocuments = [];
+    const object = {type: "PROG", name: "ZCHECK"};
+    try {
+      symlinkSync(path.join(ROOT, "tools"), path.join(home, "tools"));
+      for (const folder of ["base", "overlay"]) {
+        mkdirSync(path.join(home, folder));
+        writeFileSync(path.join(home, folder, finding.file), "REPORT zcheck.");
+      }
+      writeFileSync(path.join(home, "abap_transpile.json"), JSON.stringify({input_folder: ["base", "overlay"]}));
+      const base = path.join(home, "base", finding.file), overlay = path.join(home, "overlay", finding.file);
+      const api = registerKernelDiagnostics(f.vscode, {subscriptions: []}, {appendLine() {}}, {
+        scan: async (file) => file === overlay ? [finding] : [],
+        resolveFile: (obj) => resolveKernelObjectFile(obj, {home, running: {files: new Map([["winner", overlay]])}}),
+      });
+      try {
+        f.setMode("refuse");
+        expect(await api.allow(undefined, object)).to.equal(false);
+        expect(await resolveKernelObjectFile(object, {home})).to.equal(overlay);
+        expect(await resolveKernelObjectFile(object, {home, running: {files: new Map([["winner", base]])}})).to.equal(base);
+        expect(await resolveKernelObjectFile(object, {home, layers: [{srcDir: path.join(home, "base")}]})).to.equal(base);
+        expect(await resolveKernelObjectFile(object, {})).to.equal(undefined);
+      } finally {api.dispose();}
+    } finally {rmSync(home, {recursive: true, force: true});}
+  });
   it("maps Errors and Warnings with source, support form ID, section link and zero-based range", () => {
     const f = fixture();
     const [error] = toDiagnostics(f.vscode, [finding], f.doc, "error");
