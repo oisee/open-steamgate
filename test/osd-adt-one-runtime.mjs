@@ -3,14 +3,14 @@ import express from "express";
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {EventEmitter} from "node:events";
+import {EventEmitter, once} from "node:events";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {RemoteSessions} from "../tools/adt-remote-sessions.mjs";
 import {abapFront, abapRunner, registerContinuation} from "../tools/adt-abap-front.mjs";
 import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
-import {attachStoreIPC, StoreIPCClient, PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "../tools/osd-store-ipc.mjs";
+import {attachStoreIPC, StoreIPCClient, withStoreIPC, PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "../tools/osd-store-ipc.mjs";
 import {stepJSON} from "../tools/adt-remote-step.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
@@ -18,13 +18,13 @@ import {Data} from "../tools/osd-data.mjs";
 const BASE = "/sap/bc/adt";
 const listen = (app) => new Promise(resolve => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
 const until = async (work) => {
-  for (let i = 0; i < 200; i++) { if (work()) return; await new Promise(r => setTimeout(r, 10)); }
+  for (let i = 0; i < 200; i++) { if (await work()) return; await new Promise(r => setTimeout(r, 10)); }
   throw new Error("condition did not settle");
 };
 
 describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
   this.timeout(60000);
-  let root, runtime, store, servers, remote, node;
+  let root, runtime, store, servers, remote, node, nodeSessions;
   before(async () => {
     root = mkdtempSync(join(tmpdir(), "osd-one-runtime-"));
     mkdirSync(join(root, "src"));
@@ -38,7 +38,9 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     for (const runner of [undefined, abapRunner({remote: runtime})]) {
       const app = express();
       app.use(express.raw({type: "*/*"}));
-      app.use(adtRouter({store, data: {}, watch: false, logMisses: false, transpileOnActivate: false, abap: runner}).router);
+      const facade = adtRouter({store, data: {}, watch: false, logMisses: false, transpileOnActivate: false, abap: runner});
+      if (runner !== undefined) nodeSessions = facade.sessions;
+      app.use(facade.router);
       servers.push(await listen(app));
     }
     [node, remote] = servers.map(s => `http://127.0.0.1:${s.address().port}`);
@@ -71,6 +73,8 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
   });
 
   it("LOCK shares the child's ENQ table and its data preview; HOST write uses the same handle", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
     const login = await request(remote, "HEAD", BASE + "/core/discovery", {"x-csrf-token": "fetch", "x-sap-adt-sessiontype": "stateful"});
     const cookie = login.cookies.map(c => c.split(";")[0]).join("; ");
     const headers = {cookie, "x-csrf-token": login.token, "x-sap-adt-sessiontype": "stateful"};
@@ -82,7 +86,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     const rows = await db.query("SELECT id FROM zosd_adt_sess");
     expect(rows.rows.length).to.be.greaterThan(0);
     expect((await db.query("SELECT handle FROM zosd_adt_shdl")).rows.map(r => r.handle.trim())).to.include(handle);
-    const probe = await fetch(runtime.url + "/osd/classrun", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_ENQ_PROBE"})});
+    const probe = await fetch(url + "/osd/classrun", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_ENQ_PROBE"})});
     expect((await probe.json()).text.trim()).to.equal("1");
     const written = await request(remote, "PUT", object + `/source/main?lockHandle=${handle}`, {...headers, "content-type": "text/plain"}, "REPORT zosd_remote.\n* remote write\n");
     expect(written.status, written.body).to.equal(200);
@@ -119,7 +123,247 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     } finally { release(); await held; }
   });
 
+  const logon = async () => {
+    const login = await request(remote, "HEAD", BASE + "/core/discovery", {"x-csrf-token": "fetch", "x-sap-adt-sessiontype": "stateful"});
+    const cookie = login.cookies.map(c => c.split(";")[0]).join("; ");
+    return {session: await nodeSessions.get(/sap-contextid=([^;]+)/.exec(cookie)[1]),
+      headers: {cookie, "x-csrf-token": login.token, "x-sap-adt-sessiontype": "stateful"}};
+  };
+
+  it("B3: child ABAP LOCK and Node holderOf see each other in both directions", async () => {
+    const {session, headers} = await logon();
+    const object = BASE + "/programs/programs/zosd_remote";
+    try {
+      const locked = await request(remote, "POST", object + "?_action=LOCK&accessMode=MODIFY", headers);
+      expect(locked.served).to.equal("ABAP");
+      const handle = /<LOCK_HANDLE>([^<]+)/.exec(locked.body)[1];
+      expect((await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).handle).to.equal(handle);
+      await nodeSessions.unlock(session, handle);
+      const taken = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+      const again = await request(remote, "POST", object + "?_action=LOCK&accessMode=MODIFY", headers);
+      expect(again.served).to.equal("ABAP");
+      expect(/<LOCK_HANDLE>([^<]+)/.exec(again.body)[1]).to.equal(taken.handle);
+      await nodeSessions.release("PROG", "ZOSD_REMOTE");
+      expect(await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).to.equal(undefined);
+    } finally { await nodeSessions.end(session.id); }
+  });
+
+  it("B3: logoff-first stale write snapshot cannot run the parent callback", async () => {
+    const {session} = await logon();
+    const {handle} = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+    // The snapshot still says it holds; the authoritative child has ended it.
+    await nodeSessions.end(session.id);
+    let writes = 0;
+    expect(await nodeSessions.whileHeld(session, handle, "PROG", "ZOSD_REMOTE", () => { writes++; })).to.equal(false);
+    expect(writes).to.equal(0);
+  });
+
+  it("B3: PUT behind logoff refuses its stale HOST snapshot without writing", async () => {
+    const {session, headers} = await logon();
+    const object = BASE + "/programs/programs/zosd_remote";
+    const locked = await request(remote, "POST", object + "?_action=LOCK&accessMode=MODIFY", headers);
+    const handle = /<LOCK_HANDLE>([^<]+)/.exec(locked.body)[1];
+    const original = nodeSessions.whileHeld;
+    const source = store.read("PROG", "ZOSD_REMOTE").source;
+    nodeSessions.whileHeld = async (...args) => {
+      await nodeSessions.end(session.id);
+      return original.apply(nodeSessions, args);
+    };
+    try {
+      const answer = await request(remote, "PUT", object + `/source/main?lockHandle=${handle}`,
+        {...headers, "content-type": "text/plain"}, "REPORT zosd_remote.\n* must not write\n");
+      expect(answer.status, answer.body).to.equal(409);
+      expect(store.read("PROG", "ZOSD_REMOTE").source).to.equal(source);
+    } finally { nodeSessions.whileHeld = original; }
+  });
+
+  it("B3: DELETE behind logoff refuses after its HOST verdict and leaves the object", async () => {
+    const {session, headers} = await logon();
+    const original = nodeSessions.deleteObject;
+    let called = false;
+    nodeSessions.deleteObject = async (...args) => {
+      called = true;
+      await nodeSessions.end(session.id);
+      return original.apply(nodeSessions, args);
+    };
+    try {
+      const answer = await request(remote, "DELETE", BASE + "/programs/programs/zosd_remote", headers);
+      expect(called).to.equal(true);
+      expect(answer.status, answer.body).to.equal(403);
+      expect(store.find("PROG", "ZOSD_REMOTE")).to.not.equal(undefined);
+    } finally { nodeSessions.deleteObject = original; }
+  });
+
+  it("B3: delete callback holds the FIFO through parent deletion and releases its handle", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
+    const {session} = await logon();
+    const taken = await nodeSessions.lock(session, "PROG", "ZOSD_DELETE");
+    let enter, release;
+    const events = [];
+    const entered = new Promise(r => { enter = r; });
+    const go = new Promise(r => { release = r; });
+    const deleting = nodeSessions.deleteObject(session, "PROG", "ZOSD_DELETE", {
+      find: () => ({name: "ZOSD_DELETE"}),
+      delete: async () => { enter(); await go; events.push("deleteDone"); return {type: "PROG", name: "ZOSD_DELETE"}; },
+    });
+    let off;
+    try {
+      await entered;
+      off = nodeSessions.end(session.id).then(() => { events.push("ended"); });
+      // The only other step is logoff: prove it reached the child FIFO.
+      await until(async () => {
+        const response = await fetch(url + "/osd/serving");
+        const {workProcess} = await response.json();
+        return workProcess.held && workProcess.waiting === 1;
+      });
+      expect(events).to.deep.equal([]);
+      release();
+      expect(await deleting).to.deep.equal({gone: {type: "PROG", name: "ZOSD_DELETE"}});
+      await off;
+      expect(events).to.deep.equal(["deleteDone", "ended"]);
+      expect(await nodeSessions.holderOf("PROG", "ZOSD_DELETE")).to.equal(undefined);
+      expect(taken.handle).to.be.a("string");
+    } finally { release(); await deleting; await off; }
+  });
+
+  it("B3: callback failure releases the FIFO and removes its context", async () => {
+    const {session} = await logon();
+    const {handle} = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+    const error = await nodeSessions.whileHeld(session, handle, "PROG", "ZOSD_REMOTE", () => {
+      throw new Error("parent write failed");
+    }).then(() => undefined, e => e);
+    expect(error.message).to.contain("parent write failed");
+    expect(runtime.adtContexts.size).to.equal(0);
+    await nodeSessions.end(session.id);
+    expect(await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).to.equal(undefined);
+  });
+
+  it("B3: graceful recycle drains a held callback and carries its lock", async () => {
+    const {session} = await logon();
+    const {handle} = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+    let enter, release, calls = 0, recycling;
+    const entered = new Promise(r => { enter = r; });
+    const go = new Promise(r => { release = r; });
+    const pending = nodeSessions.whileHeld(session, handle, "PROG", "ZOSD_REMOTE", async () => {
+      enter(); await go; calls++;
+      store.write("PROG", "ZOSD_REMOTE", "REPORT zosd_remote.\n* carried write\n");
+    }).then(value => ({value}), error => ({error}));
+    try {
+      await entered;
+      const pid = runtime.child.pid;
+      recycling = runtime.recycle();
+      recycling.catch(() => undefined);
+      // Outlast server-close grace plus leave's FIFO grace.
+      await new Promise(r => setTimeout(r, 2 * runtime.grace + 250));
+      release();
+      expect(await pending).to.deep.equal({value: true});
+      await recycling;
+      expect(runtime.child.pid).to.not.equal(pid);
+      expect((await nodeSessions.holderOf("PROG", "ZOSD_REMOTE"))?.handle).to.equal(handle);
+      expect(store.read("PROG", "ZOSD_REMOTE").source).to.contain("carried write");
+      expect(calls).to.equal(1);
+    } finally {
+      release(); await pending; await recycling;
+      await nodeSessions.end(session.id);
+    }
+  });
+
+  it("B3: stop overtakes a recycle waiting for a held callback", async () => {
+    const {session} = await logon();
+    const {handle} = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+    let enter, release;
+    const entered = new Promise(r => { enter = r; });
+    const go = new Promise(r => { release = r; });
+    const pending = nodeSessions.whileHeld(session, handle, "PROG", "ZOSD_REMOTE", async () => {
+      enter(); await go;
+    }).catch(() => undefined);
+    const grace = runtime.grace;
+    try {
+      await entered;
+      runtime.grace = 50;
+      const recycled = runtime.recycle().then(() => undefined, error => error);
+      await new Promise(r => setTimeout(r, 30));
+      await runtime.stop();
+      expect((await recycled).message).to.equal("stopped while recycling");
+      expect(runtime.child).to.equal(undefined);
+      expect(runtime.adtContexts.size).to.equal(0);
+    } finally {
+      release(); await pending; runtime.grace = grace;
+      await runtime.ensure();
+    }
+  });
+
+  it("B3: a failed step after parent deletion releases the surviving handle", async () => {
+    const {session} = await logon();
+    await nodeSessions.lock(session, "PROG", "ZOSD_DELETE_ERROR");
+    let deleted = false, calls = 0;
+    const error = await nodeSessions.deleteObject(session, "PROG", "ZOSD_DELETE_ERROR", {
+      find: () => deleted ? undefined : {name: "ZOSD_DELETE_ERROR"},
+      delete: () => {
+        deleted = true; calls++;
+        // IPC serialization fails after deletion, before the child can forget.
+        return {type: "PROG", name: "ZOSD_DELETE_ERROR", unserializable: 1n};
+      },
+    }).then(() => undefined, e => e);
+    try {
+      expect(error).to.be.instanceOf(Error);
+      expect(deleted).to.equal(true);
+      expect(calls).to.equal(1);
+      expect(await nodeSessions.holderOf("PROG", "ZOSD_DELETE_ERROR")).to.equal(undefined);
+    } finally { await nodeSessions.end(session.id); }
+  });
+
+  it("B3: crash during a callback releases the old step without replaying the write", async () => {
+    const {session} = await logon();
+    const {handle} = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+    let enter, release, calls = 0;
+    const entered = new Promise(r => { enter = r; });
+    const go = new Promise(r => { release = r; });
+    const pending = nodeSessions.whileHeld(session, handle, "PROG", "ZOSD_REMOTE", async () => {
+      calls++; enter(); await go;
+    }).then(() => "resolved", () => "rejected");
+    try {
+      await entered;
+      const child = runtime.child;
+      child.kill("SIGKILL");
+      expect(await pending).to.equal("rejected");
+      // A socket error can precede exit; ensure must see a departed child.
+      if (child.exitCode === null && child.signalCode === null) await once(child, "exit");
+      expect(runtime.adtContexts.size).to.equal(0);
+      await runtime.ensure();
+      expect(runtime.child.pid).to.not.equal(child.pid);
+      expect(await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).to.equal(undefined);
+      expect(calls).to.equal(1);
+    } finally { release(); }
+  });
+
+  it("B3: the session door refuses invalid operations and the ABAP door refuses session envelopes", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
+    for (const [door, input] of [
+      ["adt-sessions", {method: "constructor", args: []}],
+      ["adt-sessions", {method: "end", args: []}],
+      ["adt-step", {view: {sessionCall: "end", args: ["absent"]}}],
+    ]) {
+      const response = await fetch(url + "/osd/" + door, {method: "POST",
+        headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input)});
+      expect(response.status).to.equal(400);
+    }
+  });
+
+  it("B3: the session door bounds its JSON body to 1 MB", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
+    const response = await fetch(url + "/osd/adt-sessions", {method: "POST",
+      headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey},
+      body: JSON.stringify({method: "get", args: ["x".repeat(1024 * 1024)]})});
+    expect(response.status).to.equal(413);
+  });
+
   it("ACTIVATE says live after the step and cannot publish while the child is held", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
     let release, entered, publishes = 0;
     const held = new Promise(r => { entered = r; });
     const go = new Promise(r => { release = r; });
@@ -129,7 +373,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       publish: async () => { publishes++; return {ok: true, recycled: true}; }}});
     runtime.systemAnswers = async kind => { if (kind === "BUILD") { entered(); await go; return {ok: true}; } };
     try {
-      const pending = fetch(runtime.url + "/osd/classrun", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_STORE_PROBE"})});
+      const pending = fetch(url + "/osd/classrun", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_STORE_PROBE"})});
       await held;
       expect(publishes, "publish has not started inside the held child step").to.equal(0);
       release();
@@ -143,6 +387,8 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
   });
 
   it("the G.8 editor activates through the parent and recycles only after its step", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
     const before = runtime.child.pid;
     const overrides = {activate: store.activate, publish: store.publish, completeActivation: store.completeActivation};
     let publishes = 0;
@@ -150,7 +396,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     store.completeActivation = () => true;
     store.publish = async () => { publishes++; await runtime.recycle(); return {ok: true, recycled: true}; };
     try {
-      const response = await fetch(runtime.url + "/sap/bc/osd/edit/", {method: "POST",
+      const response = await fetch(url + "/sap/bc/osd/edit/", {method: "POST",
         headers: {"content-type": "application/x-www-form-urlencoded"},
         body: new URLSearchParams({type: "PROG", name: "ZOSD_REMOTE", change: "x", do: "activate", src: "REPORT zosd_remote.\n* G8\n"})});
       expect(response.status).to.equal(200);
@@ -174,23 +420,31 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     ["text/plain", "text/plain", "valid", 415],
   ]) {
     it(`the internal door refuses ${name}`, async () => {
+      await runtime.ensure();
+      const url = runtime.url;
       const headers = {"content-type": type};
       if (key) headers["x-osd-adt-step-key"] = key === "valid" ? runtime.adtStepKey : key;
-      const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST", headers, body: "{}"});
-      expect(response.status).to.equal(status);
+      for (const door of ["adt-step", "adt-sessions"]) {
+        const response = await fetch(url + "/osd/" + door, {method: "POST", headers, body: "{}"});
+        expect(response.status).to.equal(status);
+      }
     });
   }
 
   it("the door accepts an ABAP body larger than 8 MB", async () => {
-    const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST",
+    await runtime.ensure();
+    const url = runtime.url;
+    const response = await fetch(url + "/osd/adt-step", {method: "POST",
       headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey},
       body: JSON.stringify({view: {method: "GET", path: BASE + "/core/http/systeminformation", url: BASE + "/core/http/systeminformation", headers: {}}, bodyHex: "00".repeat(9 * 1024 * 1024)})});
     expect(response.status).to.equal(200);
   });
 
   it("the internal door rejects invalid views and byte hex", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
     for (const input of [{}, {view: {}}, {view: {method: "GET", path: BASE, url: BASE, headers: {}}, bodyHex: "f"}]) {
-      const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST", headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input)});
+      const response = await fetch(url + "/osd/adt-step", {method: "POST", headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input)});
       expect(response.status).to.equal(400);
     }
   });
@@ -393,5 +647,79 @@ describe("remote ADT body transport", () => {
         ({method: "GET", originalUrl: BASE, headers: {}, body: Buffer.alloc(0)}, {}, () => {});
       expect(refusal).to.deep.equal({status: 413, code: "ExceptionInvalidRequest", message: "ADT request body too large"});
     } finally { globalThis.fetch = original; }
+  });
+});
+
+// With the switch off, the added internal node is inert. Existing inline
+// and JS routes keep the exact session implementation selected on main.
+describe("B3 switch off", function () {
+  this.timeout(60000);
+  it("both internal doors remain disabled", async () => {
+    const runtime = new ServingRuntime({root: process.cwd(), env: {
+      OSD_ADT_ONE_RUNTIME: "0", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0",
+    }});
+    try {
+      await runtime.start();
+      for (const door of ["adt-step", "adt-sessions"]) {
+        const response = await fetch(runtime.url + "/osd/" + door, {method: "POST",
+          headers: {"content-type": "application/json"}, body: "{}"});
+        expect(response.status).to.equal(404);
+      }
+    } finally { await runtime.stop(); }
+  });
+});
+
+describe("B3 callback timeout context", () => {
+  it("invalidates on the child timer, refuses further callbacks and logs late completion", async () => {
+    const child = new EventEmitter();
+    child.connected = true;
+    const channel = new EventEmitter();
+    channel.connected = true;
+    channel.send = message => child.emit("message", message);
+    let finish;
+    const finished = new Promise(r => { finish = r; });
+    child.send = message => {
+      channel.emit("message", message);
+      if (message.id === 1) finish(message);
+    };
+    let enter, release, fireTimer, calls = 0;
+    const entered = new Promise(r => { enter = r; });
+    const go = new Promise(r => { release = r; });
+    const runtime = {adtContexts: new Map([[1, {callback: async () => {
+      calls++; enter(); await go; return {};
+    }}]])};
+    attachStoreIPC(child, runtime);
+    const client = new StoreIPCClient(channel);
+    const originalTimer = globalThis.setTimeout;
+    const originalWarn = console.warn;
+    const warnings = [];
+    let pending;
+    try {
+      console.warn = (...args) => warnings.push(args.join(" "));
+      globalThis.setTimeout = (callback, ms) => {
+        expect(ms).to.equal(120000);
+        fireTimer = callback;
+        return undefined;
+      };
+      pending = withStoreIPC(1, () => client.request({action: "work"}, "OSD_SESSION_CALLBACK"))
+        .catch(error => error.message);
+      globalThis.setTimeout = originalTimer;
+      await entered;
+      fireTimer();
+      expect(await pending).to.contain("timed out");
+      expect(runtime.adtContexts.size).to.equal(0);
+      const refused = await withStoreIPC(1, () => client.request({action: "work"}, "OSD_SESSION_CALLBACK"))
+        .catch(error => error.message);
+      expect(refused).to.contain("context ended");
+      expect(calls).to.equal(1);
+      release();
+      const lateReply = await finished;
+      expect(warnings).to.have.length(1);
+      expect(warnings[0]).to.contain("uncertain write");
+      expect(lateReply.error).to.contain("context ended during work");
+    } finally {
+      release(); globalThis.setTimeout = originalTimer; console.warn = originalWarn;
+      client.close(); child.emit("exit");
+    }
   });
 });

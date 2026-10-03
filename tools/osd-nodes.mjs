@@ -133,6 +133,7 @@ export function declaredNodes(root = ".") {
         mountedElsewhere: d.mount === "elsewhere" ? (d.why ?? "") : undefined,
         implementedIn: d.host,
         needs: d.needs,
+        internal: d.internal === true,
         text: d.text,
         travels: false,
         source: file,

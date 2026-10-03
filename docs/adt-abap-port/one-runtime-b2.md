@@ -91,6 +91,8 @@ runs while the child's session/handle check holds its step. Delegated logoff
 ends the child session before a queued LOCK can proceed; a regression test
 proves that ordering. This prevents a second parent session authority when
 the kernel is absent, while those routes remain unported.
+[B3](one-runtime-b3.md) now extracts those calls into the dedicated
+`/osd/adt-sessions` door; `view.sessionCall` is no longer accepted.
 
 B4's RESUME door and B5's physical kernel deletion remain separate work.
 The new database SYSTEM implementations are installed in the serving child;

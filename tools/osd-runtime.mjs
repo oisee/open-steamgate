@@ -400,6 +400,14 @@ export class ServingRuntime {
         // rather than start a second one beside it
         await this.starting?.catch(() => undefined);
         stopped();
+        // Parent callbacks hold the child's FIFO. Quiescing before they
+        // finish can exhaust the grace and discard all ADT carry rows.
+        // Bound this wait; stop() still quiesces immediately and wins.
+        const drainUntil = Date.now() + this.grace + 8000;
+        while (this.adtContexts?.size > 0 && Date.now() < drainUntil) {
+          await new Promise(resolve => setTimeout(resolve, Math.min(10, drainUntil - Date.now())));
+          stopped();
+        }
         await this.#stopChild();
         stopped();
         const answer = await this.#spawn({announce: pending});

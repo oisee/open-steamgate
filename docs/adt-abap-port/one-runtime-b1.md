@@ -17,8 +17,8 @@ The door is 404 with the switch off and rejects malformed input with 400.
 The resource bridge and protocol details are in
 [B2](one-runtime-b2.md); the remote front needs both slices for STORE routes.
 
-During the mixed ABAP/Node port, the same door also accepts a view with
-`sessionCall` and JSON `args` for the remaining Node session operations.
-They run in the child's FIFO; this compatibility is necessary when the
-parent kernel is absent. B3 can replace this compatibility interface as
-those routes are ported. No session or lock authority lives in the parent.
+B1/B2 initially let the same door accept a view with `sessionCall` and
+JSON `args` for the remaining Node session operations. They run in the
+child's FIFO; this compatibility is necessary when the parent kernel is
+absent. [B3](one-runtime-b3.md) now puts this compatibility interface behind
+`/osd/adt-sessions`; the request door no longer accepts session-only views. No session or lock authority lives in the parent.

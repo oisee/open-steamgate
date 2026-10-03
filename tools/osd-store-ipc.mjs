@@ -48,6 +48,7 @@ export class StoreIPCClient {
   request(parameters, name = "ZOSD_STORE") {
     if (!this.channel.connected) return Promise.reject(new Error("STORE needs the parent process channel"));
     const id = ++this.seq;
+    const contextID = calls.getStore();
     const token = currentStepToken();
     if (token !== undefined) token.storeIPC ??= ++this.steps;
     return new Promise((resolve, reject) => {
@@ -55,10 +56,13 @@ export class StoreIPCClient {
       const long = command === "ACTIVATE" || (command === "SYSTEM" && String(parameters.IV_TYPE).toUpperCase() === "BUILD");
       const timer = long ? undefined : setTimeout(() => {
         this.pending.delete(id);
+        if (name === "OSD_SESSION_CALLBACK" && this.channel.connected) {
+          this.channel.send({type: "store-context-ended", context: contextID});
+        }
         reject(new Error("STORE IPC request timed out"));
       }, 120000);
       this.pending.set(id, {resolve, reject, timer});
-      this.channel.send({type: "store-request", id, context: calls.getStore(), step: token?.storeIPC, name, parameters}, (error) => {
+      this.channel.send({type: "store-request", id, context: contextID, step: token?.storeIPC, name, parameters}, (error) => {
         if (!error) return;
         const pending = this.pending.get(id);
         if (!pending) return;
@@ -87,6 +91,10 @@ export class StoreIPCClient {
 export function attachStoreIPC(child, runtime) {
   const deferred = new Map();
   const receive = async (message) => {
+    if (message?.type === "store-context-ended") {
+      runtime.adtContexts?.delete(message.context);
+      return;
+    }
     if (message?.type === "store-step-ended") {
       const work = deferred.get(message.step) ?? [];
       deferred.delete(message.step);
@@ -102,7 +110,14 @@ export function attachStoreIPC(child, runtime) {
       let values;
       if (message.name === "OSD_SESSION_CALLBACK") {
         if (context?.callback === undefined) throw new Error("session callback context ended");
-        values = await context.callback(message.parameters);
+        try {
+          values = await context.callback(message.parameters);
+        } finally {
+          if (runtime.adtContexts?.get(message.context) !== context) {
+            console.warn("ADT session callback completed after its context ended; uncertain write", message.context);
+            throw new Error("session callback context ended during work");
+          }
+        }
       } else {
         const {StoreDestination, withSystem} = await import("./osd-store-destination.mjs");
         const destination = runtime.storeDestination ?? new StoreDestination({reason: "no parent store installed"});
