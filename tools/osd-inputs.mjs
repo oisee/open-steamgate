@@ -76,6 +76,11 @@ export function objectOf(filename) {
 // the base and written with forward slashes, the way the transpiler globs
 // them. A package file (package.devc.xml) belongs to its folder rather than
 // to a name, so it is no object here and never a duplicate.
+// the trace sidecar of a web page (Component.js.trace.json, manifest.json.trace.json):
+// the name has three parts and reads like an object, and two generated apps in one
+// input both have one (a set's run cockpit and its Set app, DSL L3 slice 6a); a page
+// is no ABAP object, and neither is its sidecar
+const WEB_SIDECAR = /\.(js|html?|json|properties|css)\.trace\.json$/i;
 export function filesIn(base, folder) {
   const out = [];
   const walk = (dir) => {
@@ -83,7 +88,7 @@ export function filesIn(base, folder) {
       const path = `${dir}/${entry}`;
       if (statSync(resolve(base, path)).isDirectory()) {
         walk(path);
-      } else if (/\.devc\.xml$/i.test(entry) === false) {
+      } else if (/\.devc\.xml$/i.test(entry) === false && WEB_SIDECAR.test(entry) === false) {
         const object = objectOf(entry);
         if (object !== undefined) {
           out.push({file: path, name: entry, object});
