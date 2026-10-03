@@ -281,6 +281,34 @@ describe("DuckDB file migration through test/setup.mjs", function () {
     }
   });
 
+  it("disconnects DEFAULT before a second setup replaces it and commits its pending rows", async () => {
+    const path = join(dir, "twice.duckdb");
+    await oldFile(path);
+    const abap = {context: {databaseConnections: {}, RFCDestinations: {}}, builtin: {}};
+    const first = await boot(path, abap);
+    const disconnect = first.disconnect.bind(first);
+    let calls = 0;
+    first.disconnect = async () => {
+      expect(abap.context.databaseConnections.DEFAULT).to.equal(first);
+      await disconnect();
+      calls += 1;
+    };
+    try {
+      await first.modifying("INSERT INTO zstg_demo VALUES ('pending')");
+      const second = await boot(path, abap);
+      expect(calls).to.equal(1);
+      expect(second).not.to.equal(first);
+      expect(first.connected).to.equal(false);
+      expect(first.connection).to.equal(undefined);
+      expect(first.instance).to.equal(undefined);
+      expect(await second.query("SELECT id FROM zstg_demo")).to.deep.equal([{id: "pending"}]);
+    } finally {
+      first.disconnect = disconnect;
+      await abap.context.databaseConnections.DEFAULT.disconnect();
+      if (first.connected) await first.disconnect();
+    }
+  });
+
   it("opens a file with ZOSD_DB-SECTION and serves Category through ZC_OSD_DATABASE's view", async () => {
     // ZOSD_DB and its SQL view ZVOSDDB as a build before the rename wrote them
     const oldDb = `CREATE TABLE "zosd_db" ("section" VARCHAR(20), "name" VARCHAR(60), "value" VARCHAR(240),

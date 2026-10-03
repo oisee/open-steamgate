@@ -565,6 +565,9 @@ async function setupDatabase(abap, schemas, insert) {
   }
   if (process.env.STG_DB === "duckdb") {
     const {DuckDBDatabaseClient, duckdbSchema, duckdbInserts} = await import("../tools/duckdb-client.mjs");
+    // Import-time initialization and the host both call setup. Release the
+    // predecessor before replacing DEFAULT instead of leaving it to GC.
+    await abap.context.databaseConnections["DEFAULT"]?.disconnect();
     // STG_DB_PATH=some.duckdb keeps the data between runs
     db = new DuckDBDatabaseClient({trace: process.env.STG_DB_TRACE === "1", path: process.env.STG_DB_PATH ?? ":memory:"});
     abap.context.databaseConnections["DEFAULT"] = traced(db);
