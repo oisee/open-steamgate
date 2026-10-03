@@ -233,6 +233,9 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
       iv_handler = `ZCL_OSD_ADT_INTROSPECT` CHANGING ct_routes = rt_routes ).
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/transactions`
       iv_handler = `ZCL_OSD_ADT_INTROSPECT` CHANGING ct_routes = rt_routes ).
+*   A3b: loopback browser handoff.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/reentranceticket`
+      iv_handler = `ZCL_OSD_ADT_REENTRANCE` CHANGING ct_routes = rt_routes ).
 *   everything else is still the Node facade's, until its group moves
     add( EXPORTING iv_method = `*` iv_pattern = `/sap/bc/adt/*` iv_served_by = c_host
          CHANGING ct_routes = rt_routes ).

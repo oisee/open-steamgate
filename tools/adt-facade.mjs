@@ -902,6 +902,26 @@ export function adtRouter(options = {}) {
       res.status(400).type("text/plain").send("redirect-url is required");
       return;
     }
+    // A3b: check the literal authority before WHATWG can expand IPv4 aliases.
+    const authority = /^(https?):\/\/([^/?#]+)(.*)$/i.exec(target);
+    if (!authority || !/^(?:\[[^\]]+\]|[A-Za-z0-9.-]+)(?::[0-9]{1,5})?$/.test(authority[2])) {
+      res.status(400).type("text/plain").send("redirect-url is not a URL");
+      return;
+    }
+    const host = authority[2].replace(/:[0-9]+$/, "").toLowerCase();
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(host)) {
+      res.status(400).type("text/plain").send("redirect-url must point at loopback");
+      return;
+    }
+    const suffix = authority[3];
+    const path = suffix.split(/[?#]/)[0];
+    const pathGrammar = /^(?:\/(?:[A-Za-z0-9._~!$&'()*+,;=:@-]|%[0-9a-f]{2})*)*$/i;
+    const tailGrammar = /^(?:\?(?:[A-Za-z0-9._~!$&'()*+,;=:@/?-]|%[0-9a-f]{2})*)?(?:#(?:[A-Za-z0-9._~!$&'()*+,;=:@/?-]|%[0-9a-f]{2})*)?$/i;
+    if (!pathGrammar.test(path) || !tailGrammar.test(suffix.slice(path.length))
+      || path.split("/").some((part) => [".", ".."].includes(part.replace(/%2e/ig, ".")))) {
+      res.status(400).type("text/plain").send("redirect-url is not a URL");
+      return;
+    }
     let url;
     try {
       url = new URL(target);
