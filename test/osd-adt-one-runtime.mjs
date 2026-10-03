@@ -409,6 +409,58 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     } finally { Object.assign(store, overrides); }
   });
 
+  it("B4 refuses RESUME inside whileHeld promptly without a write or late error", async () => {
+    await runtime.ensure();
+    const installed = await fetch(runtime.url + "/osd/classrun", {method: "POST",
+      headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_ROUTE_F3"})});
+    expect((await installed.json()).ok).to.equal(true);
+    const {session, headers} = await logon();
+    const {handle} = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+    store.write("PROG", "ZF3_STORE", "before nested resume");
+    let code, resumeCalls = 0;
+    const originalFetch = globalThis.fetch, originalError = console.error, originalWarn = console.warn;
+    const logs = [];
+    globalThis.fetch = (url, options) => {
+      if (String(url).endsWith("/osd/adt-resume")) resumeCalls++;
+      return originalFetch(url, options);
+    };
+    console.error = console.warn = (...args) => logs.push(args.join(" "));
+    const stop = registerContinuation("b4-write", async ({resume}) => {
+      await nodeSessions.whileHeld(session, handle, "PROG", "ZOSD_REMOTE", async () => {
+        // The marker must survive an asynchronous boundary in host work.
+        await new Promise(r => setImmediate(r));
+        try { await resume("must not write"); }
+        catch (error) { code = error.code; throw error; }
+      });
+    });
+    let timer, pending;
+    try {
+      pending = request(remote, "GET", BASE + "/f3?kind=b4-write", headers);
+      const answer = await Promise.race([pending, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("nested RESUME did not fail fast")), 1500);
+      })]);
+      expect(code).to.equal("ADT_RESUME_IN_WHILE_HELD");
+      expect(answer.status, answer.body).to.equal(500);
+      expect(answer.body).to.equal(exceptionDocument("ExceptionInternalError",
+        'continuation "b4-write": ADT RESUME cannot run inside whileHeld work', {namespace: "org.open-steamgate.osd"}));
+      expect(resumeCalls, "no RESUME request may reach the child").to.equal(0);
+      // A fresh child step is a FIFO barrier: queued work would have run first.
+      expect((await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).handle).to.equal(handle);
+      expect(store.read("PROG", "ZF3_STORE").source).to.equal("before nested resume");
+      await new Promise(r => setTimeout(r, 50));
+      expect(logs).to.have.length(1);
+      expect(logs[0]).to.contain("ADT RESUME cannot run inside whileHeld work");
+      expect(runtime.adtContexts.size).to.equal(0);
+    } finally {
+      clearTimeout(timer);
+      // Also release a broken implementation's deadlocked FIFO in the red run.
+      if (code === undefined) { runtime.child.kill("SIGKILL"); await pending; await runtime.ensure(); }
+      stop(); globalThis.fetch = originalFetch; console.error = originalError; console.warn = originalWarn;
+      await nodeSessions.end(session.id);
+      await runtime.recycle();
+    }
+  });
+
   for (const scenario of ["recycle", "ended", "terminal", "rollback", "system", "large", "activation"]) {
     it(`B4 RESUME preserves F3 after ${scenario}`, async () => {
       const install = async () => {
@@ -547,6 +599,11 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
 
 describe("B4 switched-off door", function () {
   this.timeout(60000);
+  it("keeps a named refusal when an inline host has no step function", async () => {
+    const req = {osdFacade: {front: {}}};
+    const error = await resume(req, {}, "b4-write", "{}").catch(error => error);
+    expect(error.code).to.equal("ADT_RESUME_NO_STEP");
+  });
   it("inline RESUME strips and records the same miss markers as ANSWER", async () => {
     const misses = [];
     const req = {method: "GET", headers: {}, osdFacade: {step: work => work(), front: {

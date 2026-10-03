@@ -3,6 +3,15 @@
 import {remoteStep, stepJSON} from "./adt-remote-step.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
 
+// Parent callbacks hold the child's FIFO. RESUME must refuse re-entry before
+// sending another child step. Keep Node's async context out of the preview.
+let heldWork;
+if (typeof process !== "undefined" && process.versions?.node !== undefined) {
+  const {AsyncLocalStorage} = await import(/* webpackIgnore: true */ "node:async_hooks");
+  heldWork = new AsyncLocalStorage();
+}
+export const inRemoteWhileHeld = () => heldWork?.getStore() === true;
+
 export const sessionJSON = (value) => JSON.parse(JSON.stringify(value, (_key, item) =>
   item instanceof Map ? {adtLocks: [...item]} : item));
 export const sessionValue = (value) => JSON.parse(JSON.stringify(value), (_key, item) =>
@@ -32,7 +41,10 @@ export class RemoteSessions extends AbapSessions {
   lock(session, type, name) { return this.call("lock", [session, type, name]); }
   unlock(session, handle) { return this.call("unlock", [session, handle]); }
   whileHeld(session, handle, type, name, work) {
-    return this.call("whileHeld", [session, handle, type, name], async () => { await work(); return {}; });
+    return this.call("whileHeld", [session, handle, type, name], async () => {
+      await heldWork.run(true, work);
+      return {};
+    });
   }
   async deleteObject(session, type, name, store) {
     let deleted = false;

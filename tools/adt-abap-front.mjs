@@ -28,6 +28,7 @@
 // ExceptionInternalError in our namespace -- for every request, a HOST row
 // included: no session was resolved, so nothing may go past the gate.
 import {withoutHostPaths} from "./osd-build-issues.mjs";
+import {inRemoteWhileHeld} from "./adt-remote-sessions.mjs";
 import {remoteStep, stepJSON} from "./adt-remote-step.mjs";
 import {currentStepToken} from "./osd-dialog-step.mjs";
 import {withSystem} from "./osd-store-destination.mjs";
@@ -274,6 +275,9 @@ export async function resume(req, res, kind, json) {
 
 /** Shared by inline and serving-child hosts; session checks stay in the step. */
 export async function resumeRecord(req, kind, json, {store, step, front}) {
+  if (typeof step !== "function") {
+    throw Object.assign(new Error("ADT RESUME requires a host step function"), {code: "ADT_RESUME_NO_STEP"});
+  }
   const record = await withSystem((kind, name, json) => front.system?.(kind, name, req, json), () => step(async () => {
     const original = req.adt?.session;
     // A fresh stateless GET ends its session in ANSWER and cannot continue.
@@ -311,6 +315,9 @@ export async function resumeRecord(req, kind, json, {store, step, front}) {
 }
 
 async function remoteResume(runtime, req, kind, json, options) {
+  if (inRemoteWhileHeld()) {
+    throw Object.assign(new Error("ADT RESUME cannot run inside whileHeld work"), {code: "ADT_RESUME_IN_WHILE_HELD"});
+  }
   const context = (runtime.adtContextSeq = (runtime.adtContextSeq ?? 0) + 1);
   runtime.adtContexts ??= new Map();
   runtime.adtContexts.set(context, {store: options.store,
