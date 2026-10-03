@@ -9,8 +9,9 @@ const RUNS_FILES = ["index.html", "Component.js", "manifest.json", "Cockpit.cont
   "StartRun.fragment.xml", "i18n.properties"];
 const SET_FILES = ["index.html", "Component.js", "manifest.json", "Set.view.xml", "Set.controller.js", "i18n.properties"];
 const published = (name) => name === "i18n.properties" ? "i18n/i18n.properties" : name;
-// the open runs: a status that is not final (the tile's number)
-const OPEN = "Status ne 'DONE' and Status ne 'PARTIAL' and Status ne 'FAILED' and Status ne 'NOT-RUN' and Status ne 'SKIPPED' and Status ne 'KILLED'";
+// the open runs: a status that is not final (the tile's number); a run's status is its
+// last stage's (DONE, PARTIAL, NOT-RUN when final) or GLASS
+const OPEN = ["DONE", "PARTIAL", "FAILED", "NOT-RUN"].map((s) => `Status ne '${s}'`).join(" and ");
 export async function cockpitPages(m) {
   const c = m.cockpit, files = {};
   const actions = cockpitActions(m).filter((a) => !a.get).map(({name, params, reason}) => ({name, params, reason: !!reason}));
@@ -21,7 +22,7 @@ export async function cockpitPages(m) {
   const root = {...c, set: m.set, set_title: `Set ${m.set}`, config: json(runs), title_json: JSON.stringify(c.title), manifest: JSON.stringify(manifest(m), null, 2)};
   for (const name of RUNS_FILES) files[`cockpit/${c.app}/${published(name)}`] = (await renderRecipe(root, `recipes/l3-cockpit/${name}`)).text;
   for (const name of ["Series.js", "Live.js"]) files[`cockpit/${c.app}/${name}`] = readFileSync(`recipes/l3-cockpit/${name}`, "utf8");
-  const openRuns = `/sap/opu/odata/sap/${c.service}/RunSet/$count?$filter=${encodeURIComponent(OPEN)}`;
+  const openRuns = `/sap/opu/odata/sap/${c.service}/RunSet/$count?$filter=${OPEN.replaceAll(" ", "%20")}`;
   files[`cockpit/${c.app}/cockpit.json`] = JSON.stringify({app: c.app, title: `Runs ${m.set}`, service: c.service,
     files: [...RUNS_FILES.map(published), "Series.js", "Live.js"],
     tile: {type: "dynamic", subtitle: c.title, icon: "sap-icon://process", serviceUrl: openRuns, serviceRefreshInterval: "30", numberUnit: "open"}}, null, 2) + "\n";

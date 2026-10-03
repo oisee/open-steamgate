@@ -1,8 +1,9 @@
 import {expect} from "chai";
-import {mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 import vm from "node:vm";
+import yaml from "js-yaml";
 import {DatabaseSync} from "node:sqlite";
 import {compileSet, checkSet, SetError} from "../tools/dsl-l3.mjs";
 import {compile, writeCompiled} from "../tools/stg-compile.mjs";
@@ -28,6 +29,8 @@ describe("DSL L3 run cockpit", function () {
     const text = readFileSync(SET, "utf8").replace(/rule: ([a-z_]+\.l2\.yaml)/g, (_, r) => `rule: ${join(process.cwd(), "src/l2demo", r)}`);
     try {
       for (const [source, pattern] of [[text.replace("app: zosd_fleet2", "app: z1234567890123456"), /at most 15/], [text.replace("title: Fleet run cockpit", "typo: Fleet run cockpit"), /unknown cockpit key/],
+        [text.replace("app: zosd_fleet2,", "app: zosd_fleet2_ck,"), /set_app is required/],
+        [text.replace("title: Fleet run cockpit", "title: Fleet run cockpit, set_app: zosd_fleet2"), /second app/],
         [readFileSync("src/l2demo/fleet.l3.yaml", "utf8").replace(/rule: ([a-z_]+\.l2\.yaml)/g, (_, r) => `rule: ${join(process.cwd(), "src/l2demo", r)}`) + "\ncockpit: {app: ztest, service: ZTEST, title: Test}\n", /requires stages/]]) {
         const file = join(dir, "set.l3.yaml"); writeFileSync(file, source);
         expect(() => compileSet(file)).throw(SetError).and.match(pattern).and.match(/:\d+:/);
@@ -76,6 +79,72 @@ describe("DSL L3 run cockpit", function () {
       expect(files).include("zosd_fleet2.wapa.xml").and.include("zosd_fleet2_s.wapa.xml").and.include("zl3c_fleet2.iwpr.xml");
       expect(admit({files, read: (f) => readFileSync(join(out, f), "utf8"), unit})).deep.equal([]);
     } finally {rmSync(out, {recursive: true, force: true});}
+  });
+  it("generates two apps: the run app with its start dialog and Live, the Set app with its tabs, and their tiles", () => {
+    const base = "src/l2demo/cockpit", read = (f) => readFileSync(`${base}/${f}`, "utf8");
+    const runs = JSON.parse(read("zosd_fleet2/cockpit.json")), set = JSON.parse(read("zosd_fleet2_s/cockpit.json"));
+    expect([runs.title, set.title]).deep.equal(["Runs fleet2", "Set fleet2"]);
+    expect(runs.tile.type).equal("dynamic");
+    expect(runs.tile.serviceUrl.replaceAll("%20", " ")).equal("/sap/opu/odata/sap/ZL3C_FLEET2_SRV/RunSet/$count?$filter=" +
+      ["DONE", "PARTIAL", "FAILED", "NOT-RUN"].map((x) => `Status ne '${x}'`).join(" and "));
+    for (const [app, d] of [["zosd_fleet2", runs], ["zosd_fleet2_s", set]]) for (const f of d.files) expect(existsSync(`${base}/${app}/${f}`), `${app}/${f}`).equal(true);
+    // the start dialog: a date, the mode as a choice, the twin as a switch (fleet2 has simulate:)
+    const dialog = read("zosd_fleet2/StartRun.fragment.xml");
+    expect(dialog).include('<DatePicker id="startDate" value="{start>/date}" valueFormat="yyyyMMdd"').and.include('<SegmentedButtonItem key="P"')
+      .and.include('<SegmentedButtonItem key="S"').and.include('<Switch id="startSim"').and.include('id="startOpen"');
+    const list = read("zosd_fleet2/List.controller.js");
+    expect(list).include('callFunction("/StartRun"').and.include("navigateInternal").and.include("MessageBox.error").and.include('"simulate": true');
+    expect(list).not.include("JSON.stringify");
+    expect(read("zosd_fleet2/Live.js")).include("var INTERVAL = 5000;").and.include('document.visibilityState === "hidden"');
+    const manifest = JSON.parse(read("zosd_fleet2/manifest.json")), ext = manifest["sap.ui5"].extends.extensions["sap.ui.controllerExtensions"];
+    const op = ext["sap.suite.ui.generic.template.ObjectPage.view.Details"]["sap.ui.generic.app"].RunSet;
+    expect(op.Header.Actions.ContinueGlass.applicablePath).equal("CanContinue");
+    expect(op.Header.Actions.Resume.applicablePath).equal("CanResume");
+    expect(op.Sections.Pile.Actions.ReleasePile).include({requiresSelection: true, applicablePath: "CanRelease"});
+    expect(Object.keys(ext["sap.suite.ui.generic.template.ListReport.view.ListReport"]["sap.ui.generic.app"].RunSet.Actions)).deep.equal(["StartRun"]);
+    expect(manifest["sap.ui.generic.app"].pages["ListReport|Run"].component.settings.variantManagementHidden).equal(true);
+    // the run page keeps the run; the set's actions moved to the Set app
+    expect(read("zosd_fleet2/Cockpit.fragment.xml")).not.include("cockpitSettings").and.not.include("cockpitActions");
+    const view = read("zosd_fleet2_s/Set.view.xml");
+    for (const key of ["settings", "schedule", "kill", "doctor"]) expect(view).include(`key="${key}"`);
+    const config = read("zosd_fleet2_s/Set.controller.js");
+    for (const name of ["SetSetting", "ResetSetting", "SetKill", "ClearKill", "Doctor", "Schedule", "Unschedule"]) expect(config).include(`"name": "${name}"`);
+    expect(config).not.include('"name": "StartRun"');
+  });
+  it("annotations: a label for every property, criticality, fixed value lists and micro chart facets", () => {
+    // from the generator itself (the byte-for-byte test ties it to the file in src/)
+    const doc = cockpitService(compileSet(SET)).doc;
+    for (const [name, e] of Object.entries(doc.entities)) for (const [p, spec] of Object.entries(e.properties)) {
+      if (name === "Answer") continue;
+      expect(spec.label, `${name}/${p}`).a("string").not.equal(p.toUpperCase());
+      expect(doc.annotations[`${name}/${p}`]?.label, `${name}/${p}`).equal(spec.label);
+    }
+    expect(doc.entities.Run.properties.CheckDate.label).equal("Check date");
+    const ann = compile(yaml.dump(doc, {lineWidth: -1, noRefs: true})).classes["zcl_zl3c_fleet2_mpc_ann.clas.abap"], UI = "com.sap.vocabularies.UI.v1.";
+    for (const target of [`@${UI}DataPoint#Status`, `@${UI}Chart#Final`, `@${UI}Chart#Budget`, `to_Tally/@${UI}Chart#Tally`]) {
+      expect(ann).include(`set_annotation_path( '${target}' )`);
+    }
+    for (const type of ["Donut", "Bullet", "BarStacked"]) expect(ann).include(`set_enum_member_by_name( '${UI}ChartType/${type}' )`);
+    expect(ann.match(/create_property\( 'Criticality' \)->create_simple_value\( \)->set_path\( 'StatusCriticality' \)/g)).length.at.least(4);
+    expect(ann).include("create_property( 'Criticality' )->create_simple_value( )->set_path( 'StateCriticality' )");
+    expect(ann).include("create_property( 'ToleranceRangeHighValue' )->create_simple_value( )->set_path( 'WarnLevel' )");
+    expect(ann).include("create_property( 'DeviationRangeHighValue' )->create_simple_value( )->set_path( 'NarrowLevel' )");
+    expect(ann).include(`create_annotation( '${UI}Hidden' )->create_simple_value( )->set_path( 'HideEvent' )`);
+    expect(ann).include("'ZL3C_FLEET2_SRV.Run/Status' ).").and.include("ValueListWithFixedValues");
+    expect(ann).include("set_string( 'StatusVHSet' )");
+  });
+  it("keeps every generated line under 255 characters, the limit a system's BSP and source cut at", () => {
+    const files = [];
+    const walk = (dir) => {for (const f of readdirSync(dir)) {const p = join(dir, f); if (statSync(p).isDirectory()) walk(p); else if (!f.endsWith(".trace.json")) files.push(p);}};
+    walk("src/l2demo/cockpit");
+    expect(files.filter((f) => f.includes("zosd_fleet2_s/")).length).at.least(7);
+    const texts = files.map((f) => [f, readFileSync(f, "utf8")]);
+    texts.push(["src/l2demo/zl3c_fleet2.stg.yaml", readFileSync("src/l2demo/zl3c_fleet2.stg.yaml", "utf8")],
+      ["src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8")]);
+    const compiled = compile(readFileSync("src/l2demo/zl3c_fleet2.stg.yaml", "utf8"));
+    for (const [name, text] of Object.entries({...compiled.files, ...compiled.classes, ...compiled.ext})) texts.push([name, text]);
+    const long = texts.flatMap(([f, text]) => text.split(/\r?\n/).map((l, i) => [f, i + 1, l.length]).filter(([, , n]) => n >= 255));
+    expect(long).deep.equal([]);
   });
   it("plots piles, stage planning and event capacities at their actual timestamps", () => {
     const rows = [{StageNo: 1, Status: "DONE", Ended: "20261001000002"}, {StageNo: 1, Status: "HELD", Ended: "20261001000003"}, {StageNo: 2, Status: "DONE", Ended: "20261001000005"}];
@@ -222,6 +291,29 @@ describe("DSL L3 run cockpit", function () {
         }
       } finally {abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT = real;}
     });
+    it("computes the run page's fields: title, label, piles, tally, open and actions, hidden sections, the status list", async () => {
+      const r = await action("StartRun", {CheckDate: "20261001", Mode: "S"});
+      const run = await get(`RunSet('${r.RunId}')`);
+      expect(run).include({Title: "fleet2 / 2026-10-01", RunLabel: "2026-10-01 / Now", Mode: "S", Twin: false, Open: false, Piles: 7,
+        PilesDone: 7, PilesFinal: 7, PctFinal: 100, StatusCriticality: 3, CanContinue: false, CanResume: false, HidePile: false, HideStage: false});
+      for (const [section, set] of [["Event", "EventSet"], ["Doctor", "DoctorSet"], ["Snapshot", "SnapshotSet"]]) {
+        expect(run[`Hide${section}`], section).equal((await get(`${set}?$filter=RunId eq '${r.RunId}'`)).results.length === 0);
+      }
+      expect(run.HideEvent || run.HideDoctor).equal(true);
+      // the list carries the same fields as the page
+      expect((await get("RunSet")).results.find((x) => x.RunId === r.RunId)).include({Title: run.Title, Piles: 7, Open: false});
+      expect((await get(`RunSet('${r.RunId}')/to_Tally`)).results.map((t) => [t.Status, t.Piles, t.StatusCriticality])).deep.equal([["DONE", 7, 3]]);
+      const statuses = (await get("StatusVHSet")).results.map((x) => x.Status);
+      expect(statuses).include("GLASS").and.include("DONE").and.include("WAITING").and.length(9);
+      // a run in jobs holds its date until the jobs are done; the tile counts it
+      const p = await action("StartRun", {CheckDate: "20261002", Mode: "P"});
+      expect(await get(`RunSet('${p.RunId}')`)).include({RunLabel: "2026-10-02 / In jobs", Mode: "P", Open: true, CanResume: true, CanContinue: false});
+      const count = async () => +(await (await fetch(`${BASE}/RunSet/$count?$filter=${encodeURIComponent(["DONE", "PARTIAL", "FAILED", "NOT-RUN"].map((x) => `Status ne '${x}'`).join(" and "))}`)).text());
+      expect(await count()).equal(1);
+      await drain();
+      expect(await get(`RunSet('${p.RunId}')`)).include({Open: false, CanResume: false, Piles: 7, PilesDone: 7});
+      expect(await count()).equal(0);
+    });
     it("retains history from stage plans, orders newest first and filters the derived run state", async () => {
       await exec([
         "INSERT INTO zosd_l3_stage (mandt,run_id,stage_no,set_name,check_date,status,opened) VALUES ('','OLD',1,'fleet2','20260930','DONE',20260930000000), ('','OLD',2,'fleet2','20260930','DONE',20260930000001)",
@@ -237,6 +329,10 @@ describe("DSL L3 run cockpit", function () {
       await action("SetSetting", {Param: "budget.glass", Value: "1", Note: "one alert"});
       const r = await action("StartRun", {CheckDate: "20261001", Mode: "P"}); await drain();
       expect((await get(`BudgetSet('${r.RunId}')`)).State).equal("GLASS");
+      const glass = await get(`RunSet('${r.RunId}')`);
+      expect(glass).include({Status: "GLASS", StatusCriticality: 1, Open: true, CanContinue: true, CanResume: false, Glass: 1});
+      expect(glass.PilesHeld).above(0);
+      expect((await get(`RunSet('${r.RunId}')/to_Tally`)).results.find((t) => t.Status === "GLASS")).include({StatusCriticality: 1});
       expect((await action("Resume", {RunId: r.RunId})).Answer).include("GLASS");
       expect((await action("ContinueGlass", {RunId: r.RunId, NewGlass: 100, Reason: ""})).Answer).match(/^REFUSED: ContinueGlass: /);
       expect((await action("ContinueGlass", {RunId: r.RunId, NewGlass: 100, Reason: "staff available"})).Answer).equal("OK");
@@ -260,6 +356,11 @@ describe("DSL L3 run cockpit", function () {
       const held = (await get(`PileSet?$filter=RunId eq '${r.RunId}' and Status eq 'HELD'`)).results;
       expect(held.length).above(0);
       const p = held[0], args = {RunId: r.RunId, RuleName: p.RuleName, PileNo: +p.PileNo, PerPile: 100};
+      expect(held.every((h) => h.CanRelease === true && h.StatusCriticality === 2)).equal(true);
+      const others = (await get(`PileSet?$filter=RunId eq '${r.RunId}' and Status ne 'HELD'`)).results;
+      expect(others.length).above(0);
+      expect(others.some((o) => o.CanRelease)).equal(false);
+      expect((await get(`RunSet('${r.RunId}')`)).PilesHeld).equal(held.length);
       expect((await action("ReleasePile", {...args, Reason: ""})).Answer).match(/^REFUSED: ReleasePile: /);
       expect((await action("ReleasePile", {...args, Reason: "reviewed pile"})).Answer).equal("OK");
       expect((await get(`EventSet?$filter=RunId eq '${r.RunId}'`)).results.some((e) => e.Kind === "RELEASE" && e.Reason === "reviewed pile")).equal(true);
@@ -277,6 +378,43 @@ describe("DSL L3 run cockpit", function () {
       expect(waiting.split(" / ").every((s) => s.startsWith("SCHEDULED ")), waiting).equal(true);
       expect((await action("Unschedule")).Answer).match(/^deleted [1-9][0-9]*, refused 0$/);
       expect((await action("ScheduleStatus")).Answer).equal("UNSCHEDULED / UNSCHEDULED");
+    });
+    it("mutants: each computed field of the run page turns its oracle red", async () => {
+      const real = abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT, original = readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8");
+      // an open run at the glass with a held pile and no events
+      await exec(["INSERT INTO zosd_l3_run (mandt,set_name,check_date,run_id,status,started) VALUES ('','fleet2','20261003','MUTRUN','HELD',20261003000000)",
+        "INSERT INTO zosd_l3_stage (mandt,run_id,stage_no,set_name,check_date,stage_name,status,opened) VALUES ('','MUTRUN',1,'fleet2','20261003','candidates','OPEN',20261003000000)",
+        "INSERT INTO zosd_l3_stage (mandt,run_id,stage_no,set_name,check_date,stage_name,status) VALUES ('','MUTRUN',2,'fleet2','20261003','checks','WAITING')",
+        "INSERT INTO zosd_l3_pile (mandt,run_id,rule_name,pile_no,set_name,stage_no,status,check_date) VALUES ('','MUTRUN','x',1,'fleet2',1,'DONE','20261003'), ('','MUTRUN','x',2,'fleet2',1,'HELD','20261003')",
+        "INSERT INTO zosd_l3_budget (mandt,run_id,set_name,state,glass,reserved,warn_at,narrow_at) VALUES ('','MUTRUN','fleet2','GLASS',10,5,7000,8000)"]);
+      const pile = async (status) => (await get(`PileSet?$filter=RunId eq 'MUTRUN' and Status eq '${status}'`)).results[0];
+      const oracles = {
+        open: async () => expect((await get("RunSet('MUTRUN')")).Open).equal(true),
+        continue: async () => expect((await get("RunSet('MUTRUN')")).CanContinue).equal(true),
+        hidden: async () => expect((await get("RunSet('MUTRUN')")).HideEvent).equal(true),
+        release: async () => expect((await pile("HELD")).CanRelease).equal(true),
+        criticality: async () => expect((await pile("DONE")).StatusCriticality).equal(3),
+        tally: async () => expect((await get("RunSet('MUTRUN')/to_Tally")).results.map((t) => t.Status)).deep.equal(["DONE", "HELD"]),
+        levels: async () => expect((await get("RunSet('MUTRUN')")).WarnLevel).equal(7),
+      };
+      for (const oracle of Object.values(oracles)) await oracle();
+      const variants = [
+        ["open", original.replace("      cs_run-is_open = abap_true.\n", "")],
+        ["continue", original.replace("      cs_run-can_continue = abap_true.\n", "")],
+        ["hidden", original.replaceAll("IF lv_count = 0.", "IF lv_count < 0.")],
+        ["release", original.replaceAll("can_release = abap_true.", "can_release = abap_false.")],
+        ["criticality", original.replace("rv_criticality = 3.", "rv_criticality = 0.")],
+        ["tally", original.replace("        DELETE lt_counts WHERE status = lv_status.\n", "")],
+        ["levels", original.replace("cs_run-warn_level = ls_budget-glass * ls_budget-warn_at / 10000.", "cs_run-warn_level = ls_budget-glass.")],
+      ];
+      for (const [name, text] of variants) {
+        expect(text, name).not.equal(original);
+        const cls = `zcl_cockpit_${name}_mut`;
+        abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT = await loadCockpitMutant(cls, text.replaceAll("zcl_zl3c_fleet2_dpc_ext", cls), join(dir, cls));
+        let failed = false;
+        try {await oracles[name]();} catch {failed = true;} finally {abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT = real;}
+        expect(failed, name).equal(true);
+      }
     });
     it("mutants: removed set filter, direct table action and accepted missing audited reason each turn red", async () => {
       const real = abap.Classes.ZCL_ZL3C_FLEET2_DPC_EXT, original = readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8");

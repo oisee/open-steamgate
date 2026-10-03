@@ -118,8 +118,8 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
     // the selected pile of the pile table, or the first held one when the attention strip asks
     askReleasePile: function () {
       var run = this.run || {}, self = this, pile = null;
-      var tables = this.getView().findAggregatedObjects(true, function (c) {return c.isA("sap.ui.comp.smarttable.SmartTable") && /to_Pile/.test(c.getId());});
-      var selected = tables.length ? this.extensionAPI.getSelectedContexts(tables[0].getId()) : [];
+      var table = this.byId("Pile::Table");
+      var selected = table ? this.extensionAPI.getSelectedContexts(table.getId()) : [];
       if (selected.length) pile = selected[0].getObject();
       var go = function (p) {self.ask(action("ReleasePile"), {RunId: run.RunId, RuleName: p.RuleName, PileNo: String(p.PileNo), PerPile: "0"});};
       if (pile) {go(pile); return;}

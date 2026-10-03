@@ -18,7 +18,7 @@
     "type": "dynamic",
     "subtitle": "Fleet run cockpit",
     "icon": "sap-icon://process",
-    "serviceUrl": "/sap/opu/odata/sap/ZL3C_FLEET2_SRV/RunSet/$count?$filter=Status%20ne%20'DONE'%20and%20Status%20ne%20'PARTIAL'%20and%20Status%20ne%20'FAILED'%20and%20Status%20ne%20'NOT-RUN'%20and%20Status%20ne%20'SKIPPED'%20and%20Status%20ne%20'KILLED'",
+    "serviceUrl": "/sap/opu/odata/sap/ZL3C_FLEET2_SRV/RunSet/$count?$filter=Status%20ne%20'DONE'%20and%20Status%20ne%20'PARTIAL'%20and%20Status%20ne%20'FAILED'%20and%20Status%20ne%20'NOT-RUN'",
     "serviceRefreshInterval": "30",
     "numberUnit": "open"
   }
