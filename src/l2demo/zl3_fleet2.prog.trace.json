@@ -6,7 +6,7 @@
  "doctor_overlay": [
   "recipes/l3-doctor/job-tail.tpl"
  ],
- "model": "sha256:17e944cf17d734d1065eceea252161e5ca9c9ba0d7438033e1dd424e445449e5",
+ "model": "sha256:204c9c4a972314ea503b6b11cc5e2dc9762525d233afae99ed3ab36e8a31c7ec",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",

@@ -571,6 +571,38 @@ The honest summary: **the page is deployable today, the tile is not**, and
 the wall between them is customizing and authorization rather than anything
 this repository generates.
 
+## A table whose fields or key change
+
+A generated table can change shape between builds: a field added, a key
+widened (the L3 remote link table gained a destination in its key). On an
+installed system that is not an import like another.
+
+What is refused, and why. abapGit's comparator for a table (TABL) classifies
+a changed key, or a changed field, as `DATA_LOSS`, because activating the new
+definition may convert or drop the stored rows. The deploy route
+(`git_import_zip` of the vsp sibling) refuses `DATA_LOSS` and offers no
+override, and it refuses it **for an empty table too**: the comparator looks
+at the definition, not at the rows. So re-importing the zip with the same
+object name fails and nothing is changed.
+
+The procedure that worked (measured 2026-10-03 on the sandbox):
+
+1. Confirm no run is active (no pile RUNNING, no job of the set scheduled or
+   running, the daemon stopped), so no row is written during the swap.
+2. Read the rows out, if they are worth keeping (a table read through the
+   dictionary browser or the RFC channel into a file under `.local/`). Rows
+   that are disposable demo rows need not be kept.
+3. Delete the table (TABL) from the system. Anything that selects from it is
+   inactive until the import; do not run the set meanwhile.
+4. Import the zip again: the table now arrives as a new object, with the new
+   key.
+5. Restore the rows if they were kept, giving the new key field a value (for
+   the link table, the destination the run was sent to).
+
+Do the swap in a package of its own attempt where possible (the numbered
+attempt rule above) so that a failed import leaves nothing behind that the
+next attempt trips on.
+
 ## What is not done
 
 - **OSD does not serve a WAPA.** The application travels to a system as one

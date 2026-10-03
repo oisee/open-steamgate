@@ -381,6 +381,7 @@ describe('DSL L3 remote alert seam', function () {
   it('validation identifies malformed remote declarations at their manifest line',()=>{
     for(const [from,to,pattern] of [['function: Z_L3_FLEET2_ALERTS','function: bad-name',/function is a Z name/],
       ['destination: remote.destination','destination: "bad destination"',/destination is/],
+      ['destination: remote.destination','destination: '+'D'.repeat(33),/at most 32 characters/],
       ['group: ZL3_FLEET2_RFC','group: '+ 'Z'.repeat(31),/group is a Z name/]]) {
       const bad=source.replace(from,to).replace(/rule: ([a-z_]+\.l2\.yaml)/g,(_,f)=>`rule: ${join(process.cwd(),'src/l2demo',f)}`);
       const manifest=join(dir,`bad-${++serial}.l3.yaml`);writeFileSync(manifest,bad);

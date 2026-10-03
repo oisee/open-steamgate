@@ -2899,7 +2899,7 @@ the receipt without rewriting log rows or reserving again, including a retry
 after a lost reply. Refusals do not retain a DONE receipt. The existing
 synchronous first attempt is numbered zero; attempt remains a receipt column
 for audit, recording the first successful delivery, and is never a key. The
-real doctor's retry increments attempt and still returns that first receipt. `RLINK` retains the receiving run reference on both sides. Explain
+real doctor's retry increments attempt and still returns that first receipt. `RLINK` retains the receiving run reference on both sides, one row per receiving destination (its key is set, run, destination; the cockpit shows the latest). Adding the destination to the key is a key change, which an installed system cannot take as a plain import: see "A table whose fields or key change" in `docs/a4h-deploy.md`. Explain
 prints the link and the cockpit service exposes read-only `RunSet.RemoteRun`.
 No application UI changes are required. Receipts and links are durable;
 retention of this additional ledger is not implemented in this slice.
