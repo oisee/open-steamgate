@@ -97,6 +97,28 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     headers: {cookie: `sap-contextid=${client.id}`, "x-csrf-token": client.token, "x-sap-adt-sessiontype": "stateful",
       ...extra.headers}});
 
+  it("mounts Node session routes only in child mode, never behind an ABAP front", () => {
+    const paths = [`${BASE}/core/http/sessions`, `${BASE}/core/http/sessions/:id`, "/sap/public/bc/icf/logoff"];
+    for (const abap of [undefined, abapRunner({handler, step: dialogStep})]) {
+      const {router} = adtRouter({store: new ObjectStore({root, libs: []}), data: {}, watch: false,
+        logMisses: false, transpileOnActivate: false, abap});
+      const mounted = router.stack.filter((layer) => paths.includes(layer.route?.path)).map((layer) => layer.route.path);
+      expect(mounted).to.deep.equal(abap === undefined ? paths : []);
+    }
+  });
+
+  it("logoff enters the front exactly once and is served by ABAP", async () => {
+    const one = await logon();
+    entered.length = 0;
+    served.length = 0;
+    const path = "/sap/public/bc/icf/logoff";
+    const res = await fetch(`${url}${path}`, {headers: {cookie: `sap-contextid=${one.id}`}});
+    expect([res.status, await res.text()]).to.deep.equal([200, "logged off"]);
+    expect(entered).to.deep.equal([`GET ${path}`]);
+    expect(served).to.deep.equal([`ABAP GET ${path}`]);
+    expect(await sessionRow(one.id)).to.equal(undefined);
+  });
+
   it("every ADT request enters the handler once, whoever serves it", async () => {
     const one = await logon();
     const paths = [
@@ -129,7 +151,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     expect(served).to.deep.equal([`HOST GET ${BASE}/core/discovery`]);
   });
 
-  it("a HOST route serves under the session ABAP resolved", async () => {
+  it("the poll route serves in ABAP under the session it resolved", async () => {
     const one = await logon({authorization: "Basic " + Buffer.from("front:x").toString("base64")});
     const row = await sessionRow(one.id);
     expect(row.user).to.equal("FRONT");
@@ -142,7 +164,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     // a stateful session's cookies go on every answer, as Node's did, and the token is the row's
     expect(res.headers.getSetCookie()).to.have.length(2);
     expect(res.headers.get("x-csrf-token")).to.equal(row.token);
-    expect(served).to.include(`HOST GET ${BASE}/core/http/sessions`);
+    expect(served).to.include(`ABAP GET ${BASE}/core/http/sessions`);
     await fetch(`${url}/sap/public/bc/icf/logoff`, {headers: {cookie: `sap-contextid=${one.id}`}});
   });
 

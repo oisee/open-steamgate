@@ -35,6 +35,32 @@ in `adt-facade.mjs` and `adt-abap-front.mjs` are byte-unchanged from main
 still own their HOST_ALLOWED entries: B3 moves no route to ABAP and has no
 coverage block to delete. Their future ports will remove compatibility calls.
 
+A3a now serves poll, session DELETE and logoff in ABAP. The compatibility
+adapter and session door no longer forward raw `end`; the remote request door's
+transitional HOST logoff block is removed. B3 race tests end sessions through
+the ABAP logoff route, including while a parent delete callback holds the FIFO.
+The session door rejects `end` even with its formerly valid argument count.
+Remaining compatibility `RemoteSessions.end()` callers send `logoff` through
+the session door. The child's FIFO calls `ZCL_OSD_ADT_LOGOFF=>END_SESSION`
+with its own session provider, sharing the route's ABAP ID guard. Inheriting
+the inline adapter's END would instead delete parent rows, leaving the child's
+CSRF/RESUME session and ENQ locks alive, including across recycle. This bridge
+does not resolve a replacement session or depend on a test route table.
+The remaining B3 operations and internal doors stay in place for Node callers.
+**This bridge depends on one-runtime B5.** While the parent kernel exists
+(the switch off, or a step before the serving child is up), a Node caller can
+still end a session, and only the bridge takes that end to the child's owner.
+It can be removed together with B5, when every ABAP step runs in the child.
+
+The A3a compatibility follow-up ran all 37 files of `test/suites.d/adt.json`
+in one Mocha invocation in manifest order per mode: **1739 passing** with
+`OSD_ADT_ONE_RUNTIME=1`, and **1739 passing** with the switch unset, zero
+failures. The focused one-runtime/CSRF pair passed 63 tests, including the
+added child-row/lock termination regression. A3a ABAP Unit passed all 10
+methods; XML and WITH_UNIT_TESTS checks passed 6 tests. Lint passed with no
+method_length or complexity warnings in either A3a class. All heavy runs used
+`OSD_HEAVY_RANGE=90-99 tools/osd-heavy.sh`.
+
 ## Verification
 
 All commands ran through `OSD_HEAVY_RANGE=80-89 tools/osd-heavy.sh`:

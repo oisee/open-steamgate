@@ -14,6 +14,7 @@
 import {remoteForTest} from "./helpers/adt-remote.mjs";
 import {expect} from "chai";
 import express from "express";
+import {createHash} from "node:crypto";
 import {request as httpRequest} from "node:http";
 import {execFileSync} from "node:child_process";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
@@ -28,6 +29,7 @@ import {AbapSessions} from "../tools/adt-abap-sessions.mjs";
 import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
+import {Data} from "../tools/osd-data.mjs";
 import {SESSION_COOKIE} from "../tools/adt-session.mjs";
 
 const output = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
@@ -550,6 +552,147 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     }
   });
 
+  describe("A3a: sessions poll/delete and logoff", () => {
+    const POLL = "/sap/bc/adt/core/http/sessions";
+    const OFF = "/sap/public/bc/icf/logoff";
+    const hash = (id) => createHash("sha256").update(id).digest("hex").slice(0, 32).toUpperCase();
+    const count = async () => {
+      if (remoteRuntime !== undefined) {
+        const result = await new Data({runtime: remoteRuntime}).query("SELECT COUNT(*) AS total FROM zosd_adt_sess");
+        return Number(result.rows[0].total);
+      }
+      return dialogStep(async () => {
+        const rows = await globalThis.abap.context.databaseConnections.DEFAULT.select({select: "SELECT * FROM zosd_adt_sess"});
+        return rows.rows.length;
+      });
+    };
+    const wire = async (server, method, path, headers = {}, by) => {
+      served.length = 0;
+      const res = await fetch(`http://127.0.0.1:${server.address().port}${path}`, {method, headers});
+      const body = Buffer.from(await res.arrayBuffer()).toString("utf8");
+      if (by) expect(served).to.deep.equal([`${by} ${method} ${path}`]);
+      return {status: res.status, type: res.headers.get("content-type"), length: res.headers.get("content-length"),
+        etag: res.headers.get("etag"), location: res.headers.get("location"), cookies: res.headers.getSetCookie(),
+        token: res.headers.get("x-csrf-token"), generation: res.headers.get("x-osd-generation"), body};
+    };
+    const open = async (server) => {
+      const res = await wire(server, "GET", POLL, {"x-csrf-token": "fetch"});
+      const id = /sap-contextid=([0-9a-f]{24});/.exec(res.cookies[0])?.[1];
+      expect(id).to.be.a("string");
+      return {id, token: res.token};
+    };
+    const normalize = (res, ids) => {
+      const copy = {...res, cookies: [...res.cookies]};
+      if (copy.token && copy.token !== "Required") {
+        expect(copy.token).to.match(/^[A-Za-z0-9_-]{24}$/);
+        copy.token = "<token>";
+      }
+      if (copy.generation !== null) copy.generation = "<generation>";
+      for (const [index, id] of ids.entries()) {
+        copy.body = copy.body.replaceAll(hash(id), `<security-${index}>`);
+        copy.cookies = copy.cookies.map((c) => c.replaceAll(id, `<session-${index}>`));
+      }
+      // A fresh request has an id that was not known before the answer.
+      const fresh = /sap-contextid=([0-9a-f]{24});/.exec(res.cookies[0] ?? "")?.[1];
+      if (fresh && !ids.includes(fresh)) {
+        if (res.body) expect(res.body).to.contain(`/sessions/${hash(fresh)}"`);
+        copy.body = copy.body.replaceAll(hash(fresh), "<fresh-security>");
+        copy.cookies = copy.cookies.map((c) => c.replaceAll(fresh, "<fresh-session>"));
+      }
+      return copy;
+    };
+    const pair = async (work) => {
+      const shared = store();
+      const node = await mount({store: shared});
+      const ported = await mount(withAbap({store: shared}));
+      const results = [];
+      for (const [server, by] of [[node, undefined], [ported, "ABAP"]]) {
+        const a = await open(server), b = await open(server);
+        try { results.push(await work({server, by, a, b, ids: [a.id, b.id]})); }
+        finally {
+          for (const client of [a, b]) await wire(server, "GET", OFF, {cookie: `sap-contextid=${client.id}`});
+        }
+      }
+      expect(results[1]).to.deep.equal(results[0]);
+    };
+    const pollCases = {
+      fresh: () => ({}), context: ({a}) => ({cookie: `sap-contextid=${a.id}`}),
+      session: ({a}) => ({cookie: `${SESSION_COOKIE}=${a.id}`}),
+      "two cookies": ({a, b}) => ({cookie: `sap-contextid=${a.id}; ${SESSION_COOKIE}=${b.id}`}),
+      stateful: ({a}) => ({cookie: `sap-contextid=${a.id}`, "x-sap-adt-sessiontype": "stateful"}),
+      stateless: ({a}) => ({cookie: `sap-contextid=${a.id}`, "x-sap-adt-sessiontype": "stateless"}),
+      "If-None-Match has no implicit ETag": ({a}) => ({cookie: `sap-contextid=${a.id}`, "if-none-match": "*"}),
+    };
+    for (const [name, headers] of Object.entries(pollCases)) {
+      it(`poll: ${name}`, async () => pair(async (ctx) => {
+        const res = await wire(ctx.server, "GET", POLL, headers(ctx), ctx.by);
+        expect(res.status).to.equal(200);
+        expect(res.etag).to.equal(null);
+        if (name !== "fresh") expect(res.body).to.contain(`/sessions/${hash(ctx.a.id)}"`);
+        expect(res.cookies).to.have.length(["fresh", "stateful"].includes(name) ? 2 : 0);
+        return normalize(res, ctx.ids);
+      }));
+    }
+    it("poll: HEAD, case and trailing slash", async () => pair(async (ctx) => {
+      const headers = {cookie: `sap-contextid=${ctx.a.id}`};
+      const get = await wire(ctx.server, "GET", POLL, headers, ctx.by);
+      const head = await wire(ctx.server, "HEAD", POLL.toUpperCase() + "/", headers, ctx.by);
+      expect(head).to.deep.equal({...get, body: ""});
+      return normalize(head, ctx.ids);
+    }));
+    const deletes = {
+      upper: ({a}) => hash(a.id), lower: ({a}) => hash(a.id).toLowerCase(),
+      percent: ({a}) => [...hash(a.id)].map((c) => `%${c.charCodeAt(0).toString(16)}`).join(""),
+      other: ({b}) => hash(b.id), raw: ({a}) => a.id,
+      "missing token": ({a}) => hash(a.id), "wrong token": ({a}) => hash(a.id),
+    };
+    for (const [name, idOf] of Object.entries(deletes)) {
+      it(`DELETE: ${name}`, async () => pair(async (ctx) => {
+        const headers = {cookie: `sap-contextid=${ctx.a.id}`, "x-csrf-token": ctx.a.token};
+        if (name === "missing token") delete headers["x-csrf-token"];
+        if (name === "wrong token") headers["x-csrf-token"] = "wrong";
+        const res = await wire(ctx.server, "DELETE", `${POLL}/${idOf(ctx)}`, headers, ctx.by);
+        const denied = name.includes("token");
+        expect(res.status).to.equal(denied ? 403 : 200);
+        expect(res.etag).to.equal(null);
+        if (!denied) expect([res.type, res.length, res.body]).to.deep.equal([null, "0", ""]);
+        const follow = await wire(ctx.server, "POST", "/sap/bc/adt/debugger/listeners", {
+          cookie: `sap-contextid=${ctx.a.id}`, "x-csrf-token": ctx.a.token});
+        expect(follow.status).to.equal(["upper", "lower", "percent"].includes(name) ? 403 : 200);
+        if (follow.status === 403) expect(follow.token).to.equal("Required");
+        return normalize(res, ctx.ids);
+      }));
+    }
+    const logoffs = {
+      none: () => undefined, session: ({a}) => `${SESSION_COOKIE}=${a.id}`,
+      context: ({a}) => `sap-contextid=${a.id}`,
+      "empty context": ({a}) => `sap-contextid=; ${SESSION_COOKIE}=${a.id}`,
+      "two cookies": ({a, b}) => `sap-contextid=${a.id}; ${SESSION_COOKIE}=${b.id}`,
+      unknown: () => "sap-contextid=0123456789abcdef01234567",
+      malformed: () => "sap-contextid=foreign-owner", HEAD: ({a}) => `sap-contextid=${a.id}`,
+      "invalid context wins": ({b}) => `sap-contextid=foreign-owner; ${SESSION_COOKIE}=${b.id}`,
+    };
+    for (const [name, cookieOf] of Object.entries(logoffs)) {
+      it(`logoff: ${name}`, async () => pair(async (ctx) => {
+        const cookie = cookieOf(ctx);
+        const before = ctx.by ? await count() : undefined;
+        const res = await wire(ctx.server, name === "HEAD" ? "HEAD" : "GET", OFF, cookie ? {cookie} : {}, ctx.by);
+        expect(res).to.deep.equal({status: 200, type: "text/plain; charset=utf-8", length: "10", etag: null,
+          location: null, cookies: [], token: null, generation: null, body: name === "HEAD" ? "" : "logged off"});
+        const ended = ["session", "context", "empty context", "two cookies", "HEAD"].includes(name);
+        if (ctx.by) expect(await count()).to.equal(before - (ended ? 1 : 0));
+        const statuses = [];
+        for (const client of [ctx.a, ctx.b]) {
+          const follow = await wire(ctx.server, "POST", "/sap/bc/adt/debugger/listeners", {
+            cookie: `sap-contextid=${client.id}`, "x-csrf-token": client.token});
+          statuses.push(follow.status);
+        }
+        expect(statuses).to.deep.equal([ended ? 403 : 200, 200]);
+        return res;
+      }));
+    }
+  });
+
   // Slice 2: LOCK and UNLOCK in ABAP over the lock server, the ADT session
   // bound to its ENQ session, the Node write routes asking the same table.
   // The sequences are test/adt-devloop.mjs's "locks across requests and
@@ -654,6 +797,28 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
         await logoff(one);
         return [held, refused, {ended: ended.status}, after];
       },
+      "lowercase security DELETE releases the lock": async (server) => {
+        const one = await logon(server), two = await logon(server);
+        const held = await lock(two), refused = await lock(one);
+        const poll = await send(two, "GET", "/sap/bc/adt/core/http/sessions");
+        const url = /href="([^"]*\/core\/http\/sessions\/[0-9A-F]+)"/.exec(poll.body)[1];
+        const ended = await send(two, "DELETE", url.toLowerCase());
+        const after = await lock(one);
+        await logoff(one);
+        return [held, refused, {ended: ended.status}, after];
+      },
+      "two-cookie logoff preserves the session-cookie holder's lock": async (server) => {
+        const one = await logon(server), two = await logon(server);
+        const held = await lock(two);
+        const off = await fetch(`http://127.0.0.1:${server.address().port}/sap/public/bc/icf/logoff`, {
+          headers: {cookie: `sap-contextid=${one.id}; ${SESSION_COOKIE}=${two.id}`}});
+        const three = await logon(server);
+        const refused = await lock(three);
+        await logoff(two);
+        const after = await lock(three);
+        await logoff(three);
+        return [held, {ended: off.status}, refused, after];
+      },
       "DELETE respects the holder, and the holder's DELETE takes the lock with it": async (server) => {
         const one = await logon(server);
         const two = await logon(server, "DEVTWO");
@@ -715,6 +880,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       "a second session is refused with EU 510, the holder relocks, UNLOCK hands it over": [200, 403, 200, 200, 200, 403],
       "a logoff releases the session's locks": [200, 403, 200, 200],
       "the session DELETE releases them too, a stateless request does not": [200, 403, 200, 200],
+      "lowercase security DELETE releases the lock": [200, 403, 200, 200],
+      "two-cookie logoff preserves the session-cookie holder's lock": [200, 200, 403, 200],
       "DELETE respects the holder, and the holder's DELETE takes the lock with it": [200, 403, 200, 404],
       "the same user in another session is refused, because the lock is the session's": [200, 403, 200],
       "a package locks like a source object": [200, 403, 200],
@@ -741,12 +908,13 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
         served.length = 0;
         const actual = answered(await sequence(ported));
         expect(actual).to.deep.equal(expected);
-        // ABAP answered every LOCK and UNLOCK, and nothing the Node façade serves
+        // ABAP answers LOCK/UNLOCK and A3a session poll, DELETE and logoff.
         const posts = served.filter((s) => s.includes("_action="));
         expect(posts.length, "LOCK and UNLOCK reached the front").to.be.greaterThan(0);
         expect(posts.every((s) => s.startsWith("ABAP ")), posts.join("\n")).to.equal(true);
         const byAbap = served.filter((s) => s.startsWith("ABAP "));
-        expect(byAbap.every((s) => s.startsWith("ABAP POST ") && s.includes("/source/") === false), byAbap.join("\n")).to.equal(true);
+        expect(byAbap.every((s) => (s.startsWith("ABAP POST ") && s.includes("/source/") === false)
+          || s.includes("/core/http/sessions") || s.includes("/sap/public/bc/icf/logoff")), byAbap.join("\n")).to.equal(true);
         // a handle is a UUID on both sides
         for (const answer of [...expected, ...actual]) {
           if (answer.handle !== undefined && answer.handle !== "") expect(answer.handle).to.equal("<handle>");

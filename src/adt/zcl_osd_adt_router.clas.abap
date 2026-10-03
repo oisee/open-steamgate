@@ -125,6 +125,13 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
                    iv_handler = `ZCL_OSD_ADT_UNIT_OBJECT` CHANGING ct_routes = rt_routes ).
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/unit/object`
                    iv_handler = `ZCL_OSD_ADT_UNIT_OBJECT` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/sessions`
+                   iv_handler = `ZCL_OSD_ADT_SESSIONS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `DELETE` iv_pattern = `/sap/bc/adt/core/http/sessions/:id`
+                   iv_handler = `ZCL_OSD_ADT_SESSIONS` CHANGING ct_routes = rt_routes ).
+*   Node host only: SAP's standard logoff node is not shipped as SICF.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/public/bc/icf/logoff`
+                   iv_handler = `ZCL_OSD_ADT_LOGOFF` CHANGING ct_routes = rt_routes ).
 *   LOCK and UNLOCK, one row per lockable type, from the type table
     lt_types = zcl_osd_adt_types=>lockable( ).
     LOOP AT lt_types INTO ls_type.

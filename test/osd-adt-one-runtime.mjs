@@ -56,6 +56,13 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     return {status: res.status, type: res.headers.get("content-type"), body: await res.text(), token: res.headers.get("x-csrf-token"),
       cookies: res.headers.getSetCookie(), served: res.headers.get("x-osd-served-by")};
   };
+  // Session termination is A3a's ABAP route, no longer a B3 operation.
+  const logoffSession = async (id) => {
+    const answer = await request(remote, "GET", "/sap/public/bc/icf/logoff",
+      {cookie: `sap-contextid=${id}`});
+    expect(answer.status, answer.body).to.equal(200);
+    expect(answer.served).to.equal("ABAP");
+  };
   const gate = ({status, type, body}) => ({status, type, body});
 
   it("static, sysinfo, versions, misses and CSRF refusals equal the Node facade", async () => {
@@ -131,6 +138,21 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       headers: {cookie, "x-csrf-token": login.token, "x-sap-adt-sessiontype": "stateful"}};
   };
 
+  it("A3a: compatibility end removes the child's session and lock through ABAP logoff", async () => {
+    const {session, headers} = await logon();
+    await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
+    await nodeSessions.end("foreign-owner");
+    expect((await nodeSessions.get(session.id)).token).to.equal(session.token);
+    await nodeSessions.end(session.id);
+    expect(await nodeSessions.get(session.id)).to.equal(undefined);
+    expect(await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).to.equal(undefined);
+    const refused = await request(remote, "POST", BASE + "/programs/programs/zosd_remote?_action=LOCK", headers);
+    expect(refused.status).to.equal(403);
+    expect(refused.token).to.equal("Required");
+    expect(refused.body).to.equal("CSRF token validation failed");
+    expect(runtime.adtContexts.size).to.equal(0);
+  });
+
   it("B3: child ABAP LOCK and Node holderOf see each other in both directions", async () => {
     const {session, headers} = await logon();
     const object = BASE + "/programs/programs/zosd_remote";
@@ -146,14 +168,14 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       expect(/<LOCK_HANDLE>([^<]+)/.exec(again.body)[1]).to.equal(taken.handle);
       await nodeSessions.release("PROG", "ZOSD_REMOTE");
       expect(await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).to.equal(undefined);
-    } finally { await nodeSessions.end(session.id); }
+    } finally { await logoffSession(session.id); }
   });
 
   it("B3: logoff-first stale write snapshot cannot run the parent callback", async () => {
     const {session} = await logon();
     const {handle} = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
     // The snapshot still says it holds; the authoritative child has ended it.
-    await nodeSessions.end(session.id);
+    await logoffSession(session.id);
     let writes = 0;
     expect(await nodeSessions.whileHeld(session, handle, "PROG", "ZOSD_REMOTE", () => { writes++; })).to.equal(false);
     expect(writes).to.equal(0);
@@ -167,7 +189,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     const original = nodeSessions.whileHeld;
     const source = store.read("PROG", "ZOSD_REMOTE").source;
     nodeSessions.whileHeld = async (...args) => {
-      await nodeSessions.end(session.id);
+      await logoffSession(session.id);
       return original.apply(nodeSessions, args);
     };
     try {
@@ -184,7 +206,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     let called = false;
     nodeSessions.deleteObject = async (...args) => {
       called = true;
-      await nodeSessions.end(session.id);
+      await logoffSession(session.id);
       return original.apply(nodeSessions, args);
     };
     try {
@@ -211,7 +233,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     let off;
     try {
       await entered;
-      off = nodeSessions.end(session.id).then(() => { events.push("ended"); });
+      off = logoffSession(session.id).then(() => { events.push("ended"); });
       // The only other step is logoff: prove it reached the child FIFO.
       await until(async () => {
         const response = await fetch(url + "/osd/serving");
@@ -236,7 +258,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     }).then(() => undefined, e => e);
     expect(error.message).to.contain("parent write failed");
     expect(runtime.adtContexts.size).to.equal(0);
-    await nodeSessions.end(session.id);
+    await logoffSession(session.id);
     expect(await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).to.equal(undefined);
   });
 
@@ -266,7 +288,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       expect(calls).to.equal(1);
     } finally {
       release(); await pending; await recycling;
-      await nodeSessions.end(session.id);
+      await logoffSession(session.id);
     }
   });
 
@@ -312,7 +334,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       expect(deleted).to.equal(true);
       expect(calls).to.equal(1);
       expect(await nodeSessions.holderOf("PROG", "ZOSD_DELETE_ERROR")).to.equal(undefined);
-    } finally { await nodeSessions.end(session.id); }
+    } finally { await logoffSession(session.id); }
   });
 
   it("B3: crash during a callback releases the old step without replaying the write", async () => {
@@ -344,7 +366,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     const url = runtime.url;
     for (const [door, input] of [
       ["adt-sessions", {method: "constructor", args: []}],
-      ["adt-sessions", {method: "end", args: []}],
+      ["adt-sessions", {method: "end", args: ["0123456789abcdef01234567"]}],
       ["adt-step", {view: {sessionCall: "end", args: ["absent"]}}],
     ]) {
       const response = await fetch(url + "/osd/" + door, {method: "POST",

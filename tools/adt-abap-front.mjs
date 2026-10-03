@@ -389,7 +389,6 @@ function dumped(generation, message) {
  * @param {Function} options.refuse the façade's refusal: (res, status, type, message, options)
  * @param {Function} [options.system] (kind, name, req, json) => value: this façade's SYSTEM answers
  * @param {object} [options.store] this façade's ObjectStore, what OBJECT reads
- * @param {Function} [options.hostLogoff] ends a delegated logoff inside its front step, until A3a
  * @param {Function} [options.miss] (req, kind) => void, records the stripped X-OSD-Miss marker
  * @param {Function} [options.served] (servedBy, req, record) => void, for a test or a log
  * @param {Function} [options.generation] () => the live generation, for the one log line of a dump
@@ -427,10 +426,6 @@ export function abapFront(options) {
       record = options.execute !== undefined ? await options.execute(view, req, options) : await withSystem((kind, name, json) => system(kind, name, req, json),
         () => options.step(async () => {
           const answer = await options.answer(view, await options.sessions?.sessionFor?.(req));
-          // Until A3a ports logoff, its HOST fallback must end the session
-          // before this step releases the FIFO to a queued LOCK or DELETE.
-          if (path === "/sap/public/bc/icf/logoff" && ["GET", "HEAD"].includes(req.method)
-            && answer.servedBy === "HOST" && answer.continuation === undefined) await options.hostLogoff?.(req);
           return answer;
         },
           `ADT ${req.method} ${path}`),
