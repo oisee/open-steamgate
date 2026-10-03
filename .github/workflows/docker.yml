@@ -2,6 +2,12 @@ name: OSD Docker image
 
 on:
   pull_request:
+    # Temporary (Alice, 2026-10-03): an ADT-only pull request does not wait
+    # for the image. The `!` lines below exclude the ADT slices' paths; tags
+    # still build, probe and publish the image, so an ADT change that breaks
+    # it shows up at the tag. Revert at the 0.7 tag or when the image has its
+    # first user, whichever comes first (AGENDA, "CI isolation for ADT pull
+    # requests").
     paths:
       - 'docker/**'
       - '**/Dockerfile*'
@@ -11,8 +17,12 @@ on:
       - 'libs.lock.json'
       - 'abaplint.jsonc'
       - 'src/**'
+      - '!src/adt/**'
       - 'tools/**'
+      - '!tools/adt-*'
       - 'test/**'
+      - '!test/adt-*'
+      - '!test/suites.d/adt.json'
       - 'data/**'
       - 'webapp/**'
       - 'bin/**'
