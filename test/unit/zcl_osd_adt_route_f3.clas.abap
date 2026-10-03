@@ -1,10 +1,18 @@
 "! Test-only continuation route, never a system seed.
 CLASS zcl_osd_adt_route_f3 DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
+    INTERFACES if_oo_adt_classrun.
     INTERFACES zif_osd_adt_route.
     INTERFACES zif_osd_adt_resumable.
 ENDCLASS.
 CLASS zcl_osd_adt_route_f3 IMPLEMENTATION.
+  METHOD if_oo_adt_classrun~main.
+    DATA lt_routes TYPE zcl_osd_adt_router=>tt_route.
+    zcl_osd_adt_router=>add( EXPORTING iv_method = `GET`
+      iv_pattern = `/sap/bc/adt/f3` iv_handler = `ZCL_OSD_ADT_ROUTE_F3`
+      iv_resume_kind = `f3-write` CHANGING ct_routes = lt_routes ).
+    zcl_osd_adt_handler=>use_routes( lt_routes ).
+  ENDMETHOD.
   METHOD zif_osd_adt_route~handle.
     DATA ls_field TYPE ihttpnvp.
     DATA ls_probe TYPE zosd_prb.
@@ -32,6 +40,10 @@ CLASS zcl_osd_adt_route_f3 IMPLEMENTATION.
   METHOD zif_osd_adt_resumable~resume.
     DATA lv_error TYPE string.
     DATA lx_error TYPE REF TO zcx_osd_adt.
+    IF iv_json = `terminal`.
+      rs_response-continuation-kind = `f3-write`.
+      RETURN.
+    ENDIF.
     IF iv_kind = `f3-unit`.
       rs_response-status = 200.
       rs_response-body = iv_json.

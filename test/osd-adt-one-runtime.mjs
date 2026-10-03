@@ -28,6 +28,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
   before(async () => {
     root = mkdtempSync(join(tmpdir(), "osd-one-runtime-"));
     mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "v702"}}));
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
     writeFileSync(join(root, "src", "zosd_remote.prog.abap"), "REPORT zosd_remote.\n");
     store = new ObjectStore({root, libs: []});
@@ -162,24 +163,74 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     } finally { Object.assign(store, overrides); }
   });
 
+  for (const scenario of ["recycle", "ended", "terminal"]) {
+    it(`B4 RESUME preserves F3 after ${scenario}`, async () => {
+      const install = async () => {
+        const response = await fetch(runtime.url + "/osd/classrun", {method: "POST",
+          headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_ROUTE_F3"})});
+        expect((await response.json()).ok).to.equal(true);
+      };
+      store.write("PROG", "ZF3_STORE", "before");
+      const payload = JSON.stringify({source: "after recycle", marker: 42});
+      let oldPid;
+      const stop = registerContinuation("f3-write", async ({req, resume}) => {
+        oldPid = runtime.child.pid;
+        if (scenario === "ended") await req.adt.sessions.end(req.adt.session.id);
+        if (scenario === "recycle") { await runtime.recycle(); await install(); }
+        await resume(scenario === "terminal" ? "terminal" : payload);
+      });
+      const logs = [], originalError = console.error;
+      console.error = (...args) => { logs.push(args.join(" ")); originalError(...args); };
+      try {
+        await install();
+        const answer = await request(remote, "GET", BASE + "/f3", {"x-sap-adt-sessiontype": "stateful"});
+        if (scenario === "recycle") {
+          expect(runtime.child.pid).to.not.equal(oldPid);
+          expect(answer.status, answer.body).to.equal(200);
+          expect(answer.body).to.equal(`finished through RESUME: f3-write;${payload}`);
+          expect(store.read("PROG", "ZF3_STORE").source).to.equal(payload);
+        } else if (scenario === "ended") {
+          expect(answer.status).to.equal(403);
+          expect(answer.body).to.equal("CSRF token validation failed");
+          expect(answer.token).to.equal("Required");
+          expect(logs.some(line => line.includes("session ended before RESUME"))).to.equal(true);
+          expect(store.read("PROG", "ZF3_STORE").source).to.equal("before");
+        } else {
+          expect(answer.status).to.equal(500);
+          expect(answer.body).to.equal(exceptionDocument("ExceptionInternalError",
+            'continuation "f3-write": RESUME returned a continuation', {namespace: "org.open-steamgate.osd"}));
+        }
+      } finally { stop(); console.error = originalError; await runtime.recycle(); }
+    });
+  }
+
   it("an ADT read waits across a child crash instead of using its departed port", async () => {
     runtime.child.kill("SIGKILL");
     const response = await request(remote, "GET", BASE + "/core/http/systeminformation");
     expect(response.status, response.body).to.equal(200);
   });
 
-  for (const [name, type, key, status] of [
+  for (const door of ["adt-step", "adt-resume"]) for (const [name, type, key, status] of [
     ["missing key", "application/json", undefined, 403],
     ["wrong key", "application/json", "wrong", 403],
     ["text/plain", "text/plain", "valid", 415],
   ]) {
-    it(`the internal door refuses ${name}`, async () => {
+    it(`the internal ${door} door refuses ${name}`, async () => {
       const headers = {"content-type": type};
       if (key) headers["x-osd-adt-step-key"] = key === "valid" ? runtime.adtStepKey : key;
-      const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST", headers, body: "{}"});
+      const response = await fetch(runtime.url + `/osd/${door}`, {method: "POST", headers, body: "{}"});
       expect(response.status).to.equal(status);
     });
   }
+
+  it("the RESUME door validates payloads and limits its body", async () => {
+    for (const [body, status] of [["{}", 400], [JSON.stringify({kind: "x", json: "{}", headers: [], sessionId: 1}), 400],
+      [JSON.stringify({kind: "x", json: "x".repeat(1024 * 1024), headers: {}}), 413]]) {
+      const response = await fetch(runtime.url + "/osd/adt-resume", {method: "POST",
+        headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body});
+      expect(response.status).to.equal(status);
+    }
+  });
 
   it("the door accepts an ABAP body larger than 8 MB", async () => {
     const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST",
@@ -193,6 +244,19 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST", headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input)});
       expect(response.status).to.equal(400);
     }
+  });
+});
+
+describe("B4 switched-off door", function () {
+  this.timeout(60000);
+  it("refuses RESUME before JSON or key checks", async () => {
+    const runtime = new ServingRuntime({root: process.cwd(), env: {OSD_ADT_ONE_RUNTIME: "0", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
+    try {
+      await runtime.start();
+      const response = await fetch(runtime.url + "/osd/adt-resume", {method: "POST",
+        headers: {"content-type": "text/plain"}, body: "not JSON"});
+      expect(response.status).to.equal(404);
+    } finally { await runtime.stop(); }
   });
 });
 
@@ -325,9 +389,11 @@ describe("one-runtime SYSTEM kind gate", () => {
 });
 
 describe("remote ADT body transport", () => {
-  it("refuses serving-child RESUME until B4 without calling the parent's ABAP handler", async () => {
+  it("sends serving-child RESUME without calling the parent's ABAP handler", async () => {
     const originalFetch = globalThis.fetch;
-    const handler = globalThis.abap.Classes.ZCL_OSD_ADT_HANDLER;
+    const originalAbap = globalThis.abap;
+    const handler = {resume: () => { throw new Error("parent RESUME called"); }};
+    globalThis.abap = {Classes: {ZCL_OSD_ADT_HANDLER: handler}};
     const originalResume = handler.resume;
     let parentCalls = 0, refusalCode, childCalls = 0;
     const stop = registerContinuation("remote-resume", async ({resume}) => {
@@ -342,6 +408,11 @@ describe("remote ADT body transport", () => {
     globalThis.fetch = async (url, init) => {
       if (!String(url).startsWith("http://unused/")) return originalFetch(url, init);
       childCalls++;
+      if (String(url).endsWith("/osd/adt-resume")) {
+        expect(JSON.parse(init.body).json).to.equal('{"done":true}');
+        return new Response(JSON.stringify({record: {status: 200, headers: [], contentType: "text/plain", body: "resumed"}}),
+          {headers: {"content-type": "application/json"}});
+      }
       return new Response(JSON.stringify({record: {status: 500, headers: [], contentType: "application/xml",
         body: "child continuation", servedBy: "HOST", continuation: {kind: "remote-resume", payload: "{}"}}}),
       {headers: {"content-type": "application/json"}});
@@ -349,15 +420,13 @@ describe("remote ADT body transport", () => {
     try {
       const res = await originalFetch(`http://127.0.0.1:${server.address().port}${BASE}/remote-resume`);
       const body = await res.text();
-      expect(childCalls).to.equal(1);
+      expect(childCalls).to.equal(2);
       expect(parentCalls, "parent ZCL_OSD_ADT_HANDLER=>RESUME must not run").to.equal(0);
-      expect(res.status).to.equal(500);
-      expect(res.headers.get("content-type")).to.equal("application/xml; charset=utf-8");
-      expect(body).to.equal(exceptionDocument("ExceptionInternalError",
-        'continuation "remote-resume": RESUME in the serving child is slice B4', {namespace: "org.open-steamgate.osd"}));
-      expect(refusalCode).to.equal("ADT_RESUME_REMOTE");
+      expect(res.status).to.equal(200);
+      expect(body).to.equal("resumed");
+      expect(refusalCode).to.equal(undefined);
     } finally {
-      globalThis.fetch = originalFetch; handler.resume = originalResume; stop();
+      globalThis.fetch = originalFetch; globalThis.abap = originalAbap; stop();
       await new Promise(r => server.close(r));
     }
   });

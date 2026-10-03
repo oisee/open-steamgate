@@ -62,11 +62,12 @@ slice starts at this stub and supplies host work and a fresh resume step.
 No activation, ABAP Unit or notebook kind is implemented by F3.
 
 With `OSD_ADT_ONE_RUNTIME=1`, B1/B2 sends ANSWER to the serving child
-and carries STORE over IPC. F3 retains that path unchanged. RESUME remains
-available only through the local dialog-step adapter; serving-child RESUME
-is refused with a 500 ADT document until B4 ("RESUME in the serving child
-is slice B4"). F3 moves no production HTTP rows and adds
-no STORE commands, so it has no HOST_ALLOWED entries to remove.
+and carries STORE over IPC. B4 sends RESUME through the private
+`/osd/adt-resume` door in a fresh child dialog step. A publish may have
+replaced the process between ANSWER and RESUME: all continuation state
+must travel in the JSON payload. See `one-runtime-b4.md` for the transport
+and recycle proof. F3 and B4 move no production HTTP rows and add no
+STORE commands, so neither has HOST_ALLOWED entries to remove.
 
 `test/adt-abap-f3.mjs` mounts two routers and exercises host writes and
 ABAP STORE writes against both stores, real ABAP RESUME, FIFO waiting and
