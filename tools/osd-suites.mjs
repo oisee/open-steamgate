@@ -316,7 +316,7 @@ try {
     result = runWithRetries(selected, (runFiles, phase) => {
       const path = join(scratch, `${attempt++}.json`);
       console.log(`osd-suites: ${phase}: ${runFiles.length} file(s)`);
-      const child = spawnSync(process.execPath, ["node_modules/mocha/bin/mocha.js", ...runFiles,
+      const child = spawnSync("npx", ["mocha", ...runFiles,
         ...extra, "--require", fileURLToPath(new URL("./osd-suite-no-retries.cjs", import.meta.url)), "--retries", "0", "--reporter", fileURLToPath(new URL("./osd-suite-timing-reporter.cjs", import.meta.url))],
         {stdio: "inherit", env: {...process.env, OSD_SUITE_TIMINGS_FILE: path}});
       const metadata = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
