@@ -14,10 +14,11 @@
 // The compiler's own word list stays empty of any domain: tables, fields and
 // values arrive in the model.
 import {inRange} from "./dsl-l2-range.mjs";
-import {INTEGERS, PACKED, INT_RANGE, kindOf, canonical, isOrdered, initialValue, scaled, sign, compareValues, render, formatDecimal, shiftDate} from "./dsl-l2-values.mjs";
-export {INTEGERS, PACKED, INT_RANGE, kindOf, canonical, isOrdered, initialValue, compareValues, render, shiftDate} from "./dsl-l2-values.mjs";
-
-const stepDate = shiftDate;
+import {holdsRange, plainRow, rangeMutants, rangeVariants} from "./dsl-l2-selopt.mjs";
+import {INTEGERS, PACKED, INT_RANGE, kindOf, canonical, isOrdered, initialValue, scaled, sign, compareValues, render, formatDecimal, shiftDate,
+  stepValue, bump, different, defaultValue} from "./dsl-l2-values.mjs";
+export {INTEGERS, PACKED, INT_RANGE, kindOf, canonical, isOrdered, initialValue, compareValues, render, shiftDate,
+  stepValue, bump, different, defaultValue} from "./dsl-l2-values.mjs";
 
 function rhsValue(rhs, params) {
   if (rhs.kind === "literal") return rhs.value;
@@ -30,85 +31,6 @@ function rhsValue(rhs, params) {
     return shiftDate(params.date, (rhs.sign === "-" ? -1 : 1) * days);
   }
   return undefined;
-}
-
-function stepTime(text, dir) {
-  if (!/^[0-9]{6}$/.test(text)) return undefined;
-  const h = Number(text.slice(0, 2)), m = Number(text.slice(2, 4)), s = Number(text.slice(4, 6));
-  if (h > 23 || m > 59 || s > 59) return undefined;
-  const total = h * 3600 + m * 60 + s + dir;
-  if (total < 0 || total > 86399) return undefined;
-  const two = (n) => String(n).padStart(2, "0");
-  return `${two(Math.floor(total / 3600))}${two(Math.floor(total / 60) % 60)}${two(total % 60)}`;
-}
-
-// One step of a type from a value: a day, a second, 1, or 10^-decimals;
-// undefined when the step leaves the type (255 + 1 for INT1, 99991231 + 1).
-export function stepValue(type, text, dir) {
-  const b = type.built_in;
-  if (b === "DATS") return stepDate(text, dir);
-  if (b === "TIMS") return stepTime(text, dir);
-  if (b === "NUMC") {
-    if (!/^[0-9]+$/.test(text)) return undefined;
-    const n = BigInt(text) + BigInt(dir);
-    if (n < 0n || n >= 10n ** BigInt(type.length ?? 1)) return undefined;
-    return n.toString().padStart(type.length ?? 1, "0");
-  }
-  if (INTEGERS.has(b)) {
-    const n = BigInt(text) + BigInt(dir);
-    const [low, high] = INT_RANGE[b];
-    return n < low || n > high ? undefined : n.toString();
-  }
-  if (PACKED.has(b)) {
-    const decimals = type.decimals ?? 0;
-    const n = scaled(text, decimals) + BigInt(dir);
-    if ((n < 0n ? -n : n).toString().length > (type.length ?? 0)) return undefined;
-    return formatDecimal(n, decimals);
-  }
-  return undefined;
-}
-
-const ORDER = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
-// A different text of the same length: the last character one place along.
-export function bump(text, dir) {
-  if (text === "") return dir > 0 ? "A" : undefined;
-  const last = text.at(-1);
-  const at = ORDER.indexOf(last);
-  let next;
-  if (at >= 0) next = ORDER[at + dir];
-  else {
-    const c = String.fromCharCode(last.charCodeAt(0) + dir);
-    next = /[ -~]/.test(c) && c !== "'" && c !== "`" ? c : undefined;
-  }
-  return next === undefined ? undefined : text.slice(0, -1) + next;
-}
-
-// a value that is not `text`: one step along if the type has one, else a
-// different character
-export function different(type, text) {
-  if (isOrdered(type)) return stepValue(type, text, 1) ?? stepValue(type, text, -1);
-  return bump(text, 1) ?? bump(text, -1);
-}
-
-// a type-correct value to fill a field with, `seed` making keys differ
-export function defaultValue(type, seed = 1) {
-  const b = type.built_in;
-  if (b === "DATS") return "20260101";
-  if (b === "TIMS") return "120000";
-  if (b === "NUMC") return String(seed).padStart(type.length ?? 1, "0").slice(-(type.length ?? 1));
-  if (INTEGERS.has(b)) return b === "INT1" ? String(seed % 256) : String(seed);
-  if (PACKED.has(b)) {
-    // the seed as a whole number when the integer digits hold it, else as
-    // the scaled digits themselves: a DEC 3,2 takes 5.00 but not 500.00
-    const decimals = type.decimals ?? 0;
-    const digits = BigInt(type.length ?? decimals + 1);
-    const whole = BigInt(seed) * 10n ** BigInt(decimals);
-    return formatDecimal(whole < 10n ** digits ? whole : BigInt(seed) % 10n ** digits, decimals);
-  }
-  if (b === "RAW") return "AB";
-  const length = b === "STRG" || type.length === undefined ? 8 : type.length;
-  return ("A" + String(seed).padStart(Math.max(length - 1, 0), "0")).slice(0, Math.max(length, 1));
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +67,8 @@ function holdsTree(tree, leaves, holds) {
 // always matches (a row of initial values) or never does: the structural
 // mutants of the discriminate guard.
 export function evaluate(model, rows, params = {}, override = {}) {
-  params = {...Object.fromEntries((model.params ?? []).filter((p) => p.default !== undefined).map((p) => [p.name, p.default])), ...params};
+  params = {...Object.fromEntries((model.params ?? []).filter((p) => p.is_selopt || p.default !== undefined)
+    .map((p) => [p.name, p.is_selopt ? (p.default_rows ?? []).map(plainRow) : p.default])), ...params};
   const tables = lower(rows);
   const schema = model.ddic;
   const fieldsOf = (table) => schema[table].fields;
@@ -160,6 +83,7 @@ export function evaluate(model, rows, params = {}, override = {}) {
   const holdsIn = (context) => (cmp) => {
     const left = context[cmp.alias];
     const a = valueOf(left.table, left.row, cmp.column);
+    if (cmp.rhs.kind === "range") return holdsRange(cmp, a, params);
     let b, typeB = cmp.type;
     if (cmp.rhs.kind !== "field") {
       b = rhsValue(cmp.rhs, params);
@@ -190,7 +114,7 @@ export function evaluate(model, rows, params = {}, override = {}) {
   const alerts = [];
   const each = (visit) => {
     for (const o of ordered(outer.table)) {
-      if (model.range && !inRange(params.$range, fieldsOf(outer.table)[model.range.field], valueOf(outer.table, o, model.range.field), compareValues)) continue;
+      if (model.range && !inRange(params.$range, fieldsOf(outer.table)[model.range.field], valueOf(outer.table, o, model.range.field))) continue;
       const context = {[outer.alias]: {table: outer.table, row: o}};
       if (whenHolds(context)) visit(context);
     }
@@ -303,7 +227,7 @@ function ownerOf(model, cond) {
   throw new Error(`internal: ${cond.text} is in no condition of the rule`);
 }
 
-const INVERT = {"=": "<>", "<>": "=", "<": ">=", ">=": "<", ">": "<=", "<=": ">"};
+const INVERT = {"=": "<>", "<>": "=", "<": ">=", ">=": "<", ">": "<=", "<=": ">", "IN": "NOT IN", "NOT IN": "IN"};
 const LIMIT = 64; // alternatives kept per tree; a rule this wide gets fewer derived cases, never wrong ones
 
 const product = (lists) => lists.reduce((acc, list) => acc.flatMap((a) => list.map((b) => [...a, ...b])).slice(0, LIMIT), [[]]);
@@ -354,16 +278,20 @@ function solveRow(model, params, rows, alias, table, cmps, keep = false, slot = 
     const type = model.ddic[table].fields[column];
     const target = (cmp) => cmp.rhs.kind === "field" ? rows[model.for.table][0][cmp.rhs.column] ?? initialValue(cmp.rhs.type)
       : rhsValue(cmp.rhs, params);
+    const stepped = (v) => [v, isOrdered(type) ? stepValue(type, v, 1) : bump(v, 1), isOrdered(type) ? stepValue(type, v, -1) : bump(v, -1)];
     const candidates = [];
     for (const cmp of list) {
-      const v = target(cmp);
-      candidates.push(v, isOrdered(type) ? stepValue(type, v, 1) : bump(v, 1), isOrdered(type) ? stepValue(type, v, -1) : bump(v, -1));
+      // a range: every bound of its rows and the values beside them
+      if (cmp.rhs.kind === "range") candidates.push(...(params[cmp.rhs.name] ?? []).flatMap((r) => [...stepped(r.low), ...(r.high === undefined ? [] : stepped(r.high))]));
+      else candidates.push(...stepped(target(cmp)));
     }
     if (keep) candidates.unshift(row[column]);
     candidates.push(row[column], initialValue(type));
-    const ok = (value) => list.every((cmp) => test(cmp.op, compareValues(type, value, cmp.rhs.kind === "field" ? cmp.rhs.type : type, target(cmp))));
+    const ok = (value) => list.every((cmp) => cmp.rhs.kind === "range" ? holdsRange(cmp, canonical(type, value), params)
+      : test(cmp.op, compareValues(type, value, cmp.rhs.kind === "field" ? cmp.rhs.type : type, target(cmp))));
     const pick = candidates.find((value) => value !== undefined && ok(value));
-    if (pick === undefined) return `no value of ${table}-${column} satisfies ${list.map((c) => c.rhs.kind === "field" ? `${c.op} ${c.rhs.alias}.${c.rhs.column}` : `${c.op} ${target(c)}`).join(" and ")}`;
+    if (pick === undefined) return `no value of ${table}-${column} satisfies ${list.map((c) => c.rhs.kind === "field" ? `${c.op} ${c.rhs.alias}.${c.rhs.column}`
+      : c.rhs.kind === "range" ? `${c.op} range $${c.rhs.name}` : `${c.op} ${target(c)}`).join(" and ")}`;
     row[column] = pick;
   }
   return undefined;
@@ -494,6 +422,7 @@ function withCondition(model, cond, leaf) {
 // every other operator, the literal or parameter one step either way
 function mutantsOf(cond, params) {
   const cmp = cond.cmp;
+  if (cmp.rhs.kind === "range") return rangeMutants(cond);
   const out = [{...cond, constant: true}, {...cond, constant: false},
     ...OPERATORS.filter((op) => op !== cmp.op).map((op) => ({...cond, cmp: {...cmp, op}}))];
   if (cmp.rhs.kind !== "field") {
@@ -831,13 +760,15 @@ export function deriveCases(model, references, {date, params = {date}, paramArgs
     }
     throw new Error(`cannot name the cases of ${condition} (line ${condLine}) within 30 characters`);
   };
-  const add = (condition, line, suffix, methods, label, rows, structural = false) => {
+  // `given`: a range parameter this case sets for itself ({name, rows}); the others are the first example's
+  const add = (condition, line, suffix, methods, label, rows, structural = false, given = undefined) => {
     if (!keysDistinct(model, rows)) {
       skipped.push({condition: `${label} (${suffix})`, reason: "its rows would share a key"});
       return;
     }
+    const own = given ? {...params, [given.name]: given.rows} : params;
     cases.push({method: methods[suffix], label: `${label}: ${suffix}`, kind: suffix, condition, line, date, rows, paramArgs,
-      expect: evaluate(model, rows, params), structural});
+      expect: evaluate(model, rows, own), structural, params: own, ...(given ? {given} : {})});
   };
   let index = 0;
   for (const reference of references) {
@@ -884,33 +815,45 @@ export function deriveCases(model, references, {date, params = {date}, paramArgs
         cap: pivot > COUNT_ROW_CAP, case: "all variants"});
       continue;
     }
-    const setField = (value) => {
+    const setField = (value, using = params) => {
       const rows = clone(start);
       rows[table][owner.slot][cmp.column] = value;
       rejoin(model, rows, cond, owner.clause, cmp.column);
       // a changed value may break the other conditions on another row
       // (m.cnt < n.lvl): keep the tested value and adjust the other rows
-      resolveClauses(model, params, rows, owner.when ? undefined : owner.clause, true);
+      resolveClauses(model, using, rows, owner.when ? undefined : owner.clause, true);
       if (pivot === 0) rows[model.clauses[0].table] = [];
       return rows;
     };
-    const reference_value = canonical(type, cmp.rhs.kind === "field" ? start[model.for.table][0][cmp.rhs.column]
+    const isRange = cmp.rhs.kind === "range";
+    const reference_value = isRange ? undefined : canonical(type, cmp.rhs.kind === "field" ? start[model.for.table][0][cmp.rhs.column]
       : rhsValue(cmp.rhs, params));
     let variants;
-    if (isJoin) variants = [["match", reference_value], ["nomatch", different(type, reference_value)]];
+    // a range: a value in it, one outside it, the table emptied (every value), an E row added
+    if (isRange) variants = rangeVariants({name: cmp.rhs.name, rows: params[cmp.rhs.name] ?? [], type, current: start[table][owner.slot][cmp.column],
+      around: (v) => [v, isOrdered(type) ? stepValue(type, v, 1) : bump(v, 1), isOrdered(type) ? stepValue(type, v, -1) : bump(v, -1)],
+      fallbacks: [defaultValue(type), initialValue(type)], canonical});
+    else if (isJoin) variants = [["match", reference_value], ["nomatch", different(type, reference_value)]];
     else if (isOrdered(type)) variants = [["lt", stepValue(type, reference_value, -1)], ["eq", reference_value], ["gt", stepValue(type, reference_value, 1)]];
     else variants = [["eq", reference_value], ["ne", bump(reference_value, 1) ?? bump(reference_value, -1)],
       ...(compareValues(type, "", type, reference_value) === 0 ? [] : [["blank", ""]])];
     const methods = name(cond.text, columnTags, variants.map(([s]) => s), cond.rule_line);
-    for (const [suffix, value] of variants) {
-      if (value === undefined) { skipped.push({condition: cond.text, reason: `no ${suffix} value: the type has no step that way`}); delete methods[suffix]; continue; }
-      const rows = setField(value);
-      if (!caseDiscriminates(model, cond, rows, params)) {
+    for (const [suffix, value, given] of variants) {
+      if (value === undefined) {
+        skipped.push({condition: cond.text, reason: !isRange ? `no ${suffix} value: the type has no step that way`
+          : suffix === "out" ? "no value outside the range: an empty range holds every value" : `no ${suffix} value for the range`});
+        delete methods[suffix];
+        continue;
+      }
+      // a case that sets the range parameter itself is solved and judged with its own table
+      const own = given ? {...params, [given.name]: given.rows} : params;
+      const rows = setField(value, own);
+      if (!caseDiscriminates(model, cond, rows, own)) {
         skipped.push({condition: `${cond.text} (${suffix})`, reason: `does not isolate ${cond.text}`});
         delete methods[suffix];
         continue;
       }
-      add(reference, cond.rule_line, suffix, methods, cond.text, rows);
+      add(reference, cond.rule_line, suffix, methods, cond.text, rows, false, given);
     }
   }
 

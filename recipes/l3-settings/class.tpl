@@ -7,6 +7,15 @@ CLASS {{settings.class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
              {{field}} TYPE {{#value_type}}{{value_type}}{{/value_type}}{{^value_type}}{{#numeric}}i{{/numeric}}{{#char}}c LENGTH 40{{/char}}{{#period}}c LENGTH 40{{/period}}{{/value_type}},
 {{/settings.entries}}
            END OF ty_values.
+{{#settings.params}}
+{{#list}}
+    " a range parameter tuned as a list of values ("M,X"): its rows, each I EQ
+    TYPES tt_p_{{param}} TYPE RANGE OF {{range_of}}.
+    CLASS-METHODS range_{{param}}
+      IMPORTING iv_text TYPE csequence
+      RETURNING VALUE(rt_range) TYPE tt_p_{{param}}.
+{{/list}}
+{{/settings.params}}
     TYPES tt_conf TYPE STANDARD TABLE OF zosd_l3_conf WITH DEFAULT KEY.
     TYPES: BEGIN OF ty_state,
              vals TYPE ty_values,
@@ -59,6 +68,28 @@ CLASS {{settings.class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 
 CLASS {{settings.class}} IMPLEMENTATION.
+{{#settings.params}}
+{{#list}}
+  METHOD range_{{param}}.
+    DATA lt_parts TYPE string_table.
+    DATA lv_part TYPE string.
+    DATA ls_row LIKE LINE OF rt_range.
+    IF iv_text IS INITIAL.
+      RETURN.
+    ENDIF.
+    lv_part = iv_text.
+    SPLIT lv_part AT ',' INTO TABLE lt_parts.
+    LOOP AT lt_parts INTO lv_part.
+      CLEAR ls_row.
+      ls_row-sign = 'I'.
+      ls_row-option = 'EQ'.
+      ls_row-low = lv_part.
+      APPEND ls_row TO rt_range.
+    ENDLOOP.
+  ENDMETHOD.
+
+{{/list}}
+{{/settings.params}}
   METHOD specs.
     DATA ls_spec TYPE zosd_l3_conf.
     ls_spec-set_name = {{set | literal}}.
@@ -163,6 +194,13 @@ CLASS {{settings.class}} IMPLEMENTATION.
           RETURN.
         ENDIF.
 {{/pattern}}
+{{#list}}
+        " a list of values: none holds a comma or a blank
+        FIND REGEX {{list_regex | literal}} IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+{{/list}}
 {{#digit_text}}
         FIND REGEX '^[0-9]+$' IN lv_text.
         IF sy-subrc <> 0.

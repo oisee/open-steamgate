@@ -5,13 +5,23 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
 {{#range}}
     TYPES tt_range TYPE RANGE OF {{table}}-{{field}}.
 {{/range}}
+{{#params}}
+{{#is_selopt}}
+    TYPES {{selopt_type}} TYPE RANGE OF {{type_name}}.
+{{/is_selopt}}
+{{/params}}
     CLASS-METHODS check
       IMPORTING iv_date TYPE d
 {{#range}}
                 it_range TYPE tt_range OPTIONAL
 {{/range}}
 {{#params}}
+{{#is_selopt}}
+                {{ref}} TYPE {{selopt_type}} OPTIONAL
+{{/is_selopt}}
+{{^is_selopt}}
                 {{ref}} TYPE {{type_name}}{{#default}} DEFAULT {{default | literal}}{{/default}}
+{{/is_selopt}}
 {{/params}}
       RETURNING VALUE(rt_alerts) TYPE string_table.
 {{#driving_keys}}
@@ -20,7 +30,12 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_date TYPE d
                 it_range TYPE tt_range OPTIONAL
 {{#params}}
+{{#is_selopt}}
+                {{ref}} TYPE {{selopt_type}} OPTIONAL
+{{/is_selopt}}
+{{^is_selopt}}
                 {{ref}} TYPE {{type_name}}{{#default}} DEFAULT {{default | literal}}{{/default}}
+{{/is_selopt}}
 {{/params}}
       RETURNING VALUE(rt_keys) TYPE tt_range.
 {{/driving_keys}}
@@ -93,6 +108,30 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_aggregate_seen TYPE c LENGTH 1.
 {{/is_count}}
 {{/aggregate}}
+{{#params}}
+{{#has_default}}
+    DATA {{use}} TYPE {{selopt_type}}.
+    DATA {{row}} LIKE LINE OF {{use}}.
+{{/has_default}}
+{{/params}}
+{{#params}}
+{{#has_default}}
+    IF {{ref}} IS SUPPLIED.
+      {{use}} = {{ref}}.
+    ELSE.
+{{#default_rows}}
+      CLEAR {{row}}.
+      {{row}}-sign = {{sign | literal}}.
+      {{row}}-option = {{option | literal}}.
+      {{row}}-low = {{low | literal}}.
+{{#high}}
+      {{row}}-high = {{high | literal}}.
+{{/high}}
+      APPEND {{row}} TO {{use}}.
+{{/default_rows}}
+    ENDIF.
+{{/has_default}}
+{{/params}}
 {{#windows}}
     {{name}} = iv_date {{sign}} {{offset_ref}}.
 {{/windows}}
@@ -409,6 +448,30 @@ CLASS {{class}} IMPLEMENTATION.
 {{#windows}}
     DATA {{name}} TYPE d.
 {{/windows}}
+{{#params}}
+{{#has_default}}
+    DATA {{use}} TYPE {{selopt_type}}.
+    DATA {{row}} LIKE LINE OF {{use}}.
+{{/has_default}}
+{{/params}}
+{{#params}}
+{{#has_default}}
+    IF {{ref}} IS SUPPLIED.
+      {{use}} = {{ref}}.
+    ELSE.
+{{#default_rows}}
+      CLEAR {{row}}.
+      {{row}}-sign = {{sign | literal}}.
+      {{row}}-option = {{option | literal}}.
+      {{row}}-low = {{low | literal}}.
+{{#high}}
+      {{row}}-high = {{high | literal}}.
+{{/high}}
+      APPEND {{row}} TO {{use}}.
+{{/default_rows}}
+    ENDIF.
+{{/has_default}}
+{{/params}}
 {{#windows}}
     {{name}} = iv_date {{sign}} {{offset_ref}}.
 {{/windows}}

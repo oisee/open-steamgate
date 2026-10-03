@@ -1,0 +1,42 @@
+# DSL L3 with a range set parameter (docs/dsl-l3.md, "Range set parameters"): the
+# fleet's restricted statuses are one parameter, a selection table, which the runner
+# passes to the rule that says `ship.status in $restricted`, the job report receives
+# as a SELECT-OPTIONS, and an operator may tune as a list of values ("M,X"). The second
+# range, `exempt`, has a BT row for its default: the manifest's and the API's, not the
+# operator's.
+# `node tools/dsl-l3.mjs build src/l2demo/fleet3.l3.yaml --out src/l2demo`
+set: fleet3
+title: The fleet with a restricted-status range parameter
+date: $date
+params:
+  active_status: {type: ZOSD_L2_SHIP-STATUS, default: A}
+  restricted: {type: ZOSD_L2_SHIP-STATUS, range: true, default: [M, D]}
+  exempt: {type: ZOSD_L2_SHIP-SHIP_ID, range: true, default: [{sign: I, option: BT, low: S900, high: S999}]}
+piles:
+  source: ships
+  size: 2
+rules:
+  - rule: ship_captain.l2.yaml
+  - rule: ship_restricted_status.l2.yaml
+ports:
+  ships:
+    kind: source
+    table: ZOSD_L2_SHIP
+    key: ship_id
+    variants:
+      table: generated
+      capture: generated
+  alerts:
+    kind: sink
+    table: ZOSD_L3_ALERT
+    group: [set_name, rule_name, model_hash, check_date]
+    seq: alert_seq
+    variants:
+      log: generated
+      dummy: generated
+      capture: generated
+bindings:
+  ships: table
+  alerts: log
+settings:
+  tunable: [params.restricted]

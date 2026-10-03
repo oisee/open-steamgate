@@ -4,6 +4,9 @@ const INT4 = 2147483647;
 const integerRanges = {INT1: [0n, 255n], INT2: [-32768n, 32767n], INT4: [-2147483648n, 2147483647n],
   INT8: [-9223372036854775808n, 9223372036854775807n]};
 const characterTypes = new Set(["CHAR", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "NUMC", "DATS", "TIMS"]);
+// one value of a list setting, as a regular expression: no comma, no blank (the list is "M,X")
+const listElement = (type) => type.built_in === "DATS" ? "[0-9]{8}" : type.built_in === "TIMS" ? "[0-9]{6}"
+  : type.built_in === "NUMC" ? `[0-9]{1,${type.length ?? 1}}` : `[^, ]{1,${type.length ?? 1}}`;
 const numeric = [
   ["budget.glass", (m) => m.governor?.glass, 1, INT4],
   ["budget.warn", (m) => m.governor?.warn, 1, 10000],
@@ -42,6 +45,7 @@ export function compileSettings(doc, model, {line, fail}) {
   const bounds = spec.bounds ?? {};
   if (!bounds || typeof bounds !== "object" || Array.isArray(bounds)) fail(line("settings/bounds"), "settings.bounds is a mapping");
   const available = new Map();
+  const lossy_reasons = new Map();
   for (const [name, value, min, max] of numeric) {
     const defaultValue = value(model);
     if (defaultValue !== undefined) available.set(name, {defaultValue: String(defaultValue), min, max, kind: "N"});
@@ -53,6 +57,21 @@ export function compileSettings(doc, model, {line, fail}) {
   for (const stage of model.stages ?? []) if (stage.piles) available.set(`piles.${stage.name}.size`, {defaultValue: String(stage.piles.size), min: 1, max: INT4, kind: "N"});
   if (model.schedule) available.set("schedule.every", {defaultValue: model.schedule.every, kind: "P", min: 1, max: 999});
   for (const p of model.params ?? []) {
+    if (p.is_selopt) {
+      // a range is tunable as a list of values ("M,X": each an I EQ row), the form a settings row holds in 40 characters;
+      // a default with BT or E rows is the manifest's (and the API's), not the operator's
+      const rows = p.default_rows ?? [];
+      const type = p.elem_type;
+      if (rows.some((r) => r.sign !== "I" || r.option !== "EQ")) continue;
+      const text = rows.map((r) => r.low).join(",");
+      const built = type?.built_in;
+      if (!type || !characterTypes.has(built) || text.length > 40) continue;
+      // the list must round-trip: a value with the separator or a blank (or a blank value) would come back as other rows
+      const lossy = rows.find((r) => !new RegExp(`^${listElement(type)}$`).test(r.low));
+      if (lossy) { lossy_reasons.set(`params.${p.name}`, `the default of ${p.name} holds ${JSON.stringify(lossy.low)}, which a list of values cannot carry (a value is not blank and has no comma or blank); keep the parameter out of settings.tunable`); continue; }
+      available.set(`params.${p.name}`, {defaultValue: text, kind: "C", min: 0, max: 40, list: true, element: listElement(type), built, rangeOf: p.type_name});
+      continue;
+    }
     if (p.default === undefined) continue;
     const built = p["default@type"]?.built_in;
     if (integerRanges[built]) {
@@ -70,6 +89,7 @@ export function compileSettings(doc, model, {line, fail}) {
   let screenNo = 0;
   const entries = spec.tunable.map((name, i) => {
     const at = line(`settings/tunable/${i}`);
+    if (lossy_reasons.has(name)) fail(at, lossy_reasons.get(name));
     if (typeof name !== "string" || !available.has(name)) fail(at, `unknown or unavailable tunable ${JSON.stringify(name)}; available: ${[...available.keys()].join(", ")}`);
     if (seen.has(name)) fail(at, `tunable ${name} is listed twice`);
     seen.add(name);
@@ -93,8 +113,9 @@ export function compileSettings(doc, model, {line, fail}) {
     return {"@id": `${model["@id"]}/setting/${name}`, set_line: at, name, "name@type": {built_in: "CHAR", length: 30},
       field, ...(CHAOS_SETTINGS.includes(name) ? {chaos: true} : {screen: `s_${++screenNo}`}), default: base.defaultValue, "default@type": {built_in: "CHAR", length: 40},
       kind: base.kind, min: String(min), max: String(max), numeric: base.kind === "N", period: base.kind === "P", char: base.kind === "C",
-      value_type: base.valueType, digit_text: base.built === "NUMC", date_text: base.built === "DATS",
-      time_text: base.built === "TIMS", scoped: runScoped(name),
+      value_type: base.valueType, digit_text: !base.list && base.built === "NUMC", date_text: !base.list && base.built === "DATS",
+      time_text: !base.list && base.built === "TIMS", scoped: runScoped(name),
+      ...(base.list ? {list: true, range_of: base.rangeOf, list_regex: `^(${base.element}(,${base.element})*)?$`, "list_regex@type": {built_in: "STRG"}} : {}),
       ...(base.values ? {pattern: `^(${base.values.join("|")})$`, "pattern@type": {built_in: "STRG"}, values: base.values.join(", ")} : {})};
   });
   for (const name of Object.keys(bounds)) if (!seen.has(name)) fail(line(`settings/bounds/${name}`), `bounds names non-tunable ${name}`);

@@ -35,7 +35,8 @@ const CARGO_LIMIT = "src/l2demo/ship_cargo_limit.l2.yaml";
 const MAX_CARGO = "src/l2demo/ship_max_cargo.l2.yaml";
 const RECENT = "src/l2demo/recent_voyage.l2.yaml";
 const BUSY = "src/l2demo/ship_busy.l2.yaml";
-const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW, MIN_CAPTAINS, CARGO_LIMIT, MAX_CARGO, RECENT, BUSY];
+const RESTRICTED = "src/l2demo/ship_restricted_status.l2.yaml";
+const DEMO_RULES = [RULE, OR_NOT, REQUIRE, LIMIT, MIN_CREW, MIN_CAPTAINS, CARGO_LIMIT, MAX_CARGO, RECENT, BUSY, RESTRICTED];
 
 const escapePattern = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -3019,6 +3020,380 @@ examples:
       refuse("negative-example", source.replace("max_days: 1", "max_days: -1"), /params: \{max_days: -1\}/, /non-negative INT4/);
       refuse("negative-default", source.replace("default: 30", "default: -1"), /max_days:/, /non-negative INT4/);
       refuse("missing-required", source.replace(", default: 30", ""), /- name: default window/, /needs \$max_days/);
+    });
+  });
+
+  describe("slice 8: range parameters (a selection table as a parameter, `field in $name`)", () => {
+    const TEXT = readFileSync(RESTRICTED, "utf8");
+    const PARAM_AT = /restricted: \{type/;
+    const WHEN_AT = /^when:/;
+    const write = (tag, text) => writeRule(`s8-${tag}`, text.replace(/^class: .*$/m, `class: zcl_l2_s8_${tag.replaceAll("-", "_")}`));
+    const edit = (from, to, text = TEXT) => {
+      expect(text, `the rule has ${JSON.stringify(from)}`).to.include(from);
+      return text.replace(from, to);
+    };
+    const refuse = (tag, text, at, reason) => refusedAt(write(tag, text), reason, at);
+    const compile = (tag, text) => compileRule(write(tag, text), {registry});
+    const alertShips = (model, ships, params) => evaluate(model, {zosd_l2_ship: ships.map(([ship_id, status]) => ({ship_id, name: ship_id, status})),
+      zosd_l2_voy: ships.map(([ship_id], i) => ({voyage_id: `V0000${i + 1}`, ship_id, dep_date: "20261005"}))}, {date: "20261001", ...params})
+      .map((a) => a.slice(0, 4));
+    const SHIPS = [["S001", "M"], ["S002", "D"], ["S003", "A"], ["S004", "N"], ["S005", "R"]];
+    const rows = (...list) => list.map(([sign, option, low, high]) => ({sign, option, low, ...(high ? {high} : {})}));
+
+    const NO_DEFAULT = `rule: restricted-no-default
+class: zcl_l2_s8_nodefault_run
+title: A ship whose status is in the table has no voyage ahead
+params:
+  restricted: {type: ZOSD_L2_SHIP-STATUS, range: true}
+for: ZOSD_L2_SHIP as ship
+when: ship.status in $restricted
+forbid:
+  exists: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+alert: "{ship.ship_id}: {voy.voyage_id}"
+boundaries: auto
+examples:
+  - name: omitted is every status
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}, {ship_id: S002, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}, {voyage_id: V00002, ship_id: S002, dep_date: 20261005}]
+    expect: ["S001: V00001", "S002: V00002"]
+  - name: a table keeps its statuses
+    date: 20261001
+    params: {restricted: [M]}
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}, {ship_id: S002, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}, {voyage_id: V00002, ship_id: S002, dep_date: 20261005}]
+    expect: ["S002: V00002"]
+`;
+    const BOTH = `rule: crew-of-a-needed-role
+class: zcl_l2_s8_require_run
+title: A ship in service has a crew member of a needed role aboard
+params:
+  roles: {type: ZOSD_L2_CREW-ROLE, range: true, default: [{sign: I, option: BT, low: C, high: D}]}
+  skipped: {type: ZOSD_L2_SHIP-NAME, range: true, default: [Tern]}
+for: ZOSD_L2_SHIP as ship
+when: ship.status = 'A' and ship.name not in $skipped
+require:
+  exists: ZOSD_L2_CREW as crew
+  where: crew.ship_id = ship.ship_id and crew.role in $roles
+alert: "{ship.ship_id}: nobody of a needed role aboard"
+boundaries: auto
+examples:
+  - name: a captain is within default
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}]
+      ZOSD_L2_CREW: [{crew_id: C00001, ship_id: S001, role: C, since: 20260101}]
+    expect: []
+  - name: an engineer is not
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}]
+      ZOSD_L2_CREW: [{crew_id: C00001, ship_id: S001, role: E, since: 20260101}]
+    expect: ["S001: nobody of a needed role aboard"]
+  - name: the E row excludes the captain
+    date: 20261001
+    params: {roles: [{sign: I, option: BT, low: A, high: Z}, {sign: E, option: EQ, low: C}]}
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}, {ship_id: S002, status: A}]
+      ZOSD_L2_CREW: [{crew_id: C00001, ship_id: S001, role: C, since: 20260101}, {crew_id: C00002, ship_id: S002, role: E, since: 20260101}]
+    expect: ["S001: nobody of a needed role aboard"]
+  - name: empty roles is any crew
+    date: 20261001
+    params: {roles: []}
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}, {ship_id: S002, status: A}]
+      ZOSD_L2_CREW: [{crew_id: C00002, ship_id: S002, role: E, since: 20260101}]
+    expect: ["S001: nobody of a needed role aboard"]
+  - name: empty skipped checks none
+    date: 20261001
+    params: {skipped: []}
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}]
+    expect: []
+`;
+
+    const NOT_IN = `rule: restricted-not-in
+class: zcl_l2_s8_notin
+title: A ship whose status is outside the table has a voyage ahead
+params:
+  allowed: {type: ZOSD_L2_SHIP-STATUS, range: true, default: [M, D]}
+for: ZOSD_L2_SHIP as ship
+when: ship.status not in $allowed
+forbid:
+  exists: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+alert: "{ship.ship_id}: {voy.voyage_id}"
+boundaries: auto
+examples:
+  - name: outside the default table
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+    expect: ["S001: V00001"]
+  - name: inside the default table
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+    expect: []
+  - name: an empty table holds no status
+    date: 20261001
+    params: {allowed: []}
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+    expect: []
+  - name: an E row alone
+    date: 20261001
+    params: {allowed: [{sign: E, option: EQ, low: M}]}
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, status: M}, {ship_id: S002, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}, {voyage_id: V00002, ship_id: S002, dep_date: 20261005}]
+    expect: ["S001: V00001"]
+`;
+
+    it("compiles to a range parameter, a condition on it, and nodes that trace to their rule lines", () => {
+      const model = compileRule(RESTRICTED, {registry});
+      const [parameter, exempt] = model.params;
+      expect(parameter).to.include({name: "restricted", is_selopt: true, ref: "iv_restricted", use: "lt_p_restricted", selopt_type: "tt_restricted", has_default: true});
+      expect(parameter.default_rows.map((r) => [r.sign, r.option, r.low])).to.deep.equal([["I", "EQ", "M"], ["I", "EQ", "D"]]);
+      for (const r of parameter.default_rows) expect(r.rule_line).to.equal(lineIn(TEXT, PARAM_AT));
+      const condition = model.when.conditions[0];
+      expect(condition).to.include({op: "IN", lhs: "ship~status", sref: "lt_p_restricted", text: "ship.status in $restricted"});
+      expect(condition.cmp.rhs).to.deep.equal({kind: "range", name: "restricted"});
+      expect(model.when.conditions[1]).to.include({op: "NOT IN", lhs: "ship~ship_id", sref: "lt_p_exempt", text: "ship.ship_id not in $exempt"});
+      expect(exempt.default_rows.map((r) => [r.sign, r.option, r.low, r.high])).to.deep.equal([["I", "BT", "S900", "S999"]]);
+      const abap = readFileSync(join(OUT, "zcl_l2_ship_restricted.clas.abap"), "utf8").split("\n");
+      const trace = JSON.parse(readFileSync(join(OUT, "zcl_l2_ship_restricted.clas.trace.json"), "utf8"));
+      const usage = trace.lines.find((entry) => /ship~status IN lt_p_restricted/.test(abap[entry.line - 1]));
+      expect(usage).to.include({rule_line: lineIn(TEXT, WHEN_AT), param_rule_line: lineIn(TEXT, PARAM_AT)});
+      const filled = trace.lines.find((entry) => /ls_p_restricted-low = 'D'/.test(abap[entry.line - 1]));
+      expect(filled).to.include({rule_line: lineIn(TEXT, PARAM_AT)});
+    });
+
+    it("the class takes the range as its own table type, optional, and a default fills it only when it is not supplied", () => {
+      const check = readFileSync(join(OUT, "zcl_l2_ship_restricted.clas.abap"), "utf8");
+      expect(check).to.include("      ls_p_exempt-option = 'BT'.\n      ls_p_exempt-low = 'S900'.\n      ls_p_exempt-high = 'S999'.\n");
+      for (const line of ["    TYPES tt_restricted TYPE RANGE OF zosd_l2_ship-status.\n", "                iv_restricted TYPE tt_restricted OPTIONAL\n",
+        "    IF iv_restricted IS SUPPLIED.\n      lt_p_restricted = iv_restricted.\n    ELSE.\n", "      WHERE ship~status IN lt_p_restricted\n        AND ship~ship_id NOT IN lt_p_exempt\n", "                iv_exempt TYPE tt_exempt OPTIONAL\n"]) {
+        expect(check).to.include(line);
+      }
+      const test = readFileSync(join(OUT, "zcl_l2_ship_restricted.clas.testclasses.abap"), "utf8");
+      expect(test).to.include("iv_restricted TYPE zcl_l2_ship_restricted=>tt_restricted OPTIONAL");
+      expect(test, "the nested reference form asks the same question").to.include("      WHERE status IN lt_p_restricted\n");
+      expect(test, "a case that sets the table builds it from rows").to.include("    DATA lt_p_restricted TYPE zcl_l2_ship_restricted=>tt_restricted.\n");
+      expect(test).to.include("zcl_l2_ship_restricted=>check( iv_date = '20261001' it_range = lt_range iv_restricted = lt_p_restricted )");
+    });
+
+    it("without a default the parameter is read directly: an empty table is every value", () => {
+      const model = compile("nodefault", NO_DEFAULT);
+      expect(model.params[0]).to.not.have.property("has_default");
+      expect(model.params[0].use).to.equal("iv_restricted");
+    });
+
+    it("refuses what is not a range parameter, at the line of the parameter or of the condition", () => {
+      for (const [tag, from, to, at, reason] of [
+        ["option", "default: [M, D]", "default: [{sign: I, option: NE, low: M}]", PARAM_AT, /^unknown option "NE" \(EQ or BT\)/],
+        ["sign", "default: [M, D]", "default: [{sign: X, option: EQ, low: M}]", PARAM_AT, /^unknown sign "X" \(I or E\)/],
+        ["key", "default: [M, D]", "default: [{sign: I, option: EQ, low: M, lo: X}]", PARAM_AT, /^unknown range key lo/],
+        ["eq-high", "default: [M, D]", "default: [{sign: I, option: EQ, low: M, high: D}]", PARAM_AT, /^an EQ range row has no high/],
+        ["bt-no-high", "default: [M, D]", "default: [{sign: I, option: BT, low: M}]", PARAM_AT, /^a range row needs high/],
+        ["bt-reversed", "default: [M, D]", "default: [{sign: I, option: BT, low: M, high: D}]", PARAM_AT, /^range row is BT from M to D: low is above high/],
+        ["misfit", "default: [M, D]", "default: [M, MM]", PARAM_AT, /^range low must fit CHAR 1: 'MM' is 2 characters, longer than CHAR 1/],
+        ["scalar-default", "default: [M, D]", "default: M", PARAM_AT, /must be a list of rows/],
+        ["flag", "range: true", "range: yes", PARAM_AT, /^range is true or false, not "yes"/],
+        ["string", "type: ZOSD_L2_SHIP-STATUS, range", "type: STRING, range", PARAM_AT, /^parameter \$restricted is a range over STRG/],
+        ["long-name", "restricted: {type", `${"r".repeat(25)}: {type`, new RegExp(`${"r".repeat(25)}: \\{type`), /^range parameter r{25} must be at most 24 characters/],
+        ["not-a-range", ", range: true, default: [M, D]", ", default: A", WHEN_AT, /^ship\.status in \$restricted: \$restricted is not a range parameter \(declare it with range: true\)/],
+        ["scalar-op", "when: ship.status in $restricted", "when: ship.status = $restricted", WHEN_AT, /^\$restricted is a range parameter: write ship\.status in \$restricted or not in \$restricted/],
+        ["date", "when: ship.status in $restricted", "when: ship.status in $date", WHEN_AT, /^ship\.status in \$date: \$date is a date, not a range/],
+        ["literal", "when: ship.status in $restricted", "when: ship.status in 'M'", WHEN_AT, /^in takes a range parameter \(\$name\), found 'M'/],
+        ["left", "when: ship.status in $restricted", "when: $restricted in ship.status", WHEN_AT, /^in takes a range parameter/],
+        ["type", "when: ship.status in $restricted", "when: ship.name in $restricted", WHEN_AT, /^ship\.name is CHAR 30, \$restricted is a range of CHAR 1/],
+        ["example", "    rows:\n      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]", "    params: {restricted: [MM]}\n    rows:\n      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]", /params: \{restricted: \[MM\]\}/, /^range low must fit CHAR 1/],
+        ["example-option", "params: {restricted: [A]}", "params: {restricted: [{sign: I, option: CP, low: A}]}", /params: \{restricted: \[\{sign: I, option: CP/, /^unknown option "CP"/],
+        ["example-name", "params: {restricted: [A]}", "params: {restrict: [A]}", /params: \{restrict:/, /^unknown example parameter \$restrict/],
+      ]) refuse(tag, edit(from, to), at, reason);
+      expect(readFileSync(write("x", TEXT), "utf8")).to.include("range: true");
+    });
+
+    it("`in` of a range and `not in` meet Open SQL's selection table: an empty table is every value, so `not in` of it is none", () => {
+      const model = compileRule(RESTRICTED, {registry});
+      const A = ["S001", "S002", "S003", "S004", "S005"];
+      expect(alertShips(model, SHIPS, {})).to.deep.equal(["S001", "S002"]);
+      expect(alertShips(model, SHIPS, {restricted: []})).to.deep.equal(A);
+      expect(alertShips(model, SHIPS, {restricted: rows(["E", "EQ", "M"])})).to.deep.equal(["S002", "S003", "S004", "S005"]);
+      expect(alertShips(model, SHIPS, {restricted: rows(["I", "BT", "A", "M"], ["E", "EQ", "D"])})).to.deep.equal(["S001", "S003"]);
+      expect(alertShips(model, SHIPS, {restricted: rows(["I", "EQ", "A"], ["E", "BT", "A", "Z"])})).to.deep.equal([]);
+      const not = compile("not-in", NOT_IN);
+      expect(not.when.conditions[0]).to.include({op: "NOT IN", text: "ship.status not in $allowed"});
+      expect(alertShips(not, SHIPS, {})).to.deep.equal(["S003", "S004", "S005"]);
+      expect(alertShips(not, SHIPS, {allowed: []})).to.deep.equal([]);
+      expect(alertShips(not, SHIPS, {allowed: rows(["E", "EQ", "M"])})).to.deep.equal(["S001"]);
+      expect(alertShips(not, SHIPS, {allowed: rows(["I", "BT", "A", "M"], ["E", "EQ", "D"])})).to.deep.equal(["S002", "S004", "S005"]);
+    });
+
+    const caseKinds = (model) => model.cases.filter((c) => c.derived.condition === "when/1");
+    const paramsOf = (model, c, name = "restricted") => ({date: c.date.value, [name]: (c.param_args.find((a) => a.ref === `iv_${name}`)?.rows
+      ?? model.params[0].default_rows).map(({sign, option, low, high}) => ({sign, option, low, ...(high ? {high} : {})}))});
+    // the model with its one range comparison replaced by a mutant of it
+    const mutated = (model, leaf) => ({...model, when: {...model.when, conditions: model.when.conditions.map((c, i) => i === 0 ? leaf : c)}});
+    const killers = (model, c) => {
+      const cond = model.when.conditions[0];
+      const expected = JSON.stringify(c.expect.map((e) => e.value));
+      const params = paramsOf(model, c);
+      const differs = (leaf) => JSON.stringify(evaluate(mutated(model, leaf), rowsOfCase(c), params)) !== expected;
+      return {
+        always: differs({...cond, constant: true}), never: differs({...cond, constant: false}),
+        flipped: differs({...cond, cmp: {...cond.cmp, op: cond.cmp.op === "IN" ? "NOT IN" : "IN"}}),
+        exclusions: differs({...cond, cmp: {...cond.cmp, rhs: {...cond.cmp.rhs, exclusions_ignored: true}}}),
+        emptyNone: differs({...cond, cmp: {...cond.cmp, rhs: {...cond.cmp.rhs, empty_is_none: true}}}),
+      };
+    };
+
+    it("derives a value in the table, one outside it, the table emptied and an E row added, and each one kills its own mutant", () => {
+      const model = compileRule(RESTRICTED, {registry});
+      const cases = caseKinds(model);
+      expect(cases.map((c) => [c.method, c.derived.kind])).to.deep.equal([["b_status_in", "in"], ["b_status_out", "out"], ["b_status_empty", "empty"], ["b_status_excl", "excl"]]);
+      const [inCase, outCase, emptyCase, exclCase] = cases;
+      const status = (c) => rowsOfCase(c).zosd_l2_ship[0].status;
+      expect(["M", "D"]).to.include(status(inCase));
+      expect(["M", "D"]).to.not.include(status(outCase));
+      expect(inCase.expect).to.have.length(1);
+      expect(outCase.expect).to.have.length(0);
+      // the emptied table is an argument of the case, and every status passes
+      expect(emptyCase.param_args.find((a) => a.ref === "iv_restricted").rows).to.deep.equal([]);
+      expect(["M", "D"]).to.not.include(status(emptyCase));
+      expect(emptyCase.expect).to.have.length(1);
+      // the E row cuts the value that was in
+      const added = exclCase.param_args.find((a) => a.ref === "iv_restricted").rows.map((r) => [r.sign, r.option, r.low]);
+      expect(added).to.deep.equal([["I", "EQ", "M"], ["I", "EQ", "D"], ["E", "EQ", status(exclCase)]]);
+      expect(exclCase.expect).to.have.length(0);
+      const k = Object.fromEntries(cases.map((c) => [c.derived.kind, killers(model, c)]));
+      expect(k.in, "in: in turned into not in, or never").to.include({flipped: true, never: true, always: false});
+      expect(k.out, "out: the range ignored").to.include({always: true, flipped: true, never: false});
+      expect(k.empty, "empty: an empty table read as no value").to.include({emptyNone: true, flipped: true});
+      expect(k.excl, "excl: the E rows dropped").to.include({exclusions: true, always: true});
+      for (const c of cases) expect(caseDiscriminates(model, conditionOf(model, "when/1"), rowsOfCase(c), paramsOf(model, c)), c.method).to.equal(true);
+    });
+
+    it("the reviewer's view of the cases names the table a case sets for itself", () => {
+      const view = describeCases(compileRule(RESTRICTED, {registry}));
+      expect(view).to.include("b_status_empty  [when/1, rule line");
+      expect(view).to.include("  $restricted: (empty table)\n");
+      expect(view).to.include("  $restricted: I EQ M, I EQ D, E EQ M\n");
+      expect(view.match(/^  \$restricted:/gm), "only the two cases that set one").to.have.length(2);
+    });
+
+    it("an empty default has no value outside it, and says so; an E row alone still derives its cases", () => {
+      const model = compile("empty-default", NO_DEFAULT.replace("range: true}", "range: true, default: []}"));
+      expect(caseKinds(model).map((c) => c.derived.kind)).to.deep.equal(["in", "excl"]);
+      expect(model.skipped.find((k) => k.condition === "ship.status in $restricted"))
+        .to.deep.include({reason: "no value outside the range: an empty range holds every value"});
+    });
+
+    it("under `not in` the cases are the same four, and the empty table is the one that holds for no value", () => {
+      const model = compile("not-in-cases", NOT_IN);
+      const cases = caseKinds(model);
+      expect(cases.map((c) => c.derived.kind)).to.deep.equal(["in", "out", "empty", "excl"]);
+      for (const c of cases) expect(caseDiscriminates(model, conditionOf(model, "when/1"), rowsOfCase(c), paramsOf(model, c, "allowed")), c.method).to.equal(true);
+      const alerting = Object.fromEntries(cases.map((c) => [c.derived.kind, c.expect.length]));
+      expect(alerting).to.deep.equal({in: 0, out: 1, empty: 0, excl: 1});
+    });
+
+    it("the committed class runs its twelve examples and fifteen derived cases against check_reference in ABAP", async () => {
+      await import("./start.mjs");
+      const result = await new UnitRun(new ObjectStore()).runDetached("CLAS", "ZCL_L2_SHIP_RESTRICTED");
+      const model = compileRule(RESTRICTED, {registry});
+      expect(model.examples).to.have.length(12);
+      expect(model.cases).to.have.length(15);
+      expect(result.counts, JSON.stringify(result.testClasses)).to.include({methods: 27, passed: 27, failed: 0});
+    });
+
+    it("without a default the class passes the table straight to the query, and the examples run in ABAP", async () => {
+      await import("./start.mjs");
+      const file = writeRule("s8-nodefault-run", NO_DEFAULT);
+      const {model, results} = await runRule(file, "zcl_l2_s8_nodefault_run");
+      const abap = readFileSync(join(scratch, "s8-nodefault-run", "zcl_l2_s8_nodefault_run.clas.abap"), "utf8");
+      expect(abap).to.include("      WHERE ship~status IN iv_restricted\n");
+      expect(abap).to.not.include("IS SUPPLIED");
+      expect(Object.keys(results)).to.have.length(model.examples.length + model.cases.length);
+      expect(failed(results)).to.deep.equal([]);
+    });
+
+    it("`in` in a require's subquery and `not in` in a when, with defaults of BT rows, agree with check_reference in ABAP", async () => {
+      await import("./start.mjs");
+      const file = writeRule("s8-require-run", BOTH);
+      const {model, results} = await runRule(file, "zcl_l2_s8_require_run");
+      const abap = readFileSync(join(scratch, "s8-require-run", "zcl_l2_s8_require_run.clas.abap"), "utf8");
+      expect(abap).to.include("AND crew~role IN lt_p_roles");
+      expect(abap).to.include("ship~name NOT IN lt_p_skipped");
+      expect(abap).to.include("ls_p_roles-option = 'BT'.\n      ls_p_roles-low = 'C'.\n      ls_p_roles-high = 'D'.\n");
+      expect(model.cases.map((c) => c.method)).to.include.members(["b_role_in", "b_role_out", "b_role_empty", "b_role_excl",
+        "b_name_in", "b_name_out", "b_name_empty", "b_name_excl"]);
+      expect(failed(results)).to.deep.equal([]);
+    });
+
+    it("`not in` and an empty table (which holds for no value) agree with check_reference in ABAP", async () => {
+      await import("./start.mjs");
+      const {model, results} = await runRule(writeRule("s8-notin-run", NOT_IN), "zcl_l2_s8_notin");
+      const abap = readFileSync(join(scratch, "s8-notin-run", "zcl_l2_s8_notin.clas.abap"), "utf8");
+      expect(abap).to.include("      WHERE ship~status NOT IN lt_p_allowed\n");
+      expect(model.cases.map((c) => c.method)).to.include.members(["b_status_in", "b_status_out", "b_status_empty", "b_status_excl"]);
+      expect(Object.keys(results)).to.have.length(model.examples.length + model.cases.length);
+      expect(failed(results)).to.deep.equal([]);
+    });
+
+    it("keys( ) of a keys: true rule takes the range parameter too, and its examples run in ABAP", async () => {
+      await import("./start.mjs");
+      const busy = readFileSync(BUSY, "utf8").replace("class: zcl_l2_ship_busy", "class: zcl_l2_s8_keys").replace("when: ship.status <> 'D'", "when: ship.status in $watch")
+        .replace("keys: true\n", "keys: true\nparams:\n  watch: {type: ZOSD_L2_SHIP-STATUS, range: true, default: [A, M]}\n");
+      const {model, results} = await runRule(writeRule("s8-keys-run", busy), "zcl_l2_s8_keys");
+      const abap = readFileSync(join(scratch, "s8-keys-run", "zcl_l2_s8_keys.clas.abap"), "utf8");
+      expect(abap.split("IF iv_watch IS SUPPLIED.").length - 1, "the default is filled in check( ) and in keys( )").to.equal(2);
+      expect(abap).to.include("      WHERE ship~status IN lt_p_watch\n        AND voy~dep_date > iv_date\n        AND ship~ship_id IN it_range\n      ORDER BY ship~ship_id.");
+      expect(model.cases.filter((c) => c.keys_check).length, "every case also checks keys( )").to.equal(model.cases.length);
+      expect(Object.keys(results)).to.have.length(model.examples.length + model.cases.length);
+      expect(failed(results)).to.deep.equal([]);
+    });
+
+    describe("mutants of the generated ABAP", () => {
+      before(async () => { await import("./start.mjs"); });
+      const copy = (tag) => write(`mut-${tag}`, TEXT);
+      const run = (tag, mutate) => runRule(copy(tag), `zcl_l2_s8_mut_${tag}`, {mutate});
+
+      it("in turned into not in: the cases of a value in and a value out fail", async () => {
+        const {results} = await run("notin", mutateBoth("ship~status IN lt_p_restricted", "ship~status NOT IN lt_p_restricted"));
+        const red = failed(results);
+        for (const method of ["b_status_in", "b_status_out", "b_status_empty", "b_status_excl", "restricted_with_a_voyage_ahead", "active_ship_is_not_restricted"]) expect(red, method).to.include(method);
+      });
+
+      it("the table ignored: the case with a value outside it and the example of an active ship fail, and not against the reference alone", async () => {
+        const {results, messages} = await run("ignored", {"clas.abap": [["      WHERE ship~status IN lt_p_restricted\n        AND ship~ship_id NOT IN lt_p_exempt", "      WHERE ship~ship_id NOT IN lt_p_exempt"]]});
+        const red = failed(results);
+        expect(red).to.include.members(["b_status_out", "active_ship_is_not_restricted", "another_table_replaces_default"]);
+        for (const method of red) expect(messages[method], method).to.include("assert_same_as_reference");
+      });
+
+      it("the default never applied (the table always taken as supplied): every example that leans on the default fails", async () => {
+        const {results} = await run("nodefault", {"clas.abap": [["    IF iv_restricted IS SUPPLIED.", "    IF 1 = 1."]],
+          "clas.testclasses.abap": [["    IF iv_restricted IS SUPPLIED.", "    IF 1 = 1."]]});
+        const red = failed(results);
+        expect(red).to.include.members(["active_ship_is_not_restricted", "b_status_out"]);
+        expect(red).to.not.include("empty_table_is_every_status");
+      });
+
+      it("the default applied over a table that is supplied: the examples that give their own table fail", async () => {
+        const {results} = await run("override", {"clas.abap": [["    IF iv_restricted IS SUPPLIED.", "    IF 1 = 2."]],
+          "clas.testclasses.abap": [["    IF iv_restricted IS SUPPLIED.", "    IF 1 = 2."]]});
+        const red = failed(results);
+        expect(red).to.include.members(["another_table_replaces_default", "empty_table_is_every_status", "b_status_empty", "b_status_excl"]);
+        expect(red).to.not.include("restricted_with_a_voyage_ahead");
+      });
     });
   });
 });

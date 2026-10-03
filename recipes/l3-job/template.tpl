@@ -35,7 +35,13 @@ PARAMETERS {{screen}} TYPE c LENGTH 40 LOWER CASE.
 {{/chaos}}
 {{/settings.entries}}
 {{#params}}
+{{#is_selopt}}
+DATA {{sel}} TYPE {{type_name}}.
+SELECT-OPTIONS {{screen}} FOR {{sel}}.
+{{/is_selopt}}
+{{^is_selopt}}
 PARAMETERS {{screen}} TYPE {{type_name}}.
+{{/is_selopt}}
 {{/params}}
 {{#schedule}}
 PARAMETERS p_mode TYPE c LENGTH 1 DEFAULT 'R'.
@@ -83,7 +89,7 @@ START-OF-SELECTION.
 {{/resilience}}
 {{/schedule}}
 {{#params}}
-  ls_params-{{name}} = {{screen}}.
+  ls_params-{{name}} = {{screen}}{{#is_selopt}}[]{{/is_selopt}}.
 {{/params}}
   lv_bind = p_bind.
   ls_rule = {{class}}=>run_rule(

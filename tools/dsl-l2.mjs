@@ -21,6 +21,9 @@ import yaml from "js-yaml";
 import {DEFAULT_DDIC, DDIC_PROVIDER, Refusal, registryFor, unresolvedDeep} from "./dsl-ddic.mjs";
 import {compileParams} from "./dsl-l2-params.mjs";
 import {compileKeys, compileRange, exampleRange, keysCheck} from "./dsl-l2-range.mjs";
+import {caseSelopt, exampleSelopt, inComparison} from "./dsl-l2-selopt.mjs";
+import {capWarning, describeCases} from "./dsl-l2-describe.mjs";
+export {capWarning, describeCases};
 import {lineIndex, lineOf} from "./dsl-yaml-lines.mjs";
 import {INT_RANGE, PACKED, allReferences, canonical, compareValues, deriveCases, evaluate, kindOf, shiftDate} from "./dsl-l2-eval.mjs";
 
@@ -43,7 +46,7 @@ export class RuleError extends Error {
 
 const OPERATORS = ["<>", "<=", ">=", "=", "<", ">"];
 // the words of the condition language; none of them can be an alias
-export const KEYWORDS = new Set(["and", "or", "not", "as"]);
+export const KEYWORDS = new Set(["and", "or", "not", "as", "in"]);
 
 export function tokenize(text, fail) {
   const tokens = [];
@@ -164,10 +167,20 @@ class Parser {
     }
     return {op: "cmp", ...this.comparison()};
   }
-  // comparison := operand OP operand
+  // comparison := operand OP operand | operand ['not'] 'in' PARAM
   comparison() {
     const at = this.peek().column;
     const left = this.operand();
+    const word = this.peek();
+    const negated = this.keyword("not");
+    const following = this.tokens[this.at + 1];
+    if (this.keyword("in") || (negated && following?.kind === "ident" && following.value.toLowerCase() === "in")) {
+      if (negated) this.next();
+      this.next();
+      const right = this.operand();
+      if (right.kind !== "param") this.fail(`${negated ? "not in" : "in"} takes a range parameter ($name), found ${right.text} at column ${word.column}`);
+      return {left, cmp: negated ? "NOT IN" : "IN", right, at};
+    }
     const op = this.next();
     if (op.kind !== "op") this.fail(`expected a comparison operator (${OPERATORS.join(" ")}), found ${this.describe(op)}`);
     const right = this.operand();
@@ -648,16 +661,19 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   const comparison = (cmp, current, scope, nodeId, ruleLine) => {
     const fail = failAt(ruleLine);
     let {left, cmp: op, right} = cmp;
-    const written = `${cmp.left.text} ${cmp.cmp} ${cmp.right.text}`;
+    const written = `${cmp.left.text} ${cmp.cmp.toLowerCase()} ${cmp.right.text}`;
     const isCurrent = (o) => o.kind === "field" && o.alias === current.alias;
+    const inRange = op === "IN" || op === "NOT IN";
     for (const o of [left, right]) if (o.kind === "field") fieldOf(o, scope, fail);
     for (const o of [left, right]) {
       const names = o.kind === "param" ? [o.name] : o.kind === "window" && o.offset.kind === "param" ? [o.offset.name] : [];
       for (const name of names) {
         if (name !== "date" && !params.has(name)) fail(`unknown parameter $${name} (declare it under params:)`);
         if (name !== "date") usedParams.add(name);
+        if (name !== "date" && params.get(name).is_selopt && !inRange) fail(`$${name} is a range parameter: write ${left.kind === "field" ? left.text : "<field>"} in $${name} or not in $${name}`);
       }
     }
+    if (inRange) return inComparison({left, op, right, written, params, current, fieldOf, scope, fail, nodeId, ruleLine, typeText});
     if (!isCurrent(left) && isCurrent(right)) {
       [left, right] = [right, left];
       op = MIRROR[op];
@@ -733,7 +749,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
   const identity = ({cmp}) => {
     const rhs = cmp.rhs;
     const value = rhs.kind === "literal" ? (kindOf(cmp.type) === "char" ? rhs.value.replace(/ +$/, "") : canonical(cmp.type, rhs.value))
-      : rhs.kind === "param" ? `$${rhs.name}` : rhs.kind === "window" ? `$date${rhs.sign}${rhs.offset.kind === "param" ? `$${rhs.offset.name}` : rhs.offset.value}`
+      : rhs.kind === "param" || rhs.kind === "range" ? `$${rhs.name}` : rhs.kind === "window" ? `$date${rhs.sign}${rhs.offset.kind === "param" ? `$${rhs.offset.name}` : rhs.offset.value}`
         : `${rhs.alias}.${rhs.column}`;
     return `${cmp.alias}.${cmp.column} ${cmp.op} ${rhs.kind}:${value}`;
   };
@@ -803,6 +819,9 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
       conditions, tree, on: top.filter(isOn).map((t) => conditions[t.index]), rest: conjoin(top.filter((t) => !isOn(t))),
       info: inner.info, alertSpec: spec.value.alert, ...(aggregateSpec ? {aggregate: aggregateSpec} : {})};
   });
+  for (const parameter of params.values()) if (parameter.is_selopt && aliases.has(`p_${parameter.name}`)) {
+    failAt(parameter.rule_line)(`range parameter $${parameter.name} gives lt_p_${parameter.name}, which is the table of alias p_${parameter.name}`);
+  }
   for (const parameter of params.values()) if (!usedParams.has(parameter.name)) {
     failAt(parameter.rule_line)(`parameter $${parameter.name} is declared but unused`);
   }
@@ -1049,6 +1068,13 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
     const effectiveParams = {date};
     const paramArgs = [];
     for (const parameter of params.values()) {
+      if (parameter.is_selopt) {
+        // a range parameter: the example's rows, else the rule's default (else empty, which is every value)
+        const chosen = exampleSelopt({parameter, given: givenParams[parameter.name], at: `${base}/params/${parameter.name}`, exampleId, line, failAt, need, misfit, typeText});
+        effectiveParams[parameter.name] = chosen.rows;
+        if (chosen.arg) paramArgs.push(chosen.arg);
+        continue;
+      }
       const value = givenParams[parameter.name] ?? parameter.default;
       if (value === undefined) failAt(line(`${base}/params`))(`example ${JSON.stringify(label)} needs $${parameter.name} (no default)`);
       if (typeof value !== "string") failAt(line(`${base}/params/${parameter.name}`))(`$${parameter.name} must be a scalar`);
@@ -1168,7 +1194,7 @@ export function compileRule(file, {ddic = DEFAULT_DDIC, registry, out} = {}) {
       paramArgs: first.param_args ?? [], example: raw[0], reserved: methods});
     model.skipped = derived.skipped;
     model.cases = derived.cases.map((c) => caseNode(model, c));
-    if (keys) model.cases.forEach((node, i) => { node.keys_check = keysCheck({model, keys, rows: derived.cases[i].rows, params: {...exampleParams[0], $range: []}, line, failAt, evaluate, compareValues, testId: node["@id"], label: node.label}); });
+    if (keys) model.cases.forEach((node, i) => { node.keys_check = keysCheck({model, keys, rows: derived.cases[i].rows, params: {...(derived.cases[i].params ?? exampleParams[0]), $range: []}, line, failAt, evaluate, compareValues, testId: node["@id"], label: node.label}); });
   }
   // the path as given, for messages: not part of the model, so not hashed
   Object.defineProperty(model, "where", {value: where});
@@ -1213,6 +1239,9 @@ function caseNode(model, c) {
       })};
   }).filter(Boolean);
   const expect = c.expect.map((value, x) => expectNode(`${id}/expect/${x + 1}`, ruleLine, value));
+  // a case that sets a range parameter itself (the table emptied, an E row added) passes it as an argument
+  const parameter = c.given && model.params.find((p) => p.name === c.given.name);
+  const paramArgs = parameter ? [...(c.paramArgs ?? []).filter((a) => a.ref !== parameter.ref), caseSelopt({parameter, id, ruleLine, rows: c.given.rows})] : c.paramArgs ?? [];
   const label = c.label;
   const refWhy = misfit(`${label} (check against check_reference)`, STRG);
   if (refWhy) throw new Error(`derived case ${c.method}: ${refWhy}`);
@@ -1220,7 +1249,7 @@ function caseNode(model, c) {
     ref_label: `${label} (check against check_reference)`, "ref_label@type": STRG,
     derived: {condition: c.condition, kind: c.kind, structural: c.structural},
     date: {...literal(`${id}/date`, c.date, DATE_TYPE), call: `${model.class}=>check`},
-    ...(model.params ? {param_args: c.paramArgs ?? [], has_params: true} : {}),
+    ...(model.params ? {param_args: paramArgs, has_params: true} : {}),
     ...(model.range ? {range: model.range, range_args: []} : {}),
     tables,
     expect, long_expect: expect.some((x) => !x.single)};
@@ -1345,31 +1374,6 @@ export async function checkRule(file, out, options = {}) {
   } finally {
     rmSync(scratch, {recursive: true, force: true});
   }
-}
-
-// What a reviewer reads: each derived case, its rows, and the alerts the
-// interpreter expects of it.
-export function describeCases(model) {
-  const out = [`${model.where ?? model.source}: ${model.examples.length} example(s), ${model.cases.length} derived case(s)`];
-  for (const c of model.cases) {
-    out.push("", `${c.method}  [${c.derived.condition}, rule line ${c.rule_line}]  ${c.label}`, `  date ${c.date.value}`);
-    for (const t of c.tables) {
-      for (const r of t.rows) out.push(`  ${t.table}: ${r.fields.map((f) => `${f.column}=${JSON.stringify(f.value)}`).join(" ")}`);
-    }
-    for (const table of new Set(model.clauses.map((clause) => clause.table))) if (!c.tables.some((t) => t.table === table)) out.push(`  ${table}: (no rows)`);
-    out.push(c.expect.length ? `  expect: ${c.expect.map((e) => JSON.stringify(e.value)).join("\n          ")}` : "  expect: no alert");
-  }
-  for (const k of model.skipped ?? []) out.push("", `skipped ${k.condition}: ${k.reason}`);
-  return out.join("\n");
-}
-
-// Warns exactly when a derived case was skipped for the 64-row cap, naming
-// the cases (a threshold of 32 loses the two-group case, 64 a boundary).
-export function capWarning(model, file = model.where ?? model.source) {
-  const capped = (model.skipped ?? []).filter((item) => item.cap);
-  if (model.kind !== "limit" || !capped.length) return undefined;
-  const names = capped.map((item) => `${item.condition} (${item.case})`).join(", ");
-  return `${file}:${model.threshold.rule_line}: warning: the 64-row cap skips derived cases: ${names}; examples must cover them`;
 }
 
 async function main(args) {

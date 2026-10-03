@@ -118,3 +118,85 @@ export function shiftDate(text, dir) {
   if (ny < 1 || ny > 9999) return undefined;
   return `${String(ny).padStart(4, "0")}${String(nm).padStart(2, "0")}${String(nd).padStart(2, "0")}`;
 }
+
+// ---------------------------------------------------------------------------
+// the steps of a type and the values a derived case tries
+
+function stepTime(text, dir) {
+  if (!/^[0-9]{6}$/.test(text)) return undefined;
+  const h = Number(text.slice(0, 2)), m = Number(text.slice(2, 4)), s = Number(text.slice(4, 6));
+  if (h > 23 || m > 59 || s > 59) return undefined;
+  const total = h * 3600 + m * 60 + s + dir;
+  if (total < 0 || total > 86399) return undefined;
+  const two = (n) => String(n).padStart(2, "0");
+  return `${two(Math.floor(total / 3600))}${two(Math.floor(total / 60) % 60)}${two(total % 60)}`;
+}
+
+// One step of a type from a value: a day, a second, 1, or 10^-decimals;
+// undefined when the step leaves the type (255 + 1 for INT1, 99991231 + 1).
+export function stepValue(type, text, dir) {
+  const b = type.built_in;
+  if (b === "DATS") return shiftDate(text, dir);
+  if (b === "TIMS") return stepTime(text, dir);
+  if (b === "NUMC") {
+    if (!/^[0-9]+$/.test(text)) return undefined;
+    const n = BigInt(text) + BigInt(dir);
+    if (n < 0n || n >= 10n ** BigInt(type.length ?? 1)) return undefined;
+    return n.toString().padStart(type.length ?? 1, "0");
+  }
+  if (INTEGERS.has(b)) {
+    const n = BigInt(text) + BigInt(dir);
+    const [low, high] = INT_RANGE[b];
+    return n < low || n > high ? undefined : n.toString();
+  }
+  if (PACKED.has(b)) {
+    const decimals = type.decimals ?? 0;
+    const n = scaled(text, decimals) + BigInt(dir);
+    if ((n < 0n ? -n : n).toString().length > (type.length ?? 0)) return undefined;
+    return formatDecimal(n, decimals);
+  }
+  return undefined;
+}
+
+const ORDER = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+// A different text of the same length: the last character one place along.
+export function bump(text, dir) {
+  if (text === "") return dir > 0 ? "A" : undefined;
+  const last = text.at(-1);
+  const at = ORDER.indexOf(last);
+  let next;
+  if (at >= 0) next = ORDER[at + dir];
+  else {
+    const c = String.fromCharCode(last.charCodeAt(0) + dir);
+    next = /[ -~]/.test(c) && c !== "'" && c !== "`" ? c : undefined;
+  }
+  return next === undefined ? undefined : text.slice(0, -1) + next;
+}
+
+// a value that is not `text`: one step along if the type has one, else a
+// different character
+export function different(type, text) {
+  if (isOrdered(type)) return stepValue(type, text, 1) ?? stepValue(type, text, -1);
+  return bump(text, 1) ?? bump(text, -1);
+}
+
+// a type-correct value to fill a field with, `seed` making keys differ
+export function defaultValue(type, seed = 1) {
+  const b = type.built_in;
+  if (b === "DATS") return "20260101";
+  if (b === "TIMS") return "120000";
+  if (b === "NUMC") return String(seed).padStart(type.length ?? 1, "0").slice(-(type.length ?? 1));
+  if (INTEGERS.has(b)) return b === "INT1" ? String(seed % 256) : String(seed);
+  if (PACKED.has(b)) {
+    // the seed as a whole number when the integer digits hold it, else as
+    // the scaled digits themselves: a DEC 3,2 takes 5.00 but not 500.00
+    const decimals = type.decimals ?? 0;
+    const digits = BigInt(type.length ?? decimals + 1);
+    const whole = BigInt(seed) * 10n ** BigInt(decimals);
+    return formatDecimal(whole < 10n ** digits ? whole : BigInt(seed) % 10n ** digits, decimals);
+  }
+  if (b === "RAW") return "AB";
+  const length = b === "STRG" || type.length === undefined ? 8 : type.length;
+  return ("A" + String(seed).padStart(Math.max(length - 1, 0), "0")).slice(0, Math.max(length, 1));
+}
