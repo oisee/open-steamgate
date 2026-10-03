@@ -124,6 +124,11 @@ export function installDaemons(abap) {
     const row = active.getStore(), handler = value(i_timer_handler);
     if (row) { clock.clearTimer(row.timers.get(handler)); row.timers.delete(handler); }
   }};
-  abap.Classes.CL_ABAP_TIMER_MANAGER.get_timer_manager = async () => ref(abap, timer);
+  // inside a daemon callback the daemon's manager; anywhere else whatever was there before (an APC
+  // session's, or the session_type_not_supported refusal a system gives outside such a session)
+  const Timer = abap.Classes.CL_ABAP_TIMER_MANAGER, before = Timer.get_timer_manager;
+  Timer.get_timer_manager = async function (input) {
+    return active.getStore() ? ref(abap, timer) : before.call(this, input);
+  };
   return host;
 }

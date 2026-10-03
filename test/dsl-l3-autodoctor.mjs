@@ -18,7 +18,7 @@ const SET = 'src/l2demo/fleet2.l3.yaml';
 const tables = ['pile','stage','work','run','doctor','kill','conf','conf_log','run_conf','budget','event','object','alert','runstat','watch'].map((s) => `zosd_l3_${s}`);
 describe('DSL L3 5e: autonomous doctor', function () {
   this.timeout(900000);
-  let abap, dir, native, store, clock, restore, client, env;
+  let abap, dir, native, store, clock, restore, client, env, prior, priorContext, classes;
   const cls = () => abap.Classes.ZCL_L3_FLEET2;
   const str = (s) => new abap.types.String().set(s);
   const sql = async (s) => client.execute(s);
@@ -87,11 +87,15 @@ describe('DSL L3 5e: autonomous doctor', function () {
   }
   before(async () => {
     await import('./start.mjs');
+    // the suite re-initializes the runtime on its own file database; the next suite in the same
+    // process gets the context, connections and classes it had (as dsl-l3-harden does)
+    prior = globalThis.abap;
+    priorContext = {...prior.context, databaseConnections: {...prior.context.databaseConnections}, RFCDestinations: {...prior.context.RFCDestinations}};
     dir = mkdtempSync(join(tmpdir(), 'l3-autodoctor-'));
     env = Object.fromEntries(['STG_DB','STG_DB_PATH','OSD_OPERATIONS_DB'].map((k)=>[k, process.env[k]]));
     process.env.STG_DB='file'; process.env.STG_DB_PATH=join(dir,'business.sqlite'); process.env.OSD_OPERATIONS_DB=join(dir,'operations.sqlite');
     await (await import('../output/init.mjs')).initializeABAP();
-    abap=globalThis.abap; client=abap.context.databaseConnections.DEFAULT;
+    abap=globalThis.abap; client=abap.context.databaseConnections.DEFAULT; classes={...abap.Classes};
     native = new DatabaseSync(process.env.STG_DB_PATH);
     store=new BatchRuns(process.cwd(),process.env);
     clock=manualClock('2026-10-01T00:00:00Z');restore=installAbapClock(abap,clock);
@@ -108,6 +112,8 @@ describe('DSL L3 5e: autonomous doctor', function () {
   after(async () => {
     if (abap) await daemonHost(abap).close();
     restore?.();store?.close();native?.close();await client?.disconnect();
+    if (abap && classes) { for (const key of Object.keys(abap.Classes)) if (!(key in classes)) delete abap.Classes[key]; Object.assign(abap.Classes, classes); }
+    if (prior) { Object.assign(prior.context, priorContext); globalThis.abap = prior; }
     for (const [k,v] of Object.entries(env ?? {})) if (v===undefined) delete process.env[k];else process.env[k]=v;
     if(dir)rmSync(dir,{recursive:true,force:true});
   });
