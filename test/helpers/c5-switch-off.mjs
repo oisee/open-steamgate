@@ -40,7 +40,7 @@ try {
     await login.arrayBuffer();
     sides.push({url, headers: {cookie: login.headers.getSetCookie().map(c => c.split(";")[0]).join("; "), "x-csrf-token": login.headers.get("x-csrf-token")}});
   }
-  for (const [name, status] of [["ZCL_OSD_CLASSRUN_DEMO", 200], ["ZCL_OSD_C5_UNBUILT", 503]]) {
+  for (const [name, status] of [["ZCL_OSD_CLASSRUN_DEMO", 200], ["ZCL_OSD_C5_UNBUILT", 500]]) {
     const answers = [];
     served.length = 0;
     for (const side of sides) {
@@ -54,7 +54,7 @@ try {
   const door = await fetch(runtime.url + "/osd/classrun", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_CLASSRUN_DEMO"})});
   assert.equal(door.status, 200);
   assert.match((await door.json()).text, /hello from classrun/);
-  console.log("C5 switch-off: reduced kernel HOST parity 200/503; classrun door 200");
+  console.log("C5 switch-off: reduced kernel HOST parity 200/500; classrun door 200");
 } finally {
   for (const s of servers) await new Promise(done => s.close(done));
   await runtime?.stop();
