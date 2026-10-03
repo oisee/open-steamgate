@@ -102,6 +102,12 @@
           "default": "vscode",
           "description": "Where a page of the running system opens from the OSD tree (the Fiori Launchpad, an App, ICF or OData row, $metadata, the /osd/* endpoints): a tab inside VS Code (the default; one tab per page, reused) or the system browser. Every such node also has an inline link-external action and an \"Open in External Browser\" context item that always use the system browser. A single click on an expandable row shows service details; APC has no page to open."
         },
+        "osd.jobs.worker": {
+          "type": "string",
+          "enum": ["auto", "off", "on"],
+          "default": "auto",
+          "description": "Start and supervise the background job worker with the local system. auto enables it for shared file or server databases; off disables it. In-memory databases cannot share jobs."
+        },
         "osd.database.system": {
           "type": "string",
           "enum": ["sqlite", "postgres", "hana", "duckdb"],
