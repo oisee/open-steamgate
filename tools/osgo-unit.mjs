@@ -19,11 +19,11 @@ export async function main(args = process.argv.slice(2)) {
   if (args.includes("--help") || args.includes("-h")) { console.log(help); return 0; }
   const json = args.includes("--json");
   let staging, result, warnings = [];
+  const selected = [];
   try {
     const root = resolve(import.meta.dirname, "..");
     if (compiled) throw new Error("osd unit --go requires a checkout: the binary carries neither Go nor the gogen tree. Run npm run osgo:unit -- <dir>.");
     let directory, jobs = 4;
-    const selected = [];
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
       if (arg === "--json" || arg === "--kernel-strict") continue;
@@ -40,7 +40,10 @@ export async function main(args = process.argv.slice(2)) {
     if (!directory) throw new Error("<dir> is required; use --help for usage");
     const staged = stageInput(directory, selected, "osgo-unit");
     staging = staged.staging;
-    warnings = kernelWarnings(staged.input ?? directory);
+    try { warnings = kernelWarnings(staged.input ?? directory); }
+    catch (error) {
+      warnings = [{kind: "scanner-error", message: `Kernel compatibility scanner failed: ${String(error.message ?? error).replace(/\s+/g, " ")}`}];
+    }
     const {chosen, input} = staged;
     result = staged.result;
     if (!result) {
@@ -59,7 +62,7 @@ export async function main(args = process.argv.slice(2)) {
   } catch (error) {
     result = {classes: 0, compiled: 0, rows: [{status: "ERROR", message: error.message}], timingMs: {}};
   } finally { if (staging) rmSync(staging, {recursive: true, force: true}); }
-  const summary = summarize(applyKernelWarnings(result, warnings, args.includes("--kernel-strict")));
+  const summary = summarize(applyKernelWarnings(result, warnings, args.includes("--kernel-strict"), selected));
   printResult(summary.result, json);
   return summary.code;
 }

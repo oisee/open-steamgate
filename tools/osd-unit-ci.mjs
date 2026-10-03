@@ -99,16 +99,17 @@ export function kernelWarnings(input) {
   return warnings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 }
 
-export function applyKernelWarnings(result, warnings, strict = false) {
+export function applyKernelWarnings(result, warnings, strict = false, selected = []) {
   for (const warning of warnings) console.error(warning.message);
+  const findings = warnings.filter((w) => w.kind === "kernel-reject");
   const rows = result.rows.map((row) => {
-    const alerts = warnings.filter((w) => ownerOf(w.file) === row.class).map((w) => w.message);
+    const alerts = findings.filter((w) => ownerOf(w.file) === row.class).map((w) => w.message);
     return alerts.length ? {...row, alerts: [...(row.alerts ?? []), ...alerts],
-      ...(strict ? {status: "ERROR", message: [row.message, ...alerts].filter(Boolean).join("\n")} : {})} : row;
+      ...(strict && (!selected.length || selected.includes(row.class)) ? {status: "ERROR", message: [row.message, ...alerts].filter(Boolean).join("\n")} : {})} : row;
   });
-  if (strict) for (const owner of new Set(warnings.map((w) => ownerOf(w.file)))) {
-    if (rows.some((r) => r.class === owner)) continue;
-    const alerts = warnings.filter((w) => ownerOf(w.file) === owner).map((w) => w.message);
+  if (strict) for (const owner of new Set(findings.map((w) => ownerOf(w.file)))) {
+    if ((selected.length && !selected.includes(owner)) || rows.some((r) => r.class === owner)) continue;
+    const alerts = findings.filter((w) => ownerOf(w.file) === owner).map((w) => w.message);
     rows.push({class: owner, status: "ERROR", message: alerts.join("\n"), alerts});
   }
   return {...result, rows, warnings};

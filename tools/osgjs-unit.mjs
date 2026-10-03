@@ -54,9 +54,9 @@ export async function main(args = process.argv.slice(2)) {
   if (args.includes("--help") || args.includes("-h")) { console.log(help); return 0; }
   const json = args.includes("--json");
   let staging, result, warnings = [];
+  const selected = [];
   try {
     let directory;
-    const selected = [];
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
       if (arg === "--json" || arg === "--kernel-strict") continue;
@@ -70,7 +70,10 @@ export async function main(args = process.argv.slice(2)) {
     if (!directory) throw new Error("<dir> is required; use --help for usage");
     const staged = stageInput(directory, selected, "osgjs-unit");
     staging = staged.staging;
-    warnings = kernelWarnings(staged.input ?? directory);
+    try { warnings = kernelWarnings(staged.input ?? directory); }
+    catch (error) {
+      warnings = [{kind: "scanner-error", message: `Kernel compatibility scanner failed: ${String(error.message ?? error).replace(/\s+/g, " ")}`}];
+    }
     result = staged.result;
     if (!result) {
       const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
@@ -92,7 +95,7 @@ export async function main(args = process.argv.slice(2)) {
     result = {classes: 0, compiled: 0, rows: [{status: "ERROR", message: error.message}], overrides: []};
   } finally { if (staging) rmSync(staging, {recursive: true, force: true}); }
   result.overrides ??= [];
-  const summary = summarize(applyKernelWarnings(result, warnings, args.includes("--kernel-strict")));
+  const summary = summarize(applyKernelWarnings(result, warnings, args.includes("--kernel-strict"), selected));
   printResult(summary.result, json);
   return summary.code;
 }

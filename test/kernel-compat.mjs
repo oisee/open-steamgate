@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {applyKernelWarnings, kernelWarnings, summarize} from "../tools/osd-unit-ci.mjs";
 
@@ -74,6 +74,64 @@ ENDMETHOD. ENDCLASS.
     assert.equal(result.result.rows[1].class, "ZCL_KERNEL_COMPAT");
     assert.equal(result.result.rows[1].status, "ERROR");
   });
+  for (const runner of ["osgo", "osgjs"]) {
+    it(`${runner}: scanner failures preserve rows and exit codes, including strict mode`, () => {
+      const temp = mkdtempSync(join(root, ".local/kernel-scanner-error-"));
+      try {
+        const preload = join(temp, "throw-scanner.mjs");
+        // Fail the scanner's lazy dependency lookup in the parent only. Child
+        // compilers receive no preload and still execute the real Unit path.
+        writeFileSync(preload, `import {registerHooks} from "node:module";
+registerHooks({resolve(specifier, context, nextResolve) {
+  if (specifier === "@abaplint/transpiler/package.json") throw new Error("forced scanner failure");
+  return nextResolve(specifier, context);
+}});
+`);
+        const baseline = spawnSync(process.execPath, [`tools/${runner}-unit.mjs`, validFixture, "--json"],
+          {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6});
+        assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
+        const expectedResult = JSON.parse(baseline.stdout);
+        for (const strict of [false, true]) {
+          const run = spawnSync(process.execPath, ["--import", preload, `tools/${runner}-unit.mjs`, validFixture,
+            "--json", ...(strict ? ["--kernel-strict"] : [])],
+          {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6});
+          assert.equal(run.error, undefined);
+          assert.equal(run.status, baseline.status, run.stdout + run.stderr);
+          const result = JSON.parse(run.stdout);
+          assert.deepEqual(result.rows, expectedResult.rows);
+          assert.deepEqual(result.totals, expectedResult.totals);
+          assert.deepEqual(result.warnings, [{kind: "scanner-error", message: "Kernel compatibility scanner failed: forced scanner failure"}]);
+          assert.equal(run.stderr.split("\n").filter((line) => line === result.warnings[0].message).length, 1);
+        }
+      } finally { rmSync(temp, {recursive: true, force: true}); }
+    });
+    it(`${runner}: strict class selection keeps unselected warnings without ERROR rows`, () => {
+      const temp = mkdtempSync(join(root, ".local/kernel-selected-"));
+      try {
+        cpSync(validFixture, temp, {recursive: true});
+        cpSync(fixture, temp, {recursive: true});
+        // JS builds all input classes, so the unselected owner's invalid
+        // slice may still produce compiler diagnostics for the selected owner.
+        // Strict mode must preserve those outcomes and add no unselected row.
+        const options = {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6};
+        const args = [`tools/${runner}-unit.mjs`, temp, "--json", "--class", "ZCL_KERNEL_VALID"];
+        const baseline = spawnSync(process.execPath, args, options);
+        assert.equal(baseline.error, undefined);
+        const before = JSON.parse(baseline.stdout);
+        const run = spawnSync(process.execPath, [...args, "--kernel-strict"], options);
+        assert.equal(run.error, undefined);
+        assert.equal(run.status, baseline.status, run.stdout + run.stderr);
+        const result = JSON.parse(run.stdout);
+        assert.deepEqual(result.warnings.map((w) => w.line), expected);
+        assert.deepEqual(result.rows.map((r) => [r.class, r.status]), before.rows.map((r) => [r.class, r.status]));
+        assert.ok(result.rows.length > 0);
+        assert.ok(result.rows.every((r) => r.class === "ZCL_KERNEL_VALID" && r.status !== "ERROR"));
+        assert.deepEqual(result.totals, before.totals);
+        for (const warning of result.warnings)
+          assert.equal(run.stderr.split("\n").filter((line) => line === warning.message).length, 1);
+      } finally { rmSync(temp, {recursive: true, force: true}); }
+    });
+  }
   it("reports warnings with no Unit owner, preserving exit 3 unless strict", () => {
     const temp = mkdtempSync(join(root, ".local/kernel-no-owner-"));
     try {
