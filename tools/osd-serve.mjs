@@ -14,7 +14,7 @@ import {previewSQL} from "./adt-preview-sql.mjs";
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
 import {timingSafeEqual} from "node:crypto";
-import {dialogStep, exclusive, outsideStepContext, workProcess} from "./osd-dialog-step.mjs";
+import {dialogStep, exclusive, workProcess} from "./osd-dialog-step.mjs";
 import {bootGuard} from "./osd-boot-guard.mjs";
 import {HotLoader, applyRuntimeHotSwap, warmVerdict} from "./osd-hot.mjs";
 import {ensureDemoData} from "./osd-demo-data.mjs";
@@ -29,8 +29,7 @@ import {applyAtStartup, currentRows} from "./osd-icf-apply.mjs";
 import {seedAtStartup} from "./osd-xref-seed.mjs";
 import {mountChannels} from "./osd-apc.mjs";
 import {Data} from "./osd-data.mjs";
-import {dumpOf} from "./osd-where.mjs";
-import {persistDump} from "./osd-dumps.mjs";
+import {createDumpRecorder} from "./osd-dumps.mjs";
 import {serveSandboxConfig} from "./osd-sandbox-config.mjs";
 import {mountPortableCells} from "./sqlscript-to-procedure-ir.mjs";
 import {batchMonitorHandler, batchCountsHandler} from "./osd-batch-monitor.mjs";
@@ -259,29 +258,17 @@ hostNodes.serving = (a, node) => a.get(node.path, function (req, res) {
 // generated position through the source map beside each module; the maps
 // are written by the transpiler (write_source_map) and point back into the
 // tree from wherever the generation lives.
-const dumps = [];
-function dump(error, request) {
-  const d = dumpOf(error, {request});
-  dumps.push(d);
-  if (dumps.length > 100) {
-    dumps.shift();
-  }
-  // a dump is the thing a person is most likely to be waiting to see, and
-  // it was going into the tail with everything else
-  announce(`runtime error: ${d.where}${request ? `  (${request})` : ""}`);
-  for (const f of d.frames.slice(1, 6)) {
-    console.error(`    at ${f.file}:${f.line}${f.text ? "  " + f.text : ""}`);
-  }
-  // ZOSD_DUMP, the table (tools/osd-dumps.mjs): a kernel job, so it happens
-  // here and not in the ABAP. SYSTEM DUMP can arrive inside the failed
-  // step, so detach its context and queue persistence behind that step.
-  // persistDump() commits through a fresh step of its own. Not awaited:
-  // the response above does not wait on the table, and a table write that
-  // fails is still a dump the ring and the log already have.
-  outsideStepContext(() => persistDump(globalThis.abap.context.databaseConnections.DEFAULT, d, {request, generation: generationLabel()}))
-    .catch((e) => console.error(`ZOSD_DUMP: ${e?.message ?? e}`));
-  return d;
-}
+const {dump, system: dumpSystem, dumps} = createDumpRecorder({
+  connection: () => globalThis.abap.context.databaseConnections.DEFAULT,
+  generation: generationLabel,
+  onDump(d, request) {
+    // A dump goes to the tail as soon as its ABAP position is available.
+    announce(`runtime error: ${d.where}${request ? `  (${request})` : ""}`);
+    for (const f of d.frames.slice(1, 6)) {
+      console.error(`    at ${f.file}:${f.line}${f.text ? "  " + f.text : ""}`);
+    }
+  },
+});
 hostNodes.dumps = (a, node) => a.get(node.path, function (req, res) {
   res.json(dumps.slice().reverse());
 });
@@ -379,12 +366,7 @@ if (childStoreIPC !== undefined) {
       if ((kind === "SQL" || kind === "SQLCHECK") && Object.hasOwn(input, "statement")) return previewSQL(connection(), kind, input);
       if (kind === "SQL" || kind === "XREF") return data.query(input.sql ?? name, {max: input.max ?? 100});
       if (kind === "SQLCHECK") { await data.check(input.sql ?? name); return {ok: true}; }
-      if (kind === "DUMP") {
-        if (input.operation !== "record") return dumps.slice().reverse();
-        const error = {constructor: {name: input.name || ""}, message: input.message, stack: input.stack};
-        const recorded = dump(error, input.request);
-        return {where: recorded.where, frames: recorded.frames};
-      }
+      if (kind === "DUMP") return dumpSystem(json);
       if (kind === "SERVICES") return servicesFromRows(await currentRows(connection()));
       if (kind === "TRANSACTIONS") return data.query("SELECT * FROM tstc", {max: 1000});
       if (kind === "CLASSRUN") {
