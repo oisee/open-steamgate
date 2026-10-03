@@ -4,6 +4,9 @@ const INT4 = 2147483647;
 const integerRanges = {INT1: [0n, 255n], INT2: [-32768n, 32767n], INT4: [-2147483648n, 2147483647n],
   INT8: [-9223372036854775808n, 9223372036854775807n]};
 const characterTypes = new Set(["CHAR", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "NUMC", "DATS", "TIMS"]);
+// one value of a list setting, as a regular expression: no comma, no blank (the list is "M,X")
+const listElement = (type) => type.built_in === "DATS" ? "[0-9]{8}" : type.built_in === "TIMS" ? "[0-9]{6}"
+  : type.built_in === "NUMC" ? `[0-9]{1,${type.length ?? 1}}` : `[^, ]{1,${type.length ?? 1}}`;
 const numeric = [
   ["budget.glass", (m) => m.governor?.glass, 1, INT4],
   ["budget.warn", (m) => m.governor?.warn, 1, 10000],
@@ -53,6 +56,18 @@ export function compileSettings(doc, model, {line, fail}) {
   for (const stage of model.stages ?? []) if (stage.piles) available.set(`piles.${stage.name}.size`, {defaultValue: String(stage.piles.size), min: 1, max: INT4, kind: "N"});
   if (model.schedule) available.set("schedule.every", {defaultValue: model.schedule.every, kind: "P", min: 1, max: 999});
   for (const p of model.params ?? []) {
+    if (p.is_selopt) {
+      // a range is tunable as a list of values ("M,X": each an I EQ row), the form a settings row holds in 40 characters;
+      // a default with BT or E rows is the manifest's (and the API's), not the operator's
+      const rows = p.default_rows ?? [];
+      const type = p.elem_type;
+      if (rows.some((r) => r.sign !== "I" || r.option !== "EQ")) continue;
+      const text = rows.map((r) => r.low).join(",");
+      const built = type?.built_in;
+      if (!type || !characterTypes.has(built) || text.length > 40) continue;
+      available.set(`params.${p.name}`, {defaultValue: text, kind: "C", min: 0, max: 40, list: true, element: listElement(type), built, rangeOf: p.type_name});
+      continue;
+    }
     if (p.default === undefined) continue;
     const built = p["default@type"]?.built_in;
     if (integerRanges[built]) {
@@ -93,8 +108,9 @@ export function compileSettings(doc, model, {line, fail}) {
     return {"@id": `${model["@id"]}/setting/${name}`, set_line: at, name, "name@type": {built_in: "CHAR", length: 30},
       field, ...(CHAOS_SETTINGS.includes(name) ? {chaos: true} : {screen: `s_${++screenNo}`}), default: base.defaultValue, "default@type": {built_in: "CHAR", length: 40},
       kind: base.kind, min: String(min), max: String(max), numeric: base.kind === "N", period: base.kind === "P", char: base.kind === "C",
-      value_type: base.valueType, digit_text: base.built === "NUMC", date_text: base.built === "DATS",
-      time_text: base.built === "TIMS", scoped: runScoped(name),
+      value_type: base.valueType, digit_text: !base.list && base.built === "NUMC", date_text: !base.list && base.built === "DATS",
+      time_text: !base.list && base.built === "TIMS", scoped: runScoped(name),
+      ...(base.list ? {list: true, range_of: base.rangeOf, list_regex: `^(${base.element}(,${base.element})*)?$`, "list_regex@type": {built_in: "STRG"}} : {}),
       ...(base.values ? {pattern: `^(${base.values.join("|")})$`, "pattern@type": {built_in: "STRG"}, values: base.values.join(", ")} : {})};
   });
   for (const name of Object.keys(bounds)) if (!seen.has(name)) fail(line(`settings/bounds/${name}`), `bounds names non-tunable ${name}`);

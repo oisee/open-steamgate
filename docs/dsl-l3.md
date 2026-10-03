@@ -1,6 +1,6 @@
 # DSL L3: a set of rules, run as one unit
 
-Status: slice 1, 2026-10-01; ports and adapters; piles and set parameters (slice 3a), 2026-10-02; stages, filter stages with a worklist, and a schedule (slice 3b), 2026-10-02; resilience: retries, the doctor, fuses, a dry run and retention (slice 5a), 2026-10-02; a simulated twin of the work (slice 5d), 2026-10-02; chaos profiles and overrides for the twin (slice 6c), 2026-10-03. Built on L2 (`docs/dsl-l2.md`) and the background job facade
+Status: slice 1, 2026-10-01; ports and adapters; piles and set parameters (slice 3a), 2026-10-02; stages, filter stages with a worklist, and a schedule (slice 3b), 2026-10-02; resilience: retries, the doctor, fuses, a dry run and retention (slice 5a), 2026-10-02; a simulated twin of the work (slice 5d), 2026-10-02; chaos profiles and overrides for the twin (slice 6c), 2026-10-03; range set parameters, 2026-10-03. Built on L2 (`docs/dsl-l2.md`) and the background job facade
 (`docs/job-standard-fms.md`, `docs/gui-reports.md`).
 
 L2 compiles one rule into a check class, `check( iv_date ) RETURNING rt_alerts`. L3 is the layer
@@ -514,6 +514,69 @@ field it stands for, `<TABLE>-<field>` (L2's params gained that form for this, t
 extension that gives a length without a new DDIC object), and the ABAP names it as written:
 `iv_active_status TYPE zosd_l2_ship-status`, `active_status TYPE zosd_l2_ship-status`,
 `PARAMETERS p_active TYPE zosd_l2_ship-status`.
+
+### Range set parameters
+
+A set parameter is a range when it says so, and the rules that declare `$name` with `range: true`
+(`docs/dsl-l2.md`, "Slice 8") receive a selection table:
+
+```yaml
+params:
+  restricted: {type: ZOSD_L2_SHIP-STATUS, range: true, default: [M, D]}
+settings:
+  tunable: [params.restricted]
+```
+
+The default is a list of SELECT-OPTIONS rows (`{sign, option, low, high}`; sign `I` or `E`, option
+`EQ` or `BT`) or of bare values (each `I EQ`). Refused at the parameter's line: a range the rules
+declare as a scalar and a scalar the rules declare as a range, a default that does not fit or has
+a bad row, **a default of more than 20 rows** (a job step carries 20 rows per selection field,
+`docs/gui-reports.md`), a name of more than 24 characters, and **a range with no default over a
+rule that has one** (the set would pass an empty table, which is every value, over the rule's own
+default: state the default).
+
+Generated, each line traced to the parameter's `params:` entry:
+
+- `TYPES tt_p_<name> TYPE RANGE OF <type>` and the component of `ty_params`, a table. The runner
+  hands it to the checks as `iv_<name> = ls_params-<name>`.
+- **An initial table is not given**, as an initial scalar is not. `run( )` and `run_rule( )` give
+  it the default: the operator's list when the parameter is tunable, else the set's rows from a
+  generated private method `def_<name>( )`, one `APPEND` per row. The limit, stated: a caller cannot
+  pass an empty table to mean every value (an `E`-only table can: every value but its own).
+- The job report declares the parameter as `SELECT-OPTIONS s_<name> FOR gv_s_<name>` (the screen
+  name is `s_` and the first six characters, made unique with digits) and reads it as
+  `ls_params-<name> = s_<name>[]`; `submit` passes `WITH s_<name> IN is_params-<name>`. So an
+  explicit table travels to every job of the run **as its own selection field**, up to 20 rows; the
+  job step's 20 fields in all are shared with the report's own and the settings'. A table of more
+  than 20 rows fails at the SUBMIT, as any selection field does. An empty table is submitted as the
+  facade's empty `IN` (one row of sign `#`, kept apart from a scalar `WITH = ''`); the jobs'
+  input check takes that row as it is (`tools/osd-job-input.mjs`; it refused it before, so a
+  `SUBMIT VIA JOB ... WITH sel IN <empty table>` raised "Invalid job input range"), the report's
+  runner takes it out, and the job reads an initial table and gives it the default itself.
+
+**Tuning.** A range is tunable (`settings.tunable: [params.<name>]`) as **a list of values**, the
+form a settings row (`PARAM_VAL`, CHAR 40) holds: `M,D`, each value an `I EQ` row. A default with a
+`BT` or an `E` row, or more than 40 characters of list, is not tunable (the compiler says the name
+is unavailable); the manifest's full rows stay the default and the API's (`is_params`). The value is
+checked like every setting: elements of the type's length with no comma and no blank, `A,D` valid,
+`M;D`, `MM`, `A, D`, `,A`, `A,` refused without a change; an empty list is valid and means every
+value. The settings class holds `range_<name>( text )`, which splits the list into `I EQ` rows. The
+setting is run-scoped like the scalar parameters: the run's snapshot (`ZOSD_L3_RUN_CONF`) holds the
+list, a job that did not receive its selection fields reads it from there, and every change is
+audited in `ZOSD_L3_CONF_LOG`. Precedence: the table given to `run( )`, then the setting, then the
+set's default rows.
+
+`src/l2demo/fleet3.l3.yaml` is the demo: a scalar and two range parameters side by side (`restricted`,
+tunable as the list `M,D`, and `exempt`, whose default is one `BT` row and so stays the manifest's),
+two rules, piles over the ships. `test/dsl-l3-range.mjs` runs it on a file database in mode S (the
+default, a table of `EQ` rows, a `BT` row, a `BT` row with an `E` row cut out, an empty table, a table
+for the second range) and mode P (the table through the job, the default applied in the job, a tuned
+list through the job, a `BT` table through the job), and the setting's round trip (seed, tune, audit,
+snapshot, refusals, reset). Six mutants of the templates were each run against it by hand (the table
+not read from the job's SELECT-OPTIONS, not submitted, the list read as `E` rows, the default rows not
+applied, the list not checked, the operator's list not applied) and each turned a named test red;
+`SUBMIT ... VIA JOB ... WITH sel IN <empty table>` needed the one change to the jobs' input check
+above. It stays out of `fleet` and `fleet2`, whose tests count their rules and alerts.
 
 ### The pile planner
 
@@ -1440,7 +1503,7 @@ settings:
 The available names are `retry.max`, `retry.backoff`, `stale`,
 `fuses.max_alerts`, `keep.days`, `piles.size` (an unstaged set),
 `piles.<stage>.size`, `schedule.every`, and `params.<name>` for a set parameter
-with a DSL default. A name not in `settings.tunable` remains a compiled
+with a DSL default (a range parameter as a list of values, "Range set parameters"). A name not in `settings.tunable` remains a compiled
 constant. Bounds narrow the compiler range; they never enlarge it. A period
 uses the schedule grammar (`1m`, `2h`, `1d`, `1w`, within the unit's JOB_CLOSE
 width). `fuses.max_alerts` is tunable only with `bounds: {max: n}`: tunable up to

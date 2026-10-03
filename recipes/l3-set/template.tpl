@@ -54,12 +54,17 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     TYPES tt_range_{{no}} TYPE RANGE OF {{source.table}}-{{source.key}}.
 {{/piles}}
 {{/stages}}
+{{#params}}
+{{#is_selopt}}
+    TYPES tt_p_{{name}} TYPE RANGE OF {{type_name}}.
+{{/is_selopt}}
+{{/params}}
 {{#with_params}}
     " the set parameters; run( ) gives a component that is initial its default
     TYPES: BEGIN OF ty_params,
 {{/with_params}}
 {{#params}}
-             {{name}} TYPE {{type_name}},
+             {{name}} TYPE {{#is_selopt}}tt_p_{{name}}{{/is_selopt}}{{^is_selopt}}{{type_name}}{{/is_selopt}},
 {{/params}}
 {{#with_params}}
            END OF ty_params.
@@ -284,6 +289,11 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " set by dry( ) for the run( ) it calls, and cleared by that run( )
     CLASS-DATA gv_dry TYPE abap_bool.
 {{/settings}}
+{{#params}}
+{{#has_default}}
+    CLASS-METHODS def_{{name}} RETURNING VALUE(rt_range) TYPE tt_p_{{name}}.
+{{/has_default}}
+{{/params}}
     CLASS-METHODS write
       IMPORTING iv_date TYPE d
                 iv_run TYPE csequence
@@ -407,6 +417,23 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 
 CLASS {{class}} IMPLEMENTATION.
+{{#params}}
+{{#has_default}}
+  METHOD def_{{name}}.
+    DATA ls_row LIKE LINE OF rt_range.
+{{#default_rows}}
+    CLEAR ls_row.
+    ls_row-sign = {{sign | literal}}.
+    ls_row-option = {{option | literal}}.
+    ls_row-low = {{low | literal}}.
+{{#high}}
+    ls_row-high = {{high | literal}}.
+{{/high}}
+    APPEND ls_row TO rt_range.
+{{/default_rows}}
+  ENDMETHOD.
+{{/has_default}}
+{{/params}}
 {{#settings}}
   METHOD settings_seed.
     {{settings.class}}=>settings_seed( ).
@@ -1184,6 +1211,20 @@ CLASS {{class}} IMPLEMENTATION.
 {{/tunable}}
     ENDIF.
 {{/default}}
+{{#is_selopt}}
+{{#tunable}}
+    IF ls_params-{{name}} IS INITIAL.
+      ls_params-{{name}} = {{settings.class}}=>range_{{name}}( gs_settings-vals-params_{{name}} ).
+    ENDIF.
+{{/tunable}}
+{{^tunable}}
+{{#has_default}}
+    IF ls_params-{{name}} IS INITIAL.
+      ls_params-{{name}} = def_{{name}}( ).
+    ENDIF.
+{{/has_default}}
+{{/tunable}}
+{{/is_selopt}}
 {{/params}}
     rs_rule-rule = iv_rule.
 {{#piles}}
@@ -1343,6 +1384,20 @@ CLASS {{class}} IMPLEMENTATION.
 {{/tunable}}
     ENDIF.
 {{/default}}
+{{#is_selopt}}
+{{#tunable}}
+    IF ls_params-{{name}} IS INITIAL.
+      ls_params-{{name}} = {{settings.class}}=>range_{{name}}( gs_settings-vals-params_{{name}} ).
+    ENDIF.
+{{/tunable}}
+{{^tunable}}
+{{#has_default}}
+    IF ls_params-{{name}} IS INITIAL.
+      ls_params-{{name}} = def_{{name}}( ).
+    ENDIF.
+{{/has_default}}
+{{/tunable}}
+{{/is_selopt}}
 {{/params}}
 {{#killable}}
     " the kill switch: the pile goes back to PLANNED without a job and its
@@ -1628,7 +1683,7 @@ CLASS {{class}} IMPLEMENTATION.
 {{/chaos}}
 {{/settings.entries}}
 {{#params}}
-      WITH {{screen}} = is_params-{{name}}
+      WITH {{screen}} {{#is_selopt}}IN{{/is_selopt}}{{^is_selopt}}={{/is_selopt}} is_params-{{name}}
 {{/params}}
       VIA JOB lv_jobname NUMBER lv_jobcount
       AND RETURN.

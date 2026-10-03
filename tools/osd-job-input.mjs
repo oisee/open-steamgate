@@ -24,6 +24,16 @@ export function jobInput(input) {
     const rawRanges = row[keys.find((key) => key.toUpperCase() === "RANGES")];
     if (rawRanges === undefined) return {name: upper, value}; // pre-range steps
     if (!Array.isArray(rawRanges) || rawRanges.length > MAX_RANGES_PER_FIELD) throw new TypeError("Job input ranges must contain at most 20 rows");
+    // an empty `WITH sel IN <empty table>` is one row of sign '#' and blanks (src/jobs/zcl_osd_submit_ranges.clas.abap,
+    // for_submit; a string field holds its option without the trailing blanks): it keeps an empty IN distinct from a scalar
+    // WITH = '', and the report's runner takes it out before the screen is built
+    const sentinel = (range) => range && typeof range === "object" && !Array.isArray(range)
+      && Object.keys(range).map((key) => key.toUpperCase()).sort().join(",") === "HIGH,LOW,OPTION,SIGN"
+      && ["SIGN", "OPTION", "LOW", "HIGH"].every((key) => {
+        const value = range[Object.keys(range).find((name) => name.toUpperCase() === key)];
+        return key === "SIGN" ? value === "#" : typeof value === "string" && value.trim() === "";
+      });
+    if (rawRanges.length === 1 && sentinel(rawRanges[0])) return {name: upper, value, ranges: [{sign: "#", option: "  ", low: "", high: ""}]};
     const ranges = rawRanges.map((range) => {
       if (!range || typeof range !== "object" || Array.isArray(range) ||
           Object.keys(range).map((key) => key.toUpperCase()).sort().join(",") !== "HIGH,LOW,OPTION,SIGN") {
