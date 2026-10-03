@@ -35,7 +35,9 @@ export class DuckDBDatabaseClient {
     // initializeABAP can open the same file again in one process. Separate
     // engines can overwrite each other's checkpoints; the native cache gives
     // every connection to that file one engine. In-memory clients stay private.
-    this.instance = this.path === ":memory:"
+    // create("") also means private memory; resolving it would open cwd.
+    // Null and undefined retain the constructor's :memory: default.
+    this.instance = this.path === "" || this.path === ":memory:"
       ? await DuckDBInstance.create(this.path)
       // Resolve literal filenames before caching: ':memory:name' otherwise
       // means shared named memory to the cache, unlike create().

@@ -144,20 +144,30 @@ describe("database identity", () => {
     }
   });
 
-  it("DuckDB in-memory clients have independent databases", async () => {
-    const first = new DuckDBDatabaseClient();
-    const second = new DuckDBDatabaseClient();
-    try {
-      await first.connect();
-      await second.connect();
-      await first.execute("CREATE TABLE zstg_demo (id INTEGER)");
-      expect(await first.hasSchema()).to.equal(true);
-      expect(await second.hasSchema()).to.equal(false);
-    } finally {
-      await second.disconnect();
-      await first.disconnect();
-    }
-  });
+  for (const [label, input] of [
+    ["omitted", {}], ["empty", {path: ""}], ["undefined", {path: undefined}],
+    ["null", {path: null}], [":memory:", {path: ":memory:"}],
+  ]) {
+    it(`DuckDB ${label} paths open independent in-memory databases`, async () => {
+      const first = new DuckDBDatabaseClient(input);
+      const second = new DuckDBDatabaseClient(input);
+      const reopened = new DuckDBDatabaseClient(input);
+      try {
+        await first.connect();
+        await second.connect();
+        await first.execute("CREATE TABLE zstg_demo (id INTEGER)");
+        expect(await first.hasSchema()).to.equal(true);
+        expect(await second.hasSchema()).to.equal(false);
+        await first.disconnect();
+        await reopened.connect();
+        expect(await reopened.hasSchema()).to.equal(false);
+      } finally {
+        await reopened.disconnect();
+        await second.disconnect();
+        await first.disconnect();
+      }
+    });
+  }
 
   it("DuckDB relative and absolute paths share one persistent database", async () => {
     const root = mkdtempSync(join(tmpdir(), "osd-duckdb-path-"));
