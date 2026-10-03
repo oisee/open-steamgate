@@ -1,6 +1,7 @@
 {
   "files": [
     "test/adt-abap-a10.mjs",
+    "test/adt-abap-a2.mjs",
     "test/adt-abap-a3b.mjs",
     "test/adt-abap-a8a.mjs",
     "test/adt-abap-a9.mjs",

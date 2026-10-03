@@ -244,6 +244,24 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
         iv_handler = `ZCL_OSD_ADT_XREF` CHANGING ct_routes = rt_routes ).
     ENDIF.
 *   everything else is still the Node facade's, until its group moves
+*   A2: editor helpers, transport checks and occurrence markers.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/feeds`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/feeds/variants`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/system/users`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/runtime/dumps`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/runtime/systemmessages`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/gw/errorlog`
+                   iv_handler = `ZCL_OSD_ADT_FEEDS` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/cts/transportchecks`
+                   iv_handler = `ZCL_OSD_ADT_TRANSPORT` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/abapsource/occurencemarkers`
+                   iv_handler = `ZCL_OSD_ADT_OCCURRENCES` CHANGING ct_routes = rt_routes ).
+
     add( EXPORTING iv_method = `*` iv_pattern = `/sap/bc/adt/*` iv_served_by = c_host
          CHANGING ct_routes = rt_routes ).
   ENDMETHOD.
