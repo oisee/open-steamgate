@@ -7,6 +7,7 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
   constructor(runner, options) {
     super(runner, options);
     const timings = {};
+    const failures = [];
     let current;
     let began;
     const finish = () => {
@@ -20,11 +21,21 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
       current = file;
       began = process.hrtime.bigint();
     });
+    runner.on("fail", (test) => {
+      let owner = test;
+      while (owner && !owner.file) owner = owner.parent;
+      const path = owner?.file;
+      const file = path ? (isAbsolute(path) ? relative(process.cwd(), path) : path).replace(/^\.\//, "") : null;
+      failures.push({file, title: test.fullTitle()});
+    });
     runner.on("end", () => {
       finish();
       writeFileSync(process.env.OSD_SUITE_TIMINGS_FILE, JSON.stringify({
         measuredAt: new Date().toISOString(),
-        note: "Local wall time; relative weights only. Includes suite hooks and work between files.",
+        note: "Wall time including hooks and inter-file work; excludes module loading before the first suite.",
+        completed: true,
+        failures,
+        totalFailures: runner.failures,
         seconds: Object.fromEntries(Object.entries(timings).sort(([a], [b]) => a.localeCompare(b))),
       }, null, 2) + "\n");
     });

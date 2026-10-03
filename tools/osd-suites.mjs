@@ -7,9 +7,10 @@
 // forgets to pass its status back reports success for a failing suite, which
 // is the false green this project keeps paying for.
 import {spawnSync} from "node:child_process";
-import {existsSync, readFileSync, readdirSync} from "node:fs";
+import {existsSync, readFileSync, readdirSync, mkdtempSync, writeFileSync, appendFileSync, mkdirSync, rmSync} from "node:fs";
 import {fileURLToPath} from "node:url";
-import {join} from "node:path";
+import {tmpdir} from "node:os";
+import {join, dirname} from "node:path";
 
 /** Merge feature fragments, then sort suite paths alphabetically. The
  * root argument lets tools that inspect another checkout read its manifest. */
@@ -140,15 +141,39 @@ export function assignShards(files, seconds, count) {
   if (!Number.isInteger(count) || count < 1) throw new Error("shard count must be positive");
   const known = Object.values(seconds).filter((n) => Number.isFinite(n) && n > 0).sort((a, b) => a - b);
   const median = known.length ? (known[Math.floor((known.length - 1) / 2)] + known[Math.floor(known.length / 2)]) / 2 : 1;
+  const weight = (file) => Number.isFinite(seconds[file]) && seconds[file] > 0 ? seconds[file] : median;
   const shards = Array.from({length: count}, () => ({files: [], seconds: 0}));
-  for (const file of [...files].sort((a, b) => (seconds[b] ?? median) - (seconds[a] ?? median) || a.localeCompare(b))) {
+  for (const file of [...files].sort((a, b) => weight(b) - weight(a) || a.localeCompare(b))) {
     const target = shards.reduce((best, shard) => shard.seconds < best.seconds ? shard : best);
     target.files.push(file);
-    target.seconds += seconds[file] ?? median;
+    target.seconds += weight(file);
   }
   const position = new Map(files.map((file, index) => [file, index]));
   for (const shard of shards) shard.files.sort((a, b) => position.get(a) - position.get(b));
   return shards;
+}
+
+/** Executor returns a process status plus the reporter's completed failure list.
+ * Unknown crashes, missing reports and more than three failing files stay red. */
+export function runWithRetries(files, run) {
+  const first = run(files, "first");
+  const result = {status: first.status === 0 ? 0 : 1, first, retries: [], lines: []};
+  if (first.status === 0) return result;
+  const failures = first.failures ?? [];
+  const failedFiles = [...new Set(failures.map((failure) => failure.file))];
+  if (first.crashed || !first.completed || !failures.length || first.totalFailures !== failures.length ||
+      failedFiles.some((file) => !files.includes(file)) || failedFiles.length > 3) return result;
+  for (const file of failedFiles) {
+    const retry = run([file], "retry");
+    result.retries.push({file, status: retry.status});
+    if (retry.status === 0 && !retry.crashed && retry.completed && retry.totalFailures === 0) {
+      const title = failures.find((failure) => failure.file === file).title;
+      const clean = (value) => String(value).replace(/[\r\n`|<>]/g, " ");
+      result.lines.push(`- flaky / order-dependent: \`${clean(file)}\` — ${clean(title)} (passed once in isolation)`);
+    }
+  }
+  if (result.lines.length === failedFiles.length) result.status = 0;
+  return result;
 }
 
 function parseShard(spec) {
@@ -208,11 +233,12 @@ try {
   const listSpec = takeOption("--list-shard");
   const groupName = takeOption("--group");
   const timingsFile = takeOption("--timings");
+  const reportFile = takeOption("--report");
   if (shardSpec && listSpec) throw new Error("choose --shard or --list-shard");
   if (groupName && (shardSpec || listSpec)) throw new Error("choose --group or --shard/--list-shard");
   if (groupName && !Object.hasOwn(groups, groupName)) throw new Error(`unknown suite group ${groupName}`);
   const shard = parseShard(shardSpec ?? listSpec ?? "1/1");
-  const weights = JSON.parse(readFileSync(fileURLToPath(new URL("../test/suite-timings.json", import.meta.url)), "utf8")).seconds;
+  const weights = JSON.parse(readFileSync(fileURLToPath(new URL("../test/suites.timings.json", import.meta.url)), "utf8"));
   const selected = groupName ? groups[groupName] : assignShards(files, weights, shard.count)[shard.index].files;
   if (listSpec) {
     for (const file of selected) console.log(file);
@@ -222,14 +248,39 @@ try {
   const extra = argv.filter((a) => a !== "--report-skips");
   if (!groupName && Object.keys(groups).length > 0) console.log(`osd-suites: groups not run: ${Object.keys(groups).sort().join(", ")}`);
   const absent = report ? reportSkips() : [];
-  const reporter = timingsFile ? ["--reporter", fileURLToPath(new URL("./osd-suite-timing-reporter.cjs", import.meta.url))] : [];
-  const env = timingsFile ? {...process.env, OSD_SUITE_TIMINGS_FILE: timingsFile} : process.env;
-  const result = spawnSync("npx", ["mocha", ...selected, ...reporter, ...extra], {stdio: "inherit", env});
+  // Always collect failures, including hook failures, even without --timings.
+  const scratch = mkdtempSync(join(tmpdir(), "osd-suite-report-"));
+  let result;
+  try {
+    let attempt = 0;
+    result = runWithRetries(selected, (runFiles, phase) => {
+      const path = join(scratch, `${attempt++}.json`);
+      console.log(`osd-suites: ${phase}: ${runFiles.length} file(s)`);
+      const child = spawnSync(process.execPath, ["node_modules/mocha/bin/mocha.js", ...runFiles,
+        ...extra, "--retries", "0", "--reporter", fileURLToPath(new URL("./osd-suite-timing-reporter.cjs", import.meta.url))],
+        {stdio: "inherit", env: {...process.env, OSD_SUITE_TIMINGS_FILE: path}});
+      const metadata = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+      return {...metadata, status: child.status ?? 1, crashed: Boolean(child.error || child.signal)};
+    });
+    const save = (path, value) => {
+      mkdirSync(dirname(path), {recursive: true});
+      writeFileSync(path, value);
+    };
+    if (timingsFile) save(timingsFile, JSON.stringify(result.first, null, 2) + "\n");
+    const summary = result.lines.length ? "### Suite retries\n\n" + result.lines.join("\n") + "\n" : "";
+    if (reportFile) save(reportFile, summary);
+    if (summary) {
+      console.log(summary);
+      if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+    }
+  } finally {
+    rmSync(scratch, {recursive: true, force: true});
+  }
   if (report && absent.length > 0) {
     console.log(`\nosd-suites: the above ran WITHOUT ${absent.map(([p]) => p).join(", ")}.`);
     console.log("            A pass here is narrower than a pass on a tree that has them.");
   }
-  process.exit(result.status === null ? 1 : result.status);
+  process.exit(result.status);
 } catch (error) {
   console.error(`osd-suites: ${error.message}`);
   process.exit(2);
