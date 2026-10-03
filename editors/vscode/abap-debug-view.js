@@ -27,6 +27,23 @@ function inspection() {
       if (method && !("value" in method)) return undefined;
     }
     const raw = descriptor.value;
+    if (name === "FieldSymbol" && typeof data(value, "casting") !== "boolean") return undefined;
+    if (name === "Table") {
+      // An explicitly undefined options field is a valid standard table; a
+      // missing or accessor-backed field can hide renamed classification data.
+      const options = Object.getOwnPropertyDescriptor(value, "options");
+      if (!options || !("value" in options)) return undefined;
+      if (options.value !== undefined) {
+        if (!options.value || typeof options.value !== "object") return undefined;
+        const primary = Object.getOwnPropertyDescriptor(options.value, "primaryKey");
+        if (primary && !("value" in primary)) return undefined;
+        if (primary && primary.value !== undefined) {
+          if (!primary.value || typeof primary.value !== "object") return undefined;
+          const type = Object.getOwnPropertyDescriptor(primary.value, "type");
+          if (!type || !("value" in type) || ![undefined, "STANDARD", "SORTED", "INDEX", "ANY"].includes(type.value)) return undefined;
+        }
+      }
+    }
     if (["Character", "Hex", "Packed"].includes(name) && !Number.isInteger(data(value, "length"))) return undefined;
     if (["Character", "String", "Date", "Time", "Hex", "XString"].includes(name)) return typeof raw === "string" ? name : undefined;
     if (["Integer", "Float"].includes(name)) return typeof raw === "number" ? name : undefined;

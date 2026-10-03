@@ -195,6 +195,46 @@ describe("VS Code ABAP values (serialized js-debug generators)", () => {
     expect(describeValue(broken)).to.equal("'' (c2)");
     expect(props(broken)).to.deep.equal({});
   });
+  it("falls back when CASTING metadata is renamed, malformed or accessor-backed", () => {
+    for (const shape of ["renamed", "malformed", "accessor"]) {
+      const value = new t.FieldSymbol(new t.Hex({length: 8}));
+      value.assign(new t.Float().set(1.5));
+      value.setCasting();
+      if (shape === "renamed") {
+        value.renamedCasting = value.casting;
+        delete value.casting;
+      } else if (shape === "malformed") value.casting = "true";
+      else Object.defineProperty(value, "casting", {get() {throw Error("must not read casting");}});
+      expect(describeValue(value)).to.equal("default JS");
+      expect(props(value)).to.equal(value);
+    }
+  });
+  it("falls back when table classification metadata is unavailable", () => {
+    for (const shape of ["renamed", "malformed", "accessor", "primary", "type", "unknown type", "primary accessor", "type accessor"]) {
+      const value = new t.Table(new t.Integer(), {primaryKey: {type: "SORTED"}});
+      value.append(new t.Integer().set(42));
+      if (shape === "renamed") {
+        value.renamedOptions = value.options;
+        delete value.options;
+      } else if (shape === "malformed") value.options = null;
+      else if (shape === "accessor") Object.defineProperty(value, "options", {get() {throw Error("must not read options");}});
+      else if (shape === "primary") value.options.primaryKey = null;
+      else if (shape === "type") delete value.options.primaryKey.type;
+      else if (shape === "unknown type") value.options.primaryKey.type = "RENAMED_SORTED";
+      else if (shape === "primary accessor") Object.defineProperty(value.options, "primaryKey", {get() {throw Error("must not read primary key");}});
+      else Object.defineProperty(value.options.primaryKey, "type", {get() {throw Error("must not read type");}});
+      expect(describeValue(value)).to.equal("default JS");
+      expect(props(value)).to.equal(value);
+    }
+  });
+  it("keeps standard tables with explicit default options projected", () => {
+    for (const options of [undefined, {}, {primaryKey: undefined}, {primaryKey: {type: undefined}}]) {
+      const value = new t.Table(new t.Integer(), options);
+      value.append(new t.Integer().set(42));
+      expect(describeValue(value)).to.equal("[1 rows] (standard table)");
+      expect(props(value)["1"]).to.equal(value.array()[0]);
+    }
+  });
   it("never invokes unknown getters, lookalike methods or ABAP application accessors", () => {
     let calls = 0;
     const target = new t.Character(4).set("SAFE");
