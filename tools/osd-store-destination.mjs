@@ -93,7 +93,7 @@ const PARSE_KINDS = {
 // object), SESSION (does the request's session hold state) and LOCK_HOLDER
 // (IV_NAME "TYPE NAME": is the holder a live session; a dead one is ended).
 // They go when the session moves into ABAP.
-const SYSTEM_KINDS = ["SEGW_REGISTRATIONS", "IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER"];
+const SYSTEM_KINDS = ["SEGW_REGISTRATIONS", "IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER", "BUILD", "CHANGED", "SERVICES", "TRANSACTIONS"];
 let systemCalls;
 try {
   if (typeof process !== "undefined" && process.versions?.node !== undefined) {
@@ -178,7 +178,9 @@ export class StoreDestination {
     if (command === "CAPABILITIES") return {EV_NOTE: CAPABILITIES.join(" ")};
     if (!COMMANDS.includes(command)) return refusal(`unknown store command ${command}`, "NOT_SUPPORTED");
     if (command === "SYSTEM") {
-      return this.#system(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"), givenText(signature, "IV_JSON"));
+      const json = givenText(signature, "IV_JSON");
+      const kind = givenText(signature, "IV_TYPE") || JSON.parse(json || "{}").kind || "";
+      return this.#system(String(kind).toUpperCase(), givenText(signature, "IV_NAME"), json);
     }
     if (command === "OBJECT") {
       return this.#object(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));

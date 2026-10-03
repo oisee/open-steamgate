@@ -45,6 +45,9 @@ const DISCOVERY_PATHS = [
 const PORTED = [
   ...DISCOVERY_PATHS.flatMap((path) => [["GET", path], ["HEAD", path]]),
   ["GET", "/sap/bc/adt/debugger/listeners"],
+  ...["build", "changed", "services", "transactions"].flatMap((route) => [
+    ["GET", `/sap/bc/adt/core/http/${route}`], ["HEAD", `/sap/bc/adt/core/http/${route}`],
+  ]),
   ["GET", SYSINFO],
   ["HEAD", SYSINFO],
   ["GET", "/sap/bc/adt/compatibility/graph"],

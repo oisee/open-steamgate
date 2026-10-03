@@ -593,6 +593,120 @@ export async function unitRunDbEnv(req) {
 
 const STARTED = new Date().toISOString();
 
+export function buildAnswer({store, data, sourceCommit, identity}) {
+  return {raw: JSON.stringify({
+    build: facadeBuildStamp(),
+    generation: liveHash(store.root),
+    // The commit, and it is the **only** number the two deployment targets
+    // can share (docs/backlog/pages-preview.md, "Deploying: the i7 follows Pages"). The
+    // generation above is the transpiler's, the preview's `stamp` is
+    // webpack's, and those two cannot agree even when built from one
+    // source -- a check on them produces a false alarm, which is worse
+    // than no check. `unknown` when there is no git, rather than a field
+    // that looks measured and is not.
+    commit: sourceCommit(),
+    // Are we serving what we are running? Three names, and they are
+    // synchronized when all three agree. source is what a build of the
+    // tree would produce now (105 ms to compute); live is the build on
+    // disk; serving is the code the runtime child actually runs. source
+    // ahead of live means unbuilt saves; live ahead of serving means a
+    // build that went live without a recycle — a pinned runtime, or one
+    // that failed to come up and was rolled back.
+    system: (() => {
+      if (store.root === undefined) {
+        return undefined;
+      }
+      const source = hashOf(store.root);
+      const live = liveHash(store.root);
+      // null, not undefined: JSON drops an undefined field, and "no
+      // runtime is serving yet" is an answer, not an absence
+      const serving = store.served?.running === true ? store.served.generation : null;
+      // and the rows: which file the serving runtime holds, and where the
+      // preview reads — "serving" means through the runtime's door, which
+      // is the only answer in which a preview and the application agree
+      const database = {
+        serving: store.served?.running === true ? (store.served.database ?? "memory") : null,
+        preview: data.source ?? "in-process",
+      };
+      return {source, live, serving, database, synchronized: source === live && (serving === null || serving === live) && database.preview === "serving"};
+    })(),
+    started: STARTED,
+    identity,
+  })};
+}
+export function changedAnswer(store) {
+  const objects = store.changedObjects();
+  const w = store.warm?.();
+  return {raw: JSON.stringify({
+    objects,
+    reason: objects === undefined ? (w?.on !== true ? "OSD_WARM is not 1" : w?.reason) : undefined,
+  })};
+}
+export function servicesAnswer(store) {
+  try {
+    const classUri = (name) => (name !== undefined && name !== "" && store.exists("CLAS", name) ? uriOf("CLAS", name) : undefined);
+    const classSource = (name) => {
+      if (name === undefined || name === "") return undefined;
+      try {
+        return store.read("CLAS", name).file;
+      } catch {
+        return undefined;
+      }
+    };
+    const rows = serviceTree(store.root).map((one) => ({
+      kind: one.kind,
+      name: one.name,
+      path: one.path,
+      text: one.text,
+      pack: one.pack,
+      handler: one.kind === "APP" ? undefined : one.handler,
+      handlerUri: one.kind === "APP" ? undefined : classUri(one.handler),
+      handlerSource: one.kind === "APP" ? undefined : classSource(one.handler),
+      app: one.kind === "APP" ? one.handler : undefined,
+      mpc: one.mpc,
+      mpcUri: classUri(one.mpc),
+      mpcSource: classSource(one.mpc),
+      helpers: (one.kind === "ODATA" ? [
+        one.mpc?.replace(/_MPC_EXT$/i, "_MPC_ANN"),
+        "ZCL_STG_SEGW_REGISTRY", "ZCL_STG_SHLP_REGISTRY", "ZCL_STG_FM_REGISTRY",
+      ] : one.kind === "APP" ? ["ZCL_STG_BSP_REGISTRY"] : []).filter((name) => name && store.exists("CLAS", name)).map((name) => ({
+        name,
+        role: name.endsWith("_MPC_ANN") ? "annotations" : "registry",
+        uri: classUri(name),
+        source: classSource(name),
+      })),
+      source: one.source,
+    }));
+    const counts = {};
+    for (const row of rows) counts[row.kind] = (counts[row.kind] ?? 0) + 1;
+    return {raw: JSON.stringify({services: rows, counts})};
+  } catch (e) {
+    return {refuse: {status: 500, type: "ExceptionInternalError", message: String(e?.message ?? e)}};
+  }
+}
+export function transactionsAnswer(store) {
+  try {
+    const folders = generatorFoldersOf(store.root).map((folder) => join(store.root, folder));
+    const rows = transactions(folders).map((one) => ({
+      ...one,
+      file: undefined,
+      source: relative(store.root, one.file),
+      ...store.locationOf(relative(store.root, one.file)),
+      programSource: store.find(one.className ? "CLAS" : "PROG", one.className || one.program)?.file,
+    }));
+    return {raw: JSON.stringify({transactions: rows})};
+  } catch (e) {
+    return {refuse: {status: 500, type: "ExceptionInternalError", message: String(e?.message ?? e)}};
+  }
+}
+
+function sendIntrospection(res, answer) {
+  if (answer.refuse) {
+    const {status, type, message} = answer.refuse;
+    refuse(res, status, type, message);
+  } else res.type("application/json; charset=utf-8").send(answer.raw);
+}
+
 export function adtRouter(options = {}) {
   const store = options.store ?? new ObjectStore({root: options.root});
   if (options.watch !== false && typeof store.watch === "function") {
@@ -735,6 +849,10 @@ export function adtRouter(options = {}) {
     sessions, ...abapSession(sessions, async (kind, name) => {
       if (kind === "IDENTITY") return identity;
       if (kind === "SEGW_REGISTRATIONS") return segwRegistrationsOf(store);
+      if (kind === "BUILD") return buildAnswer({store, data, sourceCommit, identity});
+      if (kind === "CHANGED") return changedAnswer(store);
+      if (kind === "SERVICES") return servicesAnswer(store);
+      if (kind === "TRANSACTIONS") return transactionsAnswer(store);
       return undefined;
     })}));
 
@@ -984,47 +1102,7 @@ export function adtRouter(options = {}) {
     return commitCache;
   };
 
-  router.get(`${BASE}/core/http/build`, (req, res) => {
-    res.type("application/json; charset=utf-8").send(JSON.stringify({
-      build: facadeBuildStamp(),
-      generation: liveHash(store.root),
-      // The commit, and it is the **only** number the two deployment targets
-      // can share (docs/backlog/pages-preview.md, "Deploying: the i7 follows Pages"). The
-      // generation above is the transpiler's, the preview's `stamp` is
-      // webpack's, and those two cannot agree even when built from one
-      // source -- a check on them produces a false alarm, which is worse
-      // than no check. `unknown` when there is no git, rather than a field
-      // that looks measured and is not.
-      commit: sourceCommit(),
-      // Are we serving what we are running? Three names, and they are
-      // synchronized when all three agree. source is what a build of the
-      // tree would produce now (105 ms to compute); live is the build on
-      // disk; serving is the code the runtime child actually runs. source
-      // ahead of live means unbuilt saves; live ahead of serving means a
-      // build that went live without a recycle — a pinned runtime, or one
-      // that failed to come up and was rolled back.
-      system: (() => {
-        if (store.root === undefined) {
-          return undefined;
-        }
-        const source = hashOf(store.root);
-        const live = liveHash(store.root);
-        // null, not undefined: JSON drops an undefined field, and "no
-        // runtime is serving yet" is an answer, not an absence
-        const serving = store.served?.running === true ? store.served.generation : null;
-        // and the rows: which file the serving runtime holds, and where the
-        // preview reads — "serving" means through the runtime's door, which
-        // is the only answer in which a preview and the application agree
-        const database = {
-          serving: store.served?.running === true ? (store.served.database ?? "memory") : null,
-          preview: data.source ?? "in-process",
-        };
-        return {source, live, serving, database, synchronized: source === live && (serving === null || serving === live) && database.preview === "serving"};
-      })(),
-      started: STARTED,
-      identity,
-    }));
-  });
+  router.get(`${BASE}/core/http/build`, (req, res) => sendIntrospection(res, buildAnswer({store, data, sourceCommit, identity})));
 
   // What "Rebuild (warm)" (editors/vscode, docs/vscode-extension.md "Warm")
   // activates in one call: every CLAS/INTF whose file no longer hashes to
@@ -1035,14 +1113,7 @@ export function adtRouter(options = {}) {
   // cold rebuild rather than trust a list this could not check; `reason`
   // carries store.warm()'s own reason in that case. OSG-specific, so not
   // advertised, like the other core/http/* doors around it.
-  router.get(`${BASE}/core/http/changed`, (req, res) => {
-    const objects = store.changedObjects();
-    const w = store.warm?.();
-    res.type("application/json; charset=utf-8").send(JSON.stringify({
-      objects,
-      reason: objects === undefined ? (w?.on !== true ? "OSD_WARM is not 1" : w?.reason) : undefined,
-    }));
-  });
+  router.get(`${BASE}/core/http/changed`, (req, res) => sendIntrospection(res, changedAnswer(store)));
 
   // The host checkout is the Workbench's history layer. This endpoint is
   // intentionally read-only and resolves type/name through ObjectStore
@@ -1178,67 +1249,12 @@ export function adtRouter(options = {}) {
   // inventory, the one the status tables and the webgui menu read
   // (tools/osd-status.mjs serviceTree); an OData service's entity sets are
   // not listed here but asked for when a node opens (segw/entitysets).
-  router.get(`${BASE}/core/http/services`, (req, res) => {
-    try {
-      const classUri = (name) => (name !== undefined && name !== "" && store.exists("CLAS", name) ? uriOf("CLAS", name) : undefined);
-      const classSource = (name) => {
-        if (name === undefined || name === "") return undefined;
-        try {
-          return store.read("CLAS", name).file;
-        } catch {
-          return undefined;
-        }
-      };
-      const rows = serviceTree(store.root).map((one) => ({
-        kind: one.kind,
-        name: one.name,
-        path: one.path,
-        text: one.text,
-        pack: one.pack,
-        handler: one.kind === "APP" ? undefined : one.handler,
-        handlerUri: one.kind === "APP" ? undefined : classUri(one.handler),
-        handlerSource: one.kind === "APP" ? undefined : classSource(one.handler),
-        app: one.kind === "APP" ? one.handler : undefined,
-        mpc: one.mpc,
-        mpcUri: classUri(one.mpc),
-        mpcSource: classSource(one.mpc),
-        helpers: (one.kind === "ODATA" ? [
-          one.mpc?.replace(/_MPC_EXT$/i, "_MPC_ANN"),
-          "ZCL_STG_SEGW_REGISTRY", "ZCL_STG_SHLP_REGISTRY", "ZCL_STG_FM_REGISTRY",
-        ] : one.kind === "APP" ? ["ZCL_STG_BSP_REGISTRY"] : []).filter((name) => name && store.exists("CLAS", name)).map((name) => ({
-          name,
-          role: name.endsWith("_MPC_ANN") ? "annotations" : "registry",
-          uri: classUri(name),
-          source: classSource(name),
-        })),
-        source: one.source,
-      }));
-      const counts = {};
-      for (const row of rows) counts[row.kind] = (counts[row.kind] ?? 0) + 1;
-      res.type("application/json; charset=utf-8").send(JSON.stringify({services: rows, counts}));
-    } catch (e) {
-      refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e));
-    }
-  });
+  router.get(`${BASE}/core/http/services`, (req, res) => sendIntrospection(res, servicesAnswer(store)));
 
   // The same transaction registry the WebGUI reads, including entries that
   // cannot be entered in this runtime (reports and dynpros still belong in
   // the developer's inventory). Source paths stay relative to the tree.
-  router.get(`${BASE}/core/http/transactions`, (req, res) => {
-    try {
-      const folders = generatorFoldersOf(store.root).map((folder) => join(store.root, folder));
-      const rows = transactions(folders).map((one) => ({
-        ...one,
-        file: undefined,
-        source: relative(store.root, one.file),
-        ...store.locationOf(relative(store.root, one.file)),
-        programSource: store.find(one.className ? "CLAS" : "PROG", one.className || one.program)?.file,
-      }));
-      res.type("application/json; charset=utf-8").send(JSON.stringify({transactions: rows}));
-    } catch (e) {
-      refuse(res, 500, "ExceptionInternalError", String(e?.message ?? e));
-    }
-  });
+  router.get(`${BASE}/core/http/transactions`, (req, res) => sendIntrospection(res, transactionsAnswer(store)));
 
   // Q2b "Runner" (docs/vscode-extension.md): which service and entity set a
   // SEGW _DPC_EXT class's own `<set>_get_entityset` / `<set>_get_entity`
