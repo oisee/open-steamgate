@@ -7,6 +7,9 @@ import {basename, join, resolve} from "node:path";
 const ownerOf = (file) => basename(file).split(".")[0].replaceAll("#", "/").toUpperCase();
 
 export function kernelWarnings(input) {
+  // Test seam: OSD_KERNEL_SCANNER_FAIL=1 throws inside the runners' scanner-only
+  // try/catch, exercising advisory failure handling without affecting compilers.
+  if (process.env.OSD_KERNEL_SCANNER_FAIL === "1") throw new Error("forced scanner failure");
   // Resolve lazily: ordinary transpilation and a compiled host need no checkout-only scanner.
   // Use the transpiler's copy throughout: its AST nodes use instanceof checks.
   const require = createRequire(import.meta.url);

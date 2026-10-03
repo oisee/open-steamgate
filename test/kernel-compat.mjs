@@ -76,34 +76,23 @@ ENDMETHOD. ENDCLASS.
   });
   for (const runner of ["osgo", "osgjs"]) {
     it(`${runner}: scanner failures preserve rows and exit codes, including strict mode`, () => {
-      const temp = mkdtempSync(join(root, ".local/kernel-scanner-error-"));
-      try {
-        const preload = join(temp, "throw-scanner.mjs");
-        // Fail the scanner's lazy dependency lookup in the parent only. Child
-        // compilers receive no preload and still execute the real Unit path.
-        writeFileSync(preload, `import {registerHooks} from "node:module";
-registerHooks({resolve(specifier, context, nextResolve) {
-  if (specifier === "@abaplint/transpiler/package.json") throw new Error("forced scanner failure");
-  return nextResolve(specifier, context);
-}});
-`);
-        const baseline = spawnSync(process.execPath, [`tools/${runner}-unit.mjs`, validFixture, "--json"],
-          {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6});
-        assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
-        const expectedResult = JSON.parse(baseline.stdout);
-        for (const strict of [false, true]) {
-          const run = spawnSync(process.execPath, ["--import", preload, `tools/${runner}-unit.mjs`, validFixture,
-            "--json", ...(strict ? ["--kernel-strict"] : [])],
-          {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6});
-          assert.equal(run.error, undefined);
-          assert.equal(run.status, baseline.status, run.stdout + run.stderr);
-          const result = JSON.parse(run.stdout);
-          assert.deepEqual(result.rows, expectedResult.rows);
-          assert.deepEqual(result.totals, expectedResult.totals);
-          assert.deepEqual(result.warnings, [{kind: "scanner-error", message: "Kernel compatibility scanner failed: forced scanner failure"}]);
-          assert.equal(run.stderr.split("\n").filter((line) => line === result.warnings[0].message).length, 1);
-        }
-      } finally { rmSync(temp, {recursive: true, force: true}); }
+      const baseline = spawnSync(process.execPath, [`tools/${runner}-unit.mjs`, validFixture, "--json"],
+        {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6});
+      assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
+      const expectedResult = JSON.parse(baseline.stdout);
+      for (const strict of [false, true]) {
+        const run = spawnSync(process.execPath, [`tools/${runner}-unit.mjs`, validFixture,
+          "--json", ...(strict ? ["--kernel-strict"] : [])],
+        {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6,
+          env: {...process.env, OSD_KERNEL_SCANNER_FAIL: "1"}});
+        assert.equal(run.error, undefined);
+        assert.equal(run.status, baseline.status, run.stdout + run.stderr);
+        const result = JSON.parse(run.stdout);
+        assert.deepEqual(result.rows, expectedResult.rows);
+        assert.deepEqual(result.totals, expectedResult.totals);
+        assert.deepEqual(result.warnings, [{kind: "scanner-error", message: "Kernel compatibility scanner failed: forced scanner failure"}]);
+        assert.equal(run.stderr.split("\n").filter((line) => line === result.warnings[0].message).length, 1);
+      }
     });
     it(`${runner}: strict class selection keeps unselected warnings without ERROR rows`, () => {
       const temp = mkdtempSync(join(root, ".local/kernel-selected-"));
