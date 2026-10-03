@@ -206,13 +206,14 @@ export function installAbapClock(abap, clock) {
 
 export class JobScheduler {
   constructor({root = process.cwd(), store, env = process.env, clock = systemClock,
-    execute = runConvertedBatch, candidate = (proposal) => proposal.count, retention} = {}) {
+    execute = runConvertedBatch, candidate = (proposal) => proposal.count, retention, shouldRun = () => true} = {}) {
     if (!store) throw new TypeError("JobScheduler needs the operations store");
     this.root = root;
     this.store = store;
     this.env = env;
     this.clock = clock;
     this.execute = execute;
+    this.shouldRun = shouldRun;
     this.candidate = candidate;
     this.retentionDays = retentionDays(env, retention); // null: no reorganisation
     this.nextReorg = undefined; // the clock's ms of the next one; host start makes it due
@@ -256,7 +257,7 @@ export class JobScheduler {
     try {
       if (this.env.STG_DB === "file") await drainJobOutbox(this.store, {env: this.env});
       await this.#reorganise();
-      while (!this.stopped) {
+      while (this.shouldRun()) {
         await this.releaseDue();
         const outcome = await workQueuedBatch(this.root, this.store, this.execute);
         if (outcome.kind === "empty" || outcome.kind === "busy") break;

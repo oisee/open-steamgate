@@ -939,7 +939,7 @@ async function main(args) {
     }
     const {JobScheduler} = await import("./osd-job-scheduler.mjs"); // not at the top: it imports this module
     let stopping = false;
-    const scheduler = new JobScheduler({root, store});
+    const scheduler = new JobScheduler({root, store, shouldRun: () => !stopping});
     if (command === "work") {
       if (process.env.STG_DB === "file") await drainJobOutbox(store);
       await scheduler.releaseDue();

@@ -6,6 +6,7 @@ import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
 import express from "express";
 import {BatchRuns, liveGeneration, runPersistedBatch, workQueuedBatch} from "../tools/osd-batch-runs.mjs";
+import {JobScheduler} from "../tools/osd-job-scheduler.mjs";
 import {drainJobOutbox} from "../tools/osd-job-outbox.mjs";
 import {batchMonitorHandler, batchCountsHandler} from "../tools/osd-batch-monitor.mjs";
 import {beforeJobPredecessorDDL, ensureJobEventMetadata, migrateJobEventFile,
@@ -383,6 +384,26 @@ describe("durable one-shot batch runs", function () {
     } finally {
       store.close();
     }
+  });
+
+  it("quiesces after the active job while preserving explicit ticks after timer stop", async () => {
+    const priorAbap = globalThis.abap;
+    globalThis.abap = {context:{osdGeneration:liveGeneration(root)}};
+    const store = new BatchRuns(root, env);
+    let accepting = true;
+    const scheduler = new JobScheduler({root,store,env:{},retention:null,
+      shouldRun:()=>accepting, execute:async()=>{ accepting = false; return {status:'COMPLETED'}; }});
+    try {
+      const first = store.enqueue({program:'ZGG_EX_012',generation:liveGeneration(root)});
+      const second = store.enqueue({program:'ZGG_EX_012',generation:liveGeneration(root)});
+      expect(await scheduler.tick()).to.have.length(1);
+      expect(store.get(first.id).state).to.equal('COMPLETED');
+      expect(store.get(second.id).state).to.equal('QUEUED');
+      scheduler.stop(); // timer stop still permits an explicitly requested pass
+      accepting = true;
+      expect(await scheduler.tick()).to.have.length(1);
+      expect(store.get(second.id).state).to.equal('COMPLETED');
+    } finally { scheduler.stop(); store.close(); globalThis.abap = priorAbap; }
   });
 
   it("leaves the critic's new-generation job queued until the extension worker reloads", async () => {
