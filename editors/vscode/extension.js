@@ -2677,6 +2677,7 @@ function activate(context) {
       layers: controller.launcher?.layers ?? detectWorkspaceLayers(workspaceFoldersFor(osdHomeOf())),
     }),
   });
+  void require("./abapfs-bridge.js").registerAbapFsBridge(vscode, context, controller).catch(() => {});
   context.subscriptions.push(statusBar(context));
   jobsStatusBar(vscode, context, controller);
   breakpointToggleStatusBar(context);

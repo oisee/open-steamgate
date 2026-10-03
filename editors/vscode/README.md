@@ -80,3 +80,9 @@ it explicitly. Both modes require durable file SQLite. The default `osd.database
 Other backends leave the worker stopped and show one message to use file SQLite.
 The **OSD jobs** status bar shows idle, running/queued counts, or a stopped
 worker. Click it to open the **OSD jobs** output channel.
+
+## Local ABAP-FS connection
+
+Start your pocket system with **osd: Start**. With [our ABAP-FS fork, branch osd-api](https://github.com/oisee/vscode_abap_remote_fs/tree/osd-api), **OSD (local)** appears and connects automatically without a password prompt. Stop withdraws it; a new start uses a fresh token. Passwordless auto-connect requires this fork until API v2 is upstream. Tokens stay in memory and the serving process environment, never settings or files.
+
+With Marketplace ABAP-FS (API v1 or older), the first start offers **Add** / **Not now** once, remembered across windows. **Add** creates **OSD (local)** in user `abapfs.remote` settings with the local URL, client and username, preserving other entries and saving no password. Connect through ABAP-FS and enter any password: the local system accepts it. The settings entry remains after Stop; if a later start chooses another port, update its URL. Existing entries are preserved. This integration covers desktop systems started by OSD; independently started systems and vscode.dev do not receive a token connection.
