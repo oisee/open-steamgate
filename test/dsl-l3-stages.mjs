@@ -1,4 +1,4 @@
-import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
+import {l3TableDependencies, l3TableNames} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, jobDoctorModel, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 3b (docs/dsl-l3.md, "Stages, filters and a schedule"): a set
 // in ordered stages. A filter stage's rules (L2 keys: true) fill a worklist,
@@ -44,8 +44,7 @@ const FLEET = {
 };
 const COLUMNS = {zosd_l2_ship: ["ship_id", "name", "status"], zosd_l2_voy: ["voyage_id", "ship_id", "dep_date"],
   zosd_l2_crew: ["crew_id", "ship_id", "role", "since"], zosd_l2_cargo: ["cargo_id", "ship_id", "weight"]};
-const TABLES = ["zosd_l3_budget", "zosd_l3_event", "zosd_l3_object", "zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor", "zosd_l3_kill",
-  "zosd_l3_conf", "zosd_l3_conf_log", "zosd_l3_run_conf"];
+const TABLES = l3TableNames();
 
 describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", function () {
   this.timeout(900000);

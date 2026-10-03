@@ -1,4 +1,4 @@
-import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
+import {l3TableDependencies, l3TableNames} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 5d (docs/dsl-l3.md, "Simulated twin: the work as a port"):
 // the work of a pile is the port work, and iv_bind = 'work=sim' runs the same
@@ -36,8 +36,7 @@ const DATE = "20991001";
 const setLine = (re, text = SET_TEXT) => text.split("\n").findIndex((l) => re.test(l)) + 1;
 const where = (file) => relative(process.cwd(), file).split(sep).join("/");
 const git = (args) => spawnSync("git", args, {encoding: "utf8", maxBuffer: 64 * 1024 * 1024});
-const TABLES = ["zosd_l3_budget", "zosd_l3_event", "zosd_l3_object", "zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage",
-  "zosd_l3_work", "zosd_l3_doctor", "zosd_l3_kill", "zosd_l3_conf", "zosd_l3_conf_log", "zosd_l3_run_conf"];
+const TABLES = l3TableNames();
 const SOURCES = ["zosd_l2_ship", "zosd_l2_voy", "zosd_l2_crew", "zosd_l2_cargo"];
 const model = compileSet(SET);
 const ruleOf = (name) => model.simulate.rules.find((r) => r.rule === name);

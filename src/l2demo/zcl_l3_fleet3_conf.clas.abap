@@ -46,6 +46,9 @@ CLASS zcl_l3_fleet3_conf DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " every setting of the set back to its DSL default
     CLASS-METHODS reset_all
       RETURNING VALUE(rv_ok) TYPE abap_bool.
+    " why the last set_setting refused, in words, when it is a refusal the caller cannot
+    " read off the value (a malformed list); initial after an accepted or an unexplained one
+    CLASS-DATA refusal TYPE string.
   PRIVATE SECTION.
     CLASS-METHODS valid
       IMPORTING iv_param TYPE csequence iv_value TYPE csequence
@@ -126,6 +129,7 @@ CLASS zcl_l3_fleet3_conf IMPLEMENTATION.
     DATA lv_offset TYPE i.
     DATA lv_unit TYPE c LENGTH 1.
     lv_text = iv_value.
+    CLEAR refusal.
     rv_ok = abap_false.
     CASE iv_param.
       WHEN 'params.restricted'.
@@ -135,6 +139,7 @@ CLASS zcl_l3_fleet3_conf IMPLEMENTATION.
         " a list of values: none holds a comma or a blank
         FIND REGEX `^([^, ]{1,1}(,[^, ]{1,1})*)?$` IN lv_text.
         IF sy-subrc <> 0.
+          refusal = 'not a list of values: separate items by a comma with no empty item and no blank'.
           RETURN.
         ENDIF.
         rv_ok = abap_true.

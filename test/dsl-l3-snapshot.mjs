@@ -8,6 +8,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {compileSet, renderSet, checkSet, explainAlert, SetError} from '../tools/dsl-l3.mjs';
 import {loadGenerated} from '../tools/dsl-l3-load.mjs';
 import {cockpitService} from '../tools/dsl-l3-cockpit-service.mjs';
+import {l3TableNames} from './helpers/dsl-l3-tables.mjs';
 const SET = 'src/l2demo/fleet2.l3.yaml';
 const text = readFileSync(SET, 'utf8');
 const hash = (s) => createHash('sha256').update(s).digest('hex');
@@ -185,6 +186,31 @@ describe('DSL L3 input snapshots', function () {
       const empty=plain(await dialogStep(()=>c.snapshot({iv_name:str('reference')})));
       expect(empty.row_count).to.equal(0);expect(empty.content_hash).to.equal(hash(''));
     } finally {abap.Classes.ZCL_L3_FLEET=original;}
+  });
+  it('a lost mismatch audit is never silent: the caller is told and an event row names the run',async()=>{
+    const name=`${model.class}.clas.abap`, from='WHERE run_id = ls_audit-run_id.\n    DO 10 TIMES.\n      ls_audit-seq = ls_audit-seq + 1.';
+    expect(files[name]).to.include(from);
+    const original=cls();
+    // a copy whose audit key never moves: every one of the ten inserts collides
+    await loadGenerated({...files,[name]:files[name].replace(from,'WHERE run_id = ls_audit-run_id.\n    DO 10 TIMES.\n      ls_audit-seq = 1.')},[model.class],join(dir,'audit-lost'),model);
+    try {
+      await exec("INSERT INTO zosd_l3_doctor (mandt,run_id,seq,set_name,doc_action) VALUES ('','LOSTRUN',1,'fleet2','OTHER')");
+      const s=await snap();s.get().row_count.set(99);
+      const lost=new abap.types.Character(1);
+      const ok=await dialogStep(()=>cls().check_snapshot({is_expected:s,iv_run:str('LOSTRUN'),ev_audit_lost:lost}));
+      expect(trim(ok.get())).to.equal('');
+      expect(trim(lost.get())).to.equal('X');
+      const events=read("SELECT kind,reason FROM zosd_l3_event WHERE run_id='LOSTRUN'");
+      expect(events).to.have.length(1);
+      expect(trim(events[0].kind)).to.equal('SNAPAUDLOST');expect(events[0].reason).to.match(/audit lost/);
+    } finally {abap.Classes.ZCL_L3_FLEET2=original;}
+    // an ordinary audit still lands and is not flagged
+    const s=await snap();s.get().row_count.set(99);const flag=new abap.types.Character(1);
+    await dialogStep(()=>cls().check_snapshot({is_expected:s,iv_run:str('FINE'),ev_audit_lost:flag}));
+    expect(trim(flag.get())).to.equal('');expect(read("SELECT * FROM zosd_l3_doctor WHERE run_id='FINE'")).to.have.length(1);
+  });
+  it('the cleanup list discovers every snapshot table',()=>{
+    expect(l3TableNames()).to.include.members(['zosd_l3_snap','zosd_l3_snapk','zosd_l3_run_snap','zosd_l3_doctor','zosd_l3_event']);
   });
   it('copy mutants: sort, fields, reuse, run record, explain, handshake, audit and trim each kill their oracle',async()=>{
     const edits=[['sort','SORT lt_ships_ref BY ship_id.','" removed',async()=>plain(await snap()).content_hash,hash('4:S0019:Albatross1:M;4:S0028:Bluebird1:A;')],

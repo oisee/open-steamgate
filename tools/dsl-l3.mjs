@@ -817,7 +817,7 @@ function alertRow(db, key) {
       let pile;
       let settings = [], events = [], budget, snapshots = [], remote;
       try {
-        if (alert && /^[a-z][a-z0-9_]{0,12}$/.test(key.set)) remote = handle.prepare(`SELECT * FROM zl3_${key.set}_rlink WHERE set_name = ? AND (run_id = ? OR remote_run = ?)`).get(key.set, alert.run_id, alert.run_id);
+        if (alert && /^[a-z][a-z0-9_]{0,12}$/.test(key.set)) remote = handle.prepare(`SELECT * FROM zl3_${key.set}_rlink WHERE set_name = ? AND (run_id = ? OR remote_run = ?) ORDER BY linked DESC`).get(key.set, alert.run_id, alert.run_id);
       } catch { remote = undefined; }
       try {
         pile = alert && handle.prepare(`SELECT * FROM zosd_l3_pile WHERE set_name = ? AND run_id = ? AND rule_name = ? AND pile_no = ?`)

@@ -28,7 +28,7 @@
           AND pile_no = is_header-pile_no.
       RETURN.
     ENDIF.
-    SELECT SINGLE * FROM {{link}} INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id.
+    SELECT SINGLE * FROM {{link}} INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id AND dest = ''.
     IF sy-subrc <> 0.
       ls_link-set_name = c_set.
       ls_link-run_id = is_header-run_id.
@@ -39,7 +39,7 @@
       ENDTRY.
       INSERT {{link}} FROM ls_link.
       IF sy-subrc <> 0.
-        SELECT SINGLE * FROM {{link}} INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id.
+        SELECT SINGLE * FROM {{link}} INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id AND dest = ''.
       ENDIF.
     ENDIF.
     ls_saved = gs_settings.

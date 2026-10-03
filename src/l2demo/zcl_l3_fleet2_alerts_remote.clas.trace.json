@@ -370,7 +370,7 @@
     {
       "line": 74,
       "template_line": 79,
-      "path": "/link"
+      "path": "/"
     },
     {
       "line": 75,
@@ -380,11 +380,21 @@
     {
       "line": 76,
       "template_line": 81,
-      "path": "/"
+      "path": "/link"
     },
     {
       "line": 77,
       "template_line": 82,
+      "path": "/"
+    },
+    {
+      "line": 78,
+      "template_line": 83,
+      "path": "/"
+    },
+    {
+      "line": 79,
+      "template_line": 84,
       "path": "/"
     }
   ]

@@ -374,10 +374,15 @@ describe("DSL L3: a range set parameter", function () {
     it("the setting refuses what is not a list of values, without a change, and takes an empty list (every status)", async () => {
       await dialogStep(() => cls().settings_seed());
       const before = read("SELECT * FROM zosd_l3_conf_log").length;
-      for (const bad of ["M;D", "MM", "A, D", ",A", "A,", "A,,D", "M,D,"]) expect(await set("params.restricted", bad), bad).to.equal(false);
+      for (const bad of ["M;D", "MM", "A, D", ",A", "A,", "A,,D", "M,D,"]) {
+        expect(await set("params.restricted", bad), bad).to.equal(false);
+        // the refusal says why, in words the cockpit shows
+        expect(trim(conf().refusal.get()), `reason for ${bad}`).to.match(/not a list of values.*no empty item/);
+      }
       expect(trim(confRow().param_val)).to.equal("M,D");
       expect(read("SELECT * FROM zosd_l3_conf_log")).to.have.length(before);
       expect(await set("params.restricted", "")).to.equal(true);
+      expect(trim(conf().refusal.get())).to.equal("");
       expect(trim(confRow().param_val)).to.equal("");
       // an empty list is an initial table: the run gives it the default, as for any initial parameter... of the setting, which is empty:
       // the table stays empty and holds every status

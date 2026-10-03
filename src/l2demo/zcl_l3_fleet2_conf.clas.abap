@@ -787,7 +787,7 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
         ENDIF.
         rv_ok = abap_true.
       WHEN 'remote.destination'.
-        IF strlen( lv_text ) < 1 OR strlen( lv_text ) > 40.
+        IF strlen( lv_text ) < 1 OR strlen( lv_text ) > 32.
           RETURN.
         ENDIF.
         rv_ok = abap_true.
