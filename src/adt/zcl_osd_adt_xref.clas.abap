@@ -37,18 +37,19 @@ CLASS zcl_osd_adt_xref IMPLEMENTATION.
     DATA lv_row LIKE LINE OF lt_rows.
     DATA lv_text TYPE string.
     IF iv_readers = abap_true.
-      SELECT include FROM wbcrossgt INTO TABLE lt_rows UP TO 5000 ROWS
-        WHERE otype = 'TY' AND name = iv_name AND include <> iv_name.
-      SELECT include FROM wbcrossgtx INTO TABLE lt_extra UP TO 5000 ROWS
-        WHERE otype = 'TY' AND name = iv_name AND include <> iv_name.
+      SELECT DISTINCT include FROM wbcrossgt INTO TABLE lt_rows UP TO 5000 ROWS
+        WHERE otype = 'TY' AND name = iv_name AND include <> iv_name ORDER BY include.
+      SELECT DISTINCT include FROM wbcrossgtx INTO TABLE lt_extra UP TO 5000 ROWS
+        WHERE otype = 'TY' AND name = iv_name AND include <> iv_name ORDER BY include.
     ELSE.
-      SELECT include FROM wbcrossgt INTO TABLE lt_rows UP TO 5000 ROWS
-        WHERE otype = 'TY' AND name = iv_name.
-      SELECT include FROM wbcrossgtx INTO TABLE lt_extra UP TO 5000 ROWS
-        WHERE otype = 'TY' AND name = iv_name.
+      SELECT DISTINCT include FROM wbcrossgt INTO TABLE lt_rows UP TO 5000 ROWS
+        WHERE otype = 'TY' AND name = iv_name ORDER BY include.
+      SELECT DISTINCT include FROM wbcrossgtx INTO TABLE lt_extra UP TO 5000 ROWS
+        WHERE otype = 'TY' AND name = iv_name ORDER BY include.
     ENDIF.
     APPEND LINES OF lt_extra TO lt_rows.
-*   UNION is distinct and SQLite returns code-unit order before the cap.
+*   Node caps the SQL UNION in binary include order, before uppercasing.
+*   Each ordered distinct prefix contains every candidate for that cap.
     SORT lt_rows.
     DELETE ADJACENT DUPLICATES FROM lt_rows.
     LOOP AT lt_rows INTO lv_row.
