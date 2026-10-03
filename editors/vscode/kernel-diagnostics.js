@@ -108,6 +108,31 @@ function registerKernelDiagnostics(vscode, context, output, {scan = scanObject, 
       if (event.affectsConfiguration("osg.kernelStrict")) for (const doc of vscode.workspace.textDocuments) schedule(doc);
     }),
   ];
+  let watchers = [];
+  function diskChanged(uri) {
+    if (disposed || !/\.(abap|xml)$/i.test(uri.fsPath)) return;
+    const prefix = path.basename(uri.fsPath).split(".").slice(0, 2).join(".").toLowerCase();
+    // Clear the removed URI as well as all affected open includes. schedule()
+    // advances their revisions before an old worker can publish its result.
+    collection.delete(uri); counts.delete(uri.toString());
+    for (const doc of vscode.workspace.textDocuments) {
+      if (path.dirname(doc.fileName) !== path.dirname(uri.fsPath)
+          || !path.basename(doc.fileName).toLowerCase().startsWith(prefix + ".")) continue;
+      collection.delete(doc.uri); counts.delete(doc.uri.toString());
+      schedule(doc);
+    }
+    count();
+  }
+  function watchFolders() {
+    for (const watcher of watchers) watcher.dispose();
+    watchers = [];
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, "**/*.{abap,xml}"));
+      watchers.push(watcher, watcher.onDidChange(diskChanged), watcher.onDidCreate(diskChanged), watcher.onDidDelete(diskChanged));
+    }
+  }
+  watchFolders();
+  if (vscode.workspace.onDidChangeWorkspaceFolders) subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(watchFolders));
   const api = {
     async allow(file, object) {
       if (mode() !== "refuse") return true;
@@ -125,7 +150,7 @@ function registerKernelDiagnostics(vscode, context, output, {scan = scanObject, 
     dispose() {
       disposed = true;
       for (const timer of timers.values()) clearTimeout(timer);
-      for (const subscription of subscriptions) subscription.dispose();
+      for (const subscription of [...subscriptions, ...watchers]) subscription.dispose();
       counts.clear(); count();
     },
   };

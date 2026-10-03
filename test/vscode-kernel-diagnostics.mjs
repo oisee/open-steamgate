@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {createRequire} from "node:module";
-import {mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync} from "node:fs";
+import {mkdtempSync, mkdirSync, symlinkSync, writeFileSync, renameSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
@@ -15,11 +15,14 @@ function fixture() {
   const doc = {fileName: "/workspace/zcheck.prog.abap", lineCount: 4, lineAt: () => ({text: "  x = n BIT-AND n."}), getText: () => "unsaved", uri: {scheme: "file", toString: () => "file:///workspace/zcheck.prog.abap"}};
   const subscribe = (name) => (listener) => { events[name] = listener; return {dispose() {}}; };
   const vscode = {
+    RelativePattern: class {constructor(base, pattern) {Object.assign(this, {base, pattern});}},
     Diagnostic: class {constructor(range, message, severity) { Object.assign(this, {range, message, severity}); }},
     Range: class {constructor(...positions) {this.positions = positions;}},
     DiagnosticSeverity: {Error: 0, Warning: 1}, Uri: {parse: (uri) => uri},
     languages: {createDiagnosticCollection: (name) => {expect(name).to.equal("osd-kernel"); return {set: (uri, value) => values.set(uri.toString(), value), delete: (uri) => values.delete(uri.toString()), dispose() {}};}},
-    workspace: {textDocuments: [doc], getConfiguration: () => ({get: () => mode}), getWorkspaceFolder: () => ({}),
+    workspace: {workspaceFolders: [{uri: {fsPath: "/workspace"}}],
+      createFileSystemWatcher: (pattern) => {expect(pattern.pattern).to.equal("**/*.{abap,xml}"); return {onDidChange: subscribe("diskChange"), onDidCreate: subscribe("diskCreate"), onDidDelete: subscribe("diskDelete"), dispose() {}};},
+      textDocuments: [doc], getConfiguration: () => ({get: () => mode}), getWorkspaceFolder: () => ({}),
       onDidOpenTextDocument: subscribe("open"), onDidChangeTextDocument: subscribe("change"), onDidCloseTextDocument: subscribe("close"), onDidChangeConfiguration: subscribe("config")},
     window: {showErrorMessage: (text) => popups.push(text)},
   };
@@ -95,6 +98,41 @@ describe("VS Code kernel strict diagnostics", function () {
     f.vscode.workspace.textDocuments.push(include); let calls = 0;
     const api = register(f, async () => {calls++; return [];});
     try {f.events.change({document: include}); await sleep(40); expect(calls).to.equal(2);} finally {api.dispose();}
+  });
+  it("rescans after a closed sibling changes, is deleted, or is renamed", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "osd-kernel-disk-"));
+    const file = path.join(dir, "zcheck.clas.abap"), include = path.join(dir, "zcheck.clas.locals_def.abap");
+    const source = "CLASS zcheck DEFINITION PUBLIC. PUBLIC SECTION. METHODS run. ENDCLASS.\nCLASS zcheck IMPLEMENTATION. METHOD run. DATA x TYPE x. DATA n TYPE local_type. x = n BIT-AND n. ENDMETHOD. ENDCLASS.";
+    writeFileSync(file, source); writeFileSync(include, "TYPES local_type TYPE i.");
+    const f = fixture(); f.doc.fileName = file; f.doc.getText = () => source;
+    let calls = 0;
+    const api = register(f, async (...args) => {calls++; return scanObject(...args);});
+    const waitForScan = async () => {for (let n = 0; n < 200 && !f.values.has(f.doc.uri.toString()); n++) await sleep(20);};
+    const uri = (fsPath) => ({fsPath, toString: () => fsPath});
+    try {
+      await waitForScan(); expect(f.counts.at(-1)).to.equal(1);
+      writeFileSync(include, "TYPES local_type TYPE x.");
+      f.events.diskChange(uri(include)); f.events.diskChange(uri(include));
+      expect(f.values.size).to.equal(0); await waitForScan(); expect(f.counts.at(-1)).to.equal(0); expect(calls).to.equal(2);
+      writeFileSync(include, "TYPES local_type TYPE i."); f.events.diskChange(uri(include));
+      await waitForScan(); expect(f.counts.at(-1)).to.equal(1);
+      rmSync(include); f.events.diskDelete(uri(include));
+      await waitForScan(); expect(f.counts.at(-1)).to.equal(0);
+      writeFileSync(include, "TYPES local_type TYPE i."); f.events.diskCreate(uri(include));
+      await waitForScan(); expect(f.counts.at(-1)).to.equal(1);
+      const renamed = path.join(dir, "zother.clas.locals_def.abap"); renameSync(include, renamed);
+      f.events.diskDelete(uri(include)); f.events.diskCreate(uri(renamed));
+      await waitForScan(); expect(f.counts.at(-1)).to.equal(0);
+    } finally {api.dispose(); rmSync(dir, {recursive: true, force: true});}
+  });
+  it("invalidates an in-flight sibling scan immediately on a disk event", async () => {
+    const f = fixture(); let finish, calls = 0;
+    const api = register(f, () => ++calls === 1 ? new Promise((resolve) => {finish = resolve;}) : []);
+    try {
+      await sleep(30); f.events.diskDelete({fsPath: "/workspace/zcheck.prog.xml", toString: () => "xml"});
+      finish([finding]); await sleep(40);
+      expect(f.counts.at(-1)).to.equal(0); expect(f.values.get(f.doc.uri.toString())).to.deep.equal([]);
+    } finally {api.dispose();}
   });
   it("logs scanner exceptions once without a popup and allows default runs", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "osd-kernel-fail-"));
