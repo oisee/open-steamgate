@@ -53,6 +53,14 @@ export class OsdPostgresClient extends PostgresDatabaseClient {
     finally { this.connected = false; }
   }
 
+  async selectOne(sql) {
+    const text = sql.replace(/ ORDER BY PRIMARY KEY/i, '').replace(/ ASCENDING/ig, ' ASC')
+      .replace(/ DESCENDING/ig, ' DESC').replace(/~/g, '.');
+    // Empty values alone use simple protocol in node-postgres; queryMode
+    // forces extended protocol even for a SELECT without parameters.
+    return {rows: this.convert(await this.query({text, values: [], queryMode: 'extended'}))};
+  }
+
   async checkSelect(sql) {
     const text = sql.replace(/ UP TO (\d+) ROWS(.*)/i, "$2 LIMIT $1")
       .replace(/ ORDER BY PRIMARY KEY/i, "")
@@ -66,7 +74,7 @@ export class OsdPostgresClient extends PostgresDatabaseClient {
     const session = await this.pool.connect();
     const name = `osd_check_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     try {
-      await session.query(`PREPARE ${name} AS ${text}`);
+      await session.query({text: `PREPARE ${name} AS ${text}`, values: [], queryMode: 'extended'});
     } finally {
       await session.query(`DEALLOCATE ${name}`).catch(() => undefined);
       session.release();

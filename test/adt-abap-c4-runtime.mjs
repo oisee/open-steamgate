@@ -13,13 +13,18 @@ import './start.mjs';
 
 describe('C4 serving database and switch-off compatibility', function () {
   this.timeout(120000);
-  let runtime, store, servers = [], previous;
+  let runtime, store, servers = [], previous, previousLocal;
   before(async () => {
     previous = process.env.OSD_ADT_ONE_RUNTIME;
+    previousLocal = abap.context.RFCDestinations.STORE.localSystem;
     store = new ObjectStore({root: process.cwd()});
     runtime = new ServingRuntime({root: process.cwd(), env: {OSD_ADT_ONE_RUNTIME: '1', STG_DB:'sqlite', STG_DB_PATH:'', STG_TLS:'0'}});
     runtime.storeDestination = new StoreDestination({store});
     await runtime.start();
+  });
+  afterEach(() => {
+    abap.context.RFCDestinations.STORE.localSystem = previousLocal;
+    if (previous === undefined) delete process.env.OSD_ADT_ONE_RUNTIME; else process.env.OSD_ADT_ONE_RUNTIME = previous;
   });
   after(async () => {
     for (const s of servers) await new Promise(r => s.close(r));
@@ -85,6 +90,7 @@ describe('C4 PostgreSQL SELECT fence', () => {
     const calls = []; let aborted = false;
     client.client = {query:async sql => {
       calls.push(sql);
+      sql = sql.text ?? sql;
       if (sql.startsWith('ROLLBACK TO')) aborted = false;
       else if (aborted) throw new Error('current transaction is aborted');
       if (sql.includes('broken')) {aborted = true; throw new Error('unknown column');}
@@ -92,15 +98,35 @@ describe('C4 PostgreSQL SELECT fence', () => {
     }};
     const answer = await previewSQL(client, 'SQL', {statement:'SELECT broken FROM zstg_demo'});
     expect(answer).to.have.property('error');
-    expect(calls).to.deep.equal(['SAVEPOINT osd_adt_preview','SELECT broken FROM zstg_demo LIMIT 100',
+    expect(calls).to.deep.equal(['SAVEPOINT osd_adt_preview',{text:'SELECT broken FROM zstg_demo LIMIT 100', values:[], queryMode:'extended'},
       'ROLLBACK TO SAVEPOINT osd_adt_preview','RELEASE SAVEPOINT osd_adt_preview']);
     expect((await client.select({select:'SELECT id FROM zosd_adt_sess'})).rows).to.deep.equal([{id:'pending-session'}]);
   });
+  for (const middle of ['DELETE FROM t', 'COMMIT']) it(`refuses ${middle} before PostgreSQL SAVEPOINT`, async () => {
+    const client = new OsdPostgresClient({host:'unused'});
+    const calls = [];
+    client.client = {query:async sql => {calls.push(sql); throw new Error('must not execute');}};
+    for (const kind of ['SQL', 'SQLCHECK']) {
+      expect((await previewSQL(client, kind, {statement:`SELECT 1; ${middle}; SELECT 2`})).code).to.equal('NOT_ALLOWED');
+    }
+    expect(calls).to.deep.equal([]);
+  });
+  for (const broken of ['RELEASE SAVEPOINT', 'ROLLBACK TO SAVEPOINT', 'SAVEPOINT osd_adt_preview']) {
+    it(`reports PostgreSQL ${broken} failure without throwing`, async () => {
+      const client = new OsdPostgresClient({host:'unused'});
+      client.client = {query:async sql => {
+        const text = sql.text ?? sql;
+        if (text.startsWith(broken) || (broken.startsWith('ROLLBACK') && text.startsWith('SELECT'))) throw new Error('fence refused');
+        return {rows:[{n:1}]};
+      }};
+      expect((await previewSQL(client, 'SQL', {statement:'SELECT 1 AS n'})).rawMessage).to.equal('fence refused');
+    });
+  }
   it('SQLCHECK uses the PostgreSQL prepare session and releases it after refusal', async () => {
     const client = new OsdPostgresClient({host:'unused'});
     let released = false; const calls = [];
-    client.pool = {connect:async () => ({query:async sql => {calls.push(sql); if(sql.startsWith('PREPARE')) throw new Error('bad SELECT');}, release:() => {released=true;}})};
+    client.pool = {connect:async () => ({query:async sql => {calls.push(sql); if((sql.text ?? sql).startsWith('PREPARE')) throw new Error('bad SELECT');}, release:() => {released=true;}})};
     expect(await previewSQL(client,'SQLCHECK',{statement:'SELECT broken FROM zstg_demo'})).to.have.property('error');
-    expect(released).to.equal(true); expect(calls[0]).to.match(/^PREPARE .* AS SELECT broken/); expect(calls[1]).to.match(/^DEALLOCATE /);
+    expect(released).to.equal(true); expect(calls[0].text).to.match(/^PREPARE .* AS SELECT broken/); expect(calls[1]).to.match(/^DEALLOCATE /);
   });
 });

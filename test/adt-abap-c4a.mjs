@@ -1,4 +1,5 @@
 import {COMMANDS} from '../tools/osd-store-destination.mjs';
+import {Data} from '../tools/osd-data.mjs';
 import {previewSQL} from '../tools/adt-preview-sql.mjs';
 import {previewPair} from './helpers/adt-preview.mjs';
 import {readFileSync} from 'node:fs';
@@ -56,6 +57,37 @@ describe('C4a freestyle data preview', function () {
     try {expect((await raw.select({select:`SELECT id FROM zosd_adt_sess WHERE id='${id}'`})).rows).to.have.length(1);}
     finally {await dialogStep(() => raw.delete({table:'zosd_adt_sess',where:`id='${id}'`}));}
   });
+  // Reuse the critic's .local/critic/multi.mjs attack shapes on each backend.
+  for (const middle of ['DELETE FROM zc4_attack', 'COMMIT']) {
+    const sql = `SELECT 1 AS a; ${middle}; SELECT 2 AS b`;
+    it(`rejects multiple statements before running ${middle}`, async () => {
+      const raw = abap.context.databaseConnections.DEFAULT;
+      const exec = sql => raw.sqlite ? raw.sqlite.exec(sql) : raw.query(sql);
+      await exec('CREATE TABLE zc4_attack (k TEXT)');
+      await exec("INSERT INTO zc4_attack VALUES ('committed')");
+      const rollback = new Error('deliberate step rollback');
+      try {
+        await dialogStep(async () => {
+          expect((await raw.insert({table:'zc4_attack', columns:['k'], values:["'pending'"]})).subrc).to.equal(0);
+          const answer = await previewSQL(raw, 'SQL', {statement:sql});
+          expect(answer.code).to.equal('NOT_ALLOWED');
+          expect(answer.message).to.equal(`only SELECT is allowed here, not ${middle.split(' ')[0]}`);
+          expect((await raw.select({select:'SELECT k FROM zc4_attack ORDER BY k'})).rows).to.have.length(2);
+          throw rollback;
+        }).catch(error => {if (error !== rollback) throw error;});
+        expect((await raw.select({select:'SELECT k FROM zc4_attack'})).rows).to.deep.equal([{k:'committed'}]);
+        let refused;
+        try {await new Data({client:raw}).query(sql);} catch (error) {refused = error;}
+        expect(refused?.code).to.equal('NOT_ALLOWED');
+        expect((await pair.diff('POST', route, sql)).status).to.equal(400);
+      } finally {await exec('DROP TABLE zc4_attack');}
+    });
+  }
+  for (const sql of ["SELECT '; DELETE FROM t' AS text", 'SELECT 1 AS n; -- DELETE FROM t', 'SELECT 1 AS n; /* COMMIT */']) {
+    it(`accepts a single statement with quoted/commented delimiters: ${sql}`, async () => {
+      expect((await pair.diff('POST', route, sql)).status).to.equal(200);
+    });
+  }
   it('red proof: changing a renderer byte breaks the route diff', async () => {
     const cls = abap.Classes.ZCL_OSD_ADT_TABLEDATA, original = cls.document;
     cls.document = async (...args) => {const v = await original.apply(cls,args);v.set(v.get().replace('\n\n', '\n'));return v;};
