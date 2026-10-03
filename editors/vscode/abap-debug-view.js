@@ -198,10 +198,17 @@ function abapDebugProperties(helpers) {
     const {data, kind, target: referenceTarget} = helpers;
     const name = kind(this);
     if (name === undefined) return this;
-    if (name === "Structure") return data(this, "value");
+    if (name === "Structure") {
+      const result = Object.create(null);
+      const fields = data(this, "value");
+      for (const key of Object.keys(fields)) result[key] = data(fields, key);
+      return result;
+    }
     if (name === "FieldSymbol" || name === "DataReference") {
       const target = referenceTarget(this);
-      return target === undefined ? {} : {"->": target};
+      const result = Object.create(null);
+      if (target !== undefined) result["->"] = target;
+      return result;
     }
     if (name === "Table" || name === "HashedTable") {
       const result = Object.create(null);
@@ -235,7 +242,7 @@ function abapDebugProperties(helpers) {
       copy(data(object, "FRIENDS_ACCESS_INSTANCE"));
       return result;
     }
-    return {};
+    return Object.create(null);
   } catch {
     return this;
   }

@@ -45,12 +45,35 @@ describe("VS Code ABAP values (serialized js-debug generators)", () => {
     expect(describeValue(new t.Date())).to.equal("0000-00-00 (d)");
     expect(describeValue(new t.Time())).to.equal("00:00:00 (t)");
   });
+  it("returns prototype-free property bags for all ABAP expansions", () => {
+    class Probe {
+      static INTERNAL_TYPE = "CLAS";
+      static INTERNAL_NAME = "ZCL_DEBUG_PROBE";
+    }
+    const structure = new t.Structure({field: new t.Integer()});
+    const object = new t.ABAPObject();
+    object.set(new Probe());
+    const symbol = new t.FieldSymbol(structure);
+    symbol.assign(structure);
+    const reference = new t.DataReference(structure);
+    reference.assign(structure);
+    for (const value of [structure, new t.Table(structure), new t.HashedTable(structure),
+      new t.FieldSymbol(structure), symbol,
+      new t.DataReference(structure), reference,
+      object, new t.ABAPObject(), new Probe()]) {
+      const shown = props(value);
+      expect(Object.getPrototypeOf(shown)).to.equal(null);
+      expect("__proto__" in shown).to.equal(false);
+    }
+  });
   it("expands nested structures by declared component name and identity", () => {
     const nested = new t.Structure({amount: new t.Packed({length: 8, decimals: 2}).set("12.50")});
     const fields = {name: new t.Character(20).set("ABC"), nested};
     const value = new t.Structure(fields);
     expect(describeValue(value)).to.equal("{…} (structure)");
-    expect(props(value)).to.equal(fields);
+    expect(props(value)).to.deep.equal(fields);
+    expect(Object.getPrototypeOf(props(value))).to.equal(null);
+    expect(props(value).nested).to.equal(nested);
     expect(describeValue(props(value).nested)).to.equal("{…} (structure)");
     expect(describeValue(props(nested).amount)).to.equal("12.50 (p8,2)");
   });
