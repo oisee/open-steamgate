@@ -5,8 +5,6 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
   var config = {{config}};
   // a run that still holds its lock may change; a final one does not
   var settled = ["DONE", "PARTIAL", "FAILED", "NOT-RUN", "SKIPPED", "KILLED"];
-  // what the header and the pile table offer; the rest of the run's actions are the set's
-  var onRun = ["StartRun", "ContinueGlass", "Resume", "ReleasePile"];
   var action = function (name) {return config.actions.find(function (a) {return a.name === name;});};
   return {
     // the service says whether the run still holds its lock; without it, the status decides
@@ -86,7 +84,7 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
       this.read("PileSet", "RunId eq '" + run.RunId + "' and Status eq 'HELD'").then(function (rows) {if (rows.length) go(rows[0]);});
     },
     loaded: function () {
-      var bar = this.byId("cockpitActions"), self = this;
+      var self = this;
       var context = this.getView().getBindingContext(), run = context && context.getObject();
       if (!run) return;
       if (!this.live) this.attachLive();
@@ -94,10 +92,6 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
       // the page data comes again after every refresh; only another run starts over
       if (this.shown === run.RunId) return;
       this.shown = run.RunId;
-      bar.destroyItems();
-      config.actions.forEach(function (a) {
-        if (onRun.indexOf(a.name) < 0) bar.addItem(new Button({text: self.text(a.name), press: function () {self.ask(a);}}));
-      });
       // the answer the start dialog got for this run, in words
       var said = this.memo().getProperty("/answers/" + run.RunId);
       if (said) this.answer(said);
@@ -149,20 +143,6 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
         if (!table.getModel("dur")) table.setModel(new JSONModel({rows: []}), "dur");
         table.getModel("dur").setData({rows: list});
       }).catch(function (e) {self.answer(self.errorText(e));})];
-      if (config.settings.length) {
-        reads.push(this.read("SettingSet").then(function (rows) {
-          var box = self.byId("cockpitSettings"); box.destroyItems();
-          rows.forEach(function (r) {var def = config.settings.find(function (s) {return s.name === r.ParamName;});
-            box.addItem(new Text({text: r.ParamName + ": " + r.ParamVal + " / " + r.DslValue + " [" + def.min + ".." + def.max + "]"}));
-          });
-        }));
-        reads.push(this.read("ChangeSet").then(function (rows) {
-          rows.sort(function (a, b) {return +b.ChangedAt - +a.ChangedAt;});
-          var box = self.byId("cockpitChanges"); box.destroyItems();
-          rows.forEach(function (r) {box.addItem(new Text({text: r.ParamName + ": " + r.OldValue + " → " + r.NewValue + " · " + r.NoteText + " · " + r.ChangedBy}));});
-        }));
-      }
-      if (config.actions.some(function (a) {return a.name === "Schedule";})) this.getView().getModel().callFunction("/ScheduleStatus", {method: "GET", success: function (r) {self.byId("cockpitSchedule").setText(r.Answer);}});
       return Promise.all(reads);
     },
     answer: function (answer) {this.byId("cockpitAnswer").setText(this.human(answer)).setVisible(true);},

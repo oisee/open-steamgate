@@ -23,13 +23,5 @@
         </items>
       </Table>
     </Panel>
-    <Title text="{cockpitI18n>setActions}" class="sapUiMediumMarginTop"/>
-    <HBox id="cockpitActions" wrap="Wrap"/>
-    <Title text="{cockpitI18n>settings}"/>
-    <VBox id="cockpitSettings"/>
-    <Title text="{cockpitI18n>schedule}"/>
-    <Text id="cockpitSchedule"/>
-    <Title text="{cockpitI18n>changeLog}"/>
-    <VBox id="cockpitChanges"/>
   </VBox>
 </core:FragmentDefinition>

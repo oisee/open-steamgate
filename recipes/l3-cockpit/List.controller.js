@@ -34,7 +34,6 @@ function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit, 
     initTexts: Cockpit.initTexts,
     text: Cockpit.text,
     human: Cockpit.human,
-    ask: Cockpit.ask,
     answer: function (answer) {
       this.strip.setText(this.human(answer)).setVisible(true);
       if (this.page) this.page.setHeaderExpanded(true);
@@ -109,6 +108,5 @@ function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit, 
       });
     }
   };
-  config.actions.forEach(function (a) {if (a.name !== "StartRun") methods["ask" + a.name] = function () {this.ask(a);};});
   return methods;
 });

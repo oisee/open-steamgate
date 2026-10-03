@@ -66,11 +66,14 @@ describe("DSL L3 run cockpit", function () {
     try {
       writeCompiled(compile(readFileSync("src/l2demo/zl3c_fleet2.stg.yaml", "utf8")), out);
       writeFileSync(join(out, "zcl_zl3c_fleet2_dpc_ext.clas.abap"), readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap"));
-      buildApp({from: "src/l2demo/cockpit/zosd_fleet2", app: "ZOSD_FLEET2", out, service: SERVICE,
-        only: ["index.html", "Component.js", "manifest.json", "Cockpit.controller.js", "Cockpit.fragment.xml", "List.controller.js", "Series.js", "i18n/i18n.properties"]});
+      // both apps, each with the file list its cockpit.json names
+      for (const app of ["zosd_fleet2", "zosd_fleet2_s"]) {
+        const declared = JSON.parse(readFileSync(`src/l2demo/cockpit/${app}/cockpit.json`, "utf8"));
+        buildApp({from: `src/l2demo/cockpit/${app}`, app: app.toUpperCase(), out, service: SERVICE, only: declared.files});
+      }
       const files = readdirSync(out), unit = unitFor(loadManifest(), out, "l3demo");
-      expect(files.some((f) => f.endsWith(".sicf.xml"))).equal(true);
-      expect(files).include("zosd_fleet2.wapa.xml").and.include("zl3c_fleet2.iwpr.xml");
+      expect(files.filter((f) => f.endsWith(".sicf.xml"))).length(2);
+      expect(files).include("zosd_fleet2.wapa.xml").and.include("zosd_fleet2_s.wapa.xml").and.include("zl3c_fleet2.iwpr.xml");
       expect(admit({files, read: (f) => readFileSync(join(out, f), "utf8"), unit})).deep.equal([]);
     } finally {rmSync(out, {recursive: true, force: true});}
   });

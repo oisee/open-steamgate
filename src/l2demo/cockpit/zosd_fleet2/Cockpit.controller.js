@@ -40,162 +40,6 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
       "RunId": "String(32)"
      },
      "reason": false
-    },
-    {
-     "name": "Doctor",
-     "params": {},
-     "reason": false
-    },
-    {
-     "name": "SetKill",
-     "params": {
-      "Reason": "String(80)"
-     },
-     "reason": true
-    },
-    {
-     "name": "ClearKill",
-     "params": {
-      "Reason": "String(80)"
-     },
-     "reason": true
-    },
-    {
-     "name": "SetSetting",
-     "params": {
-      "Param": "String(30)",
-      "Value": "String(40)",
-      "Note": "String(80)"
-     },
-     "reason": true
-    },
-    {
-     "name": "ResetSetting",
-     "params": {
-      "Param": "String(30)",
-      "Note": "String(80)"
-     },
-     "reason": true
-    },
-    {
-     "name": "Schedule",
-     "params": {},
-     "reason": false
-    },
-    {
-     "name": "Unschedule",
-     "params": {},
-     "reason": false
-    }
-   ],
-   "settings": [
-    {
-     "name": "budget.glass",
-     "default": "10",
-     "min": "1",
-     "max": "2147483647"
-    },
-    {
-     "name": "budget.warn",
-     "default": "7000",
-     "min": "1",
-     "max": "10000"
-    },
-    {
-     "name": "budget.narrow_at",
-     "default": "8000",
-     "min": "1",
-     "max": "10000"
-    },
-    {
-     "name": "budget.per_pile",
-     "default": "50",
-     "min": "0",
-     "max": "2147483647"
-    },
-    {
-     "name": "retry.max",
-     "default": "2",
-     "min": "0",
-     "max": "99"
-    },
-    {
-     "name": "retry.backoff",
-     "default": "60",
-     "min": "0",
-     "max": "86400"
-    },
-    {
-     "name": "stale",
-     "default": "900",
-     "min": "60",
-     "max": "356400"
-    },
-    {
-     "name": "fuses.max_alerts",
-     "default": "500",
-     "min": "1",
-     "max": "100000"
-    },
-    {
-     "name": "keep.days",
-     "default": "30",
-     "min": "1",
-     "max": "9999"
-    },
-    {
-     "name": "simulate.seed",
-     "default": "42",
-     "min": "1",
-     "max": "2147483646"
-    },
-    {
-     "name": "simulate.time_scale",
-     "default": "10000",
-     "min": "0",
-     "max": "1000000"
-    },
-    {
-     "name": "simulate.profile",
-     "default": "default",
-     "min": "1",
-     "max": "20"
-    },
-    {
-     "name": "simulate.dump",
-     "default": "-1",
-     "min": "-1",
-     "max": "1000"
-    },
-    {
-     "name": "simulate.hang",
-     "default": "-1",
-     "min": "-1",
-     "max": "1000"
-    },
-    {
-     "name": "simulate.slow",
-     "default": "-1",
-     "min": "-1",
-     "max": "1000"
-    },
-    {
-     "name": "simulate.hits_mean",
-     "default": "-1",
-     "min": "-1",
-     "max": "100"
-    },
-    {
-     "name": "simulate.autoclose",
-     "default": "-1",
-     "min": "-1",
-     "max": "1000"
-    },
-    {
-     "name": "piles.checks.size",
-     "default": "2",
-     "min": "1",
-     "max": "2147483647"
     }
    ],
    "governor": true,
@@ -203,8 +47,6 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
   };
   // a run that still holds its lock may change; a final one does not
   var settled = ["DONE", "PARTIAL", "FAILED", "NOT-RUN", "SKIPPED", "KILLED"];
-  // what the header and the pile table offer; the rest of the run's actions are the set's
-  var onRun = ["StartRun", "ContinueGlass", "Resume", "ReleasePile"];
   var action = function (name) {return config.actions.find(function (a) {return a.name === name;});};
   return {
     // the service says whether the run still holds its lock; without it, the status decides
@@ -284,7 +126,7 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
       this.read("PileSet", "RunId eq '" + run.RunId + "' and Status eq 'HELD'").then(function (rows) {if (rows.length) go(rows[0]);});
     },
     loaded: function () {
-      var bar = this.byId("cockpitActions"), self = this;
+      var self = this;
       var context = this.getView().getBindingContext(), run = context && context.getObject();
       if (!run) return;
       if (!this.live) this.attachLive();
@@ -292,10 +134,6 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
       // the page data comes again after every refresh; only another run starts over
       if (this.shown === run.RunId) return;
       this.shown = run.RunId;
-      bar.destroyItems();
-      config.actions.forEach(function (a) {
-        if (onRun.indexOf(a.name) < 0) bar.addItem(new Button({text: self.text(a.name), press: function () {self.ask(a);}}));
-      });
       // the answer the start dialog got for this run, in words
       var said = this.memo().getProperty("/answers/" + run.RunId);
       if (said) this.answer(said);
@@ -347,20 +185,6 @@ function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONMode
         if (!table.getModel("dur")) table.setModel(new JSONModel({rows: []}), "dur");
         table.getModel("dur").setData({rows: list});
       }).catch(function (e) {self.answer(self.errorText(e));})];
-      if (config.settings.length) {
-        reads.push(this.read("SettingSet").then(function (rows) {
-          var box = self.byId("cockpitSettings"); box.destroyItems();
-          rows.forEach(function (r) {var def = config.settings.find(function (s) {return s.name === r.ParamName;});
-            box.addItem(new Text({text: r.ParamName + ": " + r.ParamVal + " / " + r.DslValue + " [" + def.min + ".." + def.max + "]"}));
-          });
-        }));
-        reads.push(this.read("ChangeSet").then(function (rows) {
-          rows.sort(function (a, b) {return +b.ChangedAt - +a.ChangedAt;});
-          var box = self.byId("cockpitChanges"); box.destroyItems();
-          rows.forEach(function (r) {box.addItem(new Text({text: r.ParamName + ": " + r.OldValue + " → " + r.NewValue + " · " + r.NoteText + " · " + r.ChangedBy}));});
-        }));
-      }
-      if (config.actions.some(function (a) {return a.name === "Schedule";})) this.getView().getModel().callFunction("/ScheduleStatus", {method: "GET", success: function (r) {self.byId("cockpitSchedule").setText(r.Answer);}});
       return Promise.all(reads);
     },
     answer: function (answer) {this.byId("cockpitAnswer").setText(this.human(answer)).setVisible(true);},

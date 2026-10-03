@@ -273,7 +273,8 @@ rm -rf .local/stage/l3demo && mkdir -p .local/stage/l3demo && cp \
   .local/stage/l3demo/
 node tools/stg-compile.mjs src/l2demo/zl3c_fleet2.stg.yaml --out .local/stage/l3demo
 cp src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.* .local/stage/l3demo/
-node tools/osd-bsp-app.mjs src/l2demo/cockpit/zosd_fleet2 --name ZOSD_FLEET2 --out .local/stage/l3demo --service ZL3C_FLEET2_SRV --only index.html,Component.js,manifest.json,Cockpit.controller.js,Cockpit.fragment.xml,List.controller.js,Series.js,i18n/i18n.properties
+node tools/osd-bsp-app.mjs src/l2demo/cockpit/zosd_fleet2 --name ZOSD_FLEET2 --out .local/stage/l3demo --service ZL3C_FLEET2_SRV --only index.html,Component.js,manifest.json,Cockpit.controller.js,Cockpit.fragment.xml,List.controller.js,StartRun.fragment.xml,Series.js,Live.js,i18n/i18n.properties
+node tools/osd-bsp-app.mjs src/l2demo/cockpit/zosd_fleet2_s --name ZOSD_FLEET2_S --out .local/stage/l3demo --service ZL3C_FLEET2_SRV --only index.html,Component.js,manifest.json,Set.view.xml,Set.controller.js,Live.js,i18n/i18n.properties
 node tools/osd-prove-on-system.mjs .local/stage/l3demo --unit l3demo --manifest deploy/manifest.json
 ```
 

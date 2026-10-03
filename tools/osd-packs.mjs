@@ -292,7 +292,9 @@ export function ddicDirsOf(root, env = process.env) {
 /** every tile the packs ask the launchpad for, in pack order */
 export function tilesOf(root, env = process.env) {
   return [...packsOf(root, env).flatMap((p) => p.tiles.map((t) => ({...t, pack: p.name, description: p.description}))),
-    ...cockpitAppsOf(root, contentFoldersOf(root, env)).map((c) => ({id: c.app, title: c.title, pack: c.app, type: "static", icon: "sap-icon://process", url: `/app/${c.app}/index.html`}))];
+    // a generated cockpit app may ask for its tile's kind, subtitle, icon and live number
+    ...cockpitAppsOf(root, contentFoldersOf(root, env)).map((c) => ({id: c.app, title: c.title, pack: c.app, type: "static", icon: "sap-icon://process",
+      url: `/app/${c.app}/index.html`, ...(c.tile ?? {})}))];
 }
 
 /** the static folders a pack brings, each served under /app/<name> */

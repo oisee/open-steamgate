@@ -2,7 +2,7 @@
  "generator": "dsl-l3-cockpit",
  "set": "src/l2demo/fleet2.l3.yaml",
  "model": "sha256:b70c3054b480bf3ec06cd4f06d96223106b633ea15ded844ad173508a997156c",
- "template": "recipes/l3-cockpit/index.html",
+ "template": "recipes/l3-cockpit/set/Component.js",
  "lines": [
   {
    "line": 1,
@@ -25,36 +25,6 @@
   {
    "line": 4,
    "template_line": 4,
-   "node": "set/fleet2/cockpit",
-   "set_line": 104
-  },
-  {
-   "line": 5,
-   "template_line": 5,
-   "node": "set/fleet2/cockpit",
-   "set_line": 104
-  },
-  {
-   "line": 6,
-   "template_line": 6,
-   "node": "set/fleet2/cockpit",
-   "set_line": 104
-  },
-  {
-   "line": 7,
-   "template_line": 7,
-   "node": "set/fleet2/cockpit",
-   "set_line": 104
-  },
-  {
-   "line": 8,
-   "template_line": 8,
-   "node": "set/fleet2/cockpit",
-   "set_line": 104
-  },
-  {
-   "line": 9,
-   "template_line": 9,
    "node": "set/fleet2/cockpit",
    "set_line": 104
   }

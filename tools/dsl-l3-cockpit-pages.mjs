@@ -2,20 +2,47 @@
 import {readFileSync} from "node:fs";
 import {renderRecipe} from "./dsl-abap.mjs";
 import {cockpitActions} from "./dsl-l3-cockpit-service.mjs";
+// Two apps per set: "Runs <set>" (list report and run page, what is about one run) and
+// "Set <set>" (settings with their audit, schedule, kill switch, doctor).
+const RUN_ACTIONS = ["StartRun", "ContinueGlass", "Resume", "ReleasePile"];
+const RUNS_FILES = ["index.html", "Component.js", "manifest.json", "Cockpit.controller.js", "Cockpit.fragment.xml", "List.controller.js",
+  "StartRun.fragment.xml", "i18n.properties"];
+const SET_FILES = ["index.html", "Component.js", "manifest.json", "Set.view.xml", "Set.controller.js", "i18n.properties"];
+const published = (name) => name === "i18n.properties" ? "i18n/i18n.properties" : name;
+// the open runs: a status that is not final (the tile's number)
+const OPEN = "Status ne 'DONE' and Status ne 'PARTIAL' and Status ne 'FAILED' and Status ne 'NOT-RUN' and Status ne 'SKIPPED' and Status ne 'KILLED'";
 export async function cockpitPages(m) {
-  const c = m.cockpit, prefix = `cockpit/${c.app}`, files = {};
-  const conf = {service: c.service, actions: cockpitActions(m).filter((a) => !a.get).map(({name, params, reason}) => ({name, params, reason: !!reason})),
-    settings: (m.settings?.entries ?? []).map(({name, default: value, min, max}) => ({name, default: value, min, max})), governor: !!m.governor,
-    simulate: !!m.simulate};
-  const root = {...c, list_actions: conf.actions.filter((a) => ["StartRun", "Doctor", "Schedule", "Unschedule"].includes(a.name)), set: m.set, config: JSON.stringify(conf, null, 1).replaceAll("\n", "\n  "), title_json: JSON.stringify(c.title),
-    manifest: JSON.stringify(manifest(m), null, 2)};
-  for (const name of ["index.html", "Component.js", "manifest.json", "Cockpit.controller.js", "Cockpit.fragment.xml", "List.controller.js",
-    "StartRun.fragment.xml", "i18n.properties"]) {
-    files[`${prefix}/${name === "i18n.properties" ? "i18n/i18n.properties" : name}`] = (await renderRecipe(root, `recipes/l3-cockpit/${name}`)).text;
-  }
-  for (const name of ["Series.js", "Live.js"]) files[`${prefix}/${name}`] = readFileSync(`recipes/l3-cockpit/${name}`, "utf8");
-  files[`${prefix}/cockpit.json`] = JSON.stringify({app: c.app, title: c.title, service: c.service}, null, 2) + "\n";
+  const c = m.cockpit, files = {};
+  const actions = cockpitActions(m).filter((a) => !a.get).map(({name, params, reason}) => ({name, params, reason: !!reason}));
+  const settings = (m.settings?.entries ?? []).map(({name, default: value, min, max}) => ({name, default: value, min, max}));
+  const json = (v) => JSON.stringify(v, null, 1).replaceAll("\n", "\n  ");
+  const runs = {service: c.service, actions: actions.filter((a) => RUN_ACTIONS.includes(a.name)), governor: !!m.governor, simulate: !!m.simulate};
+  const set = {service: c.service, actions: actions.filter((a) => !RUN_ACTIONS.includes(a.name)), settings};
+  const root = {...c, set: m.set, set_title: `Set ${m.set}`, config: json(runs), title_json: JSON.stringify(c.title), manifest: JSON.stringify(manifest(m), null, 2)};
+  for (const name of RUNS_FILES) files[`cockpit/${c.app}/${published(name)}`] = (await renderRecipe(root, `recipes/l3-cockpit/${name}`)).text;
+  for (const name of ["Series.js", "Live.js"]) files[`cockpit/${c.app}/${name}`] = readFileSync(`recipes/l3-cockpit/${name}`, "utf8");
+  const openRuns = `/sap/opu/odata/sap/${c.service}/RunSet/$count?$filter=${encodeURIComponent(OPEN)}`;
+  files[`cockpit/${c.app}/cockpit.json`] = JSON.stringify({app: c.app, title: `Runs ${m.set}`, service: c.service,
+    files: [...RUNS_FILES.map(published), "Series.js", "Live.js"],
+    tile: {type: "dynamic", subtitle: c.title, icon: "sap-icon://process", serviceUrl: openRuns, serviceRefreshInterval: "30", numberUnit: "open"}}, null, 2) + "\n";
+  const setRoot = {...root, config: json(set), manifest: JSON.stringify(setManifest(m), null, 2)};
+  for (const name of SET_FILES) files[`cockpit/${c.set_app}/${published(name)}`] = (await renderRecipe(setRoot, `recipes/l3-cockpit/set/${name}`)).text;
+  files[`cockpit/${c.set_app}/Live.js`] = readFileSync("recipes/l3-cockpit/Live.js", "utf8");
+  files[`cockpit/${c.set_app}/cockpit.json`] = JSON.stringify({app: c.set_app, title: `Set ${m.set}`, service: c.service,
+    files: [...SET_FILES.map(published), "Live.js"],
+    tile: {subtitle: "Settings, schedule, kill switch, doctor", icon: "sap-icon://action-settings"}}, null, 2) + "\n";
   return files;
+}
+function setManifest(m) {
+  const id = `l3.${m.set}.set`;
+  return {_version: "1.59.0", "sap.app": {id, type: "application", title: "{{appTitle}}", description: "{{appDescription}}", i18n: "i18n/i18n.properties",
+    dataSources: {mainService: {uri: `/sap/opu/odata/sap/${m.cockpit.service}/`, type: "OData", settings: {odataVersion: "2.0"}}},
+    crossNavigation: {inbounds: {[`${m.cockpit.set_app}-manage`]: {semanticObject: m.cockpit.set_app, action: "manage", signature: {parameters: {}, additionalParameters: "allowed"}}}}},
+    "sap.ui": {technology: "UI5", deviceTypes: {desktop: true, tablet: true, phone: true}},
+    "sap.ui5": {rootView: {viewName: `${id}.Set`, type: "XML", async: true, id: "set"},
+      dependencies: {minUI5Version: "1.120.0", libs: {"sap.m": {}}},
+      models: {i18n: {type: "sap.ui.model.resource.ResourceModel", settings: {bundleName: `${id}.i18n.i18n`, supportedLocales: [""], fallbackLocale: ""}},
+        "": {dataSource: "mainService", preload: true, settings: {useBatch: false, defaultCountMode: "None", defaultBindingMode: "OneWay"}}}}};
 }
 // a run's actions sit in its header and show only when the run's state allows them
 // (applicablePath: a boolean the DPC computes); a pile's release is a table action,
@@ -34,7 +61,7 @@ function pileActions(m) {
 }
 function manifest(m) {
   const id = `l3.${m.set}`;
-  const actions = Object.fromEntries(cockpitActions(m).filter((a) => ["StartRun", "Doctor", "Schedule", "Unschedule"].includes(a.name))
+  const actions = Object.fromEntries(cockpitActions(m).filter((a) => a.name === "StartRun")
     .map((a) => [a.name, {id: a.name, text: `{{${a.name}}}`, press: `ask${a.name}`, requiresSelection: false, global: true}]));
   const list = "sap.suite.ui.generic.template.ListReport.view.ListReport", details = "sap.suite.ui.generic.template.ObjectPage.view.Details";
   return {_version: "1.59.0", "sap.app": {id, type: "application", title: "{{appTitle}}", i18n: "i18n/i18n.properties",

@@ -83,27 +83,6 @@
                     "press": "askStartRun",
                     "requiresSelection": false,
                     "global": true
-                  },
-                  "Doctor": {
-                    "id": "Doctor",
-                    "text": "{{Doctor}}",
-                    "press": "askDoctor",
-                    "requiresSelection": false,
-                    "global": true
-                  },
-                  "Schedule": {
-                    "id": "Schedule",
-                    "text": "{{Schedule}}",
-                    "press": "askSchedule",
-                    "requiresSelection": false,
-                    "global": true
-                  },
-                  "Unschedule": {
-                    "id": "Unschedule",
-                    "text": "{{Unschedule}}",
-                    "press": "askUnschedule",
-                    "requiresSelection": false,
-                    "global": true
                   }
                 }
               }

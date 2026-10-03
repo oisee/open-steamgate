@@ -40,162 +40,6 @@ function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit, 
       "RunId": "String(32)"
      },
      "reason": false
-    },
-    {
-     "name": "Doctor",
-     "params": {},
-     "reason": false
-    },
-    {
-     "name": "SetKill",
-     "params": {
-      "Reason": "String(80)"
-     },
-     "reason": true
-    },
-    {
-     "name": "ClearKill",
-     "params": {
-      "Reason": "String(80)"
-     },
-     "reason": true
-    },
-    {
-     "name": "SetSetting",
-     "params": {
-      "Param": "String(30)",
-      "Value": "String(40)",
-      "Note": "String(80)"
-     },
-     "reason": true
-    },
-    {
-     "name": "ResetSetting",
-     "params": {
-      "Param": "String(30)",
-      "Note": "String(80)"
-     },
-     "reason": true
-    },
-    {
-     "name": "Schedule",
-     "params": {},
-     "reason": false
-    },
-    {
-     "name": "Unschedule",
-     "params": {},
-     "reason": false
-    }
-   ],
-   "settings": [
-    {
-     "name": "budget.glass",
-     "default": "10",
-     "min": "1",
-     "max": "2147483647"
-    },
-    {
-     "name": "budget.warn",
-     "default": "7000",
-     "min": "1",
-     "max": "10000"
-    },
-    {
-     "name": "budget.narrow_at",
-     "default": "8000",
-     "min": "1",
-     "max": "10000"
-    },
-    {
-     "name": "budget.per_pile",
-     "default": "50",
-     "min": "0",
-     "max": "2147483647"
-    },
-    {
-     "name": "retry.max",
-     "default": "2",
-     "min": "0",
-     "max": "99"
-    },
-    {
-     "name": "retry.backoff",
-     "default": "60",
-     "min": "0",
-     "max": "86400"
-    },
-    {
-     "name": "stale",
-     "default": "900",
-     "min": "60",
-     "max": "356400"
-    },
-    {
-     "name": "fuses.max_alerts",
-     "default": "500",
-     "min": "1",
-     "max": "100000"
-    },
-    {
-     "name": "keep.days",
-     "default": "30",
-     "min": "1",
-     "max": "9999"
-    },
-    {
-     "name": "simulate.seed",
-     "default": "42",
-     "min": "1",
-     "max": "2147483646"
-    },
-    {
-     "name": "simulate.time_scale",
-     "default": "10000",
-     "min": "0",
-     "max": "1000000"
-    },
-    {
-     "name": "simulate.profile",
-     "default": "default",
-     "min": "1",
-     "max": "20"
-    },
-    {
-     "name": "simulate.dump",
-     "default": "-1",
-     "min": "-1",
-     "max": "1000"
-    },
-    {
-     "name": "simulate.hang",
-     "default": "-1",
-     "min": "-1",
-     "max": "1000"
-    },
-    {
-     "name": "simulate.slow",
-     "default": "-1",
-     "min": "-1",
-     "max": "1000"
-    },
-    {
-     "name": "simulate.hits_mean",
-     "default": "-1",
-     "min": "-1",
-     "max": "100"
-    },
-    {
-     "name": "simulate.autoclose",
-     "default": "-1",
-     "min": "-1",
-     "max": "1000"
-    },
-    {
-     "name": "piles.checks.size",
-     "default": "2",
-     "min": "1",
-     "max": "2147483647"
     }
    ],
    "governor": true,
@@ -232,7 +76,6 @@ function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit, 
     initTexts: Cockpit.initTexts,
     text: Cockpit.text,
     human: Cockpit.human,
-    ask: Cockpit.ask,
     answer: function (answer) {
       this.strip.setText(this.human(answer)).setVisible(true);
       if (this.page) this.page.setHeaderExpanded(true);
@@ -307,6 +150,5 @@ function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit, 
       });
     }
   };
-  config.actions.forEach(function (a) {if (a.name !== "StartRun") methods["ask" + a.name] = function () {this.ask(a);};});
   return methods;
 });
