@@ -143,6 +143,15 @@ describe("bounded file retries", () => {
   const failed = (files) => ({status: 1, completed: true, internalRetries: [], totalFailures: files.length,
     failures: files.map((file) => ({file, title: "first failure"}))});
   const passed = {status: 0, completed: true, internalRetries: [], totalFailures: 0, failures: []};
+  it("retries a whole group together rather than recovering files separately", () => {
+    const calls = [];
+    const result = runWithRetries(["a", "b"], (files, phase) => {
+      calls.push(files);
+      return phase === "first" || files.length === 2 ? failed(["a"]) : passed;
+    }, {group: "shared"});
+    expect(result.status).to.equal(1);
+    expect(calls).to.deep.equal([["a", "b"], ["a", "b"]]);
+  });
   it("does not rerun a passing shard", () => {
     const calls = [];
     expect(runWithRetries(["a"], (files) => { calls.push(files); return passed; }).status).to.equal(0);
@@ -232,6 +241,12 @@ function fixtureRun(source, options = {}) {
 }
 
 describe("fail closed regressions", () => {
+  it("keeps packaging failures red without an unpublished recovery", () => {
+    const {result, reports} = fixtureRun('import {existsSync, writeFileSync} from "node:fs"; const marker = new URL("./marker", import.meta.url); describe("packaging", () => { it("transient failure", () => { if (!existsSync(marker)) { writeFileSync(marker, "failed"); throw Error("first"); } }); });', {group: "packaging"});
+    expect(result.status).to.equal(1);
+    expect(reports).to.have.length(1);
+    expect(result.lines).to.deep.equal([]);
+  });
   it("accepts explicitly all-pending files and records their counts", () => {
     const {result, reports} = fixtureRun('describe.skip("optional", () => { it("requires local data", () => {}); });');
     expect(result.status).to.equal(0);

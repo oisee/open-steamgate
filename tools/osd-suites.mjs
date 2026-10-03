@@ -155,7 +155,7 @@ export function assignShards(files, seconds, count) {
 
 /** Executor returns a process status plus the reporter's completed failure list.
  * Unknown crashes, missing reports and more than three failing files stay red. */
-export function runWithRetries(files, run) {
+export function runWithRetries(files, run, {group} = {}) {
   const first = run(files, "first");
   const complete = (report, selected) => !report.crashed && report.completed === true &&
     report.fileTests && Object.keys(report.fileTests).length === selected.length &&
@@ -173,18 +173,22 @@ export function runWithRetries(files, run) {
       return counts.failed === 0 && counts.passed + counts.pending === counts.registered;
     });
   const result = {status: passed(first, files) ? 0 : 1, first, retries: [], lines: []};
-  if (first.status === 0) return result;
+  if (first.status === 0 || group === "packaging") return result;
   const failures = first.failures ?? [];
   const failedFiles = [...new Set(failures.map((failure) => failure.file))];
   if (!complete(first, files) || !failures.length ||
       failedFiles.some((file) => !files.includes(file)) || failedFiles.length > 3) return result;
-  for (const file of failedFiles) {
-    const retry = run([file], "retry");
+  const retrySets = group ? [files] : failedFiles.map((file) => [file]);
+  for (const retryFiles of retrySets) {
+    const file = retryFiles[0];
+    const retry = run(retryFiles, "retry");
     result.retries.push({file, status: retry.status});
-    if (passed(retry, [file])) {
+    if (passed(retry, retryFiles)) {
+      for (const file of group ? failedFiles : retryFiles) {
       const title = failures.find((failure) => failure.file === file).title;
       const clean = (value) => String(value).replace(/[\r\n`|<>]/g, " ");
-      result.lines.push(`- flaky / order-dependent: \`${clean(file)}\` — ${clean(title)} (passed once in isolation)`);
+      result.lines.push(`- flaky / order-dependent: \`${clean(file)}\` — ${clean(title)} (passed once ${group ? "with the whole group" : "in isolation"})`);
+      }
     }
   }
   if (result.lines.length === failedFiles.length) result.status = 0;
@@ -276,7 +280,7 @@ try {
         {stdio: "inherit", env: {...process.env, OSD_SUITE_TIMINGS_FILE: path}});
       const metadata = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
       return {...metadata, status: child.status ?? 1, crashed: Boolean(child.error || child.signal)};
-    });
+    }, {group: groupName});
     const save = (path, value) => {
       mkdirSync(dirname(path), {recursive: true});
       writeFileSync(path, value);
