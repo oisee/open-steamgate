@@ -178,7 +178,8 @@
             "dataLoadSettings": {
               "loadDataOnAppLaunch": "always"
             },
-            "smartVariantManagement": false
+            "smartVariantManagement": false,
+            "variantManagementHidden": true
           }
         },
         "pages": {
@@ -187,7 +188,10 @@
             "component": {
               "name": "sap.suite.ui.generic.template.ObjectPage",
               "settings": {
-                "editableHeaderContent": false
+                "editableHeaderContent": false,
+                "tableSettings": {
+                  "variantManagement": false
+                }
               }
             }
           }

@@ -52,6 +52,8 @@ function manifest(m) {
         "sap.ui.viewExtensions": {[details]: {"BeforeFacet|RunSet|Stage": {
           className: "sap.ui.core.Fragment", fragmentName: `${id}.Cockpit`, type: "XML", "sap.ui.generic.app": {title: "{{progress}}"}}}}}}},
     "sap.ui.generic.app": {_version: "1.3.0", settings: {flexibilityEnabled: false}, pages: {"ListReport|Run": {entitySet: "RunSet", component: {
-      name: "sap.suite.ui.generic.template.ListReport", list: true, settings: {dataLoadSettings: {loadDataOnAppLaunch: "always"}, smartVariantManagement: false}},
-      pages: {"ObjectPage|Run": {entitySet: "RunSet", component: {name: "sap.suite.ui.generic.template.ObjectPage", settings: {editableHeaderContent: false}}}}}}}};
+      name: "sap.suite.ui.generic.template.ListReport", list: true, settings: {dataLoadSettings: {loadDataOnAppLaunch: "always"}, smartVariantManagement: false,
+        // no variant called "Standard": the page is titled by its set
+        variantManagementHidden: true}},
+      pages: {"ObjectPage|Run": {entitySet: "RunSet", component: {name: "sap.suite.ui.generic.template.ObjectPage", settings: {editableHeaderContent: false, tableSettings: {variantManagement: false}}}}}}}}};
 }

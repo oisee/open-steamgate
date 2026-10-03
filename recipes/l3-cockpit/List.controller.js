@@ -9,6 +9,9 @@ function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit, 
     onInit: function () {
       this.initTexts();
       this.strip = new MessageStrip(this.getView().createId("listCockpitAnswer"), {showIcon: true, visible: false});
+      // the table's own variant ("Standard") goes with the page's: the page is titled by its set
+      this.getView().findAggregatedObjects(true, function (c) {return c.isA("sap.ui.comp.smarttable.SmartTable");})
+        .forEach(function (t) {t.setUseVariantManagement(false);});
     },
     onAfterRendering: function () {
       if (this.strip.getParent()) return;
@@ -21,6 +24,11 @@ function (Fragment, MessageToast, MessageBox, MessageStrip, JSONModel, Cockpit, 
       if (title && title.insertAction) this.live.controls.slice().reverse().forEach(function (c) {title.insertAction(c, 0);});
     },
     onExit: function () {if (this.live) this.live.destroy();},
+    // the runs of today first: the date filter starts at today's check date
+    onInitSmartFilterBarExtension: function (event) {
+      var bar = event.getSource(), d = new Date(), day = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      bar.setFilterData({CheckDate: {items: [], ranges: [{exclude: false, operation: "EQ", value1: day, keyField: "CheckDate"}]}}, true);
+    },
     app: Cockpit.app,
     memo: Cockpit.memo,
     initTexts: Cockpit.initTexts,
