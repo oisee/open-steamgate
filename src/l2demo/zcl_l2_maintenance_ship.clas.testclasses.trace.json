@@ -398,3836 +398,3836 @@
   },
   {
    "line": 57,
-   "template_line": 207,
+   "template_line": 211,
    "path": "/reference/1/levels/1/indent",
    "node": "rule/maintenance-ship-no-future-voyage/for",
    "rule_line": 7
   },
   {
    "line": 58,
-   "template_line": 209,
+   "template_line": 213,
    "path": "/reference/1/levels/1/where/1/pre",
    "node": "rule/maintenance-ship-no-future-voyage/when/1",
    "rule_line": 9
   },
   {
    "line": 59,
-   "template_line": 209,
+   "template_line": 213,
    "path": "/reference/1/levels/1/where/2/pre",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 60,
-   "template_line": 211,
+   "template_line": 215,
    "path": "/reference/1/levels/1/indent",
    "node": "rule/maintenance-ship-no-future-voyage/for",
    "rule_line": 7
   },
   {
    "line": 61,
-   "template_line": 213,
+   "template_line": 217,
    "path": "/reference/1/levels/1/indent",
    "node": "rule/maintenance-ship-no-future-voyage/for",
    "rule_line": 7
   },
   {
    "line": 62,
-   "template_line": 207,
-   "path": "/reference/1/levels/2/indent",
-   "node": "rule/maintenance-ship-no-future-voyage/forbid",
-   "rule_line": 10
-  },
-  {
-   "line": 63,
-   "template_line": 209,
-   "path": "/reference/1/levels/2/where/1/pre",
-   "node": "rule/maintenance-ship-no-future-voyage/forbid/where/1",
-   "rule_line": 12
-  },
-  {
-   "line": 64,
-   "template_line": 209,
-   "path": "/reference/1/levels/2/where/2/pre",
-   "node": "rule/maintenance-ship-no-future-voyage/forbid/where/2",
-   "rule_line": 12
-  },
-  {
-   "line": 65,
    "template_line": 211,
    "path": "/reference/1/levels/2/indent",
    "node": "rule/maintenance-ship-no-future-voyage/forbid",
    "rule_line": 10
   },
   {
-   "line": 66,
+   "line": 63,
    "template_line": 213,
+   "path": "/reference/1/levels/2/where/1/pre",
+   "node": "rule/maintenance-ship-no-future-voyage/forbid/where/1",
+   "rule_line": 12
+  },
+  {
+   "line": 64,
+   "template_line": 213,
+   "path": "/reference/1/levels/2/where/2/pre",
+   "node": "rule/maintenance-ship-no-future-voyage/forbid/where/2",
+   "rule_line": 12
+  },
+  {
+   "line": 65,
+   "template_line": 215,
+   "path": "/reference/1/levels/2/indent",
+   "node": "rule/maintenance-ship-no-future-voyage/forbid",
+   "rule_line": 10
+  },
+  {
+   "line": 66,
+   "template_line": 217,
    "path": "/reference/1/levels/2/indent",
    "node": "rule/maintenance-ship-no-future-voyage/forbid",
    "rule_line": 10
   },
   {
    "line": 67,
-   "template_line": 220,
+   "template_line": 224,
    "path": "/reference/1/alert_parts/1/lead",
    "node": "rule/maintenance-ship-no-future-voyage/alert/hole/1",
    "rule_line": 13
   },
   {
    "line": 68,
-   "template_line": 220,
+   "template_line": 224,
    "path": "/reference/1/alert_parts/2/lead",
    "node": "rule/maintenance-ship-no-future-voyage/alert/text/1",
    "rule_line": 13
   },
   {
    "line": 69,
-   "template_line": 220,
+   "template_line": 224,
    "path": "/reference/1/alert_parts/3/lead",
    "node": "rule/maintenance-ship-no-future-voyage/alert/hole/2",
    "rule_line": 13
   },
   {
    "line": 70,
-   "template_line": 220,
+   "template_line": 224,
    "path": "/reference/1/alert_parts/4/lead",
    "node": "rule/maintenance-ship-no-future-voyage/alert/text/2",
    "rule_line": 13
   },
   {
    "line": 71,
-   "template_line": 220,
+   "template_line": 224,
    "path": "/reference/1/alert_parts/5/lead",
    "node": "rule/maintenance-ship-no-future-voyage/alert/hole/3",
    "rule_line": 13
   },
   {
    "line": 72,
-   "template_line": 220,
+   "template_line": 224,
    "path": "/reference/1/alert_parts/6/lead",
    "node": "rule/maintenance-ship-no-future-voyage/alert/text/3",
    "rule_line": 13
   },
   {
    "line": 73,
-   "template_line": 220,
+   "template_line": 224,
    "path": "/reference/1/alert_parts/7/lead",
    "node": "rule/maintenance-ship-no-future-voyage/alert/hole/4",
    "rule_line": 13
   },
   {
    "line": 74,
-   "template_line": 222,
+   "template_line": 226,
    "path": "/reference/1/indent",
    "node": "rule/maintenance-ship-no-future-voyage/forbid",
    "rule_line": 10
   },
   {
    "line": 75,
-   "template_line": 224,
+   "template_line": 228,
    "path": "/reference/1/closes/1/indent",
    "node": "rule/maintenance-ship-no-future-voyage/forbid",
    "rule_line": 10
   },
   {
    "line": 76,
-   "template_line": 224,
+   "template_line": 228,
    "path": "/reference/1/closes/2/indent",
    "node": "rule/maintenance-ship-no-future-voyage/for",
    "rule_line": 7
   },
   {
    "line": 77,
-   "template_line": 227,
-   "path": "/",
-   "node": "rule/maintenance-ship-no-future-voyage",
-   "rule_line": 4
-  },
-  {
-   "line": 78,
-   "template_line": 228,
-   "path": "/",
-   "node": "rule/maintenance-ship-no-future-voyage",
-   "rule_line": 4
-  },
-  {
-   "line": 79,
-   "template_line": 229,
-   "path": "/",
-   "node": "rule/maintenance-ship-no-future-voyage",
-   "rule_line": 4
-  },
-  {
-   "line": 80,
-   "template_line": 230,
-   "path": "/",
-   "node": "rule/maintenance-ship-no-future-voyage",
-   "rule_line": 4
-  },
-  {
-   "line": 81,
    "template_line": 231,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 82,
+   "line": 78,
    "template_line": 232,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 83,
+   "line": 79,
    "template_line": 233,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 84,
+   "line": 80,
    "template_line": 234,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 85,
+   "line": 81,
    "template_line": 235,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 86,
+   "line": 82,
    "template_line": 236,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 87,
+   "line": 83,
    "template_line": 237,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 88,
+   "line": 84,
    "template_line": 238,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 89,
+   "line": 85,
    "template_line": 239,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 90,
+   "line": 86,
    "template_line": 240,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 91,
+   "line": 87,
    "template_line": 241,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 92,
+   "line": 88,
    "template_line": 242,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 93,
+   "line": 89,
    "template_line": 243,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4
   },
   {
-   "line": 94,
+   "line": 90,
+   "template_line": 244,
+   "path": "/",
+   "node": "rule/maintenance-ship-no-future-voyage",
+   "rule_line": 4
+  },
+  {
+   "line": 91,
    "template_line": 245,
+   "path": "/",
+   "node": "rule/maintenance-ship-no-future-voyage",
+   "rule_line": 4
+  },
+  {
+   "line": 92,
+   "template_line": 246,
+   "path": "/",
+   "node": "rule/maintenance-ship-no-future-voyage",
+   "rule_line": 4
+  },
+  {
+   "line": 93,
+   "template_line": 247,
+   "path": "/",
+   "node": "rule/maintenance-ship-no-future-voyage",
+   "rule_line": 4
+  },
+  {
+   "line": 94,
+   "template_line": 249,
    "path": "/tests/1",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged",
    "rule_line": 16
   },
   {
    "line": 95,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/1/method",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged",
    "rule_line": 16
   },
   {
    "line": 96,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_ship",
    "rule_line": 19
   },
   {
    "line": 97,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/1/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_voy",
    "rule_line": 20
   },
   {
    "line": 98,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/1",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged",
    "rule_line": 16
   },
   {
    "line": 99,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/1",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged",
    "rule_line": 16
   },
   {
    "line": 100,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/1",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged",
    "rule_line": 16
   },
   {
    "line": 101,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/1/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 102,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/1/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 103,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_ship",
    "rule_line": 19
   },
   {
    "line": 104,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_ship",
    "rule_line": 19
   },
   {
    "line": 105,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_ship",
    "rule_line": 19
   },
   {
    "line": 106,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_ship",
    "rule_line": 19
   },
   {
    "line": 107,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_ship",
    "rule_line": 19
   },
   {
    "line": 108,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/1/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_ship",
    "rule_line": 19
   },
   {
    "line": 109,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/1/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_ship",
    "rule_line": 19
   },
   {
    "line": 110,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/1/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_voy",
    "rule_line": 20
   },
   {
    "line": 111,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/1/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_voy",
    "rule_line": 20
   },
   {
    "line": 112,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/1/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_voy",
    "rule_line": 20
   },
   {
    "line": 113,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/1/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_voy",
    "rule_line": 20
   },
   {
    "line": 114,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/1/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_voy",
    "rule_line": 20
   },
   {
    "line": 115,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/1/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_voy",
    "rule_line": 20
   },
   {
    "line": 116,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/1/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/table/zosd_l2_voy",
    "rule_line": 20
   },
   {
    "line": 117,
-   "template_line": 306,
+   "template_line": 314,
    "path": "/tests/1/expect/1/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/expect/1",
    "rule_line": 22
   },
   {
    "line": 118,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/1/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/date",
    "rule_line": 17
   },
   {
    "line": 119,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/1/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged/date",
    "rule_line": 17
   },
   {
    "line": 120,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/1/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged",
    "rule_line": 16
   },
   {
    "line": 121,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/1/label",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged",
    "rule_line": 16
   },
   {
    "line": 122,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/1",
    "node": "rule/maintenance-ship-no-future-voyage/example/flagged",
    "rule_line": 16
   },
   {
    "line": 123,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/2",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine",
    "rule_line": 23
   },
   {
    "line": 124,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/2/method",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine",
    "rule_line": 23
   },
   {
    "line": 125,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/2/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_ship",
    "rule_line": 26
   },
   {
    "line": 126,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/2/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_voy",
    "rule_line": 27
   },
   {
    "line": 127,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/2",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine",
    "rule_line": 23
   },
   {
    "line": 128,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/2",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine",
    "rule_line": 23
   },
   {
    "line": 129,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/2",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine",
    "rule_line": 23
   },
   {
    "line": 130,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/2/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 131,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/2/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 132,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/2/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_ship",
    "rule_line": 26
   },
   {
    "line": 133,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/2/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_ship",
    "rule_line": 26
   },
   {
    "line": 134,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/2/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_ship",
    "rule_line": 26
   },
   {
    "line": 135,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/2/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_ship",
    "rule_line": 26
   },
   {
    "line": 136,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/2/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_ship",
    "rule_line": 26
   },
   {
    "line": 137,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/2/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_ship",
    "rule_line": 26
   },
   {
    "line": 138,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/2/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_ship",
    "rule_line": 26
   },
   {
    "line": 139,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/2/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_voy",
    "rule_line": 27
   },
   {
    "line": 140,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/2/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_voy",
    "rule_line": 27
   },
   {
    "line": 141,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/2/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_voy",
    "rule_line": 27
   },
   {
    "line": 142,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/2/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_voy",
    "rule_line": 27
   },
   {
    "line": 143,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/2/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_voy",
    "rule_line": 27
   },
   {
    "line": 144,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/2/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_voy",
    "rule_line": 27
   },
   {
    "line": 145,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/2/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/table/zosd_l2_voy",
    "rule_line": 27
   },
   {
    "line": 146,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/2/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/date",
    "rule_line": 24
   },
   {
    "line": 147,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/2/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine/date",
    "rule_line": 24
   },
   {
    "line": 148,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/2/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine",
    "rule_line": 23
   },
   {
    "line": 149,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/2/label",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine",
    "rule_line": 23
   },
   {
    "line": 150,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/2",
    "node": "rule/maintenance-ship-no-future-voyage/example/past voyage is fine",
    "rule_line": 23
   },
   {
    "line": 151,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/3",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date",
    "rule_line": 29
   },
   {
    "line": 152,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/3/method",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date",
    "rule_line": 29
   },
   {
    "line": 153,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_ship",
    "rule_line": 32
   },
   {
    "line": 154,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_voy",
    "rule_line": 33
   },
   {
    "line": 155,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/3",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date",
    "rule_line": 29
   },
   {
    "line": 156,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/3",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date",
    "rule_line": 29
   },
   {
    "line": 157,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/3",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date",
    "rule_line": 29
   },
   {
    "line": 158,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/3/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 159,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/3/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 160,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_ship",
    "rule_line": 32
   },
   {
    "line": 161,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_ship",
    "rule_line": 32
   },
   {
    "line": 162,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_ship",
    "rule_line": 32
   },
   {
    "line": 163,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_ship",
    "rule_line": 32
   },
   {
    "line": 164,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_ship",
    "rule_line": 32
   },
   {
    "line": 165,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/3/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_ship",
    "rule_line": 32
   },
   {
    "line": 166,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/3/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_ship",
    "rule_line": 32
   },
   {
    "line": 167,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_voy",
    "rule_line": 33
   },
   {
    "line": 168,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_voy",
    "rule_line": 33
   },
   {
    "line": 169,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_voy",
    "rule_line": 33
   },
   {
    "line": 170,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_voy",
    "rule_line": 33
   },
   {
    "line": 171,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_voy",
    "rule_line": 33
   },
   {
    "line": 172,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/3/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_voy",
    "rule_line": 33
   },
   {
    "line": 173,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/3/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/table/zosd_l2_voy",
    "rule_line": 33
   },
   {
    "line": 174,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/3/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/date",
    "rule_line": 30
   },
   {
    "line": 175,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/3/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date/date",
    "rule_line": 30
   },
   {
    "line": 176,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/3/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date",
    "rule_line": 29
   },
   {
    "line": 177,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/3/label",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date",
    "rule_line": 29
   },
   {
    "line": 178,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/3",
    "node": "rule/maintenance-ship-no-future-voyage/example/departs on the check date",
    "rule_line": 29
   },
   {
    "line": 179,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/4",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine",
    "rule_line": 35
   },
   {
    "line": 180,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/4/method",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine",
    "rule_line": 35
   },
   {
    "line": 181,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_ship",
    "rule_line": 38
   },
   {
    "line": 182,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_voy",
    "rule_line": 39
   },
   {
    "line": 183,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/4",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine",
    "rule_line": 35
   },
   {
    "line": 184,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/4",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine",
    "rule_line": 35
   },
   {
    "line": 185,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/4",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine",
    "rule_line": 35
   },
   {
    "line": 186,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/4/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 187,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/4/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 188,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_ship",
    "rule_line": 38
   },
   {
    "line": 189,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_ship",
    "rule_line": 38
   },
   {
    "line": 190,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_ship",
    "rule_line": 38
   },
   {
    "line": 191,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_ship",
    "rule_line": 38
   },
   {
    "line": 192,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_ship",
    "rule_line": 38
   },
   {
    "line": 193,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/4/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_ship",
    "rule_line": 38
   },
   {
    "line": 194,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/4/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_ship",
    "rule_line": 38
   },
   {
    "line": 195,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_voy",
    "rule_line": 39
   },
   {
    "line": 196,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_voy",
    "rule_line": 39
   },
   {
    "line": 197,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_voy",
    "rule_line": 39
   },
   {
    "line": 198,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_voy",
    "rule_line": 39
   },
   {
    "line": 199,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_voy",
    "rule_line": 39
   },
   {
    "line": 200,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/4/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_voy",
    "rule_line": 39
   },
   {
    "line": 201,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/4/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/table/zosd_l2_voy",
    "rule_line": 39
   },
   {
    "line": 202,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/4/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/date",
    "rule_line": 36
   },
   {
    "line": 203,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/4/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine/date",
    "rule_line": 36
   },
   {
    "line": 204,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/4/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine",
    "rule_line": 35
   },
   {
    "line": 205,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/4/label",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine",
    "rule_line": 35
   },
   {
    "line": 206,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/4",
    "node": "rule/maintenance-ship-no-future-voyage/example/ship in service is fine",
    "rule_line": 35
   },
   {
    "line": 207,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/5",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage",
    "rule_line": 41
   },
   {
    "line": 208,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/5/method",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage",
    "rule_line": 41
   },
   {
    "line": 209,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 210,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 211,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/5",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage",
    "rule_line": 41
   },
   {
    "line": 212,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/5",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage",
    "rule_line": 41
   },
   {
    "line": 213,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/5",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage",
    "rule_line": 41
   },
   {
    "line": 214,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/5/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 215,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/5/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 216,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 217,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 218,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 219,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 220,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 221,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 222,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 223,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 224,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 225,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 226,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 227,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/5/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 228,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/5/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_ship",
    "rule_line": 44
   },
   {
    "line": 229,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 230,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 231,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 232,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 233,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 234,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 235,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 236,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 237,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 238,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 239,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 240,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 241,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 242,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 243,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 244,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 245,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 246,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 247,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 248,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 249,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 250,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 251,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 252,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/5/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 253,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/5/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/table/zosd_l2_voy",
    "rule_line": 47
   },
   {
    "line": 254,
-   "template_line": 306,
+   "template_line": 314,
    "path": "/tests/5/expect/1/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/expect/1",
    "rule_line": 53
   },
   {
    "line": 255,
-   "template_line": 306,
+   "template_line": 314,
    "path": "/tests/5/expect/2/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/expect/2",
    "rule_line": 54
   },
   {
    "line": 256,
-   "template_line": 306,
+   "template_line": 314,
    "path": "/tests/5/expect/3/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/expect/3",
    "rule_line": 55
   },
   {
    "line": 257,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/5/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/date",
    "rule_line": 42
   },
   {
    "line": 258,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/5/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage/date",
    "rule_line": 42
   },
   {
    "line": 259,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/5/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage",
    "rule_line": 41
   },
   {
    "line": 260,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/5/label",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage",
    "rule_line": 41
   },
   {
    "line": 261,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/5",
    "node": "rule/maintenance-ship-no-future-voyage/example/one alert per voyage",
    "rule_line": 41
   },
   {
    "line": 262,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/6",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship",
    "rule_line": 57
   },
   {
    "line": 263,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/6/method",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship",
    "rule_line": 57
   },
   {
    "line": 264,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 265,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 266,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/6",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship",
    "rule_line": 57
   },
   {
    "line": 267,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/6",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship",
    "rule_line": 57
   },
   {
    "line": 268,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/6",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship",
    "rule_line": 57
   },
   {
    "line": 269,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/6/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 270,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/6/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 271,
-   "template_line": 262,
+   "template_line": 266,
    "path": "/tests/6/range_args/1",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 272,
-   "template_line": 263,
+   "template_line": 267,
    "path": "/tests/6/range_args/1/sign",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 273,
-   "template_line": 264,
+   "template_line": 268,
    "path": "/tests/6/range_args/1/option",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 274,
-   "template_line": 265,
+   "template_line": 269,
    "path": "/tests/6/range_args/1/low",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 275,
-   "template_line": 267,
+   "template_line": 271,
    "path": "/tests/6/range_args/1/high",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 276,
-   "template_line": 269,
+   "template_line": 273,
    "path": "/tests/6/range_args/1",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/range/1",
    "rule_line": 59
   },
   {
    "line": 277,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 278,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 279,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 280,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 281,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 282,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 283,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 284,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 285,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 286,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 287,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 288,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 289,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 290,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 291,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 292,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 293,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 294,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/6/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 295,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/6/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_ship",
    "rule_line": 61
   },
   {
    "line": 296,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 297,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 298,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 299,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 300,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 301,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 302,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 303,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 304,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 305,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 306,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 307,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 308,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 309,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 310,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 311,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 312,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 313,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/6/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 314,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/6/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/table/zosd_l2_voy",
    "rule_line": 65
   },
   {
    "line": 315,
-   "template_line": 306,
+   "template_line": 314,
    "path": "/tests/6/expect/1/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/expect/1",
    "rule_line": 70
   },
   {
    "line": 316,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/6/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/date",
    "rule_line": 58
   },
   {
    "line": 317,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/6/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship/date",
    "rule_line": 58
   },
   {
    "line": 318,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/6/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship",
    "rule_line": 57
   },
   {
    "line": 319,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/6/label",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship",
    "rule_line": 57
   },
   {
    "line": 320,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/6",
    "node": "rule/maintenance-ship-no-future-voyage/example/the range keeps the inner ship",
    "rule_line": 57
   },
   {
    "line": 321,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/7",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq",
    "rule_line": 9
   },
   {
    "line": 322,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/7/method",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq",
    "rule_line": 9
   },
   {
    "line": 323,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 324,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 325,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/7",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq",
    "rule_line": 9
   },
   {
    "line": 326,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/7",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq",
    "rule_line": 9
   },
   {
    "line": 327,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/7",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq",
    "rule_line": 9
   },
   {
    "line": 328,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/7/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 329,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/7/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 330,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 331,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 332,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 333,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 334,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 335,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/7/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 336,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/7/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 337,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 338,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 339,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 340,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 341,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 342,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/7/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 343,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/7/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 344,
-   "template_line": 306,
+   "template_line": 314,
    "path": "/tests/7/expect/1/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/expect/1",
    "rule_line": 9
   },
   {
    "line": 345,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/7/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/date",
    "rule_line": 9
   },
   {
    "line": 346,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/7/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq/date",
    "rule_line": 9
   },
   {
    "line": 347,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/7/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq",
    "rule_line": 9
   },
   {
    "line": 348,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/7/label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq",
    "rule_line": 9
   },
   {
    "line": 349,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/7",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_eq",
    "rule_line": 9
   },
   {
    "line": 350,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/8",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne",
    "rule_line": 9
   },
   {
    "line": 351,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/8/method",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne",
    "rule_line": 9
   },
   {
    "line": 352,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 353,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 354,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/8",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne",
    "rule_line": 9
   },
   {
    "line": 355,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/8",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne",
    "rule_line": 9
   },
   {
    "line": 356,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/8",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne",
    "rule_line": 9
   },
   {
    "line": 357,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/8/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 358,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/8/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 359,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 360,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 361,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 362,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 363,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 364,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/8/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 365,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/8/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 366,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 367,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 368,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 369,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 370,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 371,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/8/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 372,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/8/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 373,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/8/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/date",
    "rule_line": 9
   },
   {
    "line": 374,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/8/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne/date",
    "rule_line": 9
   },
   {
    "line": 375,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/8/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne",
    "rule_line": 9
   },
   {
    "line": 376,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/8/label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne",
    "rule_line": 9
   },
   {
    "line": 377,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/8",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_ne",
    "rule_line": 9
   },
   {
    "line": 378,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/9",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank",
    "rule_line": 9
   },
   {
    "line": 379,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/9/method",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank",
    "rule_line": 9
   },
   {
    "line": 380,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 381,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/9/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 382,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/9",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank",
    "rule_line": 9
   },
   {
    "line": 383,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/9",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank",
    "rule_line": 9
   },
   {
    "line": 384,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/9",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank",
    "rule_line": 9
   },
   {
    "line": 385,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/9/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 386,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/9/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 387,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 388,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 389,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 390,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 391,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 392,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/9/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 393,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/9/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_ship",
    "rule_line": 9
   },
   {
    "line": 394,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/9/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 395,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/9/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 396,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/9/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 397,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/9/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 398,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/9/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 399,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/9/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 400,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/9/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/table/zosd_l2_voy",
    "rule_line": 9
   },
   {
    "line": 401,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/9/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/date",
    "rule_line": 9
   },
   {
    "line": 402,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/9/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank/date",
    "rule_line": 9
   },
   {
    "line": 403,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/9/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank",
    "rule_line": 9
   },
   {
    "line": 404,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/9/label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank",
    "rule_line": 9
   },
   {
    "line": 405,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/9",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_status_blank",
    "rule_line": 9
   },
   {
    "line": 406,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/10",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match",
    "rule_line": 12
   },
   {
    "line": 407,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/10/method",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match",
    "rule_line": 12
   },
   {
    "line": 408,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 409,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/10/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 410,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/10",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match",
    "rule_line": 12
   },
   {
    "line": 411,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/10",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match",
    "rule_line": 12
   },
   {
    "line": 412,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/10",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match",
    "rule_line": 12
   },
   {
    "line": 413,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/10/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 414,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/10/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 415,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 416,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 417,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 418,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 419,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 420,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/10/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 421,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/10/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 422,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/10/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 423,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/10/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 424,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/10/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 425,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/10/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 426,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/10/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 427,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/10/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 428,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/10/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 429,
-   "template_line": 306,
+   "template_line": 314,
    "path": "/tests/10/expect/1/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/expect/1",
    "rule_line": 12
   },
   {
    "line": 430,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/10/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/date",
    "rule_line": 12
   },
   {
    "line": 431,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/10/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match/date",
    "rule_line": 12
   },
   {
    "line": 432,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/10/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match",
    "rule_line": 12
   },
   {
    "line": 433,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/10/label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match",
    "rule_line": 12
   },
   {
    "line": 434,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/10",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_match",
    "rule_line": 12
   },
   {
    "line": 435,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/11",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch",
    "rule_line": 12
   },
   {
    "line": 436,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/11/method",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch",
    "rule_line": 12
   },
   {
    "line": 437,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 438,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/11/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 439,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/11",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch",
    "rule_line": 12
   },
   {
    "line": 440,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/11",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch",
    "rule_line": 12
   },
   {
    "line": 441,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/11",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch",
    "rule_line": 12
   },
   {
    "line": 442,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/11/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 443,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/11/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 444,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 445,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 446,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 447,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 448,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 449,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/11/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 450,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/11/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 451,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/11/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 452,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/11/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 453,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/11/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 454,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/11/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 455,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/11/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 456,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/11/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 457,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/11/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 458,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/11/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/date",
    "rule_line": 12
   },
   {
    "line": 459,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/11/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch/date",
    "rule_line": 12
   },
   {
    "line": 460,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/11/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch",
    "rule_line": 12
   },
   {
    "line": 461,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/11/label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch",
    "rule_line": 12
   },
   {
    "line": 462,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/11",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_ship_id_nomatch",
    "rule_line": 12
   },
   {
    "line": 463,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/12",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt",
    "rule_line": 12
   },
   {
    "line": 464,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/12/method",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt",
    "rule_line": 12
   },
   {
    "line": 465,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 466,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/12/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 467,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/12",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt",
    "rule_line": 12
   },
   {
    "line": 468,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/12",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt",
    "rule_line": 12
   },
   {
    "line": 469,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/12",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt",
    "rule_line": 12
   },
   {
    "line": 470,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/12/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 471,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/12/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 472,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 473,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 474,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 475,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 476,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 477,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/12/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 478,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/12/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 479,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/12/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 480,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/12/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 481,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/12/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 482,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/12/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 483,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/12/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 484,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/12/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 485,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/12/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 486,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/12/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/date",
    "rule_line": 12
   },
   {
    "line": 487,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/12/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt/date",
    "rule_line": 12
   },
   {
    "line": 488,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/12/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt",
    "rule_line": 12
   },
   {
    "line": 489,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/12/label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt",
    "rule_line": 12
   },
   {
    "line": 490,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/12",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_lt",
    "rule_line": 12
   },
   {
    "line": 491,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/13",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq",
    "rule_line": 12
   },
   {
    "line": 492,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/13/method",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq",
    "rule_line": 12
   },
   {
    "line": 493,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 494,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 495,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/13",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq",
    "rule_line": 12
   },
   {
    "line": 496,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/13",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq",
    "rule_line": 12
   },
   {
    "line": 497,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/13",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq",
    "rule_line": 12
   },
   {
    "line": 498,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/13/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 499,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/13/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 500,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 501,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 502,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 503,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 504,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 505,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/13/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 506,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/13/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 507,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 508,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 509,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 510,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 511,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 512,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/13/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 513,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/13/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 514,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/13/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/date",
    "rule_line": 12
   },
   {
    "line": 515,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/13/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq/date",
    "rule_line": 12
   },
   {
    "line": 516,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/13/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq",
    "rule_line": 12
   },
   {
    "line": 517,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/13/label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq",
    "rule_line": 12
   },
   {
    "line": 518,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/13",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_eq",
    "rule_line": 12
   },
   {
    "line": 519,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/14",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt",
    "rule_line": 12
   },
   {
    "line": 520,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/14/method",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt",
    "rule_line": 12
   },
   {
    "line": 521,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 522,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 523,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/14",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt",
    "rule_line": 12
   },
   {
    "line": 524,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/14",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt",
    "rule_line": 12
   },
   {
    "line": 525,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/14",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt",
    "rule_line": 12
   },
   {
    "line": 526,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/14/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 527,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/14/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 528,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 529,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 530,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 531,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 532,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 533,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/14/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 534,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/14/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_ship",
    "rule_line": 12
   },
   {
    "line": 535,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 536,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 537,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 538,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 539,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 540,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/14/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 541,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/14/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/table/zosd_l2_voy",
    "rule_line": 12
   },
   {
    "line": 542,
-   "template_line": 306,
+   "template_line": 314,
    "path": "/tests/14/expect/1/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/expect/1",
    "rule_line": 12
   },
   {
    "line": 543,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/14/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/date",
    "rule_line": 12
   },
   {
    "line": 544,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/14/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt/date",
    "rule_line": 12
   },
   {
    "line": 545,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/14/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt",
    "rule_line": 12
   },
   {
    "line": 546,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/14/label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt",
    "rule_line": 12
   },
   {
    "line": 547,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/14",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_dep_date_gt",
    "rule_line": 12
   },
   {
    "line": 548,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/15",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero",
    "rule_line": 11
   },
   {
    "line": 549,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/15/method",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero",
    "rule_line": 11
   },
   {
    "line": 550,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 551,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/15",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero",
    "rule_line": 11
   },
   {
    "line": 552,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/15",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero",
    "rule_line": 11
   },
   {
    "line": 553,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/15",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero",
    "rule_line": 11
   },
   {
    "line": 554,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/15/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 555,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/15/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 556,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 557,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 558,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 559,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 560,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 561,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/15/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 562,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/15/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 563,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/15/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero/date",
    "rule_line": 11
   },
   {
    "line": 564,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/15/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero/date",
    "rule_line": 11
   },
   {
    "line": 565,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/15/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero",
    "rule_line": 11
   },
   {
    "line": 566,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/15/label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero",
    "rule_line": 11
   },
   {
    "line": 567,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/15",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_zero",
    "rule_line": 11
   },
   {
    "line": 568,
-   "template_line": 245,
+   "template_line": 249,
    "path": "/tests/16",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two",
    "rule_line": 11
   },
   {
    "line": 569,
-   "template_line": 246,
+   "template_line": 250,
    "path": "/tests/16/method",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two",
    "rule_line": 11
   },
   {
    "line": 570,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 571,
-   "template_line": 248,
+   "template_line": 252,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 572,
-   "template_line": 250,
+   "template_line": 254,
    "path": "/tests/16",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two",
    "rule_line": 11
   },
   {
    "line": 573,
-   "template_line": 251,
+   "template_line": 255,
    "path": "/tests/16",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two",
    "rule_line": 11
   },
   {
    "line": 574,
-   "template_line": 252,
+   "template_line": 256,
    "path": "/tests/16",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two",
    "rule_line": 11
   },
   {
    "line": 575,
-   "template_line": 259,
+   "template_line": 263,
    "path": "/tests/16/range/table",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 576,
-   "template_line": 260,
+   "template_line": 264,
    "path": "/tests/16/range",
    "node": "rule/maintenance-ship-no-future-voyage/range",
    "rule_line": 8
   },
   {
    "line": 577,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 578,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 579,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 580,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 581,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 582,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/16/tables/1/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 583,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/16/tables/1/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_ship",
    "rule_line": 11
   },
   {
    "line": 584,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 585,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 586,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 587,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 588,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 589,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 590,
-   "template_line": 293,
+   "template_line": 301,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 591,
-   "template_line": 295,
+   "template_line": 303,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 592,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 593,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 594,
-   "template_line": 298,
+   "template_line": 306,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 595,
-   "template_line": 300,
+   "template_line": 308,
    "path": "/tests/16/tables/2/wa",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 596,
-   "template_line": 302,
+   "template_line": 310,
    "path": "/tests/16/tables/2/table",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/table/zosd_l2_voy",
    "rule_line": 11
   },
   {
    "line": 597,
-   "template_line": 306,
+   "template_line": 314,
    "path": "/tests/16/expect/1/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/expect/1",
    "rule_line": 11
   },
   {
    "line": 598,
-   "template_line": 306,
+   "template_line": 314,
    "path": "/tests/16/expect/2/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/expect/2",
    "rule_line": 11
   },
   {
    "line": 599,
-   "template_line": 315,
+   "template_line": 323,
    "path": "/tests/16/date/call",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/date",
    "rule_line": 11
   },
   {
    "line": 600,
-   "template_line": 316,
+   "template_line": 324,
    "path": "/tests/16/date/value",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two/date",
    "rule_line": 11
   },
   {
    "line": 601,
-   "template_line": 317,
+   "template_line": 325,
    "path": "/tests/16/ref_label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two",
    "rule_line": 11
   },
   {
    "line": 602,
-   "template_line": 318,
+   "template_line": 326,
    "path": "/tests/16/label",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two",
    "rule_line": 11
   },
   {
    "line": 603,
-   "template_line": 330,
+   "template_line": 338,
    "path": "/tests/16",
    "node": "rule/maintenance-ship-no-future-voyage/case/b_exists_two",
    "rule_line": 11
   },
   {
    "line": 604,
-   "template_line": 332,
+   "template_line": 340,
    "path": "/",
    "node": "rule/maintenance-ship-no-future-voyage",
    "rule_line": 4

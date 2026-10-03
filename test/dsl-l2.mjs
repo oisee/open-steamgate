@@ -3305,13 +3305,13 @@ examples:
       expect(alerting).to.deep.equal({in: 0, out: 1, empty: 0, excl: 1});
     });
 
-    it("the committed class runs its eleven examples and fifteen derived cases against check_reference in ABAP", async () => {
+    it("the committed class runs its twelve examples and fifteen derived cases against check_reference in ABAP", async () => {
       await import("./start.mjs");
       const result = await new UnitRun(new ObjectStore()).runDetached("CLAS", "ZCL_L2_SHIP_RESTRICTED");
       const model = compileRule(RESTRICTED, {registry});
-      expect(model.examples).to.have.length(11);
+      expect(model.examples).to.have.length(12);
       expect(model.cases).to.have.length(15);
-      expect(result.counts, JSON.stringify(result.testClasses)).to.include({methods: 26, passed: 26, failed: 0});
+      expect(result.counts, JSON.stringify(result.testClasses)).to.include({methods: 27, passed: 27, failed: 0});
     });
 
     it("without a default the class passes the table straight to the query, and the examples run in ABAP", async () => {

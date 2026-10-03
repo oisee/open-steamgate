@@ -31,6 +31,7 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
     METHODS bt_row_with_an_e_row_cut_out FOR TESTING.
     METHODS an_exempt_ship_is_skipped FOR TESTING.
     METHODS own_exempt_table FOR TESTING.
+    METHODS both_tables_given FOR TESTING.
     METHODS key_range_keeps_inner_ship FOR TESTING.
     METHODS b_status_in FOR TESTING.
     METHODS b_status_out FOR TESTING.
@@ -68,6 +69,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lv_alert TYPE string.
     DATA lt_p_restricted TYPE zcl_l2_ship_restricted=>tt_restricted.
     DATA ls_p_restricted LIKE LINE OF lt_p_restricted.
+    DATA lt_p_exempt TYPE zcl_l2_ship_restricted=>tt_exempt.
+    DATA ls_p_exempt LIKE LINE OF lt_p_exempt.
     IF iv_restricted IS SUPPLIED.
       lt_p_restricted = iv_restricted.
     ELSE.
@@ -82,8 +85,6 @@ CLASS ltcl_examples IMPLEMENTATION.
       ls_p_restricted-low = 'D'.
       APPEND ls_p_restricted TO lt_p_restricted.
     ENDIF.
-    DATA lt_p_exempt TYPE zcl_l2_ship_restricted=>tt_exempt.
-    DATA ls_p_exempt LIKE LINE OF lt_p_exempt.
     IF iv_exempt IS SUPPLIED.
       lt_p_exempt = iv_exempt.
     ELSE.
@@ -529,6 +530,73 @@ CLASS ltcl_examples IMPLEMENTATION.
     lt_ref = check_reference( iv_date = '20261001' it_range = lt_range iv_exempt = lt_p_exempt ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `own exempt table (check against check_reference)` ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `own exempt table` ).
+  ENDMETHOD.
+
+  METHOD both_tables_given.
+    DATA ls_zosd_l2_ship TYPE zosd_l2_ship.
+    DATA ls_zosd_l2_voy TYPE zosd_l2_voy.
+    DATA lt_act TYPE string_table.
+    DATA lt_ref TYPE string_table.
+    DATA lt_exp TYPE string_table.
+    DATA lt_range TYPE RANGE OF zosd_l2_ship-ship_id.
+    DATA ls_range LIKE LINE OF lt_range.
+    DATA lt_p_restricted TYPE zcl_l2_ship_restricted=>tt_restricted.
+    DATA ls_p_restricted LIKE LINE OF lt_p_restricted.
+    DATA lt_p_exempt TYPE zcl_l2_ship_restricted=>tt_exempt.
+    DATA ls_p_exempt LIKE LINE OF lt_p_exempt.
+    CLEAR ls_p_restricted.
+    ls_p_restricted-sign = 'I'.
+    ls_p_restricted-option = 'EQ'.
+    ls_p_restricted-low = 'A'.
+    APPEND ls_p_restricted TO lt_p_restricted.
+    CLEAR ls_p_exempt.
+    ls_p_exempt-sign = 'I'.
+    ls_p_exempt-option = 'EQ'.
+    ls_p_exempt-low = 'S002'.
+    APPEND ls_p_exempt TO lt_p_exempt.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S001'.
+    ls_zosd_l2_ship-name = 'Albatross'.
+    ls_zosd_l2_ship-status = 'M'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S002'.
+    ls_zosd_l2_ship-name = 'Cormorant'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_ship.
+    ls_zosd_l2_ship-mandt = sy-mandt.
+    ls_zosd_l2_ship-ship_id = 'S003'.
+    ls_zosd_l2_ship-name = 'Petrel'.
+    ls_zosd_l2_ship-status = 'A'.
+    APPEND ls_zosd_l2_ship TO mt_zosd_l2_ship.
+    INSERT zosd_l2_ship FROM TABLE mt_zosd_l2_ship.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00019'.
+    ls_zosd_l2_voy-ship_id = 'S001'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00020'.
+    ls_zosd_l2_voy-ship_id = 'S002'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    CLEAR ls_zosd_l2_voy.
+    ls_zosd_l2_voy-mandt = sy-mandt.
+    ls_zosd_l2_voy-voyage_id = 'V00021'.
+    ls_zosd_l2_voy-ship_id = 'S003'.
+    ls_zosd_l2_voy-dep_date = '20261005'.
+    APPEND ls_zosd_l2_voy TO mt_zosd_l2_voy.
+    INSERT zosd_l2_voy FROM TABLE mt_zosd_l2_voy.
+    APPEND `S003 Petrel: restricted status A, voyage V00021 departs 20261005` TO lt_exp.
+    lt_act = zcl_l2_ship_restricted=>check( iv_date = '20261001' it_range = lt_range iv_restricted = lt_p_restricted iv_exempt = lt_p_exempt ).
+    lt_ref = check_reference( iv_date = '20261001' it_range = lt_range iv_restricted = lt_p_restricted iv_exempt = lt_p_exempt ).
+    assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = `both tables given (check against check_reference)` ).
+    assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = `both tables given` ).
   ENDMETHOD.
 
   METHOD key_range_keeps_inner_ship.

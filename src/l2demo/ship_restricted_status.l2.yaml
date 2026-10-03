@@ -115,6 +115,20 @@ examples:
         - {voyage_id: V00018, ship_id: S901, dep_date: 20261005}
     expect:
       - "S901 Skiff: restricted status M, voyage V00018 departs 20261005"
+  - name: both tables given
+    date: 20261001
+    params: {restricted: [A], exempt: [S002]}
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S002, name: Cormorant, status: A}
+        - {ship_id: S003, name: Petrel, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00019, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00020, ship_id: S002, dep_date: 20261005}
+        - {voyage_id: V00021, ship_id: S003, dep_date: 20261005}
+    expect:
+      - "S003 Petrel: restricted status A, voyage V00021 departs 20261005"
   - name: key range keeps inner ship
     date: 20261001
     range: [{sign: I, option: EQ, low: S002}]

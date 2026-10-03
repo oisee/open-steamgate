@@ -28,6 +28,8 @@ CLASS zcl_l2_ship_restricted IMPLEMENTATION.
     DATA lv_alert TYPE string.
     DATA lt_p_restricted TYPE tt_restricted.
     DATA ls_p_restricted LIKE LINE OF lt_p_restricted.
+    DATA lt_p_exempt TYPE tt_exempt.
+    DATA ls_p_exempt LIKE LINE OF lt_p_exempt.
     IF iv_restricted IS SUPPLIED.
       lt_p_restricted = iv_restricted.
     ELSE.
@@ -42,8 +44,6 @@ CLASS zcl_l2_ship_restricted IMPLEMENTATION.
       ls_p_restricted-low = 'D'.
       APPEND ls_p_restricted TO lt_p_restricted.
     ENDIF.
-    DATA lt_p_exempt TYPE tt_exempt.
-    DATA ls_p_exempt LIKE LINE OF lt_p_exempt.
     IF iv_exempt IS SUPPLIED.
       lt_p_exempt = iv_exempt.
     ELSE.

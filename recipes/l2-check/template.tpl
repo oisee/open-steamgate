@@ -112,6 +112,10 @@ CLASS {{class}} IMPLEMENTATION.
 {{#has_default}}
     DATA {{use}} TYPE {{selopt_type}}.
     DATA {{row}} LIKE LINE OF {{use}}.
+{{/has_default}}
+{{/params}}
+{{#params}}
+{{#has_default}}
     IF {{ref}} IS SUPPLIED.
       {{use}} = {{ref}}.
     ELSE.
@@ -448,6 +452,10 @@ CLASS {{class}} IMPLEMENTATION.
 {{#has_default}}
     DATA {{use}} TYPE {{selopt_type}}.
     DATA {{row}} LIKE LINE OF {{use}}.
+{{/has_default}}
+{{/params}}
+{{#params}}
+{{#has_default}}
     IF {{ref}} IS SUPPLIED.
       {{use}} = {{ref}}.
     ELSE.

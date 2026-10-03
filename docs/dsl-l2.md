@@ -820,9 +820,9 @@ default always applied.
 
 `src/l2demo/ship_restricted_status.l2.yaml` is the demo: a ship whose status is in `restricted`
 (default `M`, `D`) and whose id is not in `exempt` (default one `BT` row, `S900` to `S999`) has no
-voyage after the check date, with eleven examples (the table omitted, replaced, empty, one `E` row, a `BT`
-row with an `E` row cut out of it, an exempt ship, its own exempt table, and a driving-key range
-beside them) and fifteen derived cases (four for each of the two range comparisons). It has a `range:`
+voyage after the check date, with twelve examples (the table omitted, replaced, empty, one `E` row, a `BT`
+row with an `E` row cut out of it, an exempt ship, its own exempt table, both tables at once, and a
+driving-key range beside them) and fifteen derived cases (four for each of the two range comparisons). It has a `range:`
 of its own, so a set may pile it (docs/dsl-l3.md, "Range set parameters"); it stays out of
 `fleet.l3.yaml` and `fleet2.l3.yaml`, whose tests count their rules and alerts, and `fleet3.l3.yaml`
 runs it.
