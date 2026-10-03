@@ -255,7 +255,7 @@ export async function resume(req, res, kind, json) {
   if (front.execute !== undefined || typeof step !== "function") {
     throw Object.assign(new Error("RESUME in the serving child is slice B4"), {code: "ADT_RESUME_REMOTE"});
   }
-  const record = await withSystem((k, n) => front.system?.(k, n, req), () => step(async () => {
+  const record = await withSystem((kind, name, json) => front.system?.(kind, name, req, json), () => step(async () => {
     const original = req.adt?.session;
     // A fresh stateless GET ends its session in ANSWER and cannot continue.
     if (original !== undefined && await front.sessions.get(original.id) === undefined) {
@@ -263,8 +263,9 @@ export async function resume(req, res, kind, json) {
       error.code = "ENQ_SESSION_ENDED";
       throw error;
     }
-    const session = await front.sessions?.sessionFor?.(req);
-    // Re-resolve in the new step: this pins ENQ and notices ended sessions.
+    // Re-resolve only ANSWER's session: pin ENQ without creating a session
+    // for a caller that entered without req.adt.
+    const session = original === undefined ? undefined : await front.sessions?.sessionFor?.(req);
     if (session !== undefined) {
       const a = globalThis.abap;
       const params = a.Classes[HANDLER].METHODS.ANSWER.parameters.IS_REQUEST.type().get();
@@ -272,8 +273,7 @@ export async function resume(req, res, kind, json) {
       // ANSWER resolved, including that case, rather than opening a new one.
       // This replaces Cookie with sap-contextid only, dropping other cookies.
       // Harmless today: RESUME does no CSRF check. B4 must revisit this.
-      const headers = original === undefined ? req.headers
-        : {...req.headers, cookie: `sap-contextid=${original.id}`};
+      const headers = {...req.headers, cookie: `sap-contextid=${original.id}`};
       for (const [name, value] of Object.entries(headers)) {
         for (const one of Array.isArray(value) ? value : [value]) {
           const r = params.headers.appendInitial().get(); r.name.set(name); r.value.set(String(one));
@@ -282,7 +282,7 @@ export async function resume(req, res, kind, json) {
       await session.zif_osd_adt_session$resolve({it_cookies: await a.Classes.ZCL_OSD_ADT_CSRF.cookies_of({it_headers: params.headers}),
         it_headers: params.headers});
     }
-    const record = await front.resume(kind, typeof json === "string" ? json : JSON.stringify(json));
+    const record = await front.resume(kind, typeof json === "string" ? json : JSON.stringify(json) ?? "");
     if (record.continuation !== undefined) {
       throw Object.assign(new Error("RESUME returned a continuation"), {code: "ADT_RESUME_CONTINUATION"});
     }
@@ -448,6 +448,7 @@ export function abapFront(options) {
         replay: () => replay(res, record, req.method, {sessionSent: true})});
     } catch (e) {
       if (e?.code === "ENQ_SESSION_ENDED" && res.headersSent !== true) {
+        console.error(`continuation ${kind}: session ended before RESUME; a fresh stateless GET cannot resume, use POST or x-sap-adt-sessiontype: stateful`);
         res.status(403).set("x-csrf-token", "Required").type("text/plain; charset=utf-8").send("CSRF token validation failed");
         return;
       }

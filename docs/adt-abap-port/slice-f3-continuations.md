@@ -39,7 +39,9 @@ first row with that kind wins. RESUME creates that owner and returns its
 handler fences session work before dispatch, rolls route work back on
 exceptions, and formats ZCX/root failures in the usual ADT document.
 The route must not COMMIT or ROLLBACK. The surrounding dialog step commits
-successful work. Unknown ABAP kinds become a typed ZCX internal refusal
+successful work. ANSWER's step is its own LUW and is committed before host work;
+writes that must be atomic with the continuation belong in RESUME.
+Unknown ABAP kinds become a typed ZCX internal refusal
 with status 500. Unknown host kinds retain the existing front refusal.
 
 The host sends RESUME's status, content type, headers and bytes, retaining

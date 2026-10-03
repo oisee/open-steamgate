@@ -41,7 +41,8 @@ export async function previewAdtAnswer(handler, {method, path, search = "", head
   if (kind) return previewContinuation(kind);
   const resultHeaders = new Headers();
   if (servedBy.get() === "HOST") resultHeaders.set("x-osd-served-by", "HOST");
-  for (const row of s.headers.array()) resultHeaders.append(row.get().name.get(), row.get().value.get());
+  const wireHeaders = await handler.wire_headers({it_headers: s.headers});
+  for (const row of wireHeaders.array()) resultHeaders.append(row.get().name.get(), row.get().value.get());
   resultHeaders.set("content-type", s.content_type.get() || "text/html");
   return {status: s.status.get() || 200, headers: resultHeaders, body: new TextEncoder().encode(s.body.get())};
 }

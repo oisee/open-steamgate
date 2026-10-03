@@ -26,6 +26,24 @@ describe("ADT preview backend wiring", function () {
         answers.push({status: answer.status, contentType: answer.headers.get("content-type"),
           body: new TextDecoder().decode(answer.body)});
       }
+      // Inject the internal miss marker alongside a normal response header
+      // into a real ABAP answer, then use the handler's wire filtering.
+      const {previewAdtAnswer} = await import("./web/preview-continuations.mjs");
+      const {dialogStep} = await import("./tools/osd-dialog-step.mjs");
+      const handler = a.Classes.ZCL_OSD_ADT_HANDLER;
+      const markedHandler = {METHODS: handler.METHODS,
+        wire_headers: (params) => handler.wire_headers(params),
+        answer: async (params) => {
+          await handler.answer(params);
+          const headers = params.es_response.get().headers;
+          for (const [name, value] of [["X-OSD-Miss", "resource"], ["X-F3-Keep", "retained"]]) {
+            const row = headers.appendInitial().get(); row.name.set(name); row.value.set(value);
+          }
+        }};
+      const miss = await dialogStep(() => previewAdtAnswer(markedHandler, {
+        method: "POST", path: "/sap/bc/adt/f3"}), "preview miss");
+      answers.push({status: miss.status, miss: miss.headers.get("x-osd-miss"),
+        kept: miss.headers.get("x-f3-keep"), contentType: miss.headers.get("content-type")});
       process.send(answers);
       process.exit(0);
     `;
@@ -48,5 +66,6 @@ describe("ADT preview backend wiring", function () {
       body: '<?xml version="1.0"?><body>café &amp; test</body>'});
     expect(answers[1]).to.deep.equal({status: 500, contentType: "application/xml; charset=utf-8",
       body: exceptionDocument("ExceptionInternalError", 'ZCL_OSD_ADT_HANDLER: no continuation "f3-write" is registered on this host', {namespace: "org.open-steamgate.osd"})});
+    expect(answers[2]).to.deep.equal({status: 200, miss: null, kept: "retained", contentType: "text/html"});
   });
 });

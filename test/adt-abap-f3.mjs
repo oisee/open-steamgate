@@ -5,7 +5,8 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import "./start.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
-import {abapRunner, registerContinuation, resume} from "../tools/adt-abap-front.mjs";
+import {abapRunner, registerContinuation, resume, resumeOf} from "../tools/adt-abap-front.mjs";
+import {currentSystemAnswers} from "../tools/osd-store-destination.mjs";
 import {dialogStep, currentStepToken} from "../tools/osd-dialog-step.mjs";
 import {adtEnqOwner} from "../tools/adt-enq-key.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
@@ -63,7 +64,7 @@ describe("ADT F3: continuation re-entry", function () {
     await handler.use_routes({}); unregister();
     for (const m of mounts) { await new Promise((r) => m.server.close(r)); rmSync(m.root, {recursive: true, force: true}); }
   });
-  afterEach(() => { for (const m of mounts) { delete m.options.f3Host; delete m.options.f3Continuation; } });
+  afterEach(() => { for (const m of mounts) { delete m.options.f3Host; delete m.options.f3Continuation; delete m.options.f3Source; } });
 
   it("two routers finish through RESUME against their own bound stores", async () => {
     for (const [i, m] of mounts.entries()) {
@@ -108,6 +109,48 @@ describe("ADT F3: continuation re-entry", function () {
     expect(res.headers.get("x-csrf-token")).to.equal("Required");
     expect(await res.text()).to.equal("CSRF token validation failed");
     expect(m.store.read("PROG", "ZF3_STORE").source).to.equal("host work");
+  });
+
+  it("HANDLE rows persist when the later RESUME raises", async () => {
+    const db = abap.context.databaseConnections.DEFAULT;
+    const sql = "SELECT * FROM zosd_prb WHERE TRIM(k1) = 'F3-HANDLE'";
+    const m = mounts[0];
+    m.options.f3Source = "raise-root";
+    m.options.f3Host = async () => {
+      expect((await db.select({select: sql})).rows).to.have.length(1);
+    };
+    try {
+      const res = await fetch(m.url + "?write=1", {headers: {"x-sap-adt-sessiontype": "stateful"}});
+      expect(res.status).to.equal(500);
+      expect(await res.text()).to.include("Division by zero.");
+      expect((await db.select({select: sql})).rows).to.have.length(1);
+    } finally {
+      await dialogStep(() => db.execute("DELETE FROM zosd_prb WHERE TRIM(k1) = 'F3-HANDLE'"), "F3 fixture cleanup");
+    }
+  });
+
+  it("sessionless RESUME forwards SYSTEM JSON and undefined as an empty ABAP string", async () => {
+    let resolved = 0;
+    const req = {method: "GET", headers: {}, osdFacade: {step: dialogStep, front: {
+      sessions: {sessionFor: () => { resolved++; throw new Error("must not create a session"); }},
+      system: (kind, name, request, json) => {
+        expect([kind, name, request, json]).to.deep.equal(["SESSION", "probe", req, '{"probe":true}']);
+        return "forwarded";
+      },
+      resume: async (kind, json) => {
+        expect(await currentSystemAnswers()("SESSION", "probe", '{"probe":true}')).to.equal("forwarded");
+        return resumeOf({resume: async ({iv_kind, iv_json}) => {
+          expect(iv_kind.get()).to.equal("f3-write");
+          expect(iv_json.get()).to.equal("");
+          const response = handler.METHODS.ANSWER.parameters.ES_RESPONSE.type();
+          response.get().status.set(200);
+          return response;
+        }}, kind, json);
+      },
+    }}};
+    const res = {status: () => res, set: () => res, append: () => res, end: () => res};
+    await resume(req, res, "f3-write", undefined);
+    expect(resolved).to.equal(0);
   });
 
   it("unknown host and ABAP kinds give ADT 500 documents", async () => {

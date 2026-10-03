@@ -7,10 +7,18 @@ ENDCLASS.
 CLASS zcl_osd_adt_route_f3 IMPLEMENTATION.
   METHOD zif_osd_adt_route~handle.
     DATA ls_field TYPE ihttpnvp.
+    DATA ls_probe TYPE zosd_prb.
     IF is_request-method = `POST`.
       rs_response-status = 200.
       rs_response-body = cl_abap_codepage=>convert_from( is_request-body ).
       RETURN.
+    ENDIF.
+    READ TABLE is_request-query INTO ls_field WITH KEY name = `write`.
+    IF sy-subrc = 0.
+      ls_probe-mandt = sy-mandt.
+      ls_probe-k1 = `F3-HANDLE`.
+      ls_probe-k2 = `committed`.
+      INSERT zosd_prb FROM ls_probe.
     ENDIF.
     rs_response-status = 500.
     rs_response-body = `host unavailable`.
