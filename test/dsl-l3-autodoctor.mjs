@@ -6,7 +6,7 @@ import {modulesOf} from '../tools/osd-transpile.mjs';
 import {lowerNarrowSubmit} from '../tools/osd-narrow-submit.mjs';
 import {pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawnSync} from 'node:child_process';
 import {DatabaseSync} from 'node:sqlite';
 import {compileSet, renderSet} from '../tools/dsl-l3.mjs';
 import {dialogStep} from '../tools/osd-dialog-step.mjs';
@@ -532,7 +532,10 @@ describe('DSL L3 5e: autonomous doctor', function () {
           expect(built.files[`${combined.report}.prog.abap`]).not.to.include('pile_done');
         }
       }
-      // Compare the periodic-job method to the pre-slice implementation, byte for byte.
+      // Compare the periodic-job method to the pre-slice implementation, byte for byte; a shallow
+      // clone (CI) has no pre-slice commit, and only this comparison is left out there
+      const history=spawnSync('git',['cat-file','-e','28d17e752:src/l2demo/zcl_l3_fleet2.clas.abap']).status===0;
+      if(history) {
       const oldRunner=execFileSync('git',['show','28d17e752:src/l2demo/zcl_l3_fleet2.clas.abap'],{encoding:'utf8'});
       const method=(text)=>text.match(/  METHOD schedule_doctor\.[\s\S]*?  ENDMETHOD\./)[0];
       expect(method(rendered.files[`${model.class}.clas.abap`])).to.equal(method(oldRunner));
@@ -540,6 +543,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
       // Source filenames and the configurable parameter numbering are outside the doctor's tail.
       const tail=(text)=>text.slice(text.indexOf('  WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.'));
       expect(tail(rendered.files[`${model.report}.prog.abap`])).to.equal(tail(oldJob));
+      }
 
     } finally {rmSync(file,{force:true});}
   });

@@ -2,6 +2,8 @@
 // The system's kernel provides the complete WPLIST instead.
 import {BatchRuns} from './osd-batch-runs.mjs';
 export function installCapacity(abap, jobs) {
+  // a runtime set up without function modules (some suites' minimal setups) has nothing to answer
+  if (!abap?.FunctionModules) return;
   abap.FunctionModules.TH_WPINFO = async (input) => {
     const table = input.tables?.wplist;
     if (!table) throw new Error('TH_WPINFO requires WPLIST');
