@@ -33,7 +33,7 @@ describe("database identity", () => {
     const statements = [];
     client.client = {query: async () => { activeCalls += 1; }};
     client.pool = {connect: async () => ({
-      query: async (sql) => { statements.push(sql); },
+      query: async (sql) => { statements.push(sql?.text ?? sql); },
       release: () => { released = true; },
     })};
     await client.checkSelect("SELECT 1");
