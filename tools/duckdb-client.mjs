@@ -205,6 +205,16 @@ export class DuckDBDatabaseClient {
     }
   }
 
+  async selectOne(sql) {
+    let prepared;
+    try {
+      prepared = await this.connection.prepare(this.rewrite(sql));
+      const result = await prepared.runAndReadAll();
+      return {rows: result.getRowObjects().map(row => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, plain(v)])))};
+    } catch (error) {throw await osqlSemanticsError(error);}
+    finally {prepared?.destroySync();}
+  }
+
   async checkSelect(sql) {
     const prepared = await this.connection.prepare(this.rewrite(sql));
     prepared.destroySync();

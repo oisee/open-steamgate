@@ -3,7 +3,7 @@ CLASS zcl_osd_adt_ddic DEFINITION PUBLIC FINAL CREATE PUBLIC.
     INTERFACES zif_osd_adt_route.
     TYPES: BEGIN OF ty_field,
       name TYPE string, element TYPE string, datatype TYPE string,
-      length TYPE string, decimals TYPE string, key TYPE abap_bool, notnull TYPE abap_bool,
+      description TYPE string, letter TYPE string, length TYPE string, decimals TYPE string, key TYPE abap_bool, notnull TYPE abap_bool,
     END OF ty_field.
     TYPES tt_field TYPE STANDARD TABLE OF ty_field WITH DEFAULT KEY.
     TYPES: BEGIN OF ty_table,
@@ -14,10 +14,13 @@ CLASS zcl_osd_adt_ddic DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS js_int IMPORTING iv_text TYPE string RETURNING VALUE(rv_text) TYPE string.
     "! Resolver hook for C4: ELEMENT is retained for resolution after parsing.
     "! These document routes deliberately do not call a type resolver.
-    CLASS-METHODS table_fields IMPORTING iv_xml TYPE string iv_name TYPE string RETURNING VALUE(rs_table) TYPE ty_table.
+    CLASS-METHODS table_fields IMPORTING iv_xml TYPE string iv_name TYPE string iv_resolve TYPE abap_bool DEFAULT abap_false RETURNING VALUE(rs_table) TYPE ty_table.
     CLASS-METHODS table_source IMPORTING is_table TYPE ty_table RETURNING VALUE(rv_body) TYPE string.
     CLASS-METHODS table_document IMPORTING iv_name TYPE string iv_package TYPE string iv_description TYPE string RETURNING VALUE(rv_body) TYPE string.
     CLASS-METHODS data_element IMPORTING iv_xml TYPE string iv_name TYPE string iv_package TYPE string RETURNING VALUE(rv_body) TYPE string.
+  PRIVATE SECTION.
+    CLASS-METHODS resolve IMPORTING iv_element TYPE string CHANGING cs_field TYPE ty_field.
+    CLASS-METHODS letter IMPORTING iv_type TYPE string iv_default TYPE string RETURNING VALUE(rv_letter) TYPE string.
 ENDCLASS.
 CLASS zcl_osd_adt_ddic IMPLEMENTATION.
   METHOD zif_osd_adt_route~handle.
@@ -116,6 +119,8 @@ CLASS zcl_osd_adt_ddic IMPLEMENTATION.
     DATA lv_block TYPE string.
     DATA lv_off TYPE i.
     DATA ls_field TYPE ty_field.
+    DATA lt_resolved TYPE HASHED TABLE OF ty_field WITH UNIQUE KEY element.
+    DATA ls_resolved TYPE ty_field.
     rs_table-name = iv_name.
     lv_head = iv_xml.
     FIND FIRST OCCURRENCE OF `<DD03P_TABLE>` IN lv_head MATCH OFFSET lv_off.
@@ -155,6 +160,27 @@ CLASS zcl_osd_adt_ddic IMPLEMENTATION.
       ls_field-decimals = js_int( tag( iv_xml = lv_block iv_tag = `DECIMALS` ) ).
       ls_field-key = boolc( tag( iv_xml = lv_block iv_tag = `KEYFLAG` ) = `X` ).
       ls_field-notnull = boolc( tag( iv_xml = lv_block iv_tag = `NOTNULL` ) = `X` ).
+      ls_field-description = tag( iv_xml = lv_block iv_tag = `DDTEXT` ).
+      IF iv_resolve = abap_true.
+        IF ls_field-element IS NOT INITIAL AND ls_field-datatype IS INITIAL.
+          READ TABLE lt_resolved WITH TABLE KEY element = ls_field-element INTO ls_resolved.
+          IF sy-subrc <> 0.
+            CLEAR ls_resolved.
+            ls_resolved-element = ls_field-element.
+            resolve( EXPORTING iv_element = ls_field-element CHANGING cs_field = ls_resolved ).
+            INSERT ls_resolved INTO TABLE lt_resolved.
+          ENDIF.
+          IF ls_resolved-datatype IS NOT INITIAL.
+            ls_field-datatype = ls_resolved-datatype.
+            ls_field-length = ls_resolved-length.
+            ls_field-decimals = ls_resolved-decimals.
+            IF ls_field-description IS INITIAL.
+              ls_field-description = ls_resolved-description.
+            ENDIF.
+          ENDIF.
+        ENDIF.
+        ls_field-letter = letter( iv_type = ls_field-datatype iv_default = tag( iv_xml = lv_block iv_tag = `INTTYPE` ) ).
+      ENDIF.
       APPEND ls_field TO rs_table-fields.
     ENDDO.
   ENDMETHOD.
@@ -338,5 +364,72 @@ CLASS zcl_osd_adt_ddic IMPLEMENTATION.
       && |@AbapCatalog.deliveryClass : #{ is_table-delivery }\n|
       && |@AbapCatalog.dataMaintenance : { is_table-maintenance }\n|
       && |define table { to_lower( is_table-name ) } \{\n\n{ lv_lines }\n\n\}\n|.
+  ENDMETHOD.
+  METHOD resolve.
+    DATA ls_answer TYPE zcl_osd_adt_host=>ty_answer.
+    DATA lv_domain TYPE string.
+    DATA lv_xml TYPE string.
+    DATA lv_text TYPE string.
+    TRY.
+        ls_answer = zcl_osd_adt_host=>store( iv_command = `READ` iv_type = `DTEL` iv_name = iv_element ).
+        lv_xml = ls_answer-source.
+        lv_text = tag( iv_xml = lv_xml iv_tag = `DDTEXT` ).
+        IF lv_text IS INITIAL.
+          lv_text = tag( iv_xml = lv_xml iv_tag = `SCRTEXT_M` ).
+        ENDIF.
+        lv_domain = tag( iv_xml = lv_xml iv_tag = `DOMNAME` ).
+        IF tag( iv_xml = lv_xml iv_tag = `DATATYPE` ) IS INITIAL AND lv_domain IS NOT INITIAL.
+          ls_answer = zcl_osd_adt_host=>store( iv_command = `READ` iv_type = `DOMA` iv_name = lv_domain ).
+          lv_xml = ls_answer-source.
+        ENDIF.
+        IF tag( iv_xml = lv_xml iv_tag = `DATATYPE` ) IS INITIAL.
+          RETURN.
+        ENDIF.
+        cs_field-datatype = tag( iv_xml = lv_xml iv_tag = `DATATYPE` ).
+        cs_field-length = js_int( tag( iv_xml = lv_xml iv_tag = `LENG` ) ).
+        cs_field-decimals = js_int( tag( iv_xml = lv_xml iv_tag = `DECIMALS` ) ).
+        IF cs_field-description IS INITIAL.
+          cs_field-description = lv_text.
+        ENDIF.
+      CATCH zcx_osd_adt.
+*       Unresolved elements keep their original inline attributes.
+    ENDTRY.
+  ENDMETHOD.
+  METHOD letter.
+    CASE iv_type.
+      WHEN `CHAR` OR `CLNT` OR `CUKY` OR `LANG` OR `UNIT` OR `ACCP` OR `LCHR`.
+        rv_letter = `C`.
+      WHEN `NUMC`.
+        rv_letter = `N`.
+      WHEN `DATS`.
+        rv_letter = `D`.
+      WHEN `TIMS`.
+        rv_letter = `T`.
+      WHEN `INT1`.
+        rv_letter = `b`.
+      WHEN `INT2`.
+        rv_letter = `s`.
+      WHEN `INT4` OR `RAW` OR `LRAW`.
+        rv_letter = `X`.
+      WHEN `INT8`.
+        rv_letter = `8`.
+      WHEN `DEC` OR `CURR` OR `QUAN`.
+        rv_letter = `P`.
+      WHEN `FLTP`.
+        rv_letter = `F`.
+      WHEN `RSTR`.
+        rv_letter = `y`.
+      WHEN `STRG` OR `SSTR`.
+        rv_letter = `g`.
+      WHEN `DF16_DEC`.
+        rv_letter = `a`.
+      WHEN `DF34_DEC`.
+        rv_letter = `e`.
+      WHEN OTHERS.
+        rv_letter = iv_default.
+        IF rv_letter IS INITIAL.
+          rv_letter = `C`.
+        ENDIF.
+    ENDCASE.
   ENDMETHOD.
 ENDCLASS.

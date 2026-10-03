@@ -1,3 +1,4 @@
+import {renderCell, cellType} from "./adt-datapreview-cells.mjs";
 // The ADT façade of OSD: `/sap/bc/adt/**` answered by a local system that
 // has no system behind it. A client that speaks ADT to a real ABAP server
 // should not be able to tell, within the surface we advertise.
@@ -249,13 +250,8 @@ ${list.map(collection).join("\n")}
 export function tableDataDocument(answer, options = {}) {
   const rows = answer.rows ?? [];
   const columns = answer.columns ?? (rows.length === 0 ? [] : Object.keys(rows[0]));
-  const render = (v) => (v === null || v === undefined ? "" : typeof v === "object" ? Buffer.from(v).toString("hex").toUpperCase() : String(v));
-  // C for a character column, I for a number, X for raw: enough for a client
-  // to lay out a preview, and all the runtime's rows can tell us
-  const type = (name) => {
-    const first = rows.find((r) => r[name] !== null && r[name] !== undefined)?.[name];
-    return typeof first === "number" ? "I" : typeof first === "object" && first !== null ? "X" : "C";
-  };
+  const render = renderCell;
+  const type = (name) => cellType(rows, name);
 
   // The dictionary's own metadata when the table is known (a4h-adt.jsonl:642:
   // type letter, colType, length, description per column), the guess from

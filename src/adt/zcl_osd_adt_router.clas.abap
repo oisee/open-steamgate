@@ -154,6 +154,18 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
                        iv_handler = `ZCL_OSD_ADT_VERSIONS` CHANGING ct_routes = rt_routes ).
       ENDIF.
     ENDLOOP.
+    IF zcl_osd_adt_host=>one_runtime( ) = abap_true.
+      add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/datapreview/freestyle`
+                     iv_handler = `ZCL_OSD_ADT_FREESTYLE` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/datapreview/ddic/:name/metadata`
+                     iv_handler = `ZCL_OSD_ADT_PREVIEW` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/datapreview/ddic`
+                     iv_handler = `ZCL_OSD_ADT_PREVIEW` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/datapreview/cds/:name/metadata`
+                     iv_handler = `ZCL_OSD_ADT_PREVIEW` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/datapreview/cds`
+                     iv_handler = `ZCL_OSD_ADT_PREVIEW` CHANGING ct_routes = rt_routes ).
+    ENDIF.
 *   Only ADT on one runtime can bind the serving generation and DUMP.
     lv_classrun_by = c_host.
     IF zcl_osd_kernel_guard=>has_generation( ) = abap_true.

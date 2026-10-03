@@ -1,3 +1,4 @@
+import {previewSQL} from "./adt-preview-sql.mjs";
 // The serving half of OSD, on its own, in a process that can be replaced.
 //
 // This is the OData front and nothing else: the transpiled runtime, the
@@ -370,6 +371,7 @@ if (childStoreIPC !== undefined) {
     const previous = currentSystemAnswers();
     return withSystem(async (kind, name, json) => {
       const input = JSON.parse(json || "{}");
+      if ((kind === "SQL" || kind === "SQLCHECK") && Object.hasOwn(input, "statement")) return previewSQL(connection(), kind, input);
       if (kind === "SQL" || kind === "XREF") return data.query(input.sql ?? name, {max: input.max ?? 100});
       if (kind === "SQLCHECK") { await data.check(input.sql ?? name); return {ok: true}; }
       if (kind === "DUMP") {

@@ -1,3 +1,5 @@
+import {selectSQLiteOne} from './adt-single-select.mjs';
+
 // The end of a dialog step, for every host that runs the ABAP.
 //
 // An AS ABAP commits the database implicitly when a request's work is done
@@ -247,6 +249,10 @@ export async function exclusive(work, what, {dialog = false} = {}) {
 export function lockedClient(client, what = "a read of the shared connection") {
   return new Proxy(client, {
     get(target, key) {
+      // Keep cursor preparation, fetching and closing in one exclusive read.
+      if (key === 'selectOne' && target.name === 'sqlite' && target.openCursor && !target.selectOne) {
+        return (sql, max) => exclusive(() => selectSQLiteOne(target, sql, max), what);
+      }
       const value = Reflect.get(target, key, target);
       if (typeof value !== "function") return value;
       return (...args) => exclusive(() => value.apply(target, args), what);

@@ -44,6 +44,11 @@ export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILI
 export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
 
 const PARSE_KINDS = {
+  DDLS: async (store, input) => {
+    const {entityHeadOf} = await import("./adt-cds.mjs");
+    const head = entityHeadOf(store, input.name ?? "");
+    return head === undefined ? {found: false} : {found: true, ...head};
+  },
   UNIT_PLAN: async (store, input) => {
     const {unitPlan} = await import("./osd-unit.mjs");
     return unitPlan(store, String(input.type ?? "").toUpperCase(),
