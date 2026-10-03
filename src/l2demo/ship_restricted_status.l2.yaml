@@ -1,0 +1,109 @@
+# DSL L2 with a range parameter (docs/dsl-l2.md, "Range parameters"): the statuses
+# that bar a ship from a voyage are a selection table, not a chain of equalities.
+# `restricted` is a SELECT-OPTIONS-shaped parameter: its default [M, D] is two I EQ
+# rows, a caller may pass any table (BT rows, E rows, an empty table = every status),
+# and the generated Open SQL says `ship~status IN lt_p_restricted`.
+# `node tools/dsl-l2.mjs build src/l2demo/ship_restricted_status.l2.yaml --out src/l2demo`
+rule: ship-restricted-status-no-voyage
+class: zcl_l2_ship_restricted
+title: A ship whose status is restricted has no voyage departing after the check date
+params:
+  restricted: {type: ZOSD_L2_SHIP-STATUS, range: true, default: [M, D]}
+for: ZOSD_L2_SHIP as ship
+range: ship.ship_id
+when: ship.status in $restricted
+forbid:
+  exists: ZOSD_L2_VOY as voy
+  where: voy.ship_id = ship.ship_id and voy.dep_date > $date
+alert: "{ship.ship_id} {ship.name}: restricted status {ship.status}, voyage {voy.voyage_id} departs {voy.dep_date}"
+boundaries: auto
+examples:
+  - name: restricted with a voyage ahead
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00001, ship_id: S001, dep_date: 20261005}]
+    expect:
+      - "S001 Albatross: restricted status M, voyage V00001 departs 20261005"
+  - name: active ship is not restricted
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S002, name: Cormorant, status: A}]
+      ZOSD_L2_VOY: [{voyage_id: V00002, ship_id: S002, dep_date: 20261005}]
+    expect: []
+  - name: second default status counts
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S003, name: Petrel, status: D}]
+      ZOSD_L2_VOY: [{voyage_id: V00003, ship_id: S003, dep_date: 20261005}]
+    expect:
+      - "S003 Petrel: restricted status D, voyage V00003 departs 20261005"
+  - name: restricted past voyage only
+    date: 20261001
+    rows:
+      ZOSD_L2_SHIP: [{ship_id: S001, name: Albatross, status: M}]
+      ZOSD_L2_VOY: [{voyage_id: V00004, ship_id: S001, dep_date: 20261001}]
+    expect: []
+  - name: another table replaces default
+    date: 20261001
+    params: {restricted: [A]}
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S002, name: Cormorant, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00005, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00006, ship_id: S002, dep_date: 20261006}
+    expect:
+      - "S002 Cormorant: restricted status A, voyage V00006 departs 20261006"
+  - name: empty table is every status
+    date: 20261001
+    params: {restricted: []}
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S002, name: Cormorant, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00007, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00008, ship_id: S002, dep_date: 20261006}
+    expect:
+      - "S001 Albatross: restricted status M, voyage V00007 departs 20261005"
+      - "S002 Cormorant: restricted status A, voyage V00008 departs 20261006"
+  - name: E row alone excludes its own
+    date: 20261001
+    params: {restricted: [{sign: E, option: EQ, low: M}]}
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S002, name: Cormorant, status: A}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00009, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00010, ship_id: S002, dep_date: 20261006}
+    expect:
+      - "S002 Cormorant: restricted status A, voyage V00010 departs 20261006"
+  - name: BT row with an E row cut out
+    date: 20261001
+    params: {restricted: [{sign: I, option: BT, low: A, high: M}, {sign: E, option: EQ, low: D}]}
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S002, name: Cormorant, status: D}
+        - {ship_id: S003, name: Petrel, status: R}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00011, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00012, ship_id: S002, dep_date: 20261006}
+        - {voyage_id: V00013, ship_id: S003, dep_date: 20261007}
+    expect:
+      - "S001 Albatross: restricted status M, voyage V00011 departs 20261005"
+  - name: key range keeps inner ship
+    date: 20261001
+    range: [{sign: I, option: EQ, low: S002}]
+    rows:
+      ZOSD_L2_SHIP:
+        - {ship_id: S001, name: Albatross, status: M}
+        - {ship_id: S002, name: Cormorant, status: M}
+      ZOSD_L2_VOY:
+        - {voyage_id: V00014, ship_id: S001, dep_date: 20261005}
+        - {voyage_id: V00015, ship_id: S002, dep_date: 20261006}
+    expect:
+      - "S002 Cormorant: restricted status M, voyage V00015 departs 20261006"

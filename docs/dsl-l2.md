@@ -1,6 +1,6 @@
 # DSL L2: a domain rule compiled to L1
 
-Status: slices 1 to 7, 2026-10-01. Built on L1 (`docs/dsl-l1.md`) and the template engine
+Status: slices 1 to 8, 2026-10-03. Built on L1 (`docs/dsl-l1.md`) and the template engine
 (`docs/abap-templates.md`).
 
 ## What L2 is
@@ -744,9 +744,90 @@ numbers moved, their model hashes did not). The demo rule is `ship_busy.l2.yaml`
 decommissioned with a voyage ahead; the mutant whose `keys( )` returns duplicates turns its example
 "several voyages one key" red.
 
+## Slice 8: range parameters (`field in $name`)
+
+Real rule sets select by ranges, a SELECT-OPTIONS or a variant's table of countries, categories,
+statuses, and a rule should say `ship.status in $restricted`, not an OR chain of equalities. A
+parameter is a range when it says so:
+
+```yaml
+params:
+  restricted: {type: ZOSD_L2_SHIP-STATUS, range: true, default: [M, D]}
+when: ship.status in $restricted
+```
+
+`range: true` makes the parameter a selection table of its type (a data element, a built-in or
+`<TABLE>-<field>`, as for a scalar). The class declares `TYPES tt_restricted TYPE RANGE OF
+<type>` and takes it as `iv_restricted TYPE tt_restricted OPTIONAL`. The type of a range is a
+character, numeric, date or time type; a string or a floating point type is refused at the
+parameter, and so is a name of more than 24 characters (the local copy is `lt_p_<name>`) and the
+name `range` (the driving-key range's `tt_range`).
+
+**Rows.** `default` and an example's `params:` value are a list of SELECT-OPTIONS rows
+`{sign, option, low, high}`, or of bare values, each one an `I EQ` row (`[M, D]`). The sign is `I`
+or `E`, the option `EQ` or `BT` (a `BT` row has `high`, with `low` not above it; an `EQ` row has
+none); values fit the type by the same check as every literal. Refused at their lines: an unknown
+sign, option or key, a value that does not fit, a `BT` without `high` or reversed, a scalar
+default for a range, a list for a scalar. A range without `default` is an empty table.
+
+**Conditions.** `field in $name` and `field not in $name` are comparisons like the others: they
+may stand in `when`, in a `forbid` or `require` `where`, under `and`, `or` and `not`, and the field is of the table being selected, on the left. The generated Open SQL is
+`ship~status IN lt_p_restricted` (a table of the class's own, no `@` host escape: the same form
+the driving-key range has) or `NOT IN`; the nested reference form says `status IN lt_p_restricted`.
+`in` is a word of the condition language now, so it can no longer be an alias. Refused at the
+comparison's line: `in` with a parameter that is not a range, a range parameter under `=`, `<`
+and the rest (the message says to write `in`), `$date`, a literal or a field on the right, a field
+that is not on the left, and a field whose type is not the range's.
+
+**Empty means every value, and `not in` of it means none.** Open SQL reads a value as in a
+selection table when it meets some `I` row (every value when there is no `I` row) and no `E` row,
+and an empty table as every value. `NOT IN` is the negation of the whole, so against an empty table
+it holds for no value. The interpreter (`inSelection` in `tools/dsl-l2-range.mjs`) says the same,
+and the ABAP of `test/dsl-l2.mjs` ("slice 8") agrees on this runtime for an empty table, `E` rows
+alone and `E` rows cut out of a `BT` row. **Measured here only: not yet on A4H.**
+
+**The default is applied when the parameter is not supplied.** A range with a default makes the
+class (and the test's `check_reference`) copy it into a local table: `IF iv_restricted IS
+SUPPLIED. lt_p_restricted = iv_restricted. ELSE.` then the default rows, one `APPEND` each. So a
+caller can supply an empty table on purpose (every value), which a scalar `DEFAULT` cannot tell
+from "not given" in the same way. A range without a default is read directly:
+`ship~status IN iv_restricted`. Every row of the default traces to its line of `params:`, and the
+line that uses it to the condition (`rule_line`) and the declaration (`param_rule_line`).
+
+**Examples.** `params: {restricted: [A]}` gives an example its own table; `[]` is the empty table. The
+test builds the table from its rows (`lt_p_restricted`, `ls_p_restricted`) and passes it to `check`
+and `check_reference`. An example that gives none gets the rule's default, and the interpreter the
+same.
+
+**Derived cases.** A range comparison has four, `b_<column>_<in|out|empty|excl>`, each isolating
+the comparison like the others and each killing one mutant of it:
+
+| case | rows | kills |
+|---|---|---|
+| `in` | a value that the table holds | the condition always false, `in` turned into `not in` |
+| `out` | a value that it does not | the condition always true (the range ignored), `in` turned into `not in` |
+| `empty` | the table emptied for this case (an argument of the case), with a value the full table did not hold | an empty table read as no value, `in` turned into `not in` |
+| `excl` | an `E` row for the value of `in` added to the table (an argument of the case) | the `E` rows dropped, the range ignored |
+
+`node tools/dsl-l2.mjs cases` prints the table a case sets for itself (`$restricted: I EQ M, I EQ D, E EQ M`, `(empty table)`).
+An empty default has no value outside it, so `out` is skipped and listed under `skipped` ("no
+value outside the range: an empty range holds every value"). The mutants are `{...cond, constant}`,
+the operator turned, and two of the range's own (`exclusions_ignored`, `empty_is_none` on the
+comparison's `rhs`, tools/dsl-l2-eval.mjs, `mutantsOf`); `test/dsl-l2.mjs` checks each case against
+the mutant it is for, and four mutants of the generated ABAP: `in` turned into `not in`, the table
+dropped from the WHERE (red against `check_reference` too), the default never applied and the
+default always applied.
+
+`src/l2demo/ship_restricted_status.l2.yaml` is the demo: a ship whose status is in `restricted`
+(default `M`, `D`) has no voyage after the check date, with nine examples (the table omitted,
+replaced, empty, one `E` row, a `BT` row with an `E` row cut out of it, and a driving-key range
+beside it) and the eleven derived cases. It has a `range:` of its own, so a set may pile it
+(docs/dsl-l3.md, "Range set parameters"); it stays out of `fleet.l3.yaml` and `fleet2.l3.yaml`,
+whose tests count their rules and alerts, and `fleet3.l3.yaml` runs it.
+
 ## Not yet
 
-Grouping by fields of the counted table,
+Grouping by fields of the counted table, a range comparison in a `limit`'s `where` (untested), the other options of a range row (`NE`, `GT`, `CP` and the rest) and a range over a string type,
 `limit` under `all` / `any`, a condition on the outer table inside `where` beyond
 the join (a comparison of an `exists` field with an outer field is allowed; one of only outer
 fields is not), a `for` and an `exists` on the same table, a join without an equality, an

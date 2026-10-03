@@ -8,6 +8,8 @@
 // `range: [{sign: I, option: BT, low: S002, high: S003}]` (sign I, option EQ
 // with low, or BT with low and high).
 
+import {inSelection} from "./dsl-l2-selopt.mjs";
+
 const RANGE_KEYS = ["sign", "option", "low", "high"];
 
 // the rule's `range:` line, read against the for source: undefined without one
@@ -45,12 +47,8 @@ export function exampleRange({example, base, range, exampleId, line, failAt, nee
 }
 
 // the interpreter's reading of the same range: does `value` (of `type`) lie in it
-export function inRange(rows, type, value, compareValues) {
-  if (!rows?.length) return true;
-  return rows.some((r) => {
-    const low = compareValues(type, value, type, r.low);
-    return r.option === "EQ" ? low === 0 : low >= 0 && compareValues(type, value, type, r.high) <= 0;
-  });
+export function inRange(rows, type, value) {
+  return inSelection(rows, type, value);
 }
 
 // ---------------------------------------------------------------------------

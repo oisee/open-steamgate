@@ -20,7 +20,12 @@ CLASS ltcl_examples DEFINITION FOR TESTING RISK LEVEL DANGEROUS DURATION SHORT F
                 it_range TYPE tt_range OPTIONAL
 {{/range}}
 {{#params}}
+{{#is_selopt}}
+                {{ref}} TYPE {{class}}=>{{selopt_type}} OPTIONAL
+{{/is_selopt}}
+{{^is_selopt}}
                 {{ref}} TYPE {{type_name}}{{#default}} DEFAULT {{default | literal}}{{/default}}
+{{/is_selopt}}
 {{/params}}
       RETURNING VALUE(rt_alerts) TYPE string_table.
     METHODS assert_alerts
@@ -90,6 +95,26 @@ CLASS ltcl_examples IMPLEMENTATION.
     DATA lv_aggregate_seen TYPE c LENGTH 1.
 {{/is_count}}
 {{/threshold}}
+{{#params}}
+{{#has_default}}
+    DATA {{use}} TYPE {{class}}=>{{selopt_type}}.
+    DATA {{row}} LIKE LINE OF {{use}}.
+    IF {{ref}} IS SUPPLIED.
+      {{use}} = {{ref}}.
+    ELSE.
+{{#default_rows}}
+      CLEAR {{row}}.
+      {{row}}-sign = {{sign | literal}}.
+      {{row}}-option = {{option | literal}}.
+      {{row}}-low = {{low | literal}}.
+{{#high}}
+      {{row}}-high = {{high | literal}}.
+{{/high}}
+      APPEND {{row}} TO {{use}}.
+{{/default_rows}}
+    ENDIF.
+{{/has_default}}
+{{/params}}
 {{#windows}}
     {{name}} = iv_date {{sign}} {{offset_ref}}.
 {{/windows}}
@@ -244,6 +269,22 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND ls_range TO lt_range.
 {{/range_args}}
 {{/range}}
+{{#param_args}}
+{{#is_selopt}}
+    DATA {{var}} TYPE {{class}}=>{{selopt_type}}.
+    DATA {{row}} LIKE LINE OF {{var}}.
+{{#rows}}
+    CLEAR {{row}}.
+    {{row}}-sign = {{sign | literal}}.
+    {{row}}-option = {{option | literal}}.
+    {{row}}-low = {{low | literal}}.
+{{#high}}
+    {{row}}-high = {{high | literal}}.
+{{/high}}
+    APPEND {{row}} TO {{var}}.
+{{/rows}}
+{{/is_selopt}}
+{{/param_args}}
 {{#long_expect}}
     DATA lv_exp TYPE string.
 {{/long_expect}}
@@ -271,8 +312,8 @@ CLASS ltcl_examples IMPLEMENTATION.
     APPEND lv_exp TO lt_exp.
 {{/single}}
 {{/expect}}
-    lt_act = {{date.call}}( iv_date = {{date.value | literal}}{{#range}} it_range = lt_range{{/range}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
-    lt_ref = check_reference( iv_date = {{date.value | literal}}{{#range}} it_range = lt_range{{/range}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
+    lt_act = {{date.call}}( iv_date = {{date.value | literal}}{{#range}} it_range = lt_range{{/range}}{{#param_args}}{{#is_selopt}} {{ref}} = {{var}}{{/is_selopt}}{{^is_selopt}} {{ref}} = {{value | literal}}{{/is_selopt}}{{/param_args}} ).
+    lt_ref = check_reference( iv_date = {{date.value | literal}}{{#range}} it_range = lt_range{{/range}}{{#param_args}}{{#is_selopt}} {{ref}} = {{var}}{{/is_selopt}}{{^is_selopt}} {{ref}} = {{value | literal}}{{/is_selopt}}{{/param_args}} ).
     assert_same_as_reference( it_act = lt_act it_ref = lt_ref iv_example = {{ref_label | literal}} ).
     assert_alerts( it_act = lt_act it_exp = lt_exp iv_example = {{label | literal}} ).
 {{#keys_check}}
@@ -283,7 +324,7 @@ CLASS ltcl_examples IMPLEMENTATION.
     ls_key-low = {{value | literal}}.
     APPEND ls_key TO lt_keys_exp.
 {{/values}}
-    lt_keys = {{call}}( iv_date = {{date.value | literal}}{{#range}} it_range = lt_range{{/range}}{{#param_args}} {{ref}} = {{value | literal}}{{/param_args}} ).
+    lt_keys = {{call}}( iv_date = {{date.value | literal}}{{#range}} it_range = lt_range{{/range}}{{#param_args}}{{#is_selopt}} {{ref}} = {{var}}{{/is_selopt}}{{^is_selopt}} {{ref}} = {{value | literal}}{{/is_selopt}}{{/param_args}} ).
     cl_abap_unit_assert=>assert_equals( act = lt_keys exp = lt_keys_exp msg = {{label | literal}} ).
 {{/keys_check}}
   ENDMETHOD.
