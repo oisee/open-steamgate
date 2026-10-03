@@ -58,7 +58,19 @@ export class OsdPostgresClient extends PostgresDatabaseClient {
       .replace(/ DESCENDING/ig, ' DESC').replace(/~/g, '.');
     // Empty values alone use simple protocol in node-postgres; queryMode
     // forces extended protocol even for a SELECT without parameters.
-    return {rows: this.convert(await this.query({text, values: [], queryMode: 'extended'}))};
+    const request = {text, values: [], queryMode: 'extended'};
+    if (this.client === undefined) return {rows: this.convert(await this.query(request))};
+    // a failed SELECT aborts PostgreSQL's whole transaction: fence it the way
+    // native() and upstream's modifying() do, so an open LUW survives it
+    await this.client.query("SAVEPOINT osd_select");
+    try {
+      const answer = await this.client.query(request);
+      await this.client.query("RELEASE SAVEPOINT osd_select");
+      return {rows: this.convert(answer)};
+    } catch (error) {
+      await this.client.query("ROLLBACK TO SAVEPOINT osd_select; RELEASE SAVEPOINT osd_select;");
+      throw error;
+    }
   }
 
   async checkSelect(sql) {

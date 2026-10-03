@@ -98,10 +98,28 @@ describe('C4 PostgreSQL SELECT fence', () => {
     }};
     const answer = await previewSQL(client, 'SQL', {statement:'SELECT broken FROM zstg_demo'});
     expect(answer).to.have.property('error');
-    expect(calls).to.deep.equal(['SAVEPOINT osd_adt_preview',{text:'SELECT broken FROM zstg_demo LIMIT 100', values:[], queryMode:'extended'},
+    // selectOne fences itself too (the switch-off Data path has no outer fence)
+    expect(calls).to.deep.equal(['SAVEPOINT osd_adt_preview','SAVEPOINT osd_select',{text:'SELECT broken FROM zstg_demo LIMIT 100', values:[], queryMode:'extended'},
+      'ROLLBACK TO SAVEPOINT osd_select; RELEASE SAVEPOINT osd_select;',
       'ROLLBACK TO SAVEPOINT osd_adt_preview','RELEASE SAVEPOINT osd_adt_preview']);
     expect((await client.select({select:'SELECT id FROM zosd_adt_sess'})).rows).to.deep.equal([{id:'pending-session'}]);
   });
+  it('selectOne alone (the switch-off Data path) keeps an open LUW usable after a failed SELECT', async () => {
+    const client = new OsdPostgresClient({host:'unused'});
+    let aborted = false;
+    client.client = {query:async sql => {
+      sql = sql.text ?? sql;
+      if (sql.startsWith('ROLLBACK TO')) aborted = false;
+      else if (aborted) throw new Error('current transaction is aborted');
+      if (sql.includes('broken')) {aborted = true; throw new Error('unknown column');}
+      return {rows:[{id:'pending-session'}]};
+    }};
+    let failed;
+    try { await client.selectOne('SELECT broken FROM zstg_demo'); } catch (error) { failed = error; }
+    expect(failed?.message).to.equal('unknown column');
+    expect((await client.select({select:'SELECT id FROM zosd_adt_sess'})).rows).to.deep.equal([{id:'pending-session'}]);
+  });
+
   for (const middle of ['DELETE FROM t', 'COMMIT']) it(`refuses ${middle} before PostgreSQL SAVEPOINT`, async () => {
     const client = new OsdPostgresClient({host:'unused'});
     const calls = [];
