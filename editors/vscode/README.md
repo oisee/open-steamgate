@@ -16,7 +16,7 @@ Start a bundled ABAP runtime, explore its OData services, run ABAP Unit, and ope
 
 1. Install **open-steamgate** from the VS Code Marketplace, or install the downloaded `.vsix` with **Extensions: Install from VSIX...**.
 2. Open the **OSD** Activity Bar view and select **Start**. The first start builds the bundled system; later starts reuse its cache.
-3. Try the services in the tree, or open an ABAP project such as [osg-demo](https://github.com/oisee/osg-demo) as a workspace layer.
+3. Run **OSD: Open sample** from the command palette or the system status bar. Choose a bundled notebook and run a cell; the command offers to start OSD if needed. In an [osg-demo](https://github.com/oisee/osg-demo) workspace, it also offers **ZOSD_DEMO_HELLO** (press **F9** to run).
 
 The status bar shows **OSD running/stopped**, the serving **OSD generation**, and **OSD jobs** (when enabled for a file SQLite database). Click the system or jobs item for start actions, job output, or **System overview**.
 

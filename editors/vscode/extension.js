@@ -2526,6 +2526,7 @@ function runningParts(controller) {
       detail: other || worker?.running ? "Show jobs" : state === "running" ? "Start worker" : state === "stopped" ? "Start system" : "Show overview",
       command: other || worker?.running ? "osd.showJobs" : state === "running" ? "osd.startJobWorker" : state === "stopped" ? "osd.start" : "osd.openSystemOverview"});
   }
+  items.push({label: "Open sample", detail: "Choose a notebook or hello class", command: "osd.openSample"});
   items.push({label: "System overview", detail: "Show overview", command: "osd.openSystemOverview"});
   return items;
 }
@@ -2761,6 +2762,7 @@ function activate(context) {
   context.subscriptions.push(vscode.workspace.registerNotebookSerializer(NOTEBOOK_TYPE, sqlNotebookSerializer()));
   context.subscriptions.push(sqlNotebookController(output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.newSqlNotebook", newSqlNotebook));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openSample", () => openSample(context, controller)));
 
   // The controller is available to the Test Explorer and lenses from their
   // registration onward, including before the first Start.
@@ -4460,6 +4462,46 @@ function sqlNotebookSerializer() {
   };
 }
 
+/** Bundled notebooks work against the demo seed. The book's hello class
+ *  is offered only when its source is in this workspace and is a classrun. */
+async function sampleItems(context) {
+  const dir = path.join(context.extensionUri.fsPath, "examples");
+  const items = fs.readdirSync(dir).filter((name) => name.endsWith(".osdnb")).sort().map((name) => ({
+    label: name, description: "Bundled notebook", detail: "Open and run a cell",
+    uri: vscode.Uri.file(path.join(dir, name)), notebook: true,
+  }));
+  const classes = await vscode.workspace.findFiles("**/zosd_demo_hello.clas.abap", EXCLUDE);
+  for (const uri of classes) {
+    const document = await vscode.workspace.openTextDocument(uri);
+    if (implementsClassrun(document.getText())) {
+      items.push({label: "ZOSD_DEMO_HELLO", description: "Workspace classrun", detail: "Open and press F9 to run", uri});
+    }
+  }
+  return items;
+}
+
+async function openSample(context, controller) {
+  try {
+    const picked = await vscode.window.showQuickPick(await sampleItems(context), {title: "OSD: Open sample"});
+    if (!picked) return;
+    if (picked.notebook) {
+      const document = await vscode.workspace.openNotebookDocument(picked.uri);
+      await vscode.window.showNotebookDocument(document);
+    } else {
+      await vscode.window.showTextDocument(picked.uri);
+    }
+    // Also accept a system started outside this window, at osd.url.
+    if (controller.launcher?.state === "running") return;
+    try { await osd().json("/osd/serving", {signal: AbortSignal.timeout(3000)}); return; }
+    catch { /* Offer the existing Start action below. */ }
+    if (controller.launcher && controller.launcher.state !== "stopped") return;
+    const action = await vscode.window.showInformationMessage("Start OSD to run this sample.", "Start system");
+    if (action === "Start system") await vscode.commands.executeCommand("osd.start");
+  } catch (error) {
+    vscode.window.showErrorMessage(`osd: could not open sample: ${String(error.message ?? error)}`);
+  }
+}
+
 /** `osd.newSqlNotebook`'s own untitled notebook, and Q7's "Open in SQL
  *  notebook" button -- `statement` is the cell it opens with, ready to
  *  run; the command palette and SQL tree node use the base status example. */
@@ -4528,7 +4570,7 @@ async function deactivate() {
 }
 
 module.exports = {WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
-  httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands, startStopStatusBar, runningParts, showRunning,
+  httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands, startStopStatusBar, runningParts, showRunning, sampleItems, openSample,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
   wirePageTabs, openDetailsMetadata, serviceCardFiles};

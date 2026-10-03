@@ -4115,3 +4115,100 @@ describe("editors/vscode: serving generation status", () => {
     }
   });
 });
+
+describe("editors/vscode: Open sample", () => {
+  const context = {extensionUri: {fsPath: path.join(ROOT, "editors/vscode")}};
+  function sampleApi(classes = []) {
+    const h = runningStatusApi();
+    h.api.Uri = {file: fsPath => ({fsPath})};
+    h.api.workspace = {
+      getConfiguration() { return {get: (_, fallback) => fallback}; },
+      async findFiles(pattern, exclude) {
+        expect(pattern).to.equal("**/zosd_demo_hello.clas.abap");
+        expect(exclude).to.include("node_modules");
+        return classes.map(c => c.uri);
+      },
+      async openTextDocument(uri) { return {getText: () => classes.find(c => c.uri === uri).source}; },
+      async openNotebookDocument(uri) { h.openedNotebook = uri; return {uri}; },
+    };
+    h.api.window.showNotebookDocument = async doc => { h.shownNotebook = doc.uri; };
+    h.api.window.showTextDocument = async uri => { h.shownClass = uri; };
+    h.api.window.showInformationMessage = async (_, action) => { h.offer = action; return h.startChoice; };
+    h.api.window.showErrorMessage = message => { h.error = message; };
+    return h;
+  }
+  it("lists every bundled notebook and only a present classrun hello sample", async () => {
+    const h = sampleApi();
+    const {sampleItems, runningParts} = loadExtension(h.api);
+    const notebooks = await sampleItems(context);
+    expect(notebooks.map(e => e.label)).to.deep.equal(["abap-amdp.osdnb", "demo.osdnb"]);
+    for (const item of notebooks) {
+      expect(item.notebook).to.equal(true);
+      expect(item.uri.fsPath).to.equal(path.join(context.extensionUri.fsPath, "examples", item.label));
+      expect(JSON.parse(readFileSync(item.uri.fsPath, "utf8")).cells.length).to.be.greaterThan(0);
+    }
+    expect(runningParts({}).find(e => e.label === "Open sample").command).to.equal("osd.openSample");
+    const uri = {fsPath: "/workspace/src/zosd_demo_hello.clas.abap"};
+    const classes = [{uri, source: "CLASS zosd_demo_hello DEFINITION.\n  PUBLIC SECTION.\n    INTERFACES if_oo_adt_classrun.\nENDCLASS."}];
+    const demo = sampleApi(classes);
+    const items = await loadExtension(demo.api).sampleItems(context);
+    expect(items).to.have.length(3);
+    expect(items[2]).to.include({label: "ZOSD_DEMO_HELLO", uri, detail: "Open and press F9 to run"});
+    classes[0].source = "CLASS zosd_demo_hello DEFINITION. ENDCLASS.";
+    expect(await loadExtension(demo.api).sampleItems(context)).to.have.length(2);
+    const manifest = JSON.parse(readFileSync(path.join(context.extensionUri.fsPath, "package.json"), "utf8"));
+    expect(manifest.contributes.commands.find(c => c.command === "osd.openSample").title).to.equal("OSD: Open sample");
+    expect(readFileSync(path.join(context.extensionUri.fsPath, "walkthrough/try-it.md"), "utf8")).to.include("command:osd.openSample");
+  });
+
+  it("opens the chosen notebook or class without running it", async () => {
+    const uri = {fsPath: "/workspace/src/zosd_demo_hello.clas.abap"};
+    const h = sampleApi([{uri, source: "INTERFACES if_oo_adt_classrun."}]);
+    const {openSample} = loadExtension(h.api);
+    h.choose(entries => entries.find(e => e.label === "demo.osdnb"));
+    await openSample(context, {launcher: {state: "running"}});
+    expect(h.openedNotebook).to.equal(h.shownNotebook);
+    expect(h.shownNotebook.fsPath).to.match(/examples\/demo.osdnb$/);
+    h.choose(entries => entries.find(e => e.label === "ZOSD_DEMO_HELLO"));
+    await openSample(context, {launcher: {state: "running"}});
+    expect(h.shownClass).to.equal(uri);
+    expect(h.executed).to.deep.equal([]);
+    expect(h.offer).to.equal(undefined);
+    expect(h.error).to.equal(undefined);
+  });
+
+  it("offers Start only for an unavailable system, allows dismissal and cancellation", async () => {
+    const h = sampleApi();
+    const {openSample} = loadExtension(h.api);
+    const originalFetch = globalThis.fetch;
+    try {
+      h.choose(entries => entries[0]);
+      let available = false;
+      globalThis.fetch = async (url, options) => {
+        expect(url).to.match(/\/osd\/serving$/);
+        expect(options.signal).to.be.instanceOf(AbortSignal);
+        if (!available) throw Error("offline");
+        return {ok: true, json: async () => ({generation: "external"})};
+      };
+      await openSample(context, {});
+      expect(h.offer).to.equal("Start system");
+      expect(h.executed).to.deep.equal([]);
+      h.startChoice = "Start system";
+      await openSample(context, {});
+      expect(h.executed).to.deep.equal(["osd.start"]);
+      h.offer = undefined;
+      available = true;
+      await openSample(context, {});
+      expect(h.offer).to.equal(undefined);
+      available = false;
+      await openSample(context, {launcher: {state: "starting"}});
+      expect(h.offer).to.equal(undefined);
+      h.choose(() => undefined);
+      h.openedNotebook = undefined;
+      await openSample(context, {});
+      expect(h.openedNotebook).to.equal(undefined);
+      expect(h.executed).to.deep.equal(["osd.start"]);
+      expect(h.error).to.equal(undefined);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+});
