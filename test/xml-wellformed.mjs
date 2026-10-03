@@ -50,3 +50,11 @@ describe("every shipped class with test classes carries WITH_UNIT_TESTS", () => 
     expect(missing, missing.join("\n")).to.deep.equal([]);
   });
 });
+
+// F3 is a test-only continuation fixture, so the shipped-class scan excludes it.
+describe("F3 continuation fixture metadata", () => {
+  it("carries WITH_UNIT_TESTS for its local ABAP Unit tests", () => {
+    const xml = readFileSync("test/unit/zcl_osd_adt_route_f3.clas.xml", "utf8");
+    expect(xml).to.include("<WITH_UNIT_TESTS>X</WITH_UNIT_TESTS>");
+  });
+});

@@ -53,6 +53,12 @@ unregistered-kind 500 document byte for byte. A later browser continuation
 slice starts at this stub and supplies host work and a fresh resume step.
 No activation, ABAP Unit or notebook kind is implemented by F3.
 
+With `OSD_ADT_ONE_RUNTIME=1`, B1/B2 sends ANSWER to the serving child
+and carries STORE over IPC. F3 retains that path unchanged. RESUME remains
+available only through the local dialog-step adapter; moving RESUME into
+the serving child belongs to B4. F3 moves no production HTTP rows and adds
+no STORE commands, so it has no HOST_ALLOWED entries to remove.
+
 `test/adt-abap-f3.mjs` mounts two routers and exercises host writes and
 ABAP STORE writes against both stores, real ABAP RESUME, FIFO waiting and
 step context, both unknown-kind paths, duplicate registration, and browser
