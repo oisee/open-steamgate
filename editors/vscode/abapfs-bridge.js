@@ -49,7 +49,7 @@ async function registerAbapFsBridge(vscode, context, controller) {
           'Add "OSD (local)" to ABAP-FS? Any password works locally.', "Add", "Not now");
         if (choice !== "Add" || disposed) return;
         const config = vscode.workspace.getConfiguration("abapfs");
-        const remote = config.get("remote", {});
+        const remote = config.inspect("remote")?.globalValue ?? {};
         if (remote["OSD (local)"]) return; // Do not overwrite an existing connection.
         await config.update("remote", {...remote, "OSD (local)": {
           url,

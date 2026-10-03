@@ -30,7 +30,7 @@ function fixture(api, answer, saved = new Map()) {
     window: {showInformationMessage: async (...args) => { messages.push(args); return answer; },
       showWarningMessage: (s) => messages.push(s)},
     workspace: {getConfiguration: (name) => { expect(name).to.equal("abapfs"); return {
-      get: () => remote, update: async (key, value, scope) => {
+      get: () => remote, inspect: () => ({globalValue: remote}), update: async (key, value, scope) => {
         expect(key).to.equal("remote"); expect(scope).to.equal(1); remote = value; writes.push(value);
       },
     }; }},
@@ -133,6 +133,34 @@ describe("ABAP-FS local bridge", () => {
       expect(again.messages).to.deep.equal([]);
     });
   }
+  it("merges the legacy connection only with user settings, preserving workspace secrets and overrides", async () => {
+    const f = fixture({}, "Add");
+    const globalValue = {shared: {url: "http://user.example", username: "USER"}};
+    const workspaceValue = {shared: {url: "http://workspace.example", password: "workspace-secret"},
+      workspaceOnly: {url: "http://workspace.example", password: "other-secret"}};
+    f.vscode.workspace.getConfiguration = () => ({
+      get: () => workspaceValue,
+      inspect: key => { expect(key).to.equal("remote"); return {globalValue, workspaceValue}; },
+      update: async (key, value, scope) => {
+        expect(key).to.equal("remote"); expect(scope).to.equal(f.vscode.ConfigurationTarget.Global);
+        f.writes.push(value);
+      },
+    });
+    await registerAbapFsBridge(f.vscode, f.context, f.controller); f.start(); await settled();
+    expect(f.writes).to.have.length(1);
+    expect(f.writes[0].shared).to.deep.equal(globalValue.shared);
+    expect(f.writes[0]).not.to.have.property("workspaceOnly");
+    expect(JSON.stringify(f.writes)).not.to.contain("secret");
+    expect(workspaceValue.shared.password).to.equal("workspace-secret");
+    expect(globalValue).not.to.have.property("OSD (local)");
+  });
+  it("adds the legacy connection when there are no user remote settings", async () => {
+    const f = fixture({}, "Add");
+    f.vscode.workspace.getConfiguration = () => ({inspect: () => ({}),
+      update: async (_key, value) => f.writes.push(value)});
+    await registerAbapFsBridge(f.vscode, f.context, f.controller); f.start(); await settled();
+    expect(Object.keys(f.writes[0])).to.deep.equal(["OSD (local)"]);
+  });
   it("ignores missing or failed optional ABAP-FS installations", async () => {
     const f = fixture({});
     f.vscode.extensions.getExtension = () => undefined;
