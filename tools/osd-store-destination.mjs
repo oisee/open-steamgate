@@ -25,11 +25,18 @@
 // gives them two buttons: one name over a cheap and an expensive operation
 // is a button people stop pressing.
 import {withoutHostPaths} from "./osd-build-issues.mjs";
-import {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "./osd-system-kinds.mjs";
+import {PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS, SOURCE_SYSTEM_KINDS} from "./osd-system-kinds.mjs";
 import {given, givenText, fill} from "./osd-destination.mjs";
 import {snapshotOf, changedSince} from "./osd-generation-diff.mjs";
 import {objectOf} from "./osd-inputs.mjs";
 import {basename, join} from "node:path";
+
+// Shared fresh registration facts; route and SYSTEM use the same layer walk.
+export async function segwRegistrationsOf(store) {
+  const {segwRegistrations} = await import(/* webpackIgnore: true */ "./segw-registry.mjs");
+  const {generatorFoldersOf} = await import(/* webpackIgnore: true */ "./osd-packs.mjs");
+  return segwRegistrations(generatorFoldersOf(store.root).map((f) => join(store.root, f)));
+}
 
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
@@ -86,7 +93,7 @@ const PARSE_KINDS = {
 // object), SESSION (does the request's session hold state) and LOCK_HOLDER
 // (IV_NAME "TYPE NAME": is the holder a live session; a dead one is ended).
 // They go when the session moves into ABAP.
-const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER"];
+const SYSTEM_KINDS = ["IDENTITY", "LOCK_HANDLE", "LOCK_RELEASE", "SESSION", "LOCK_HOLDER", "BUILD", "CHANGED", "SERVICES", "TRANSACTIONS", ...SOURCE_SYSTEM_KINDS];
 let systemCalls;
 try {
   if (typeof process !== "undefined" && process.versions?.node !== undefined) {
@@ -171,7 +178,9 @@ export class StoreDestination {
     if (command === "CAPABILITIES") return {EV_NOTE: CAPABILITIES.join(" ")};
     if (!COMMANDS.includes(command)) return refusal(`unknown store command ${command}`, "NOT_SUPPORTED");
     if (command === "SYSTEM") {
-      return this.#system(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"), givenText(signature, "IV_JSON"));
+      const json = givenText(signature, "IV_JSON");
+      const kind = givenText(signature, "IV_TYPE") || JSON.parse(json || "{}").kind || "";
+      return this.#system(String(kind).toUpperCase(), givenText(signature, "IV_NAME"), json);
     }
     if (command === "OBJECT") {
       return this.#object(givenText(signature, "IV_TYPE").toUpperCase(), givenText(signature, "IV_NAME"));
@@ -291,7 +300,11 @@ export class StoreDestination {
       return {EV_ERROR: `nothing answers SYSTEM ${kind} for this call: it is bound per ADT facade instance (withSystem)`};
     }
     try {
-      const value = await bound.answers(kind, name, json);
+      let value;
+      if (["OBJECT_TYPES", "TESTCLASSES", "SERVICE_ROWS", "SEGW_REGISTRATIONS"].includes(kind) && bound.store) {
+        const {xrefFact} = await import(/* webpackIgnore: true */ "./adt-xref-facts.mjs");
+        value = xrefFact(bound.store, kind, JSON.parse(json || "{}"));
+      } else value = await bound.answers(kind, name, json);
       if (value === undefined) return {EV_ERROR: `SYSTEM ${kind} has no answer here`};
       return typeof value?.raw === "string" ? {EV_SOURCE: value.raw} : {EV_JSON: JSON.stringify(value)};
     } catch (error) {

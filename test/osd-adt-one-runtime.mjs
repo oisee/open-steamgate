@@ -11,6 +11,7 @@ import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
 import {attachStoreIPC, StoreIPCClient, withStoreIPC, PARENT_SYSTEM_KINDS, CHILD_SYSTEM_KINDS} from "../tools/osd-store-ipc.mjs";
+import {SOURCE_SYSTEM_KINDS} from "../tools/osd-system-kinds.mjs";
 import {stepJSON} from "../tools/adt-remote-step.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
@@ -771,7 +772,7 @@ describe("STORE long commands and non-dialog activation", () => {
 
 describe("one-runtime SYSTEM kind gate", () => {
   for (const enabled of [false, true]) {
-    it(`accepts resource kinds only with the switch on (${enabled ? "on" : "off"})`, async () => {
+    it(`accepts source facts and introspection in both modes and gates other resource kinds (${enabled ? "on" : "off"})`, async () => {
       const previous = process.env.OSD_ADT_ONE_RUNTIME;
       try {
         if (enabled) process.env.OSD_ADT_ONE_RUNTIME = "1";
@@ -779,7 +780,8 @@ describe("one-runtime SYSTEM kind gate", () => {
         const destination = new StoreDestination({store: {}});
         for (const kind of [...PARENT_SYSTEM_KINDS, ...CHILD_SYSTEM_KINDS]) {
           const answer = await withSystem(() => ({owner: kind}), () => destination.execute({IV_COMMAND: "SYSTEM", IV_TYPE: kind}));
-          if (enabled) expect(JSON.parse(answer.EV_JSON)).to.deep.equal({owner: kind});
+          const introspection = ["BUILD", "CHANGED", "SERVICES", "TRANSACTIONS"].includes(kind);
+          if (enabled || SOURCE_SYSTEM_KINDS.has(kind) || introspection) expect(JSON.parse(answer.EV_JSON)).to.deep.equal({owner: kind});
           else expect(answer.EV_ERROR).to.equal(`unknown SYSTEM kind ${kind}`);
         }
       } finally {

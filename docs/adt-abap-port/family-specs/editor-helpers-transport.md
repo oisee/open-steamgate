@@ -97,7 +97,7 @@ Transport check, byte-equal including ETag (all POSTs with the token and cookie)
 
 Occurrence markers:
 - a valid encoded URI gives 200 with an equal ETag;
-- If-None-Match with that ETag gives 304 on both sides;
+- If-None-Match with that ETag gives 200 on both sides for POST (live Node check: Express freshness applies to GET/HEAD);
 - missing, `uri=`, bare `?uri`, `uri=a&uri=b`, `uri[x]=1` and `URI=x` give a 400 byte-equal to Node;
 - `uri=%` gives 200;
 - a 1 MB body is ignored;

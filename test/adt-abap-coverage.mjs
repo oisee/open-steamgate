@@ -73,27 +73,6 @@ const HOST_ALLOWED = reasonedMap([
 ]);
 
 const PORT_PENDING = [
-  // A2: feeds, system/users, transport check, occurrence markers
-  "GET /sap/bc/adt/feeds",
-  "GET /sap/bc/adt/feeds/variants",
-  "GET /sap/bc/adt/system/users",
-  "GET /sap/bc/adt/runtime/dumps",
-  "GET /sap/bc/adt/runtime/systemmessages",
-  "GET /sap/bc/adt/gw/errorlog",
-  "POST /sap/bc/adt/cts/transportchecks",
-  "POST /sap/bc/adt/abapsource/occurencemarkers",
-  // A3b: reentrance ticket
-  "GET /sap/bc/adt/core/http/reentranceticket",
-  // A8a: thin introspection rows
-  "GET /sap/bc/adt/core/http/build",
-  "GET /sap/bc/adt/core/http/changed",
-  "GET /sap/bc/adt/core/http/services",
-  "GET /sap/bc/adt/core/http/transactions",
-  // A9: xref
-  "GET /sap/bc/adt/core/http/xref/readers",
-  "GET /sap/bc/adt/core/http/xref/closure",
-  // A10: segw entity sets
-  "GET /sap/bc/adt/core/http/segw/entitysets",
 ];
 
 const text = (value) => String(value?.get?.() ?? value ?? "").trimEnd();

@@ -86,10 +86,10 @@ What the host is asked:
 - in the step: only PARSE UNIT_PLAN;
 - after the step (continuation): run the child, then call RENDER in a fresh dialogStep and send it with the payload's contentType, and for unit-object-run send JSON.stringify(run).
 
-Recommended alongside, same unit C2 in the port map: POST `abapsource/occurencemarkers` (S, static, ABAP-pure). abap-adt-api calls it after every unit run and the run's UI breaks without it.
+POST `abapsource/occurencemarkers` belongs to A2; see [editor-helpers-transport.md](editor-helpers-transport.md).
 
 Proposed slicing:
-- C2a (S): metadata, GET unit/object, PARSE UNIT_PLAN, and the occurencemarkers row.
+- C2a (S): metadata, GET unit/object, PARSE UNIT_PLAN.
 - C2b (M): testruns and evaluation, the AUNIT_DOC renderer, the aunit-run continuation and the resume/render step.
 - C3 (S/M): unit/object/run and the unit-object-run continuation with cancellation.
 
