@@ -98,3 +98,16 @@ installing the same new kinds in inline hosts remains future port work.
 Workers other than the primary still own independent ENQ tables, as in the
 note. This slice does not claim pool-wide lock synchronization or crash
 durability for an in-memory database. Default behavior remains switched off.
+
+**Before the switch is turned on by default** (open items from review):
+- A step without an ADT context (the G.8 editor's ZCL_OSD_EDIT ACTIVATE) is
+  still answered "live after the step" before publication, and a failed
+  publication there is not reported. Record the outcome where the editor
+  sees it, or answer "activation queued".
+- The parent's wait for a deferred publication has no upper bound if the
+  child stays alive but its "step ended" message is lost; bound it by the
+  build time plus the recycle limit.
+- A route with a body costs one extra round trip for the body-required probe.
+- ADT now shares the child's recycle: a request inside the child when a
+  publish recycles it gets about 2 s to finish, then a GET is retried and a
+  write answers 500. That is the cost of option B, by design.

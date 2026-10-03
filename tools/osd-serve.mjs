@@ -191,11 +191,15 @@ if (process.env.OSD_ADT_CARRY === "1") {
 const app = express();
 app.disable("x-powered-by");
 app.set("etag", false);
+// The door key is read once and removed from the environment, so processes
+// this child spawns (warm verify, batch workers) do not inherit it.
+const adtStepKey = Buffer.from(process.env.OSD_ADT_STEP_KEY ?? "");
+delete process.env.OSD_ADT_STEP_KEY;
 // Hex plus metadata must fit every body accepted by the public 16 MB parser.
 app.use("/osd/adt-step", (req, res, next) => {
   if (process.env.OSD_ADT_ONE_RUNTIME !== "1") return res.status(404).end();
   if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] ?? "")) return res.status(415).json({error: {message: "JSON required"}});
-  const expected = Buffer.from(process.env.OSD_ADT_STEP_KEY ?? "");
+  const expected = adtStepKey;
   const supplied = Buffer.from(req.headers["x-osd-adt-step-key"] ?? "");
   if (!expected.length || supplied.length !== expected.length || !timingSafeEqual(expected, supplied)) return res.status(403).json({error: {message: "invalid step key"}});
   next();
