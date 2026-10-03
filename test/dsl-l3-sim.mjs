@@ -85,7 +85,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
     expect(error.message.slice(where(file).length), error.message).to.match(new RegExp(`^:${line}: ${message.source}`));
   };
   // the set as it was before this slice: no simulate:, no work port, no sim variant
-  const STRIPPED = SET_TEXT.replace(/^simulate:\n(  .*\n)+/m, "")
+  const STRIPPED = SET_TEXT.replace(/^cockpit:.*\n/m, "").replace(/^simulate:\n(  .*\n)+/m, "")
     .replace("  work:\n    kind: work\n    variants:\n      real: generated\n      sim: generated\n", "")
     .replace("      sim: generated\n", "").replace("  work: real\n", "")
     .replace(/^# Slice 5d[^\n]*\n(#[^\n]*\n)*?(?=# `node)/m, "").replace(", simulate.seed, simulate.time_scale, piles", ", piles");
@@ -225,7 +225,8 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
 
     it("the trace: every line the twin adds traces to simulate: or the work port, the real calls it moves to their rule", async () => {
       const file = join(OUT, `zz_plain_${process.pid}.l3.yaml`);
-      writeFileSync(file, STRIPPED);
+      // Compare only the twin: keep the cockpit in both runners.
+      writeFileSync(file, STRIPPED + (SET_TEXT.match(/^cockpit:.*\n/m)?.[0] ?? ""));
       let plainRunner;
       try { plainRunner = (await renderSet(compileSet(file))).files[`${RUNNER}.clas.abap`].replaceAll(basename(file), "fleet2.l3.yaml").split("\n"); } finally { rmSync(file, {force: true}); }
       const simLine = setLine(/^simulate:/), workLine = setLine(/^  work:$/);

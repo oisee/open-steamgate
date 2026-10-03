@@ -1,0 +1,943 @@
+project: ZL3C_FLEET2
+service: ZL3C_FLEET2_SRV
+description: Fleet run cockpit
+entities:
+  Run:
+    set: RunSet
+    source:
+      table: ZOSD_L3_RUN
+    keys:
+      - RunId
+    properties:
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        label: SetName
+        readonly: true
+      CheckDate:
+        type: DateTime
+        field: CHECK_DATE
+        label: CheckDate
+        readonly: true
+      RunId:
+        type: String(32)
+        field: RUN_ID
+        label: RunId
+        readonly: true
+      Status:
+        type: String(12)
+        field: STATUS
+        label: Status
+        readonly: true
+      Started:
+        type: DateTime
+        field: STARTED
+        label: Started
+        readonly: true
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
+      - Q
+  Stage:
+    set: StageSet
+    source:
+      table: ZOSD_L3_STAGE
+    keys:
+      - RunId
+      - StageNo
+    properties:
+      RunId:
+        type: String(32)
+        field: RUN_ID
+        label: RunId
+        readonly: true
+      StageNo:
+        type: Int32
+        field: STAGE_NO
+        label: StageNo
+        readonly: true
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        label: SetName
+        readonly: true
+      CheckDate:
+        type: DateTime
+        field: CHECK_DATE
+        label: CheckDate
+        readonly: true
+      StageName:
+        type: String(16)
+        field: STAGE_NAME
+        label: StageName
+        readonly: true
+      Status:
+        type: String(12)
+        field: STATUS
+        label: Status
+        readonly: true
+      Opened:
+        type: DateTime
+        field: OPENED
+        label: Opened
+        readonly: true
+      Ended:
+        type: DateTime
+        field: ENDED
+        label: Ended
+        readonly: true
+      RunBind:
+        type: String(255)
+        field: RUN_BIND
+        label: RunBind
+        readonly: true
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
+      - Q
+  Pile:
+    set: PileSet
+    source:
+      table: ZOSD_L3_PILE
+    keys:
+      - RunId
+      - RuleName
+      - PileNo
+    properties:
+      RunId:
+        type: String(32)
+        field: RUN_ID
+        label: RunId
+        readonly: true
+      RuleName:
+        type: String(60)
+        field: RULE_NAME
+        label: RuleName
+        readonly: true
+      PileNo:
+        type: Int32
+        field: PILE_NO
+        label: PileNo
+        readonly: true
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        label: SetName
+        readonly: true
+      StageNo:
+        type: Int32
+        field: STAGE_NO
+        label: StageNo
+        readonly: true
+      ModelHash:
+        type: String(71)
+        field: MODEL_HASH
+        label: ModelHash
+        readonly: true
+      CheckDate:
+        type: DateTime
+        field: CHECK_DATE
+        label: CheckDate
+        readonly: true
+      RangeLow:
+        type: String(40)
+        field: RANGE_LOW
+        label: RangeLow
+        readonly: true
+      RangeHigh:
+        type: String(40)
+        field: RANGE_HIGH
+        label: RangeHigh
+        readonly: true
+      Status:
+        type: String(12)
+        field: STATUS
+        label: Status
+        readonly: true
+      JobName:
+        type: String(32)
+        field: JOB_NAME
+        label: JobName
+        readonly: true
+      JobCount:
+        type: String(8)
+        field: JOB_COUNT
+        label: JobCount
+        readonly: true
+      Alerts:
+        type: Int32
+        field: ALERTS
+        label: Alerts
+        readonly: true
+      Started:
+        type: DateTime
+        field: STARTED
+        label: Started
+        readonly: true
+      Ended:
+        type: DateTime
+        field: ENDED
+        label: Ended
+        readonly: true
+      Attempt:
+        type: Int32
+        field: ATTEMPT
+        label: Attempt
+        readonly: true
+      Reason:
+        type: String(40)
+        field: REASON
+        label: Reason
+        readonly: true
+      PerPile:
+        type: Int32
+        field: PER_PILE
+        label: PerPile
+        readonly: true
+      Hits:
+        type: Int32
+        field: HITS
+        label: Hits
+        readonly: true
+      Closed:
+        type: Int32
+        field: CLOSED
+        label: Closed
+        readonly: true
+      OpenAlerts:
+        type: Int32
+        field: OPEN_ALERTS
+        label: OpenAlerts
+        readonly: true
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
+      - Q
+  Budget:
+    set: BudgetSet
+    source:
+      table: ZOSD_L3_BUDGET
+    keys:
+      - RunId
+    properties:
+      RunId:
+        type: String(32)
+        field: RUN_ID
+        label: RunId
+        readonly: true
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        label: SetName
+        readonly: true
+      Reserved:
+        type: Int32
+        field: RESERVED
+        label: Reserved
+        readonly: true
+      Consumed:
+        type: Int32
+        field: CONSUMED
+        label: Consumed
+        readonly: true
+      Refunded:
+        type: Int32
+        field: REFUNDED
+        label: Refunded
+        readonly: true
+      Glass:
+        type: Int32
+        field: GLASS
+        label: Glass
+        readonly: true
+      WarnAt:
+        type: Int32
+        field: WARN_AT
+        label: WarnAt
+        readonly: true
+      NarrowAt:
+        type: Int32
+        field: NARROW_AT
+        label: NarrowAt
+        readonly: true
+      PerPile:
+        type: Int32
+        field: PER_PILE
+        label: PerPile
+        readonly: true
+      EventSeq:
+        type: Int32
+        field: EVENT_SEQ
+        label: EventSeq
+        readonly: true
+      State:
+        type: String(7)
+        field: STATE
+        label: State
+        readonly: true
+      Warned:
+        type: String(1)
+        field: WARNED
+        label: Warned
+        readonly: true
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
+      - Q
+  Event:
+    set: EventSet
+    source:
+      table: ZOSD_L3_EVENT
+    keys:
+      - RunId
+      - Seq
+    properties:
+      RunId:
+        type: String(32)
+        field: RUN_ID
+        label: RunId
+        readonly: true
+      Seq:
+        type: Int32
+        field: SEQ
+        label: Seq
+        readonly: true
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        label: SetName
+        readonly: true
+      Kind:
+        type: String(12)
+        field: KIND
+        label: Kind
+        readonly: true
+      Reserved:
+        type: Int32
+        field: RESERVED
+        label: Reserved
+        readonly: true
+      Consumed:
+        type: Int32
+        field: CONSUMED
+        label: Consumed
+        readonly: true
+      Refunded:
+        type: Int32
+        field: REFUNDED
+        label: Refunded
+        readonly: true
+      Glass:
+        type: Int32
+        field: GLASS
+        label: Glass
+        readonly: true
+      Amount:
+        type: Int32
+        field: AMOUNT
+        label: Amount
+        readonly: true
+      RuleNo:
+        type: Int32
+        field: RULE_NO
+        label: RuleNo
+        readonly: true
+      PileNo:
+        type: Int32
+        field: PILE_NO
+        label: PileNo
+        readonly: true
+      Reason:
+        type: String(80)
+        field: REASON
+        label: Reason
+        readonly: true
+      Actor:
+        type: String(12)
+        field: ACTOR
+        label: Actor
+        readonly: true
+      Acted:
+        type: DateTime
+        field: ACTED
+        label: Acted
+        readonly: true
+      RuleName:
+        type: String(60)
+        field: RULE_NAME
+        label: RuleName
+        readonly: true
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
+      - Q
+  Doctor:
+    set: DoctorSet
+    source:
+      table: ZOSD_L3_DOCTOR
+    keys:
+      - RunId
+      - Seq
+    properties:
+      RunId:
+        type: String(32)
+        field: RUN_ID
+        label: RunId
+        readonly: true
+      Seq:
+        type: Int32
+        field: SEQ
+        label: Seq
+        readonly: true
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        label: SetName
+        readonly: true
+      CheckDate:
+        type: DateTime
+        field: CHECK_DATE
+        label: CheckDate
+        readonly: true
+      StageNo:
+        type: Int32
+        field: STAGE_NO
+        label: StageNo
+        readonly: true
+      RuleName:
+        type: String(60)
+        field: RULE_NAME
+        label: RuleName
+        readonly: true
+      PileNo:
+        type: Int32
+        field: PILE_NO
+        label: PileNo
+        readonly: true
+      DocAction:
+        type: String(12)
+        field: DOC_ACTION
+        label: DocAction
+        readonly: true
+      Reason:
+        type: String(40)
+        field: REASON
+        label: Reason
+        readonly: true
+      Acted:
+        type: DateTime
+        field: ACTED
+        label: Acted
+        readonly: true
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
+      - Q
+  Setting:
+    set: SettingSet
+    source:
+      table: ZOSD_L3_CONF
+    keys:
+      - SetName
+      - ParamName
+    properties:
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        label: SetName
+        readonly: true
+      ParamName:
+        type: String(30)
+        field: PARAM_NAME
+        label: ParamName
+        readonly: true
+      ParamVal:
+        type: String(40)
+        field: PARAM_VAL
+        label: ParamVal
+        readonly: true
+      Origin:
+        type: String(4)
+        field: ORIGIN
+        label: Origin
+        readonly: true
+      DslValue:
+        type: String(40)
+        field: DSL_VALUE
+        label: DslValue
+        readonly: true
+      ChangedBy:
+        type: String(12)
+        field: CHANGED_BY
+        label: ChangedBy
+        readonly: true
+      ChangedAt:
+        type: DateTime
+        field: CHANGED_AT
+        label: ChangedAt
+        readonly: true
+      NoteText:
+        type: String(80)
+        field: NOTE_TEXT
+        label: NoteText
+        readonly: true
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
+      - Q
+  Change:
+    set: ChangeSet
+    source:
+      table: ZOSD_L3_CONF_LOG
+    keys:
+      - ChangeId
+    properties:
+      ChangeId:
+        type: String(32)
+        field: CHANGE_ID
+        label: ChangeId
+        readonly: true
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        label: SetName
+        readonly: true
+      ParamName:
+        type: String(30)
+        field: PARAM_NAME
+        label: ParamName
+        readonly: true
+      OldValue:
+        type: String(40)
+        field: OLD_VALUE
+        label: OldValue
+        readonly: true
+      NewValue:
+        type: String(40)
+        field: NEW_VALUE
+        label: NewValue
+        readonly: true
+      OldOrigin:
+        type: String(4)
+        field: OLD_ORIGIN
+        label: OldOrigin
+        readonly: true
+      NewOrigin:
+        type: String(4)
+        field: NEW_ORIGIN
+        label: NewOrigin
+        readonly: true
+      ChangedBy:
+        type: String(12)
+        field: CHANGED_BY
+        label: ChangedBy
+        readonly: true
+      ChangedAt:
+        type: DateTime
+        field: CHANGED_AT
+        label: ChangedAt
+        readonly: true
+      NoteText:
+        type: String(80)
+        field: NOTE_TEXT
+        label: NoteText
+        readonly: true
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
+      - Q
+  Snapshot:
+    set: SnapshotSet
+    source:
+      table: ZOSD_L3_RUN_CONF
+    keys:
+      - RunId
+      - ParamName
+    properties:
+      RunId:
+        type: String(32)
+        field: RUN_ID
+        label: RunId
+        readonly: true
+      ParamName:
+        type: String(30)
+        field: PARAM_NAME
+        label: ParamName
+        readonly: true
+      SetName:
+        type: String(16)
+        field: SET_NAME
+        label: SetName
+        readonly: true
+      ParamVal:
+        type: String(40)
+        field: PARAM_VAL
+        label: ParamVal
+        readonly: true
+      Origin:
+        type: String(8)
+        field: ORIGIN
+        label: Origin
+        readonly: true
+      DslValue:
+        type: String(40)
+        field: DSL_VALUE
+        label: DslValue
+        readonly: true
+      ChangedBy:
+        type: String(12)
+        field: CHANGED_BY
+        label: ChangedBy
+        readonly: true
+      ChangedAt:
+        type: DateTime
+        field: CHANGED_AT
+        label: ChangedAt
+        readonly: true
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - R
+      - Q
+  Answer:
+    keys:
+      - RunId
+    properties:
+      RunId:
+        type: String(32)
+        field: RUN_ID
+      Answer: String
+    creatable: false
+    updatable: false
+    deletable: false
+    operations: []
+functions:
+  StartRun:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters:
+      CheckDate: String(8)
+      Mode: String(1)
+      Work: String(4)
+  ReleasePile:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters:
+      RunId: String(32)
+      RuleName: String(60)
+      PileNo: Int32
+      PerPile: Int32
+      Reason: String(80)
+  ContinueGlass:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters:
+      RunId: String(32)
+      NewGlass: Int32
+      Reason: String(80)
+  Resume:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters:
+      RunId: String(32)
+  Doctor:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters: {}
+  SetKill:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters:
+      Reason: String(80)
+  ClearKill:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters:
+      Reason: String(80)
+  SetSetting:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters:
+      Param: String(30)
+      Value: String(40)
+      Note: String(80)
+  ResetSetting:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters:
+      Param: String(30)
+      Note: String(80)
+  Schedule:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters: {}
+  Unschedule:
+    method: POST
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters: {}
+  ScheduleStatus:
+    method: GET
+    returns:
+      entity: Answer
+      multiplicity: '1'
+    parameters: {}
+associations:
+  RunToStage:
+    from: Run
+    to: Stage
+    cardinality: 1:N
+    constraint:
+      RunId: RunId
+    navigation:
+      Run: to_Stage
+  RunToPile:
+    from: Run
+    to: Pile
+    cardinality: 1:N
+    constraint:
+      RunId: RunId
+    navigation:
+      Run: to_Pile
+  RunToBudget:
+    from: Run
+    to: Budget
+    cardinality: 1:N
+    constraint:
+      RunId: RunId
+    navigation:
+      Run: to_Budget
+  RunToEvent:
+    from: Run
+    to: Event
+    cardinality: 1:N
+    constraint:
+      RunId: RunId
+    navigation:
+      Run: to_Event
+  RunToDoctor:
+    from: Run
+    to: Doctor
+    cardinality: 1:N
+    constraint:
+      RunId: RunId
+    navigation:
+      Run: to_Doctor
+  RunToSnapshot:
+    from: Run
+    to: Snapshot
+    cardinality: 1:N
+    constraint:
+      RunId: RunId
+    navigation:
+      Run: to_Snapshot
+annotations:
+  Run:
+    lineItem:
+      - value: RunId
+        label: Run Id
+      - value: CheckDate
+        label: Check Date
+      - value: Status
+        label: Status
+      - value: Started
+        label: Started
+    header:
+      typeName: Run
+      typeNamePlural: Runs
+      title: RunId
+      description: Status
+    selectionFields:
+      - CheckDate
+      - Status
+    facets:
+      - id: Stage
+        label: Stage
+        lineItem: to_Stage
+      - id: Pile
+        label: Pile
+        lineItem: to_Pile
+      - id: Budget
+        label: Budget
+        lineItem: to_Budget
+      - id: Event
+        label: Event
+        lineItem: to_Event
+      - id: Doctor
+        label: Doctor
+        lineItem: to_Doctor
+      - id: Snapshot
+        label: Snapshot
+        lineItem: to_Snapshot
+  Stage:
+    lineItem:
+      - value: StageNo
+        label: Stage No
+      - value: StageName
+        label: Stage Name
+      - value: Status
+        label: Status
+      - value: Opened
+        label: Opened
+      - value: Ended
+        label: Ended
+      - value: RunBind
+        label: Run Bind
+  Pile:
+    lineItem:
+      - value: RuleName
+        label: Rule Name
+      - value: PileNo
+        label: Pile No
+      - value: Status
+        label: Status
+      - value: Attempt
+        label: Attempt
+      - value: Reason
+        label: Reason
+      - value: Alerts
+        label: Alerts
+      - value: Started
+        label: Started
+      - value: Ended
+        label: Ended
+  Budget:
+    lineItem:
+      - value: Reserved
+        label: Reserved
+      - value: Consumed
+        label: Consumed
+      - value: Refunded
+        label: Refunded
+      - value: Glass
+        label: Glass
+      - value: State
+        label: State
+      - value: WarnAt
+        label: Warn At
+      - value: NarrowAt
+        label: Narrow At
+      - value: PerPile
+        label: Per Pile
+  Event:
+    lineItem:
+      - value: Seq
+        label: Seq
+      - value: Kind
+        label: Kind
+      - value: Acted
+        label: Acted
+      - value: Reason
+        label: Reason
+      - value: Actor
+        label: Actor
+      - value: Reserved
+        label: Reserved
+      - value: Consumed
+        label: Consumed
+      - value: Refunded
+        label: Refunded
+      - value: Glass
+        label: Glass
+  Doctor:
+    lineItem:
+      - value: Seq
+        label: Seq
+      - value: DocAction
+        label: Doc Action
+      - value: Reason
+        label: Reason
+      - value: Acted
+        label: Acted
+      - value: RuleName
+        label: Rule Name
+      - value: PileNo
+        label: Pile No
+  Setting:
+    lineItem:
+      - value: ParamName
+        label: Param Name
+      - value: ParamVal
+        label: Param Val
+      - value: Origin
+        label: Origin
+      - value: DslValue
+        label: Dsl Value
+      - value: ChangedBy
+        label: Changed By
+      - value: ChangedAt
+        label: Changed At
+      - value: NoteText
+        label: Note Text
+  Change:
+    lineItem:
+      - value: ChangeId
+        label: Change Id
+      - value: ParamName
+        label: Param Name
+      - value: OldValue
+        label: Old Value
+      - value: NewValue
+        label: New Value
+      - value: OldOrigin
+        label: Old Origin
+      - value: NewOrigin
+        label: New Origin
+      - value: ChangedBy
+        label: Changed By
+      - value: ChangedAt
+        label: Changed At
+      - value: NoteText
+        label: Note Text
+  Snapshot:
+    lineItem:
+      - value: ParamName
+        label: Param Name
+      - value: ParamVal
+        label: Param Val
+      - value: DslValue
+        label: Dsl Value
+      - value: Origin
+        label: Origin
+      - value: ChangedBy
+        label: Changed By
+      - value: ChangedAt
+        label: Changed At

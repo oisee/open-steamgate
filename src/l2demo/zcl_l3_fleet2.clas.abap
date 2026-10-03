@@ -206,6 +206,11 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     " true while zosd_l3_kill holds a row of the set: the kill switch
     CLASS-METHODS killed
       RETURNING VALUE(rv_killed) TYPE abap_bool.
+    CLASS-METHODS set_kill IMPORTING iv_reason TYPE csequence RETURNING VALUE(rv_ok) TYPE abap_bool.
+    CLASS-METHODS clear_kill IMPORTING iv_reason TYPE csequence RETURNING VALUE(rv_ok) TYPE abap_bool.
+    CLASS-METHODS cockpit_reset_setting
+      IMPORTING iv_param TYPE csequence iv_note TYPE csequence RETURNING VALUE(rv_ok) TYPE abap_bool.
+    CLASS-METHODS cockpit_schedule_status RETURNING VALUE(rv_status) TYPE string.
   PRIVATE SECTION.
     CLASS-METHODS budget_start IMPORTING iv_run TYPE csequence.
     CLASS-METHODS budget_counts IMPORTING iv_run TYPE csequence CHANGING ct_rules TYPE tt_rule.
@@ -363,6 +368,65 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 
 CLASS zcl_l3_fleet2 IMPLEMENTATION.
+  METHOD set_kill.
+    DATA ls_kill TYPE zosd_l3_kill.
+    DATA lt_report TYPE tt_doctor.
+    DATA lv_reason TYPE string.
+    lv_reason = iv_reason.
+    CONDENSE lv_reason.
+    IF lv_reason IS INITIAL OR strlen( iv_reason ) > 80.
+      RETURN.
+    ENDIF.
+    ls_kill-set_name = c_set.
+    ls_kill-reason = iv_reason.
+    MODIFY zosd_l3_kill FROM ls_kill.
+    act( EXPORTING iv_run = 'SET' iv_action = 'SET-KILL' iv_reason = iv_reason CHANGING ct_report = lt_report ).
+    rv_ok = abap_true.
+  ENDMETHOD.
+  METHOD clear_kill.
+    DATA lt_report TYPE tt_doctor.
+    DATA lv_reason TYPE string.
+    lv_reason = iv_reason.
+    CONDENSE lv_reason.
+    IF lv_reason IS INITIAL OR strlen( iv_reason ) > 80.
+      RETURN.
+    ENDIF.
+    DELETE FROM zosd_l3_kill WHERE set_name = c_set.
+    act( EXPORTING iv_run = 'SET' iv_action = 'CLEAR-KILL' iv_reason = iv_reason CHANGING ct_report = lt_report ).
+    rv_ok = abap_true.
+  ENDMETHOD.
+  METHOD cockpit_reset_setting.
+    DATA lv_note TYPE string.
+    lv_note = iv_note.
+    CONDENSE lv_note.
+    IF lv_note IS INITIAL OR strlen( iv_note ) > 80.
+      RETURN.
+    ENDIF.
+    rv_ok = zcl_l3_fleet2_conf=>reset_setting( iv_param = iv_param iv_note = iv_note ).
+  ENDMETHOD.
+  METHOD cockpit_schedule_status.
+    DATA lv_driver TYPE string VALUE 'UNSCHEDULED'.
+    DATA lv_doctor TYPE string VALUE 'UNSCHEDULED'.
+    DATA ls_select TYPE btcselect.
+    DATA lt_jobs TYPE STANDARD TABLE OF tbtcjob WITH DEFAULT KEY.
+    DATA ls_job TYPE tbtcjob.
+    ls_select-jobname = c_driver.
+    ls_select-username = sy-uname.
+    ls_select-schedul = 'X'.
+    CALL FUNCTION 'BP_JOB_SELECT' EXPORTING jobselect_dialog = 'N' jobsel_param_in = ls_select
+      TABLES jobselect_joblist = lt_jobs EXCEPTIONS OTHERS = 1.
+    LOOP AT lt_jobs INTO ls_job WHERE status = 'S'.
+      lv_driver = |SCHEDULED { ls_job-jobcount }|.
+    ENDLOOP.
+    CLEAR lt_jobs.
+    ls_select-jobname = c_doctor.
+    CALL FUNCTION 'BP_JOB_SELECT' EXPORTING jobselect_dialog = 'N' jobsel_param_in = ls_select
+      TABLES jobselect_joblist = lt_jobs EXCEPTIONS OTHERS = 1.
+    LOOP AT lt_jobs INTO ls_job WHERE status = 'S'.
+      lv_doctor = |SCHEDULED { ls_job-jobcount }|.
+    ENDLOOP.
+    rv_status = |{ lv_driver } / { lv_doctor }|.
+  ENDMETHOD.
   METHOD settings_seed.
     zcl_l3_fleet2_conf=>settings_seed( ).
   ENDMETHOD.

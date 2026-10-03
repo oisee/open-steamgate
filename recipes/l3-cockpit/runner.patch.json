@@ -1,0 +1,18 @@
+[
+  {
+    "before": [
+      "  PRIVATE SECTION.\n"
+    ],
+    "after": [
+      "{{#cockpit}}\n{{#killable}}\n    CLASS-METHODS set_kill IMPORTING iv_reason TYPE csequence RETURNING VALUE(rv_ok) TYPE abap_bool.\n    CLASS-METHODS clear_kill IMPORTING iv_reason TYPE csequence RETURNING VALUE(rv_ok) TYPE abap_bool.\n{{/killable}}\n{{#settings}}\n    CLASS-METHODS cockpit_reset_setting\n      IMPORTING iv_param TYPE csequence iv_note TYPE csequence RETURNING VALUE(rv_ok) TYPE abap_bool.\n{{/settings}}\n{{#schedule}}\n    CLASS-METHODS cockpit_schedule_status RETURNING VALUE(rv_status) TYPE string.\n{{/schedule}}\n{{/cockpit}}\n  PRIVATE SECTION.\n"
+    ]
+  },
+  {
+    "before": [
+      "CLASS {{class}} IMPLEMENTATION.\n"
+    ],
+    "after": [
+      "CLASS {{class}} IMPLEMENTATION.\n{{#cockpit}}\n{{#killable}}\n  METHOD set_kill.\n    DATA ls_kill TYPE zosd_l3_kill.\n    DATA lt_report TYPE tt_doctor.\n    DATA lv_reason TYPE string.\n    lv_reason = iv_reason.\n    CONDENSE lv_reason.\n    IF lv_reason IS INITIAL OR strlen( iv_reason ) > 80.\n      RETURN.\n    ENDIF.\n    ls_kill-set_name = c_set.\n    ls_kill-reason = iv_reason.\n    MODIFY zosd_l3_kill FROM ls_kill.\n    act( EXPORTING iv_run = 'SET' iv_action = 'SET-KILL' iv_reason = iv_reason CHANGING ct_report = lt_report ).\n    rv_ok = abap_true.\n  ENDMETHOD.\n  METHOD clear_kill.\n    DATA lt_report TYPE tt_doctor.\n    DATA lv_reason TYPE string.\n    lv_reason = iv_reason.\n    CONDENSE lv_reason.\n    IF lv_reason IS INITIAL OR strlen( iv_reason ) > 80.\n      RETURN.\n    ENDIF.\n    DELETE FROM zosd_l3_kill WHERE set_name = c_set.\n    act( EXPORTING iv_run = 'SET' iv_action = 'CLEAR-KILL' iv_reason = iv_reason CHANGING ct_report = lt_report ).\n    rv_ok = abap_true.\n  ENDMETHOD.\n{{/killable}}\n{{#settings}}\n  METHOD cockpit_reset_setting.\n    DATA lv_note TYPE string.\n    lv_note = iv_note.\n    CONDENSE lv_note.\n    IF lv_note IS INITIAL OR strlen( iv_note ) > 80.\n      RETURN.\n    ENDIF.\n    rv_ok = {{settings.class}}=>reset_setting( iv_param = iv_param iv_note = iv_note ).\n  ENDMETHOD.\n{{/settings}}\n{{#schedule}}\n  METHOD cockpit_schedule_status.\n    DATA lv_driver TYPE string VALUE 'UNSCHEDULED'.\n    DATA lv_doctor TYPE string VALUE 'UNSCHEDULED'.\n    DATA ls_select TYPE btcselect.\n    DATA lt_jobs TYPE STANDARD TABLE OF tbtcjob WITH DEFAULT KEY.\n    DATA ls_job TYPE tbtcjob.\n    ls_select-jobname = c_driver.\n    ls_select-username = sy-uname.\n    ls_select-schedul = 'X'.\n    CALL FUNCTION 'BP_JOB_SELECT' EXPORTING jobselect_dialog = 'N' jobsel_param_in = ls_select\n      TABLES jobselect_joblist = lt_jobs EXCEPTIONS OTHERS = 1.\n    LOOP AT lt_jobs INTO ls_job WHERE status = 'S'.\n      lv_driver = |SCHEDULED { ls_job-jobcount }|.\n    ENDLOOP.\n{{#resilience}}\n{{#scheduled}}\n    CLEAR lt_jobs.\n    ls_select-jobname = c_doctor.\n    CALL FUNCTION 'BP_JOB_SELECT' EXPORTING jobselect_dialog = 'N' jobsel_param_in = ls_select\n      TABLES jobselect_joblist = lt_jobs EXCEPTIONS OTHERS = 1.\n    LOOP AT lt_jobs INTO ls_job WHERE status = 'S'.\n      lv_doctor = |SCHEDULED { ls_job-jobcount }|.\n    ENDLOOP.\n{{/scheduled}}\n{{/resilience}}\n    rv_status = |{ lv_driver } / { lv_doctor }|.\n  ENDMETHOD.\n{{/schedule}}\n{{/cockpit}}\n"
+    ]
+  }
+]

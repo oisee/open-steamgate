@@ -9,7 +9,7 @@ import {expect} from "chai";
 import {existsSync, readFileSync, readdirSync, mkdtempSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {MAX_APP_NAME, buildApp, checkAppName, icfNodeFile, icfNodeXml, icfUrlOf, pageFile, pageKey, wapaXml} from "../tools/osd-bsp-app.mjs";
+import {MAX_APP_NAME, PAGE_LINE, buildApp, checkAppName, longLine, icfNodeFile, icfNodeXml, icfUrlOf, pageFile, pageKey, wapaXml} from "../tools/osd-bsp-app.mjs";
 
 const CORPUS = ".local/corpus/ui5-code-search/src";
 const APP = "ZUI5_CODE_SEA";
@@ -62,6 +62,17 @@ describe("tools/osd-bsp-app: a folder of web files as a BSP application", () => 
         "the tree is not edited").to.not.equal("../../../../opu/odata/sap/ZX_SRV/");
     } finally {
       rmSync(dir, {recursive: true, force: true});
+    }
+  });
+
+  it("refuses a text page with a line a system would cut (255 per line), not a binary one", () => {
+    expect(PAGE_LINE).to.equal(255);
+    expect(() => longLine("x.js", Buffer.from(`a\n${"b".repeat(255)}\n`))).to.not.throw();
+    expect(() => longLine("List.controller.js", Buffer.from(`a\r\n${"b".repeat(256)}\n`))).to.throw(/List\.controller\.js:2: a line of 256 characters/);
+    expect(() => longLine("logo.png", Buffer.from("c".repeat(1000)))).to.not.throw();
+    // the generated cockpit of the demo set stays under it, page by page
+    for (const f of readdirSync("src/l2demo/cockpit/zosd_fleet2").filter((f) => !f.endsWith(".trace.json"))) {
+      if (f !== "i18n") longLine(f, readFileSync(join("src/l2demo/cockpit/zosd_fleet2", f)));
     }
   });
 

@@ -225,6 +225,19 @@ export function checkAppName(app) {
   return app;
 }
 
+/** A system stores a text page of a BSP application in lines of 255
+ *  characters and cuts what is longer, silently: measured on a sandbox, where a
+ *  controller with one 1790-character line arrived 1511 bytes short and the
+ *  application did not start. Refused here, by file and line. */
+export const PAGE_LINE = 255;
+const TEXT_PAGE = /\.(js|mjs|ts|json|xml|svg|html?|properties|css|csv|txt|md|ya?ml)$/i;
+export function longLine(page, body) {
+  if (!TEXT_PAGE.test(page)) return;
+  const lines = body.toString("utf8").split(/\r?\n/);
+  const at = lines.findIndex((l) => l.length > PAGE_LINE);
+  if (at >= 0) throw new Error(`${page}:${at + 1}: a line of ${lines[at].length} characters; a system keeps ${PAGE_LINE} per line of a BSP page and cuts the rest`);
+}
+
 export function buildApp({from, app, out, text = app, service, only, icf, namespace = "sap"}) {
   checkAppName(app);
   mkdirSync(out, {recursive: true});
@@ -239,6 +252,7 @@ export function buildApp({from, app, out, text = app, service, only, icf, namesp
         ? manifestRebased(readFileSync(join(from, page), "utf8"))
         : manifestFor(readFileSync(join(from, page), "utf8"), service))
       : readFileSync(join(from, page));
+    longLine(page, body);
     writeFileSync(join(out, pageFile(app, page)), body);
   }
   writeFileSync(join(out, `${app.toLowerCase()}.wapa.xml`), wapaXml(app, pages, text));

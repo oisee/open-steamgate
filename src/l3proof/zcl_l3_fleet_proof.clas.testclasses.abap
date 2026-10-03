@@ -51,6 +51,7 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS settle.
     METHODS cleanup.
     " in the order a system runs them: alphabetical
+    METHODS cockpit_action FOR TESTING.
     METHODS collect_waits_for_submit FOR TESTING.
     METHODS doctor_heals FOR TESTING.
     METHODS doctor_keeps_run_values FOR TESTING.
@@ -140,6 +141,34 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
 ENDCLASS.
 
 CLASS ltcl_proof IMPLEMENTATION.
+  METHOD cockpit_action.
+    DATA lo_dpc TYPE REF TO zcl_zl3c_fleet2_dpc_ext.
+    DATA lt_params TYPE /iwbep/t_mgw_name_value_pair.
+    DATA ls_param TYPE /iwbep/s_mgw_name_value_pair.
+    DATA lr_answer TYPE REF TO data.
+    DATA lv_expected TYPE string.
+    FIELD-SYMBOLS <ls_answer> TYPE zcl_zl3c_fleet2_mpc=>ts_answer.
+    CREATE OBJECT lo_dpc.
+    lv_expected = zcl_l3_fleet2=>cockpit_schedule_status( ).
+    lo_dpc->/iwbep/if_mgw_appl_srv_runtime~execute_action(
+      EXPORTING iv_action_name = 'ScheduleStatus' it_parameter = lt_params IMPORTING er_data = lr_answer ).
+    ASSIGN lr_answer->* TO <ls_answer>.
+    cl_abap_unit_assert=>assert_equals( act = <ls_answer>-answer exp = lv_expected ).
+    ls_param-name = 'Param'.
+    ls_param-value = 'budget.glass'.
+    APPEND ls_param TO lt_params.
+    ls_param-name = 'Value'.
+    ls_param-value = '0'.
+    APPEND ls_param TO lt_params.
+    ls_param-name = 'Note'.
+    ls_param-value = 'cockpit refusal proof'.
+    APPEND ls_param TO lt_params.
+    lo_dpc->/iwbep/if_mgw_appl_srv_runtime~execute_action(
+      EXPORTING iv_action_name = 'SetSetting' it_parameter = lt_params IMPORTING er_data = lr_answer ).
+    ASSIGN lr_answer->* TO <ls_answer>.
+    cl_abap_unit_assert=>assert_char_cp( act = <ls_answer>-answer exp = 'REFUSED: SetSetting: *' ).
+  ENDMETHOD.
+
 
   METHOD setup.
     " a maintenance ship with a voyage ahead and a pilot aboard; an active

@@ -9,6 +9,9 @@ START-OF-SELECTION.
   DATA ls_row TYPE zosd_l3_conf.
   DATA lv_ok TYPE abap_bool.
   IF p_param IS NOT INITIAL.
+    IF p_reset = abap_false AND p_note IS INITIAL.
+      MESSAGE 'Provide P_NOTE: cockpit setting changes require an audit note' TYPE 'E'.
+    ENDIF.
     IF p_reset = abap_true.
       lv_ok = zcl_l3_fleet2=>reset_setting( p_param ).
     ELSE.

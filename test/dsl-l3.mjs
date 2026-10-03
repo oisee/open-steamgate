@@ -1226,7 +1226,7 @@ ENDCLASS.
       // method was DOCTOR_HEALS, and the methods after it never ran). The
       // harness runs them in that order, read off the class, so a method that
       // leaves something behind for the next one fails here as it would there.
-      const PROOF_METHODS = ["collect_waits_for_submit", "doctor_heals", "doctor_keeps_run_values", "fuse_stops", "governor_glass", "mode_p", "mode_s", "partial_keeps_old", "rerun",
+      const PROOF_METHODS = ["cockpit_action", "collect_waits_for_submit", "doctor_heals", "doctor_keeps_run_values", "fuse_stops", "governor_glass", "mode_p", "mode_s", "partial_keeps_old", "rerun",
         "rerun_fewer_piles", "settings_tune", "sim_twin", "stages_mode_p", "stages_mode_s", "stages_partial"];
       const systemOrder = () => [...readFileSync(join(PROOF_DIR, `${PROOF}.clas.testclasses.abap`), "utf8")
         .matchAll(/^\s*METHODS (\w+) FOR TESTING\./gm)].map((m) => m[1].toLowerCase()).sort();

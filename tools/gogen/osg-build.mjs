@@ -58,6 +58,11 @@ function filteredLib(name) {
 const abapgit = filteredLib("abapgit");
 if (abapgit) libs.push(abapgit);
 
+// a library object a layer holds too is the layer's: the Node build takes it out of the library input
+// (src/gateway/compat overlays three objects of open-abap-odata), and the front end loads one of each
+const layerFiles = new Set(layers.flatMap(walk).filter((f) => !hidden.has(f)).map((f) => f.split("/").pop()));
+for (const f of libs.flatMap(walk)) if (layerFiles.has(f.split("/").pop())) hidden.add(f);
+
 /** every class, interface and function group of the layers and libraries, compiled (a statement outside the subset is a stub) */
 export function compileOsg() {
   // a pack that fetches a folder and has not: a smaller system than its

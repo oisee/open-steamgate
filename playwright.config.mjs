@@ -1,4 +1,5 @@
 import {defineConfig} from "@playwright/test";
+import {delimiter} from "node:path";
 // the port of the gateway under test: STG_PORT, as test/start.mjs reads it, so sessions do not collide on 3030
 const PORT = process.env.STG_PORT ?? 3030;
 
@@ -23,7 +24,8 @@ export default defineConfig({
     command: "node test/run.mjs",
     // CRUD suites must not reuse the developer's persistent default DB.
     // Explicit adapter selection is retained for targeted backend checks.
-    env: {STG_DB: process.env.STG_DB ?? "sqlite",
+    // The cockpit browser fixture opts in here; ordinary ABAP Unit has no fleet rows.
+    env: {OSD_PACKS: [process.env.OSD_PACKS, "demo/cockpit-fleet"].filter(Boolean).join(delimiter), STG_DB: process.env.STG_DB ?? "sqlite",
       STG_DB_PATH: process.env.STG_DB ? process.env.STG_DB_PATH ?? "" : ""},
     url: `http://localhost:${PORT}/`,
     reuseExistingServer: false,

@@ -75,8 +75,9 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
         return text;
       };
       const file = join(OUT, `zz_plain_${process.pid}.l3.yaml`);
-      // slice 5d's simulated twin needs resilience: its block, the work port and the sim variant go too
-      writeFileSync(file, SET_TEXT.replace(/^governor:\n(  .*\n)+/m, "").replace(/^resilience:\n(  .*\n)+/m, "").replace(/^settings:\n(  .*\n|    .*\n)+/m, "")
+      // This oracle compares pre-resilience bytes, so remove every later opt-in and what it needs:
+      // the cockpit (slice 6), the governor, settings, and slice 5d's twin (its block, the work port, the sim variant)
+      writeFileSync(file, SET_TEXT.replace(/^cockpit:.*\n/m, "").replace(/^governor:\n(  .*\n)+/m, "").replace(/^resilience:\n(  .*\n)+/m, "").replace(/^settings:\n(  .*\n|    .*\n)+/m, "")
         .replace(/^simulate:\n(  .*\n)+/m, "").replace(/^  work:\n(    .*\n)+/m, "").replace("      sim: generated\n", "").replace("  work: real\n", ""));
       try {
         const model = compileSet(file);
