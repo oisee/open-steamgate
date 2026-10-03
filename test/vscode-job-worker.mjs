@@ -371,7 +371,7 @@ describe('VS Code readable job summaries', () => {
   });
   it('opens a current snapshot by default and keeps the exact raw stream reachable explicitly', async () => {
     const channels = [], commands = new Map(), subscriptions = [];
-    const vscode = {StatusBarAlignment:{Left:1}, commands:{registerCommand(id, fn) { commands.set(id, fn); return {dispose(){}}; }},
+    const vscode = {StatusBarAlignment:{Left:1}, ThemeColor: class {constructor(id) {this.id = id;}}, commands:{registerCommand(id, fn) { commands.set(id, fn); return {dispose(){}}; }},
       window:{createOutputChannel(name) {
         const channel = {name, content:'', shown:0, append(s){this.content += s;}, appendLine(s){this.content += s + '\n';},
           clear(){this.content = '';}, show(){this.shown++;}, dispose(){}};
@@ -416,7 +416,7 @@ describe('VS Code job status request lifecycle', () => {
     let disposed = false;
     const record = value => { writes.push({value, disposed}); };
     const channels = [];
-    const api = {StatusBarAlignment:{Left:1}, commands:{registerCommand(id, fn) {commands.set(id, fn); return {dispose(){}};}},
+    const api = {StatusBarAlignment:{Left:1}, ThemeColor: class {constructor(id) {this.id = id;}}, commands:{registerCommand(id, fn) {commands.set(id, fn); return {dispose(){}};}},
       window:{createOutputChannel(name) {
         const channel = {content:'', clear(){record(`${name}: clear`); this.content = '';},
           appendLine(value){record(`${name}: ${value}`); this.content += value;}, show(){record(`${name}: show`);}, dispose(){}};
@@ -472,7 +472,15 @@ describe('VS Code job status request lifecycle', () => {
           : {ok:false,status:failure};
         if (endpoint === 'counts') {
           h.controller.launcher.jobWorker.running = true;
-          await h.tick();
+          const savedNow = Date.now;
+          let now = 0;
+          try {
+            Date.now = () => now;
+            await h.tick();
+            expect(h.writes.map(w => w.value)).to.include('OSD jobs: busy');
+            now = 7500; await h.tick();
+            now = 15000; await h.tick();
+          } finally { Date.now = savedNow; }
           expect(h.writes.map(w => w.value)).to.include('OSD jobs: status unavailable');
           expect(h.channels[1].content).to.include(failure === 'non-JSON' ? 'JSON' : `HTTP ${failure}`);
         } else {

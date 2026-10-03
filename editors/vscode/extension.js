@@ -2862,25 +2862,48 @@ function statusBar(context, findingCount = () => kernelFindingCount, controller 
   item.command = "osd.showDumps";
   item.show();
   let dumpsSeen;
-  let disposed = false;
+  let disposed = false, pollEpoch = 0, observedLauncher, observedState;
+  let awaitingServing = false;
   const transitioning = () => ["building", "starting", "stopping"].includes(controller?.launcher?.state);
   const visibility = () => {
     if (disposed) return;
+    const launcher = controller?.launcher;
+    if (launcher !== observedLauncher || launcher?.state !== observedState) {
+      observedLauncher = launcher; observedState = launcher?.state; pollEpoch++;
+      if (["building", "starting", "running"].includes(observedState)) awaitingServing = true;
+      else if (observedState === "stopped") {
+        awaitingServing = false;
+        item.text = "$(debug-disconnect) osd down";
+        item.backgroundColor = undefined;
+      }
+    }
     if (transitioning()) item.hide();
-    else item.show();
+    else {
+      if (awaitingServing) {
+        item.text = "$(sync~spin) OSD generation: awaiting serving";
+        item.tooltip = "Waiting for the first serving response after Start";
+        item.backgroundColor = undefined;
+      }
+      item.show();
+    }
   };
   const onState = controller?.onDidChange(visibility);
   const tick = async () => {
     if (disposed) return;
     visibility();
     if (transitioning()) return;
+    const epoch = pollEpoch;
+    const current = () => !disposed && epoch === pollEpoch;
     try {
       const serving = await osd().serving();
+      if (!current()) return;
+      awaitingServing = false;
       setServingAvailability(true);
       await activeController?.launcher?.refreshJobsGeneration(serving);
       await activeController?.refreshDebuggerGeneration().catch((error) =>
         activeController.output.appendLine(`osd debugger: ${String(error?.message ?? error)}`));
       const dumps = await osd().dumps().catch(() => []);
+      if (!current()) return;
       const generation = String(serving.generation ?? "?").slice(0, 8);
       const warm = serving.warm;
       // T7 (docs/vscode-extension.md "Warm"): the swap count from the warm
@@ -2902,6 +2925,8 @@ function statusBar(context, findingCount = () => kernelFindingCount, controller 
         ? new vscode.ThemeColor("statusBarItem.errorBackground") : undefined;
       dumpsSeen ??= dumps.length;
     } catch {
+      if (!current()) return;
+      if (awaitingServing) { visibility(); return; }
       setServingAvailability(false);
       item.text = "$(debug-disconnect) osd down";
       item.tooltip = `nothing answers /osd/serving at ${osd().url} (setting osd.url)`;

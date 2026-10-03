@@ -4078,7 +4078,8 @@ describe("editors/vscode: running parts status and actions", () => {
       }
       globalThis.fetch = async () => { throw Error("offline"); };
       await tick();
-      expect(item.text).to.equal("OSD jobs: status unavailable");
+      expect(item.text).to.equal("OSD jobs: running 2, queued 1");
+      expect(item.backgroundColor).to.equal(undefined);
       controller.launcher.jobWorker.otherWindow = true;
       controller.launcher.jobWorker.running = false;
       let queried = false;
@@ -4120,7 +4121,12 @@ describe("editors/vscode: serving generation status", () => {
       rejectPoll(new Error("not serving yet"));
       await new Promise(resolve => setTimeout(resolve, 10));
       expect(item.visible, "late failed poll during startup").to.equal(false);
-      for (const state of ["running", "stopped"]) {
+      controller.launcher.state = "running";
+      refresh();
+      expect(item.visible).to.equal(true);
+      expect(item.text).to.include("awaiting serving");
+      expect(item.backgroundColor).to.equal(undefined);
+      for (const state of ["stopped"]) {
         controller.launcher.state = state;
         refresh();
         expect(item.visible, state).to.equal(true);
@@ -4134,6 +4140,52 @@ describe("editors/vscode: serving generation status", () => {
       globalThis.fetch = originalFetch;
     }
     expect(refresh).to.equal(undefined);
+  });
+
+  it("stays neutral through failed handoff polls, accepts the first fresh serving poll, and shows a later crash", async () => {
+    const h = runningStatusApi();
+    h.api.workspace = {getConfiguration() { return {get: (_, fallback) => fallback}; }};
+    const {statusBar} = loadExtension(h.api);
+    const originalFetch = globalThis.fetch, originalInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    const context = {subscriptions: []};
+    let tick, refresh, resolveOld, respond;
+    const controller = {launcher: {state: "stopped"},
+      onDidChange(fn) { refresh = fn; return {dispose() {}}; }};
+    try {
+      globalThis.setInterval = fn => { tick = fn; return 1; };
+      globalThis.clearInterval = () => {};
+      respond = () => new Promise(resolve => { resolveOld = resolve; });
+      globalThis.fetch = (...args) => respond(...args);
+      const item = statusBar(context, () => 0, controller);
+      controller.launcher.state = "starting"; refresh();
+      controller.launcher.state = "running"; refresh();
+      expect(item.text).to.include("awaiting serving");
+      resolveOld({ok: true, json: async () => ({generation: "stale"})});
+      await new Promise(resolve => setImmediate(resolve));
+      expect(item.text).to.include("awaiting serving");
+      respond = async () => { throw Error("not ready"); };
+      await tick(); await tick();
+      expect(item.visible).to.equal(true);
+      expect(item.text).to.include("awaiting serving");
+      expect(item.backgroundColor).to.equal(undefined);
+      respond = async url => ({ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {generation: "fresh123"}});
+      await tick();
+      expect(item.text).to.include("OSD generation fresh123");
+      respond = async () => { throw Error("crashed"); };
+      await tick();
+      expect(item.text).to.include("osd down");
+      controller.launcher.state = "starting"; refresh();
+      controller.launcher.state = "running"; refresh();
+      expect(item.text).to.include("awaiting serving");
+      controller.launcher.state = "stopped"; refresh();
+      expect(item.text).to.include("osd down");
+    } finally {
+      context.subscriptions.forEach(s => s.dispose());
+      globalThis.fetch = originalFetch;
+      globalThis.setInterval = originalInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
   });
 
   it("preserves generation, database, dump action and kernel findings tooltip", async () => {
