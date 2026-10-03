@@ -5,11 +5,11 @@ const departed = async (child) => {
     await new Promise(resolve => child.once("exit", resolve));
   }
 };
-export async function remoteStep(runtime, input) {
+export async function remoteStep(runtime, input, door = "/osd/adt-step") {
   if (runtime.child?.connected === false) await departed(runtime.child);
   await runtime.ensure();
   const child = runtime.child;
-  const ask = () => fetch(`${runtime.url}/osd/adt-step`, {
+  const ask = () => fetch(`${runtime.url}${door}`, {
     method: "POST", headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input),
   });
   try { return await ask(); }

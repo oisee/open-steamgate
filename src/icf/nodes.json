@@ -76,6 +76,10 @@
     "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "batch-runs", "needs": "state",
     "text": "opt-in, token-protected read access to saved batch runs and output"
   },
+  "/osd/adt-sessions": {
+    "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "adt-sessions", "needs": "state",
+    "text": "loopback-only compatibility session calls in the serving child, with parent callbacks inside the step; opt-in OSD_ADT_ONE_RUNTIME=1"
+  },
   "/osd/adt-step": {
     "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "adt-step", "needs": "state",
     "text": "loopback-only remote ADT dialog step: request view and bodyHex in, answer record and session snapshot out; opt-in OSD_ADT_ONE_RUNTIME=1"

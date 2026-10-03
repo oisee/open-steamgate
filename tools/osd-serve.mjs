@@ -37,7 +37,7 @@ import {identity} from "./osd-identity.mjs";
 import {parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {abapSession} from "./adt-enq.mjs";
 import {answerOf, abapServes} from "./adt-abap-front.mjs";
-import {sessionJSON, sessionValue} from "./adt-remote-sessions.mjs";
+import {sessionsDoor} from "./osd-adt-sessions-door.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
 import {StoreIPCClient, withStoreIPC} from "./osd-store-ipc.mjs";
 import {StoreDestination, withSystem, currentSystemAnswers} from "./osd-store-destination.mjs";
@@ -196,14 +196,16 @@ app.set("etag", false);
 const adtStepKey = Buffer.from(process.env.OSD_ADT_STEP_KEY ?? "");
 delete process.env.OSD_ADT_STEP_KEY;
 // Hex plus metadata must fit every body accepted by the public 16 MB parser.
-app.use("/osd/adt-step", (req, res, next) => {
+const guardAdtDoor = (req, res, next) => {
   if (process.env.OSD_ADT_ONE_RUNTIME !== "1") return res.status(404).end();
   if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] ?? "")) return res.status(415).json({error: {message: "JSON required"}});
   const expected = adtStepKey;
   const supplied = Buffer.from(req.headers["x-osd-adt-step-key"] ?? "");
   if (!expected.length || supplied.length !== expected.length || !timingSafeEqual(expected, supplied)) return res.status(403).json({error: {message: "invalid step key"}});
   next();
-}, express.raw({type: "application/json", limit: "34mb"}));
+};
+app.use("/osd/adt-step", guardAdtDoor, express.raw({type: "application/json", limit: "34mb"}));
+app.use("/osd/adt-sessions", guardAdtDoor, express.raw({type: "application/json", limit: "34mb"}));
 app.use(express.raw({type: "*/*", limit: "16mb"}));
 mountPortableCells(app, () => globalThis.abap.context.databaseConnections.DEFAULT,
   (work) => exclusive(work, "SQLScript notebook cell"));
@@ -281,6 +283,7 @@ function dump(error, request) {
 hostNodes.dumps = (a, node) => a.get(node.path, function (req, res) {
   res.json(dumps.slice().reverse());
 });
+hostNodes["adt-sessions"] = (a, node) => a.post(node.path, sessionsDoor(identity));
 hostNodes["adt-step"] = (a, node) => a.post(node.path, async (req, res) => {
   const address = req.socket.remoteAddress ?? "";
   if (address !== "::1" && !/^127\./.test(address) && !/^::ffff:127\./.test(address)) {
@@ -291,9 +294,9 @@ hostNodes["adt-step"] = (a, node) => a.post(node.path, async (req, res) => {
   let input;
   try {
     input = JSON.parse(req.body.toString("utf8"));
-    if (input.view?.sessionCall === undefined && (!input.view || typeof input.view.method !== "string" || typeof input.view.path !== "string"
+    if (!input.view || typeof input.view.method !== "string" || typeof input.view.path !== "string"
       || typeof input.view.url !== "string" || input.view.headers === null || typeof input.view.headers !== "object" || Array.isArray(input.view.headers)
-      || (input.bodyHex !== undefined && (typeof input.bodyHex !== "string" || !/^(?:[0-9a-f]{2})*$/i.test(input.bodyHex))))) throw new Error("invalid view or bodyHex");
+      || (input.bodyHex !== undefined && (typeof input.bodyHex !== "string" || !/^(?:[0-9a-f]{2})*$/i.test(input.bodyHex)))) throw new Error("invalid view or bodyHex");
   } catch (error) {
     return res.status(400).json({error: {code: "BAD_REQUEST", message: error.message}});
   }
@@ -302,27 +305,6 @@ hostNodes["adt-step"] = (a, node) => a.post(node.path, async (req, res) => {
     return res.json({bodyRequired});
   }
   const sessions = new AbapSessions({identity: {systemID: identity().adt.systemID, client: identity().adt.client, ...input.identity}});
-  if (input.view.sessionCall !== undefined) {
-    const method = input.view.sessionCall;
-    if (!["get", "end", "holderOf", "holds", "lock", "unlock", "release", "whileHeld", "deleteObject"].includes(method)) return res.status(400).json({error: {message: "unknown session operation"}});
-    try {
-      const value = await withStoreIPC(input.context, () => dialogStep(async () => {
-        const args = sessionValue(input.view.args);
-        const callback = (parameters) => globalThis.abap.context.RFCDestinations.STORE.request(parameters, "OSD_SESSION_CALLBACK");
-        if (method === "whileHeld") return sessions.whileHeld(...args, () => callback({action: "work"}));
-        if (method === "deleteObject") {
-          return sessions.deleteObject(...args, {
-            find: (type, name) => callback({action: "find", type, name}),
-            delete: (type, name) => callback({action: "delete", type, name}),
-          });
-        }
-        return sessions[method](...args);
-      }, "ADT session compatibility"));
-      return res.json({value: sessionJSON(value ?? null)});
-    } catch (error) {
-      return res.status(500).json({error: {message: String(error.message ?? error)}});
-    }
-  }
   const request = {headers: input.view.headers};
   try {
     const {system} = abapSession(sessions, async (kind, name, _req, json) => {

@@ -19,7 +19,7 @@ export class RemoteSessions extends AbapSessions {
     this.runtime.adtContexts.set(context, {callback});
     try {
       const response = await remoteStep(this.runtime,
-        {view: {sessionCall: method, args: sessionJSON(args)}, identity: this.identity, context});
+        {method, args: sessionJSON(args), identity: this.identity, context}, "/osd/adt-sessions");
       const result = await stepJSON(response);
       if (!response.ok) throw new Error(result.error?.message ?? "ADT session call failed");
       return result.value === null ? undefined : sessionValue(result.value);
