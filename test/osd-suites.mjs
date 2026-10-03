@@ -135,9 +135,9 @@ describe("suite sharding", () => {
 
 
 describe("bounded file retries", () => {
-  const failed = (files) => ({status: 1, completed: true, totalFailures: files.length,
+  const failed = (files) => ({status: 1, completed: true, internalRetries: [], totalFailures: files.length,
     failures: files.map((file) => ({file, title: "first failure"}))});
-  const passed = {status: 0, completed: true, totalFailures: 0, failures: []};
+  const passed = {status: 0, completed: true, internalRetries: [], totalFailures: 0, failures: []};
   it("does not rerun a passing shard", () => {
     const calls = [];
     expect(runWithRetries(["a"], (files) => { calls.push(files); return passed; }).status).to.equal(0);
@@ -215,7 +215,8 @@ function fixtureRun(source, options = {}) {
     const result = runWithRetries([file], (files) => {
       const output = join(dir, `report-${reports.length}.json`);
       const child = spawnSync(process.execPath, ["node_modules/mocha/bin/mocha.js", ...files,
-        "--reporter", "tools/osd-suite-timing-reporter.cjs", "--retries", "0"],
+        "--reporter", "tools/osd-suite-timing-reporter.cjs", "--retries", "0",
+        ...(options.allowInternalRetries ? [] : ["--require", "tools/osd-suite-no-retries.cjs"])],
         {encoding: "utf8", env: {...process.env, OSD_SUITE_TIMINGS_FILE: output}});
       const metadata = existsSync(output) ? JSON.parse(readFileSync(output, "utf8")) : {};
       reports.push({...metadata, stdout: child.stdout});
@@ -226,6 +227,16 @@ function fixtureRun(source, options = {}) {
 }
 
 describe("fail closed regressions", () => {
+  it("prevents test-level retries from silently recovering", () => {
+    const {result} = fixtureRun('let attempts = 0; describe("retry fixture", function () { this.retries(2); it("recovers internally", function () { this.retries(2); if (++attempts < 3) throw Error("retry"); }); });');
+    expect(result.status).to.equal(1);
+    expect(result.lines).to.deep.equal([]);
+  });
+  it("fails red and names any internal retry observed by the reporter", () => {
+    const {result, reports} = fixtureRun('let attempts = 0; describe("retry event", () => { it("unexpected retry", function () { this.retries(2); if (++attempts < 3) throw Error("retry"); }); });', {allowInternalRetries: true});
+    expect(result.status).to.equal(1);
+    expect(reports[0].internalRetries[0].title).to.equal("retry event unexpected retry");
+  });
   it("rejects a failing test followed by process.exit(0)", () => {
     const {result, reports} = fixtureRun('describe("exit fixture", () => { it("fails", () => { throw Error("failure"); }); after(() => process.exit(0)); });');
     expect(reports[0].completed).to.equal(undefined);

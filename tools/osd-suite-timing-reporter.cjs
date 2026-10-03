@@ -8,6 +8,11 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
     super(runner, options);
     const timings = {};
     const failures = [];
+    const internalRetries = [];
+    runner.on("retry", (test) => {
+      internalRetries.push({title: test.fullTitle()});
+      console.error(`osd-suites: forbidden internal retry: ${test.fullTitle()}`);
+    });
     let current;
     let began;
     const finish = () => {
@@ -35,6 +40,7 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
         note: "Wall time including hooks and inter-file work; excludes module loading before the first suite.",
         completed: true,
         failures,
+        internalRetries,
         totalFailures: runner.failures,
         seconds: Object.fromEntries(Object.entries(timings).sort(([a], [b]) => a.localeCompare(b))),
       }, null, 2) + "\n");

@@ -159,6 +159,7 @@ export function runWithRetries(files, run) {
   const first = run(files, "first");
   const complete = (report) => !report.crashed && report.completed === true &&
     Array.isArray(report.failures) && Number.isInteger(report.totalFailures) &&
+    Array.isArray(report.internalRetries) && report.internalRetries.length === 0 &&
     report.totalFailures >= 0 && report.totalFailures === report.failures.length;
   const passed = (report) => report.status === 0 && complete(report) && report.totalFailures === 0;
   const result = {status: passed(first) ? 0 : 1, first, retries: [], lines: []};
@@ -261,7 +262,7 @@ try {
       const path = join(scratch, `${attempt++}.json`);
       console.log(`osd-suites: ${phase}: ${runFiles.length} file(s)`);
       const child = spawnSync(process.execPath, ["node_modules/mocha/bin/mocha.js", ...runFiles,
-        ...extra, "--retries", "0", "--reporter", fileURLToPath(new URL("./osd-suite-timing-reporter.cjs", import.meta.url))],
+        ...extra, "--require", fileURLToPath(new URL("./osd-suite-no-retries.cjs", import.meta.url)), "--retries", "0", "--reporter", fileURLToPath(new URL("./osd-suite-timing-reporter.cjs", import.meta.url))],
         {stdio: "inherit", env: {...process.env, OSD_SUITE_TIMINGS_FILE: path}});
       const metadata = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
       return {...metadata, status: child.status ?? 1, crashed: Boolean(child.error || child.signal)};
