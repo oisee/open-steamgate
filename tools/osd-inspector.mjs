@@ -11,7 +11,9 @@
 // Loopback only, always: the inspector is code execution for whoever
 // connects, and a host other than 127.0.0.1 is refused here rather than
 // trusted to the caller. Opening on a port it already listens on is a
-// no-op; opening on another port moves it.
+// no-op. Closing and moving are refused here: node:inspector's close()
+// blocks the process until every debugger has let go, so the runtime
+// recycles the child instead (tools/osd-runtime.mjs inspector()).
 
 export const INSPECTOR_HOST = "127.0.0.1";
 
@@ -39,9 +41,11 @@ export function inspectorRequest(message, inspector) {
     if (inspector === undefined || typeof inspector.open !== "function") {
       throw new Error("this host has no V8 inspector to open");
     }
+    // close() blocks this process until every attached debugger has
+    // finished closing, forever for one that does not answer: closing and
+    // moving are a recycle (tools/osd-runtime.mjs inspector()), never this
     if (message.open !== true) {
-      if (inspector.url() !== undefined) inspector.close();
-      return {type: "inspector-done", id, ok: true, open: false};
+      throw new Error("the serving process does not close its inspector; the runtime recycles it");
     }
     const port = Number(message.port);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -51,8 +55,10 @@ export function inspectorRequest(message, inspector) {
       throw new Error(`the inspector listens on ${INSPECTOR_HOST} only, not ${message.host}`);
     }
     const current = inspector.url();
-    if (current !== undefined && portOfUrl(current) !== port) inspector.close();
-    if (inspector.url() === undefined) inspector.open(port, INSPECTOR_HOST, false);
+    if (current !== undefined && portOfUrl(current) !== port) {
+      throw new Error(`the inspector is open on ${portOfUrl(current)}; moving it to ${port} is a recycle`);
+    }
+    if (current === undefined) inspector.open(port, INSPECTOR_HOST, false);
     // stack traces of a debugged child name .abap lines too
     process.setSourceMapsEnabled?.(true);
     const url = inspector.url();

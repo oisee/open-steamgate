@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {createServer} from "node:net";
@@ -88,6 +88,221 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
       expect(await targets(), "and a closed inspector stays closed").to.equal(0);
     } finally {
       await runtime.stop();
+    }
+  });
+
+  // node:inspector's close() blocks the child's event loop until every
+  // attached debugger has finished the close handshake, forever for one
+  // that never answers it (the CI flake of test/osd-child.mjs). The child
+  // never calls it: a close, or a move to another port, is a graceful
+  // recycle, and a debugger that never answers changes nothing about that
+  const freePort = async () => {
+    const {createServer: listen} = await import("node:net");
+    return new Promise((resolve) => {
+      const probe = listen().listen(0, "127.0.0.1", () => {
+        const free = probe.address().port;
+        probe.close(() => resolve(free));
+      });
+    });
+  };
+  // Round 3's recovery/reopen probes, with readiness released by IPC
+  // rather than a boot delay: every follow-up lands after spawn captured env.
+  for (const change of ["reopen", "close", "move", "stop"]) {
+    it(`reconciles an inspector ${change} requested during replacement boot`, async () => {
+      const command = [process.execPath, "--input-type=module", "-e", [
+        "import inspector from 'node:inspector';",
+        "process.on('message', m => {",
+        "  if (m.type === 'release') process.send({type: 'ready', port: 1, pid: process.pid, ms: 0});",
+        "  if (m.type === 'quiesce') process.exit(0);",
+        "  if (m.type === 'inspector') { inspector.open(m.port, '127.0.0.1'); process.send({type: 'inspector-done', id: m.id, ok: true, open: true, port: m.port}); }",
+        "});",
+        "process.send({type: 'booting', phase: 'gated'});",
+      ].join("\n")];
+      const runtime = new ServingRuntime({command});
+      const gated = async () => {
+        const deadline = Date.now() + 5000;
+        while (runtime.booting?.phase !== "gated") {
+          if (Date.now() >= deadline) throw new Error("child never reached boot gate");
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      };
+      let release;
+      try {
+        const starting = runtime.start();
+        await gated();
+        runtime.bootingChild.send({type: "release"});
+        await starting;
+        const one = await freePort();
+        const two = await freePort();
+        const three = await freePort();
+        await runtime.inspector({open: true, port: one});
+        await runtime.inspector(change === "reopen" ? {open: false} : {open: true, port: two});
+        await gated();
+        const desired = change === "close" ? {open: false} : {open: true, port: three};
+        expect(await runtime.inspector(desired)).to.include({pending: true});
+        if (change === "stop") {
+          const recovering = runtime.start().catch((error) => error);
+          await runtime.stop();
+          expect(await recovering).to.be.an("error");
+          expect(runtime.running).to.equal(false);
+          expect(runtime.bootingChild).to.equal(undefined);
+          return;
+        }
+        // Release this child and any further replacement needed for a close/move.
+        release = setInterval(() => {
+          if (runtime.booting?.phase === "gated" && runtime.bootingChild?.connected) {
+            runtime.bootingChild.send({type: "release"});
+          }
+        }, 5);
+        await runtime.start();
+        expect(runtime.child.osdInspectPort).to.equal(desired.open ? three : undefined);
+        if (desired.open) {
+          expect((await fetch(`http://127.0.0.1:${three}/json/list`)).status).to.equal(200);
+        } else {
+          expect(await fetch(`http://127.0.0.1:${two}/json/list`).then(() => true, () => false)).to.equal(false);
+        }
+      } finally {
+        clearInterval(release);
+        await runtime.stop();
+      }
+    });
+  }
+
+  // the tie-breaker's finding: a refused open during reconciliation left a
+  // live child that never announced readiness, so every request was
+  // NotServing until somebody asked for the inspector again
+  it("serves without the inspector when the new child refuses to open it", async () => {
+    const command = [process.execPath, "--input-type=module", "-e", [
+      "process.on('message', m => {",
+      "  if (m.type === 'release') process.send({type: 'ready', port: 1, pid: process.pid, ms: 0});",
+      "  if (m.type === 'quiesce') process.exit(0);",
+      "  if (m.type === 'inspector') process.send({type: 'inspector-done', id: m.id, ok: false, error: 'refused'});",
+      "});",
+      "process.send({type: 'booting', phase: 'gated'});",
+    ].join("\n")];
+    const runtime = new ServingRuntime({command});
+    try {
+      const starting = runtime.start();
+      const deadline = Date.now() + 5000;
+      while (runtime.booting?.phase !== "gated") {
+        if (Date.now() >= deadline) throw new Error("child never reached boot gate");
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(await runtime.inspector({open: true, port: await freePort()})).to.include({pending: true});
+      runtime.bootingChild.send({type: "release"});
+      await starting;
+      expect(runtime.child.osdInspectPort).to.equal(undefined);
+      expect(runtime.inspecting).to.equal(null);
+      await runtime.whenReady();
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  // a WebSocket upgrade on the inspector, and then silence: the close frame
+  // the inspector sends when it closes is never answered
+  const silentDebugger = async (port) => {
+    const {connect} = await import("node:net");
+    const [target] = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
+    const socket = connect({host: "127.0.0.1", port});
+    await new Promise((resolve) => socket.once("connect", resolve));
+    socket.write(`GET ${new URL(target.webSocketDebuggerUrl).pathname} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n`
+      + "Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n");
+    expect(String(await new Promise((resolve) => socket.once("data", resolve)))).to.match(/^HTTP\/1\.1 101/);
+    socket.pause();
+    return socket;
+  };
+  const listening = async (port) => {
+    const {connect} = await import("node:net");
+    return new Promise((resolve) => {
+      const probe = connect({host: "127.0.0.1", port}, () => { probe.destroy(); resolve(true); });
+      probe.on("error", () => resolve(false));
+    });
+  };
+
+  it("a close recycles, with a silent debugger attached; the new child serves without an inspector", async () => {
+    const port = await freePort();
+    const runtime = new ServingRuntime();
+    let socket;
+    try {
+      const first = await runtime.start();
+      expect(await runtime.inspector({open: true, port})).to.include({open: true, port});
+      socket = await silentDebugger(port);
+      const closed = await runtime.inspector({open: false});
+      expect(closed).to.include({open: false, recycled: true, recovering: true});
+      // answered once the old child has gone, not after the next has
+      // booted: a caller with a deadline polls /osd/ready for that
+      expect(runtime.running, "the next child is still coming up").to.equal(false);
+      expect(alive(first.pid), "the old child is gone").to.equal(false);
+      expect(await listening(port), "nothing listens on the inspector's port").to.equal(false);
+      await runtime.start();
+      expect(runtime.running, "and a new child serves").to.equal(true);
+      expect(await listening(port), "and it was started without an inspector").to.equal(false);
+      expect((await fetch(`${runtime.url}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`)).status).to.equal(200);
+      // a close of what is closed recycles nothing
+      const pid = runtime.child.pid;
+      expect(await runtime.inspector({open: false})).to.deep.equal({open: false, port: undefined, url: undefined});
+      expect(runtime.child.pid).to.equal(pid);
+    } finally {
+      socket?.destroy();
+      await runtime.stop();
+    }
+  });
+
+  it("a move to another port recycles onto it, with a silent debugger on the old one", async () => {
+    const one = await freePort();
+    const two = await freePort();
+    const runtime = new ServingRuntime();
+    let socket;
+    try {
+      await runtime.start();
+      expect(await runtime.inspector({open: true, port: one})).to.include({open: true, port: one});
+      socket = await silentDebugger(one);
+      expect(await runtime.inspector({open: true, port: two})).to.include({open: true, port: two, recycled: true, recovering: true});
+      await runtime.start();
+      expect(await listening(one), "the old port is closed").to.equal(false);
+      const targets = await (await fetch(`http://127.0.0.1:${two}/json/list`)).json();
+      expect(targets, "the new child opened the new port at its start").to.have.length(1);
+      expect((await fetch(`${runtime.url}/sap/opu/odata/sap/ZSTG_DEMO_SRV/$metadata`)).status).to.equal(200);
+      // and the same port again is the in-process no-op, no recycle
+      const pid = runtime.child.pid;
+      expect(await runtime.inspector({open: true, port: two})).to.include({open: true, port: two});
+      expect(runtime.child.pid).to.equal(pid);
+    } finally {
+      socket?.destroy();
+      await runtime.stop();
+    }
+  });
+
+  it("a committed row survives the close on a path-backed sql.js", async () => {
+    // sql.js writes its file only at exit: the close is a quiesce, so the
+    // exit-time save runs.
+    // STG_DB unset with a path is sql.js (test/setup.mjs); "file" is native
+    // SQLite, which writes as it goes, and the suite may have set it
+    const folder = mkdtempSync(join(tmpdir(), "osd-db-"));
+    const port = await freePort();
+    const runtime = new ServingRuntime({database: join(folder, "osd.sqlite"), env: {STG_DB: undefined}});
+    let socket;
+    try {
+      await runtime.start();
+      const created = await fetch(`${runtime.url}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet`, {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({Project: "ZSTG_MAPPED", TravelId: "T7778", Description: "committed before the close", Status: "O", Seats: 1}),
+      });
+      expect(created.status, await created.text()).to.be.oneOf([201, 200]);
+      expect(await runtime.inspector({open: true, port})).to.include({open: true, port});
+      socket = await silentDebugger(port);
+      expect(await runtime.inspector({open: false})).to.include({open: false, recycled: true});
+      expect(existsSync(join(folder, "osd.sqlite")), "the old child saved on its way out").to.equal(true);
+      await runtime.start();
+      const read = await get(runtime.url, "/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet('T7778')?$format=json");
+      expect(read.status, read.text).to.equal(200);
+      expect(read.text).to.contain("committed before the close");
+    } finally {
+      socket?.destroy();
+      await runtime.stop();
+      rmSync(folder, {recursive: true, force: true});
     }
   });
 
@@ -507,7 +722,7 @@ describe("tools/osd-inspector: one request, one answer, loopback only", function
     };
   };
 
-  it("opens on 127.0.0.1, moves to another port, closes; refuses another host and a bad port", async () => {
+  it("opens on 127.0.0.1; refuses to move or close, another host and a bad port", async () => {
     const {inspectorRequest} = await import("../tools/osd-inspector.mjs");
     const inspector = fakeInspector();
     expect(inspectorRequest({id: 1, open: true, port: 9300}, inspector))
@@ -515,10 +730,12 @@ describe("tools/osd-inspector: one request, one answer, loopback only", function
     // the same port again opens nothing twice
     inspectorRequest({id: 2, open: true, port: 9300}, inspector);
     expect(inspector.calls).to.deep.equal([["open", 9300, "127.0.0.1"]]);
-    expect(inspectorRequest({id: 3, open: true, port: 9301}, inspector).port).to.equal(9301);
-    expect(inspector.calls.slice(1)).to.deep.equal([["close"], ["open", 9301, "127.0.0.1"]]);
-    expect(inspectorRequest({id: 4, open: false}, inspector)).to.include({ok: true, open: false});
-    expect(inspector.url()).to.equal(undefined);
+    // moving and closing would call close(), which blocks the process until
+    // every debugger lets go: refused, the runtime recycles instead
+    expect(inspectorRequest({id: 3, open: true, port: 9301}, inspector).error).to.match(/moving it to 9301 is a recycle/);
+    expect(inspectorRequest({id: 4, open: false}, inspector)).to.include({ok: false});
+    expect(inspector.calls, "close() is never called").to.deep.equal([["open", 9300, "127.0.0.1"]]);
+    expect(inspector.url()).to.equal("ws://127.0.0.1:9300/x");
     expect(inspectorRequest({id: 5, open: true, port: 9300, host: "0.0.0.0"}, inspector))
       .to.include({ok: false, error: "the inspector listens on 127.0.0.1 only, not 0.0.0.0"});
     expect(inspectorRequest({id: 6, open: true, port: 0}, inspector)).to.include({ok: false});
@@ -575,6 +792,32 @@ describe("tools/osd-runtime: a slow boot is waited for, a silent one is not", fu
   afterEach(() => {
     for (const child of liveChildren()) child.kill("SIGKILL");
     if (dir) rmSync(dir, {recursive: true, force: true});
+  });
+
+  // a close is a quiesce: a child still busy in a step is given the normal
+  // grace to finish it, and leaves by itself; it is not killed early
+  it("a close quiesces a busy child with the normal grace, and does not kill it", async () => {
+    const command = fake();
+    writeFileSync(command[1], [
+      "process.send({type: 'ready', port: 1, pid: process.pid, ms: 0});",
+      "setInterval(() => {}, 1000);",
+      "process.on('message', (m) => { if (m?.type === 'inspector') process.send({type: 'inspector-done', id: m.id, ok: true, open: true, port: m.port}); });",
+      // busy: the step in flight ends 1.5 s after the quiesce, then it goes
+      "process.on('message', (m) => { if (m?.type === 'quiesce') setTimeout(() => process.exit(0), 1500); });",
+    ].join("\n"));
+    const runtime = new ServingRuntime({command, grace: 2000});
+    try {
+      await runtime.start();
+      expect(await runtime.inspector({open: true, port: 9399})).to.include({open: true, port: 9399});
+      const child = runtime.child;
+      const exited = new Promise((resolve) => child.once("exit", (code, signal) => resolve({code, signal})));
+      const began = Date.now();
+      expect(await runtime.inspector({open: false})).to.include({open: false, recycled: true});
+      expect(Date.now() - began, "the step was waited for").to.be.at.least(1400);
+      expect(await exited, "it left by itself").to.deep.equal({code: 0, signal: null});
+    } finally {
+      await runtime.stop();
+    }
   });
 
   it("a boot longer than the silence limit, that keeps talking, starts", async () => {

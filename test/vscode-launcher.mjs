@@ -1517,6 +1517,75 @@ describe("editors/vscode/launcher.js: the inspector on demand", function () {
   let server;
   afterEach(() => server && new Promise((resolve) => server.close(resolve)));
 
+  for (const early of ["pending", "recovering"]) {
+    it(`waits for readiness and the requested endpoint after a ${early} answer`, async () => {
+      const {createServer} = await import("node:http");
+      let requested;
+      let ready = false;
+      let confirmed = false;
+      let sawServing;
+      let sawInspector;
+      const servingRead = new Promise((resolve) => { sawServing = resolve; });
+      const inspectorRead = new Promise((resolve) => { sawInspector = resolve; });
+      server = createServer((req, res) => {
+        let text = "";
+        req.on("data", (data) => { text += data; });
+        req.on("end", () => {
+          let answer;
+          if (req.method === "POST") {
+            requested = JSON.parse(text).port;
+            answer = {open: true, port: requested, [early]: true};
+          } else if (req.url === "/osd/serving") {
+            answer = {ready, generation: "test"};
+            sawServing();
+          } else {
+            answer = {open: true, port: confirmed ? requested : requested + 1};
+            sawInspector();
+          }
+          res.writeHead(200, {"content-type": "application/json"});
+          res.end(JSON.stringify(answer));
+        });
+      });
+      await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const launcher = new Launcher({osdHome: process.cwd(), storageDir: tmpdir()});
+      launcher.state = "running";
+      launcher.port = server.address().port;
+      let settled = false;
+      const opening = launcher.openInspector().then((port) => { settled = true; return port; });
+      // The old implementation returns at POST, before either poll.
+      await Promise.race([opening, servingRead]);
+      expect(settled, "not attachable while booting").to.equal(false);
+      expect(launcher.inspectorOpen).not.to.equal(true);
+      ready = true;
+      await Promise.race([opening, inspectorRead]);
+      expect(settled, "a different endpoint is not the requested inspector").to.equal(false);
+      confirmed = true;
+      expect(await opening).to.equal(requested);
+      expect(launcher.inspectorOpen).to.equal(true);
+    });
+  }
+
+  it("bounds recovery readiness and leaves the inspector unopened on timeout", async function () {
+    this.timeout(20000);
+    const {createServer} = await import("node:http");
+    server = createServer((req, res) => {
+      let text = "";
+      req.on("data", (data) => { text += data; });
+      req.on("end", () => {
+        res.writeHead(200, {"content-type": "application/json"});
+        res.end(JSON.stringify(req.method === "POST"
+          ? {open: true, port: JSON.parse(text).port, recovering: true}
+          : {ready: false}));
+      });
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const launcher = new Launcher({osdHome: process.cwd(), storageDir: tmpdir()});
+    launcher.state = "running";
+    launcher.port = server.address().port;
+    await rejects(launcher.openInspector(), /not ready within 15000 ms/);
+    expect(launcher.inspectorOpen).not.to.equal(true);
+  });
+
   it("opens through /osd/inspector on a free port, once; closes what it opened; says the door's reason", async () => {
     const http = await import("node:http");
     const requests = [];

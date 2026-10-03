@@ -273,20 +273,68 @@ export class ServingRuntime {
   // it again. `open: false` closes it and keeps it closed, OSD_INSPECT
   // notwithstanding. Answers {open, port, url} ({pending: true} when no
   // child is serving yet: the next one opens it).
+  //
+  // **The serving child never calls node:inspector's close().** close()
+  // joins the inspector's I/O thread, and that thread ends only when every
+  // attached debugger has finished the WebSocket close handshake: until
+  // then the child's event loop is blocked -- no IPC, no HTTP -- for as long
+  // as the debugger takes, which is forever for one that does not answer
+  // (Node documents close() as blocking; same on Node 22, 24 and 26). That
+  // was the CI flake of test/osd-child.mjs: its CDP socket was still
+  // closing when the door closed the inspector, and the child froze inside
+  // close(). Recovering from a frozen close (kill it, checkpoint first, tell
+  // a wedge from a busy child) grew a new edge with every review, so the
+  // close is not made at all: closing, or moving to another port, is an
+  // ordinary graceful recycle -- quiesce with its grace, commit, carry and
+  // the exit-time save, then a new child started with the inspector off or
+  // on the new port. Opening stays in-process: open() does not block. The
+  // answer comes once the old child has exited ({recycled: true,
+  // recovering: true}); /osd/ready says when the new one serves, so a
+  // caller with a deadline (the VS Code extension's 15 s) is not held for
+  // a boot.
   async inspector({open, port} = {}) {
     if (open === true && (!Number.isInteger(port) || port < 1 || port > 65535)) {
       throw new Error(`invalid inspector port: ${port}`);
     }
     const before = this.inspecting;
-    this.inspecting = open === true ? {port} : null;
+    const requested = open === true ? {port} : null;
+    this.inspecting = requested;
     const child = this.child;
-    if (this.running !== true || child === undefined) {
+    if (this.running !== true || child === undefined || this.starting !== undefined || this.stopping !== undefined) {
       return {open: open === true, port: open === true ? port : undefined, pending: true};
     }
+    // what the serving child has open: the port it was started with, or the
+    // one it opened on request (osdInspectPort, set in #spawnOne and below)
+    const current = child.osdInspectPort;
+    if (open !== true && current === undefined) {
+      return {open: false, port: undefined, url: undefined};
+    }
+    if (open !== true || (current !== undefined && current !== port)) {
+      const gone = child.exitCode !== null || child.signalCode !== null ? Promise.resolve()
+        : new Promise((resolve) => child.once("exit", resolve));
+      // its failure is what /osd/ready and the next request report
+      this.recycle().catch(() => undefined);
+      await gone;
+      return {open: open === true, port: open === true ? port : undefined, url: undefined, recycled: true, recovering: true};
+    }
+    return this.#openInspector(child, port).catch((error) => {
+      // A failed older request must not undo a newer desired state.
+      if (this.inspecting === requested) this.inspecting = before;
+      throw error;
+    });
+  }
+
+  #openInspector(child, port) {
+    const current = child.osdInspectPort;
     const id = (this.inspectSeq = (this.inspectSeq ?? 0) + 1);
-    const done = await new Promise((resolve, reject) => {
+    // counted as open from the moment it is asked: a request a busy child
+    // answers after the timeout below still opens it, and a close must then
+    // still recycle rather than believe there is nothing to close
+    child.osdInspectPort = port;
+    return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         child.off("message", onMessage);
+        child.off("exit", onExit);
         reject(new Error("the serving process did not answer the inspector request within 10 s"));
       }, 10000);
       const onMessage = (message) => {
@@ -294,18 +342,28 @@ export class ServingRuntime {
           return;
         }
         child.off("message", onMessage);
+        child.off("exit", onExit);
         clearTimeout(timer);
         if (message.ok === true) resolve(message);
-        else reject(new Error(message.error));
+        else {
+          // refused (no V8 inspector, a bad host): nothing was opened
+          child.osdInspectPort = current;
+          reject(new Error(message.error));
+        }
+      };
+      // a child recycled away answers nothing: do not hold the caller 10 s
+      const onExit = () => {
+        child.off("message", onMessage);
+        clearTimeout(timer);
+        reject(new Error("the serving process exited before it answered the inspector request"));
       };
       child.on("message", onMessage);
-      child.send({type: "inspector", id, open: open === true, port});
-    }).catch((error) => {
-      // not changed: the next child does what it would have done before
-      this.inspecting = before;
-      throw error;
+      child.once("exit", onExit);
+      child.send({type: "inspector", id, open: true, port});
+    }).then((done) => {
+      child.osdInspectPort = done.port;
+      return {open: done.open, port: done.port, url: done.url};
     });
-    return {open: done.open, port: done.port, url: done.url};
   }
 
   // a cold transpile of the same inputs gave the same bytes (osd-warm verify)
@@ -423,7 +481,43 @@ export class ServingRuntime {
       }
       return this.starting;
     }
-    const starting = this.#spawnOne(options);
+    const stops = this.stops;
+    const starting = (async () => {
+      let answer = await this.#spawnOne();
+      // Spawn captures the inspector env, but requests can change it while
+      // that child boots. Read the desired state again before announcing
+      // readiness, and repeat if another request arrives during reconciliation.
+      for (;;) {
+        if (this.stops !== stops) throw new NotServing("stopped while starting");
+        const desired = this.inspecting === null ? undefined
+          : this.inspecting?.port ?? inspectPortOf(process.env.OSD_INSPECT);
+        const current = this.child?.osdInspectPort;
+        if (current === desired) break;
+        if (current === undefined) {
+          const wanted = this.inspecting;
+          try {
+            await this.#openInspector(this.child, desired);
+          } catch (error) {
+            // a child that serves without the inspector is better than one
+            // that never announces itself: the caller already has its
+            // `pending` answer and sees the endpoint missing. The desired
+            // state follows what the child has, unless a newer request came.
+            console.error(`inspector not opened on the new runtime: ${error.message}`);
+            if (this.inspecting !== wanted) continue;
+            const has = this.child?.osdInspectPort;
+            this.inspecting = has === undefined ? null : {port: has};
+            break;
+          }
+        } else {
+          await this.#stopChild();
+          if (this.stops !== stops) throw new NotServing("stopped while starting");
+          answer = await this.#spawnOne();
+        }
+      }
+      this.ready = Promise.resolve(answer);
+      options.announce?.resolve(answer);
+      return answer;
+    })();
     this.starting = starting;
     const clear = () => {
       if (this.starting === starting) this.starting = undefined;
@@ -432,7 +526,7 @@ export class ServingRuntime {
     return starting;
   }
 
-  #spawnOne(options = {}) {
+  #spawnOne() {
     // Capture at spawn, before child IPC. The temporary parent provider
     // reads both SQLite tables in one statement without queuing behind a
     // publication step that can itself be waiting for this boot.
@@ -477,6 +571,8 @@ export class ServingRuntime {
         },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       });
+      // the inspector this child was started with (inspector() above)
+      child.osdInspectPort = inspectPort || undefined;
       child.on("message", (message) => {
         if (message?.type === "adt-carry") this.adtCarry = message.state;
         if (message?.type === "adt-state-request") {
@@ -628,8 +724,6 @@ export class ServingRuntime {
           pid: message.pid, port: this.port, generation, root: this.root, database: this.database ?? "memory", since: new Date().toISOString(),
         }]);
         const answer = {url: this.url, port: this.port, generation, epoch, pid: message.pid, ms: message.ms, started: true};
-        this.ready = Promise.resolve(answer);
-        options.announce?.resolve(answer);
         resolve(answer);
       };
       child.on("message", onMessage);
