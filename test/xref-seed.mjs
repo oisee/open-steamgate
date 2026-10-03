@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {execFileSync, fork, spawn} from "node:child_process";
-import {appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
@@ -157,7 +157,9 @@ describe("tools/osd-xref-seed: the cross-reference on every host", function () {
     // over a copy of tools/, so the test edits nothing anybody else reads
     const copy = mkdtempSync(join(tmpdir(), "osd-xref-key-"));
     try {
-      for (const f of readdirSync("tools").filter((n) => n.endsWith(".mjs"))) cpSync(join("tools", f), join(copy, f));
+      // the whole folder: the closure reaches tools/sqlscript/ (through the
+      // STORE destination's checkrun), and a copy without it is another derivation
+      cpSync("tools", copy, {recursive: true, filter: (src) => !src.includes("node_modules")});
       const root = process.cwd();
       const same = await cacheKey(root, {tools: `${copy}/`});
       expect(same, "the copy is the same derivation").to.equal(await cacheKey(root));
