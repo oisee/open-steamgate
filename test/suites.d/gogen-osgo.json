@@ -52,6 +52,7 @@
   "groups": {
     "gogen": [
       "test/osgo-unit.mjs",
+      "test/kernel-compat.mjs",
       "test/osgjs-unit.mjs"
     ]
   }
