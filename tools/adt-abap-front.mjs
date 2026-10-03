@@ -28,6 +28,7 @@
 // ExceptionInternalError in our namespace -- for every request, a HOST row
 // included: no session was resolved, so nothing may go past the gate.
 import {withoutHostPaths} from "./osd-build-issues.mjs";
+import {inRemoteWhileHeld} from "./adt-remote-sessions.mjs";
 import {remoteStep, stepJSON} from "./adt-remote-step.mjs";
 import {currentStepToken} from "./osd-dialog-step.mjs";
 import {withSystem} from "./osd-store-destination.mjs";
@@ -212,20 +213,7 @@ export function abapRunner({handler, step, stale, remote}) {
           if (result.adt !== undefined) req.adt = {...result.adt, sessions: options.sessions,
             session: result.adt.session === undefined ? undefined : {...result.adt.session,
               locks: new Map(result.adt.session.locks)}};
-          const publications = await Promise.all(runtime.adtContexts.get(context).publications ?? []);
-          const failed = publications.filter(p => p.EV_ACTIVE !== "X");
-          if (failed.length) {
-            // lazy: adt-documents pulls @abaplint/core and the store, which the
-            // serving child must not load at boot (test/setup.mjs keeps it out)
-            const {activationFailureDocument} = await import("./adt-documents.mjs");
-            const entries = failed.flatMap(p => p.failureEntries ?? [{type: p.type ?? "PROG", name: p.name ?? "",
-              issues: [{message: withoutHostPaths(String(p.EV_NOTE), options.store?.root ?? runtime.root)
-                .split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}],
-            }]);
-            return {...result.record, status: 200, servedBy: "ABAP", continuation: undefined,
-              contentType: "application/xml", body: Buffer.from(activationFailureDocument(entries))};
-          }
-          return {...result.record, body: Buffer.from(result.record.body, "utf8")};
+          return await publicationRecord(runtime, context, result.record, options);
         } finally { runtime.adtContexts.delete(context); }
       },
     };
@@ -240,6 +228,31 @@ export function abapRunner({handler, step, stale, remote}) {
   };
 }
 
+/** Finish deferred activation before replaying either remote entry point. */
+async function publicationRecord(runtime, context, record, options) {
+  const publications = await Promise.all(runtime.adtContexts.get(context).publications ?? []);
+  const failed = publications.filter(p => p.EV_ACTIVE !== "X");
+  if (failed.length) {
+    // Keep the child's boot free of adt-documents and its store dependencies.
+    const {activationFailureDocument} = await import("./adt-documents.mjs");
+    const entries = failed.flatMap(p => p.failureEntries ?? [{type: p.type ?? "PROG", name: p.name ?? "",
+      issues: [{message: withoutHostPaths(String(p.EV_NOTE), options.store?.root ?? runtime.root)
+        .split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}],
+    }]);
+    return {...record, status: 200, servedBy: "ABAP", continuation: undefined,
+      contentType: "application/xml", body: Buffer.from(activationFailureDocument(entries))};
+  }
+  return {...record, body: Buffer.from(record.body, "utf8")};
+}
+
+function filterMisses(record, req, options) {
+  record.headers = record.headers.filter(([name, value]) => {
+    if (name.toLowerCase() !== "x-osd-miss") return true;
+    if (value === "object" || value === "resource") options.miss?.(req, value);
+    return false;
+  });
+}
+
 /** Call only inside the request's fresh dialog step. */
 export async function resumeOf(handler, kind, json) {
   if (currentStepToken() === undefined) throw new Error("ADT RESUME requires a dialog step");
@@ -251,8 +264,19 @@ export async function resumeOf(handler, kind, json) {
 /** Host work finishes by sending the response returned by ABAP RESUME. */
 export async function resume(req, res, kind, json) {
   const {store, step, front} = req.osdFacade;
-  if (front.execute !== undefined || typeof step !== "function") {
-    throw Object.assign(new Error("RESUME in the serving child is slice B4"), {code: "ADT_RESUME_REMOTE"});
+  const payload = typeof json === "string" ? json : JSON.stringify(json) ?? "";
+  const record = front.remote !== undefined
+    ? await remoteResume(front.remote, req, kind, payload, {store, system: front.system, sessions: front.sessions})
+    : await resumeRecord(req, kind, payload, {store, step, front});
+  filterMisses(record, req, front);
+  replay(res, record, req.method);
+  return record;
+}
+
+/** Shared by inline and serving-child hosts; session checks stay in the step. */
+export async function resumeRecord(req, kind, json, {store, step, front}) {
+  if (typeof step !== "function") {
+    throw Object.assign(new Error("ADT RESUME requires a host step function"), {code: "ADT_RESUME_NO_STEP"});
   }
   const record = await withSystem((kind, name, json) => front.system?.(kind, name, req, json), () => step(async () => {
     const original = req.adt?.session;
@@ -271,7 +295,7 @@ export async function resume(req, res, kind, json) {
       // A fresh request had no cookie on arrival. Re-entry uses the session
       // ANSWER resolved, including that case, rather than opening a new one.
       // This replaces Cookie with sap-contextid only, dropping other cookies.
-      // Harmless today: RESUME does no CSRF check. B4 must revisit this.
+      // RESUME does no CSRF check; only the original session is resolved.
       const headers = {...req.headers, cookie: `sap-contextid=${original.id}`};
       for (const [name, value] of Object.entries(headers)) {
         for (const one of Array.isArray(value) ? value : [value]) {
@@ -287,10 +311,31 @@ export async function resume(req, res, kind, json) {
     }
     return record;
   }, `ADT RESUME ${kind}`), {store});
-  // RESUME does not stamp session headers; keep every header its owner
-  // returned, alongside the cookies already sent by ANSWER.
-  replay(res, record, req.method);
   return record;
+}
+
+async function remoteResume(runtime, req, kind, json, options) {
+  if (inRemoteWhileHeld()) {
+    throw Object.assign(new Error("ADT RESUME cannot run inside whileHeld work"), {code: "ADT_RESUME_IN_WHILE_HELD"});
+  }
+  const context = (runtime.adtContextSeq = (runtime.adtContextSeq ?? 0) + 1);
+  runtime.adtContexts ??= new Map();
+  runtime.adtContexts.set(context, {store: options.store,
+    system: (kind, name, json) => options.system?.(kind, name, req, json)});
+  try {
+    let systemIdentity, identityError;
+    try { systemIdentity = await options.system?.("IDENTITY", "", req, ""); }
+    catch (error) { identityError = String(error.message ?? error); }
+    const response = await remoteStep(runtime, {kind, json, context, systemIdentity, identityError,
+      identity: options.sessions?.identity, sessionId: req.adt?.session?.id,
+      headers: Object.fromEntries(Object.entries(req.headers).filter(([name]) => {
+        const lower = name.toLowerCase();
+        return lower === "cookie" || lower === "authorization" || lower === "x-csrf-token" || lower.startsWith("x-sap-adt-");
+      }))}, "/osd/adt-resume");
+    const result = await stepJSON(response);
+    if (!response.ok) throw Object.assign(new Error(result.error?.message ?? "ADT RESUME failed"), {code: result.error?.code});
+    return await publicationRecord(runtime, context, result.record, options);
+  } finally { runtime.adtContexts.delete(context); }
 }
 
 const SESSION_HEADERS = new Set(["set-cookie", "x-csrf-token"]);
@@ -410,11 +455,7 @@ export function abapFront(options) {
     }
     // Slice 0 stamps the ZCX miss kind here. This is an internal marker,
     // consumed even when a continuation replays the answer later.
-    record.headers = record.headers.filter(([name, value]) => {
-      if (name.toLowerCase() !== "x-osd-miss") return true;
-      if (value === "object" || value === "resource") options.miss?.(req, value);
-      return false;
-    });
+    filterMisses(record, req, options);
     const by = record.servedBy === "HOST" ? "HOST" : "ABAP";
     res.set(SERVED_BY, by);
     options.served?.(by, req, record);
@@ -447,7 +488,7 @@ export function abapFront(options) {
         replay: () => replay(res, record, req.method, {sessionSent: true})});
     } catch (e) {
       if (e?.code === "ENQ_SESSION_ENDED" && res.headersSent !== true) {
-        console.error(`continuation ${kind}: session ended before RESUME; a fresh stateless GET cannot resume, use POST or x-sap-adt-sessiontype: stateful`);
+        console.error(`continuation ${kind}: session ended before RESUME; the original ANSWER session is no longer available (ended or lost after recycle)`);
         res.status(403).set("x-csrf-token", "Required").type("text/plain; charset=utf-8").send("CSRF token validation failed");
         return;
       }

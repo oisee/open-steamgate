@@ -94,7 +94,8 @@ the kernel is absent, while those routes remain unported.
 [B3](one-runtime-b3.md) now extracts those calls into the dedicated
 `/osd/adt-sessions` door; `view.sessionCall` is no longer accepted.
 
-B4's RESUME door and B5's physical kernel deletion remain separate work.
+B4's RESUME door is documented in `one-runtime-b4.md`; B5's physical
+kernel deletion remains separate work.
 The new database SYSTEM implementations are installed in the serving child;
 installing the same new kinds in inline hosts remains future port work.
 Workers other than the primary still own independent ENQ tables, as in the
