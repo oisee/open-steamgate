@@ -4,25 +4,23 @@ description: Fleet run cockpit
 entities:
   Run:
     set: RunSet
-    source:
-      table: ZOSD_L3_RUN
     keys:
       - RunId
     properties:
       SetName:
         type: String(16)
         field: SET_NAME
-        label: SetName
+        label: Set
         readonly: true
       CheckDate:
-        type: DateTime
+        type: Date
         field: CHECK_DATE
-        label: CheckDate
+        label: Check date
         readonly: true
       RunId:
         type: String(32)
         field: RUN_ID
-        label: RunId
+        label: Run ID
         readonly: true
       Status:
         type: String(12)
@@ -34,6 +32,196 @@ entities:
         field: STARTED
         label: Started
         readonly: true
+        typeName: TIMESTAMP
+      Title:
+        type: String(40)
+        field: TITLE
+        label: Run
+        readonly: true
+        sortable: false
+        filterable: false
+      RunLabel:
+        type: String(40)
+        field: RUN_LABEL
+        label: Run
+        readonly: true
+        sortable: false
+        filterable: false
+      Mode:
+        type: String(1)
+        field: RUN_MODE
+        label: Mode
+        readonly: true
+        sortable: false
+        filterable: false
+      Twin:
+        type: Boolean
+        field: TWIN
+        label: Twin
+        readonly: true
+        sortable: false
+        filterable: false
+      Open:
+        type: Boolean
+        field: IS_OPEN
+        label: Open
+        readonly: true
+        sortable: false
+        filterable: false
+      Piles:
+        type: Int32
+        field: PILES
+        label: Piles
+        readonly: true
+        sortable: false
+        filterable: false
+      PilesFinal:
+        type: Int32
+        field: PILES_FINAL
+        label: Piles final
+        readonly: true
+        sortable: false
+        filterable: false
+      PilesDone:
+        type: Int32
+        field: PILES_DONE
+        label: Piles done
+        readonly: true
+        sortable: false
+        filterable: false
+      PilesRunning:
+        type: Int32
+        field: PILES_RUNNING
+        label: Piles running
+        readonly: true
+        sortable: false
+        filterable: false
+      PilesFailed:
+        type: Int32
+        field: PILES_FAILED
+        label: Piles failed
+        readonly: true
+        sortable: false
+        filterable: false
+      PilesHeld:
+        type: Int32
+        field: PILES_HELD
+        label: Piles held
+        readonly: true
+        sortable: false
+        filterable: false
+      PilesOrphaned:
+        type: Int32
+        field: PILES_ORPHANED
+        label: Piles running without a live job
+        readonly: true
+        sortable: false
+        filterable: false
+      PctFinal:
+        type: Int32
+        field: PCT_FINAL
+        label: Piles done (%)
+        readonly: true
+        sortable: false
+        filterable: false
+      StatusCriticality:
+        type: Byte
+        field: STATUS_CRIT
+        label: Status criticality
+        readonly: true
+        sortable: false
+        filterable: false
+      CanContinue:
+        type: Boolean
+        field: CAN_CONTINUE
+        label: Can continue past glass
+        readonly: true
+        sortable: false
+        filterable: false
+      CanResume:
+        type: Boolean
+        field: CAN_RESUME
+        label: Can resume
+        readonly: true
+        sortable: false
+        filterable: false
+      Reserved:
+        type: Int32
+        field: RESERVED
+        label: Budget reserved
+        readonly: true
+        sortable: false
+        filterable: false
+      Glass:
+        type: Int32
+        field: GLASS
+        label: Glass
+        readonly: true
+        sortable: false
+        filterable: false
+      WarnLevel:
+        type: Int32
+        field: WARN_LEVEL
+        label: Warn level
+        readonly: true
+        sortable: false
+        filterable: false
+      NarrowLevel:
+        type: Int32
+        field: NARROW_LEVEL
+        label: Narrow level
+        readonly: true
+        sortable: false
+        filterable: false
+      HideStage:
+        type: Boolean
+        field: HIDE_STAGE
+        label: No stage rows
+        readonly: true
+        sortable: false
+        filterable: false
+      HidePile:
+        type: Boolean
+        field: HIDE_PILE
+        label: No pile rows
+        readonly: true
+        sortable: false
+        filterable: false
+      HideBudget:
+        type: Boolean
+        field: HIDE_BUDGET
+        label: No budget rows
+        readonly: true
+        sortable: false
+        filterable: false
+      HideEvent:
+        type: Boolean
+        field: HIDE_EVENT
+        label: No event rows
+        readonly: true
+        sortable: false
+        filterable: false
+      HideDoctor:
+        type: Boolean
+        field: HIDE_DOCTOR
+        label: No doctor rows
+        readonly: true
+        sortable: false
+        filterable: false
+      HideRunStat:
+        type: Boolean
+        field: HIDE_RUNSTAT
+        label: No runstat rows
+        readonly: true
+        sortable: false
+        filterable: false
+      HideSnapshot:
+        type: Boolean
+        field: HIDE_SNAPSHOT
+        label: No snapshot rows
+        readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false
@@ -42,8 +230,6 @@ entities:
       - Q
   Stage:
     set: StageSet
-    source:
-      table: ZOSD_L3_STAGE
     keys:
       - RunId
       - StageNo
@@ -51,27 +237,27 @@ entities:
       RunId:
         type: String(32)
         field: RUN_ID
-        label: RunId
+        label: Run ID
         readonly: true
       StageNo:
         type: Int32
         field: STAGE_NO
-        label: StageNo
+        label: Stage
         readonly: true
       SetName:
         type: String(16)
         field: SET_NAME
-        label: SetName
+        label: Set
         readonly: true
       CheckDate:
-        type: DateTime
+        type: Date
         field: CHECK_DATE
-        label: CheckDate
+        label: Check date
         readonly: true
       StageName:
         type: String(16)
         field: STAGE_NAME
-        label: StageName
+        label: Stage name
         readonly: true
       Status:
         type: String(12)
@@ -83,16 +269,25 @@ entities:
         field: OPENED
         label: Opened
         readonly: true
+        typeName: TIMESTAMP
       Ended:
         type: DateTime
         field: ENDED
         label: Ended
         readonly: true
+        typeName: TIMESTAMP
       RunBind:
         type: String(255)
         field: RUN_BIND
-        label: RunBind
+        label: Work binding
         readonly: true
+      StatusCriticality:
+        type: Byte
+        field: STATUS_CRIT
+        label: Criticality
+        readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false
@@ -101,8 +296,6 @@ entities:
       - Q
   Pile:
     set: PileSet
-    source:
-      table: ZOSD_L3_PILE
     keys:
       - RunId
       - RuleName
@@ -111,47 +304,47 @@ entities:
       RunId:
         type: String(32)
         field: RUN_ID
-        label: RunId
+        label: Run ID
         readonly: true
       RuleName:
         type: String(60)
         field: RULE_NAME
-        label: RuleName
+        label: Rule
         readonly: true
       PileNo:
         type: Int32
         field: PILE_NO
-        label: PileNo
+        label: Pile
         readonly: true
       SetName:
         type: String(16)
         field: SET_NAME
-        label: SetName
+        label: Set
         readonly: true
       StageNo:
         type: Int32
         field: STAGE_NO
-        label: StageNo
+        label: Stage
         readonly: true
       ModelHash:
         type: String(71)
         field: MODEL_HASH
-        label: ModelHash
+        label: Model hash
         readonly: true
       CheckDate:
-        type: DateTime
+        type: Date
         field: CHECK_DATE
-        label: CheckDate
+        label: Check date
         readonly: true
       RangeLow:
         type: String(40)
         field: RANGE_LOW
-        label: RangeLow
+        label: Range from
         readonly: true
       RangeHigh:
         type: String(40)
         field: RANGE_HIGH
-        label: RangeHigh
+        label: Range to
         readonly: true
       Status:
         type: String(12)
@@ -161,12 +354,12 @@ entities:
       JobName:
         type: String(32)
         field: JOB_NAME
-        label: JobName
+        label: Job name
         readonly: true
       JobCount:
         type: String(8)
         field: JOB_COUNT
-        label: JobCount
+        label: Job number
         readonly: true
       Alerts:
         type: Int32
@@ -178,11 +371,13 @@ entities:
         field: STARTED
         label: Started
         readonly: true
+        typeName: TIMESTAMP
       Ended:
         type: DateTime
         field: ENDED
         label: Ended
         readonly: true
+        typeName: TIMESTAMP
       Attempt:
         type: Int32
         field: ATTEMPT
@@ -196,7 +391,7 @@ entities:
       PerPile:
         type: Int32
         field: PER_PILE
-        label: PerPile
+        label: Pile cap
         readonly: true
       Hits:
         type: Int32
@@ -206,13 +401,27 @@ entities:
       Closed:
         type: Int32
         field: CLOSED
-        label: Closed
+        label: Closed alerts
         readonly: true
       OpenAlerts:
         type: Int32
         field: OPEN_ALERTS
-        label: OpenAlerts
+        label: Open alerts
         readonly: true
+      StatusCriticality:
+        type: Byte
+        field: STATUS_CRIT
+        label: Criticality
+        readonly: true
+        sortable: false
+        filterable: false
+      CanRelease:
+        type: Boolean
+        field: CAN_RELEASE
+        label: Can be released
+        readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false
@@ -221,20 +430,18 @@ entities:
       - Q
   Budget:
     set: BudgetSet
-    source:
-      table: ZOSD_L3_BUDGET
     keys:
       - RunId
     properties:
       RunId:
         type: String(32)
         field: RUN_ID
-        label: RunId
+        label: Run ID
         readonly: true
       SetName:
         type: String(16)
         field: SET_NAME
-        label: SetName
+        label: Set
         readonly: true
       Reserved:
         type: Int32
@@ -259,22 +466,22 @@ entities:
       WarnAt:
         type: Int32
         field: WARN_AT
-        label: WarnAt
+        label: Warn at (bp)
         readonly: true
       NarrowAt:
         type: Int32
         field: NARROW_AT
-        label: NarrowAt
+        label: Narrow at (bp)
         readonly: true
       PerPile:
         type: Int32
         field: PER_PILE
-        label: PerPile
+        label: Pile cap
         readonly: true
       EventSeq:
         type: Int32
         field: EVENT_SEQ
-        label: EventSeq
+        label: Event sequence
         readonly: true
       State:
         type: String(7)
@@ -286,6 +493,13 @@ entities:
         field: WARNED
         label: Warned
         readonly: true
+      StateCriticality:
+        type: Byte
+        field: STATE_CRIT
+        label: Criticality
+        readonly: true
+        sortable: false
+        filterable: false
     creatable: false
     updatable: false
     deletable: false
@@ -303,17 +517,17 @@ entities:
       RunId:
         type: String(32)
         field: RUN_ID
-        label: RunId
+        label: Run ID
         readonly: true
       Seq:
         type: Int32
         field: SEQ
-        label: Seq
+        label: Sequence
         readonly: true
       SetName:
         type: String(16)
         field: SET_NAME
-        label: SetName
+        label: Set
         readonly: true
       Kind:
         type: String(12)
@@ -348,12 +562,12 @@ entities:
       RuleNo:
         type: Int32
         field: RULE_NO
-        label: RuleNo
+        label: Rule no
         readonly: true
       PileNo:
         type: Int32
         field: PILE_NO
-        label: PileNo
+        label: Pile
         readonly: true
       Reason:
         type: String(80)
@@ -363,17 +577,17 @@ entities:
       Actor:
         type: String(12)
         field: ACTOR
-        label: Actor
+        label: By
         readonly: true
       Acted:
         type: DateTime
         field: ACTED
-        label: Acted
+        label: When
         readonly: true
       RuleName:
         type: String(60)
         field: RULE_NAME
-        label: RuleName
+        label: Rule
         readonly: true
     creatable: false
     updatable: false
@@ -392,42 +606,42 @@ entities:
       RunId:
         type: String(32)
         field: RUN_ID
-        label: RunId
+        label: Run ID
         readonly: true
       Seq:
         type: Int32
         field: SEQ
-        label: Seq
+        label: Sequence
         readonly: true
       SetName:
         type: String(16)
         field: SET_NAME
-        label: SetName
+        label: Set
         readonly: true
       CheckDate:
         type: DateTime
         field: CHECK_DATE
-        label: CheckDate
+        label: Check date
         readonly: true
       StageNo:
         type: Int32
         field: STAGE_NO
-        label: StageNo
+        label: Stage
         readonly: true
       RuleName:
         type: String(60)
         field: RULE_NAME
-        label: RuleName
+        label: Rule
         readonly: true
       PileNo:
         type: Int32
         field: PILE_NO
-        label: PileNo
+        label: Pile
         readonly: true
       DocAction:
         type: String(12)
         field: DOC_ACTION
-        label: DocAction
+        label: Doctor action
         readonly: true
       Reason:
         type: String(40)
@@ -437,7 +651,7 @@ entities:
       Acted:
         type: DateTime
         field: ACTED
-        label: Acted
+        label: When
         readonly: true
     creatable: false
     updatable: false
@@ -456,47 +670,47 @@ entities:
       SetName:
         type: String(16)
         field: SET_NAME
-        label: SetName
+        label: Set
         readonly: true
       RunId:
         type: String(32)
         field: RUN_ID
-        label: RunId
+        label: Run ID
         readonly: true
       PilesDone:
         type: Int32
         field: PILES_DONE
-        label: PilesDone
+        label: Piles done
         readonly: true
       PilesFailed:
         type: Int32
         field: PILES_FAILED
-        label: PilesFailed
+        label: Piles failed
         readonly: true
       PilesRunning:
         type: Int32
         field: PILES_RUNNING
-        label: PilesRunning
+        label: Piles running
         readonly: true
       PilesHeld:
         type: Int32
         field: PILES_HELD
-        label: PilesHeld
+        label: Piles held
         readonly: true
       MeanSecs:
         type: Decimal(15,3)
         field: MEAN_SECS
-        label: MeanSecs
+        label: Mean secs
         readonly: true
       MedianSecs:
         type: Decimal(15,3)
         field: MEDIAN_SECS
-        label: MedianSecs
+        label: Median secs
         readonly: true
       UpdatedAt:
         type: DateTime
         field: UPDATED_AT
-        label: UpdatedAt
+        label: Updated at
         readonly: true
     creatable: false
     updatable: false
@@ -515,17 +729,17 @@ entities:
       SetName:
         type: String(16)
         field: SET_NAME
-        label: SetName
+        label: Set
         readonly: true
       ParamName:
         type: String(30)
         field: PARAM_NAME
-        label: ParamName
+        label: Setting
         readonly: true
       ParamVal:
         type: String(40)
         field: PARAM_VAL
-        label: ParamVal
+        label: Value
         readonly: true
       Origin:
         type: String(4)
@@ -535,22 +749,22 @@ entities:
       DslValue:
         type: String(40)
         field: DSL_VALUE
-        label: DslValue
+        label: DSL default
         readonly: true
       ChangedBy:
         type: String(12)
         field: CHANGED_BY
-        label: ChangedBy
+        label: Changed by
         readonly: true
       ChangedAt:
         type: DateTime
         field: CHANGED_AT
-        label: ChangedAt
+        label: Changed at
         readonly: true
       NoteText:
         type: String(80)
         field: NOTE_TEXT
-        label: NoteText
+        label: Note
         readonly: true
     creatable: false
     updatable: false
@@ -568,52 +782,52 @@ entities:
       ChangeId:
         type: String(32)
         field: CHANGE_ID
-        label: ChangeId
+        label: Change id
         readonly: true
       SetName:
         type: String(16)
         field: SET_NAME
-        label: SetName
+        label: Set
         readonly: true
       ParamName:
         type: String(30)
         field: PARAM_NAME
-        label: ParamName
+        label: Setting
         readonly: true
       OldValue:
         type: String(40)
         field: OLD_VALUE
-        label: OldValue
+        label: Old value
         readonly: true
       NewValue:
         type: String(40)
         field: NEW_VALUE
-        label: NewValue
+        label: New value
         readonly: true
       OldOrigin:
         type: String(4)
         field: OLD_ORIGIN
-        label: OldOrigin
+        label: Old origin
         readonly: true
       NewOrigin:
         type: String(4)
         field: NEW_ORIGIN
-        label: NewOrigin
+        label: New origin
         readonly: true
       ChangedBy:
         type: String(12)
         field: CHANGED_BY
-        label: ChangedBy
+        label: Changed by
         readonly: true
       ChangedAt:
         type: DateTime
         field: CHANGED_AT
-        label: ChangedAt
+        label: Changed at
         readonly: true
       NoteText:
         type: String(80)
         field: NOTE_TEXT
-        label: NoteText
+        label: Note
         readonly: true
     creatable: false
     updatable: false
@@ -632,22 +846,22 @@ entities:
       RunId:
         type: String(32)
         field: RUN_ID
-        label: RunId
+        label: Run ID
         readonly: true
       ParamName:
         type: String(30)
         field: PARAM_NAME
-        label: ParamName
+        label: Setting
         readonly: true
       SetName:
         type: String(16)
         field: SET_NAME
-        label: SetName
+        label: Set
         readonly: true
       ParamVal:
         type: String(40)
         field: PARAM_VAL
-        label: ParamVal
+        label: Value
         readonly: true
       Origin:
         type: String(8)
@@ -657,17 +871,17 @@ entities:
       DslValue:
         type: String(40)
         field: DSL_VALUE
-        label: DslValue
+        label: DSL default
         readonly: true
       ChangedBy:
         type: String(12)
         field: CHANGED_BY
-        label: ChangedBy
+        label: Changed by
         readonly: true
       ChangedAt:
         type: DateTime
         field: CHANGED_AT
-        label: ChangedAt
+        label: Changed at
         readonly: true
     creatable: false
     updatable: false
@@ -682,11 +896,82 @@ entities:
       RunId:
         type: String(32)
         field: RUN_ID
+        label: Run ID
       Answer: String
     creatable: false
     updatable: false
     deletable: false
     operations: []
+  Tally:
+    set: TallySet
+    keys:
+      - RunId
+      - Status
+    properties:
+      RunId:
+        type: String(32)
+        field: RUN_ID
+        label: Run ID
+        readonly: true
+        sortable: false
+        filterable: true
+      Status:
+        type: String(12)
+        field: STATUS
+        label: Status
+        readonly: true
+        sortable: false
+        filterable: false
+      Piles:
+        type: Int32
+        field: PILES
+        label: Piles
+        readonly: true
+        sortable: false
+        filterable: false
+      StatusCriticality:
+        type: Byte
+        field: STATUS_CRIT
+        label: Criticality
+        readonly: true
+        sortable: false
+        filterable: false
+      Label:
+        type: String(24)
+        field: LABEL
+        label: Piles of the status
+        readonly: true
+        sortable: false
+        filterable: false
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - Q
+  StatusVH:
+    set: StatusVHSet
+    keys:
+      - Status
+    properties:
+      Status:
+        type: String(12)
+        field: STATUS
+        label: Status
+        readonly: true
+        sortable: false
+        filterable: false
+      Text:
+        type: String(60)
+        field: TEXT
+        label: Meaning
+        readonly: true
+        sortable: false
+        filterable: false
+    creatable: false
+    updatable: false
+    deletable: false
+    operations:
+      - Q
 functions:
   StartRun:
     method: POST
@@ -848,69 +1133,135 @@ associations:
       RunId: RunId
     navigation:
       Run: to_Snapshot
+  RunToTally:
+    from: Run
+    to: Tally
+    cardinality: 1:N
+    constraint:
+      RunId: RunId
+    navigation:
+      Run: to_Tally
 annotations:
   Run:
-    lineItem:
-      - value: RunId
-        label: Run Id
-      - value: CheckDate
-        label: Check Date
-      - value: Status
-        label: Status
-      - value: Started
-        label: Started
     header:
       typeName: Run
       typeNamePlural: Runs
-      title: RunId
-      description: Status
+      title: Title
+      description: RunId
     selectionFields:
       - CheckDate
       - Status
+    lineItem:
+      - value: RunLabel
+        label: Run
+      - value: Status
+        label: Status
+        criticality: StatusCriticality
+      - value: PctFinal
+        label: Piles done (%)
+      - value: Started
+        label: Started
+    headerFacets:
+      - id: StatusPoint
+        label: Run status
+        target: '@UI.DataPoint#Status'
+      - id: FinalChart
+        label: Piles done of planned
+        target: '@UI.Chart#Final'
+      - id: BudgetChart
+        label: 'Budget: reserved of the glass'
+        target: '@UI.Chart#Budget'
+      - id: TallyChart
+        label: Piles by status
+        target: to_Tally/@UI.Chart#Tally
+    dataPoints:
+      Status:
+        value: Status
+        title: Run status
+        criticality: StatusCriticality
+      Final:
+        value: PilesDone
+        title: Piles done
+        targetValue: Piles
+      Budget:
+        value: Reserved
+        title: Budget reserved
+        minimumValue: 0
+        maximumValue: Glass
+        criticalityCalculation:
+          improvementDirection: Minimize
+          toleranceRangeHighValue: WarnLevel
+          deviationRangeHighValue: NarrowLevel
+    charts:
+      Final:
+        type: Donut
+        title: Piles done
+        measures:
+          - PilesDone
+        measureAttributes:
+          - measure: PilesDone
+            dataPoint: Final
+      Budget:
+        type: Bullet
+        title: Budget
+        measures:
+          - Reserved
+        measureAttributes:
+          - measure: Reserved
+            dataPoint: Budget
     facets:
       - id: Stage
-        label: Stage
+        label: Stages
         lineItem: to_Stage
+        hidden: HideStage
       - id: Pile
-        label: Pile
+        label: Piles
         lineItem: to_Pile
+        hidden: HidePile
       - id: Budget
         label: Budget
         lineItem: to_Budget
+        hidden: HideBudget
       - id: Event
-        label: Event
+        label: Budget events
         lineItem: to_Event
+        hidden: HideEvent
       - id: Doctor
-        label: Doctor
+        label: Doctor journal
         lineItem: to_Doctor
+        hidden: HideDoctor
       - id: RunStat
         label: RunStat
         lineItem: to_RunStat
+        hidden: HideRunStat
       - id: Snapshot
-        label: Snapshot
+        label: Settings of the run
         lineItem: to_Snapshot
+        hidden: HideSnapshot
   Stage:
     lineItem:
       - value: StageNo
-        label: Stage No
+        label: Stage
       - value: StageName
-        label: Stage Name
+        label: Stage name
       - value: Status
         label: Status
+        criticality: StatusCriticality
       - value: Opened
         label: Opened
       - value: Ended
         label: Ended
       - value: RunBind
-        label: Run Bind
+        label: Work binding
   Pile:
     lineItem:
       - value: RuleName
-        label: Rule Name
+        label: Rule
       - value: PileNo
-        label: Pile No
+        label: Pile
       - value: Status
         label: Status
+        criticality: StatusCriticality
       - value: Attempt
         label: Attempt
       - value: Reason
@@ -933,24 +1284,25 @@ annotations:
         label: Glass
       - value: State
         label: State
+        criticality: StateCriticality
       - value: WarnAt
-        label: Warn At
+        label: Warn at (bp)
       - value: NarrowAt
-        label: Narrow At
+        label: Narrow at (bp)
       - value: PerPile
-        label: Per Pile
+        label: Pile cap
   Event:
     lineItem:
       - value: Seq
-        label: Seq
+        label: Sequence
       - value: Kind
         label: Kind
       - value: Acted
-        label: Acted
+        label: When
       - value: Reason
         label: Reason
       - value: Actor
-        label: Actor
+        label: By
       - value: Reserved
         label: Reserved
       - value: Consumed
@@ -962,82 +1314,405 @@ annotations:
   Doctor:
     lineItem:
       - value: Seq
-        label: Seq
+        label: Sequence
       - value: DocAction
-        label: Doc Action
+        label: Doctor action
       - value: Reason
         label: Reason
       - value: Acted
-        label: Acted
+        label: When
       - value: RuleName
-        label: Rule Name
+        label: Rule
       - value: PileNo
-        label: Pile No
+        label: Pile
   RunStat:
     lineItem:
       - value: RunId
-        label: Run Id
+        label: Run ID
       - value: PilesDone
-        label: Piles Done
+        label: Piles done
       - value: PilesFailed
-        label: Piles Failed
+        label: Piles failed
       - value: PilesRunning
-        label: Piles Running
+        label: Piles running
       - value: PilesHeld
-        label: Piles Held
+        label: Piles held
       - value: MeanSecs
-        label: Mean Secs
+        label: Mean secs
       - value: MedianSecs
-        label: Median Secs
+        label: Median secs
       - value: UpdatedAt
-        label: Updated At
+        label: Updated at
   Setting:
     lineItem:
       - value: ParamName
-        label: Param Name
+        label: Setting
       - value: ParamVal
-        label: Param Val
+        label: Value
       - value: Origin
         label: Origin
       - value: DslValue
-        label: Dsl Value
+        label: DSL default
       - value: ChangedBy
-        label: Changed By
+        label: Changed by
       - value: ChangedAt
-        label: Changed At
+        label: Changed at
       - value: NoteText
-        label: Note Text
+        label: Note
   Change:
     lineItem:
       - value: ChangeId
-        label: Change Id
+        label: Change id
       - value: ParamName
-        label: Param Name
+        label: Setting
       - value: OldValue
-        label: Old Value
+        label: Old value
       - value: NewValue
-        label: New Value
+        label: New value
       - value: OldOrigin
-        label: Old Origin
+        label: Old origin
       - value: NewOrigin
-        label: New Origin
+        label: New origin
       - value: ChangedBy
-        label: Changed By
+        label: Changed by
       - value: ChangedAt
-        label: Changed At
+        label: Changed at
       - value: NoteText
-        label: Note Text
+        label: Note
   Snapshot:
     lineItem:
       - value: ParamName
-        label: Param Name
+        label: Setting
       - value: ParamVal
-        label: Param Val
+        label: Value
       - value: DslValue
-        label: Dsl Value
+        label: DSL default
       - value: Origin
         label: Origin
       - value: ChangedBy
-        label: Changed By
+        label: Changed by
       - value: ChangedAt
-        label: Changed At
+        label: Changed at
+  Tally:
+    dataPoints:
+      Tally:
+        value: Piles
+        title: Piles
+        criticality: StatusCriticality
+    charts:
+      Tally:
+        type: BarStacked
+        title: Piles by status
+        dimensions:
+          - Status
+        measures:
+          - Piles
+        measureAttributes:
+          - measure: Piles
+            dataPoint: Tally
+  Tally/Piles:
+    label: Piles
+    text: Label
+  Run/Status:
+    label: Status
+    valueListFixed: true
+    valueList:
+      label: Status
+      collection: StatusVHSet
+      search: false
+      parameters:
+        - inOut:
+            Status: Status
+        - displayOnly: Text
+  StatusVH:
+    lineItem:
+      - value: Status
+        label: Status
+      - value: Text
+        label: Meaning
+  Run/SetName:
+    label: Set
+  Run/CheckDate:
+    label: Check date
+  Run/RunId:
+    label: Run ID
+  Run/Started:
+    label: Started
+  Run/Title:
+    label: Run
+  Run/RunLabel:
+    label: Run
+  Run/Mode:
+    label: Mode
+  Run/Twin:
+    label: Twin
+  Run/Open:
+    label: Open
+  Run/Piles:
+    label: Piles
+  Run/PilesFinal:
+    label: Piles final
+  Run/PilesDone:
+    label: Piles done
+  Run/PilesRunning:
+    label: Piles running
+  Run/PilesFailed:
+    label: Piles failed
+  Run/PilesHeld:
+    label: Piles held
+  Run/PilesOrphaned:
+    label: Piles running without a live job
+  Run/PctFinal:
+    label: Piles done (%)
+  Run/StatusCriticality:
+    label: Status criticality
+  Run/CanContinue:
+    label: Can continue past glass
+  Run/CanResume:
+    label: Can resume
+  Run/Reserved:
+    label: Budget reserved
+  Run/Glass:
+    label: Glass
+  Run/WarnLevel:
+    label: Warn level
+  Run/NarrowLevel:
+    label: Narrow level
+  Run/HideStage:
+    label: No stage rows
+  Run/HidePile:
+    label: No pile rows
+  Run/HideBudget:
+    label: No budget rows
+  Run/HideEvent:
+    label: No event rows
+  Run/HideDoctor:
+    label: No doctor rows
+  Run/HideRunStat:
+    label: No runstat rows
+  Run/HideSnapshot:
+    label: No snapshot rows
+  Stage/RunId:
+    label: Run ID
+  Stage/StageNo:
+    label: Stage
+  Stage/SetName:
+    label: Set
+  Stage/CheckDate:
+    label: Check date
+  Stage/StageName:
+    label: Stage name
+  Stage/Status:
+    label: Status
+  Stage/Opened:
+    label: Opened
+  Stage/Ended:
+    label: Ended
+  Stage/RunBind:
+    label: Work binding
+  Stage/StatusCriticality:
+    label: Criticality
+  Pile/RunId:
+    label: Run ID
+  Pile/RuleName:
+    label: Rule
+  Pile/PileNo:
+    label: Pile
+  Pile/SetName:
+    label: Set
+  Pile/StageNo:
+    label: Stage
+  Pile/ModelHash:
+    label: Model hash
+  Pile/CheckDate:
+    label: Check date
+  Pile/RangeLow:
+    label: Range from
+  Pile/RangeHigh:
+    label: Range to
+  Pile/Status:
+    label: Status
+  Pile/JobName:
+    label: Job name
+  Pile/JobCount:
+    label: Job number
+  Pile/Alerts:
+    label: Alerts
+  Pile/Started:
+    label: Started
+  Pile/Ended:
+    label: Ended
+  Pile/Attempt:
+    label: Attempt
+  Pile/Reason:
+    label: Reason
+  Pile/PerPile:
+    label: Pile cap
+  Pile/Hits:
+    label: Hits
+  Pile/Closed:
+    label: Closed alerts
+  Pile/OpenAlerts:
+    label: Open alerts
+  Pile/StatusCriticality:
+    label: Criticality
+  Pile/CanRelease:
+    label: Can be released
+  Budget/RunId:
+    label: Run ID
+  Budget/SetName:
+    label: Set
+  Budget/Reserved:
+    label: Reserved
+  Budget/Consumed:
+    label: Consumed
+  Budget/Refunded:
+    label: Refunded
+  Budget/Glass:
+    label: Glass
+  Budget/WarnAt:
+    label: Warn at (bp)
+  Budget/NarrowAt:
+    label: Narrow at (bp)
+  Budget/PerPile:
+    label: Pile cap
+  Budget/EventSeq:
+    label: Event sequence
+  Budget/State:
+    label: State
+  Budget/Warned:
+    label: Warned
+  Budget/StateCriticality:
+    label: Criticality
+  Event/RunId:
+    label: Run ID
+  Event/Seq:
+    label: Sequence
+  Event/SetName:
+    label: Set
+  Event/Kind:
+    label: Kind
+  Event/Reserved:
+    label: Reserved
+  Event/Consumed:
+    label: Consumed
+  Event/Refunded:
+    label: Refunded
+  Event/Glass:
+    label: Glass
+  Event/Amount:
+    label: Amount
+  Event/RuleNo:
+    label: Rule no
+  Event/PileNo:
+    label: Pile
+  Event/Reason:
+    label: Reason
+  Event/Actor:
+    label: By
+  Event/Acted:
+    label: When
+  Event/RuleName:
+    label: Rule
+  Doctor/RunId:
+    label: Run ID
+  Doctor/Seq:
+    label: Sequence
+  Doctor/SetName:
+    label: Set
+  Doctor/CheckDate:
+    label: Check date
+  Doctor/StageNo:
+    label: Stage
+  Doctor/RuleName:
+    label: Rule
+  Doctor/PileNo:
+    label: Pile
+  Doctor/DocAction:
+    label: Doctor action
+  Doctor/Reason:
+    label: Reason
+  Doctor/Acted:
+    label: When
+  RunStat/SetName:
+    label: Set
+  RunStat/RunId:
+    label: Run ID
+  RunStat/PilesDone:
+    label: Piles done
+  RunStat/PilesFailed:
+    label: Piles failed
+  RunStat/PilesRunning:
+    label: Piles running
+  RunStat/PilesHeld:
+    label: Piles held
+  RunStat/MeanSecs:
+    label: Mean secs
+  RunStat/MedianSecs:
+    label: Median secs
+  RunStat/UpdatedAt:
+    label: Updated at
+  Setting/SetName:
+    label: Set
+  Setting/ParamName:
+    label: Setting
+  Setting/ParamVal:
+    label: Value
+  Setting/Origin:
+    label: Origin
+  Setting/DslValue:
+    label: DSL default
+  Setting/ChangedBy:
+    label: Changed by
+  Setting/ChangedAt:
+    label: Changed at
+  Setting/NoteText:
+    label: Note
+  Change/ChangeId:
+    label: Change id
+  Change/SetName:
+    label: Set
+  Change/ParamName:
+    label: Setting
+  Change/OldValue:
+    label: Old value
+  Change/NewValue:
+    label: New value
+  Change/OldOrigin:
+    label: Old origin
+  Change/NewOrigin:
+    label: New origin
+  Change/ChangedBy:
+    label: Changed by
+  Change/ChangedAt:
+    label: Changed at
+  Change/NoteText:
+    label: Note
+  Snapshot/RunId:
+    label: Run ID
+  Snapshot/ParamName:
+    label: Setting
+  Snapshot/SetName:
+    label: Set
+  Snapshot/ParamVal:
+    label: Value
+  Snapshot/Origin:
+    label: Origin
+  Snapshot/DslValue:
+    label: DSL default
+  Snapshot/ChangedBy:
+    label: Changed by
+  Snapshot/ChangedAt:
+    label: Changed at
+  Tally/RunId:
+    label: Run ID
+  Tally/Status:
+    label: Status
+  Tally/StatusCriticality:
+    label: Criticality
+  Tally/Label:
+    label: Piles of the status
+  StatusVH/Status:
+    label: Status
+  StatusVH/Text:
+    label: Meaning

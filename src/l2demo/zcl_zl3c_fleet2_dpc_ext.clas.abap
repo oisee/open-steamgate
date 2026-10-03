@@ -179,6 +179,11 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     IF lv_count = 0.
       cs_run-hide_doctor = abap_true.
     ENDIF.
+    SELECT COUNT( * ) FROM zosd_l3_runstat INTO lv_count
+      WHERE set_name = 'fleet2' AND run_id = cs_run-run_id.
+    IF lv_count = 0.
+      cs_run-hide_runstat = abap_true.
+    ENDIF.
     SELECT COUNT( * ) FROM zosd_l3_run_conf INTO lv_count
       WHERE set_name = 'fleet2' AND run_id = cs_run-run_id.
     IF lv_count = 0.
@@ -367,13 +372,13 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     CONCATENATE lv_computed_fields 'PILES_HELD PILES_ORPHANED PCT_FINAL STATUS_CRIT CAN_CONTINUE' INTO lv_computed_fields SEPARATED BY space.
     CONCATENATE lv_computed_fields 'CAN_RESUME RESERVED GLASS WARN_LEVEL NARROW_LEVEL' INTO lv_computed_fields SEPARATED BY space.
     CONCATENATE lv_computed_fields 'HIDE_STAGE HIDE_PILE HIDE_BUDGET HIDE_EVENT HIDE_DOCTOR' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_fields 'HIDE_SNAPSHOT' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'HIDE_RUNSTAT HIDE_SNAPSHOT' INTO lv_computed_fields SEPARATED BY space.
     CONCATENATE lv_computed_props 'Title RunLabel Mode Twin Open' INTO lv_computed_props SEPARATED BY space.
     CONCATENATE lv_computed_props 'Piles PilesFinal PilesDone PilesRunning PilesFailed' INTO lv_computed_props SEPARATED BY space.
     CONCATENATE lv_computed_props 'PilesHeld PilesOrphaned PctFinal StatusCriticality CanContinue' INTO lv_computed_props SEPARATED BY space.
     CONCATENATE lv_computed_props 'CanResume Reserved Glass WarnLevel NarrowLevel' INTO lv_computed_props SEPARATED BY space.
     CONCATENATE lv_computed_props 'HideStage HidePile HideBudget HideEvent HideDoctor' INTO lv_computed_props SEPARATED BY space.
-    CONCATENATE lv_computed_props 'HideSnapshot' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'HideRunStat HideSnapshot' INTO lv_computed_props SEPARATED BY space.
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
       it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).
