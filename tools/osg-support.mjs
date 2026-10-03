@@ -159,15 +159,42 @@ export function evidence(classes, run) {
       if (row.status === "NOT_COMPILED") refusals.push({class: cls, message: String(row.message ?? "").split(/\r?\n/)[0]});
     }
   }
+  const share = classShare(classes, {failures, refusals, missing});
   // A failure takes precedence, but retain all refusals and missing owners too.
   return {status: failures.length ? "fails" : refusals.length ? "refused" : missing.length ? "not measured" : "runs",
-    failures, refusals, missing, reasons};
+    failures, refusals, missing, reasons, ...share};
+}
+function classShare(classes, {failures, refusals, missing}) {
+  const failingClasses = [...new Set(failures.map((f) => f.class))].sort(order);
+  const blocked = new Set([...failingClasses, ...refusals.map((f) => f.class), ...missing]);
+  return {failingClasses, passingClasses: [...new Set(classes)].filter((cls) => !blocked.has(cls)).sort(order)};
+}
+function generatorContent() {
+  const generatorFiles = ["tools/osg-support.mjs", "tools/osd-kernel-compat.mjs"].map((file) => ({
+    file, blob: execFileSync("git", ["hash-object", "--no-filters", file], {cwd: root, encoding: "utf8"}).trim(),
+  }));
+  const revision = createHash("sha256").update(generatorFiles.map(({file, blob}) => `${file}:${blob}\n`).join("")).digest("hex").slice(0, 12);
+  return {generatorFiles, revision};
+}
+const knownWarnings = () => KERNEL_FORMS.map(({form, anchor, title, rejects, rewrite, rejectedExample, acceptedExample}) =>
+  ({form, anchor, title, rejects, rewrite, rejectedExample, acceptedExample}));
+
+// Rerender a recorded inventory when its original generated ABAP inputs are absent.
+// Preserve the source revision/date and every recorded count and test outcome.
+export function generateRecorded(file, options = {}) {
+  const report = JSON.parse(readFileSync(file, "utf8"));
+  const {generatorFiles, revision} = generatorContent();
+  for (const c of report.constructs) for (const runtime of ["osgjs", "osgo"])
+    Object.assign(c[runtime], classShare(c.classes, c[runtime]));
+  Object.assign(report, {generatorFiles, openSteamgate: options["osg-rev"] ?? revision,
+    date: options.date ?? report.date, knownWarnings: knownWarnings()});
+  return {report, markdown: render(report)};
 }
 const git = (cwd, format) => execFileSync("git", ["log", "-1", `--format=${format}`], {cwd, encoding: "utf8"}).trim();
 const safe = (value) => String(value).replaceAll("|", "\\|").replace(/[\r\n]/g, " ");
 const sectionOf = (r) => r.osgjs.status === "runs"
   ? r.osgo.status === "runs" ? "both" : "js"
-  : r.osgjs.status === "fails" ? "fails"
+  : r.osgjs.status === "fails" ? r.osgjs.passingClasses.length > r.classes.length / 2 ? "some" : "fails"
   : r.osgjs.status === "not measured" ? "none"
   : r.osgo.status === "runs" ? "go" : "none";
 
@@ -250,72 +277,80 @@ export function generate(directories, paths, options = {}) {
     tests: [...owners].flatMap((cls) => run.rows.get(cls) ?? []).filter((r) => r.method).length,
   }]));
   const abapiti = join(root, ".local/abapiti-src");
-  const generatorFiles = ["tools/osg-support.mjs", "tools/osd-kernel-compat.mjs"].map((file) => ({
-    file, blob: execFileSync("git", ["hash-object", "--no-filters", file], {cwd: root, encoding: "utf8"}).trim(),
-  }));
-  const revision = createHash("sha256").update(generatorFiles.map(({file, blob}) => `${file}:${blob}\n`).join("")).digest("hex").slice(0, 12);
+  const {generatorFiles, revision} = generatorContent();
   const date = existsSync(abapiti) ? git(abapiti, "%cs") : "unavailable";
   const report = {abapiti: existsSync(abapiti) ? git(abapiti, "%H") : "unavailable",
     openSteamgate: options["osg-rev"] ?? revision, generatorFiles, date: options.date ?? date, folders: folders.sort((a, b) => order(a.name, b.name)), runtime,
     constructs, warnings: [...warnings].sort(([a], [b]) => order(a, b)).map(([form, count]) => ({form, count})),
-    knownWarnings: KERNEL_FORMS.map(({form, anchor, title}) => ({form, anchor, title}))};
+    knownWarnings: knownWarnings()};
   return {report, markdown: render(report)};
 }
 
 function render(report) {
   const incomplete = report.folders.some((f) => !f.evidence.osgjs || f.evidence.osgjs.startsWith("not measured:") || f.evidence.osgjs.includes("missing test owners"));
-  const out = ["# OSG support evidence", "", ...(incomplete ? ["The JS column is incomplete; remeasurement in progress.", ""] : []), `ABAPiti commit: ${report.abapiti}.`,
+  const out = ["# OSG support evidence", "",
+    "Runs means all using classes passed their recorded tests; fails means some had FAILURE/ERROR rows, and fails in some classes means most passed. Not measured means evidence is missing or incomplete, including harness crashes; class results do not prove each construct correct.",
+    "The osgo column records the Go runtime's results for the same classes; refused means the compiler rejected them.",
+    "The VS Code column is OSG-JS, the JavaScript runtime used by the extension.", "",
+    ...(incomplete ? ["The JS column is incomplete; remeasurement in progress.", ""] : [])];
+  const provenance = [`ABAPiti commit: ${report.abapiti}.`,
     `open-steamgate generator content: ${report.openSteamgate}. Date: ${report.date}.`,
     ...report.generatorFiles.map(({file, blob}) => `Generator file: ${file} (git blob ${blob}).`), "",
-    "Generated from the ABAPiti corpus; a construct marked runs means its using classes passed their rows, not that the construct is correct or specified.", "",
     "Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. In a declared full-folder run where every test owner has rows and every row is SUCCESS, helpers without Unit rows count as runs: exercised by the tests in the same run. In partial runs, passing classes retain their results; omitted test owners and helpers in incomplete or failing runs are not measured. A harness crash, heap exhaustion or setup failure before any class is not measured, with its reason; fails applies only to FAILURE/ERROR test results.", "",
     "Folders: " + report.folders.map((f) => `${safe(f.name)} (${f.classes} classes, ${f.lines} lines)`).join("; ") + ".", "",
     "| Runtime | Classes with evidence | Lines in classes with evidence | Tests |", "|---|---:|---:|---:|"];
-  for (const [name, r] of Object.entries(report.runtime)) out.push(`| ${name === "osgjs" ? "VS Code (OSG-JS)" : name} | ${r.classes} | ${r.lines} | ${r.tests} |`);
-  out.push("", "Folder run evidence:", "");
+  for (const [name, r] of Object.entries(report.runtime)) provenance.push(`| ${name === "osgjs" ? "VS Code (OSG-JS)" : name} | ${r.classes} | ${r.lines} | ${r.tests} |`);
+  provenance.push("", "Folder run evidence:", "");
   for (const folder of report.folders) for (const name of ["osgjs", "osgo"]) {
     const measurement = folder.measurements?.[name];
     const metrics = measurement ? ` (${measurement.wallSeconds} s; peak RSS ${measurement.peakRssKiB} KiB)` : "";
-    out.push(`- ${safe(folder.name)} / ${name === "osgjs" ? "VS Code (OSG-JS)" : name}: ${safe(folder.evidence[name] ?? "not measured: no full-folder run declared; per-class rows retained")}${metrics}`);
+    provenance.push(`- ${safe(folder.name)} / ${name === "osgjs" ? "VS Code (OSG-JS)" : name}: ${safe(folder.evidence[name] ?? "not measured: no full-folder run declared; per-class rows retained")}${metrics}`);
   }
-  out.push("", "Folder run provenance (snapshotted from installed tools; no clock or rendering environment):", "",
+  provenance.push("", "Folder run provenance (snapshotted from installed tools; no clock or rendering environment):", "",
     "| Folder | Runtime | Database backend | Heap setting | Installed versions |", "|---|---|---|---|---|");
   for (const folder of report.folders) for (const name of ["osgjs", "osgo"]) {
     const p = folder.provenance?.[name];
     const versions = p ? Object.entries(p.versions).sort(([a], [b]) => order(a, b)).map(([tool, v]) => `${tool} ${v}`).join("; ") : "not recorded";
-    out.push(`| ${safe(folder.name)} | ${name === "osgjs" ? "VS Code (OSG-JS)" : name} | ${safe(p?.database ?? "not recorded")} | ${safe(p?.heap ?? "not recorded")} | ${safe(versions || "not recorded")} |`);
+    provenance.push(`| ${safe(folder.name)} | ${name === "osgjs" ? "VS Code (OSG-JS)" : name} | ${safe(p?.database ?? "not recorded")} | ${safe(p?.heap ?? "not recorded")} | ${safe(versions || "not recorded")} |`);
   }
   const warned = () => {
     out.push("", "## Warned", "", "The shared kernel compatibility scanner knows these forms (including forms absent from this corpus):", "");
-    for (const {anchor, title} of report.knownWarnings) out.push(`<a id="${anchor}"></a>`, `- ${title}`, "");
+    for (const {anchor, title, rejects, rewrite, rejectedExample, acceptedExample} of report.knownWarnings)
+      out.push(`<a id="${anchor}"></a>`, `### ${title}`, "", rejects, "", "Rejected by SAP:", "", "```abap", rejectedExample, "```", "",
+        rewrite, "", "Correct rewrite:", "", "```abap", acceptedExample, "```", "");
     out.push("", "| Observed form | Findings |", "|---|---:|");
     for (const w of report.warnings) out.push(`| ${safe(w.form)} | ${w.count} |`);
     if (!report.warnings.length) out.push("| None | 0 |");
   };
-  for (const [section, title] of [["both", "Runs on JS (osgo agrees)"], ["js", "JS only"], ["go", "osgo only"], ["fails", "Fails on JS"], ["none", "Not measured on JS"]]) {
+  for (const [section, title] of [["both", "Runs on JS (osgo agrees)"], ["js", "JS only"], ["go", "osgo only"], ["fails", "Fails on JS"], ["some", "Fails in some classes on JS"], ["none", "Not measured on JS"]]) {
     const rows = report.constructs.filter((r) => sectionOf(r) === section);
+    if (["fails", "some"].includes(section)) rows.sort((a, b) =>
+      b.osgjs.failingClasses.length / b.classes.length - a.osgjs.failingClasses.length / a.classes.length
+      || order(`${a.kind}: ${a.name}`, `${b.kind}: ${b.name}`));
     out.push("", `## ${title} (${rows.length})`, "", "| Construct | Occurrences | Classes | Lines | VS Code (OSG-JS) | osgo |", "|---|---:|---:|---:|---|---|");
-    const describe = (e) => [e.status,
-      ...e.failures.map((f) => `${f.class}: ${f.status}${f.message ? ": " + f.message : ""}`),
+    const describe = (e, total) => [e.status === "fails"
+      ? `fails in ${e.failingClasses.length} of ${total} classes (${e.failingClasses.slice(0, 3).join(", ")}${e.failingClasses.length > 3 ? ", …" : ""}); passes in ${e.passingClasses.length}` : e.status,
+      ...e.failingClasses.slice(0, 3).map((cls) => e.failures.find((f) => f.class === cls)).map((f) => `${f.class}: ${f.status}${f.message ? ": " + f.message : ""}`),
       ...e.reasons.map((f) => `${f.class}: ${f.reason}`),
       ...e.refusals.map((f) => `${f.class}: ${f.message}`),
       ...(e.missing.length ? [`missing: ${e.missing.join(", ")}`] : [])].map(safe).join("; ");
-    for (const r of rows) out.push(`| ${safe(r.kind + ": " + r.name)} | ${r.count} | ${r.classes.length} | ${r.lines} | ${describe(r.osgjs)} | ${describe(r.osgo)} |`);
+    for (const r of rows) out.push(`| ${safe(r.kind + ": " + r.name)} | ${r.count} | ${r.classes.length} | ${r.lines} | ${describe(r.osgjs, r.classes.length)} | ${describe(r.osgo, r.classes.length)} |`);
     if (!rows.length) out.push("| None | | | | | |");
   }
   warned();
+  out.push("", "## Provenance", "", ...provenance);
   return out.join("\n") + "\n";
 }
 
 export function main(args = process.argv.slice(2)) {
   if (args.includes("--help")) {
-    console.log("Usage: npm run osg:support -- <dir>... [--osgo <json>]... [--osgjs <json>]... [--out <file.md>] [--json <file>] [--check <file.md>] [--runs <manifest.json>] [--osg-rev <hex-id>] [--date <yyyy-mm-dd>]"); return 0;
+    console.log("Usage: npm run osg:support -- <dir>... [--recorded <inventory.json>] [--osgo <json>]... [--osgjs <json>]... [--out <file.md>] [--json <file>] [--check <file.md>] [--runs <manifest.json>] [--osg-rev <hex-id>] [--date <yyyy-mm-dd>]"); return 0;
   }
   try {
     const directories = [], paths = {osgo: [], osgjs: [], runs: []}, options = {};
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
-      if (["--osgo", "--osgjs", "--out", "--json", "--check", "--runs", "--osg-rev", "--date"].includes(arg)) {
+      if (["--recorded", "--osgo", "--osgjs", "--out", "--json", "--check", "--runs", "--osg-rev", "--date"].includes(arg)) {
         const value = args[++i];
         if (!value || value.startsWith("--")) throw new Error(`${arg} needs a value`);
         if (arg === "--osgo" || arg === "--osgjs" || arg === "--runs") paths[arg.slice(2)].push(value);
@@ -323,11 +358,13 @@ export function main(args = process.argv.slice(2)) {
       } else if (arg.startsWith("-")) throw new Error(`unexpected argument: ${arg}`);
       else directories.push(resolve(arg));
     }
-    if (!directories.length) throw new Error("at least one input directory is required");
+    if (!directories.length && !options.recorded) throw new Error("at least one input directory or --recorded inventory is required");
+    if (options.recorded && (directories.length || Object.values(paths).some((p) => p.length)))
+      throw new Error("--recorded cannot be combined with input directories or run files");
     if (options["osg-rev"] && !/^[a-f0-9]{7,40}$/i.test(options["osg-rev"])) throw new Error("--osg-rev needs a hexadecimal revision id");
     if (options.date && (!/^\d{4}-\d{2}-\d{2}$/.test(options.date) ||
       new Date(options.date).toISOString().slice(0, 10) !== options.date)) throw new Error("--date needs yyyy-mm-dd");
-    const {report, markdown} = generate(directories, paths, options);
+    const {report, markdown} = options.recorded ? generateRecorded(options.recorded, options) : generate(directories, paths, options);
     if (options.check) {
       const old = existsSync(options.check) ? readFileSync(options.check, "utf8") : "";
       if (old !== markdown) {
