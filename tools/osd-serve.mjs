@@ -551,9 +551,10 @@ const server = app.listen(wanted, "127.0.0.1", () => {
   }
 });
 // The parent reuses keep-alive sockets to this listener (fetch pools them).
-// Node's default keepAliveTimeout (5 s) closes an idle socket the parent may
-// pick up for the next door call at that moment ("other side closed", seen on
-// Node 22 between data previews); outlive the client's idle limit instead.
+// On Node 22 a door call between data previews met a socket the server had
+// just closed ("other side closed"); the default keepAliveTimeout (5 s) is the
+// likely race. A longer server timeout is the mitigation; the read-only SQL
+// door's single retry (tools/osd-data.mjs readDoor) is the recovery.
 server.keepAliveTimeout = 65_000;
 server.headersTimeout = 66_000;
 
