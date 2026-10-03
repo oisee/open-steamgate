@@ -71,7 +71,7 @@ function walk(dir, hit = []) {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) walk(full, hit);
-    else hit.push(full);
+    else if (!name.endsWith(".trace.meta.json")) hit.push(full);
   }
   return hit;
 }
@@ -124,6 +124,7 @@ export function declared(file = "src/bsp/apps.json") {
       .flatMap((f) => (existsSync(join(at, f)) && statSync(join(at, f)).isDirectory()
         ? walk(join(at, f)).map((g) => g.slice(at.length + 1).replaceAll("\\", "/"))
         : [f]))
+      .filter(f => !f.endsWith(".trace.meta.json"))
       .sort();
     return {
       app,

@@ -1,134 +1,145 @@
 {
- "generator": "dsl-l3",
- "set": "src/l2demo/fleet.l3.yaml",
- "template": "recipes/l3-ports/iface-sink.tpl",
- "model": "sha256:3fc2d5c3f4806027d5ce7e079ccae70919d2e185179d644b892ff75525c2c10c",
- "lines": [
-  {
-   "line": 1,
-   "template_line": 1,
-   "path": "/source",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 2,
-   "template_line": 2,
-   "path": "/port",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 3,
-   "template_line": 3,
-   "path": "/iface",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 4,
-   "template_line": 4,
-   "path": "/table",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 5,
-   "template_line": 5,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 6,
-   "template_line": 7,
-   "path": "/group/1/name",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 7,
-   "template_line": 7,
-   "path": "/group/2/name",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 8,
-   "template_line": 7,
-   "path": "/group/3/name",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 9,
-   "template_line": 7,
-   "path": "/group/4/name",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 10,
-   "template_line": 7,
-   "path": "/group/5/name",
-   "node": "set/fleet/piles",
-   "set_line": 11
-  },
-  {
-   "line": 11,
-   "template_line": 9,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 12,
-   "template_line": 10,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 13,
-   "template_line": 11,
-   "path": "/seq",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 14,
-   "template_line": 12,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 15,
-   "template_line": 13,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 16,
-   "template_line": 14,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 17,
-   "template_line": 15,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  },
-  {
-   "line": 18,
-   "template_line": 16,
-   "path": "/",
-   "node": "set/fleet/port/alerts",
-   "set_line": 34
-  }
- ]
+  "format": "osd-trace/1",
+  "outputs": [
+    {
+      "file": "zif_l3_fleet_alerts.intf.abap",
+      "lines": [
+        {
+          "line": 1,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 2,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/port"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/set"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 3,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/iface"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 4,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "line": 5,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 6,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/group/1"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/group/1/name"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 5}
+          ]
+        },
+        {
+          "line": 7,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/group/2"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/group/2/name"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 8,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/group/3"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/group/3/name"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 7}
+          ]
+        },
+        {
+          "line": 9,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/group/4"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/group/4/name"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 8}
+          ]
+        },
+        {
+          "line": 10,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/piles", "selector": "/"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/piles", "selector": "/name"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 0},
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 9}
+          ]
+        },
+        {
+          "lines": [11, 12],
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 10}
+          ]
+        },
+        {
+          "line": 13,
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/"},
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/seq"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 12}
+          ]
+        },
+        {
+          "lines": [14, 18],
+          "sources": [
+            {"file": "src/l2demo/fleet.l3.yaml", "node": "set/fleet/port/alerts", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/iface-sink.tpl", "anchor": "<partial>", "offset": 13}
+          ]
+        }
+      ]
+    }
+  ]
 }

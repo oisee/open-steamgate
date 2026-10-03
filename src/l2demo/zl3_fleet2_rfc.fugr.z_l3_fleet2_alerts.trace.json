@@ -1,71 +1,67 @@
 {
-  "source": "src/l2demo/fleet2.l3.yaml",
-  "recipe": "recipes/l3-remote/module.tpl",
-  "lines": [
+  "format": "osd-trace/1",
+  "outputs": [
     {
-      "line": 1,
-      "template_line": 1,
-      "path": "/function_lower"
-    },
-    {
-      "line": 2,
-      "template_line": 2,
-      "path": "/"
-    },
-    {
-      "line": 3,
-      "template_line": 3,
-      "path": "/"
-    },
-    {
-      "line": 4,
-      "template_line": 4,
-      "path": "/"
-    },
-    {
-      "line": 5,
-      "template_line": 5,
-      "path": "/"
-    },
-    {
-      "line": 6,
-      "template_line": 6,
-      "path": "/"
-    },
-    {
-      "line": 7,
-      "template_line": 7,
-      "path": "/runner"
-    },
-    {
-      "line": 8,
-      "template_line": 8,
-      "path": "/"
-    },
-    {
-      "line": 9,
-      "template_line": 9,
-      "path": "/"
-    },
-    {
-      "line": 10,
-      "template_line": 10,
-      "path": "/"
-    },
-    {
-      "line": 11,
-      "template_line": 11,
-      "path": "/runner"
-    },
-    {
-      "line": 12,
-      "template_line": 12,
-      "path": "/"
-    },
-    {
-      "line": 13,
-      "template_line": 13,
-      "path": "/"
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "lines": [
+        {
+          "line": 1,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/alerts/variant/remote", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/alerts/variant/remote", "selector": "/function_lower"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-remote/module.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "lines": [2, 6],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/alerts/variant/remote", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-remote/module.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 7,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/alerts/variant/remote", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/alerts/variant/remote", "selector": "/runner"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-remote/module.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "lines": [8, 10],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/alerts/variant/remote", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-remote/module.tpl", "anchor": "<partial>", "offset": 7}
+          ]
+        },
+        {
+          "line": 11,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/alerts/variant/remote", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/alerts/variant/remote", "selector": "/runner"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-remote/module.tpl", "anchor": "<partial>", "offset": 10}
+          ]
+        },
+        {
+          "lines": [12, 13],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/alerts/variant/remote", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-remote/module.tpl", "anchor": "<partial>", "offset": 11}
+          ]
+        }
+      ]
     }
   ]
 }

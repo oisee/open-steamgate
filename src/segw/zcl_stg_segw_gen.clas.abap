@@ -915,6 +915,8 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
 
   METHOD generate.
     DATA ls_model TYPE ty_model.
+    DATA ls_mpc_meta TYPE ty_file.
+    DATA ls_dpc_meta TYPE ty_file.
     DATA ls_file  TYPE ty_file.
     DATA ls_result TYPE zcl_osd_tpl=>ty_result.
     DATA lo_json TYPE REF TO zif_ajson.
@@ -942,6 +944,11 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
         ls_file-content = zcl_osd_dsl_trace=>sidecar(
           iv_generator = 'dsl-mpc' iv_template = 'mpc_class'
           io_model = lo_json is_result = ls_result iv_model_json = lv_model_json ).
+        ls_mpc_meta-name = file_name( iv_class = ls_model-mpc iv_ext = '.clas.trace.meta.json' ).
+        ls_mpc_meta-content = zcl_osd_dsl_trace=>metadata(
+          iv_generator = 'dsl-mpc' iv_template = 'mpc_class'
+          io_model = lo_json is_result = ls_result iv_model_json = lv_model_json ).
+        APPEND ls_mpc_meta TO rt_files.
       CATCH cx_static_check INTO lx_error.
         RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
           EXPORTING message = |{ ls_model-mpc }: { lx_error->get_text( ) }|.
@@ -975,6 +982,11 @@ CLASS zcl_stg_segw_gen IMPLEMENTATION.
           ls_trace-content = zcl_osd_dsl_trace=>sidecar(
             iv_generator = 'dsl-dpc' iv_template = 'dpc_class'
             io_model = lo_json is_result = ls_result iv_model_json = lv_model_json ).
+          ls_dpc_meta-name = file_name( iv_class = ls_model-dpc iv_ext = '.clas.trace.meta.json' ).
+          ls_dpc_meta-content = zcl_osd_dsl_trace=>metadata(
+            iv_generator = 'dsl-dpc' iv_template = 'dpc_class'
+            io_model = lo_json is_result = ls_result iv_model_json = lv_model_json ).
+          APPEND ls_dpc_meta TO rt_files.
         CATCH cx_static_check INTO lx_error.
           RAISE EXCEPTION TYPE /iwbep/cx_mgw_busi_exception
             EXPORTING message = |{ ls_model-dpc }: { lx_error->get_text( ) }|.

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Render a report selection model through the L1 recipes.
-import {readFileSync, writeFileSync} from "node:fs";
-import {join, resolve} from "node:path";
+import {convertTrace, legacyTrace, legacyEntries, traceArgs} from "./dsl-trace.mjs";
+import {readFileSync, readdirSync, writeFileSync} from "node:fs";
+import {basename, join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {reportModel} from "./dsl-report-model.mjs";
 import {renderWithEngine} from "./dsl-build.mjs";
@@ -29,13 +30,16 @@ export async function renderReport(kind, report, {out} = {}) {
   });
   if (out) {
     writeFileSync(out, rendered.text);
-    writeFileSync(`${out}.trace.json`, `${JSON.stringify(trace, null, 2)}\n`);
+    const source = report.endsWith(".prog.abap") ? report : join(report, readdirSync(report).find(file => file.endsWith(".prog.abap")));
+    const pair = convertTrace(trace, {[basename(out)]: rendered.text}, {model, generator: "dsl-report", source, recipe: `recipes/${recipe}/template.tpl`});
+    writeFileSync(`${out}.trace.json`, legacyTrace() ? `${JSON.stringify(legacyEntries(trace), null, 2)}\n` : pair.trace);
+    if (!legacyTrace()) writeFileSync(`${out}.trace.meta.json`, pair.meta);
   }
   return {model, text: rendered.text, trace};
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const [command, report, ...rest] = process.argv.slice(2);
+  const [command, report, ...rest] = traceArgs(process.argv.slice(2));
   if (!report || !["model", "help", "manpage", "args"].includes(command)) {
     throw new Error("usage: node tools/dsl-report.mjs model|help|manpage|args <report> [--out <file>]");
   }

@@ -1,3 +1,4 @@
+import {readJSONFile} from "./trace-reader.mjs";
 import {expect} from "chai";
 import {mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -74,7 +75,7 @@ describe("report selection L1", function () {
         const out = join(dir, kind);
         const result = await renderReport(kind, sample, {out});
         expect(readFileSync(out, "utf8")).to.equal(result.text);
-        expect(JSON.parse(readFileSync(`${out}.trace.json`, "utf8"))).to.deep.equal(result.trace);
+        expect(readJSONFile(`${out}.trace.json`, "utf8").lines.map(({sources,locations,file,contributors,...line}) => line)).to.deep.equal(result.trace.map(({contributors,...line}) => ({...line,...(line.nodes ? {nodes:[...line.nodes].sort()} : {})})));
       }
     } finally {
       rmSync(dir, {recursive: true, force: true});

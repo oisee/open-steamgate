@@ -1,0 +1,169 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l3",
+  "generator_version": "0.7",
+  "lines": [
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"},
+          "template": "main",
+          "template_line": 1
+        },
+        {
+          "invocation": 1,
+          "path": "/source",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/source"},
+          "template": "main",
+          "template_line": 1
+        }
+      ],
+      "file": "zif_l3_fleet2_close.intf.abap",
+      "line": 1,
+      "node": "set/fleet2/port/close",
+      "path": "/source",
+      "set_line": 63,
+      "template": "main",
+      "template_line": 1
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/port",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/port"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/set",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/set"},
+          "template": "main",
+          "template_line": 2
+        }
+      ],
+      "file": "zif_l3_fleet2_close.intf.abap",
+      "line": 2,
+      "node": "set/fleet2/port/close",
+      "path": "/port",
+      "set_line": 63,
+      "template": "main",
+      "template_line": 2
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"},
+          "template": "main",
+          "template_line": 3
+        },
+        {
+          "invocation": 1,
+          "path": "/iface",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/iface"},
+          "template": "main",
+          "template_line": 3
+        }
+      ],
+      "file": "zif_l3_fleet2_close.intf.abap",
+      "line": 3,
+      "node": "set/fleet2/port/close",
+      "path": "/iface",
+      "set_line": 63,
+      "template": "main",
+      "template_line": 3
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"},
+          "template": "main",
+          "template_line": 4
+        }
+      ],
+      "file": "zif_l3_fleet2_close.intf.abap",
+      "line": 4,
+      "node": "set/fleet2/port/close",
+      "path": "/",
+      "set_line": 63,
+      "template": "main",
+      "template_line": 4
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"},
+          "template": "main",
+          "template_line": 5
+        }
+      ],
+      "file": "zif_l3_fleet2_close.intf.abap",
+      "line": 5,
+      "node": "set/fleet2/port/close",
+      "path": "/",
+      "set_line": 63,
+      "template": "main",
+      "template_line": 5
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"},
+          "template": "main",
+          "template_line": 6
+        }
+      ],
+      "file": "zif_l3_fleet2_close.intf.abap",
+      "line": 6,
+      "node": "set/fleet2/port/close",
+      "path": "/",
+      "set_line": 63,
+      "template": "main",
+      "template_line": 6
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/close", "selector": "/"},
+          "template": "main",
+          "template_line": 7
+        }
+      ],
+      "file": "zif_l3_fleet2_close.intf.abap",
+      "line": 7,
+      "node": "set/fleet2/port/close",
+      "path": "/",
+      "set_line": 63,
+      "template": "main",
+      "template_line": 7
+    }
+  ],
+  "model": "sha256:89d438d2236551994a7c2f8d0ebe52971989cec86fd090a098ca34338896e8e1",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "zif_l3_fleet2_close.intf.abap", "hash": "sha256:e8b7c35ee3b6e7e039c002edfb34a37c7807dfedef7244ed8f18b1798d6cd39f"}
+  ],
+  "set": "src/l2demo/fleet2.l3.yaml",
+  "template": "recipes/l3-ports/iface-autoclose.tpl",
+  "templates": {"recipes/l3-ports/iface-autoclose.tpl": "sha256:c2a5c5718da4a74c3df04158f062545deaad74f0cbac397d243ac47726a32008"}
+}

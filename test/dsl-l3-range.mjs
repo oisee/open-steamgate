@@ -192,7 +192,8 @@ describe("DSL L3: a range set parameter", function () {
   describe("on a file database", () => {
     let dir, dbPath, envBefore, priorAbap, priorContext, abap, client, dialogStep, drainJobOutbox, workQueuedBatch, store, classesBefore;
     const root = process.cwd();
-    const model = compileSet(SET);
+    let model;
+    before(() => { model = compileSet(SET); });
     const cls = () => abap.Classes.ZCL_L3_FLEET3;
     const conf = () => abap.Classes.ZCL_L3_FLEET3_CONF;
     const date = () => new abap.types.Date().set(DATE);
