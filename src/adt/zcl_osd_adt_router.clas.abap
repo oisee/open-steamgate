@@ -194,6 +194,15 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/oo/classrun/:name`
       iv_handler = `ZCL_OSD_ADT_CLASSRUN` iv_served_by = lv_classrun_by
       CHANGING ct_routes = rt_routes ).
+*   A8a: thin introspection documents over SYSTEM raw.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/build`
+      iv_handler = `ZCL_OSD_ADT_INTROSPECT` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/changed`
+      iv_handler = `ZCL_OSD_ADT_INTROSPECT` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/services`
+      iv_handler = `ZCL_OSD_ADT_INTROSPECT` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/transactions`
+      iv_handler = `ZCL_OSD_ADT_INTROSPECT` CHANGING ct_routes = rt_routes ).
 *   everything else is still the Node facade's, until its group moves
     add( EXPORTING iv_method = `*` iv_pattern = `/sap/bc/adt/*` iv_served_by = c_host
          CHANGING ct_routes = rt_routes ).

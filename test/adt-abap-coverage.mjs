@@ -92,11 +92,6 @@ const PORT_PENDING = [
   "POST /sap/bc/adt/abapsource/occurencemarkers",
   // A3b: reentrance ticket
   "GET /sap/bc/adt/core/http/reentranceticket",
-  // A8a: thin introspection rows
-  "GET /sap/bc/adt/core/http/build",
-  "GET /sap/bc/adt/core/http/changed",
-  "GET /sap/bc/adt/core/http/services",
-  "GET /sap/bc/adt/core/http/transactions",
   // A9: xref
   "GET /sap/bc/adt/core/http/xref/readers",
   "GET /sap/bc/adt/core/http/xref/closure",

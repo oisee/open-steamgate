@@ -38,6 +38,9 @@ const SYSINFO = "/sap/bc/adt/core/http/systeminformation";
 
 // what the ABAP serves today; the gate grows with every route that moves
 const PORTED = [
+  ...["build", "changed", "services", "transactions"].flatMap((route) => [
+    ["GET", `/sap/bc/adt/core/http/${route}`], ["HEAD", `/sap/bc/adt/core/http/${route}`],
+  ]),
   ["GET", SYSINFO],
   ["HEAD", SYSINFO],
   ["GET", "/sap/bc/adt/compatibility/graph"],
