@@ -464,3 +464,44 @@ FUGR and FUNC) and its self-hosted compiler (GENERATE from M2). Labels follow "o
   names, subrc 4 / LINE / WORD from the check, lifetime of the internal session, PERFORM USING fixed. The preview
   and OSGo keep the refusal. [M]
 - nice: P6, FUGR and FUNC creation (always cold, live after the step). [M]
+
+## Reentrance ticket: timestamp arithmetic (2026-10-03, A3b)
+
+Not an SAP/open-abap discrepancy (nothing was measured on a system), so it
+lives here rather than in ANORMALIES: the reentrance route needs epoch
+milliseconds, and `CL_ABAP_TSTMP=>SUBTRACT` on the locked open-abap-core
+returns whole seconds. Owner: adt-i5. Open question for whoever needs it: what
+SUBTRACT returns on a real kernel (an A4H probe; not a blocker).
+
+
+- Status: `documented`; the route retains millisecond arithmetic.
+- Discovery date: `2026-10-03`; corrected after critic round 1.
+- Affected API: `CL_ABAP_TSTMP=>SUBTRACT` in open-abap-core at
+  `8b397be863e805182c32e4bbb8bedbd291619f58` (`libs.lock.json`), whose
+  return type is `i` (whole seconds).
+- Executable observation: `subtract_precision` in
+  `src/adt/zcl_osd_adt_reentrance.clas.testclasses.abap`, registered in
+  `test/adt-abap-a3b.mjs`. Both operands are `TIMESTAMPL`: literal
+  `20261003123456.9980000` and epoch `19700101000000.0000000`.
+  SUBTRACT returns `1791030896`; multiplying by 1000 gives `1791030896000`,
+  losing 998 milliseconds. The same test calls SUBTRACT with a live
+  `GET TIME STAMP FIELD` value and verifies the discarded fraction.
+- Exact command (after `npm run transpile`): `OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node_modules/.bin/mocha test/adt-abap-a3b.mjs --grep subtract_precision`.
+- Expected route arithmetic: milliseconds since 1970, within the request's
+  time window. This is the Node route's numeric contract, not a new
+  SAP-system measurement or a claim that SUBTRACT promises milliseconds.
+- Correction: the initial implementation was reported to answer 500 with
+  `The number NaN cannot be converted to a BigInt because it is not an integer`.
+  Its exact original operands and assignment were not preserved. Literal
+  and live long-timestamp probes on the locked substrate do not reproduce
+  that dump. The `default clock` route test bypasses SUBTRACT and is a
+  regression test, not a reproducer of the reported dump.
+- Route implementation: calculate UTC epoch milliseconds from date and
+  time differences, adding the first three fractional digits as text. For
+  the literal above, `unix_ms` returns `1791030896998`. Retained to satisfy
+  the millisecond contract and avoid the packed-to-Number precision loss
+  documented in the A2 timestamp observation above; no runtime change.
+- Regression: `test/adt-abap-a3b.mjs`, `clock`, `subtract_precision` and
+  `default clock`.
+- Upstream: none; whole-second return is the locked API's declared contract,
+  and the originally reported dump is unconfirmed.
