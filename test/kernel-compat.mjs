@@ -20,7 +20,7 @@ describe("folder unit kernel compatibility", function () {
     assert.deepEqual(kernelWarnings(bitsFixture).map((w) => w.form),
       ["BIT-AND on i", "BIT-OR on int8", "BIT-XOR on i", "BIT-NOT on int8"]);
     for (const w of warnings) {
-      assert.deepEqual(Object.keys(w), ["file", "line", "kind", "form", "message"]);
+      assert.deepEqual(Object.keys(w), ["file", "line", "kind", "form", "message", "supportAnchor"]);
       assert.equal(w.kind, "kernel-reject");
       assert.equal(w.file, "zcl_kernel_compat.clas.abap");
     }

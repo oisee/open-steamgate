@@ -108,6 +108,12 @@ describe("packaging: test-only ABAP stays out of a system seed", function () {
       }
       expect(existsSync(join(scratch, "test", "start.mjs"))).to.equal(true);
       expect(existsSync(join(scratch, "test", "integration", "zosd_voyage.prog.abap"))).to.equal(false);
+      for (const name of ["sessions", "logoff"]) {
+        const cls = join("src", "adt", `zcl_osd_adt_${name}.clas`);
+        expect(existsSync(join(root, `${cls}.testclasses.abap`)), "checkout keeps the unit tests").to.equal(true);
+        expect(existsSync(join(scratch, `${cls}.testclasses.abap`)), "tests require the excluded session double").to.equal(false);
+        for (const ext of ["abap", "xml"]) expect(existsSync(join(scratch, `${cls}.${ext}`)), "product class stays").to.equal(true);
+      }
     } finally {
       // the libraries arrive with the read-only modes of their locked clones
       const writable = (path) => {

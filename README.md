@@ -164,6 +164,69 @@ Each invocation owns its output and database; parallel runs leave the input
 folder, `output/` and `build/live` untouched. The Go command additionally accepts
 `--jobs N` (default 4) and needs Go 1.26.
 
+[The generated support page](docs/osg-support.md) inventories statements, built-ins,
+elementary declarations and conversions, joins per-class results for both runtimes,
+and lists kernel compatibility warnings. It is evidence from a corpus, not a specification.
+Regenerate from a read-only ABAPiti checkout with the commands below; flatten the
+split fixtures as the ABAPiti CI does, and repeat the two runtime commands for
+any extra `qjs`, `mono` and `int8` folders under `.local/abapiti`. Retain JSON from partial runs so passing and failing classes keep their results.
+Declare full-folder runs using `--runs <manifest.json>`; each array entry has
+`folder` (input basename), `runtime` (`osgo` or `osgjs`) and `file` (relative to
+that manifest), or `reason` for a crash without class results. Full-folder runs
+covering every test owner with all rows SUCCESS credit helper classes as
+exercised by their tests; partial
+runs with failures leave helpers fails/unknown; missing test owners leave helpers
+and omitted owners with no evidence. Plain `--osgo`/`--osgjs` files give per-class
+evidence only, which is safe for runs restricted with `--class`.
+
+Editors can import `kernelWarnings` and `KERNEL_FORMS` from
+`tools/osd-kernel-compat.mjs`, then call `kernelWarnings([{file, source}])` on
+unsaved buffers. Each finding includes file, line, form, message and
+`supportAnchor`, a stable link into this page; `KERNEL_FORMS` lists the fixed
+anchors and titles. Show findings as Error diagnostics by default while allowing
+the code to run. `osg.kernelStrict: "refuse"` opts into refusal, matching the
+unit runners' `--kernel-strict` mode.
+
+```sh
+mkdir -p .local/support-work/go-cache .local/support-work/go-tmp
+export GOTOOLCHAIN=go1.26.0 GOFLAGS=-buildvcs=false
+export GOCACHE="$PWD/.local/support-work/go-cache" GOTMPDIR="$PWD/.local/support-work/go-tmp"
+export ABAPITI_TEST_OUT="$PWD/.local/support-work/corpus"
+OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'cd .local/abapiti-src && go test ./wasm -run "^TestOSD_EmitUnitClasses$" -count=1'
+cp .local/support-work/corpus/TestOSD_EmitUnitClasses/split/*.abap .local/support-work/corpus/TestOSD_EmitUnitClasses/
+rm -r .local/support-work/corpus/TestOSD_EmitUnitClasses/split
+OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'timeout 1200 npm run -s osgo:unit -- .local/support-work/corpus/TestOSD_EmitUnitClasses --json > .local/support-work/osgo-corpus.json'
+OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'timeout 1200 npm run -s osgjs:unit -- .local/support-work/corpus/TestOSD_EmitUnitClasses --json > .local/support-work/osgjs-corpus.json'
+npm run osg:support -- .local/support-work/corpus/TestOSD_EmitUnitClasses --osgo .local/support-work/osgo-corpus.json --osgjs .local/support-work/osgjs-corpus.json --out docs/osg-support.md --json .local/support-work/support.json
+# Append extra input folders and partial or successful --osgo/--osgjs files.
+# To credit helpers, create a full-folder manifest (paths relative to this JSON):
+# Run each extra folder on both runtimes with the same commands and timeout,
+# writing osgo-{int8,mono,qjs}.json and osgjs-{int8,mono,qjs}.json.
+# The committed page uses the following recorded results (retain crash reasons):
+cat > .local/support-work/runs.json <<'JSON'
+[
+  {"folder":"TestOSD_EmitUnitClasses","runtime":"osgo","file":"osgo-corpus.json"},
+  {"folder":"TestOSD_EmitUnitClasses","runtime":"osgjs","reason":"memory access out of bounds (73 s; no class results)"},
+  {"folder":"int8","runtime":"osgo","file":"osgo-int8.json"},
+  {"folder":"int8","runtime":"osgjs","file":"osgjs-int8.json"},
+  {"folder":"mono","runtime":"osgo","file":"osgo-mono.json"},
+  {"folder":"mono","runtime":"osgjs","file":"osgjs-mono.json"},
+  {"folder":"qjs","runtime":"osgo","file":"osgo-qjs.json"},
+  {"folder":"qjs","runtime":"osgjs","reason":"SIGABRT: heap exhaustion (439 s; no class results)"}
+]
+JSON
+# Exact command for the committed page:
+npm run osg:support -- .local/support-work/corpus/TestOSD_EmitUnitClasses .local/abapiti/int8 .local/abapiti/mono .local/abapiti/qjs --runs .local/support-work/runs.json --out docs/osg-support.md --json .local/support-work/support.json
+# Replace --out with --check docs/osg-support.md to compare without writing.
+```
+
+The header identifies generator content by combining the git blob hashes of
+`tools/osg-support.mjs` and `tools/osd-kernel-compat.mjs` into a short SHA-256 id,
+and lists both files and their blob hashes. The default date comes from the
+external ABAPiti commit, which is immutable; rebasing or squash-merging OSG
+therefore leaves the page and its exact `--check` comparison unchanged.
+To override metadata explicitly, append `--osg-rev <hex-id> --date <yyyy-mm-dd>`.
+
 ## Architecture
 
 ```mermaid

@@ -53,6 +53,7 @@
     "gogen": [
       "test/osgo-unit.mjs",
       "test/kernel-compat.mjs",
+      "test/osg-support.mjs",
       "test/osgjs-unit.mjs"
     ]
   }

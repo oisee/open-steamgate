@@ -79,7 +79,10 @@ describe("osgjs unit CI entry point", function () {
   });
   it("runs the ABAPiti M1 input: 14 SUCCESS without writing its folder", () => {
     const supplied = join(root, ".local/abapiti");
-    const dir = existsSync(supplied) ? supplied : input;
+    // Extra corpus folders alone are not the two M1 owner/test pairs.
+    const hasM1 = ["add", "factorial"].every((name) => ["abap", "testclasses.abap"]
+      .every((suffix) => existsSync(join(supplied, `zcl_abapiti_${name}.clas.${suffix}`))));
+    const dir = hasM1 ? supplied : input;
     if (dir === input) for (const name of ["add", "factorial"]) {
       const fixtures = join(root, "test/fixtures/osgjs-unit-m1");
       writeFileSync(join(input, `zcl_abapiti_${name}.clas.abap`), readFileSync(join(fixtures, `${name}.abap`)));

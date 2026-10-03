@@ -1,0 +1,73 @@
+{
+  "classes": 1,
+  "compiled": 1,
+  "totals": {
+    "success": 6,
+    "failure": 0,
+    "not_compiled": 0,
+    "error": 0,
+    "tests": 6
+  },
+  "rows": [
+    {
+      "class": "ZCL_ABAPITI_INT8X",
+      "testclass": "LTCL_INT8X",
+      "method": "TO_X8_NEGATIVE",
+      "status": "SUCCESS",
+      "message": "",
+      "alerts": [
+        "->* of a data"
+      ]
+    },
+    {
+      "class": "ZCL_ABAPITI_INT8X",
+      "testclass": "LTCL_INT8X",
+      "method": "TO_X8_PATTERN",
+      "status": "SUCCESS",
+      "message": "",
+      "alerts": [
+        "->* of a data"
+      ]
+    },
+    {
+      "class": "ZCL_ABAPITI_INT8X",
+      "testclass": "LTCL_INT8X",
+      "method": "X8_BACK",
+      "status": "SUCCESS",
+      "message": "",
+      "alerts": [
+        "->* of a data"
+      ]
+    },
+    {
+      "class": "ZCL_ABAPITI_INT8X",
+      "testclass": "LTCL_INT8X",
+      "method": "TO_X4_TRUNCATES",
+      "status": "SUCCESS",
+      "message": "",
+      "alerts": [
+        "->* of a data"
+      ]
+    },
+    {
+      "class": "ZCL_ABAPITI_INT8X",
+      "testclass": "LTCL_INT8X",
+      "method": "TO_X16_PADS",
+      "status": "SUCCESS",
+      "message": "",
+      "alerts": [
+        "->* of a data"
+      ]
+    },
+    {
+      "class": "ZCL_ABAPITI_INT8X",
+      "testclass": "LTCL_INT8X",
+      "method": "TO_X16_PADS_NEGATIVE",
+      "status": "SUCCESS",
+      "message": "",
+      "alerts": [
+        "->* of a data"
+      ]
+    }
+  ]
+}
