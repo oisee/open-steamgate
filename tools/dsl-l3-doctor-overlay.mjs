@@ -27,10 +27,26 @@ export function doctorOverlay(model, text, kind) {
 `;
       text = text.replace(/(  METHOD heal\.[\s\S]*?)(  ENDMETHOD\.)/, (_, body, end) => body.replace("{{#settings}}\n    gs_settings-vals = ls_pass.", dispatch + "{{#settings}}\n    gs_settings-vals = ls_pass.") + end);
     }
+    text = text.replace(/(  METHOD run_rule\.[\s\S]*?)(  ENDMETHOD\.)/, (_, body, end) => {
+      const guard = "        IF owns_pile( ls_pile ) = abap_false.\n          rs_rule-status = 'STALE-JOB'.\n          RETURN.\n        ENDIF.\n";
+      body = body.replace(/        (fill|write)\( EXPORTING /g, (sink) => guard + sink);
+      const at = body.lastIndexOf("    save_pile( ls_pile ).");
+      if (at < 0) throw new Error("doctor recipe needs the pile execution tail");
+      body = body.slice(0, at) + body.slice(at).replace("    save_pile( ls_pile ).", "    save_pile( is_pile = ls_pile iv_owned = abap_true ).");
+      return body + end;
+    });
     if (model.release_event) text = governorTemplate(text, JSON.parse(readFileSync("recipes/l3-doctor/release.patch.json", "utf8")).filter((p) => !p.governor || model.governor));
     if (model.autodoctor.arm_job) text = text.replace(/(  METHOD run\.[\s\S]*?)(  ENDMETHOD\.)/, "$1    IF iv_mode = c_parallel AND rs_result-status = 'SUBMITTED'.\n      arm_doctor_job( ).\n    ENDIF.\n$2");
     if (model.daemon) text = text.replace(/(  METHOD run\.[\s\S]*?)(  ENDMETHOD\.)/, "$1{{#daemon}}\n    IF iv_mode = c_parallel AND rs_result-status = 'SUBMITTED'.\n      start_daemon( ).\n    ENDIF.\n{{/daemon}}\n$2");
-    if (!model.resilience.doctor.job) text = text.replace("    schedule_doctor( ).", "").replace("    rs_deleted = unschedule_doctor( ).", "");
+    if (model.daemon) {
+      const wake = "{{#daemon}}\n    start_daemon( ).\n{{/daemon}}\n";
+      for (const method of ["clear_kill", "release_pile"]) {
+        const pattern = new RegExp(`(  METHOD ${method}\\.[\\s\\S]*?)(    rv_ok = abap_true\\.)`);
+        text = text.replace(pattern, (_, body, end) => body + wake + end);
+      }
+      text = text.replace(/(  METHOD set_kill\.[\s\S]*?)(    rv_ok = abap_true\.)/, "$1{{#daemon}}\n    stop_daemon( ).\n    watcher_audit( 'DMN-KILL' ).\n{{/daemon}}\n$2");
+    }
+    if (!model.resilience.doctor.job) text = text.replace("    schedule_doctor( ).\n", "").replace('    " the doctor goes with the schedule, as a periodic job of its own\n', "").replace('    " the doctor\'s job goes with the schedule\n', "").replace("    rs_deleted = unschedule_doctor( ).\n", "");
     text = text.replace(/ENDCLASS\.\s*$/, readFileSync("recipes/l3-doctor/runner.tpl", "utf8") + "ENDCLASS.\n");
   }
   return text;

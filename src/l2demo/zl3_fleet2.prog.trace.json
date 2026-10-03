@@ -664,6 +664,41 @@
   {
    "line": 89,
    "template_line": 106,
+   "path": "/staged",
+   "node": "set/fleet2/stages",
+   "set_line": 20
+  },
+  {
+   "line": 90,
+   "template_line": 107,
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 15
+  },
+  {
+   "line": 91,
+   "template_line": 109,
+   "path": "/with_params",
+   "node": "set/fleet2/params",
+   "set_line": 18
+  },
+  {
+   "line": 92,
+   "template_line": 111,
+   "path": "/staged",
+   "node": "set/fleet2/stages",
+   "set_line": 20
+  },
+  {
+   "line": 93,
+   "template_line": 112,
+   "path": "/staged",
+   "node": "set/fleet2/stages",
+   "set_line": 20
+  },
+  {
+   "line": 94,
+   "template_line": 115,
    "path": "/class",
    "node": "set/fleet2",
    "set_line": 15

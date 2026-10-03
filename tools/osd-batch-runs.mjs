@@ -864,11 +864,17 @@ export async function workQueuedBatch(root, store, execute = runConvertedBatch) 
   try {
     result = await execute(root, step?.program ?? run.program, step?.input ?? run.input, run.generation);
   } catch (error) {
+    if (store.db.prepare("SELECT state FROM batch_runs WHERE id = ?").get(run.id)?.state === "INTERRUPTED") {
+      return {kind: "interrupted", run: store.get(run.id)};
+    }
     try {
       if (step) store.failStep(run.id, step.number, error);
       else store.fail(run.id, error);
     } catch (recordError) { throw resultRecordingError(run.id, step?.number, recordError, error); }
     return {kind: "failed", run: store.get(run.id)};
+  }
+  if (store.db.prepare("SELECT state FROM batch_runs WHERE id = ?").get(run.id)?.state === "INTERRUPTED") {
+    return {kind: "interrupted", run: store.get(run.id)};
   }
   try {
     if (step) return store.finishStep(run.id, step.number, result);

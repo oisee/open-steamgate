@@ -65,6 +65,9 @@ export function compileResilience(doc, {id, set, line, fail, staged, sink, sched
   if (!Array.isArray(mechanisms) || !mechanisms.length || mechanisms.some((m) => !["daemon", "event", "job"].includes(m)) || new Set(mechanisms).size !== mechanisms.length) {
     fail(line("resilience/doctor/as"), "doctor.as is a nonempty list of distinct daemon, event, job mechanisms");
   }
+  if (!mechanisms.includes("daemon") && !mechanisms.includes("job")) {
+    fail(line("resilience/doctor/as"), "doctor.as needs daemon or job to catch a silent live job");
+  }
   const doctor = node("doctor", {mechanisms,
     tick: whole(doctorSpec.tick ?? "10", {min: 1, max: 3600, at: line("resilience/doctor/tick"), fail, what: "doctor.tick"}),
     every: whole(doctorSpec.every ?? "15", {min: 1, max: 99, at: line("resilience/doctor/every"), fail, what: "doctor.every (minutes)"}),

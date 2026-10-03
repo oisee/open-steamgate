@@ -36,7 +36,7 @@
       "        ELSEIF lv_finished = 'X' OR lv_aborted = 'X'.\n          lv_reason = 'JOB-ENDED'.\n        ENDIF.\n      ENDIF.\n"
     ],
     "after": [
-      "        ELSEIF lv_finished = 'X' OR lv_aborted = 'X'.\n          lv_reason = 'JOB-ENDED'.\n{{#autodoctor}}\n        ELSEIF lv_running = 'X' AND ls_pile-status = 'RUNNING' AND ls_pile-started <= lv_stale.\n          lv_reason = 'JOB-SILENT'.\n{{/autodoctor}}\n        ENDIF.\n      ENDIF.\n"
+      "        ELSEIF lv_finished = 'X' OR lv_aborted = 'X'.\n          lv_reason = 'JOB-ENDED'.\n{{#autodoctor}}\n        ELSEIF lv_running = 'X' AND ls_pile-status = 'RUNNING' AND ls_pile-started <= lv_stale.\n          CALL FUNCTION 'BP_JOB_ABORT' EXPORTING jobname = ls_pile-job_name jobcount = ls_pile-job_count\n            EXCEPTIONS OTHERS = 1.\n          IF sy-subrc <> 0.\n            CONTINUE.\n          ENDIF.\n          act( EXPORTING iv_run = iv_run iv_date = iv_date iv_stage = ls_pile-stage_no\n            iv_rule = ls_pile-rule_name iv_pile = ls_pile-pile_no iv_action = 'JOB-ABORT'\n            iv_reason = 'JOB-SILENT' iv_now = iv_now CHANGING ct_report = ct_report ).\n          lv_reason = 'JOB-SILENT'.\n{{/autodoctor}}\n        ENDIF.\n      ENDIF.\n"
     ]
   },
   {
@@ -45,6 +45,22 @@
     ],
     "after": [
       "    APPEND LINES OF lt_purged TO rt_report.\n{{#autodoctor}}\n{{#release_event}}\n    release_events( ).\n{{/release_event}}\n    count_runs( ).\n{{/autodoctor}}\n  ENDMETHOD."
+    ]
+  },
+  {
+    "before": [
+      "      IMPORTING is_pile TYPE zosd_l3_pile."
+    ],
+    "after": [
+      "      IMPORTING is_pile TYPE zosd_l3_pile\n                iv_owned TYPE abap_bool DEFAULT abap_false.\n    CLASS-METHODS owns_pile IMPORTING is_pile TYPE zosd_l3_pile\n      RETURNING VALUE(rv_ok) TYPE abap_bool."
+    ]
+  },
+  {
+    "before": [
+      "  METHOD save_pile.\n"
+    ],
+    "after": [
+      "  METHOD save_pile.\n    IF iv_owned = abap_true AND owns_pile( is_pile ) = abap_false.\n      RETURN.\n    ENDIF.\n"
     ]
   }
 ]

@@ -211,7 +211,13 @@ unknown job.
 On a system `JOB_OPEN` and `JOB_CLOSE` commit the caller's LUW as well; here
 they do not (ANORMALIES.md, job-open-commits).
 
-**Not here:** `BP_JOB_ABORT`. A running instance holds the one work process,
-so nothing could call it while the instance runs; the abort fixture uses an
-instance that ends `A` by itself. It belongs with the multi-work-process
-dispatcher (0.6).
+`BP_JOB_ABORT` now exposes a narrow local subset: only the configured
+caller's exact name/count of an imported RUNNING job can be interrupted.
+It refuses unknown, foreign, pending and ended jobs, marks the active step
+INTERRUPTED and later steps SKIPPED, and emits SAP_END_OF_JOB through the
+existing terminal transition. It never commits the caller's business LUW.
+The single work process cannot preempt ABAP currently executing in its own
+dialog step; it cancels the operations claim. DSL pile attempt fencing
+suppresses late business writes. OS process termination and a multi-work-process
+abort remain outside this subset; the facade is not a measured full SAP
+BP_JOB_ABORT implementation.

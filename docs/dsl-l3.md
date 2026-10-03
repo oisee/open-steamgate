@@ -1083,7 +1083,7 @@ waits; `unschedule( )` deletes the waiting instance of both jobs and answers how
 ### Autonomous doctor (slice 5e)
 
 A parallel run now arms its own watcher; it does not depend on the daily driver
-having run `schedule( )`. The default is one daemon per set. Configure cooperating
+having run `schedule( )`. The default is one daemon per set per creating user (the kernel list is user-scoped). Configure cooperating
 mechanisms in the manifest:
 
 ```yaml
@@ -1098,7 +1098,8 @@ settings:
   tunable: [doctor.tick, piles.lanes]
 ```
 
-`as` is a nonempty list of distinct `daemon`, `event`, `job` values. `tick` is
+`as` is a nonempty list of distinct `daemon`, `event`, `job` values and must
+include `daemon` or `job`: an event alone cannot catch a hung live job. `tick` is
 1..3600 seconds (default 10); `every` is 1..99 minutes (default 15). Unknown keys,
 duplicate mechanisms and invalid numbers are refused at their YAML lines.
 `doctor.tick` is available to `settings.tunable`; it is loaded again at every arm,
@@ -1141,14 +1142,32 @@ executes the forbidden `SUBMIT`, dispatch must instead use the measured-allowed
 on a direct `SUBMIT` or `WAIT` in a callback; they do not prove SAP's FM internals.
 A busy background pool can consequently delay a pass beyond its timer tick.
 
+Kill stops the daemon and audits `DMN-KILL`; `clear_kill`, `resume` and
+`release_pile` start it again. At GLASS the watcher retains its timer but
+submits no pass job until `continue_glass` resumes the run. It queues a pass
+only for an eligible HELD run; one outstanding pass covers all such runs.
+`count_runs` scans all runs of the set and reads their piles, sorting DONE
+durations for each median, on every doctor pass. Its cost grows with retained
+runs and piles, rather than just the currently open work.
+
+With `event`, a pile whose JOB_CLOSE fails, or whose job is deleted before
+start, can leave an orphan SAP_END_OF_JOB watcher. No end event is guaranteed
+for those cases. Automatic watcher cleanup at run end is deferred: the
+current watcher jobs have no durable run association for safe deletion.
+
 The shared doctor immediately marks an aborted/finished/gone job's unfinished
 pile FAILED, without the stale timeout. A still-running job whose RUNNING pile
-has been silent past `stale` is FAILED with `JOB-SILENT`. Retries retain their
+has been silent past `stale` is aborted through `BP_JOB_ABORT`, audited as
+`JOB-ABORT`, then FAILED with `JOB-SILENT`. If abort fails it is left live and
+not retried. Pile sink writes and the execution tail recheck the captured
+job name/count and attempt under the pile lock; a superseded attempt writes
+nothing, including filter worklist keys. Retries retain their
 backoff, retry budget and conditional `UPDATE` claims; manual `Doctor` uses the
 same path. Final autonomous runs are collected and released immediately, so
-there is no stale-lock delay before self-stop. The default pile report tail is
-only `COMMIT WORK` followed by the runner's `pile_done( run, pile )`; gate
-advancement and counting belong to the doctor. Returned HELD/FUSED/KILLED states
+there is no stale-lock delay before self-stop. The pile report tail commits,
+retains `advance( )` as a fallback when a new run finds an old daemon still
+listed until ON_STOP (P11), then calls the runner's `pile_done( run, pile )`.
+The doctor also advances gates and updates the counts. Returned HELD/FUSED/KILLED states
 also commit and notify. A simulated dump never reaches the tail and is detected
 by the timer (or the kernel job-end event).
 

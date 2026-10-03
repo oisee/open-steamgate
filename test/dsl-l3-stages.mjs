@@ -224,11 +224,13 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
       expect(runner.join("\n")).to.include("zcl_l2_ship_busy=>keys( iv_date = iv_date it_range = lt_range_1 ).");
     });
 
-    it("the runner ends no unit of work; reports commit before notifying the daemon or advancing a job-mode gate", async () => {
+    it("the runner ends no unit of work; reports commit before advancing a gate and notifying the daemon", async () => {
       expect(unitFindings(readFileSync(join(OUT, `${RUNNER}.clas.abap`), "utf8"), `${RUNNER}.clas.abap`, {writes: true, jobs: true})).to.deep.equal([]);
       const report = readFileSync(join(OUT, `${REPORT}.prog.abap`), "utf8");
-      expect(report).to.include("  COMMIT WORK.\n  zcl_l3_fleet2=>pile_done( iv_run = p_run iv_pile = p_pile ).");
-      expect(report).not.to.include("zcl_l3_fleet2=>advance(");
+      const tail = report.slice(report.indexOf('  WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.'));
+      expect(tail).to.match(/COMMIT WORK\.\n  IF ls_rule-status = 'DONE'\.\n    zcl_l3_fleet2=>advance\(/);
+      expect(tail.indexOf('COMMIT WORK.')).to.be.lessThan(tail.indexOf('=>advance('));
+      expect(tail.indexOf('=>advance(')).to.be.lessThan(tail.indexOf('=>pile_done('));
       const {files} = await renderSet(jobDoctorModel("fleet2"));
       expect(files[`${REPORT}.prog.abap`]).to.match(/IF ls_rule-status = 'DONE'\.\n.*\n    COMMIT WORK\.\n    zcl_l3_fleet2=>advance\(/);
       expect(report).to.include("PARAMETERS p_mode TYPE c LENGTH 1 DEFAULT 'R'.");

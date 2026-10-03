@@ -23,6 +23,12 @@ describe('DSL L3 5e: autonomous doctor', function () {
   const str = (s) => new abap.types.String().set(s);
   const sql = async (s) => client.execute(s);
   const read = (s, ...args) => native.prepare(s).all(...args);
+  async function abandonJobs() {
+    // Every preceding invocation has joined its worker; discard only this test fixture's abandoned jobs.
+    await sql('DELETE FROM zosd_job_step');
+    await sql('DELETE FROM zosd_job_outbox');
+    store.db.prepare("UPDATE batch_runs SET state='FAILED' WHERE state IN ('QUEUED','RUNNING','WAITING')").run();
+  }
   async function work(limit = 1000) {
     await daemonHost(abap).idle();
     await drainJobOutbox(store);
@@ -93,6 +99,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
   beforeEach(async () => {
     await daemonHost(abap).close();
     clock.set(Date.parse('2026-10-01T00:00:00Z'));
+    await abandonJobs();
     for (const table of tables) await sql(`DELETE FROM ${table}`);
     for (const table of ['ship','voy','crew','cargo']) await sql(`DELETE FROM zosd_l2_${table}`);
     await sql("INSERT INTO zosd_l2_ship (mandt,ship_id,name,status) VALUES ('123','S001','Ship','A')");
@@ -179,10 +186,111 @@ describe('DSL L3 5e: autonomous doctor', function () {
     clock.set(Date.parse('2026-10-01T00:16:00Z'));
     await dialogStep(()=>cls().doctor({}));
     expect(read('SELECT status FROM zosd_l3_pile WHERE stage_no=1')[0].status.trim()).to.equal('FAILED');
-    expect(read("SELECT * FROM zosd_l3_doctor WHERE reason='JOB-SILENT'")).to.have.length(1);
-    // End the deliberately silent job so it cannot occupy the next test's slot.
-    store.interruptQueued(claimed.run.id);
+    expect(read("SELECT * FROM zosd_l3_doctor WHERE reason='JOB-SILENT' AND doc_action='FAILED'")).to.have.length(1);
+    expect(store.get(claimed.run.id).state).to.equal('INTERRUPTED');
+    expect(read("SELECT * FROM zosd_l3_doctor WHERE doc_action='JOB-ABORT'")).to.have.length(1);
+    // Save the old attempt's snapshot, then let the retry claim its row.
+    await clock.advance(60000);
+    await dialogStep(()=>cls().doctor({}));
+    await dialogStep(()=>sql("UPDATE zosd_l3_pile SET status='RUNNING' WHERE stage_no=1"));
+    const retry=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
+    expect(retry.attempt).to.equal(pile.attempt+1);
+    expect(retry.job_count).not.to.equal(pile.job_count);
+    // Even a late tail called with the complete old row cannot overwrite the retry.
+    const row = new abap.types.Structure(Object.fromEntries(Object.entries(retry).map(([key,value])=>
+      [key, typeof value==='number' ? new abap.types.Integer().set(value) : new abap.types.String().set(String(value ?? ''))])));
+    row.get().attempt.set(pile.attempt);row.get().job_name.set(pile.job_name);row.get().job_count.set(pile.job_count);
+    row.get().status.set('DONE');
+    await dialogStep(()=>cls().save_pile({is_pile:row,iv_owned:str('X')}));
+    expect(read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0]).to.deep.equal(retry);
   });
+  async function lateAttempt(checkRule = false) {
+    await run();await daemonHost(abap).idle();
+    await daemonHost(abap).close();
+    if (checkRule) await work();
+    const pile=read(`SELECT * FROM zosd_l3_pile WHERE stage_no=${checkRule?2:1}`)[0];
+    await dialogStep(async()=> {
+      await sql("UPDATE zosd_l3_run SET status='HELD'");
+      await sql("UPDATE zosd_l3_budget SET state='RUNNING'");
+      await sql(`UPDATE zosd_l3_pile SET status='PLANNED' WHERE run_id='${pile.run_id}' AND rule_name='${pile.rule_name}' AND pile_no=${pile.pile_no}`);
+    });
+    const beforeWork=read('SELECT * FROM zosd_l3_work'), beforeAlerts=read('SELECT * FROM zosd_l3_alert');
+    const l2=abap.Classes[checkRule?'ZCL_L2_MAINTENANCE_SHIP':'ZCL_L2_SHIP_BUSY'];
+    const method=checkRule?'check':'keys', original=l2[method];
+    l2[method]=async(input)=> {
+      const result=await original.call(l2,input);
+      await sql(`UPDATE zosd_l3_pile SET attempt=attempt+1, job_count='99999999', status='RUNNING' WHERE run_id='${pile.run_id}' AND rule_name='${pile.rule_name}' AND pile_no=${pile.pile_no}`);
+      return result;
+    };
+    let answer, sinkWrites=0;
+    const sink=abap.Classes.ZCL_L3_FLEET2_ALERTS_LOG.prototype, put=sink.zif_l3_fleet2_alerts$put;
+    sink.zif_l3_fleet2_alerts$put=async function(input){sinkWrites++;return put.call(this,input);};
+    try { answer=await dialogStep(()=>cls().run_rule({iv_rule:str(pile.rule_name.trim()),iv_run:str(pile.run_id.trim()),
+      iv_date:new abap.types.Date().set('20261001'),iv_pile:new abap.types.Integer().set(pile.pile_no),iv_bind:str('')})); }
+    finally {l2[method]=original;sink.zif_l3_fleet2_alerts$put=put;}
+    return {sinkWrites,status:answer.get().status.get().trim(), beforeWork,beforeAlerts,
+      work:read('SELECT * FROM zosd_l3_work'),alerts:read('SELECT * FROM zosd_l3_alert'),
+      pile:read('SELECT * FROM zosd_l3_pile WHERE run_id=? AND rule_name=? AND pile_no=?',pile.run_id,pile.rule_name,pile.pile_no)[0]};
+  }
+  it('a superseded attempt writes neither filter keys nor alerts nor the pile tail', async()=> {
+    const filter=await lateAttempt();
+    expect(filter.status).to.equal('STALE-JOB');expect(filter.work).to.deep.equal(filter.beforeWork);
+    expect(filter.pile.status.trim()).to.equal('RUNNING');expect(filter.pile.job_count.trim()).to.equal('99999999');
+    for(const table of tables)await sql(`DELETE FROM ${table}`);
+    await abandonJobs();
+    const check=await lateAttempt(true);
+    expect(check.status).to.equal('STALE-JOB');expect(check.alerts).to.deep.equal(check.beforeAlerts);expect(check.sinkWrites).to.equal(0);
+    expect(check.pile.status.trim()).to.equal('RUNNING');
+  });
+  async function quietHour(kind,ticks=360) {
+    const runId=(await run()).get().run_id.get().trim();
+    await initialPassFirst();
+    if(kind==='kill') {
+      expect((await dialogStep(()=>cls().set_kill({iv_reason:str('operator pause')}))).get()).to.equal('X');
+      await daemonHost(abap).idle();
+    } else await dialogStep(()=>sql("UPDATE zosd_l3_budget SET state='GLASS'"));
+    const count=()=>store.db.prepare("SELECT count(*) n FROM batch_runs WHERE job_name='L3_FLEET2_PASS'").get().n;
+    const before=count();
+    for(let i=0;i<ticks;i++){await clock.advance(10000);await work();}
+    return {runId, passes:count()-before};
+  }
+  it('kill stops and audits the daemon; an hour submits no passes; clear_kill restarts healing',async()=> {
+    const quiet=await quietHour('kill');expect(quiet.passes).to.be.at.most(1);
+    expect(daemonHost(abap).instances.size).to.equal(0);
+    expect(read("SELECT * FROM zosd_l3_doctor WHERE doc_action='DMN-KILL'")).to.have.length(1);
+    await dialogStep(()=>cls().clear_kill({iv_reason:str('operator continue')}));
+    await work();await clock.advance(10000);await work();
+    expect(read("SELECT * FROM zosd_l3_run WHERE status='HELD'")).to.have.length(0);
+  });
+  it('GLASS sleeps for an hour without passes; continue_glass resumes healing',async()=> {
+    const quiet=await quietHour('glass');expect(quiet.passes).to.be.at.most(1);
+    const ok=await dialogStep(()=>cls().continue_glass({iv_run:str(quiet.runId),iv_reason:str('operator continue'),iv_new_glass:new abap.types.Integer().set(10000)}));
+    expect(ok.get()).to.equal('X');await work();await clock.advance(10000);await work();
+    expect(read("SELECT * FROM zosd_l3_run WHERE status='HELD'")).to.have.length(0);
+  });
+  async function stoppingRace() {
+    const manager=abap.Classes.CL_ABAP_DAEMON_CLIENT_MANAGER;
+    const info=manager.get_daemon_info;let saved;
+    manager.get_daemon_info=async(input)=> {const result=await info.call(manager,input);if(result.array().length)saved=result.clone();return result;};
+    try {
+      await run();await daemonHost(abap).idle();
+      await dialogStep(()=>cls().start_daemon());
+      // The last old run ends, and its daemon decides to stop.
+      await dialogStep(()=>sql("UPDATE zosd_l3_run SET status='RELEASED'"));
+      await clock.advance(10000);await daemonHost(abap).idle();
+    }finally{manager.get_daemon_info=info;}
+    expect(saved.array()).to.have.length(1);
+    // Retain the stopped instance in GET_DAEMON_INFO, as SAP does until ON_STOP.
+    await daemonHost(abap).close();
+    await abandonJobs();
+    manager.get_daemon_info=async()=>saved;
+    try {
+      await run('20261002');expect(daemonHost(abap).instances.size).to.equal(0);
+      await work();
+      expect(read("SELECT status FROM zosd_l3_stage WHERE check_date='20261002' AND stage_no=2")[0].status.trim()).to.equal('DONE');
+    }finally{manager.get_daemon_info=info;}
+  }
+  it('a run started while the old daemon awaits ON_STOP still advances through the job tail',stoppingRace);
   it('RunStat equals an independent oracle over every DONE pile', async () => {
     await run();await work();
     await dialogStep(async()=> {
@@ -224,7 +332,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
         await run();expect(daemonHost(abap).instances.size).to.equal(0);
       }],
       ['no-message','zcl_l3_fleet2',t=>t.replace('static async pile_done(INPUT) {','static async pile_done(INPUT) { return;'),async()=>{
-        await run();await initialPassFirst();await work();expect(read("SELECT status FROM zosd_l3_stage WHERE stage_no=2")[0].status.trim()).to.equal('WAITING');
+        await run();await initialPassFirst();await work();expect(read("SELECT * FROM zosd_l3_runstat")[0].piles_done).to.equal(0);
       }],
       ['no-heal','zcl_l3_fleet2',t=>t.replace("lv_reason.set(abap.CharacterFactory.get(9, 'JOB-ENDED'));","lv_reason.clear();"),async()=>{
         const original=abap.Classes.ZCL_L2_SHIP_BUSY.keys;abap.Classes.ZCL_L2_SHIP_BUSY.keys=async()=>{throw new Error('dump');};
@@ -242,8 +350,93 @@ describe('DSL L3 5e: autonomous doctor', function () {
       for(const table of tables) await sql(`DELETE FROM ${table}`);
       await mutant(name,clsName,edit,check);
       // Settle abandoned queued jobs before installing the next mutant.
-      store.db.prepare("UPDATE batch_runs SET state='FAILED' WHERE state IN ('QUEUED','RUNNING','WAITING')").run();
+      await abandonJobs();
     }
+  });
+  it('P2 mutants by copy: missing sink fence, tail fence, abort, GLASS sleep, kill stop or fallback fail their oracles',async()=> {
+    const reset=async()=> {
+      await daemonHost(abap).close();
+      for(const table of tables)await sql(`DELETE FROM ${table}`);
+      await abandonJobs();
+      clock.set(Date.parse('2026-10-01T00:00:00Z'));
+    };
+    await reset();
+    await mutant('no-sink-fence','zcl_l3_fleet2',t=>t.replaceAll('if (abap.compare.eq((await this.owns_pile({is_pile: ls_pile, rv_ok: 1})), abap.builtin.abap_false)) {','if (false) {'),async()=> {
+      const late=await lateAttempt();expect(late.status).not.to.equal('STALE-JOB');expect(late.work).not.to.deep.equal(late.beforeWork);
+    });
+    await reset();
+    await mutant('no-alert-fence','zcl_l3_fleet2',t=>t.replaceAll('if (abap.compare.eq((await this.owns_pile({is_pile: ls_pile, rv_ok: 1})), abap.builtin.abap_false)) {','if (false) {'),async()=> {
+      const late=await lateAttempt(true);expect(late.sinkWrites).to.be.greaterThan(0);
+    });
+    await reset();
+    await mutant('no-tail-fence','zcl_l3_fleet2',t=>t.replace('if (abap.compare.eq(iv_owned, abap.builtin.abap_true) &&', 'if (false &&'),async()=> {
+      await run();await daemonHost(abap).idle();
+      const pile=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
+      const row=new abap.types.Structure(Object.fromEntries(Object.entries(pile).map(([key,value])=>
+        [key,typeof value==='number'?new abap.types.Integer().set(value):str(String(value??''))])));
+      row.get().status.set('DONE');row.get().attempt.set(pile.attempt-1);
+      await dialogStep(()=>cls().save_pile({is_pile:row,iv_owned:str('X')}));
+      expect(read('SELECT status FROM zosd_l3_pile WHERE stage_no=1')[0].status.trim()).to.equal('DONE');
+    });
+    await reset();
+    await mutant('no-abort','zcl_l3_fleet2',t=>t.replace("await abap.FunctionModules['BP_JOB_ABORT']({exporting: {jobname: ls_pile.get().job_name, jobcount: ls_pile.get().job_count}});",'abap.builtin.sy.get().subrc.set(0);'),async()=> {
+      await run();await daemonHost(abap).idle();await drainJobOutbox(store);
+      const claimed=store.claimNext(), pile=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
+      expect(claimed.run.jobName).to.equal(pile.job_name.trim());expect(claimed.run.jobCount).to.equal(pile.job_count.trim());
+      await dialogStep(()=>sql("UPDATE zosd_l3_pile SET status='RUNNING', started='20261001000000' WHERE stage_no=1"));
+      clock.set(Date.parse('2026-10-01T00:16:00Z'));await dialogStep(()=>cls().doctor({}));
+      expect(store.get(claimed.run.id).state).to.equal('RUNNING');
+    });
+    await reset();
+    await mutant('no-glass-sleep','zcl_l3_fleet2',t=>t.replace('if (abap.compare.eq((await this.budget_state({iv_run: ls_run.get().run_id, rv_state: 1})), abap.CharacterFactory.get(5, \'GLASS\'))) {','if (false) {'),async()=> {
+      const quiet=await quietHour('glass',3);expect(quiet.passes).to.be.greaterThan(1);
+    });
+    await reset();
+    await mutant('no-kill-stop','zcl_l3_fleet2',t=>t.replace('await this.stop_daemon();','await this.daemon_status();'),async()=> {
+      await run();await daemonHost(abap).idle();
+      await dialogStep(()=>cls().set_kill({iv_reason:str('operator pause')}));await daemonHost(abap).idle();
+      expect(daemonHost(abap).instances.size).to.equal(1);
+    });
+    await reset();
+    await mutant('no-tail-advance','zcl_osd_gui_l3_fleet2',t=>t.replace("await abap.Classes['ZCL_L3_FLEET2'].advance(","await abap.Classes['ZCL_L3_FLEET2'].pile_done("),async()=> {
+      let failure;try{await stoppingRace();}catch(error){failure=error;}
+      expect(failure?.message).to.include("expected 'WAITING' to equal 'DONE'");
+    });
+    await reset();
+  });
+  it('generic BP_JOB_ABORT refuses unknown, foreign and non-running jobs and preserves the business LUW',async()=> {
+    await run();await daemonHost(abap).idle();await drainJobOutbox(store);
+    const claimed=store.claimNext(), pile=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
+    expect(claimed.run.jobName).to.equal(pile.job_name.trim());expect(claimed.run.jobCount).to.equal(pile.job_count.trim());
+    const abort=()=>abap.FunctionModules.BP_JOB_ABORT({exporting:{jobname:str(pile.job_name.trim()),jobcount:str(pile.job_count.trim())}});
+    await dialogStep(async()=> {
+      await sql("UPDATE zosd_job_identity SET owner='OTHER' WHERE jobname='"+pile.job_name.trim()+"'");
+    });
+    let refused;try{await dialogStep(abort);}catch(error){refused=error;}
+    expect(String(refused?.classic).toUpperCase()).to.equal('NO_ABORT_AUTHORITY');expect(store.get(claimed.run.id).state).to.equal('RUNNING');
+    await dialogStep(()=>sql("UPDATE zosd_job_identity SET owner='"+abap.builtin.sy.get().uname.get().trim()+"' WHERE jobname='"+pile.job_name.trim()+"'"));
+    await dialogStep(async()=> {
+      await client.beginTransaction();
+      await sql("INSERT INTO zosd_l3_kill (mandt,set_name) VALUES ('123','rollback-probe')");
+      await abort();
+      throw new Error('roll back business LUW');
+    }).catch(error=>expect(error.message).to.equal('roll back business LUW'));
+    expect(read("SELECT * FROM zosd_l3_kill WHERE set_name='rollback-probe'")).to.have.length(0);
+    expect(store.get(claimed.run.id).state).to.equal('INTERRUPTED');
+    for(const count of [pile.job_count.trim(),'99999999']) {
+      let error;try{await dialogStep(()=>abap.FunctionModules.BP_JOB_ABORT({exporting:{jobname:str(pile.job_name.trim()),jobcount:str(count)}}));}catch(e){error=e;}
+      expect(String(error?.classic).toUpperCase()).to.equal(count===pile.job_count.trim()?'JOB_NOT_RUNNING':'JOB_DOES_NOT_EXIST');
+    }
+  });
+  it('a generic worker recognizes an aborted claim and cannot record a late success',async()=> {
+    await run();await daemonHost(abap).idle();await drainJobOutbox(store);
+    const pile=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
+    const outcome=await workQueuedBatch(process.cwd(),store,async()=> {
+      await dialogStep(()=>abap.FunctionModules.BP_JOB_ABORT({exporting:{jobname:str(pile.job_name.trim()),jobcount:str(pile.job_count.trim())}}));
+      return {status:'COMPLETED',lines:[]};
+    });
+    expect(outcome.kind).to.equal('interrupted');expect(outcome.run.state).to.equal('INTERRUPTED');
+    expect(outcome.run.steps[0].state).to.equal('INTERRUPTED');
   });
   it('event release plans waiting jobs and enforces lanes, kill and GLASS before completing both stages', async()=> {
     const model=compileSet(SET);
@@ -304,6 +497,19 @@ describe('DSL L3 5e: autonomous doctor', function () {
         writeFileSync(file,text.replace(from,to));
         expect(()=>compileSet(file)).to.throw(/doctor/).and.match(/:\d+:/);
       }
+      const eventOnly=text.replace('[daemon]','[event]').replace('doctor.tick, ','');
+      writeFileSync(file,eventOnly);
+      const eventLine=eventOnly.split('\n').findIndex(line=>line.includes('doctor: {as: [event]'))+1;
+      expect(()=>compileSet(file)).to.throw(new RegExp(`:${eventLine}: doctor.as needs daemon or job`));
+      const source=readFileSync('tools/dsl-l3-resilience.mjs','utf8');
+      const copied=source.replace('if (!mechanisms.includes("daemon") && !mechanisms.includes("job")) {','if (false) {');
+      expect(copied).not.to.equal(source);
+      const copy=join(dir,'event-only-validator.mjs');writeFileSync(copy,copied);
+      const validationMutant=await import(pathToFileURL(copy).href);
+      const accepted=validationMutant.compileResilience({resilience:{doctor:{as:['event']},stale:900,keep:{days:30}}},
+        {id:'fixture',set:'fixture',line:()=>eventLine,fail:(line,message)=>{throw new Error(`:${line}: ${message}`);},
+          staged:true,sink:{name:'alerts',variants:[{name:'capture',generated:true,class:'z_capture'}]}});
+      expect(accepted.doctor.mechanisms).to.deep.equal(['event']);
       writeFileSync(file,text.replace('[daemon]','[job]').replace('doctor.tick, ',''));
       const model=compileSet(file); const rendered=await renderSet(model);
       expect(model.daemon).to.equal(undefined);

@@ -149,8 +149,15 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
     it("a set without profiles and chaos settings renders the bytes it rendered before the slice", async function () {
       if (git(["cat-file", "-e", `${BEFORE}:${SET}`]).status !== 0) this.skip();
       // the manifest as it was: no profiles, none of the six settings
-      // Use the historical manifest and explicitly retain its scheduled job doctor.
-      const before = git(["show", `${BEFORE}:${SET}`]).stdout;
+      // Restore the pre-chaos manifest and explicitly retain its scheduled job doctor.
+      // Normalize only the three explicit 5e additions; all other live manifest bytes stay in the oracle.
+      const slice6c = SET_TEXT.replace("  doctor: {as: [daemon], tick: 10}\n", "").replace("[doctor.tick, ", "[")
+        .replace("# takes over a silent pile or gate after 15 minutes; the daemon doctor is\n# armed by every parallel run;",
+          "# takes over a lock, a pile or a gate left for 15 minutes and runs as a job of\n# the schedule;");
+      expect(slice6c, "only the doctor's additions since 6c").to.equal(git(["show", `8f032a432:${SET}`]).stdout);
+      const before = slice6c.replace(PROFILES, "").replace(/^  # Chaos profiles[^\n]*\n(  #[^\n]*\n)*/m, "")
+        .replace(/, simulate\.(profile|dump|hang|slow|hits_mean|autoclose)/g, "");
+      expect(before, "the set before the slice").to.equal(git(["show", `${BEFORE}:${SET}`]).stdout);
       const file = join(OUT, `zz_chaos_${process.pid}.l3.yaml`);
       writeFileSync(file, before.replace("resilience:\n", "resilience:\n  doctor: {as: [job]}\n"));
       try {

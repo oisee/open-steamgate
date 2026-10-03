@@ -86,4 +86,9 @@ START-OF-SELECTION.
     iv_bind = lv_bind ).
   WRITE: / ls_rule-rule, ls_rule-status, ls_rule-alerts.
   COMMIT WORK.
+  IF ls_rule-status = 'DONE'.
+    zcl_l3_fleet2=>advance( iv_run = p_run iv_date = p_date iv_stage = ls_rule-stage_no
+      is_params = ls_params
+      iv_bind = lv_bind ).
+  ENDIF.
   zcl_l3_fleet2=>pile_done( iv_run = p_run iv_pile = p_pile ).

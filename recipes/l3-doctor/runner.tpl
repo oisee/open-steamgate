@@ -1,24 +1,61 @@
 {{#autodoctor}}
+  METHOD owns_pile.
+    DATA ls_owner TYPE zosd_l3_pile.
+    DATA ls_run TYPE zosd_l3_run.
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_pile INTO ls_owner
+      WHERE set_name = c_set AND run_id = is_pile-run_id
+        AND rule_name = is_pile-rule_name AND pile_no = is_pile-pile_no
+        AND attempt = is_pile-attempt AND job_name = is_pile-job_name
+        AND job_count = is_pile-job_count AND status = 'RUNNING'.
+    IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    SELECT SINGLE * FROM zosd_l3_run INTO ls_run
+      WHERE set_name = c_set AND run_id = is_pile-run_id AND status = 'HELD'.
+    IF sy-subrc = 0.
+      rv_ok = abap_true.
+    ENDIF.
+  ENDMETHOD.
   METHOD watcher_audit.
     DATA lt_report TYPE tt_doctor.
+    DATA lv_now TYPE timestamp.
+    GET TIME STAMP FIELD lv_now.
     IF iv_action = 'DMN-STOP'.
       UPDATE zosd_l3_watch SET watch_state = 'STOPPED' instance_id = '' WHERE set_name = c_set.
     ENDIF.
-    act( EXPORTING iv_run = 'SET' iv_action = iv_action iv_reason = 'set watcher'
+    act( EXPORTING iv_run = 'SET' iv_action = iv_action iv_reason = 'set watcher' iv_now = lv_now
       CHANGING ct_report = lt_report ).
   ENDMETHOD.
   METHOD watcher_pass.
+    DATA lt_runs TYPE STANDARD TABLE OF zosd_l3_run WITH DEFAULT KEY.
     DATA ls_run TYPE zosd_l3_run.
+    DATA lv_work TYPE abap_bool.
     DATA ls_select TYPE btcselect.
     DATA lt_jobs TYPE STANDARD TABLE OF tbtcjob WITH DEFAULT KEY.
     DATA ls_job TYPE tbtcjob.
     DATA lv_count TYPE tbtcjob-jobcount.
     DATA lv_name TYPE tbtcjob-jobname.
-    SELECT SINGLE * FROM zosd_l3_run INTO ls_run WHERE set_name = c_set AND status = 'HELD'.
-    IF sy-subrc <> 0.
+{{#killable}}
+    IF killed( ) = abap_true.
+      RETURN.
+    ENDIF.
+{{/killable}}
+    SELECT * FROM zosd_l3_run INTO TABLE lt_runs WHERE set_name = c_set AND status = 'HELD'.
+    IF lt_runs IS INITIAL.
       RETURN.
     ENDIF.
     rv_open = abap_true.
+    LOOP AT lt_runs INTO ls_run.
+{{#governor}}
+      IF budget_state( ls_run-run_id ) = 'GLASS'.
+        CONTINUE.
+      ENDIF.
+{{/governor}}
+      lv_work = abap_true.
+    ENDLOOP.
+    IF lv_work = abap_false.
+      RETURN.
+    ENDIF.
     lv_name = 'L3_{{set_upper}}_PASS'.
     ls_select-jobname = lv_name.
     ls_select-username = sy-uname.
