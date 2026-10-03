@@ -266,14 +266,24 @@ rm -rf .local/stage/l3demo && mkdir -p .local/stage/l3demo && cp \
   src/l2demo/zl3_fleet.prog.* src/l3proof/zcl_l3_fleet_proof.clas.* \
   src/dsl/zosd_l3_work.tabl.xml src/dsl/zosd_l3_stage.tabl.xml src/l2demo/zcl_l2_ship_busy.clas.* \
   src/dsl/zosd_l3_doctor.tabl.xml src/dsl/zosd_l3_kill.tabl.xml src/dsl/zosd_l3_conf.tabl.xml src/dsl/zosd_l3_conf_log.tabl.xml src/dsl/zosd_l3_run_conf.tabl.xml \
+  src/dsl/zosd_l3_budget.tabl.xml src/dsl/zosd_l3_object.tabl.xml src/dsl/zosd_l3_event.tabl.xml \
   src/l2demo/zcl_l3_fleet2.clas.* src/l2demo/zcl_l3_fleet2_*.clas.* src/l2demo/zif_l3_fleet2_*.intf.* \
   src/l2demo/zcx_l3_fleet2_port.clas.* src/l2demo/zl3_fleet2.prog.* src/l2demo/zl3_fleet2_conf.prog.* \
+  src/l2demo/zcl_l3_fleet_seed.clas.* src/l2demo/zl3_fleet_seed.prog.* \
   .local/stage/l3demo/
 node tools/stg-compile.mjs src/l2demo/zl3c_fleet2.stg.yaml --out .local/stage/l3demo
 cp src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.* .local/stage/l3demo/
 node tools/osd-bsp-app.mjs src/l2demo/cockpit/zosd_fleet2 --name ZOSD_FLEET2 --out .local/stage/l3demo --service ZL3C_FLEET2_SRV --only index.html,Component.js,manifest.json,Cockpit.controller.js,Cockpit.fragment.xml,List.controller.js,Series.js,i18n/i18n.properties
 node tools/osd-prove-on-system.mjs .local/stage/l3demo --unit l3demo --manifest deploy/manifest.json
 ```
+
+**The cockpit on a system needs three more things**, measured on the sandbox (2026-10-02):
+- the hub registration of `ZL3C_FLEET2_SRV`, which abapGit carries as an IWSG (the registration,
+  named in every `SRV_IDENTIFIER`) and an IWOM (its model, every `MODEL_IDENTIFIER` and `MODEL_ID`);
+  the zip admits both since #507, read off a service registered by `/IWFND/MAINT_SERVICE`;
+- one row of `/IWFND/C_MGDEAM` for the service, system alias `LOCAL` (customizing, not carried by
+  abapGit; without it every request answers `/IWFND/CM_COS/064`, no system alias);
+- `ZL3_FLEET_SEED` run once, so the twin has a fleet to plan piles over.
 
 The trace sidecars are copied and left out of the zip like every sidecar; anything else in the
 folder that the unit does not list refuses the zip. Keep `--osg` at its default, `count`: `--osg
@@ -289,6 +299,14 @@ The second run (2026-10-01, after the rename) passed end to end on A4H:
 - 109 ABAP Unit methods, all green: the six rule classes' own tests and the three proof methods, mode S, rerun and mode P;
 - **mode P ran on the system's own job scheduler**: six background jobs, `L3_FLEET_01` to `L3_FLEET_06`, all with status F (finished), within about a second. The log equals mode S's. This is the first check of this runtime's job emulation against a real scheduler;
 - cleanup by receipt removed every object and the package. The jobs stay in SM37's history, as a system keeps them.
+
+**A fleet to watch.** The four tables hold a handful of rows; a run of a few piles ends before
+anyone looks. `ZL3_FLEET_SEED` (`ZCL_L3_FLEET_SEED=>generate`) fills them with a synthetic fleet of
+up to 999 ships drawn from a seed: one ship in ten in maintenance, zero to four voyages from ten
+days back to thirty ahead, zero to five crew of whom the first is usually the captain and sometimes
+signed on late, zero to three cargo items of up to 600.00. The same seed and date give the same
+fleet; `p_wipe` empties the four tables of the client first. With 200 ships fleet2 plans about a
+hundred piles in its first stage, enough to see the twin, the governor and the doctor at work.
 
 ## Ports and adapters
 
