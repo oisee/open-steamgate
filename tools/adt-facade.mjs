@@ -1,4 +1,5 @@
 import {segwRegistrationsOf} from "./osd-store-destination.mjs";
+import {xrefFact} from "./adt-xref-facts.mjs";
 import {renderCell, cellType} from "./adt-datapreview-cells.mjs";
 // The ADT façade of OSD: `/sap/bc/adt/**` answered by a local system that
 // has no system behind it. A client that speaks ADT to a real ABAP server
@@ -44,7 +45,7 @@ import {checkRunReport} from "./adt-checkrun.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
 import {objectVersions, versionSource, versionsFeedDocument} from "./adt-versions.mjs";
-import {segwRegistrations, registeredServices, countServiceRegistrations} from "./segw-registry.mjs";
+import {segwRegistrations, countServiceRegistrations} from "./segw-registry.mjs";
 import {generatorFoldersOf} from "./osd-packs.mjs";
 import {withoutHostPaths} from "./osd-build-issues.mjs";
 import {entitySetMapFor} from "./segw-entityset-map.mjs";
@@ -846,13 +847,14 @@ export function adtRouter(options = {}) {
   if (options.abap !== undefined) pass("abap-front", [BASE, "/sap/public/bc/icf/logoff"], abapFront({...options.abap, served: options.abapServed, refuse, store, facadeOptions: options,
     miss: (req, kind, detail) => record(req, kind, detail, (req.originalUrl ?? req.url).split("?")[0]),
     generation: () => liveHash(store.root),
-    sessions, ...abapSession(sessions, async (kind, name) => {
+    sessions, ...abapSession(sessions, async (kind, name, req, json) => {
       if (kind === "IDENTITY") return identity;
       if (kind === "SEGW_REGISTRATIONS") return segwRegistrationsOf(store);
       if (kind === "BUILD") return buildAnswer({store, data, sourceCommit, identity});
       if (kind === "CHANGED") return changedAnswer(store);
       if (kind === "SERVICES") return servicesAnswer(store);
       if (kind === "TRANSACTIONS") return transactionsAnswer(store);
+      if (kind === "XREF_WARM") return xrefFact(store, kind, {...JSON.parse(json || "{}"), limit: options.xrefLimit ?? 5000});
       return undefined;
     })}));
 
@@ -1346,7 +1348,7 @@ export function adtRouter(options = {}) {
       // last build, where the seeded rows are as fresh as the last start of
       // the serving process, and a warm swap does not reseed them -- and the
       // seeded rows otherwise; `source` says which one answered
-      let includes = store.warm?.().compiler?.readersOf(type, name)?.map((o) => o.name);
+      let includes = xrefFact(store, "XREF_WARM", {operation: "READERS", type, name}).objects?.map(o => o.name);
       const source = includes === undefined ? "xref" : "warm";
       if (includes === undefined) {
         const escaped = name.replace(/'/g, "''");
@@ -1356,10 +1358,9 @@ export function adtRouter(options = {}) {
           {max: 5000});
         includes = result.rows.map((r) => String(r.include).toUpperCase());
       }
-      const typeOf = new Map(store.list().map((o) => [o.name, o.type]));
-      const folders = generatorFoldersOf(store.root).map((f) => join(store.root, f));
-      const registrations = registeredServices(segwRegistrations(folders));
-      const testClasses = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
+      const typeOf = new Map(Object.entries(xrefFact(store, "OBJECT_TYPES")));
+      const registrations = xrefFact(store, "SEGW_REGISTRATIONS", {registered:true});
+      const testClasses = new Set(xrefFact(store, "TESTCLASSES"));
       const readers = [...new Set(includes)]
         .filter((include) => include !== name)
         .sort()
@@ -1370,7 +1371,7 @@ export function adtRouter(options = {}) {
           isTest: testClasses.has(include),
           services: registrations.filter((r) => r.dpc === include).map((r) => r.external),
         }));
-      const serviceCount = countServiceRegistrations(readers, type === "CLAS" ? serviceTree(store.root) : [], name);
+      const serviceCount = countServiceRegistrations(readers, type === "CLAS" ? xrefFact(store, "SERVICE_ROWS") : [], name);
       res.type("application/json; charset=utf-8").send(JSON.stringify({
         name,
         source,
@@ -1404,13 +1405,13 @@ export function adtRouter(options = {}) {
       return;
     }
     try {
-      const LIMIT = 5000;
-      let closure = store.warm?.().compiler?.closureOf(type, name);
+      const LIMIT = options.xrefLimit ?? 5000;
+      let closure = xrefFact(store, "XREF_WARM", {operation: "CLOSURE", type, name}).objects;
       let source = "warm";
       let truncated = false;
       if (closure === undefined) {
         source = "xref";
-        const typeOf = new Map(store.list().map((o) => [o.name, o.type]));
+        const typeOf = new Map(Object.entries(xrefFact(store, "OBJECT_TYPES")));
         const seen = new Set([name]);
         const todo = [name];
         while (todo.length > 0 && seen.size < LIMIT) {
@@ -1430,7 +1431,7 @@ export function adtRouter(options = {}) {
         truncated = todo.length > 0;
         closure = [...seen].map((n) => ({type: n === name ? type : (typeOf.get(n) ?? "UNKNOWN"), name: n}));
       }
-      const tests = new Set(testClassesIn(store.root).map((n) => n.replace(/\s+\(.*$/, "")));
+      const tests = new Set(xrefFact(store, "TESTCLASSES"));
       const objects = closure
         .map((o) => ({...o, isTest: o.type === "CLAS" && tests.has(o.name)}))
         .sort((a, b) => a.name.localeCompare(b.name));

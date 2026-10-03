@@ -2,6 +2,7 @@
 "! lines are comments and a non-class-based error is a normal short dump.
 CLASS zcl_osd_kernel_guard DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
+    CLASS-METHODS has_serving_database RETURNING VALUE(rv_available) TYPE abap_bool.
     CLASS-METHODS has_generation RETURNING VALUE(rv_available) TYPE abap_bool.
     CLASS-METHODS call_classrun
       IMPORTING iv_name TYPE string
@@ -11,6 +12,11 @@ CLASS zcl_osd_kernel_guard DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RAISING cx_root.
 ENDCLASS.
 CLASS zcl_osd_kernel_guard IMPLEMENTATION.
+  METHOD has_serving_database.
+    rv_available = abap_true.
+*   The reduced parent kernel holds sessions, not seeded application tables.
+    WRITE '@KERNEL if (globalThis.__osdAdtKernel !== undefined) rv_available.set(" ");'.
+  ENDMETHOD.
   METHOD has_generation.
     rv_available = abap_true.
 *   One-runtime comes from OSD_ADT_ONE_RUNTIME or the request's
