@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {randomUUID} from "node:crypto";
-import {appendFileSync, mkdirSync, mkdtempSync, symlinkSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {appendFileSync, mkdirSync, mkdtempSync, symlinkSync, unlinkSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
@@ -20,6 +20,7 @@ import {identity} from "../tools/osd-identity.mjs";
 const SID = identity().sid;
 
 const root = resolve(".");
+const loadedGeneration = () => globalThis.abap?.context?.osdGeneration ?? liveGeneration(root);
 
 describe("durable one-shot batch runs", function () {
   let dir;
@@ -30,6 +31,42 @@ describe("durable one-shot batch runs", function () {
     env = {...process.env, OSD_OPERATIONS_DB: join(dir, "operations.sqlite")};
   });
   afterEach(() => rmSync(dir, {recursive: true, force: true}));
+
+  it("drains every started report step before quiescing on activation", async () => {
+    const store = new BatchRuns(dir, env);
+    const before = globalThis.abap;
+    const workerMode = process.env.OSD_JOB_WORKER;
+    const sourceDb = join(dir, "business.sqlite");
+    for (const generation of ["old", "new"]) mkdirSync(join(dir, "build", generation), {recursive:true});
+    symlinkSync("old", join(dir, "build/live"));
+    globalThis.abap = {context: {osdGeneration:"old", databaseConnections:{DEFAULT:{path:sourceDb}}},
+      builtin:{sy:{get:() => ({mandt:{get:() => "123"},sysid:{get:() => "OSD"},uname:{get:() => "DEVELOPER"}})}}};
+    process.env.OSD_JOB_WORKER = "extension";
+    let accepting = true, executions = 0;
+    const scheduler = new JobScheduler({root:dir,store,env:{},retention:null,shouldRun:() => accepting,
+      execute:async () => {
+        if (++executions === 1) {
+          unlinkSync(join(dir, "build/live")); symlinkSync("new", join(dir, "build/live"));
+          accepting = false; scheduler.stop();
+        }
+        return {status:"COMPLETED"};
+      }});
+    try {
+      const {run} = store.importIntent({intentId:randomUUID().replaceAll("-", ""),sourceDb,
+        client:"123",sysid:"OSD",owner:"DEVELOPER",jobname:"CHAIN",jobcount:"00000001",
+        program:"ZGG_EX_012",generation:"old",
+        steps:[{number:1,program:"ZGG_EX_012"},{number:2,program:"ZGG_EX_012"}]});
+      const untouched = store.enqueue({program:"ZGG_EX_012",generation:"new"});
+      await scheduler.tick();
+      expect(executions).to.equal(2);
+      expect(store.get(run.id).state).to.equal("COMPLETED");
+      expect(store.get(run.id).steps.map(step => step.state)).to.deep.equal(["COMPLETED", "COMPLETED"]);
+      expect(store.get(untouched.id).state).to.equal("QUEUED");
+    } finally {
+      scheduler.stop(); store.close(); globalThis.abap = before;
+      if (workerMode === undefined) delete process.env.OSD_JOB_WORKER; else process.env.OSD_JOB_WORKER = workerMode;
+    }
+  });
 
   it("retains every range option in an imported job step", () => {
     const store = new BatchRuns(root, env);
@@ -480,7 +517,7 @@ describe("durable one-shot batch runs", function () {
   it("preserves the execution error when recording that failure also fails", async () => {
     const store = new BatchRuns(root, env);
     try {
-      const run = store.enqueue({program: "ZGG_EX_012", generation: liveGeneration(root)});
+      const run = store.enqueue({program: "ZGG_EX_012", generation: loadedGeneration()});
       store.db.exec(`CREATE TRIGGER reject_failed_execution BEFORE INSERT ON batch_job_log
         WHEN NEW.event_code = 'JOB_FAILED' BEGIN SELECT RAISE(FAIL, 'log unavailable'); END`);
       const executionError = new Error("report's private diagnostic");
@@ -543,7 +580,7 @@ describe("durable one-shot batch runs", function () {
   it("keeps a legacy queued run RUNNING if its result cannot be recorded", async () => {
     const store = new BatchRuns(root, env);
     try {
-      const run = store.enqueue({program: "ZGG_EX_012", generation: liveGeneration(root)});
+      const run = store.enqueue({program: "ZGG_EX_012", generation: loadedGeneration()});
       store.db.exec(`CREATE TRIGGER reject_legacy_result BEFORE INSERT ON batch_job_log
         WHEN NEW.event_code = 'STEP_COMPLETED' BEGIN SELECT RAISE(FAIL, 'result log unavailable'); END`);
       let caught;
@@ -558,7 +595,7 @@ describe("durable one-shot batch runs", function () {
   it("records an execution exception as a failed queued job", async () => {
     const store = new BatchRuns(root, env);
     try {
-      const run = store.enqueue({program: "ZGG_EX_012", generation: liveGeneration(root)});
+      const run = store.enqueue({program: "ZGG_EX_012", generation: loadedGeneration()});
       const outcome = await workQueuedBatch(root, store, async () => { throw new Error("report dumped"); });
       expect(outcome.kind).to.equal("failed");
       expect(store.get(run.id)).to.include({state: "FAILED", detail: "report dumped"});

@@ -1,5 +1,6 @@
-// A separate IPC guard owns the worker PID. Losing the extension host closes
-// IPC even after SIGKILL; the guard then reaps its child before exiting.
+// The supervisor records the worker process group before opening guard IPC.
+// Losing the extension host closes IPC even after SIGKILL; the guard drains
+// or kills that group and recovers its interrupted operations before exiting.
 const {spawn} = require('node:child_process');
 const path = require('node:path');
 const {EventEmitter} = require('node:events');
@@ -8,61 +9,129 @@ function workerEnabled(mode = 'auto', env = {}) {
     && typeof env.STG_DB_PATH === 'string' && env.STG_DB_PATH !== ''
     && env.STG_DB_PATH !== ':memory:';
 }
-function reap(child, graceMs) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-  return new Promise(resolve => {
-    const timer = setTimeout(() => child.kill('SIGKILL'), graceMs);
-    child.once('exit', () => { clearTimeout(timer); resolve(); });
-    child.kill('SIGTERM');
-  });
+const fs = require('node:fs');
+const {pathToFileURL} = require('node:url');
+const {randomUUID} = require('node:crypto');
+function alive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; }
+}
+function signalGroup(pid, signal) {
+  try { process.kill(process.platform === 'win32' ? pid : -pid, signal); }
+  catch (e) { if (e.code !== 'ESRCH') throw e; }
+}
+function send(child, message) {
+  if (child.connected) child.send(message, () => {}); // disconnect can race this write
 }
 class JobWorker extends EventEmitter {
   constructor({cwd, env, script = path.join(cwd, 'tools/osd-batch-runs.mjs'), args = ['worker'], log = () => {}, backoffMs = 500, graceMs = 55000}) {
     super(); Object.assign(this, {cwd, env, script, args, log, backoffMs, graceMs});
     this.running = false; this.stopped = true; this.failures = 0;
   }
+  acquireLease() {
+    if (this.lease || !workerEnabled('auto', this.env)) return true;
+    const file = path.resolve(this.cwd, this.env.STG_DB_PATH) + '.worker.lock';
+    fs.mkdirSync(path.dirname(file), {recursive:true});
+    const token = randomUUID();
+    const create = () => {
+      try { fs.writeFileSync(file, JSON.stringify({pid:process.pid, token}), {flag:'wx', mode:0o600}); }
+      catch (e) { if (e.code === 'EEXIST') return false; throw e; }
+      this.lease = {file, token}; return true;
+    };
+    if (create()) return true;
+    // Serialize stale-lock reclamation as well as initial acquisition.
+    const reclaim = file + '.reclaim';
+    try { fs.mkdirSync(reclaim); } catch (e) { if (e.code === 'EEXIST') return false; throw e; }
+    try {
+      let owner;
+      try { owner = JSON.parse(fs.readFileSync(file, 'utf8')); }
+      catch (e) { if (e.code !== 'ENOENT') return false; }
+      if (owner && (alive(owner.pid) || (owner.guardPid && alive(owner.guardPid)))) return false;
+      // A crashed supervisor/guard pair must not leave a group beside the
+      // next window. A retry acquires only once the old worker has gone.
+      if (owner?.workerPid && alive(owner.workerPid)) {
+        signalGroup(owner.workerPid, 'SIGKILL'); return false;
+      }
+      fs.rmSync(file, {force:true});
+      return create();
+    } finally { fs.rmdirSync(reclaim); }
+  }
+  recordLease(workerPid, guardPid) {
+    if (!this.lease) return;
+    const {file, token} = this.lease;
+    const temp = `${file}.${token}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify({pid:process.pid, token, workerPid, guardPid}), {flag:'wx', mode:0o600});
+    fs.renameSync(temp, file);
+  }
+  releaseLease() {
+    if (!this.lease) return;
+    const {file, token} = this.lease;
+    if (JSON.parse(fs.readFileSync(file, 'utf8')).token === token) fs.unlinkSync(file);
+    this.lease = undefined;
+  }
   start() {
-    if (!this.stopped) return;
-    this.stopped = false; this.failures = 0; this.launch();
+    if (!this.stopped || this.closing) return;
+    if (!this.acquireLease()) {
+      this.otherWindow = true; this.log('OSD jobs: jobs handled by another window\n'); this.emit('state'); return;
+    }
+    this.otherWindow = false; this.stopped = false; this.failures = 0; this.launch();
   }
   launch() {
-    if (this.stopped) return;
-    const child = spawn(process.execPath, [__filename, '--guard', this.script, String(this.graceMs), ...this.args],
-      {cwd:this.cwd, env:this.env, detached:process.platform !== 'win32', stdio:['ignore','pipe','pipe','ipc']});
+    if (this.stopped || this.child) return;
+    // Record the PID synchronously before establishing any guard IPC. The
+    // actual worker owns its process group, including any descendants.
+    const worker = spawn(process.execPath, [this.script, ...this.args],
+      {cwd:this.cwd, env:this.env, detached:process.platform !== 'win32', stdio:['ignore','pipe','pipe']});
+    this.workerPid = worker.pid;
+    this.recordLease(worker.pid);
+    const exited = new Promise(resolve => {
+      worker.once('exit', resolve);
+      worker.once('error', e => { this.log(`OSD jobs: ${e.message}\n`); resolve(); });
+    });
+    worker.stdout.on('data', d => this.log(d.toString()));
+    worker.stderr.on('data', d => this.log(d.toString()));
+    const child = spawn(process.execPath, [__filename, '--guard', String(worker.pid), String(this.graceMs), this.script],
+      {cwd:this.cwd, env:this.env, stdio:['ignore','ignore','pipe','ipc']});
     this.child = child;
-    child.stdout.on('data', d => this.log(d.toString()));
+    this.recordLease(worker.pid, child.pid);
     child.stderr.on('data', d => this.log(d.toString()));
     const started = Date.now();
-    let workerPid;
-    child.on('message', m => {
-      if (m?.pid) { workerPid = m.pid; this.running = true; this.emit('state'); }
-      if (m === 'reaped') workerPid = undefined;
-    });
+    worker.once('spawn', () => { this.running = true; this.emit('state'); });
+    worker.once('exit', () => send(child, 'exited'));
     child.on('error', e => this.log(`OSD jobs: ${e.message}\n`));
-    child.once('exit', async () => {
-      // If the guard itself crashed, its child is still ours. Reap by PID
-      // before restarting so two workers never overlap.
-      if (workerPid) {
-        try { process.kill(workerPid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') this.log(error.message); }
-      }
-      this.child = undefined; this.running = false; this.emit('state');
+    this.closed = new Promise(resolve => child.once('close', async () => {
+      // Also reap descendants after a normal exit, before any replacement.
+      if (worker.pid) signalGroup(worker.pid, 'SIGKILL');
+      await exited;
+      try { await this.recoverInterrupted(); }
+      catch (e) { this.log(`OSD jobs: recovery failed: ${e.message}\n`); this.stopped = true; }
+      this.child = undefined; this.workerPid = undefined;
+      this.running = false; this.emit('state'); resolve();
       if (this.stopped) return;
       if (Date.now() - started > 30000) this.failures = 0;
       const wait = Math.min(30000, this.backoffMs * 2 ** Math.min(this.failures++, 10));
       this.log(`OSD jobs: worker exited; restarting in ${wait} ms\n`);
       this.timer = setTimeout(() => this.launch(), wait);
-    });
+    }));
   }
-  async stop() {
+  async recoverInterrupted(pid = this.workerPid) {
+    if (!pid || path.basename(this.script) !== 'osd-batch-runs.mjs' || !workerEnabled('auto', this.env)) return;
+    const {BatchRuns} = await import(pathToFileURL(this.script).href);
+    const store = new BatchRuns(this.cwd, this.env);
+    try {
+      const rows = store.db.prepare(`SELECT id FROM batch_runs WHERE state = 'RUNNING'
+        AND queued_at IS NOT NULL AND worker_pid = ?
+        AND (source_db IS NULL OR source_db = ?)`).all(pid, path.resolve(this.cwd, this.env.STG_DB_PATH));
+      for (const row of rows) store.interruptQueued(row.id);
+    } finally { store.close(); }
+  }
+  async stop({refresh = false} = {}) {
     this.stopped = true; clearTimeout(this.timer);
-    const child = this.child;
-    if (child && child.exitCode === null && child.signalCode === null) {
-      // The guard must live until it has reaped the actual worker.
-      const closed = new Promise(resolve => child.once('exit', resolve));
-      if (child.connected) child.disconnect();
-      await closed;
+    if (this.child) send(this.child, refresh ? 'refresh' : 'shutdown');
+    if (!this.closing) {
+      this.closing = (async () => { await this.closed; this.running = false; })();
     }
-    this.running = false;
+    await this.closing; this.closing = undefined;
+    if (!refresh) this.releaseLease();
   }
 }
 function jobsStatus(running, counts = {}) {
@@ -80,6 +149,7 @@ function jobsStatusBar(vscode, context, controller) {
     busy = true;
     const launcher = controller.launcher;
     try {
+      if (launcher?.jobWorker?.otherWindow) { item.text = 'OSD jobs: jobs handled by another window'; return; }
       if (!launcher?.jobWorker?.running) { item.text = jobsStatus(false); return; }
       const answer = await fetch(`http://127.0.0.1:${launcher.port}/osd/job-counts`,
         {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}, signal:AbortSignal.timeout(3000)});
@@ -94,13 +164,30 @@ function jobsStatusBar(vscode, context, controller) {
 }
 module.exports = {JobWorker, workerEnabled, jobsStatus, jobsStatusBar};
 if (require.main === module && process.argv[2] === '--guard') {
-  const [script, grace, ...args] = process.argv.slice(3);
-  const child = spawn(process.execPath, [script, ...args], {cwd:process.cwd(), env:process.env, stdio:['ignore','inherit','inherit']});
-  let stopping;
-  const stop = () => { stopping ??= reap(child, Number(grace)); return stopping; };
-  for (const signal of ['SIGTERM','SIGINT','SIGHUP']) process.on(signal, stop);
-  process.on('disconnect', stop);
-  child.once('spawn', () => { if (process.connected) process.send({pid:child.pid}); else stop(); });
-  child.once('error', error => { console.error(error.message); process.exitCode = 1; if (process.connected) process.disconnect(); });
-  child.once('exit', code => { if (process.connected) process.send('reaped'); process.exitCode = code ?? 1; if (process.connected) process.disconnect(); });
+  const [pidText, grace, script] = process.argv.slice(3);
+  const pid = Number(pidText);
+  let stopping = false, finished = false, timer;
+  const stop = (deadline) => {
+    if (finished) return;
+    if (!stopping) { stopping = true; signalGroup(pid, 'SIGTERM'); }
+    if (deadline && !timer) timer = setTimeout(() => signalGroup(pid, 'SIGKILL'), Number(grace));
+  };
+  const finish = async () => {
+    if (finished) return;
+    finished = true; clearTimeout(timer); clearInterval(poll);
+    signalGroup(pid, 'SIGKILL');
+    // If the supervisor died it cannot repair the operations store itself.
+    if (!process.connected) {
+      try { await new JobWorker({cwd:process.cwd(), env:process.env, script}).recoverInterrupted(pid); }
+      catch (error) { console.error(`OSD jobs: recovery failed: ${error.message}`); process.exitCode = 1; }
+    }
+    if (process.connected) process.disconnect();
+  };
+  const poll = setInterval(() => { if (!alive(pid)) finish(); }, 25);
+  process.on('message', m => {
+    if (m === 'exited') finish();
+    else stop(m !== 'refresh');
+  });
+  process.on('disconnect', () => stop(true));
+  for (const signal of ['SIGTERM','SIGINT','SIGHUP']) process.on(signal, () => stop(true));
 }

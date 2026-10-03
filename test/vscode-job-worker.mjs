@@ -78,6 +78,75 @@ describe('VS Code job worker supervision', function () {
     expect(lines).to.deep.equal(['ready','finished','ready','finished']);
     expect(worker.running).to.equal(false);
   });
+  it('coalesces twelve refreshes and drains beyond the shutdown grace', async () => {
+    const {JobWorker} = require('../editors/vscode/job-worker.js');
+    const {Launcher} = require('../editors/vscode/launcher.js');
+    const script = join(dir, 'refresh.cjs');
+    writeFileSync(script, `console.log('ready '+process.pid); process.on('SIGTERM',()=>setTimeout(()=>{console.log('finished');process.exit(0)},150));setInterval(()=>{},100);`);
+    const pids = []; let finished = 0, launches = 0;
+    worker = new JobWorker({cwd:dir, env:process.env, script, graceMs:30,
+      log:s => { if (s.startsWith('ready')) pids.push(Number(s.split(' ')[1])); if (s.includes('finished')) finished++; }});
+    const launch = worker.launch.bind(worker);
+    worker.launch = () => { launches++; launch(); };
+    const launcher = new Launcher({osdHome:dir,storageDir:dir});
+    launcher.state = 'running'; launcher.generation = 'old'; launcher.jobWorker = worker;
+    worker.start(); await until(() => pids.length === 1);
+    await Promise.all(Array.from({length:12}, (_, i) => launcher.refreshJobsGeneration({ready:true,generation:String(i)})));
+    await until(() => pids.length === 2);
+    expect(finished).to.equal(1);
+    expect(launches).to.equal(2);
+    await launcher.stop();
+    expect(pids.filter(alive)).to.deep.equal([]);
+  });
+  it('leases a database to one window, and releases it on shutdown', async () => {
+    const {JobWorker} = require('../editors/vscode/job-worker.js');
+    const script = join(dir, 'lease.cjs');
+    writeFileSync(script, `console.log('ready');setInterval(()=>{},100);`);
+    const env = {...process.env, STG_DB:'file', STG_DB_PATH:join(dir,'db')};
+    worker = new JobWorker({cwd:dir, env, script});
+    const second = new JobWorker({cwd:dir, env, script});
+    try {
+      worker.start(); await until(() => worker.running);
+      second.start();
+      expect(second.otherWindow).to.equal(true);
+      expect(second.child).to.equal(undefined);
+      await second.stop(); // cannot release the first window's lease
+      second.start(); expect(second.child).to.equal(undefined);
+      await worker.stop(); second.start();
+      await until(() => second.running);
+      expect(second.otherWindow).to.equal(false);
+    } finally { await second.stop(); }
+  });
+  it('reclaims a lease whose owning process no longer exists', async () => {
+    const {JobWorker} = require('../editors/vscode/job-worker.js');
+    const script = join(dir, 'lease.cjs');
+    const db = join(dir, 'db');
+    writeFileSync(script, `setInterval(()=>{},100);`);
+    writeFileSync(db + '.worker.lock', JSON.stringify({pid:2147483647,token:'stale'}));
+    worker = new JobWorker({cwd:dir,env:{...process.env,STG_DB:'file',STG_DB_PATH:db},script});
+    worker.start(); await until(() => worker.running);
+    expect(worker.otherWindow).to.equal(false);
+    await worker.stop();
+  });
+  it('marks a killed job interrupted and lets a later job claim', async () => {
+    const {JobWorker} = require('../editors/vscode/job-worker.js');
+    const {BatchRuns} = await import('../tools/osd-batch-runs.mjs');
+    const env = {...process.env, STG_DB:'file', STG_DB_PATH:join(dir,'db'), OSD_OPERATIONS_DB:join(dir,'ops.sqlite')};
+    const store = new BatchRuns(dir, env);
+    // Use the real module name so supervisor recovery follows the production path.
+    const script = join(dir, 'osd-batch-runs.mjs');
+    const moduleURL = new URL('../tools/osd-batch-runs.mjs', import.meta.url).href;
+    writeFileSync(script, `import {BatchRuns} from ${JSON.stringify(moduleURL)}; export {BatchRuns}; import {pathToFileURL} from 'node:url'; if (pathToFileURL(process.argv[1]).href === import.meta.url) {const store = new BatchRuns(process.cwd(),process.env);store.claimNext();store.close();process.on('SIGTERM',()=>{});console.log('ready');setInterval(()=>{},100);}`);
+    const run = store.enqueue({program:'ZGG_EX_012',generation:'test'});
+    const next = store.enqueue({program:'ZGG_EX_012',generation:'test'});
+    let ready = false;
+    worker = new JobWorker({cwd:dir,env,script,graceMs:30,log:s => { if (s.includes('ready')) ready = true; }});
+    try {
+      worker.start(); await until(() => ready); await worker.stop();
+      expect(store.get(run.id).state).to.equal('INTERRUPTED');
+      expect(store.claimNext().run.id).to.equal(next.id);
+    } finally { store.close(); }
+  });
   it('kills an unresponsive worker by PID after the shutdown grace', async () => {
     const {JobWorker} = require('../editors/vscode/job-worker.js');
     const script = join(dir,'stubborn.cjs');

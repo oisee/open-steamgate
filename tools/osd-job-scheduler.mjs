@@ -259,7 +259,13 @@ export class JobScheduler {
       await this.#reorganise();
       while (this.shouldRun()) {
         await this.releaseDue();
-        const outcome = await workQueuedBatch(this.root, this.store, this.execute);
+        let outcome = await workQueuedBatch(this.root, this.store, this.execute);
+        // A started job owns this generation through every report step.
+        // Quiesce only after its terminal result, even if the host stops.
+        while (outcome.kind === "advanced") {
+          outcomes.push(outcome);
+          outcome = await workQueuedBatch(this.root, this.store, this.execute, outcome.run.id);
+        }
         if (outcome.kind === "empty" || outcome.kind === "busy") break;
         outcomes.push(outcome);
       }

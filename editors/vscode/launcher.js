@@ -1187,11 +1187,14 @@ class Launcher extends EventEmitter {
     this.generation = serving.generation;
     const worker = this.jobWorker;
     if (!worker) return;
-    // Serialize swaps. stop() gives an active job its bounded shutdown grace.
-    this.jobsRefresh = (this.jobsRefresh ?? Promise.resolve()).then(async () => {
-      await worker.stop();
-      if (this.state === "running" && !this.jobsStopping && this.jobWorker === worker) worker.start();
-    });
+    // One refresh drains the active job. Further generations observed while
+    // draining are loaded by the same replacement, rather than queued swaps.
+    if (!this.jobsRefresh) {
+      this.jobsRefresh = (async () => {
+        await worker.stop({refresh:true});
+        if (this.state === "running" && !this.jobsStopping && this.jobWorker === worker) worker.start();
+      })().finally(() => { this.jobsRefresh = undefined; });
+    }
     await this.jobsRefresh;
   }
 

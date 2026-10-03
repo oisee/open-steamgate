@@ -106,6 +106,9 @@ export class BatchRuns {
       if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "step_count")) {
         this.db.exec("ALTER TABLE batch_runs ADD COLUMN step_count INTEGER NOT NULL DEFAULT 0");
       }
+      if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some(column => column.name === "worker_pid")) {
+        this.db.exec("ALTER TABLE batch_runs ADD COLUMN worker_pid INTEGER");
+      }
       this.db.exec(`CREATE TABLE IF NOT EXISTS batch_imports (
         intent_id TEXT PRIMARY KEY, payload_sha256 TEXT NOT NULL, run_id TEXT NOT NULL
       )`);
@@ -481,7 +484,7 @@ export class BatchRuns {
   // BEGIN IMMEDIATE makes two independent worker processes serialize the
   // decision. A RUNNING queued job blocks a second worker, even if its
   // process vanished: replay requires an explicit decision about side effects.
-  claimNext(source) {
+  claimNext(source, runId) {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const scoped = source === undefined ? "" : source.legacyOnly ? " AND source_db IS NULL" :
@@ -499,7 +502,7 @@ export class BatchRuns {
         this.db.exec("COMMIT");
         return {kind: "busy", id: busy.id};
       }
-      const row = this.db.prepare(`SELECT id, step_count FROM batch_runs WHERE state = 'QUEUED'${scoped} ORDER BY queued_at, rowid LIMIT 1`).get(...params);
+      const row = this.db.prepare(`SELECT id, step_count FROM batch_runs WHERE state = 'QUEUED'${scoped}${runId ? ' AND id = ?' : ''} ORDER BY queued_at, rowid LIMIT 1`).get(...params, ...(runId ? [runId] : []));
       if (!row) {
         this.db.exec("COMMIT");
         return {kind: "empty"};
@@ -515,9 +518,9 @@ export class BatchRuns {
       }
       const step = ready[0];
       const startedAt = new Date().toISOString();
-      const claimed = this.db.prepare(`UPDATE batch_runs SET state = 'RUNNING',
+      const claimed = this.db.prepare(`UPDATE batch_runs SET state = 'RUNNING', worker_pid = ?,
         started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END
-        WHERE id = ? AND state = 'QUEUED'`).run(startedAt, row.id).changes;
+        WHERE id = ? AND state = 'QUEUED'`).run(process.pid, startedAt, row.id).changes;
       if (claimed !== 1) throw new Error(`queued run ${row.id} changed before claim`);
       if (step) {
         const active = this.db.prepare(`UPDATE batch_run_steps SET state = 'RUNNING', started_at = ?
@@ -844,13 +847,13 @@ function resultRecordingError(runId, stepNumber, cause, executionError) {
   return error;
 }
 
-export async function workQueuedBatch(root, store, execute = runConvertedBatch) {
+export async function workQueuedBatch(root, store, execute = runConvertedBatch, continuingRun) {
   // The extension restarts on serving changes. Until then, leave new jobs
   // queued rather than claiming them with an obsolete initialized runtime.
-  if (process.env.OSD_JOB_WORKER === "extension"
+  if (!continuingRun && process.env.OSD_JOB_WORKER === "extension"
       && globalThis.abap?.context?.osdGeneration !== liveGeneration(root)) return {kind: "busy"};
   const source = workerSource();
-  const next = store.claimNext(source ?? {legacyOnly: true});
+  const next = store.claimNext(source ?? {legacyOnly: true}, continuingRun);
   if (next.kind !== "claimed") return next;
   const {run} = next;
   const step = next.step ? run.steps.find((item) => item.number === next.step) : undefined;
