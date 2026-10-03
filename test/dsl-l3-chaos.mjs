@@ -117,9 +117,10 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
       for (const [name, max] of [["simulate.dump", "1000"], ["simulate.hang", "1000"], ["simulate.slow", "1000"], ["simulate.hits_mean", "100"], ["simulate.autoclose", "1000"]]) {
         expect(entry(name), name).to.include({default: "-1", min: "-1", max, numeric: true, scoped: true});
       }
-      // none of them takes a selection field of the pile job (a job step carries at most 20)
+      // none of them takes a selection field of the pile job (a job step carries at most 20), nor does piles.lanes, read live
       expect(model.settings.entries.filter((e) => e.chaos).map((e) => e.name)).to.have.length(6);
-      expect(model.settings.entries.filter((e) => !e.chaos).map((e) => e.screen)).to.deep.equal(Array.from({length: 13}, (_, i) => `s_${i + 1}`));
+      expect(model.settings.entries.filter((e) => e.unscreened && !e.chaos).map((e) => e.name)).to.deep.equal(["piles.lanes"]);
+      expect(model.settings.entries.filter((e) => !e.unscreened).map((e) => e.screen)).to.deep.equal(Array.from({length: 13}, (_, i) => `s_${i + 1}`));
       expect(model.settings.chaos_outcomes.map((e) => e.name)).to.deep.equal(["simulate.dump", "simulate.hang", "simulate.slow"]);
       // a manifest narrows an override: never more than 30 per cent dumps from the cockpit
       const narrowed = compileSet(manifest([["    fuses.max_alerts: {min: 1, max: 100000}\n", "    fuses.max_alerts: {min: 1, max: 100000}\n    simulate.dump: {min: -1, max: 300}\n"]]));
@@ -150,8 +151,9 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
       if (git(["cat-file", "-e", `${BEFORE}:${SET}`]).status !== 0) this.skip();
       // the manifest as it was: no profiles, none of the six settings
       // Restore the pre-chaos manifest and explicitly retain its scheduled job doctor.
-      // Normalize the later doctor and snapshot additions; keep all other manifest bytes in the oracle.
-      const slice6c = SET_TEXT.replace("  doctor: {as: [daemon], tick: 10}\n", "").replace("[doctor.tick, ", "[")
+      // Normalize the 5e additions, the snapshots and the event release of the lanes slice; all other live
+      // manifest bytes stay in the oracle.
+      const slice6c = SET_TEXT.replace(/^# Bounded concurrency[^\n]*\n(# [^\n]*\n){3}/m, "").replace("piles: {release: event}\n", "").replace(", piles.lanes]", "]").replace("  doctor: {as: [daemon], tick: 10}\n", "").replace("[doctor.tick, ", "[")
         .replace(/^snapshots:\n(  .*\n)+/m, "").replace(/^    input:.*\n/gm, "")
         .replace("# takes over a silent pile or gate after 15 minutes; the daemon doctor is\n# armed by every parallel run;",
           "# takes over a lock, a pile or a gate left for 15 minutes and runs as a job of\n# the schedule;");

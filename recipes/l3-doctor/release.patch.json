@@ -1,10 +1,18 @@
 [
   {
     "before": [
+      "    \" the job finds its range in the plan row by set, run, rule and pile\n{{/planned}}\n"
+    ],
+    "after": [
+      "    \" the job finds its range in the plan row by set, run, rule and pile\n{{/planned}}\n{{#release_event}}\n    DATA lv_release_param TYPE c LENGTH 64.\n{{/release_event}}\n"
+    ]
+  },
+  {
+    "before": [
       "    CLASS-METHODS count_runs.\n"
     ],
     "after": [
-      "    CLASS-METHODS count_runs.\n{{#release_event}}\n    CLASS-METHODS release_events.\n{{/release_event}}\n"
+      "    CLASS-METHODS count_runs.\n{{#release_event}}\n    CLASS-METHODS release_claim RETURNING VALUE(rt_claimed) TYPE tt_pile.\n    CLASS-METHODS release_raise IMPORTING it_claimed TYPE tt_pile.\n    CLASS-METHODS lanes EXPORTING ev_lanes TYPE i ev_source TYPE string.\n    CLASS-METHODS lanes_status RETURNING VALUE(rv_status) TYPE string.\n{{/release_event}}\n"
     ]
   },
   {
@@ -20,7 +28,7 @@
       "    cs_pile-job_count = lv_jobcount.\n    save_pile( cs_pile )."
     ],
     "after": [
-      "    cs_pile-job_count = lv_jobcount.\n{{#release_event}}\n    DATA lv_release_param TYPE c LENGTH 64.\n    lv_release_param = |{ lv_jobname }/{ lv_jobcount }|.\n    cs_pile-reason = 'EVENT-WAIT'.\n{{/release_event}}\n    save_pile( cs_pile )."
+      "    cs_pile-job_count = lv_jobcount.\n{{#release_event}}\n    lv_release_param = |{ lv_jobname }/{ lv_jobcount }|.\n    cs_pile-reason = 'EVENT-WAIT'.\n{{/release_event}}\n    save_pile( cs_pile )."
     ]
   },
   {

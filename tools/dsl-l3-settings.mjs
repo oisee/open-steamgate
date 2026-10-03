@@ -1,6 +1,8 @@
 // Tunable L3 defaults. The compiler preserves all non-tunable values as constants.
 import {CHAOS_SETTINGS} from "./dsl-l3-sim.mjs";
 const INT4 = 2147483647;
+// settings no job step carries: read live from the settings table by their one reader
+const LIVE_ONLY = ["piles.lanes"];
 const integerRanges = {INT1: [0n, 255n], INT2: [-32768n, 32767n], INT4: [-2147483648n, 2147483647n],
   INT8: [-9223372036854775808n, 9223372036854775807n]};
 const characterTypes = new Set(["CHAR", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "NUMC", "DATS", "TIMS"]);
@@ -12,7 +14,8 @@ const numeric = [
   ["budget.warn", (m) => m.governor?.warn, 1, 10000],
   ["budget.narrow_at", (m) => m.governor?.narrow_at, 1, 10000],
   ["budget.per_pile", (m) => m.governor?.per_pile, 0, INT4],
-  ["piles.lanes", (m) => m.release_event?.automatic ? undefined : m.release_event?.lanes, 1, 9999],
+  // the operator's cap on the lanes of event release; 0 = none, the computed lanes stand
+  ["piles.lanes", (m) => m.release_event?.lanes, 0, 9999],
   ["doctor.tick", (m) => m.resilience?.doctor?.tick, 1, 3600],
   ["retry.max", (m) => m.resilience?.retry?.max, 0, 99],
   ["retry.backoff", (m) => m.resilience?.retry?.backoff, 0, 86400],
@@ -85,7 +88,8 @@ export function compileSettings(doc, model, {line, fail}) {
   }
   const seen = new Set();
   // a job step carries at most 20 selection values: the chaos settings are not among them, the pile job reads
-  // them from its run's snapshot, so they take no selection field
+  // them from its run's snapshot, so they take no selection field; nor does a setting only read live
+  // (LIVE_ONLY: piles.lanes, which lanes( ) loads at every release pass)
   let screenNo = 0;
   const entries = spec.tunable.map((name, i) => {
     const at = line(`settings/tunable/${i}`);
@@ -111,7 +115,7 @@ export function compileSettings(doc, model, {line, fail}) {
     if (base.kind === "P" && (+base.defaultValue.slice(0, -1) < min || +base.defaultValue.slice(0, -1) > max)) fail(at, `DSL default of ${name} is outside its bounds`);
     const field = name.replace(/\./g, "_");
     return {"@id": `${model["@id"]}/setting/${name}`, set_line: at, name, "name@type": {built_in: "CHAR", length: 30},
-      field, ...(CHAOS_SETTINGS.includes(name) ? {chaos: true} : {screen: `s_${++screenNo}`}), default: base.defaultValue, "default@type": {built_in: "CHAR", length: 40},
+      field, ...(CHAOS_SETTINGS.includes(name) ? {chaos: true, unscreened: true} : LIVE_ONLY.includes(name) ? {live: true, unscreened: true} : {screen: `s_${++screenNo}`}), default: base.defaultValue, "default@type": {built_in: "CHAR", length: 40},
       kind: base.kind, min: String(min), max: String(max), numeric: base.kind === "N", period: base.kind === "P", char: base.kind === "C",
       value_type: base.valueType, digit_text: !base.list && base.built === "NUMC", date_text: !base.list && base.built === "DATS",
       time_text: !base.list && base.built === "TIMS", scoped: runScoped(name),

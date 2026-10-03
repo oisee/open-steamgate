@@ -44,7 +44,7 @@
       "    APPEND LINES OF lt_purged TO rt_report.\n  ENDMETHOD."
     ],
     "after": [
-      "    APPEND LINES OF lt_purged TO rt_report.\n{{#autodoctor}}\n{{#release_event}}\n    release_events( ).\n{{/release_event}}\n    count_runs( ).\n{{/autodoctor}}\n  ENDMETHOD."
+      "    APPEND LINES OF lt_purged TO rt_report.\n{{#autodoctor}}\n    count_runs( ).\n{{/autodoctor}}\n  ENDMETHOD."
     ]
   },
   {

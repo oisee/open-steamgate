@@ -438,6 +438,9 @@ describe("DSL L3 run cockpit", function () {
       expect((await action("Resume", {RunId: r.RunId})).Answer).include("GLASS");
       expect((await action("ContinueGlass", {RunId: r.RunId, NewGlass: 100, Reason: ""})).Answer).match(/^REFUSED: ContinueGlass: /);
       expect((await action("ContinueGlass", {RunId: r.RunId, NewGlass: 100, Reason: "staff available"})).Answer).equal("OK");
+      // fleet2 releases by event: the continued piles wait for the daemon's next pass (its tick, not run
+      // here on the manual clock); the Doctor action is that pass now, and each pile's tail releases the next
+      await action("Doctor");
       await drain();
       const events = (await get(`EventSet?$filter=RunId eq '${r.RunId}'`)).results;
       expect(events.some((e) => e.Kind === "CONTINUE" && e.Reason === "staff available")).equal(true);

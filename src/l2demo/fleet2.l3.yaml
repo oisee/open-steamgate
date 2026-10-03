@@ -11,6 +11,10 @@
 # of a pile is the port work; iv_bind = 'work=sim' runs the same runner with a
 # simulated twin of the checks (outcomes, durations and hits drawn from the
 # seed), and close=sim closes its alerts by chance.
+# Bounded concurrency (docs/dsl-l3.md, "Release by event"): the pile jobs are
+# planned waiting on the event ZOSD_L3_RELEASE; a doctor's pass and each pile's
+# tail release them up to the lanes in force, 3/4 of the background processes
+# the set may use, at least one; the setting piles.lanes caps it (0 = no cap).
 # `node tools/dsl-l3.mjs build src/l2demo/fleet2.l3.yaml --out src/l2demo`
 set: fleet2
 title: The fleet in two stages, busy ships first, then the deep checks
@@ -36,6 +40,7 @@ stages:
       - rule: ship_cargo_limit.l2.yaml
 snapshots:
   ships_ref: {source: ships, key: [ship_id], canonical: sorted-by-key}
+piles: {release: event}
 schedule: {every: 1d, at: "020000"}
 ports:
   ships:
@@ -112,7 +117,7 @@ simulate:
     stuck: {outcome: {ok: 0.7, hang: 0.3}}
     random: {outcome: {ok: 0.25, dump: 0.25, hang: 0.25, slow: 0.25}}
 settings:
-  tunable: [doctor.tick, budget.glass, budget.warn, budget.narrow_at, budget.per_pile, retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, simulate.seed, simulate.time_scale, simulate.profile, simulate.dump, simulate.hang, simulate.slow, simulate.hits_mean, simulate.autoclose, piles.checks.size]
+  tunable: [doctor.tick, budget.glass, budget.warn, budget.narrow_at, budget.per_pile, retry.max, retry.backoff, stale, fuses.max_alerts, keep.days, simulate.seed, simulate.time_scale, simulate.profile, simulate.dump, simulate.hang, simulate.slow, simulate.hits_mean, simulate.autoclose, piles.checks.size, piles.lanes]
   bounds:
     fuses.max_alerts: {min: 1, max: 100000}
 cockpit: {app: zosd_fleet2, service: ZL3C_FLEET2_SRV, title: Fleet run cockpit}

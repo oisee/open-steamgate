@@ -200,7 +200,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       refusedAt(manifest("nosimvariant", [["  work:\n    kind: work\n    variants:\n      real: generated\n      sim: generated\n", ""], ["  work: real\n", ""]], plain),
         /a sim variant comes with simulate:/, /^      sim: generated/);
       // simulate: needs stages and resilience
-      refusedAt(manifest("noresilience", [], SET_TEXT.replace(/^resilience:\n(  .*\n|    .*\n)+/m, "").replace(/^governor:\n(  .*\n)+/m, "")
+      refusedAt(manifest("noresilience", [], SET_TEXT.replace(/^# Bounded concurrency[^\n]*\n(# [^\n]*\n){3}/m, "").replace("piles: {release: event}\n", "").replace(", piles.lanes]", "]").replace(/^resilience:\n(  .*\n|    .*\n)+/m, "").replace(/^governor:\n(  .*\n)+/m, "")
         .replace(/^settings:\n(  .*\n|    .*\n)+/m, "")), /simulate needs stages and resilience/, /^simulate:/);
     });
 

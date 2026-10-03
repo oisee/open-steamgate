@@ -4,8 +4,8 @@ FUNCTION th_wpinfo.
   DATA lv_free TYPE i VALUE 4.
   DATA lv_busy TYPE i.
   WHILE lv_free > 0.
-    ls_wp-wp_typ = 'BTC'.
-    ls_wp-wp_status = 'Wait'.
+    ls_wp-wp_typ = 'BGD'.
+    ls_wp-wp_status = 'Waiting'.
     APPEND ls_wp TO wplist.
     lv_free = lv_free - 1.
   ENDWHILE.

@@ -138,9 +138,20 @@ CLASS ltcl_proof DEFINITION FINAL FOR TESTING RISK LEVEL DANGEROUS DURATION MEDI
     METHODS wait_for_stages
       IMPORTING is_result TYPE zcl_l3_fleet2=>ty_result
       RETURNING VALUE(rs_result) TYPE zcl_l3_fleet2=>ty_result.
+    METHODS release.
 ENDCLASS.
 
 CLASS ltcl_proof IMPLEMENTATION.
+  METHOD release.
+    " fleet2 releases by event: after a doctor pass, the release a job report makes, the
+    " claims committed before their events are raised
+    DATA lt_claimed TYPE zcl_l3_fleet2=>tt_pile.
+    lt_claimed = zcl_l3_fleet2=>release_claim( ).
+    COMMIT WORK.
+    zcl_l3_fleet2=>release_raise( lt_claimed ).
+    COMMIT WORK.
+  ENDMETHOD.
+
   METHOD cockpit_action.
     DATA lo_dpc TYPE REF TO zcl_zl3c_fleet2_dpc_ext.
     DATA lt_params TYPE /iwbep/t_mgw_name_value_pair.
@@ -154,7 +165,11 @@ CLASS ltcl_proof IMPLEMENTATION.
     lo_dpc->/iwbep/if_mgw_appl_srv_runtime~execute_action(
       EXPORTING iv_action_name = 'ScheduleStatus' it_parameter = lt_params IMPORTING er_data = lr_answer ).
     ASSIGN lr_answer->* TO <ls_answer>.
-    cl_abap_unit_assert=>assert_equals( act = <ls_answer>-answer exp = lv_expected ).
+    " the lanes in force follow; they read TH_WPINFO, which a system may change between two calls
+    lv_expected = lv_expected && ` / LANES `.
+    cl_abap_unit_assert=>assert_equals( act = substring( val = <ls_answer>-answer len = strlen( lv_expected ) )
+      exp = lv_expected ).
+    cl_abap_unit_assert=>assert_char_cp( act = <ls_answer>-answer exp = '* WAITING *' ).
     ls_param-name = 'Param'.
     ls_param-value = 'budget.glass'.
     APPEND ls_param TO lt_params.
@@ -1214,6 +1229,7 @@ CLASS ltcl_proof IMPLEMENTATION.
     ls_result = open_run( abap_true ).
     lt_report = zcl_l3_fleet2=>doctor( ).
     COMMIT WORK.
+    release( ).
     LOOP AT lt_report INTO ls_report WHERE run_id = ls_result-run_id AND doc_action = 'RESUBMIT'.
       lv_count = lv_count + 1.
     ENDLOOP.
@@ -1284,6 +1300,7 @@ CLASS ltcl_proof IMPLEMENTATION.
     COMMIT WORK.
     lt_report = zcl_l3_fleet2=>doctor( ).
     COMMIT WORK.
+    release( ).
     LOOP AT lt_report INTO ls_report WHERE run_id = ls_result-run_id AND doc_action = 'RESUBMIT'.
       lv_count = lv_count + 1.
     ENDLOOP.
@@ -1491,6 +1508,7 @@ CLASS ltcl_proof IMPLEMENTATION.
     DO.
       lt_report = zcl_l3_fleet2=>doctor( ).
       COMMIT WORK.
+      release( ).
       SELECT SINGLE * FROM zosd_l3_run INTO ls_lock
         WHERE set_name = zcl_l3_fleet2=>c_set
           AND check_date = zcl_l3_fleet_proof=>c_check_date.

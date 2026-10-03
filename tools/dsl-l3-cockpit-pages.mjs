@@ -49,6 +49,7 @@ const ABOUT = {
   "stale": "seconds after which the doctor takes over a lock, a pile or a gate",
   "fuses.max_alerts": "alerts a rule may write in one run before it stops writing",
   "keep.days": "days the plans of a final run are kept",
+  "piles.lanes": "most pile jobs released at once; 0 = no cap, the lanes computed from the free background processes",
   "simulate.seed": "seed of the twin's draws: the same seed, the same night",
   "simulate.time_scale": "wall time per simulated time in millionths, 10000 = 0.01 (40 s take 0.4 s)",
   "simulate.profile": "chaos profile of the twin",

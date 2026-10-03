@@ -30,9 +30,9 @@ PARAMETERS p_pile TYPE i.
 {{/planned}}
 PARAMETERS p_bind TYPE c LENGTH 255 LOWER CASE.
 {{#settings.entries}}
-{{^chaos}}
+{{^unscreened}}
 PARAMETERS {{screen}} TYPE c LENGTH 40 LOWER CASE.
-{{/chaos}}
+{{/unscreened}}
 {{/settings.entries}}
 {{#params}}
 {{#is_selopt}}
@@ -53,9 +53,9 @@ START-OF-SELECTION.
 {{#settings}}
   DATA ls_settings TYPE {{settings.class}}=>ty_values.
 {{#entries}}
-{{^chaos}}
+{{^unscreened}}
   ls_settings-{{field}} = {{screen}}.
-{{/chaos}}
+{{/unscreened}}
 {{/entries}}
 {{/settings}}
 {{#with_params}}
@@ -84,6 +84,17 @@ START-OF-SELECTION.
     lt_report = {{class}}=>doctor( ).
     lv_actions = lines( lt_report ).
     WRITE: / 'doctor', lv_actions.
+{{#autodoctor}}
+{{#release_event}}
+    " then the release: the claims are committed before their events are raised
+    DATA lt_released_h TYPE {{class}}=>tt_pile.
+    COMMIT WORK.
+    lt_released_h = {{class}}=>release_claim( ).
+    COMMIT WORK.
+    {{class}}=>release_raise( lt_released_h ).
+    COMMIT WORK.
+{{/release_event}}
+{{/autodoctor}}
     RETURN.
   ENDIF.
 {{/resilience}}

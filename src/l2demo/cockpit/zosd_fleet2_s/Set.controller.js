@@ -189,6 +189,13 @@ function (Controller, JSONModel, DateFormat, Dialog, Button, Input, Label, Text,
      "min": "1",
      "max": "2147483647",
      "about": "keys per pile in stage checks"
+    },
+    {
+     "name": "piles.lanes",
+     "default": "0",
+     "min": "0",
+     "max": "9999",
+     "about": "most pile jobs released at once; 0 = no cap, the lanes computed from the free background processes"
     }
    ]
   };

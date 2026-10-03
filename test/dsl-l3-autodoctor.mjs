@@ -1,10 +1,8 @@
-import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 import {expect} from 'chai';
-import {readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync, mkdirSync} from 'node:fs';
+import {readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync} from 'node:fs';
+import * as abaplintCore from '@abaplint/core';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {modulesOf} from '../tools/osd-transpile.mjs';
-import {lowerNarrowSubmit} from '../tools/osd-narrow-submit.mjs';
 import {pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {execFileSync, spawnSync} from 'node:child_process';
@@ -30,13 +28,17 @@ describe('DSL L3 5e: autonomous doctor', function () {
     await sql('DELETE FROM zosd_job_outbox');
     store.db.prepare("UPDATE batch_runs SET state='FAILED' WHERE state IN ('QUEUED','RUNNING','WAITING')").run();
   }
+  // probe: called after every job and every drain (the lane oracle samples there)
+  let probe = null;
   async function work(limit = 1000) {
     await daemonHost(abap).idle();
     await drainJobOutbox(store);
+    probe?.();
     for (let i=0; i<limit; i++) {
       const outcome = await workQueuedBatch(process.cwd(), store);
       await daemonHost(abap).idle();
       const drained = await drainJobOutbox(store);
+      probe?.();
       if (!['completed','failed','step','running'].includes(outcome.kind) && !drained.imported) break;
     }
   }
@@ -44,6 +46,15 @@ describe('DSL L3 5e: autonomous doctor', function () {
     await daemonHost(abap).idle();await drainJobOutbox(store);
     store.db.prepare("UPDATE batch_runs SET queued_at='2000-01-01T00:00:00Z' WHERE state='QUEUED' AND program='ZL3_FLEET2_DOC'").run();
     await work(1);
+  }
+  // fleet2 releases by event: a pile job waits on ZOSD_L3_RELEASE until the first pass releases it
+  async function releasedPile() {
+    await run();await initialPassFirst();await drainJobOutbox(store);
+  }
+  // one release pass as a job report makes it: the claims in one step (committed), the raises in the next
+  async function release() {
+    const claimed=await dialogStep(()=>cls().release_claim());
+    await dialogStep(()=>cls().release_raise({it_claimed:claimed}));
   }
   const run = (day='20261001', bind='') => dialogStep(() => cls().run({iv_date: new abap.types.Date().set(day), iv_mode: str('P'), iv_bind: str(bind)}));
   async function mutant(name, className, edit, check) {
@@ -57,35 +68,6 @@ describe('DSL L3 5e: autonomous doctor', function () {
     const file=join(folder,`${className}.clas.mjs`);writeFileSync(file,copy);
     await import(pathToFileURL(file).href);
     try {await check();} finally {await daemonHost(abap).close();abap.Classes[className.toUpperCase()]=original;}
-  }
-  async function variantRunner(model, label, check) {
-    const rendered=await renderSet(model), {Transpiler, core}=modulesOf(process.cwd());
-    const registry=new core.Registry(), deps=new Map();
-    const walk=(folder)=> {
-      for(const entry of readdirSync(folder,{withFileTypes:true})) {
-        const path=join(folder,entry.name);
-        if(entry.isDirectory())walk(path);
-        else if(/\.(abap|xml)$/.test(entry.name))deps.set(entry.name,path);
-      }
-    };
-    for(const folder of ['.local/lars/open-abap-core/src','.local/lars/open-abap-apc/src','src','gen'])walk(folder);
-    for(const path of l3TableDependencies())deps.set(path.split('/').pop(),path);
-    deps.set('zif_gg_selection_screen_types.intf.abap','.local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap');
-    for(const [name,path] of deps)if(!name.startsWith(`${model.class}.`))registry.addDependency(new core.MemoryFile(name,readFileSync(path,'utf8')));
-    for(const ext of ['abap','xml']) {
-      const name=`${model.class}.clas.${ext}`;
-      registry.addFile(new core.MemoryFile(name,lowerNarrowSubmit(rendered.files[name],name,core)));
-    }
-    const options=JSON.parse(readFileSync('abap_transpile.json','utf8')).options;
-    const output=await new Transpiler({...options,unknownTypes:'runtimeError',ignoreSourceMap:true,skip:[],only:(object)=>object.getName().toUpperCase()===model.class.toUpperCase()}).run(registry);
-    const own=output.objects.find(o=>o.filename===`${model.class}.clas.mjs`);
-    const folder=join(dir,label);mkdirSync(folder,{recursive:true});
-    const outputUrl=pathToFileURL(join(process.cwd(),'output')+'/').href;
-    const code=own.chunk.getCode().replace(/(?:from |import\()(["'])\.\/([^"']+)\1/g,(m,q,file)=>m.replace(`${q}./${file}${q}`,`${q}${outputUrl}${file}${q}`));
-    const file=join(folder,own.filename);writeFileSync(file,code);
-    const original=abap.Classes[model.class.toUpperCase()];
-    await import(pathToFileURL(file).href);
-    try{await check();}finally{await daemonHost(abap).close();abap.Classes[model.class.toUpperCase()]=original;}
   }
   before(async () => {
     await import('./start.mjs');
@@ -145,14 +127,26 @@ describe('DSL L3 5e: autonomous doctor', function () {
     await clock.advance(60000); await work();
     expect(read("SELECT status FROM zosd_l3_stage WHERE stage_no=2")[0].status.trim()).to.equal('DONE');
   });
-  it('the 100-pile twin reaches stage 2 and completes without manual doctor or resume', async () => {
-    for (const [name,value] of [['budget.glass','100000'],['retry.max','99'],['retry.backoff','0'],['simulate.time_scale','0']]) {
+  // A twin run over `ships` ships with piles.lanes = `lanes` on a host of eight background processes
+  // (computed: 3/4 of 8 = 6 > lanes, so the set cap is what binds). After every job and every drain the
+  // probe counts the pile jobs released and not ended: queued or running in the batch store (retries
+  // are jobs of their own, so they count), and RUNNING or EVENT-SENT in the pile table.
+  async function cappedRun(ships, lanes) {
+    const workers=process.env.OSD_BG_WORKERS;process.env.OSD_BG_WORKERS='8';
+    const peak={jobs:0,piles:0};
+    probe=()=> {
+      const jobs=store.db.prepare("SELECT count(*) n FROM batch_runs WHERE job_name GLOB 'L3_FLEET2_[0-9]*' AND state IN ('QUEUED','RUNNING')").get().n;
+      const piles=read("SELECT count(*) n FROM zosd_l3_pile WHERE status='RUNNING' OR (status='PLANNED' AND reason='EVENT-SENT')")[0].n;
+      peak.jobs=Math.max(peak.jobs,jobs);peak.piles=Math.max(peak.piles,piles);
+    };
+    try {
+    for (const [name,value] of [['budget.glass','100000'],['retry.max','99'],['retry.backoff','0'],['simulate.time_scale','0'],['piles.lanes',String(lanes)]]) {
       const ok = await dialogStep(()=>cls().set_setting({iv_param:str(name),iv_value:str(value),iv_note:str('test policy')}));
       expect(ok.get(),name).to.equal('X');
     }
     await dialogStep(async()=> {
       await sql('DELETE FROM zosd_l2_ship');await sql('DELETE FROM zosd_l2_voy');
-      for(let i=0;i<200;i++) {
+      for(let i=0;i<ships;i++) {
         const ship=`S${String(i).padStart(3,'0')}`;
         await sql(`INSERT INTO zosd_l2_ship (mandt,ship_id,name,status) VALUES ('123','${ship}','Ship','A')`);
         await sql(`INSERT INTO zosd_l2_voy (mandt,voyage_id,ship_id,dep_date) VALUES ('123','V${String(i).padStart(5,'0')}','${ship}','20261005')`);
@@ -160,8 +154,15 @@ describe('DSL L3 5e: autonomous doctor', function () {
     });
     await run('20261001','work=sim');
     await work();
-    expect(read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')).to.have.length(100);
     for(let i=0;i<20 && read("SELECT * FROM zosd_l3_run WHERE status='HELD'").length;i++) {await clock.advance(10000);await work();}
+    } finally {probe=null;if(workers===undefined)delete process.env.OSD_BG_WORKERS;else process.env.OSD_BG_WORKERS=workers;}
+    return peak;
+  }
+  it('the 100-pile twin reaches stage 2 and completes without manual doctor or resume, never more than 3 piles released at once', async () => {
+    const peak=await cappedRun(200,3);
+    expect(read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')).to.have.length(100);
+    expect(peak).to.deep.equal({jobs:3,piles:3});
+    expect(read('SELECT * FROM zosd_l3_pile WHERE attempt>1').length,'retries ran').to.be.greaterThan(0);
     expect(read("SELECT status FROM zosd_l3_stage WHERE stage_no=2")[0].status.trim()).to.equal('DONE');
     expect(read("SELECT * FROM zosd_l3_run WHERE status='HELD'")).to.have.length(0);
     expect(read("SELECT * FROM zosd_l3_doctor WHERE stage_no=1 AND doc_action='FAILED'").length).to.be.greaterThan(20);
@@ -184,7 +185,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
     expect(daemonHost(abap).errors.map(e=>String(e))).to.deep.equal([]);
   });
   it('a silent live job stays running before stale and is failed after stale', async () => {
-    await run();await daemonHost(abap).idle();await drainJobOutbox(store);
+    await releasedPile();
     const pile=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
     const claimed=store.claimNext();
     expect(claimed.run.jobName).to.equal(pile.job_name.trim());
@@ -388,7 +389,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
     });
     await reset();
     await mutant('no-abort','zcl_l3_fleet2',t=>t.replace("await abap.FunctionModules['BP_JOB_ABORT']({exporting: {jobname: ls_pile.get().job_name, jobcount: ls_pile.get().job_count}});",'abap.builtin.sy.get().subrc.set(0);'),async()=> {
-      await run();await daemonHost(abap).idle();await drainJobOutbox(store);
+      await releasedPile();
       const claimed=store.claimNext(), pile=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
       expect(claimed.run.jobName).to.equal(pile.job_name.trim());expect(claimed.run.jobCount).to.equal(pile.job_count.trim());
       await dialogStep(()=>sql("UPDATE zosd_l3_pile SET status='RUNNING', started='20261001000000' WHERE stage_no=1"));
@@ -413,7 +414,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
     await reset();
   });
   it('generic BP_JOB_ABORT refuses unknown, foreign and non-running jobs and preserves the business LUW',async()=> {
-    await run();await daemonHost(abap).idle();await drainJobOutbox(store);
+    await releasedPile();
     const claimed=store.claimNext(), pile=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
     expect(claimed.run.jobName).to.equal(pile.job_name.trim());expect(claimed.run.jobCount).to.equal(pile.job_count.trim());
     const abort=()=>abap.FunctionModules.BP_JOB_ABORT({exporting:{jobname:str(pile.job_name.trim()),jobcount:str(pile.job_count.trim())}});
@@ -437,7 +438,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
     }
   });
   it('a generic worker recognizes an aborted claim and cannot record a late success',async()=> {
-    await run();await daemonHost(abap).idle();await drainJobOutbox(store);
+    await releasedPile();
     const pile=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
     const outcome=await workQueuedBatch(process.cwd(),store,async()=> {
       await dialogStep(()=>abap.FunctionModules.BP_JOB_ABORT({exporting:{jobname:str(pile.job_name.trim()),jobcount:str(pile.job_count.trim())}}));
@@ -447,10 +448,9 @@ describe('DSL L3 5e: autonomous doctor', function () {
     expect(outcome.run.steps[0].state).to.equal('INTERRUPTED');
   });
   it('event release plans waiting jobs and enforces lanes, kill and GLASS before completing both stages', async()=> {
-    const model=compileSet(SET);
-    model.release_event={"@id":`${model['@id']}/piles`,set_line:model.set_line,lanes:'2'};
-    await variantRunner(model,'release-event',async()=> {
-      expect((await dialogStep(()=>cls().set_setting({iv_param:str('budget.glass'),iv_value:str('1000'),iv_note:str('release fixture capacity')}))).get()).to.equal('X');
+    {
+      for (const [name,value] of [['budget.glass','1000'],['piles.lanes','2']])
+        expect((await dialogStep(()=>cls().set_setting({iv_param:str(name),iv_value:str(value),iv_note:str('release fixture capacity')}))).get()).to.equal('X');
       for(let i=1;i<8;i++) {
         await sql(`INSERT INTO zosd_l2_ship (mandt,ship_id,name,status) VALUES ('123','E${String(i).padStart(3,'0')}','Ship','A')`);
         await sql(`INSERT INTO zosd_l2_voy (mandt,voyage_id,ship_id,dep_date) VALUES ('123','E${String(i).padStart(5,'0')}','E${String(i).padStart(3,'0')}','20261005')`);
@@ -461,22 +461,245 @@ describe('DSL L3 5e: autonomous doctor', function () {
       expect(read("SELECT * FROM zosd_l3_pile WHERE reason='EVENT-SENT'")).to.have.length(2);
       expect(read("SELECT * FROM zosd_l3_pile WHERE reason='EVENT-WAIT'")).to.have.length(2);
       await dialogStep(()=>sql("UPDATE zosd_l3_budget SET state='GLASS'"));
-      await dialogStep(()=>cls().release_events());
+      await release();
       expect(read("SELECT * FROM zosd_l3_pile WHERE reason='EVENT-SENT'")).to.have.length(2);
       await dialogStep(()=>sql("UPDATE zosd_l3_budget SET state='NARROW'"));
-      await dialogStep(()=>cls().release_events());
+      await release();
       expect(read("SELECT * FROM zosd_l3_pile WHERE reason='EVENT-SENT'")).to.have.length(2);
       await dialogStep(()=>sql("UPDATE zosd_l3_budget SET state='RUNNING'"));
-      await work(1);
-      // A set kill suppresses releases after an actual pile frees a lane.
+      // A set kill suppresses a release while a lane is free: the operator raises the cap from 2 to 3
+      // under the kill, and only clearing it releases the third pile.
       await dialogStep(()=>sql("INSERT INTO zosd_l3_kill (mandt,set_name) VALUES ('123','fleet2')"));
-      await dialogStep(()=>cls().release_events());
-      expect(read("SELECT * FROM zosd_l3_pile WHERE status='PLANNED' AND reason='EVENT-SENT'")).to.have.length(1);
+      expect((await dialogStep(()=>cls().set_setting({iv_param:str('piles.lanes'),iv_value:str('3'),iv_note:str('one lane more')}))).get()).to.equal('X');
+      await release();
+      expect(read("SELECT * FROM zosd_l3_pile WHERE status='PLANNED' AND reason='EVENT-SENT'")).to.have.length(2);
       await dialogStep(()=>sql('DELETE FROM zosd_l3_kill'));
+      await release();
+      expect(read("SELECT * FROM zosd_l3_pile WHERE status='PLANNED' AND reason='EVENT-SENT'")).to.have.length(3);
       await work();
       for(let i=0;i<8 && read("SELECT * FROM zosd_l3_run WHERE status='HELD'").length;i++){await clock.advance(10000);await work();}
       expect(read("SELECT status FROM zosd_l3_stage WHERE stage_no=2")[0].status.trim(), JSON.stringify(read('SELECT status,reason FROM zosd_l3_pile'))).to.equal('DONE');
+    }
+  });
+  // A pass whose report dumps after its first raise and before its last commit. BP_EVENT_RAISE outlives
+  // the rollback; the claims must too, or the released job runs on a lane the next pass counts as free.
+  // After every step every pile job released (queued or running in the batch store) belongs to a pile
+  // counted active; the raise the dump lost is made again by a pass a minute after the claim.
+  // two lanes, four stage-1 piles planned waiting for their event
+  async function fourWaiting(note) {
+    for (const [name,value] of [['budget.glass','1000'],['piles.lanes','2']])
+      expect((await dialogStep(()=>cls().set_setting({iv_param:str(name),iv_value:str(value),iv_note:str(note)}))).get()).to.equal('X');
+    for(let i=1;i<8;i++) {
+      await sql(`INSERT INTO zosd_l2_ship (mandt,ship_id,name,status) VALUES ('123','E${String(i).padStart(3,'0')}','Ship','A')`);
+      await sql(`INSERT INTO zosd_l2_voy (mandt,voyage_id,ship_id,dep_date) VALUES ('123','E${String(i).padStart(5,'0')}','E${String(i).padStart(3,'0')}','20261005')`);
+    }
+    await run();await daemonHost(abap).idle();await drainJobOutbox(store);
+    expect(read("SELECT * FROM zosd_l3_pile WHERE reason='EVENT-WAIT'")).to.have.length(4);
+  }
+  // the pile jobs released (queued or running in the batch store), and those whose pile is not counted active
+  const released=()=>store.db.prepare("SELECT job_name,job_count FROM batch_runs WHERE job_name GLOB 'L3_FLEET2_[0-9]*' AND state IN ('QUEUED','RUNNING')").all();
+  const unreserved=()=>released().filter(job=>!read("SELECT * FROM zosd_l3_pile WHERE job_name=? AND job_count=? AND (status='RUNNING' OR (status='PLANNED' AND reason='EVENT-SENT'))",job.job_name,job.job_count).length);
+  async function dumpAfterFirstRaise() {
+    await fourWaiting('dump fixture');
+    const original=abap.FunctionModules.BP_EVENT_RAISE;let raises=0;
+    abap.FunctionModules.BP_EVENT_RAISE=async(input)=> {
+      if(String(input.exporting.eventid.get()).trim()==='ZOSD_L3_RELEASE' && raises++===1) throw new Error('simulated dump after the first raise');
+      return original(input);
+    };
+    try {await initialPassFirst();} finally {abap.FunctionModules.BP_EVENT_RAISE=original;}
+    await drainJobOutbox(store);
+    expect(raises,'the second raise dumped').to.equal(2);
+    expect(released(),'the first raise released its job').to.have.length(1);
+    expect(unreserved(),'a released job without its claim').to.deep.equal([]);
+    expect(read("SELECT * FROM zosd_l3_pile WHERE status='PLANNED' AND reason='EVENT-SENT'")).to.have.length(2);
+    // the next pass finds both lanes taken; within the grace it leaves the lost raise alone
+    await release();await drainJobOutbox(store);
+    expect(read("SELECT * FROM zosd_l3_pile WHERE reason='EVENT-SENT'")).to.have.length(2);
+    expect(released()).to.have.length(1);
+    // past the grace the job still waits for its event: raised again
+    await clock.advance(61000);await release();await drainJobOutbox(store);
+    expect(released(),'the lost raise made again').to.have.length(2);
+    expect(unreserved()).to.deep.equal([]);
+    // and a raise for a job that has left the wait does nothing
+    const before=store.db.prepare("SELECT id,state FROM batch_runs ORDER BY id").all();
+    for(const job of released()) await dialogStep(()=>abap.FunctionModules.BP_EVENT_RAISE({exporting:{eventid:str('ZOSD_L3_RELEASE'),eventparm:str(`${job.job_name.trim()}/${job.job_count.trim()}`)}}));
+    await drainJobOutbox(store);
+    expect(store.db.prepare("SELECT id,state FROM batch_runs ORDER BY id").all()).to.deep.equal(before);
+    await work();
+    for(let i=0;i<8 && read("SELECT * FROM zosd_l3_run WHERE status='HELD'").length;i++){await clock.advance(10000);await work();}
+    expect(read("SELECT status FROM zosd_l3_stage WHERE stage_no=2")[0].status.trim(), JSON.stringify(read('SELECT status,reason FROM zosd_l3_pile'))).to.equal('DONE');
+  }
+  it('a release that dumps after a raise keeps its claims, and the lost raise is made again after the grace', dumpAfterFirstRaise);
+  // A claims and commits, then stalls past the grace; B's pass raises A's claims again and their jobs
+  // are released; the kill switch is set; A goes on. A committed claim is never put back: A raises
+  // nothing under the kill and leaves its claims, so once the kill is cleared every released job is
+  // still counted and no pass releases past the lanes. A failed raise leaves its claim as well.
+  async function killAfterRecovery() {
+    await fourWaiting('kill fixture');
+    const claimed=await dialogStep(()=>cls().release_claim());
+    expect(claimed.array()).to.have.length(2);
+    await clock.advance(61000);
+    const none=await dialogStep(()=>cls().release_claim());
+    expect(none.array(),'both lanes are claimed').to.have.length(0);
+    await dialogStep(()=>cls().release_raise({it_claimed:none}));await drainJobOutbox(store);
+    expect(released(),'the recovery raise released both jobs').to.have.length(2);
+    await dialogStep(()=>sql("INSERT INTO zosd_l3_kill (mandt,set_name) VALUES ('123','fleet2')"));
+    await dialogStep(()=>cls().release_raise({it_claimed:claimed}));
+    await dialogStep(()=>sql('DELETE FROM zosd_l3_kill'));
+    expect(unreserved(),'a released job outside the count after the kill').to.deep.equal([]);
+    await release();await drainJobOutbox(store);
+    expect(released(),'no lane past the two').to.have.length(2);
+    // a failed raise: the claim stays, and the pass after the grace raises it
+    const original=abap.FunctionModules.BP_EVENT_RAISE;
+    // one lane more, whose raise fails
+    expect((await dialogStep(()=>cls().set_setting({iv_param:str('piles.lanes'),iv_value:str('3'),iv_note:str('one lane more')}))).get()).to.equal('X');
+    abap.FunctionModules.BP_EVENT_RAISE=async()=>{abap.builtin.sy.get().subrc.set(1);};
+    let failed;
+    try {failed=await dialogStep(()=>cls().release_claim());await dialogStep(()=>cls().release_raise({it_claimed:failed}));}
+    finally {abap.FunctionModules.BP_EVENT_RAISE=original;}
+    expect(failed.array(),'the third lane was claimed').to.have.length(1);
+    for(const pile of failed.array()) expect(read('SELECT reason FROM zosd_l3_pile WHERE job_name=? AND job_count=?',pile.get().job_name.get(),pile.get().job_count.get())[0].reason.trim(),'a failed raise keeps its claim').to.equal('EVENT-SENT');
+    expect(released()).to.have.length(2);
+    await clock.advance(61000);await release();await drainJobOutbox(store);
+    expect(released(),'the failed raise made again').to.have.length(3);
+    expect(unreserved()).to.deep.equal([]);
+    await work();
+    for(let i=0;i<8 && read("SELECT * FROM zosd_l3_run WHERE status='HELD'").length;i++){await clock.advance(10000);await work();}
+    expect(read("SELECT status FROM zosd_l3_stage WHERE stage_no=2")[0].status.trim(), JSON.stringify(read('SELECT status,reason FROM zosd_l3_pile'))).to.equal('DONE');
+  }
+  it('a committed claim is never put back: a kill after another pass raised it again leaves every released job counted; a failed raise keeps its claim', killAfterRecovery);
+  it('release mutants by copy: raise before the claims commit, a kill that puts claims back, no second raise', async()=> {
+    // each mutant must fail at its own assertion, not at a fixture left over from the one before
+    const fails=async(check,message)=> {let failure;try{await check();}catch(error){failure=error;}expect(failure,'the oracle catches the mutant').to.be.instanceOf(Error);expect(failure.message).to.include(message);};
+    const reset=async()=> {
+      await daemonHost(abap).close();
+      clock.set(Date.parse('2026-10-01T00:00:00Z'));
+      await abandonJobs();
+      for(const table of tables)await sql(`DELETE FROM ${table}`);
+      for(const table of ['ship','voy','crew','cargo'])await sql(`DELETE FROM zosd_l2_${table}`);
+      await sql("INSERT INTO zosd_l2_ship (mandt,ship_id,name,status) VALUES ('123','S001','Ship','A')");
+      await sql("INSERT INTO zosd_l2_voy (mandt,voyage_id,ship_id,dep_date) VALUES ('123','V00001','S001','20261005')");
+    };
+    await reset();
+    await mutant('raise-before-commit','zcl_osd_gui_l3_fleet2_doc',t=>t.replace("release_claim({rt_claimed: 1})));\n    await abap.statements.commit();","release_claim({rt_claimed: 1})));"),()=>fails(dumpAfterFirstRaise,'a released job without its claim'));
+    await reset();
+    // the reset of round 2, by copy: under the kill the claims not yet raised go back to EVENT-WAIT
+    const reset2=(text)=> {
+      const at=text.indexOf('static async release_raise(');
+      const kill='if (abap.compare.eq((await this.killed({rv_killed: 1})), abap.builtin.abap_true)) {';
+      const k=text.indexOf(kill,at);
+      expect(k).to.be.greaterThan(at);
+      const back="for (const row of it_claimed.array()) {const r=row.get();await abap.context.databaseConnections.DEFAULT.execute(`UPDATE zosd_l3_pile SET reason='EVENT-WAIT' WHERE rtrim(set_name)='fleet2' AND rtrim(run_id)='${r.run_id.get().trimEnd()}' AND rtrim(rule_name)='${r.rule_name.get().trimEnd()}' AND pile_no=${r.pile_no.get()} AND rtrim(status)='PLANNED' AND rtrim(reason)='EVENT-SENT'`);}";
+      return text.slice(0,k+kill.length)+back+text.slice(k+kill.length);
+    };
+    await mutant('kill-puts-claims-back','zcl_l3_fleet2',reset2,()=>fails(killAfterRecovery,'a released job outside the count after the kill'));
+    await reset();
+    await mutant('no-second-raise','zcl_l3_fleet2',t=>t.replace(/(if \(abap\.compare\.eq\(abap\.builtin\.sy\.get\(\)\.subrc, abap\.IntegerFactory\.get\(0\)\) && abap\.compare\.eq\(lv_waiting, abap\.CharacterFactory\.get\(1, 'X'\)\)\) \{)/,'if (false) {'),()=>fails(dumpAfterFirstRaise,'the lost raise made again'));
+    await reset();
+  });
+  // Every SELECT SINGLE FOR UPDATE of the generated L3 sources names the whole primary key of its table
+  // (KEYFLAG in the table's definition): a system locks no row by part of a key. Read with abaplint.
+  function forUpdateMisses(files) {
+    const keys=new Map();
+    const walk=(folder)=>readdirSync(folder,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(join(folder,e.name)):[join(folder,e.name)]);
+    const all=walk('src');
+    for(const file of all.filter(f=>f.endsWith('.tabl.xml'))) {
+      const fields=[...readFileSync(file,'utf8').matchAll(/<DD03P>([\s\S]*?)<\/DD03P>/g)].map(m=>m[1]).filter(b=>/<KEYFLAG>X<\/KEYFLAG>/.test(b))
+        .map(b=>b.match(/<FIELDNAME>([^<]*)<\/FIELDNAME>/)[1].toLowerCase()).filter(f=>f!=='mandt');
+      keys.set(file.split('/').pop().replace('.tabl.xml','').toLowerCase(),fields);
+    }
+    const misses=[];let seen=0;
+    for(const [name,text] of files) {
+      const registry=new abaplintCore.Registry();registry.addFile(new abaplintCore.MemoryFile(name,text));registry.parse();
+      for(const file of registry.getObjects().flatMap(o=>o.getABAPFiles())) for(const statement of file.getStatements()) {
+        const source=statement.concatTokens().replace(/\s+/g,' ');
+        if(!/^SELECT SINGLE FOR UPDATE /i.test(source)) continue;
+        const table=source.match(/\bFROM (\w+)/i)[1].toLowerCase();
+        expect(keys.has(table),`${name}:${statement.getStart().getRow()} locks ${table}, whose definition is not under src`).to.equal(true);
+        seen++;
+        const where=source.split(/\bWHERE\b/i)[1]??'';
+        const missing=keys.get(table).filter(field=>!new RegExp(`(?<![\\w-])${field}\\s*=`,'i').test(where));
+        if(missing.length) misses.push(`${name}:${statement.getStart().getRow()} ${table} without ${missing.join(', ')}`);
+      }
+    }
+    return {misses,seen};
+  }
+  it('every SELECT SINGLE FOR UPDATE of the generated L3 sources names its table\'s whole primary key; the old run lock does not', async()=> {
+    const model=compileSet(SET), rendered=await renderSet(model);
+    const generated=Object.entries(rendered.files).filter(([name])=>name.endsWith('.abap'));
+    const committed=readdirSync('src/l2demo').filter(n=>/^(zcl_l3_|zl3_|zcl_zl3c_).*\.abap$/.test(n)).map(n=>[n,readFileSync(join('src/l2demo',n),'utf8')]);
+    const result=forUpdateMisses([...generated,...committed]);
+    expect(result.seen,'statements checked').to.be.greaterThan(10);
+    expect(result.misses).to.deep.equal([]);
+    // mutant by copy: the run lock as it was, by set and run id
+    const runner=rendered.files[`${model.class}.clas.abap`];
+    const fixed='SELECT SINGLE FOR UPDATE * FROM zosd_l3_run INTO ls_run WHERE set_name = c_set AND check_date = ls_pile-check_date.';
+    expect(runner).to.include(fixed);
+    const old=runner.replace(fixed,"SELECT SINGLE FOR UPDATE * FROM zosd_l3_run INTO ls_run WHERE set_name = c_set AND run_id = ls_pile-run_id AND status = 'HELD'.");
+    expect(forUpdateMisses([['old.clas.abap',old]]).misses).to.have.length(1).and.match(/zosd_l3_run without check_date/);
+  });
+  // TH_WPINFO as the sandbox answered it (2026-10-03): 15 work processes, 7 DIA, 1 UPD, 5 BGD of which
+  // 4 are Waiting, 1 SPO, 1 UP2. Every non-background process is idle here, so only a filter on the type
+  // counts 4; an older kernel says BTC and Wait.
+  const MEASURED=[...Array(7).fill(['DIA','Waiting']),['UPD','Waiting'],['BGD','Running'],...Array(4).fill(['BGD','Waiting']),['SPO','Waiting'],['UP2','Waiting']];
+  async function withWplist(rows, fn) {
+    const original=abap.FunctionModules.TH_WPINFO;
+    abap.FunctionModules.TH_WPINFO=async(input)=> {
+      const table=input.tables.wplist;table.clear();
+      for(const [type,status] of rows){const row=table.getRowType().clone();row.get().wp_typ.set(type);row.get().wp_status.set(status);table.append(row);}
+    };
+    try {return await fn();} finally {abap.FunctionModules.TH_WPINFO=original;}
+  }
+  async function lanesFor(rows, {cap='0', running=0}={}) {
+    await dialogStep(async()=> {
+      await sql("DELETE FROM zosd_l3_pile");
+      for(let i=1;i<=running;i++) await sql(`INSERT INTO zosd_l3_pile (mandt,run_id,rule_name,pile_no,set_name,stage_no,status) VALUES ('123','LANES','x',${i},'fleet2',1,'RUNNING')`);
+      for(let i=1;i<=2;i++) await sql(`INSERT INTO zosd_l3_pile (mandt,run_id,rule_name,pile_no,set_name,stage_no,status,reason) VALUES ('123','LANES','x',${10+i},'fleet2',1,'PLANNED','EVENT-WAIT')`);
     });
+    expect((await dialogStep(()=>cls().set_setting({iv_param:str('piles.lanes'),iv_value:str(cap),iv_note:str('lane fixture')}))).get()).to.equal('X');
+    return withWplist(rows, async()=> {
+      const lanes=new abap.types.Integer(), source=new abap.types.String();
+      await dialogStep(()=>cls().lanes({ev_lanes:lanes,ev_source:source}));
+      const status=(await dialogStep(()=>cls().lanes_status())).get();
+      return {lanes:lanes.get(),source:source.get(),status};
+    });
+  }
+  const laneOracle={
+    measured:async()=>expect(await lanesFor(MEASURED)).to.deep.equal({lanes:3,source:'COMPUTED',status:'LANES 3 COMPUTED RELEASED 0 WAITING 2'}),
+    older:async()=>expect((await lanesFor([['DIA','Wait'],...Array(4).fill(['BTC','Wait']),['BTC','Run']])).lanes).to.equal(3),
+    cap:async()=>expect(await lanesFor(MEASURED,{cap:'2'})).to.deep.equal({lanes:2,source:'SET',status:'LANES 2 SET RELEASED 0 WAITING 2'}),
+    capAbove:async()=>expect((await lanesFor(MEASURED,{cap:'5'})).source).to.equal('COMPUTED'),
+    // two of the four idle BGD now run this set's piles: 2 idle + 2 own = 4, 3 lanes, as before they started
+    own:async()=>expect(await lanesFor(MEASURED.map((row,i)=>i===9||i===10?['BGD','Running']:row),{running:2})).to.deep.equal({lanes:3,source:'COMPUTED',status:'LANES 3 COMPUTED RELEASED 2 WAITING 2'}),
+    floor:async()=>expect(await lanesFor(MEASURED.map(([type])=>[type,'Running']))).to.deep.equal({lanes:1,source:'FLOOR',status:'LANES 1 FLOOR RELEASED 0 WAITING 2'}),
+  };
+  it('lanes in force from the measured TH_WPINFO rows: 3/4 of the idle BGD, own running piles, the set cap, a floor of one', async()=> {
+    for(const [name,check] of Object.entries(laneOracle)) {
+      try {await check();} catch(error) {error.message=`${name}: ${error.message}`;throw error;}
+    }
+  });
+  it('lane mutants by copy: the old BTC/Wait filter, no cap, no floor, own piles not counted, no lane check, no first pass, no tail release', async()=> {
+    const fails=async(check)=> {let failure;try{await check();}catch(error){failure=error;}expect(failure,'the oracle catches the mutant').to.be.instanceOf(Error);};
+    const reset=async()=> {
+      await daemonHost(abap).close();
+      for(const table of tables)await sql(`DELETE FROM ${table}`);
+      await abandonJobs();
+      clock.set(Date.parse('2026-10-01T00:00:00Z'));
+    };
+    const filter="(abap.compare.eq(I.wp_typ, abap.CharacterFactory.get(3, 'BGD')) || abap.compare.eq(I.wp_typ, abap.CharacterFactory.get(3, 'BTC'))) && (abap.compare.eq(I.wp_status, abap.CharacterFactory.get(7, 'Waiting')) || abap.compare.eq(I.wp_status, abap.CharacterFactory.get(4, 'Wait')))";
+    await mutant('btc-wait-only','zcl_l3_fleet2',t=>t.replace(filter,"abap.compare.eq(I.wp_typ, abap.CharacterFactory.get(3, 'BTC')) && abap.compare.eq(I.wp_status, abap.CharacterFactory.get(4, 'Wait'))"),()=>fails(laneOracle.measured));
+    await mutant('no-cap','zcl_l3_fleet2',t=>t.replace('if (abap.compare.gt(lv_cap, abap.IntegerFactory.get(0)) && abap.compare.le(lv_cap, ev_lanes)) {','if (false) {'),()=>fails(laneOracle.cap));
+    await mutant('no-floor','zcl_l3_fleet2',t=>t.replace('if (abap.compare.lt(ev_lanes, abap.IntegerFactory.get(1))) {','if (false) {'),()=>fails(laneOracle.floor));
+    await mutant('own-not-counted','zcl_l3_fleet2',t=>t.replace('abap.operators.add(lv_free,lv_running)','lv_free'),()=>fails(laneOracle.own));
+    await reset();
+    await mutant('no-lane-check','zcl_l3_fleet2',t=>t.replace('if (abap.compare.ge(lv_active, lv_lanes)) {','if (false) {'),async()=> {
+      const peak=await cappedRun(20,3);expect(peak.jobs).to.be.greaterThan(3);
+    });
+    await reset();
+    await mutant('no-first-pass','zcl_l3_fleet2',t=>t.replace('          await this.start_daemon();\n          await this.watcher_pass();','          await this.start_daemon();'),()=>fails(stoppingRace));
+    await reset();
+    await mutant('no-tail-release','zcl_osd_gui_l3_fleet2',t=>t.replace("this.#lt_released.set((await abap.Classes['ZCL_L3_FLEET2'].release_claim({rt_claimed: 1})));",';'),()=>fails(stoppingRace));
+    await reset();
   });
   it('SAP_END_OF_JOB releases an exact name/count watcher on success, abort and interruption', async () => {
     const folder=join(dir,'kernel-end');const isolated=new BatchRuns(folder,{OSD_OPERATIONS_DB:join(dir,'kernel-end.sqlite')});
@@ -499,13 +722,18 @@ describe('DSL L3 5e: autonomous doctor', function () {
   });
   it('manifest validation names the line; job-only retains legacy runner and job bytes', async () => {
     const file=`src/l2demo/zz_autodoctor_${process.pid}.l3.yaml`;
-    const text=readFileSync(SET,'utf8');
+    // the doctor without a daemon cannot release by event (refused below): those variants pin release: submit
+    const text=readFileSync(SET,'utf8'), submit=text.replace('piles: {release: event}','piles: {release: submit}').replace(', piles.lanes]',']');
+    expect(submit).not.to.equal(text);
     try {
       for(const [from,to] of [['tick: 10','tick: 0'],['[daemon]','[daemon, daemon]'],['[daemon]','[unknown]']]) {
         writeFileSync(file,text.replace(from,to));
         expect(()=>compileSet(file)).to.throw(/doctor/).and.match(/:\d+:/);
       }
-      const eventOnly=text.replace('[daemon]','[event]').replace('doctor.tick, ','');
+      writeFileSync(file,text.replace('[daemon]','[job]').replace('doctor.tick, ',''));
+      const releaseLine=text.split('\n').findIndex(line=>line.startsWith('piles: {release: event}'))+1;
+      expect(()=>compileSet(file)).to.throw(new RegExp(`:${releaseLine}: event release needs a daemon doctor`));
+      const eventOnly=submit.replace('[daemon]','[event]').replace('doctor.tick, ','');
       writeFileSync(file,eventOnly);
       const eventLine=eventOnly.split('\n').findIndex(line=>line.includes('doctor: {as: [event]'))+1;
       expect(()=>compileSet(file)).to.throw(new RegExp(`:${eventLine}: doctor.as needs daemon or job`));
@@ -518,14 +746,14 @@ describe('DSL L3 5e: autonomous doctor', function () {
         {id:'fixture',set:'fixture',line:()=>eventLine,fail:(line,message)=>{throw new Error(`:${line}: ${message}`);},
           staged:true,sink:{name:'alerts',variants:[{name:'capture',generated:true,class:'z_capture'}]}});
       expect(accepted.doctor.mechanisms).to.deep.equal(['event']);
-      writeFileSync(file,text.replace('[daemon]','[job]').replace('doctor.tick, ',''));
+      writeFileSync(file,submit.replace('[daemon]','[job]').replace('doctor.tick, ',''));
       const model=compileSet(file); const rendered=await renderSet(model);
       expect(model.daemon).to.equal(undefined);
       expect(rendered.files[`${model.report}.prog.abap`]).to.include('=>advance(');
       expect(rendered.files[`${model.class}.clas.abap`]).not.to.include('start_daemon');
       expect(rendered.files[`${model.class}.clas.abap`]).to.include("WITH p_mode = 'H'");
       for(const mechanisms of ['[event, job]','[daemon, event, job]']) {
-        writeFileSync(file,text.replace('[daemon]',mechanisms));
+        writeFileSync(file,(mechanisms.includes('daemon') ? text : submit).replace('[daemon]',mechanisms));
         const combined=compileSet(file), built=await renderSet(combined);
         expect(built.files[`${combined.class}.clas.abap`]).include("event_id = 'SAP_END_OF_JOB'").and.include('arm_doctor_job( ).');
         expect(built.findings.filter(f=>f.severity==='E')).to.have.length(0);

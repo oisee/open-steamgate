@@ -31,7 +31,10 @@ export function cockpitActions(m) {
       "iv_run = lv_run iv_new_glass = lv_glass iv_reason = lv_reason", true, "the run is not at GLASS, the new glass is not above the current one, or the reason is empty or over 80 characters");
   }
   if (m.resilience) for (const [name, method, params, args] of [["Resume", "resume", {RunId: "String(32)"}, "iv_run = lv_run"], ["Doctor", "doctor", {}, ""]]) {
-    actions.push({name, method, params, call: `lt_report = ${m.class}=>${method}( ${args} ).\n        LOOP AT lt_report INTO ls_report.\n          ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.\n        ENDLOOP.`});
+    // with release by event the Doctor action also asks for a pass job: a release commits its claims
+    // before it raises, and a commit belongs to a job, not to a service call
+    const pass = name === "Doctor" && m.release_event && m.daemon ? `\n        \" the release: a pass job of its own (it commits its claims before it raises)\n        ${m.class}=>watcher_pass( ).` : "";
+    actions.push({name, method, params, call: `lt_report = ${m.class}=>${method}( ${args} ).${pass}\n        LOOP AT lt_report INTO ls_report.\n          ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.\n        ENDLOOP.`});
   }
   if (m.daemon) {
     boolean("StartDaemon", "start_daemon", {}, "");
@@ -52,7 +55,7 @@ export function cockpitActions(m) {
     // (this runtime converted it silently), so the cockpit words it
     actions.push({name: "Unschedule", method: "unschedule", params: {}, call: `ls_unschedule = ${m.class}=>unschedule( ).\n        ls_answer-answer = |deleted { ls_unschedule-deleted }, refused { ls_unschedule-refused }|.`});
     actions.push({name: "ScheduleStatus", method: "cockpit_schedule_status", params: {}, get: true,
-      call: `ls_answer-answer = ${m.class}=>cockpit_schedule_status( ).${m.daemon ? `\n        ls_answer-answer = ls_answer-answer && ' / ' && ${m.class}=>daemon_status( ).` : ""}`});
+      call: `ls_answer-answer = ${m.class}=>cockpit_schedule_status( ).${m.daemon ? `\n        ls_answer-answer = ls_answer-answer && ' / ' && ${m.class}=>daemon_status( ).` : ""}${m.release_event ? `\n        ls_answer-answer = ls_answer-answer && \` / \` && ${m.class}=>lanes_status( ).` : ""}`});
   }
   return actions;
 }
