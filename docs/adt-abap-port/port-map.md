@@ -447,10 +447,10 @@ B4 is last because it waits for PARSE OUTLINE. B8 provides `tableFieldsOf` to C4
 | POST | `abapunit/testruns/evaluation` | M | UNIT, JOB | unitResult | adt-devloop `:427` |
 | POST | `abapunit/testruns` | L | PARSE UNIT_PLAN, UNIT, JOB | unitResult | adt-devloop `:446-740` |
 | GET | `datapreview/ddic/:name/metadata` | S | READ | tableData | adt-facade `:1243` |
-| POST | `datapreview/ddic` | M | READ; ADBC | tableData | adt-facade `:1256-1283`; osd-data; osd-child |
+| POST | `datapreview/ddic` | M | READ; SYSTEM SQL | tableData | adt-facade `:1256-1283`; osd-data; osd-child |
 | GET | `datapreview/cds/:name/metadata` | M | PARSE DDLS | tableData | adt-facade `:1293`, `:1306` |
-| POST | `datapreview/cds` | M | PARSE DDLS; ADBC | tableData | adt-facade `:1310-1318` |
-| POST | `datapreview/freestyle` | M | SQLCHECK; ADBC | checkReport, tableData | adt-facade `:545-603`; adt-devloop `:871`, `:947` |
+| POST | `datapreview/cds` | M | PARSE DDLS; SYSTEM SQL | tableData | adt-facade `:1310-1318` |
+| POST | `datapreview/freestyle` | M | SYSTEM SQLCHECK / SQL | checkReport, tableData | adt-facade `:545-603`; adt-devloop `:871`, `:947` |
 
 Order: C1 → C4 → C2 → C5 → C3 → C6.
 

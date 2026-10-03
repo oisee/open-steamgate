@@ -133,13 +133,6 @@ const HOST_ALLOWED = [
   "POST /sap/bc/adt/abapunit/testruns",
   // C3: unit/object/run (continuation behind an ABAP row)
   "POST /sap/bc/adt/core/http/unit/object/run",
-  // C4a: freestyle data preview
-  "POST /sap/bc/adt/datapreview/freestyle",
-  // C4b: ddic and cds data preview
-  "GET /sap/bc/adt/datapreview/ddic/:name/metadata",
-  "POST /sap/bc/adt/datapreview/ddic",
-  "GET /sap/bc/adt/datapreview/cds/:name/metadata",
-  "POST /sap/bc/adt/datapreview/cds",
   // C5: classrun
   "POST /sap/bc/adt/oo/classrun/:name",
   // C6: notebook (continuation behind an ABAP row)
@@ -289,13 +282,22 @@ describe("ADT on ABAP: the done gate (every adtRouter registration has an ABAP r
       walks[name] = {...walk(made.router, made.middleware), reported: made.middleware.map((m) => m.id)};
     }
     regs = walks.abap.registrations;
-    ({table, verdicts} = await dialogStep(async () => {
-      const rows = await globalThis.abap.Classes.ZCL_OSD_ADT_ROUTER.routes();
-      return {table: rows.array().map((line) => {
-        const r = line.get();
-        return {method: text(r.method), pattern: text(r.pattern), handler: text(r.handler), servedBy: text(r.served_by)};
-      }), verdicts: await verdictsOf(regs, rows)};
-    }, "test: the coverage gate's match"));
+    // C4 is mounted in the one-runtime profile. Audit its complete table;
+    // c4-runtime separately proves the switch-off HOST compatibility path.
+    const destination = abap.context.RFCDestinations.STORE;
+    const previousLocal = destination.localSystem;
+    destination.localSystem = {};
+    try {
+      ({table, verdicts} = await dialogStep(async () => {
+        const rows = await globalThis.abap.Classes.ZCL_OSD_ADT_ROUTER.routes();
+        return {table: rows.array().map((line) => {
+          const r = line.get();
+          return {method: text(r.method), pattern: text(r.pattern), handler: text(r.handler), servedBy: text(r.served_by)};
+        }), verdicts: await verdictsOf(regs, rows)};
+      }, "test: the coverage gate's match"));
+    } finally {
+      destination.localSystem = previousLocal;
+    }
     if (process.env.OSD_ADT_ONE_RUNTIME === "1") {
       const runtime = await remoteForTest();
       const queries = verdicts.flatMap(v => v.probes.map(p => p.sample));
