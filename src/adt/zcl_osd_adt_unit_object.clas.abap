@@ -138,7 +138,7 @@ CLASS zcl_osd_adt_unit_object IMPLEMENTATION.
     DATA lt_keys TYPE string_table.
     CREATE OBJECT lo_writer.
     lo_writer->add_raw( iv_name = `object` iv_json = project( io_json = io_plan iv_path = `/object` iv_keys = `type,name` ) ).
-    SPLIT `writes,writesTotal,riskError` AT `,` INTO TABLE lt_keys.
+    SPLIT `writes,writesTotal,dynamicCalls,dynamicCallsTotal,riskError` AT `,` INTO TABLE lt_keys.
     LOOP AT lt_keys INTO lv_key.
       IF io_plan->exists( `/` && lv_key ) = abap_true.
         lo_writer->add_raw( iv_name = lv_key iv_json = value( io_json = io_plan iv_path = `/` && lv_key ) ).

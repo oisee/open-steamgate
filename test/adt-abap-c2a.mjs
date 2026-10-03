@@ -34,7 +34,7 @@ describe("C2a metadata and unit object live Node byte diff",function () {
         return p;
       }
       return name === "ZCL_EMPTY" ? {object:{type,name},classes:[]} : plan(type,name);
-    },withRisk:async (p) => ({...p,writes:[{object:escapes,kind:"INSERT",file:escapes,line:2}],writesTotal:1,
+    },withRisk:async (p) => ({...p,writes:[{object:escapes,kind:"INSERT",file:escapes,line:2}],writesTotal:1,dynamicCalls:[{object:escapes,kind:"a dynamic method call",file:escapes,line:3}],dynamicCallsTotal:1,
       ...(p.object.name === "ZCL_RISK_ERROR" ? {riskError:escapes} : {}),
       classes:p.classes.map((c) => ({...c,schedule:"dangerous",guard:false}))})};
     if (process.env.OSD_ADT_RED === "json") {
@@ -66,6 +66,13 @@ describe("C2a metadata and unit object live Node byte diff",function () {
       const r=await fronts.diff(base+"core/http/unit/object?type=CLAS&name="+name);
       expect(Object.hasOwn(JSON.parse(r.body),"riskError")).to.equal(name==="ZCL_RISK_ERROR");
     }
+  });
+  it("discovery projects dynamic uncertainty separately from confirmed writes",async () => {
+    const r=await fronts.diff(base+"core/http/unit/object?type=CLAS&name=ZCL_DISCOVER");
+    const body=JSON.parse(r.body);
+    expect(body.writesTotal).to.equal(1);
+    expect(body.dynamicCallsTotal).to.equal(1);
+    expect(body.dynamicCalls[0]).to.include({kind:"a dynamic method call",line:3});
   });
   it("real parser and risk graph share exported unitClasses and unitPlan",async () => {
     delete store.tests;

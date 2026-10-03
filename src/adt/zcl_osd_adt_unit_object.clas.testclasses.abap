@@ -6,9 +6,9 @@ ENDCLASS.
 CLASS ltcl_discovery IMPLEMENTATION.
   METHOD projection.
     DATA lo_plan TYPE REF TO zcl_ajson.
-    lo_plan = zcl_ajson=>parse( iv_json = `{"object":{"name":"ZCL_X","type":"CLAS","private":"omit"},"classes":[],"writes":[],"writesTotal":0}` iv_keep_item_order = abap_true ).
+    lo_plan = zcl_ajson=>parse( iv_json = `{"object":{"name":"ZCL_X","type":"CLAS","private":"omit"},"classes":[],"writes":[],"writesTotal":0,"dynamicCalls":[{"kind":"a dynamic method call","file":"zcl_x.clas.abap","line":3}],"dynamicCallsTotal":1}` iv_keep_item_order = abap_true ).
     cl_abap_unit_assert=>assert_equals( act = zcl_osd_adt_unit_object=>document( lo_plan )
-      exp = `{"object":{"type":"CLAS","name":"ZCL_X"},"writes":[],"writesTotal":0,"classes":[]}` ).
+      exp = `{"object":{"type":"CLAS","name":"ZCL_X"},"writes":[],"writesTotal":0,"dynamicCalls":[{"kind":"a dynamic method call","file":"zcl_x.clas.abap","line":3}],"dynamicCallsTotal":1,"classes":[]}` ).
   ENDMETHOD.
   METHOD metadata.
     DATA lv_xml TYPE string.

@@ -383,10 +383,19 @@ async function runUnitQueue(units, {poolSize = 1, cancelled = () => false} = {})
 function riskWarning(testClass, found = {}) {
   if (testClass?.riskLevelDeclared !== true || testClass.riskLevel !== "harmless" || testClass.schedule === "harmless") return undefined;
   const first = found.writes?.[0];
-  if (first === undefined) return undefined;
+  if (first === undefined) {
+    const dynamic = found.dynamicCalls?.[0];
+    if (dynamic === undefined) return undefined;
+    const reason = dynamic.kind?.includes("dynamic") ? "a dynamic call" : "an unresolved call";
+    return `RISK LEVEL HARMLESS, but the tests may reach a database write through ${reason} in ${dynamic.method ?? dynamic.object} (${dynamic.file}:${dynamic.line}). It runs one at a time while the target is unknown.`;
+  }
   const more = (found.writesTotal ?? found.writes.length) - 1;
+  const path = first.path?.slice(0, -1) ?? [];
+  // At most five call hops; an ellipsis explicitly marks omitted middle edges.
+  const shown = path.length > 6 ? [...path.slice(0, 2), null, ...path.slice(-2)] : path;
+  const route = shown.map((hop) => hop === null ? "…" : `${hop.target ?? hop.method ?? hop.object} (${hop.file}:${hop.line})`).join(" → ");
   return `RISK LEVEL HARMLESS, but the tests of ${found.object?.name ?? "this object"} reach a database write: `
-    + `${first.kind} in ${first.object} (${first.file}:${first.line})${more > 0 ? ` and ${more} more` : ""}. `
+    + `${route ? `${route} → ` : ""}${first.kind} in ${first.object} (${first.file}:${first.line})${more > 0 ? ` and ${more} more` : ""}. `
     + "It runs one at a time, as DANGEROUS; declare RISK LEVEL DANGEROUS to say so.";
 }
 
