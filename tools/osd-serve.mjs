@@ -37,7 +37,7 @@ import {batchMonitorHandler} from "./osd-batch-monitor.mjs";
 import {identity} from "./osd-identity.mjs";
 import {parseCookies, sessionIdOf} from "./adt-session.mjs";
 import {abapSession} from "./adt-enq.mjs";
-import {answerOf, abapServes} from "./adt-abap-front.mjs";
+import {answerOf, abapServes, resumeOf, resumeRecord} from "./adt-abap-front.mjs";
 import {sessionJSON, sessionValue} from "./adt-remote-sessions.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
 import {StoreIPCClient, withStoreIPC} from "./osd-store-ipc.mjs";
@@ -197,14 +197,16 @@ app.set("etag", false);
 const adtStepKey = Buffer.from(process.env.OSD_ADT_STEP_KEY ?? "");
 delete process.env.OSD_ADT_STEP_KEY;
 // Hex plus metadata must fit every body accepted by the public 16 MB parser.
-app.use("/osd/adt-step", (req, res, next) => {
+const adtDoorGuard = (req, res, next) => {
   if (process.env.OSD_ADT_ONE_RUNTIME !== "1") return res.status(404).end();
   if (!/^application\/json(?:;|$)/i.test(req.headers["content-type"] ?? "")) return res.status(415).json({error: {message: "JSON required"}});
   const expected = adtStepKey;
   const supplied = Buffer.from(req.headers["x-osd-adt-step-key"] ?? "");
   if (!expected.length || supplied.length !== expected.length || !timingSafeEqual(expected, supplied)) return res.status(403).json({error: {message: "invalid step key"}});
   next();
-}, express.raw({type: "application/json", limit: "34mb"}));
+};
+app.use("/osd/adt-step", adtDoorGuard, express.raw({type: "application/json", limit: "34mb"}));
+app.use("/osd/adt-resume", adtDoorGuard, express.raw({type: "application/json", limit: "1mb"}));
 app.use(express.raw({type: "*/*", limit: "16mb"}));
 mountPortableCells(app, () => globalThis.abap.context.databaseConnections.DEFAULT,
   (work) => exclusive(work, "SQLScript notebook cell"));
@@ -349,6 +351,34 @@ hostNodes["adt-step"] = (a, node) => a.post(node.path, async (req, res) => {
     const adt = request.adt === undefined ? undefined : {...request.adt, sessions: undefined,
       session: request.adt.session === undefined ? undefined : {...request.adt.session, locks: [...request.adt.session.locks]}};
     res.json({record: {...record, body: record.body.toString("utf8")}, adt});
+  } catch (error) {
+    res.status(500).json({error: {code: error.code ?? "FAILED", message: String(error.message?.get?.() ?? error.message ?? error)}});
+  }
+});
+hostNodes["adt-resume"] = (a, node) => a.post(node.path, async (req, res) => {
+  const address = req.socket.remoteAddress ?? "";
+  if (address !== "::1" && !/^127\./.test(address) && !/^::ffff:127\./.test(address)) return res.status(403).json({error: {code: "LOCAL_ONLY"}});
+  let input;
+  try {
+    input = JSON.parse(req.body.toString("utf8"));
+    if (typeof input.kind !== "string" || typeof input.json !== "string"
+      || !input.headers || typeof input.headers !== "object" || Array.isArray(input.headers)
+      || (input.sessionId !== undefined && typeof input.sessionId !== "string")) throw new Error("invalid RESUME payload");
+  } catch (error) { return res.status(400).json({error: {code: "BAD_REQUEST", message: error.message}}); }
+  const sessions = new AbapSessions({identity: {systemID: identity().adt.systemID, client: identity().adt.client, ...input.identity}});
+  const request = {headers: input.headers,
+    adt: input.sessionId === undefined ? undefined : {session: {id: input.sessionId}}};
+  const {system} = abapSession(sessions, async (kind) => {
+    if (kind !== "IDENTITY") return undefined;
+    if (input.identityError !== undefined) throw new Error(input.identityError);
+    return input.systemIdentity;
+  });
+  try {
+    const record = await withStoreIPC(input.context, () => resumeRecord(request, input.kind, input.json, {
+      step: dialogStep, front: {sessions, system,
+        resume: (kind, json) => resumeOf(globalThis.abap.Classes.ZCL_OSD_ADT_HANDLER, kind, json)},
+    }));
+    res.json({record: {...record, body: record.body.toString("utf8")}});
   } catch (error) {
     res.status(500).json({error: {code: error.code ?? "FAILED", message: String(error.message?.get?.() ?? error.message ?? error)}});
   }

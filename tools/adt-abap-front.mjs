@@ -251,9 +251,17 @@ export async function resumeOf(handler, kind, json) {
 /** Host work finishes by sending the response returned by ABAP RESUME. */
 export async function resume(req, res, kind, json) {
   const {store, step, front} = req.osdFacade;
-  if (front.execute !== undefined || typeof step !== "function") {
-    throw Object.assign(new Error("RESUME in the serving child is slice B4"), {code: "ADT_RESUME_REMOTE"});
-  }
+  const payload = typeof json === "string" ? json : JSON.stringify(json) ?? "";
+  const record = front.remote !== undefined
+    ? await remoteResume(front.remote, req, kind, payload, {store, system: front.system, sessions: front.sessions})
+    : await resumeRecord(req, kind, payload, {store, step, front});
+  record.headers = record.headers.filter(([name]) => name.toLowerCase() !== "x-osd-miss");
+  replay(res, record, req.method);
+  return record;
+}
+
+/** Shared by inline and serving-child hosts; session checks stay in the step. */
+export async function resumeRecord(req, kind, json, {store, step, front}) {
   const record = await withSystem((kind, name, json) => front.system?.(kind, name, req, json), () => step(async () => {
     const original = req.adt?.session;
     // A fresh stateless GET ends its session in ANSWER and cannot continue.
@@ -271,7 +279,7 @@ export async function resume(req, res, kind, json) {
       // A fresh request had no cookie on arrival. Re-entry uses the session
       // ANSWER resolved, including that case, rather than opening a new one.
       // This replaces Cookie with sap-contextid only, dropping other cookies.
-      // Harmless today: RESUME does no CSRF check. B4 must revisit this.
+      // RESUME does no CSRF check; only the original session is resolved.
       const headers = {...req.headers, cookie: `sap-contextid=${original.id}`};
       for (const [name, value] of Object.entries(headers)) {
         for (const one of Array.isArray(value) ? value : [value]) {
@@ -287,10 +295,26 @@ export async function resume(req, res, kind, json) {
     }
     return record;
   }, `ADT RESUME ${kind}`), {store});
-  // RESUME does not stamp session headers; keep every header its owner
-  // returned, alongside the cookies already sent by ANSWER.
-  replay(res, record, req.method);
   return record;
+}
+
+async function remoteResume(runtime, req, kind, json, options) {
+  const context = (runtime.adtContextSeq = (runtime.adtContextSeq ?? 0) + 1);
+  runtime.adtContexts ??= new Map();
+  runtime.adtContexts.set(context, {store: options.store,
+    system: (kind, name, json) => options.system?.(kind, name, req, json)});
+  try {
+    let systemIdentity, identityError;
+    try { systemIdentity = await options.system?.("IDENTITY", "", req, ""); }
+    catch (error) { identityError = String(error.message ?? error); }
+    const response = await remoteStep(runtime, {kind, json, context, systemIdentity, identityError,
+      identity: options.sessions?.identity, sessionId: req.adt?.session?.id,
+      headers: req.headers}, "/osd/adt-resume");
+    const result = await stepJSON(response);
+    if (!response.ok) throw Object.assign(new Error(result.error?.message ?? "ADT RESUME failed"), {code: result.error?.code});
+    await Promise.all(runtime.adtContexts.get(context).publications ?? []);
+    return {...result.record, body: Buffer.from(result.record.body, "utf8")};
+  } finally { runtime.adtContexts.delete(context); }
 }
 
 const SESSION_HEADERS = new Set(["set-cookie", "x-csrf-token"]);

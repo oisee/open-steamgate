@@ -80,6 +80,10 @@
     "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "adt-step", "needs": "state",
     "text": "loopback-only remote ADT dialog step: request view and bodyHex in, answer record and session snapshot out; opt-in OSD_ADT_ONE_RUNTIME=1"
   },
+  "/osd/adt-resume": {
+    "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "adt-resume", "needs": "state",
+    "text": "private loopback-only ADT continuation re-entry in a fresh dialog step; opt-in OSD_ADT_ONE_RUNTIME=1"
+  },
   "/osd/sql": {
     "type": "HOST", "host": "tools/osd-serve.mjs", "handler": "sql", "needs": "state",
     "text": "the statement log and the bounded SELECT door this process holds"
