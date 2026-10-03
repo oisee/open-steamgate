@@ -43,9 +43,19 @@ CLASS zcl_l3_fleet2_work_sim DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_million TYPE i VALUE 1000000.
     CONSTANTS c_alphabet TYPE string VALUE `0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_.:|`.
     CONSTANTS c_percentiles TYPE string VALUE `1000 10000 50000 100000 200000 300000 400000 500000 600000 700000 800000 900000 950000 990000 999000`.
+    " Poisson(1), P(K <= k) in millionths: a hits mean override sums that many draws of it
+    CONSTANTS c_poisson1 TYPE string VALUE `367879 735759 919699 981012 996340 999406 999917 999990 999999 1000000`.
     CLASS-METHODS config
       IMPORTING iv_rule TYPE csequence
+                is_chaos TYPE zif_l3_fleet2_work=>ty_chaos OPTIONAL
       RETURNING VALUE(rs_config) TYPE ty_config.
+    " the chaos settings of the runner's values, and of the snapshot of run iv_run
+    CLASS-METHODS chaos_of
+      IMPORTING is_vals TYPE zcl_l3_fleet2_conf=>ty_values
+      RETURNING VALUE(rs_chaos) TYPE zif_l3_fleet2_work=>ty_chaos.
+    CLASS-METHODS chaos_of_run
+      IMPORTING iv_run TYPE csequence
+      RETURNING VALUE(rs_chaos) TYPE zif_l3_fleet2_work=>ty_chaos.
     CLASS-METHODS draw
       IMPORTING is_pile TYPE zif_l3_fleet2_work=>ty_pile
                 it_keys TYPE string_table
@@ -102,6 +112,18 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
         rs_config-keep = 500000.
         rs_config-prefix = ``.
         rs_config-key_length = 4.
+        " a profile takes the place of default: only what it changes for this rule
+        CASE is_chaos-profile.
+          WHEN 'storm'.
+            rs_config-slow_factor = 10.
+          WHEN 'flood'.
+            rs_config-hits = 'P'.
+            rs_config-hits_a = 0.
+            rs_config-hits_b = 0.
+            CLEAR rs_config-cdf.
+            rs_config-cdf = rs_config-cdf && `6 80 522 2292 7600 20341 45822 89504 155028 242392 347229 461597 575965 681536 772025 844416 898709 937034 962584 978720 988402 993935 996953 998527 999314 999692 999867 999944 999977 999991 999997 `.
+            rs_config-cdf = rs_config-cdf && `999999 1000000`.
+        ENDCASE.
       WHEN 'maintenance-ship-no-future-voyage'.
         rs_config-dist = 'L'.
         rs_config-dur_a = 40.
@@ -120,6 +142,42 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
         rs_config-keep = 1000000.
         rs_config-prefix = ``.
         rs_config-key_length = 4.
+        " a profile takes the place of default: only what it changes for this rule
+        CASE is_chaos-profile.
+          WHEN 'calm'.
+            rs_config-ok = 990000.
+            rs_config-slow = 5000.
+            rs_config-dump = 5000.
+            rs_config-hang = 0.
+          WHEN 'squall'.
+            rs_config-ok = 850000.
+            rs_config-slow = 50000.
+            rs_config-dump = 80000.
+            rs_config-hang = 20000.
+          WHEN 'storm'.
+            rs_config-ok = 600000.
+            rs_config-slow = 100000.
+            rs_config-dump = 200000.
+            rs_config-hang = 100000.
+            rs_config-slow_factor = 10.
+          WHEN 'flood'.
+            rs_config-hits = 'P'.
+            rs_config-hits_a = 0.
+            rs_config-hits_b = 0.
+            CLEAR rs_config-cdf.
+            rs_config-cdf = rs_config-cdf && `6 80 522 2292 7600 20341 45822 89504 155028 242392 347229 461597 575965 681536 772025 844416 898709 937034 962584 978720 988402 993935 996953 998527 999314 999692 999867 999944 999977 999991 999997 `.
+            rs_config-cdf = rs_config-cdf && `999999 1000000`.
+          WHEN 'stuck'.
+            rs_config-ok = 700000.
+            rs_config-slow = 0.
+            rs_config-dump = 0.
+            rs_config-hang = 300000.
+          WHEN 'random'.
+            rs_config-ok = 250000.
+            rs_config-slow = 250000.
+            rs_config-dump = 250000.
+            rs_config-hang = 250000.
+        ENDCASE.
       WHEN 'grounded-ship-keeps-only-keepers'.
         rs_config-dist = 'L'.
         rs_config-dur_a = 40.
@@ -138,6 +196,42 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
         rs_config-keep = 1000000.
         rs_config-prefix = ``.
         rs_config-key_length = 4.
+        " a profile takes the place of default: only what it changes for this rule
+        CASE is_chaos-profile.
+          WHEN 'calm'.
+            rs_config-ok = 990000.
+            rs_config-slow = 5000.
+            rs_config-dump = 5000.
+            rs_config-hang = 0.
+          WHEN 'squall'.
+            rs_config-ok = 850000.
+            rs_config-slow = 50000.
+            rs_config-dump = 80000.
+            rs_config-hang = 20000.
+          WHEN 'storm'.
+            rs_config-ok = 600000.
+            rs_config-slow = 100000.
+            rs_config-dump = 200000.
+            rs_config-hang = 100000.
+            rs_config-slow_factor = 10.
+          WHEN 'flood'.
+            rs_config-hits = 'P'.
+            rs_config-hits_a = 0.
+            rs_config-hits_b = 0.
+            CLEAR rs_config-cdf.
+            rs_config-cdf = rs_config-cdf && `6 80 522 2292 7600 20341 45822 89504 155028 242392 347229 461597 575965 681536 772025 844416 898709 937034 962584 978720 988402 993935 996953 998527 999314 999692 999867 999944 999977 999991 999997 `.
+            rs_config-cdf = rs_config-cdf && `999999 1000000`.
+          WHEN 'stuck'.
+            rs_config-ok = 700000.
+            rs_config-slow = 0.
+            rs_config-dump = 0.
+            rs_config-hang = 300000.
+          WHEN 'random'.
+            rs_config-ok = 250000.
+            rs_config-slow = 250000.
+            rs_config-dump = 250000.
+            rs_config-hang = 250000.
+        ENDCASE.
       WHEN 'ship-in-service-has-a-captain'.
         rs_config-dist = 'L'.
         rs_config-dur_a = 40.
@@ -156,6 +250,42 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
         rs_config-keep = 1000000.
         rs_config-prefix = ``.
         rs_config-key_length = 4.
+        " a profile takes the place of default: only what it changes for this rule
+        CASE is_chaos-profile.
+          WHEN 'calm'.
+            rs_config-ok = 990000.
+            rs_config-slow = 5000.
+            rs_config-dump = 5000.
+            rs_config-hang = 0.
+          WHEN 'squall'.
+            rs_config-ok = 850000.
+            rs_config-slow = 50000.
+            rs_config-dump = 80000.
+            rs_config-hang = 20000.
+          WHEN 'storm'.
+            rs_config-ok = 600000.
+            rs_config-slow = 100000.
+            rs_config-dump = 200000.
+            rs_config-hang = 100000.
+            rs_config-slow_factor = 10.
+          WHEN 'flood'.
+            rs_config-hits = 'P'.
+            rs_config-hits_a = 0.
+            rs_config-hits_b = 0.
+            CLEAR rs_config-cdf.
+            rs_config-cdf = rs_config-cdf && `6 80 522 2292 7600 20341 45822 89504 155028 242392 347229 461597 575965 681536 772025 844416 898709 937034 962584 978720 988402 993935 996953 998527 999314 999692 999867 999944 999977 999991 999997 `.
+            rs_config-cdf = rs_config-cdf && `999999 1000000`.
+          WHEN 'stuck'.
+            rs_config-ok = 700000.
+            rs_config-slow = 0.
+            rs_config-dump = 0.
+            rs_config-hang = 300000.
+          WHEN 'random'.
+            rs_config-ok = 250000.
+            rs_config-slow = 250000.
+            rs_config-dump = 250000.
+            rs_config-hang = 250000.
+        ENDCASE.
       WHEN 'ship-too-many-future-voyages'.
         rs_config-dist = 'L'.
         rs_config-dur_a = 40.
@@ -174,6 +304,42 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
         rs_config-keep = 1000000.
         rs_config-prefix = ``.
         rs_config-key_length = 4.
+        " a profile takes the place of default: only what it changes for this rule
+        CASE is_chaos-profile.
+          WHEN 'calm'.
+            rs_config-ok = 990000.
+            rs_config-slow = 5000.
+            rs_config-dump = 5000.
+            rs_config-hang = 0.
+          WHEN 'squall'.
+            rs_config-ok = 850000.
+            rs_config-slow = 50000.
+            rs_config-dump = 80000.
+            rs_config-hang = 20000.
+          WHEN 'storm'.
+            rs_config-ok = 600000.
+            rs_config-slow = 100000.
+            rs_config-dump = 200000.
+            rs_config-hang = 100000.
+            rs_config-slow_factor = 10.
+          WHEN 'flood'.
+            rs_config-hits = 'P'.
+            rs_config-hits_a = 0.
+            rs_config-hits_b = 0.
+            CLEAR rs_config-cdf.
+            rs_config-cdf = rs_config-cdf && `6 80 522 2292 7600 20341 45822 89504 155028 242392 347229 461597 575965 681536 772025 844416 898709 937034 962584 978720 988402 993935 996953 998527 999314 999692 999867 999944 999977 999991 999997 `.
+            rs_config-cdf = rs_config-cdf && `999999 1000000`.
+          WHEN 'stuck'.
+            rs_config-ok = 700000.
+            rs_config-slow = 0.
+            rs_config-dump = 0.
+            rs_config-hang = 300000.
+          WHEN 'random'.
+            rs_config-ok = 250000.
+            rs_config-slow = 250000.
+            rs_config-dump = 250000.
+            rs_config-hang = 250000.
+        ENDCASE.
       WHEN 'ship-min-crew'.
         rs_config-dist = 'L'.
         rs_config-dur_a = 40.
@@ -191,6 +357,35 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
         rs_config-keep = 1000000.
         rs_config-prefix = ``.
         rs_config-key_length = 4.
+        " a profile takes the place of default: only what it changes for this rule
+        CASE is_chaos-profile.
+          WHEN 'calm'.
+            rs_config-ok = 990000.
+            rs_config-slow = 5000.
+            rs_config-dump = 5000.
+            rs_config-hang = 0.
+          WHEN 'squall'.
+            rs_config-ok = 850000.
+            rs_config-slow = 50000.
+            rs_config-dump = 80000.
+            rs_config-hang = 20000.
+          WHEN 'storm'.
+            rs_config-ok = 600000.
+            rs_config-slow = 100000.
+            rs_config-dump = 200000.
+            rs_config-hang = 100000.
+            rs_config-slow_factor = 10.
+          WHEN 'stuck'.
+            rs_config-ok = 700000.
+            rs_config-slow = 0.
+            rs_config-dump = 0.
+            rs_config-hang = 300000.
+          WHEN 'random'.
+            rs_config-ok = 250000.
+            rs_config-slow = 250000.
+            rs_config-dump = 250000.
+            rs_config-hang = 250000.
+        ENDCASE.
       WHEN 'ship-cargo-limit'.
         rs_config-dist = 'L'.
         rs_config-dur_a = 40.
@@ -209,11 +404,106 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
         rs_config-keep = 1000000.
         rs_config-prefix = ``.
         rs_config-key_length = 4.
+        " a profile takes the place of default: only what it changes for this rule
+        CASE is_chaos-profile.
+          WHEN 'calm'.
+            rs_config-ok = 990000.
+            rs_config-slow = 5000.
+            rs_config-dump = 5000.
+            rs_config-hang = 0.
+          WHEN 'squall'.
+            rs_config-ok = 850000.
+            rs_config-slow = 50000.
+            rs_config-dump = 80000.
+            rs_config-hang = 20000.
+          WHEN 'storm'.
+            rs_config-ok = 600000.
+            rs_config-slow = 100000.
+            rs_config-dump = 200000.
+            rs_config-hang = 100000.
+            rs_config-slow_factor = 10.
+          WHEN 'flood'.
+            rs_config-hits = 'P'.
+            rs_config-hits_a = 0.
+            rs_config-hits_b = 0.
+            CLEAR rs_config-cdf.
+            rs_config-cdf = rs_config-cdf && `6 80 522 2292 7600 20341 45822 89504 155028 242392 347229 461597 575965 681536 772025 844416 898709 937034 962584 978720 988402 993935 996953 998527 999314 999692 999867 999944 999977 999991 999997 `.
+            rs_config-cdf = rs_config-cdf && `999999 1000000`.
+          WHEN 'stuck'.
+            rs_config-ok = 700000.
+            rs_config-slow = 0.
+            rs_config-dump = 0.
+            rs_config-hang = 300000.
+          WHEN 'random'.
+            rs_config-ok = 250000.
+            rs_config-slow = 250000.
+            rs_config-dump = 250000.
+            rs_config-hang = 250000.
+        ENDCASE.
       WHEN OTHERS.
         rs_config-ok = c_million.
         rs_config-slow_factor = 1.
         rs_config-keep = c_million.
     ENDCASE.
+    " explicit overrides beat the manifest and the profile; ok is the rest
+    IF is_chaos-outcome_set = abap_true.
+      rs_config-slow = is_chaos-slow * 1000.
+      rs_config-dump = is_chaos-dump * 1000.
+      rs_config-hang = is_chaos-hang * 1000.
+      rs_config-ok = c_million - rs_config-slow - rs_config-dump - rs_config-hang.
+    ENDIF.
+    IF is_chaos-hits_set = abap_true.
+      IF is_chaos-hits_mean = 0.
+        rs_config-hits = 'F'.
+        rs_config-hits_a = 0.
+      ELSE.
+        rs_config-hits = 'S'.
+        rs_config-hits_a = is_chaos-hits_mean.
+        rs_config-cdf = c_poisson1.
+      ENDIF.
+    ENDIF.
+    IF is_chaos-close_set = abap_true.
+      rs_config-autoclose = is_chaos-close * 1000.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD chaos_of.
+    DATA lv_slow TYPE i VALUE -1.
+    DATA lv_dump TYPE i VALUE -1.
+    DATA lv_hang TYPE i VALUE -1.
+    rs_chaos-profile = is_vals-simulate_profile.
+    lv_slow = is_vals-simulate_slow.
+    lv_dump = is_vals-simulate_dump.
+    lv_hang = is_vals-simulate_hang.
+    IF lv_slow >= 0 OR lv_dump >= 0 OR lv_hang >= 0.
+      rs_chaos-outcome_set = abap_true.
+      IF lv_slow > 0.
+        rs_chaos-slow = lv_slow.
+      ENDIF.
+      IF lv_dump > 0.
+        rs_chaos-dump = lv_dump.
+      ENDIF.
+      IF lv_hang > 0.
+        rs_chaos-hang = lv_hang.
+      ENDIF.
+    ENDIF.
+    IF is_vals-simulate_hits_mean >= 0.
+      rs_chaos-hits_set = abap_true.
+      rs_chaos-hits_mean = is_vals-simulate_hits_mean.
+    ENDIF.
+    IF is_vals-simulate_autoclose >= 0.
+      rs_chaos-close_set = abap_true.
+      rs_chaos-close = is_vals-simulate_autoclose.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD chaos_of_run.
+    " the run's own settings: its snapshot, else the compiled defaults
+    DATA ls_vals TYPE zcl_l3_fleet2_conf=>ty_values.
+    ls_vals = zcl_l3_fleet2_conf=>defaults( ).
+    ls_vals = zcl_l3_fleet2_conf=>scope( iv_run = iv_run
+                                              is_vals = ls_vals ).
+    rs_chaos = chaos_of( ls_vals ).
   ENDMETHOD.
 
   METHOD next.
@@ -344,7 +634,7 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
         lv_product = lv_span * iv_u.
         lv_product = lv_product DIV c_million.
         rv_hits = is_config-hits_a + lv_product.
-      WHEN 'P'.
+      WHEN 'P' OR 'S'.
         SPLIT is_config-cdf AT ` ` INTO TABLE lt_cdf.
         rv_hits = lines( lt_cdf ) - 1.
         LOOP AT lt_cdf INTO lv_text.
@@ -369,6 +659,7 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
     DATA lv_u TYPE i.
     DATA lv_base TYPE i.
     DATA lv_bound TYPE i.
+    DATA lv_more TYPE i.
     DATA lt_pool TYPE string_table.
     DATA lv_key TYPE string.
     DATA lv_other TYPE string.
@@ -378,7 +669,8 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
     DATA lv_j TYPE i.
     DATA lv_span TYPE p LENGTH 16 DECIMALS 0.
     DATA lv_product TYPE p LENGTH 16 DECIMALS 0.
-    ls_config = config( is_pile-rule ).
+    ls_config = config( iv_rule = is_pile-rule
+                        is_chaos = is_pile-chaos ).
     lv_run = is_pile-run_id.
     lv_rule = is_pile-rule.
     lv_text = |{ lv_run }\|{ lv_rule }\|{ is_pile-pile_no }\|{ is_pile-attempt }|.
@@ -410,6 +702,16 @@ CLASS zcl_l3_fleet2_work_sim IMPLEMENTATION.
     lv_u = lv_state MOD c_million.
     rs_draw-hits = hits( is_config = ls_config
                          iv_u = lv_u ).
+    IF ls_config-hits = 'S'.
+      " a hits mean override: the sum of that many Poisson(1) draws, the first being the one above
+      lv_more = ls_config-hits_a - 1.
+      DO lv_more TIMES.
+        lv_state = next( lv_state ).
+        lv_u = lv_state MOD c_million.
+        rs_draw-hits = rs_draw-hits + hits( is_config = ls_config
+                                            iv_u = lv_u ).
+      ENDDO.
+    ENDIF.
     IF iv_filter = abap_true.
       " a filter keeps each key with the probability keep
       LOOP AT it_keys INTO lv_key.

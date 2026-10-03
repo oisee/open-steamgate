@@ -1,4 +1,5 @@
 // Tunable L3 defaults. The compiler preserves all non-tunable values as constants.
+import {CHAOS_SETTINGS} from "./dsl-l3-sim.mjs";
 const INT4 = 2147483647;
 const integerRanges = {INT1: [0n, 255n], INT2: [-32768n, 32767n], INT4: [-2147483648n, 2147483647n],
   INT8: [-9223372036854775808n, 9223372036854775807n]};
@@ -16,6 +17,13 @@ const numeric = [
   // the simulated twin: its seed, and its time scale in wall millionths per simulated second
   ["simulate.seed", (m) => m.simulate?.seed?.value, 1, INT4 - 1],
   ["simulate.time_scale", (m) => m.simulate?.scale?.value, 0, 1000000],
+  // chaos (slice 6c): per-mille shares of the outcomes and the autoclose, the mean of the hits; -1 = not set,
+  // the profile's (or the manifest's) value stands. The three outcomes together may not exceed 1000.
+  ["simulate.dump", (m) => (m.simulate ? -1 : undefined), -1, 1000],
+  ["simulate.hang", (m) => (m.simulate ? -1 : undefined), -1, 1000],
+  ["simulate.slow", (m) => (m.simulate ? -1 : undefined), -1, 1000],
+  ["simulate.hits_mean", (m) => (m.simulate ? -1 : undefined), -1, 100],
+  ["simulate.autoclose", (m) => (m.simulate ? -1 : undefined), -1, 1000],
 ];
 // What a run is planned and fused with belongs to the run: the fuse, the pile
 // sizes and the set's parameters are read from the run's snapshot whenever the
@@ -36,6 +44,9 @@ export function compileSettings(doc, model, {line, fail}) {
     const defaultValue = value(model);
     if (defaultValue !== undefined) available.set(name, {defaultValue: String(defaultValue), min, max, kind: "N"});
   }
+  // a setting with a list of values: the profile of the simulated twin, `default` or one the manifest names
+  if (model.simulate?.profile_names) available.set("simulate.profile", {defaultValue: "default", kind: "C", min: 1, max: 20,
+    values: ["default", ...model.simulate.profile_names]});
   if (model.piles) available.set("piles.size", {defaultValue: String(model.piles.size), min: 1, max: INT4, kind: "N"});
   for (const stage of model.stages ?? []) if (stage.piles) available.set(`piles.${stage.name}.size`, {defaultValue: String(stage.piles.size), min: 1, max: INT4, kind: "N"});
   if (model.schedule) available.set("schedule.every", {defaultValue: model.schedule.every, kind: "P", min: 1, max: 999});
@@ -52,6 +63,9 @@ export function compileSettings(doc, model, {line, fail}) {
     }
   }
   const seen = new Set();
+  // a job step carries at most 20 selection values: the chaos settings are not among them, the pile job reads
+  // them from its run's snapshot, so they take no selection field
+  let screenNo = 0;
   const entries = spec.tunable.map((name, i) => {
     const at = line(`settings/tunable/${i}`);
     if (typeof name !== "string" || !available.has(name)) fail(at, `unknown or unavailable tunable ${JSON.stringify(name)}; available: ${[...available.keys()].join(", ")}`);
@@ -75,13 +89,15 @@ export function compileSettings(doc, model, {line, fail}) {
     if (base.kind === "P" && (+base.defaultValue.slice(0, -1) < min || +base.defaultValue.slice(0, -1) > max)) fail(at, `DSL default of ${name} is outside its bounds`);
     const field = name.replace(/\./g, "_");
     return {"@id": `${model["@id"]}/setting/${name}`, set_line: at, name, "name@type": {built_in: "CHAR", length: 30},
-      field, screen: `s_${i + 1}`, default: base.defaultValue, "default@type": {built_in: "CHAR", length: 40},
+      field, ...(CHAOS_SETTINGS.includes(name) ? {chaos: true} : {screen: `s_${++screenNo}`}), default: base.defaultValue, "default@type": {built_in: "CHAR", length: 40},
       kind: base.kind, min: String(min), max: String(max), numeric: base.kind === "N", period: base.kind === "P", char: base.kind === "C",
       value_type: base.valueType, digit_text: base.built === "NUMC", date_text: base.built === "DATS",
-      time_text: base.built === "TIMS", scoped: runScoped(name)};
+      time_text: base.built === "TIMS", scoped: runScoped(name),
+      ...(base.values ? {pattern: `^(${base.values.join("|")})$`, "pattern@type": {built_in: "STRG"}, values: base.values.join(", ")} : {})};
   });
   for (const name of Object.keys(bounds)) if (!seen.has(name)) fail(line(`settings/bounds/${name}`), `bounds names non-tunable ${name}`);
   const has = (name) => seen.has(name);
+  const chaosOutcomes = entries.filter((e) => ["simulate.dump", "simulate.hang", "simulate.slow"].includes(e.name));
   for (const param of model.params ?? []) if (has(`params.${param.name}`)) param.tunable = true;
   for (const stage of model.stages ?? []) if (stage.piles && has(`piles.${stage.name}.size`)) {
     stage.piles.tunable_size = true;
@@ -94,6 +110,7 @@ export function compileSettings(doc, model, {line, fail}) {
     retry_max: has("retry.max"), retry_backoff: has("retry.backoff"), stale: has("stale"),
     max_alerts: has("fuses.max_alerts"), keep_days: has("keep.days"),
     ...(model.simulate ? {simulate_seed: has("simulate.seed"), simulate_time_scale: has("simulate.time_scale")} : {}),
+    ...(chaosOutcomes.length ? {chaos_sum: true, chaos_outcomes: chaosOutcomes} : {}),
     schedule_every: has("schedule.every"), pile_size: has("piles.size"),
     params: entries.filter((e) => e.name.startsWith("params.")).map((e) => ({...e, param: e.name.slice(7)})),
     stages: (model.stages ?? []).map((s) => ({no: s.no, field: `piles_${s.name}_size`, tunable: has(`piles.${s.name}.size`)}))};

@@ -39,15 +39,27 @@ CLASS {{class}} IMPLEMENTATION.
     DATA lv_key TYPE string.
     DATA lv_seed TYPE i.
     DATA lv_seed_run TYPE string.
+{{#chaos_conf}}
+    DATA ls_chaos TYPE {{work_iface}}=>ty_chaos.
+{{/chaos_conf}}
     DATA lv_state TYPE i.
     DATA lv_u TYPE i.
     LOOP AT it_alerts INTO ls_alert.
+{{^chaos_conf}}
       ls_config = {{work_class}}=>config( ls_alert-rule_name ).
+{{/chaos_conf}}
       lv_run = ls_alert-run_id.
       IF lv_run <> lv_seed_run.
         lv_seed = seed_of( lv_run ).
+{{#chaos_conf}}
+        ls_chaos = {{work_class}}=>chaos_of_run( lv_run ).
+{{/chaos_conf}}
         lv_seed_run = lv_run.
       ENDIF.
+{{#chaos_conf}}
+      ls_config = {{work_class}}=>config( iv_rule = ls_alert-rule_name
+                                          is_chaos = ls_chaos ).
+{{/chaos_conf}}
       lv_rule = ls_alert-rule_name.
       lv_key = ls_alert-object_key.
       lv_text = |{ lv_run }\|{ lv_rule }\|{ lv_key }\|close|.

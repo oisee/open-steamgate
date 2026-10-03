@@ -2,6 +2,19 @@
 * Port work of set fleet2: the work of one pile. Variant real is the
 * runner's own static calls of the L2 classes; sim is a simulated twin.
 INTERFACE zif_l3_fleet2_work PUBLIC.
+  " the chaos of a run, from its settings: a profile, and explicit overrides
+  " (outcome shares and the autoclose in per mille, the mean of the hits)
+  TYPES: BEGIN OF ty_chaos,
+           profile TYPE c LENGTH 20,
+           outcome_set TYPE abap_bool,
+           slow TYPE i,
+           dump TYPE i,
+           hang TYPE i,
+           hits_set TYPE abap_bool,
+           hits_mean TYPE i,
+           close_set TYPE abap_bool,
+           close TYPE i,
+         END OF ty_chaos.
   " one pile: its stream is a pure function of seed, run, rule, pile and
   " attempt; scale is wall millionths of a second per simulated second
   TYPES: BEGIN OF ty_pile,
@@ -12,6 +25,7 @@ INTERFACE zif_l3_fleet2_work PUBLIC.
            seed TYPE i,
            scale TYPE i,
            stale TYPE i,
+           chaos TYPE ty_chaos,
          END OF ty_pile.
   " a check rule's work: its alert lines over the pile's keys
   METHODS check

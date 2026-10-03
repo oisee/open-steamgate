@@ -1,6 +1,6 @@
 # DSL L3: a set of rules, run as one unit
 
-Status: slice 1, 2026-10-01; ports and adapters; piles and set parameters (slice 3a), 2026-10-02; stages, filter stages with a worklist, and a schedule (slice 3b), 2026-10-02; resilience: retries, the doctor, fuses, a dry run and retention (slice 5a), 2026-10-02; a simulated twin of the work (slice 5d), 2026-10-02. Built on L2 (`docs/dsl-l2.md`) and the background job facade
+Status: slice 1, 2026-10-01; ports and adapters; piles and set parameters (slice 3a), 2026-10-02; stages, filter stages with a worklist, and a schedule (slice 3b), 2026-10-02; resilience: retries, the doctor, fuses, a dry run and retention (slice 5a), 2026-10-02; a simulated twin of the work (slice 5d), 2026-10-02; chaos profiles and overrides for the twin (slice 6c), 2026-10-03. Built on L2 (`docs/dsl-l2.md`) and the background job facade
 (`docs/job-standard-fms.md`, `docs/gui-reports.md`).
 
 L2 compiles one rule into a check class, `check( iv_date ) RETURNING rt_alerts`. L3 is the layer
@@ -1806,6 +1806,71 @@ DuckDB file by `tools/osd-db-migrate.mjs` (with the gate's `RUN_BIND`); on both 
 from before gets an empty sequence and drains first, in the order it drained before (time, then
 intent id; `test/batch-runs.mjs`, `test/db-migrate.mjs`). A run on a manual clock then runs its jobs
 in one order every time, also with other jobs released and deleted around it.
+
+### Chaos profiles and overrides
+
+Slice 6c, 2026-10-03. The outcome shares, the slow factor, the hits and the autoclose chance of the twin
+are no longer only the manifest's: an operator chooses a weather for a run and changes it from the
+cockpit, with no new code of the cockpit (its `SettingSet`, `SetSetting` and `ResetSetting` already do it).
+
+```yaml
+simulate:
+  profiles:                 # named partial overrides of default:, at most 10, names a-z and _ (1 to 20)
+    calm: {outcome: {ok: 0.99, dump: 0.005, hang: 0, slow: 0.005}}
+    squall: {outcome: {ok: 0.85, dump: 0.08, hang: 0.02, slow: 0.05}}
+    storm: {outcome: {ok: 0.6, dump: 0.2, hang: 0.1, slow: 0.1}, slow_factor: 10}
+    flood: {hits: {dist: poisson, mean: 12}}          # alerts flood the governor: WARN, NARROW, GLASS
+    stuck: {outcome: {ok: 0.7, hang: 0.3}}            # the doctor's STALE path
+    random: {outcome: {ok: 0.25, dump: 0.25, hang: 0.25, slow: 0.25}}   # every outcome equally likely
+settings:
+  tunable: [..., simulate.profile, simulate.dump, simulate.hang, simulate.slow, simulate.hits_mean, simulate.autoclose]
+```
+
+A profile names any of `duration`, `outcome`, `slow_factor`, `hits`, `autoclose` (not `keep`, which is
+a field of a stage or a rule), each checked as in `default:` (shares in 0 to 1 summing to 1 per
+outcome block, known keys, each error at its line). `default` is not a profile name: it is what is chosen
+when none is. A manifest that names profiles must list `simulate.profile` in `settings.tunable`, and the
+setting exists only for a manifest that names them.
+
+**The order, field by field: the rule's block, then its stage's, then the chosen profile, then
+`default:`, then the built-in, and over all of them the explicit overrides.** A profile takes
+`default:`'s place and nothing more: a field a stage or a rule names is that stage's or that rule's own
+in every profile (fleet2's candidates stage keeps its 50 per cent dumps under calm, and `ship-min-crew`
+keeps its one hit under flood). The compiler emits, per rule and profile, only the fields where the profile
+changes what the rule would have had, each traced to the profile's line, and the generated `config( )` takes
+the profile's name from the run.
+
+The settings (run-scoped, so a run keeps what it started with and a pile the doctor submits again draws
+from the same weather; the run's `ZOSD_L3_RUN_CONF` snapshot records the profile and every override):
+
+| setting | values | meaning |
+| --- | --- | --- |
+| `simulate.profile` | `default` or a profile's name | the weather of the run |
+| `simulate.dump`, `simulate.hang`, `simulate.slow` | -1, or 0 to 1000 (per mille) | the share of that outcome; -1 is not set |
+| `simulate.hits_mean` | -1, or 0 to 100 | the mean of the hits of a pile (a Poisson, for every rule, over any `hits:`); 0 is no hits |
+| `simulate.autoclose` | -1, or 0 to 1000 (per mille) | the chance an alert is closed by the chance autoclose |
+
+The three outcome shares act together: if any of them is set, all three are the override's (a share not
+set is 0) and `ok` is the rest, over the profile's and the manifest's. `set_setting( )` refuses a change
+that makes the three set shares total more than 1000 (the cockpit answers `REFUSED: SetSetting: ...
+simulate dump + hang + slow above 1000 ...`) and changes nothing. `simulate.profile` takes only the
+values the manifest lists (an enum: the settings machinery takes a list of values for a character
+setting, `pattern` in the compiled entry, checked in `valid( )` where a value is read as well as written).
+The bounds of the manifest can narrow an override (`simulate.dump: {min: -1, max: 300}`: no more than 30
+per cent dumps from the cockpit); a `min` of 0 is refused, since the default, -1, would lie outside it.
+
+A mean of n overrides the hits to the sum of n draws of the compiler's table of a Poisson with mean 1
+(the first draw is the hits draw of the pile, the others follow it in the stream), so the override needs no
+table per mean and no floating point on a system; a profile's `poisson` mean is a table of its own as
+before. The draw is still a pure function of (seed, run, rule, pile, attempt) and now also of the run's
+profile and overrides: the same seed, profile and overrides give the same piles
+(`test/dsl-l3-sim.mjs`, "chaos": 271 piles, calm against storm, each pile and alert exactly what
+`tools/dsl-l3-sim.mjs` says, with `configOf( node, chaos )` and `chaosOf( settings )`).
+
+None of the six takes a selection field of the pile job (a job step carries at most 20 values, and
+fleet2 had 20): the runner reads them from its run's snapshot with `chaos_of_run( iv_run )` (and the
+autoclose variant the same, as it reads the seed). A replay twin (`work=replay`) has no profile: it
+draws the measured numbers.
 
 ### Safety
 

@@ -31,15 +31,18 @@ CLASS zcl_l3_fleet2_close_sim IMPLEMENTATION.
     DATA lv_key TYPE string.
     DATA lv_seed TYPE i.
     DATA lv_seed_run TYPE string.
+    DATA ls_chaos TYPE zif_l3_fleet2_work=>ty_chaos.
     DATA lv_state TYPE i.
     DATA lv_u TYPE i.
     LOOP AT it_alerts INTO ls_alert.
-      ls_config = zcl_l3_fleet2_work_sim=>config( ls_alert-rule_name ).
       lv_run = ls_alert-run_id.
       IF lv_run <> lv_seed_run.
         lv_seed = seed_of( lv_run ).
+        ls_chaos = zcl_l3_fleet2_work_sim=>chaos_of_run( lv_run ).
         lv_seed_run = lv_run.
       ENDIF.
+      ls_config = zcl_l3_fleet2_work_sim=>config( iv_rule = ls_alert-rule_name
+                                          is_chaos = ls_chaos ).
       lv_rule = ls_alert-rule_name.
       lv_key = ls_alert-object_key.
       lv_text = |{ lv_run }\|{ lv_rule }\|{ lv_key }\|close|.

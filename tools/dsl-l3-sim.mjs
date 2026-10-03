@@ -16,8 +16,14 @@
 // time does no floating point. tools/dsl-l3.mjs calls this; it knows the set
 // language and nothing of any domain.
 
-export const SIM_KEYS = ["seed", "time_scale", "allow_sink", "default", "rules", "stages", "profile"];
+export const SIM_KEYS = ["seed", "time_scale", "allow_sink", "default", "rules", "stages", "profile", "profiles"];
 export const FIELDS = ["duration", "outcome", "slow_factor", "hits", "autoclose", "keep"];
+// chaos profiles (slice 6c): a named partial override of default:, chosen at run time by the setting simulate.profile
+export const PROFILE_FIELDS = ["duration", "outcome", "slow_factor", "hits", "autoclose"];
+export const PROFILE_NAME = /^[a-z_]{1,20}$/;
+export const MAX_PROFILES = 10;
+// the settings that tune the chaos of a run, each -1 = not set (the profile's value stands)
+export const CHAOS_SETTINGS = ["simulate.profile", "simulate.dump", "simulate.hang", "simulate.slow", "simulate.hits_mean", "simulate.autoclose"];
 // the order of the outcome thresholds: u below ok is OK, below ok + slow SLOW, ...
 export const OUTCOMES = ["ok", "slow", "dump", "hang"];
 export const WORK_PORT = "work";
@@ -99,7 +105,9 @@ export function draw(config, {run, rule, pile, attempt, seed, scale, stale}, key
   const u0 = stream.next();
   const outcome = u0 < config.ok ? "OK" : u0 < config.ok + config.slow ? "SLOW" : u0 < config.ok + config.slow + config.dump ? "DUMP" : "HANG";
   const base = duration(config, stream.next());
-  const count = hits(config, stream.next());
+  let count = hits(config, stream.next());
+  // an override of the mean (kind S) is the sum of that many Poisson(1) variates: the first is the draw above
+  if (config.hits === "S") for (let i = 1; i < config.hits_a; i++) count += hits(config, stream.next());
   let chosen;
   if (filter && !config.empirical) {
     chosen = keys.filter(() => stream.next() < config.keep);
@@ -222,9 +230,9 @@ export function compileSimulate(doc, model, all, {line, fail, bindings}) {
     return millionths(raw, {at: fat, fail, what: name});
   };
   // a field set: default, or one rule's or one stage's overrides
-  const fieldSet = (raw, key) => {
-    const value = map(raw, key, `a mapping of ${FIELDS.join(", ")}`);
-    for (const k of Object.keys(value)) if (!FIELDS.includes(k)) fail(line(`${key}/${k}`), `unknown key ${k} in ${key.replace(/\//g, ".")} (${FIELDS.join(", ")})`);
+  const fieldSet = (raw, key, allowed = FIELDS) => {
+    const value = map(raw, key, `a mapping of ${allowed.join(", ")}`);
+    for (const k of Object.keys(value)) if (!allowed.includes(k)) fail(line(`${key}/${k}`), `unknown key ${k} in ${key.replace(/\//g, ".")} (${allowed.join(", ")})`);
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, {value: field(k, v, `${key}/${k}`), at: line(`${key}/${k}`)}]));
   };
   const defaults = spec.default === undefined ? {} : fieldSet(spec.default, "simulate/default");
@@ -239,27 +247,52 @@ export function compileSimulate(doc, model, all, {line, fail, bindings}) {
   const stageSets = named("stages", model.stages.map((s) => s.name), "stage");
   const builtin = Object.fromEntries(FIELDS.map((k) => [k, {value: field(k, BUILTIN[k], "simulate"), at}]));
 
+  // chaos profiles: each a partial override of default:, in the place of default in the precedence below
+  const profileSets = {};
+  if (spec.profiles !== undefined) {
+    const named = map(spec.profiles, "simulate/profiles", "a mapping of profile name to a partial override of default");
+    const names = Object.keys(named);
+    if (names.length > MAX_PROFILES) fail(line("simulate/profiles"), `simulate.profiles has at most ${MAX_PROFILES} profiles (the setting simulate.profile lists them in one line), not ${names.length}`);
+    for (const name of names) {
+      if (!PROFILE_NAME.test(name)) fail(line(`simulate/profiles/${name}`), `a profile name is 1 to 20 characters from a-z and _, not ${JSON.stringify(name)}`);
+      if (name === "default") fail(line(`simulate/profiles/${name}`), "default is the name of simulate.default, which is the profile when none is chosen; name this one otherwise");
+      profileSets[name] = fieldSet(named[name], `simulate/profiles/${name}`, PROFILE_FIELDS);
+    }
+  }
+
   const sets = {rules: ruleSets, stages: stageSets, default: defaults, builtin};
+  // one field of a rule's configuration, as the generated class assigns it; `pick` says whose value it is
+  const build = (name, pick, root) => {
+    const f = (extra) => ({"@id": `${root}/${name}`, set_line: pick(name).at, ...extra});
+    const v = pick(name).value;
+    if (name === "duration") return f({dist: v.kind, "dist@type": CHAR(1), a: String(v.a), "a@type": INT4, b: String(v.b), "b@type": INT4,
+      ...(v.knots ? {knots: v.knots, "knots@type": STRG} : {})});
+    if (name === "outcome") return f(Object.fromEntries(OUTCOMES.flatMap((k) => [[k, String(v[k])], [`${k}@type`, INT4]])));
+    if (name === "hits") return f({dist: v.kind, "dist@type": CHAR(1), a: String(v.a), "a@type": INT4, b: String(v.b), "b@type": INT4,
+      ...(v.cdf ? {chunks: chunks(v.cdf).map((text) => ({text, "text@type": STRG}))} : {})});
+    return f({value: String(v), "value@type": INT4});
+  };
   const rules = model.rules.map((r) => {
     const stage = model.stages.find((s) => s.no === r.stage_no);
     const pick = (name) => precedence(sets, r.name, stage.name, name);
     const entry = all.find((e) => e.compiled.rule === r.name);
     const {prefix, length} = keyLayout(entry.compiled);
-    const f = (name, extra) => ({"@id": `${id}/rule/${r.name}/${name}`, set_line: pick(name).at, ...extra});
-    const d = pick("duration").value, h = pick("hits").value, o = pick("outcome").value;
+    const rid = `${id}/rule/${r.name}`;
     const config = {
-      "@id": `${id}/rule/${r.name}`, set_line: ruleSets[r.name] ? line(`simulate/rules/${r.name}`) : at,
+      "@id": rid, set_line: ruleSets[r.name] ? line(`simulate/rules/${r.name}`) : at,
       rule: r.name, "rule@type": CHAR(60),
-      duration: f("duration", {dist: d.kind, "dist@type": CHAR(1), a: String(d.a), "a@type": INT4, b: String(d.b), "b@type": INT4,
-        ...(d.knots ? {knots: d.knots, "knots@type": STRG} : {})}),
-      outcome: f("outcome", Object.fromEntries(OUTCOMES.flatMap((k) => [[k, String(o[k])], [`${k}@type`, INT4]]))),
-      slow_factor: f("slow_factor", {value: String(pick("slow_factor").value), "value@type": INT4}),
-      hits: f("hits", {dist: h.kind, "dist@type": CHAR(1), a: String(h.a), "a@type": INT4, b: String(h.b), "b@type": INT4,
-        ...(h.cdf ? {chunks: chunks(h.cdf).map((text) => ({text, "text@type": STRG}))} : {})}),
-      autoclose: f("autoclose", {value: String(pick("autoclose").value), "value@type": INT4}),
-      keep: f("keep", {value: String(pick("keep").value), "value@type": INT4}),
-      layout: {"@id": `${id}/rule/${r.name}`, set_line: at, prefix, "prefix@type": STRG, length: String(length), "length@type": INT4},
+      ...Object.fromEntries(FIELDS.map((name) => [name, build(name, pick, rid)])),
+      layout: {"@id": rid, set_line: at, prefix, "prefix@type": STRG, length: String(length), "length@type": INT4},
     };
+    // a profile takes the default's place: a field the rule or its stage names stays theirs, so a profile
+    // changes only what the rule would have taken from default (or the built-in); only those fields are emitted
+    const profiles = Object.entries(profileSets).map(([pname, pset]) => {
+      const via = (name) => precedence({...sets, default: {...defaults, ...pset}}, r.name, stage.name, name);
+      const changed = PROFILE_FIELDS.filter((name) => via(name) !== pick(name));
+      return {"@id": `${rid}/profile/${pname}`, set_line: line(`simulate/profiles/${pname}`), name: pname, "name@type": CHAR(20), changed,
+        ...Object.fromEntries(changed.map((name) => [`p_${name}`, build(name, via, `${rid}/profile/${pname}`)]))};
+    }).filter((p) => p.changed.length).map(({changed, ...rest}) => rest);
+    if (profiles.length) config.chaos = {"@id": `${rid}/profiles`, set_line: line("simulate/profiles"), profiles};
     // the runner's lines about this rule's simulation trace to simulate: what
     // they name of the rule is copied here, so they resolve it in this node
     r.sim = {"@id": id, set_line: at, stage_no: r.stage_no, ...(r.range ? {range: {"@id": id, set_line: at}} : {}),
@@ -276,7 +309,8 @@ export function compileSimulate(doc, model, all, {line, fail, bindings}) {
     sink: {name: sink.name, "name@type": CHAR(30)}, work_class: work.variants.find((v) => v.name === "sim").class, work_iface: work.iface,
     blocked, ...(blocked.length ? {guarded: {"@id": id, set_line: at}} : {}),
     ...(simOnly.length ? {sim_only: simOnly} : {}), rules,
-    percentiles: PERCENTILES.join(" "), "percentiles@type": STRG, alphabet: ALPHABET, "alphabet@type": STRG};
+    percentiles: PERCENTILES.join(" "), "percentiles@type": STRG, alphabet: ALPHABET, "alphabet@type": STRG,
+    ...(Object.keys(profileSets).length ? {profile_names: Object.keys(profileSets)} : {})};
   for (const port of model.ports) if (port.name === WORK_PORT || port.variants.some((v) => v.sim_only)) port.sim = sim;
   return sim;
 }
@@ -295,6 +329,9 @@ function poissonTable(mean) {
   out[out.length - 1] = MILLION;
   return out;
 }
+
+// the table of Poisson(1): an override of the mean sums that many draws of it
+export const POISSON1 = poissonTable(1).join(" ");
 
 // a long table as literals of at most 200 characters, cut between numbers
 function chunks(text) {
@@ -353,14 +390,43 @@ export function simVariant({kind, vname, generated, simulate, at, fail}) {
   return {};
 }
 
-// The twin's view of a rule's compiled configuration (a node of model.simulate.rules)
-export const configOf = (node) => ({
-  dist: node.duration.dist, dur_a: Number(node.duration.a), dur_b: Number(node.duration.b), knots: node.duration.knots ?? "",
-  ok: Number(node.outcome.ok), slow: Number(node.outcome.slow), dump: Number(node.outcome.dump), hang: Number(node.outcome.hang),
-  slow_factor: Number(node.slow_factor.value), hits: node.hits.dist, hits_a: Number(node.hits.a), hits_b: Number(node.hits.b),
-  cdf: (node.hits.chunks ?? []).map((c) => c.text).join(""), autoclose: Number(node.autoclose.value), keep: Number(node.keep.value),
-  empirical: !!node.empirical, prefix: node.layout.prefix, key_length: Number(node.layout.length),
-});
+// The twin's view of a rule's compiled configuration (a node of model.simulate.rules).
+// `chaos` is what the run's settings say (the runner's ty_chaos): the profile's
+// fields over the rule's, then the explicit overrides over everything.
+export const configOf = (node, chaos = {}) => {
+  const config = {
+    dist: node.duration.dist, dur_a: Number(node.duration.a), dur_b: Number(node.duration.b), knots: node.duration.knots ?? "",
+    ok: Number(node.outcome.ok), slow: Number(node.outcome.slow), dump: Number(node.outcome.dump), hang: Number(node.outcome.hang),
+    slow_factor: Number(node.slow_factor.value), hits: node.hits.dist, hits_a: Number(node.hits.a), hits_b: Number(node.hits.b),
+    cdf: (node.hits.chunks ?? []).map((c) => c.text).join(""), autoclose: Number(node.autoclose.value), keep: Number(node.keep.value),
+    empirical: !!node.empirical, prefix: node.layout.prefix, key_length: Number(node.layout.length),
+  };
+  const profile = node.chaos?.profiles.find((p) => p.name === chaos.profile);
+  if (profile) {
+    if (profile.p_duration) Object.assign(config, {dist: profile.p_duration.dist, dur_a: Number(profile.p_duration.a), dur_b: Number(profile.p_duration.b), knots: profile.p_duration.knots ?? ""});
+    if (profile.p_outcome) Object.assign(config, Object.fromEntries(OUTCOMES.map((o) => [o, Number(profile.p_outcome[o])])));
+    if (profile.p_slow_factor) config.slow_factor = Number(profile.p_slow_factor.value);
+    if (profile.p_hits) Object.assign(config, {hits: profile.p_hits.dist, hits_a: Number(profile.p_hits.a), hits_b: Number(profile.p_hits.b), cdf: (profile.p_hits.chunks ?? []).map((c) => c.text).join("")});
+    if (profile.p_autoclose) config.autoclose = Number(profile.p_autoclose.value);
+  }
+  if (chaos.outcome_set) {
+    config.slow = chaos.slow * 1000; config.dump = chaos.dump * 1000; config.hang = chaos.hang * 1000;
+    config.ok = MILLION - config.slow - config.dump - config.hang;
+  }
+  if (chaos.hits_set) Object.assign(config, chaos.hits_mean === 0 ? {hits: "F", hits_a: 0} : {hits: "S", hits_a: chaos.hits_mean, cdf: POISSON1});
+  if (chaos.close_set) config.autoclose = chaos.close * 1000;
+  return config;
+};
+
+// What the runner makes of the run's settings (values by setting name; -1 or absent = not set): the twin's ty_chaos
+export function chaosOf(values = {}) {
+  const at = (name) => (values[name] === undefined ? -1 : Number(values[name]));
+  const [slow, dump, hang] = ["simulate.slow", "simulate.dump", "simulate.hang"].map(at);
+  return {profile: values["simulate.profile"] ?? "default",
+    outcome_set: slow >= 0 || dump >= 0 || hang >= 0, slow: Math.max(slow, 0), dump: Math.max(dump, 0), hang: Math.max(hang, 0),
+    hits_set: at("simulate.hits_mean") >= 0, hits_mean: Math.max(at("simulate.hits_mean"), 0),
+    close_set: at("simulate.autoclose") >= 0, close: Math.max(at("simulate.autoclose"), 0)};
+}
 
 // What the orchestration does with one pile, as the twin sees it: attempts
 // from 1 until one ends normally (OK or SLOW), at most retryMax + 1 of them;

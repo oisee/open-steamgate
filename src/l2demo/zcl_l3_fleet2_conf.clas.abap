@@ -14,6 +14,12 @@ CLASS zcl_l3_fleet2_conf DEFINITION PUBLIC FINAL CREATE PUBLIC.
              keep_days TYPE i,
              simulate_seed TYPE i,
              simulate_time_scale TYPE i,
+             simulate_profile TYPE c LENGTH 40,
+             simulate_dump TYPE i,
+             simulate_hang TYPE i,
+             simulate_slow TYPE i,
+             simulate_hits_mean TYPE i,
+             simulate_autoclose TYPE i,
              piles_checks_size TYPE i,
            END OF ty_values.
     TYPES tt_conf TYPE STANDARD TABLE OF zosd_l3_conf WITH DEFAULT KEY.
@@ -60,6 +66,10 @@ CLASS zcl_l3_fleet2_conf DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS audit
       IMPORTING is_old TYPE zosd_l3_conf is_new TYPE zosd_l3_conf iv_note TYPE csequence.
     CLASS-METHODS authorised RETURNING VALUE(rv_ok) TYPE abap_bool.
+    " the simulated twin's three outcome shares (per mille) together may not exceed 1000
+    CLASS-METHODS chaos_ok
+      IMPORTING iv_param TYPE csequence iv_value TYPE csequence
+      RETURNING VALUE(rv_ok) TYPE abap_bool.
 ENDCLASS.
 
 CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
@@ -123,6 +133,36 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     APPEND ls_spec TO rt_specs.
     CLEAR ls_spec.
     ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'simulate.profile'.
+    ls_spec-dsl_value = 'default'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'simulate.dump'.
+    ls_spec-dsl_value = '-1'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'simulate.hang'.
+    ls_spec-dsl_value = '-1'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'simulate.slow'.
+    ls_spec-dsl_value = '-1'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'simulate.hits_mean'.
+    ls_spec-dsl_value = '-1'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'simulate.autoclose'.
+    ls_spec-dsl_value = '-1'.
+    APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
     ls_spec-param_name = 'piles.checks.size'.
     ls_spec-dsl_value = '2'.
     APPEND ls_spec TO rt_specs.
@@ -140,6 +180,12 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     rs_vals-keep_days = '30'.
     rs_vals-simulate_seed = '42'.
     rs_vals-simulate_time_scale = '10000'.
+    rs_vals-simulate_profile = 'default'.
+    rs_vals-simulate_dump = '-1'.
+    rs_vals-simulate_hang = '-1'.
+    rs_vals-simulate_slow = '-1'.
+    rs_vals-simulate_hits_mean = '-1'.
+    rs_vals-simulate_autoclose = '-1'.
     rs_vals-piles_checks_size = '2'.
   ENDMETHOD.
 
@@ -248,6 +294,55 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     IF valid( iv_param = 'simulate.time_scale' iv_value = lv_text ) = abap_false.
       rs_vals-simulate_time_scale = ls_def-simulate_time_scale.
     ENDIF.
+    lv_text = is_vals-simulate_profile.
+    IF valid( iv_param = 'simulate.profile' iv_value = lv_text ) = abap_false.
+      rs_vals-simulate_profile = ls_def-simulate_profile.
+    ENDIF.
+    lv_number = is_vals-simulate_dump.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'simulate.dump' iv_value = lv_text ) = abap_false.
+      rs_vals-simulate_dump = ls_def-simulate_dump.
+    ENDIF.
+    lv_number = is_vals-simulate_hang.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'simulate.hang' iv_value = lv_text ) = abap_false.
+      rs_vals-simulate_hang = ls_def-simulate_hang.
+    ENDIF.
+    lv_number = is_vals-simulate_slow.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'simulate.slow' iv_value = lv_text ) = abap_false.
+      rs_vals-simulate_slow = ls_def-simulate_slow.
+    ENDIF.
+    lv_number = is_vals-simulate_hits_mean.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'simulate.hits_mean' iv_value = lv_text ) = abap_false.
+      rs_vals-simulate_hits_mean = ls_def-simulate_hits_mean.
+    ENDIF.
+    lv_number = is_vals-simulate_autoclose.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'simulate.autoclose' iv_value = lv_text ) = abap_false.
+      rs_vals-simulate_autoclose = ls_def-simulate_autoclose.
+    ENDIF.
     lv_number = is_vals-piles_checks_size.
     lv_text = abs( lv_number ).
     CONDENSE lv_text.
@@ -322,6 +417,54 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
       lv_value = ls_row-param_val.
       IF valid( iv_param = 'simulate.time_scale' iv_value = lv_value ) = abap_true.
         rs_vals-simulate_time_scale = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-simulate_profile = ls_def-simulate_profile.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'simulate.profile'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'simulate.profile' iv_value = lv_value ) = abap_true.
+        rs_vals-simulate_profile = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-simulate_dump = ls_def-simulate_dump.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'simulate.dump'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'simulate.dump' iv_value = lv_value ) = abap_true.
+        rs_vals-simulate_dump = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-simulate_hang = ls_def-simulate_hang.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'simulate.hang'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'simulate.hang' iv_value = lv_value ) = abap_true.
+        rs_vals-simulate_hang = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-simulate_slow = ls_def-simulate_slow.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'simulate.slow'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'simulate.slow' iv_value = lv_value ) = abap_true.
+        rs_vals-simulate_slow = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-simulate_hits_mean = ls_def-simulate_hits_mean.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'simulate.hits_mean'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'simulate.hits_mean' iv_value = lv_value ) = abap_true.
+        rs_vals-simulate_hits_mean = lv_value.
+      ENDIF.
+    ENDIF.
+    rs_vals-simulate_autoclose = ls_def-simulate_autoclose.
+    READ TABLE lt_rows INTO ls_row WITH KEY param_name = 'simulate.autoclose'.
+    IF sy-subrc = 0.
+      lv_value = ls_row-param_val.
+      IF valid( iv_param = 'simulate.autoclose' iv_value = lv_value ) = abap_true.
+        rs_vals-simulate_autoclose = lv_value.
       ENDIF.
     ENDIF.
     rs_vals-piles_checks_size = ls_def-piles_checks_size.
@@ -486,6 +629,81 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
           RETURN.
         ENDIF.
         rv_ok = abap_true.
+      WHEN 'simulate.profile'.
+        IF strlen( lv_text ) < 1 OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        " one of the values the manifest lists: default, calm, squall, storm, flood, stuck, random
+        FIND REGEX `^(default|calm|squall|storm|flood|stuck|random)$` IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
+      WHEN 'simulate.dump'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < -1 OR lv_number > 1000.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
+      WHEN 'simulate.hang'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < -1 OR lv_number > 1000.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
+      WHEN 'simulate.slow'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < -1 OR lv_number > 1000.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
+      WHEN 'simulate.hits_mean'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < -1 OR lv_number > 100.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
+      WHEN 'simulate.autoclose'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < -1 OR lv_number > 1000.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
       WHEN 'piles.checks.size'.
         IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
           RETURN.
@@ -500,6 +718,41 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
         ENDIF.
         rv_ok = abap_true.
     ENDCASE.
+  ENDMETHOD.
+
+  METHOD chaos_ok.
+    DATA ls_current TYPE ty_state.
+    DATA lv_sum TYPE i.
+    DATA lv_share TYPE i.
+    rv_ok = abap_true.
+    IF iv_param <> 'simulate.dump' AND iv_param <> 'simulate.hang' AND iv_param <> 'simulate.slow'.
+      RETURN.
+    ENDIF.
+    ls_current = load( iv_write = abap_false ).
+    lv_share = ls_current-vals-simulate_dump.
+    IF iv_param = 'simulate.dump'.
+      lv_share = iv_value.
+    ENDIF.
+    IF lv_share > 0.
+      lv_sum = lv_sum + lv_share.
+    ENDIF.
+    lv_share = ls_current-vals-simulate_hang.
+    IF iv_param = 'simulate.hang'.
+      lv_share = iv_value.
+    ENDIF.
+    IF lv_share > 0.
+      lv_sum = lv_sum + lv_share.
+    ENDIF.
+    lv_share = ls_current-vals-simulate_slow.
+    IF iv_param = 'simulate.slow'.
+      lv_share = iv_value.
+    ENDIF.
+    IF lv_share > 0.
+      lv_sum = lv_sum + lv_share.
+    ENDIF.
+    IF lv_sum > 1000.
+      rv_ok = abap_false.
+    ENDIF.
   ENDMETHOD.
 
   METHOD audit.
@@ -619,6 +872,18 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
           rs_state-vals-simulate_seed = lv_effective.
         WHEN 'simulate.time_scale'.
           rs_state-vals-simulate_time_scale = lv_effective.
+        WHEN 'simulate.profile'.
+          rs_state-vals-simulate_profile = lv_effective.
+        WHEN 'simulate.dump'.
+          rs_state-vals-simulate_dump = lv_effective.
+        WHEN 'simulate.hang'.
+          rs_state-vals-simulate_hang = lv_effective.
+        WHEN 'simulate.slow'.
+          rs_state-vals-simulate_slow = lv_effective.
+        WHEN 'simulate.hits_mean'.
+          rs_state-vals-simulate_hits_mean = lv_effective.
+        WHEN 'simulate.autoclose'.
+          rs_state-vals-simulate_autoclose = lv_effective.
         WHEN 'piles.checks.size'.
           rs_state-vals-piles_checks_size = lv_effective.
       ENDCASE.
@@ -696,6 +961,9 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     SELECT SINGLE * FROM zosd_l3_conf INTO ls_row
       WHERE set_name = 'fleet2' AND param_name = iv_param.
     IF sy-subrc <> 0.
+      RETURN.
+    ENDIF.
+    IF chaos_ok( iv_param = iv_param iv_value = iv_value ) = abap_false.
       RETURN.
     ENDIF.
     ls_old = ls_row.

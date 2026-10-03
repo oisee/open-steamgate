@@ -30,7 +30,9 @@ PARAMETERS p_pile TYPE i.
 {{/planned}}
 PARAMETERS p_bind TYPE c LENGTH 255 LOWER CASE.
 {{#settings.entries}}
+{{^chaos}}
 PARAMETERS {{screen}} TYPE c LENGTH 40 LOWER CASE.
+{{/chaos}}
 {{/settings.entries}}
 {{#params}}
 PARAMETERS {{screen}} TYPE {{type_name}}.
@@ -45,7 +47,9 @@ START-OF-SELECTION.
 {{#settings}}
   DATA ls_settings TYPE {{settings.class}}=>ty_values.
 {{#entries}}
+{{^chaos}}
   ls_settings-{{field}} = {{screen}}.
+{{/chaos}}
 {{/entries}}
 {{/settings}}
 {{#with_params}}

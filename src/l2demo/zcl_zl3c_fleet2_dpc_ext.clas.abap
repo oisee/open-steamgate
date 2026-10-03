@@ -546,7 +546,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
             IF lv_ok = abap_true.
               ls_answer-answer = 'OK'.
             ELSE.
-              ls_answer-answer = 'REFUSED: SetSetting: unknown setting, a value outside its range, budget.warn above budget.narrow_at, or the note is empty or over 80 characters'.
+              ls_answer-answer = 'REFUSED: SetSetting: unknown setting, a value outside its range, budget.warn above budget.narrow_at, simulate dump + hang + slow above 1000, or the note is empty or over 80 characters'.
             ENDIF.
           WHEN 'ResetSetting'.
             lv_ok = zcl_l3_fleet2=>cockpit_reset_setting( iv_param = lv_param iv_note = lv_note ).
