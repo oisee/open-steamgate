@@ -3612,22 +3612,36 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Upstream version containing a fix: `unknown`
 - Validation: selected owner 7/7 SUCCESS in 82.37 s; full folder 48 class sources / 26 Unit owners, 4,077 SUCCESS, zero FAILURE/NOT_COMPILED/ERROR in 86.26 s. Including two setups and seed, the full run executes 430 SQL calls / 21,911,412 bytes. Peak full-run RSS 2,607,208 KiB includes compilation. Focused regression/batching/anomaly checks: 22 passing.
 
-### ANOMALY-2026-10-03-adt-long-timestamp-subtract — Long timestamp subtraction dumps
+### ANOMALY-2026-10-03-adt-long-timestamp-subtract - Long timestamp subtraction loses fractional seconds
 
-- Status: `workaround`
-- Discovery date: `2026-10-03`
-- Affected API: `CL_ABAP_TSTMP=>SUBTRACT` in the locked open-abap-core substrate,
-  with `GET TIME STAMP FIELD` into `TIMESTAMPL` and a long epoch timestamp.
-- Reproducer: A3b reentrance's default `_` case in `test/adt-abap-a3b.mjs`;
-  the first implementation passed both long timestamps directly to SUBTRACT.
-- Exact command: `OSD_HEAVY_RANGE=90-99 tools/osd-heavy.sh npx mocha test/adt-abap-a3b.mjs test/xml-wellformed.mjs`.
-- Expected arithmetic: milliseconds since 1970, within the request's time window.
-  This expectation is a numeric contract, not a new SAP-system measurement.
-- Actual open-abap behaviour: `The number NaN cannot be converted to a BigInt
-  because it is not an integer`; the ADT front answered 500.
-- Smallest safe workaround: calculate UTC epoch milliseconds from date and
-  time differences, adding the first three fractional digits as text. The
-  route uses ABAP arithmetic and adds no host clock command or kernel code.
-- Regression: `test/adt-abap-a3b.mjs`, `default clock`.
-- Upstream: not reported; isolated while building A3b, outside this slice's
-  substrate-change scope. Upstream fix version: unknown.
+- Status: `documented`; the route retains millisecond arithmetic.
+- Discovery date: `2026-10-03`; corrected after critic round 1.
+- Affected API: `CL_ABAP_TSTMP=>SUBTRACT` in open-abap-core at
+  `8b397be863e805182c32e4bbb8bedbd291619f58` (`libs.lock.json`), whose
+  return type is `i` (whole seconds).
+- Executable observation: `subtract_precision` in
+  `src/adt/zcl_osd_adt_reentrance.clas.testclasses.abap`, registered in
+  `test/adt-abap-a3b.mjs`. Both operands are `TIMESTAMPL`: literal
+  `20261003123456.9980000` and epoch `19700101000000.0000000`.
+  SUBTRACT returns `1791030896`; multiplying by 1000 gives `1791030896000`,
+  losing 998 milliseconds. The same test calls SUBTRACT with a live
+  `GET TIME STAMP FIELD` value and verifies the discarded fraction.
+- Exact command (after `npm run transpile`): `OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node_modules/.bin/mocha test/adt-abap-a3b.mjs --grep subtract_precision`.
+- Expected route arithmetic: milliseconds since 1970, within the request's
+  time window. This is the Node route's numeric contract, not a new
+  SAP-system measurement or a claim that SUBTRACT promises milliseconds.
+- Correction: the initial implementation was reported to answer 500 with
+  `The number NaN cannot be converted to a BigInt because it is not an integer`.
+  Its exact original operands and assignment were not preserved. Literal
+  and live long-timestamp probes on the locked substrate do not reproduce
+  that dump. The `default clock` route test bypasses SUBTRACT and is a
+  regression test, not a reproducer of the reported dump.
+- Route implementation: calculate UTC epoch milliseconds from date and
+  time differences, adding the first three fractional digits as text. For
+  the literal above, `unix_ms` returns `1791030896998`. Retained to satisfy
+  the millisecond contract and avoid the packed-to-Number precision loss
+  documented in the A2 timestamp observation above; no runtime change.
+- Regression: `test/adt-abap-a3b.mjs`, `clock`, `subtract_precision` and
+  `default clock`.
+- Upstream: none; whole-second return is the locked API's declared contract,
+  and the originally reported dump is unconfirmed.
