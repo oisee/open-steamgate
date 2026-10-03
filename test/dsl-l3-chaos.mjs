@@ -14,6 +14,7 @@ import {tmpdir} from "node:os";
 import {basename, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {compileSet, renderSet, SetError} from "../tools/dsl-l3.mjs";
+import {renderCockpit} from "../tools/dsl-l3-cockpit.mjs";
 import {chaosOf, configOf, draw, POISSON1} from "../tools/dsl-l3-sim.mjs";
 
 const SET = "src/l2demo/fleet2.l3.yaml";
@@ -153,17 +154,24 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
       const file = join(OUT, `zz_chaos_${process.pid}.l3.yaml`);
       writeFileSync(file, before);
       try {
-        const {files} = await renderSet(compileSet(file));
+        const model = compileSet(file);
+        const {files} = await renderSet(model);
+        // the run cockpit's files (its service, DPC extension and two apps) are the
+        // cockpit's (slice 6a), which changed after this slice; what this slice owns
+        // is everything else the set renders
+        const cockpit = new Set(Object.keys(await renderCockpit(model)));
+        expect(cockpit.size, "the cockpit renders its own files").to.be.greaterThan(10);
         let compared = 0;
         for (const [name, text] of Object.entries(files)) {
           // a sidecar names the recipes' hashes, which this slice changed; every other file is the bytes
-          if (name.endsWith(".trace.json")) continue;
+          if (name.endsWith(".trace.json") || cockpit.has(name)) continue;
           const was = git(["show", `${BEFORE}:${OUT}/${name}`]);
           expect(was.status, `${name} existed before the slice`).to.equal(0);
           expect(text.replaceAll(basename(file), "fleet2.l3.yaml"), name).to.equal(was.stdout);
           compared++;
         }
-        expect(compared).to.be.greaterThan(40);
+        // the set's own files (runner, ports and variants, the twin, settings, reports): 40 without the cockpit's
+        expect(compared).to.be.at.least(40);
       } finally { rmSync(file, {force: true}); }
     });
 

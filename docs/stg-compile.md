@@ -170,8 +170,21 @@ action}` for a `DataFieldForIntentBasedNavigation` button), `facets`
 targets) and `fieldGroups`. Per property: `label` (`Common.Label`),
 `text: {path, arrangement}` (`Common.Text` + `UI.TextArrangement`),
 `valueList` (`Common.ValueList` with `inOut`/`in`/`out`/`displayOnly`
-parameters, `search:`). Anything else is not in the grammar yet: write it
-in the `_MPC_EXT` by hand against `vocab_anno_model`.
+parameters, `search:`) and `valueListFixed: true`
+(`Common.ValueListWithFixedValues`, a drop-down). Since the run cockpit
+(DSL L3 slice 6a) also: `criticality: <path>` on a `lineItem` or field-group
+entry (the value's colour, `UI.CriticalityType` 0 to 3), `hidden: <path>` on
+a facet (`UI.Hidden`, a section hidden while a boolean is true),
+`headerFacets` with a `target:` such as `@UI.DataPoint#Q`, `@UI.Chart#Q` or
+`to_Nav/@UI.Chart#Q`, `dataPoints: {Q: {value, title, targetValue,
+minimumValue, maximumValue, criticality, visualization,
+criticalityCalculation: {improvementDirection, toleranceRangeHighValue, ...}}}`
+(a number is a constant, a name a path) and `charts: {Q: {type: Donut |
+Bullet | BarStacked | ..., title, measures, dimensions, measureAttributes:
+[{measure, role, dataPoint}]}}`, which Fiori Elements V2 renders as header
+micro charts. The writer is `tools/stg-compile-annotations.mjs`. Anything
+else is not in the grammar yet: write it in the `_MPC_EXT` by hand against
+`vocab_anno_model`.
 
 stg-compile writes them into a class of their own,
 `ZCL_<project>_MPC_ANN`, one static `define( io_vocab )` over the

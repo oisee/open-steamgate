@@ -26,7 +26,8 @@
 "! which makes a client log on again (docs/adt-abap-port/slice-3-front.md).
 "!
 "! FENCE commits session work before dispatch and rolls back only when
-"! dispatch raises. The surrounding step commits successful route work,
+"! dispatch raises or the response requests rollback. The surrounding step
+"! commits successful route work,
 "! whatever its response status. ENQ locks at _SCOPE 1 are independent.
 CLASS zcl_osd_adt_handler DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
@@ -245,6 +246,9 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
     COMMIT WORK.
     TRY.
         rs_result = zcl_osd_adt_router=>dispatch( is_request = is_request it_routes = it_routes ).
+        IF rs_result-response-rollback = abap_true.
+          ROLLBACK WORK.
+        ENDIF.
       CATCH cx_root INTO lx_error.
         ROLLBACK WORK.
         RAISE EXCEPTION lx_error.

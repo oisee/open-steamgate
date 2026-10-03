@@ -3507,3 +3507,15 @@ The same run also showed an `INSERT` taking `mandt` from the work area (999 writ
   packed calculation retained for wider intermediates and fractional trees.
 - Tests: the shared Go/JS fixture, `int8arith.test.mjs`, and randomized
   `go/intarith` comparisons against an independent big-integer reference.
+
+### ANOMALY-2026-10-02-regex-space-repeat - only the first POSIX space class is translated
+
+- Status: `open`
+- Affected version: `@abaplint/runtime` 2.13.96
+- Reproducer: `FIND REGEX '[[:space:]]*interfaces[[:space:]]+if_oo_adt_classrun' IN lv_source.` with source `  interfaces if_oo_adt_classrun.`
+- Expected: both POSIX whitespace classes match whitespace.
+- Actual: ABAPRegExp.convert uses String.replace without a global flag; the second class remains literal JS regex syntax and the FIND fails.
+- Command: `OSD_HEAVY_RANGE=80-89 tools/osd-heavy.sh npx mocha test/adt-abap-c5.mjs` (initial C5 run).
+- Workaround: construct the whitespace character set explicitly in C5; keep the word boundary explicit for 7.02 as well.
+- Regression: C5 source decision ABAP Unit and the source parity cases in `test/adt-abap-c5.mjs`.
+- Upstream: needs an issue; no upstream change made in this slice.

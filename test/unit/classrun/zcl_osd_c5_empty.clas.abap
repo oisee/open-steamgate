@@ -1,0 +1,8 @@
+CLASS zcl_osd_c5_empty DEFINITION PUBLIC CREATE PUBLIC.
+  PUBLIC SECTION.
+    INTERFACES if_oo_adt_classrun.
+ENDCLASS.
+CLASS zcl_osd_c5_empty IMPLEMENTATION.
+  METHOD if_oo_adt_classrun~main.
+  ENDMETHOD.
+ENDCLASS.
