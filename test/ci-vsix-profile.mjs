@@ -17,8 +17,43 @@ describe("CI VSIX profile", () => {
     expect(needsFullVsix(["packs/zork/games/zork1-z3.w3mi.data.z3"], before, before)).to.equal(true);
   });
 
-  it("checks a missing manifest in full and ignores unrelated code", () => {
+  it("checks a missing manifest in full", () => {
     expect(needsFullVsix(["editors/vscode/package.json"], undefined, before)).to.equal(true);
-    expect(needsFullVsix(["src/gateway/zcl_stg_gateway.clas.abap"], before, before)).to.equal(false);
   });
+
+  for (const path of [
+    "src/adt/zcl_x.clas.testclasses.abap",
+    "src/foo.clas.abap",
+    "webapp/x.js",
+    "tools/x.mjs",
+    "data/x.tabu.json",
+    "packs/other/src/foo.clas.abap",
+    "abap_transpile.json",
+    "abaplint.jsonc",
+    "libs.lock.json",
+    "package.json",
+    // test/ ships except the staging exclusions: even this JS is payload.
+    "test/x.mjs",
+    "test/setup.mjs",
+    "test/unit/zcl_x.clas.testclasses.abap",
+  ]) {
+    it(`checks shipped seed content in full: ${path}`, () => {
+      expect(needsFullVsix([path], before, before)).to.equal(true);
+    });
+  }
+
+  for (const path of [
+    "docs/x.md",
+    "gen/x.clas.abap", // regenerated inside the seed, never copied
+    "test/e2e/x.mjs",
+    "test/fixtures/x.clas.abap",
+    "test/unit/zcl_osd_adt_session_mem.clas.abap",
+    "test/unit/zcl_osd_adt_route_f2.clas.testclasses.abap",
+    "test/integration/zosd_voyage.prog.abap",
+    "src-other/foo.clas.abap",
+  ]) {
+    it(`keeps unshipped content fast: ${path}`, () => {
+      expect(needsFullVsix([path], before, before)).to.equal(false);
+    });
+  }
 });
