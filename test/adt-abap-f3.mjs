@@ -51,7 +51,8 @@ describe("ADT F3: continuation re-entry", function () {
       options.abap = {...runner, resume: async (...args) => {
         expect(currentStepToken(), "RESUME must hold a dialog step").to.not.equal(undefined);
         expect(currentStepToken().enqSession, "re-entry pins the original session").to.equal(options.f3SessionKey);
-        return runner.resume(...args);
+        const record = await runner.resume(...args);
+        return options.f3Continuation ? {...record, continuation: {kind: "f3-write", payload: "{}"}} : record;
       }};
       const app = express(); app.use(express.raw({type: "*/*"})); app.use(adtRouter(options).router);
       const server = await new Promise((r) => { const s = app.listen(0, "127.0.0.1", () => r(s)); });
@@ -62,7 +63,7 @@ describe("ADT F3: continuation re-entry", function () {
     await handler.use_routes({}); unregister();
     for (const m of mounts) { await new Promise((r) => m.server.close(r)); rmSync(m.root, {recursive: true, force: true}); }
   });
-  afterEach(() => { for (const m of mounts) delete m.options.f3Host; });
+  afterEach(() => { for (const m of mounts) { delete m.options.f3Host; delete m.options.f3Continuation; } });
 
   it("two routers finish through RESUME against their own bound stores", async () => {
     for (const [i, m] of mounts.entries()) {
@@ -122,6 +123,16 @@ describe("ADT F3: continuation re-entry", function () {
       expect(unknown.status).to.equal(500);
       expect(await unknown.text()).to.equal(exceptionDocument("ExceptionInternalError", "no ABAP continuation f3-unknown is registered", {namespace: "org.open-steamgate.osd"}));
     } finally { stop(); }
+  });
+
+  it("RESUME returning another continuation gives an ADT 500 document", async () => {
+    const m = mounts[0];
+    m.options.f3Continuation = true;
+    const res = await fetch(m.url, {headers: {"x-csrf-token": "fetch", "x-sap-adt-sessiontype": "stateful"}});
+    expect(res.status).to.equal(500);
+    expect(res.headers.get("content-type")).to.equal("application/xml; charset=utf-8");
+    expect(await res.text()).to.equal(exceptionDocument("ExceptionInternalError",
+      'continuation "f3-write": RESUME returned a continuation', {namespace: "org.open-steamgate.osd"}));
   });
 
   it("duplicate registration is refused without replacing the module handler", () => {

@@ -252,6 +252,9 @@ export async function resumeOf(handler, kind, json) {
 /** Host work finishes by sending the response returned by ABAP RESUME. */
 export async function resume(req, res, kind, json) {
   const {store, step, front} = req.osdFacade;
+  if (front.execute !== undefined || typeof step !== "function") {
+    throw Object.assign(new Error("RESUME in the serving child is slice B4"), {code: "ADT_RESUME_REMOTE"});
+  }
   const record = await withSystem((k, n) => front.system?.(k, n, req), () => step(async () => {
     const original = req.adt?.session;
     // A fresh stateless GET ends its session in ANSWER and cannot continue.
@@ -267,6 +270,8 @@ export async function resume(req, res, kind, json) {
       const params = a.Classes[HANDLER].METHODS.ANSWER.parameters.IS_REQUEST.type().get();
       // A fresh request had no cookie on arrival. Re-entry uses the session
       // ANSWER resolved, including that case, rather than opening a new one.
+      // This replaces Cookie with sap-contextid only, dropping other cookies.
+      // Harmless today: RESUME does no CSRF check. B4 must revisit this.
       const headers = original === undefined ? req.headers
         : {...req.headers, cookie: `sap-contextid=${original.id}`};
       for (const [name, value] of Object.entries(headers)) {
@@ -277,7 +282,11 @@ export async function resume(req, res, kind, json) {
       await session.zif_osd_adt_session$resolve({it_cookies: await a.Classes.ZCL_OSD_ADT_CSRF.cookies_of({it_headers: params.headers}),
         it_headers: params.headers});
     }
-    return front.resume(kind, typeof json === "string" ? json : JSON.stringify(json));
+    const record = await front.resume(kind, typeof json === "string" ? json : JSON.stringify(json));
+    if (record.continuation !== undefined) {
+      throw Object.assign(new Error("RESUME returned a continuation"), {code: "ADT_RESUME_CONTINUATION"});
+    }
+    return record;
   }, `ADT RESUME ${kind}`), {store});
   // RESUME does not stamp session headers; keep every header its owner
   // returned, alongside the cookies already sent by ANSWER.

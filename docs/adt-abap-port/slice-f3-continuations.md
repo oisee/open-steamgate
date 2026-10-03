@@ -24,6 +24,10 @@ that keep their session (POST/PUT, or an explicitly stateful GET). A fresh state
 and cannot resume. An ended session receives the
 existing 403 CSRF refusal. It never runs ABAP in `outsideStepContext`.
 
+Host work done before RESUME is outside the LUW and remains when RESUME
+fails or the session has ended. A handler must make its host work
+idempotent or undo that work itself.
+
 The only ABAP re-entry is `ZCL_OSD_ADT_HANDLER=>RESUME(iv_kind, iv_json)`.
 Register the owner with `ZCL_OSD_ADT_ROUTER=>ADD`, passing the optional
 `iv_resume_kind` alongside `iv_method`, `iv_pattern` and `iv_handler`
@@ -42,6 +46,8 @@ The host sends RESUME's status, content type, headers and bytes, retaining
 cookies/token already sent by the first step. RESUME does not stamp
 session cookies again; every header returned by its owner is replayed. RESUME is terminal: it must
 return a finished response, rather than request another continuation.
+The host refuses a RESUME response carrying a continuation with a 500
+ADT document ("RESUME returned a continuation").
 The kernel closure follows the router's literal owner class and the new
 interface, so parent-kernel hosts need no separate loader registry.
 
@@ -55,8 +61,9 @@ No activation, ABAP Unit or notebook kind is implemented by F3.
 
 With `OSD_ADT_ONE_RUNTIME=1`, B1/B2 sends ANSWER to the serving child
 and carries STORE over IPC. F3 retains that path unchanged. RESUME remains
-available only through the local dialog-step adapter; moving RESUME into
-the serving child belongs to B4. F3 moves no production HTTP rows and adds
+available only through the local dialog-step adapter; serving-child RESUME
+is refused with a 500 ADT document until B4 ("RESUME in the serving child
+is slice B4"). F3 moves no production HTTP rows and adds
 no STORE commands, so it has no HOST_ALLOWED entries to remove.
 
 `test/adt-abap-f3.mjs` mounts two routers and exercises host writes and
