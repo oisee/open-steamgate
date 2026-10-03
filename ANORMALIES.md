@@ -3627,3 +3627,20 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Upstream issue: not reported yet; the fix belongs in the runtime (`get_time.js`: build the packed value from strings, not a float sum) -- runtime owner (stoker)
 - Regression-test location: `test/adt-abap-a3b.mjs` (default clock)
 - Upstream version containing a fix: unknown
+
+### ANOMALY-2026-10-03-int8-hex-conversion - int8 byte assignments keep the wrong bytes
+
+- Status: `fixed locally; upstream pending`
+- Discovery date: `2026-10-03`
+- Affected version: `@abaplint/runtime` 2.13.96
+- Affected path: int8 -> x, x -> int8, int8 -> xstring; i -> xstring for negative values
+- Minimal ABAP reproducer: `DATA n TYPE int8. DATA h TYPE x LENGTH 4. n = 72623859790382856. h = n. ASSERT h = '05060708'.`
+- Expected SAP behaviour: A4H 758 measured two's complement, big-endian, right-aligned; shorter x keeps the last bytes, longer x pads with 00 on the left without sign extension. x -> int8 uses the last eight bytes signed. Integer -> xstring uses minimal bytes for non-negative values (zero = 00, no leading 00 for a set top bit), full type width for negatives.
+- Actual before fix: the int8 folder has 6/10 SUCCESS, four failures: positive x4 truncates from the right; negative x16 pads on the right; x16 -> int8 is unsigned and retains high bytes. int8 -> xstring throws; negative i -> xstring is invalid hex.
+- Smallest safe workaround: use the local upstream runtime for verification; no OSG runtime patch. Fixed-length i -> x and x -> i already follow the four-byte rule and were left unchanged.
+- Command: `OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh npm run osgjs:unit -- .local/abapiti/int8 --json` in a disposable checkout with locally linked packages; shared node_modules is untouched.
+- Upstream: `abaplint/transpiler`, branch `fix/int8-hex-conversion`; unsent draft at `.local/jsint8-upstream.md`.
+- Regression tests: upstream `packages/runtime/test/integer_hex.ts`; OSG `test/osgjs-int8.mjs` and `test/fixtures/osgjs-unit-int8/`. Existing `it.skip` upstream-pending convention; `OSD_INT8_UPSTREAM=1` runs the full test against a local build.
+- Upstream version containing a fix: `unknown`
+- Verification: int8 folder 10/10 SUCCESS; OSG opt-in harness 1 pass (default 1 pending); upstream 154 new tests, 192 runtime passes, 99 affected ABAP passes with 4 existing pending. All 26 supplied xstring conversion methods pass. Folder 007 is 12/17 overall: five of seven byte/integer equality methods fail in the separate comparison path; folder 008 is 16/16. This fix does not change comparison operators.
+- Dependency isolation: proof used core 2.120.64 (declared upstream minimum); 2.120.65 changes CREATE DATA TYPE HANDLE operand nodes and breaks the unchanged compiler on the library tree. The original shared dependencies were already a local 2.13.93 build, not published; their symlink and contents were preserved, and the disposable copy was removed.

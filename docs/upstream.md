@@ -511,3 +511,25 @@ the same kind — a claim I believed because I had not gone to look:
 And one number was cut for being second-hand: a colleague's measurement of
 our own suite, which neither the author nor the critic had run. Unverifiable
 and about us, not about them.
+
+## Local int8 byte conversion fix (2026-10-03)
+
+`ANOMALY-2026-10-03-int8-hex-conversion` is fixed on
+`fix/int8-hex-conversion` in `.local/transpiler`, based on its `main`.
+The runtime keeps the low bytes of an int8 assigned to x, zero-pads long
+byte targets on the left, decodes the last eight source bytes signed and
+converts i/int8 to xstring using the measured source width and minimal-byte
+rules. Fixed-length i byte conversions already match and remain unchanged.
+The upstream runtime tests include both Hex implementations; OSG's two
+oracle classes run through `test/osgjs-int8.mjs`, pending until the pinned
+runtime carries the fix (`OSD_INT8_UPSTREAM=1` verifies a local build).
+The unsent issue/PR draft is `.local/jsint8-upstream.md`. Nothing is pushed
+or sent as part of this task.
+
+Proof: upstream 192 runtime passes (154 new; red proof 119 pass / 35 fail),
+99 affected ABAP passes / 4 existing pending, lint; OSG int8 10/10 and all
+26 supplied xstring conversion methods. The additional comparison methods
+in inbox 007 still fail 5/7; those operators are outside this fix. Validation
+uses core 2.120.64 because 2.120.65 changes a CREATE DATA operand node.
+The OSG proof used a disposable dependency copy; the original shared local
+2.13.93 dependencies were preserved.
