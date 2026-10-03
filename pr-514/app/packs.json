@@ -25,6 +25,14 @@
       "enabled": true,
       "pack": "zvdb",
       "description": "Portable 8–1536-bit vector search with an optional native SQL engine"
+    },
+    {
+      "id": "zosd_fleet2",
+      "title": "Fleet run cockpit",
+      "pack": "zosd_fleet2",
+      "type": "static",
+      "icon": "sap-icon://process",
+      "url": "/app/zosd_fleet2/index.html"
     }
   ],
   "applications": {

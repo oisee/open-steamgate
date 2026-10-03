@@ -23,7 +23,9 @@ sap.ui.define([
   "sap/m/Title",
   "sap/m/MessageToast",
   "sap/m/MessageBox",
-], function (Controller, JSONModel, Filter, FilterOperator, Sorter, Title, Label, Input, Dialog, Button, List, StandardListItem, TextArea, Select, Item, Table, Column, ColumnListItem, Text, OverflowToolbar, ToolbarSpacer, MTitle, MessageToast, MessageBox) {
+], function (Controller, JSONModel, Filter, FilterOperator, Sorter, Title, Label, Input, Dialog, Button, List,
+  StandardListItem, TextArea, Select, Item, Table, Column, ColumnListItem, Text, OverflowToolbar, ToolbarSpacer, MTitle,
+  MessageToast, MessageBox) {
   "use strict";
 
   // The tree SEGW shows, in terms of the entity sets of ZSTG_SEGW_SRV (one
@@ -108,7 +110,9 @@ sap.ui.define([
         const es = c.id();
         const se = c.id();
         const rows = [
-          ["EntitySetSet", {...key(c, es), Model: c.model, Name: v.Name, EntityType: v.EntityType, Creatable: "X", Updatable: "X", Deletable: "X", Pageable: "X", Addressable: "X", RefType: "T", TechName: v.Name.toUpperCase(), DescriptionXu: "X", StgSeq: c.seq()}],
+          ["EntitySetSet", {...key(c, es), Model: c.model, Name: v.Name, EntityType: v.EntityType, Creatable: "X",
+            Updatable: "X", Deletable: "X", Pageable: "X", Addressable: "X", RefType: "T", TechName: v.Name.toUpperCase(),
+            DescriptionXu: "X", StgSeq: c.seq()}],
           textRow(c, "EntitySetTextSet", es, "EsetLabel", v.Name),
           // the service implementation node of the set and its five operations
           ["ServiceEntitySet", {...key(c, se), ParentUuid: c.service, Name: v.Name, EntitySetUuid: es, StgSeq: c.seq()}],
@@ -168,7 +172,9 @@ sap.ui.define([
         const fi = c.id();
         const set = v.ReturnType ? firstSetOf(c, v.ReturnType) : undefined;
         return [
-          ["FunctionImportSet", {...key(c, fi), Model: c.model, Name: v.Name, HttpMethod: v.HttpMethod, ReturnCard: v.ReturnType ? "1" : "", ReturnRefType: v.ReturnType, ReturnTypeKind: v.ReturnType ? "ETYP" : "", ReturnEntityset: set ? set.NodeUuid : "", RefType: "T", DescriptionXu: "X", StgSeq: c.seq()}],
+          ["FunctionImportSet", {...key(c, fi), Model: c.model, Name: v.Name, HttpMethod: v.HttpMethod,
+            ReturnCard: v.ReturnType ? "1" : "", ReturnRefType: v.ReturnType, ReturnTypeKind: v.ReturnType ? "ETYP" : "",
+            ReturnEntityset: set ? set.NodeUuid : "", RefType: "T", DescriptionXu: "X", StgSeq: c.seq()}],
           textRow(c, "FunctionImportTextSet", fi, "FiLabel", v.Name),
         ];
       },
