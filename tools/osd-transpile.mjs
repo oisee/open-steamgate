@@ -16,7 +16,6 @@
 // transpiler and the registry it is handed must come from ONE copy of
 // @abaplint/core, because the transpiler checks its input with instanceof.
 // So core is resolved from where the transpiler package is, not from here.
-import {isWarnedKernelDiagnostic} from "./osd-unit-ci.mjs";
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {createRequire} from "node:module";
@@ -259,10 +258,6 @@ export async function transpile(options = {}) {
   }
   const t = new Transpiler(settings, plugin);
   const reg = new core.Registry();
-  if (process.env.OSD_UNIT_KERNEL_WARNINGS) {
-    const findIssues = reg.findIssues.bind(reg);
-    reg.findIssues = (...args) => findIssues(...args).filter((issue) => !isWarnedKernelDiagnostic(issue));
-  }
   for (const f of files) {
     reg.addFile(new core.MemoryFile(f.filename, f.contents));
   }

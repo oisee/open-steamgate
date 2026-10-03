@@ -6,18 +6,18 @@ import {applyKernelWarnings, kernelWarnings, summarize} from "../tools/osd-unit-
 
 const root = resolve(import.meta.dirname, "..");
 const fixture = join(root, "tools/testdata-kernel-compat");
-// The policy concerns activation compatibility of all input sources. The
-// Unit method stays portable: executing integer bit operands is independently
-// limited by Go lowering and the ordinary JS runtime, before this check.
-// Red proof: removing !byteType(type) warns at fixture lines 30, 31, 32
-// and 37 (valid x operations); the near-miss assertion fails.
-const expected = [17, 18, 19, 20, 22, 23, 24, 26, 28, 29];
+const validFixture = join(root, "tools/testdata-kernel-valid");
+const bitsFixture = join(root, "tools/testdata-kernel-bits");
+// Red proof: removing !byteType(type) must make the near-miss assertion fail.
+const expected = [16, 17, 18, 20, 22, 23];
+const expectedBits = [9, 10, 11, 12];
 describe("folder unit kernel compatibility", function () {
   this.timeout(240000);
   it("finds each rejected form by AST and type, excluding byte operations and reads", () => {
     const warnings = kernelWarnings(fixture);
+    assert.deepEqual(kernelWarnings(validFixture), []);
     assert.deepEqual(warnings.map((w) => w.line), expected);
-    assert.deepEqual(warnings.slice(0, 4).map((w) => w.form),
+    assert.deepEqual(kernelWarnings(bitsFixture).map((w) => w.form),
       ["BIT-AND on i", "BIT-OR on int8", "BIT-XOR on i", "BIT-NOT on int8"]);
     for (const w of warnings) {
       assert.deepEqual(Object.keys(w), ["file", "line", "kind", "form", "message"]);
@@ -45,6 +45,9 @@ x = xs BIT-XOR xs.
 x = BIT-NOT n BIT-AND x.
 DATA ref TYPE REF TO lcl_types.
 ref->attr+0(1) = '01'.
+DATA external TYPE missing_ddic_type.
+x = external BIT-AND external.
+external+0(1) = '01'.
 ENDMETHOD. ENDCLASS.
 `);
       const warnings = kernelWarnings(temp);
@@ -53,6 +56,15 @@ ENDMETHOD. ENDCLASS.
       assert.match(warnings[2].form, /^BIT-XOR on c/);
       assert.equal(warnings[3].form, "BIT-NOT on string");
     } finally { rmSync(temp, {recursive: true, force: true}); }
+  });
+  it("default warnings preserve successful rows and exit codes", () => {
+    const warnings = kernelWarnings(fixture);
+    const result = summarize(applyKernelWarnings({rows: [
+      {class: "ZCL_KERNEL_COMPAT", status: "SUCCESS", method: "CHECK"},
+    ]}, warnings));
+    assert.equal(result.code, 0);
+    assert.equal(result.result.rows[0].status, "SUCCESS");
+    assert.deepEqual(result.result.rows[0].alerts, warnings.map((w) => w.message));
   });
   it("strict mode attributes even a methodless class and preserves unrelated failures", () => {
     const warnings = kernelWarnings(fixture);
@@ -78,21 +90,55 @@ ENDMETHOD. ENDCLASS.
     } finally { rmSync(temp, {recursive: true, force: true}); }
   });
   for (const runner of ["osgo", "osgjs"]) for (const strict of [false, true]) {
-    it(`${runner}: warnings ${strict ? "become ERROR rows with exit 2" : "preserve execution and exit 0"}`, () => {
+    it(`${runner}: integer bits keep syntax diagnostics${strict ? " and become ERROR" : " and NOT_COMPILED"}`, () => {
+      const run = spawnSync(process.execPath, [`tools/${runner}-unit.mjs`, bitsFixture, "--json", ...(strict ? ["--kernel-strict"] : [])],
+        {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6});
+      assert.equal(run.error, undefined);
+      assert.equal(run.status, 2, run.stdout + run.stderr);
+      const result = JSON.parse(run.stdout);
+      assert.deepEqual(result.warnings.map((w) => w.line), expectedBits);
+      assert.ok(result.rows.length > 0);
+      for (const row of result.rows) {
+        assert.equal(row.class, "ZCL_KERNEL_BITS");
+        assert.equal(row.status, strict ? "ERROR" : "NOT_COMPILED");
+        assert.deepEqual(row.alerts, result.warnings.map((w) => w.message));
+        assert.match(row.message, /Operator only valid for XSTRING or HEX/);
+      }
+      assert.equal(result.compiled, 0);
+      for (const w of result.warnings) assert.equal(run.stderr.split("\n").filter((l) => l === w.message).length, 1);
+    });
+  }
+  for (const runner of ["osgo", "osgjs"]) for (const strict of [false, true]) {
+    it(`${runner}: xstring warnings ${strict ? "become ERROR rows" : "preserve NOT_COMPILED diagnostics"}`, () => {
       const run = spawnSync(process.execPath, [`tools/${runner}-unit.mjs`, fixture, "--json", ...(strict ? ["--kernel-strict"] : [])],
         {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6});
       assert.equal(run.error, undefined);
-      assert.equal(run.status, strict ? 2 : 0, run.stdout + run.stderr);
+      assert.equal(run.status, 2, run.stdout + run.stderr);
       const result = JSON.parse(run.stdout);
       assert.deepEqual(result.warnings.map((w) => w.line), expected);
       assert.ok(result.rows.length > 0);
       for (const row of result.rows) {
         assert.equal(row.class, "ZCL_KERNEL_COMPAT");
-        assert.equal(row.status, strict ? "ERROR" : "SUCCESS");
-        assert.deepEqual(row.alerts.filter((a) => a.includes("OSG is more permissive")), result.warnings.map((w) => w.message));
+        assert.equal(row.status, strict ? "ERROR" : "NOT_COMPILED");
+        assert.match(row.message, /xstring\/string offset\/length in writer position not possible/);
+        assert.deepEqual(row.alerts.filter((a) => a.includes("this form is rejected")), result.warnings.map((w) => w.message));
       }
       for (const w of result.warnings) assert.equal(run.stderr.split("\n").filter((l) => l === w.message).length, 1);
-      assert.equal(result.totals.tests, 1);
+      assert.equal(result.compiled, 0);
     });
   }
+  for (const runner of ["osgo", "osgjs"]) {
+    it(`${runner}: executes valid byte forms and xstring reads without warnings`, () => {
+      const run = spawnSync(process.execPath, [`tools/${runner}-unit.mjs`, validFixture, "--json", "--kernel-strict"],
+        {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6});
+      assert.equal(run.error, undefined);
+      assert.equal(run.status, 0, run.stdout + run.stderr);
+      const result = JSON.parse(run.stdout);
+      assert.deepEqual(result.warnings, []);
+      assert.equal(result.compiled, 1);
+      assert.equal(result.totals.tests, 1);
+      assert.deepEqual(result.rows.map((r) => r.status), ["SUCCESS"]);
+    });
+  }
+
 });

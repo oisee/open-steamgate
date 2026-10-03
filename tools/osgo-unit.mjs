@@ -9,11 +9,11 @@ Reads the immediate directory only (no recursion). Default jobs: 4.
 osd unit --go accepts the same arguments in a checkout.
 The compiled binary carries neither Go nor the gogen tree; use the checkout
 command with Node dependencies, synced libraries and Go 1.26 installed.
-Kernel compatibility warnings preserve execution; --kernel-strict reports ERROR (exit 2).
+Kernel compatibility warnings preserve compiler diagnostics and exit codes; --kernel-strict reports ERROR (exit 2).
 Exit codes: 0 all SUCCESS, 1 FAILURE, 2 NOT_COMPILED/ERROR, 3 no tests.`;
 
 export {metadata, summarize} from "./osd-unit-ci.mjs";
-import {stageInput, summarize, printResult, run, kernelWarnings, applyKernelWarnings, kernelWarningEnv} from "./osd-unit-ci.mjs";
+import {stageInput, summarize, printResult, run, kernelWarnings, applyKernelWarnings} from "./osd-unit-ci.mjs";
 
 export async function main(args = process.argv.slice(2)) {
   if (args.includes("--help") || args.includes("-h")) { console.log(help); return 0; }
@@ -48,7 +48,7 @@ export async function main(args = process.argv.slice(2)) {
         ["--input", input, "--jobs", String(jobs), "--out", join(staging, "out"), "--no-cache", ...chosen.flatMap((name) => ["--class", name])]);
       // Hosted dispatch uses a unique name: gogen's unit.mjs and osd-unit.mjs differ.
       if (hosted()) command[JSON.parse(process.env.OSD_SELF).length + 1] = "gogen-unit.mjs";
-      const child = await run(command, root, kernelWarningEnv(warnings));
+      const child = await run(command, root);
       if (child.stderr) process.stderr.write(child.stderr);
       if (child.signal) throw new Error(`unit runner terminated by ${child.signal}`);
       try { result = JSON.parse(child.stdout); }

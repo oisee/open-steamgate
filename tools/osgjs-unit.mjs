@@ -5,7 +5,7 @@ import {runsAs} from "./osd-main.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
 import {inputFoldersOf} from "./osd-packs.mjs";
 import {unitInputs} from "./gogen/unit-inputs.mjs";
-import {stageInput, summarize, printResult, run, kernelWarnings, applyKernelWarnings, kernelWarningEnv} from "./osd-unit-ci.mjs";
+import {stageInput, summarize, printResult, run, kernelWarnings, applyKernelWarnings} from "./osd-unit-ci.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 // Unit CI uses checkout layers only, regardless of installed or external packs.
@@ -13,7 +13,7 @@ const unitEnv = {OSD_PACKS: "", OSD_WEB_PACKS: ""};
 const help = `Usage: npm run osgjs:unit -- <dir> [--json] [--kernel-strict] [--class NAME...]
 Reads the immediate directory only (no recursion). Requires a checkout and synced libraries.
 Builds the whole system in a temporary directory; runs only the selected owners.
-Kernel compatibility warnings preserve execution; --kernel-strict reports ERROR (exit 2).
+Kernel compatibility warnings preserve compiler diagnostics and exit codes; --kernel-strict reports ERROR (exit 2).
 Exit codes: 0 all SUCCESS, 1 FAILURE, 2 NOT_COMPILED/ERROR/SKIPPED, 3 no tests.`;
 
 // Generators write to src/, gen/ and web/generated/: give them copies too.
@@ -78,7 +78,7 @@ export async function main(args = process.argv.slice(2)) {
       for (const o of overrides) console.error(`Override ${o.object}: ${o.hidden} hidden by ${o.input}`);
       const home = isolatedSystem(staging, staged.input);
       const child = await run([process.execPath, join(home, "tools/osgjs-unit-run.mjs"), staged.input, ...staged.chosen], home, {
-        ...unitEnv, ...kernelWarningEnv(warnings), OSD_LAYERS: "", STG_DB: "sqlite", STG_DB_PATH: "",
+        ...unitEnv, OSD_LAYERS: "", STG_DB: "sqlite", STG_DB_PATH: "",
       });
       if (child.stderr) process.stderr.write(child.stderr);
       if (child.signal) throw new Error(`unit runner terminated by ${child.signal}`);

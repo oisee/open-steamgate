@@ -3566,16 +3566,17 @@ names when the transpiler supplies no map. No SAP measurement was made for
 this slice. `test/dsl-l3-remote.mjs` exercises a copied dumping ABAP module,
 SNAPSHOT_MISMATCH and the doctor retry.
 
-### ANOMALY-2026-10-02-kernel-permissive-bit-xstring — OSG accepts integer bit operands and xstring slice writes
+### ANOMALY-2026-10-02-kernel-permissive-bit-xstring — kernel compatibility of bit operands and xstring slice writes
 
-- Status: `intentional` permissiveness; a compatibility warning is available (`--kernel-strict`)
+- Status: `documented`; a compatibility warning supplements existing compiler diagnostics (`--kernel-strict`)
 - Discovery date: `2026-10-02`
 - Affected path: `osgo:unit` and `osgjs:unit`, shared `tools/osd-unit-ci.mjs`
 - Minimal ABAP reproducer: `DATA n TYPE i. n = n BIT-AND n.` and `DATA mem TYPE xstring. mem+0(1) = '01'.`
-- Exact observations: ABAPiti on A4H 758, 2026-10-02: activation rejected BIT-AND with i/int8 operands in the clz32/clz64 helpers; activation rejected xstring offset writes in mem_copy, mem_fill and mem_st_f64. The same generated code runs on OSG and the JS runtime. BIT-OR, BIT-XOR and BIT-NOT follow the same byte-operand rule.
+- Exact observations: ABAPiti on A4H 758, 2026-10-02: activation rejected BIT-AND with i/int8 operands in the clz32/clz64 helpers; activation rejected xstring offset writes in mem_copy, mem_fill and mem_st_f64. BIT-OR, BIT-XOR and BIT-NOT follow the same byte-operand rule.
 - Expected SAP behaviour: bit operands must be x/xstring; offset or length access to an xstring is read-only.
-- Actual open-abap behaviour: OSG is more permissive than the kernel; a warning is available (`--kernel-strict`). This is not a bug to fix: the check never refuses execution by default. Backend execution support is separate: an additional local probe calling the fixture forms found that Go lowering refuses integer bit expressions and the ordinary JS runtime raises `leftHex.padEnd is not a function`; the compatibility warning does not implement those backend semantics.
-- Impact: generated code can pass local Unit runs but fail activation when carried to a real system.
+- Actual open-abap behaviour: for BIT-* on integer operands, OSG refuses compilation as the kernel does (NOT_COMPILED); the warning supplements the existing abaplint syntax diagnostic. Restoring the unmodified compiler diagnostics also makes the pinned abaplint reject typed xstring slice writes in both folder Unit runners (NOT_COMPILED). The underlying OSG slice-write permissiveness is intentional, not a bug to fix, but it does not establish that these sources compile. Default warnings leave compiler diagnostics and exit codes unchanged.
+- Check limitation: the focused input-only type pass cannot resolve operands typed from libraries or DDIC objects outside the input folder. Void/Unknown types are not checked; an absent warning does not establish kernel compatibility.
+- Impact: the warning identifies activation incompatibilities independently of Unit execution. Suppressing the compiler diagnostic would instead move integer BIT-* failures to runtime.
 - Smallest safe workaround: use byte operands and replace whole xstrings before deployment; enable `--kernel-strict` to make compatibility warnings ERROR rows (exit 2).
 - Upstream: none; intentional local policy, no refusal added to either runtime.
-- Regression tests: `test/kernel-compat.mjs`, `tools/testdata-kernel-compat/`; both runners report warnings in JSON, row alerts and stderr.
+- Regression tests: `test/kernel-compat.mjs`, `tools/testdata-kernel-compat/`, `tools/testdata-kernel-bits/`, `tools/testdata-kernel-valid/`; both runners report warnings in JSON, row alerts and stderr.

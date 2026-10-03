@@ -9,15 +9,9 @@ CLASS zcl_kernel_compat IMPLEMENTATION.
     val = '00'.
   ENDMETHOD.
   METHOD forms.
-    DATA a TYPE i.
-    DATA b TYPE int8.
     DATA bytes TYPE x LENGTH 8.
     DATA local TYPE xstring.
     FIELD-SYMBOLS <mem> TYPE xstring.
-    a = a BIT-AND a.
-    b = b BIT-OR b.
-    a = a BIT-XOR a.
-    b = BIT-NOT b.
     local = '0000'.
     local+0(1) = '01'.
     MOVE '02' TO local+0.
