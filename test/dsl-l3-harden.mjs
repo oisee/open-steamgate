@@ -209,14 +209,22 @@ describe("DSL L3 hardening: claims, set-scoped writes and unschedule refusals", 
     });
     const deleted = (r) => ({deleted: r.get().deleted.get(), refused: r.get().refused.get()});
     async function refusalOracle(name = "zcl_l3_fleet2") {
+      // the oracle's own jobs only: the shard's store may hold another suite's L3_FLEET2 instances,
+      // which made unschedule see four and the count flaky; those pass through to the facade untouched
+      const key = (r) => `${r.job_name}/${r.job_count}`;
+      const before = new Set(store.db.prepare("SELECT job_name, job_count FROM batch_runs").all().map(key));
       await dialogStep(() => cls("fleet2").schedule());
       await drainJobOutbox(store);
+      const ours = new Set(store.db.prepare("SELECT job_name, job_count FROM batch_runs WHERE state = 'WAITING'").all().map(key)
+        .filter((k) => !before.has(k)));
+      expect(ours.size, "the schedule made a driver and a doctor").to.equal(2);
       const port = abap.context.RFCDestinations.JOBS, original = port.call;
       let refusals = 0;
       // Race: a selected waiting job starts before DELETE. The facade answers
       // FORBIDDEN for that now-running job, producing NO_DELETE_AUTHORITY.
       port.call = async function (fm, signature) {
-        if (givenText(signature, "IV_COMMAND") === "DELETE") {
+        const job = `${givenText(signature, "IV_JOBNAME").trim()}/${givenText(signature, "IV_JOBCOUNT").trim()}`;
+        if (givenText(signature, "IV_COMMAND") === "DELETE" && ours.has(job)) {
           refusals++;
           // Selection already returned status S; the selected instance now
           // starts, before the facade handles its deletion.
@@ -230,11 +238,15 @@ describe("DSL L3 hardening: claims, set-scoped writes and unschedule refusals", 
       try {
         const result = deleted(await dialogStep(() => abap.Classes[name.toUpperCase()].unschedule()));
         expect(refusals, "driver and doctor both refused").to.equal(2);
-        expect(store.db.prepare("SELECT COUNT(*) AS n FROM batch_runs WHERE state = 'RUNNING'").get().n).to.equal(2);
+        const running = store.db.prepare("SELECT job_name, job_count FROM batch_runs WHERE state = 'RUNNING'").all().map(key);
+        expect(running.filter((k) => ours.has(k))).to.have.length(2);
         return result;
       } finally {
         port.call = original;
-        store.db.prepare("UPDATE batch_runs SET state = 'WAITING' WHERE state = 'RUNNING'").run();
+        for (const k of ours) {
+          const [n, c] = k.split("/");
+          store.db.prepare("UPDATE batch_runs SET state = 'WAITING' WHERE state = 'RUNNING' AND job_name = ? AND job_count = ?").run(n, c);
+        }
         await dialogStep(() => cls("fleet2").unschedule());
       }
     }
