@@ -76,10 +76,10 @@ CLASS zcl_osd_adt_ddic IMPLEMENTATION.
       ls_table = table_fields( iv_xml = lv_source iv_name = lv_name ).
       IF is_request-pattern = `/sap/bc/adt/ddic/tables/:name/source/main`.
         lv_body = table_source( ls_table ).
-        rs_response = zcl_osd_adt_entity=>send( is_request = is_request iv_body = lv_body iv_type = `text/plain` ).
+        rs_response = zcl_osd_adt_entity=>send( is_request = is_request iv_body = lv_body iv_type = `text/plain; charset=utf-8` ).
       ELSE.
         lv_body = table_document( iv_name = lv_name iv_package = lv_package iv_description = ls_table-description ).
-        rs_response = zcl_osd_adt_entity=>send( is_request = is_request iv_body = lv_body iv_type = `application/vnd.sap.adt.tables.v2+xml` ).
+        rs_response = zcl_osd_adt_entity=>send( is_request = is_request iv_body = lv_body iv_type = `application/vnd.sap.adt.tables.v2+xml; charset=utf-8` ).
       ENDIF.
     ENDIF.
   ENDMETHOD.

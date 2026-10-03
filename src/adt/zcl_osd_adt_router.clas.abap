@@ -154,10 +154,17 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
       add( EXPORTING iv_method = `POST` iv_pattern = lv_pattern iv_handler = `ZCL_OSD_ADT_LOCK`
            CHANGING ct_routes = rt_routes ).
     ENDLOOP.
-*   Versions use the same source collections as the Node facade. These
-*   specific GET rows precede the HOST catch-all and cannot shadow POST LOCK.
+*   Source and document rows follow the Node source-collection loop order.
+*   Specific GET rows precede the HOST catch-all and cannot shadow POST LOCK.
     lt_types = zcl_osd_adt_types=>sources( ).
     LOOP AT lt_types INTO ls_type.
+      lv_pattern = c_base && `/` && ls_type-collection && `/:name`.
+      add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern && `/source/main`
+                     iv_handler = `ZCL_OSD_ADT_SOURCE` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern && `/includes/:include`
+                     iv_handler = `ZCL_OSD_ADT_SOURCE` CHANGING ct_routes = rt_routes ).
+      add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern && `/includes/:include/source/main`
+                     iv_handler = `ZCL_OSD_ADT_SOURCE` CHANGING ct_routes = rt_routes ).
       lv_pattern = c_base && `/` && ls_type-collection && `/:name/source/main/versions`.
       add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern iv_handler = `ZCL_OSD_ADT_VERSIONS`
            CHANGING ct_routes = rt_routes ).
@@ -176,6 +183,11 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
              CHANGING ct_routes = rt_routes ).
         add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern && `/:stamp/:version/content`
                        iv_handler = `ZCL_OSD_ADT_VERSIONS` CHANGING ct_routes = rt_routes ).
+      ENDIF.
+      lv_pattern = c_base && `/` && ls_type-collection && `/:name`.
+      IF ls_type-type = `CLAS` OR ls_type-type = `PROG` OR ls_type-type = `INTF` OR ls_type-type = `DDLS`.
+        add( EXPORTING iv_method = `GET` iv_pattern = lv_pattern
+                       iv_handler = `ZCL_OSD_ADT_OBJECT` CHANGING ct_routes = rt_routes ).
       ENDIF.
     ENDLOOP.
 *   B2b: structure rows and its bare aliases, separate from source B2a.

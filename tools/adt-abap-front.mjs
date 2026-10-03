@@ -248,7 +248,13 @@ async function publicationRecord(runtime, context, record, options) {
 function filterMisses(record, req, options) {
   record.headers = record.headers.filter(([name, value]) => {
     if (name.toLowerCase() !== "x-osd-miss") return true;
-    if (value === "object" || value === "resource") options.miss?.(req, value);
+    if (value === "object" || value === "resource") {
+      // Operational miss records keep the same detail as Node's answer().
+      // Resource misses such as parser/info deliberately have no detail.
+      const encoded = value === "object" ? /<message\b[^>]*>([\s\S]*?)<\/message>/.exec(record.body.toString("utf8"))?.[1] : undefined;
+      const detail = encoded?.replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+      options.miss?.(req, value, detail);
+    }
     return false;
   });
 }
@@ -363,7 +369,9 @@ export function replay(res, record, method, {sessionSent = false} = {}) {
   // (`.end()`), unless it is typed and not a HEAD: the Node façade answers
   // that with `.type(t).send("")`, and express gives it an ETag (UNLOCK)
   const typed = record.contentType !== "" || record.headers.some(([name]) => name.toLowerCase() === "content-type");
-  if (record.body.length === 0 && (typed === false || method === "HEAD" || record.status === 304)) res.end();
+  // Empty entities still use send() on HEAD: Node retains length and freshness.
+  const entity = record.headers.some(([name]) => name.toLowerCase() === "etag");
+  if (record.body.length === 0 && (typed === false || (method === "HEAD" && !entity) || record.status === 304)) res.end();
   else res.send(record.body);
 }
 
@@ -389,7 +397,7 @@ function dumped(generation, message) {
  * @param {Function} options.refuse the façade's refusal: (res, status, type, message, options)
  * @param {Function} [options.system] (kind, name, req, json) => value: this façade's SYSTEM answers
  * @param {object} [options.store] this façade's ObjectStore, what OBJECT reads
- * @param {Function} [options.miss] (req, kind) => void, records the stripped X-OSD-Miss marker
+ * @param {Function} [options.miss] (req, kind, detail) => void, records the stripped X-OSD-Miss marker
  * @param {Function} [options.served] (servedBy, req, record) => void, for a test or a log
  * @param {Function} [options.generation] () => the live generation, for the one log line of a dump
  * @param {Function} [options.stale] () => true when the ABAP the front runs is older than the generation

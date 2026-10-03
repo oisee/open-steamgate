@@ -310,6 +310,9 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       await runtime.stop();
       expect((await recycled).message).to.equal("stopped while recycling");
       expect(runtime.child).to.equal(undefined);
+      // Socket closure completes the in-flight call asynchronously after stop.
+      // Its finally removes the callback context before we inspect the map.
+      await pending;
       expect(runtime.adtContexts.size).to.equal(0);
     } finally {
       release(); await pending; runtime.grace = grace;

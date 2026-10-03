@@ -44,6 +44,17 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
              includes TYPE string_table,
            END OF ty_object.
 
+    TYPES: BEGIN OF ty_read,
+             source TYPE string,
+             file TYPE string,
+             package TYPE string,
+             name TYPE string,
+             changed_by TYPE string,
+             empty TYPE abap_bool,
+           END OF ty_read.
+    CLASS-METHODS read IMPORTING iv_type TYPE string iv_name TYPE string iv_include TYPE string DEFAULT `main`
+      RETURNING VALUE(rs_read) TYPE ty_read RAISING zcx_osd_adt.
+
     TYPES: BEGIN OF ty_answer,
              json TYPE string,
              source TYPE string,
@@ -219,6 +230,28 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
     ELSE.
       rv_json = ls_answer-json.
     ENDIF.
+  ENDMETHOD.
+
+  METHOD read.
+    DATA lv_json TYPE string.
+    DATA lv_error TYPE string.
+    DATA lo_json TYPE REF TO zcl_ajson.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+    require( `READ` ).
+    CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
+      EXPORTING iv_command = `READ` iv_type = iv_type iv_name = iv_name iv_include = iv_include
+      IMPORTING ev_source = rs_read-source ev_file = rs_read-file ev_package = rs_read-package
+                ev_json = lv_json ev_error = lv_error
+      EXCEPTIONS OTHERS = 1.
+    IF sy-subrc <> 0.
+      lx_error = zcx_osd_adt=>internal( `no object store here` ).
+      RAISE EXCEPTION lx_error.
+    ENDIF.
+    check_error( iv_json = lv_json iv_error = lv_error ).
+    lo_json = parse( iv_what = `READ` iv_json = lv_json ).
+    rs_read-name = lo_json->get_string( `/name` ).
+    rs_read-changed_by = lo_json->get_string( `/changedBy` ).
+    rs_read-empty = lo_json->get_boolean( `/empty` ).
   ENDMETHOD.
 
   METHOD object.
