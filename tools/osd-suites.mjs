@@ -155,7 +155,7 @@ export function assignShards(files, seconds, count) {
 
 /** Executor returns a process status plus the reporter's completed failure list.
  * Unknown crashes, missing reports and more than three failing files stay red. */
-export function runWithRetries(files, run, {group} = {}) {
+export function runWithRetries(files, run, {group, stopEarly = false} = {}) {
   const first = run(files, "first");
   const complete = (report, selected) => !report.crashed && report.completed === true &&
     report.fileTests && Object.keys(report.fileTests).length === selected.length &&
@@ -179,11 +179,22 @@ export function runWithRetries(files, run, {group} = {}) {
       return counts.failed === 0 && counts.passed + counts.pending === counts.registered;
     });
   const result = {status: passed(first, files) ? 0 : 1, first, retries: [], lines: []};
-  if (first.status === 0 || group === "packaging") return result;
+  if (first.status === 0 || group === "packaging" || stopEarly || first.bail === true) return result;
   const failures = first.failures ?? [];
   const failedFiles = [...new Set(failures.map((failure) => failure.file))];
   if (!complete(first, files) || !failures.length ||
       failedFiles.some((file) => !files.includes(file)) || failedFiles.length > 3) return result;
+  const unaccounted = group ? [] : files.filter((file) => !failedFiles.includes(file) &&
+    first.tests[file].some((test) => test.outcome === null));
+  if (unaccounted.length) {
+    for (const file of unaccounted) {
+      for (const test of first.tests[file].filter((test) => test.outcome === null)) {
+        const clean = (value) => String(value).replace(/[\r\n`|<>]/g, " ");
+        result.lines.push(`- recovery refused: \`${clean(file)}\` — unexecuted test: ${clean(test.titlePath.join(" > "))}`);
+      }
+    }
+    return result;
+  }
   const retrySets = group ? [files] : failedFiles.map((file) => [file]);
   let recovered = 0;
   const clean = (value) => String(value).replace(/[\r\n`|<>]/g, " ");
@@ -206,7 +217,7 @@ export function runWithRetries(files, run, {group} = {}) {
             // original failing instance ambiguous.
             const notPassed = original.outcome === "failed" && retry.tests[file].find((test) =>
               JSON.stringify(test.titlePath) === JSON.stringify(original.titlePath) && test.outcome !== "passed");
-            if (notPassed) refused.push({file, title: original.titlePath.join(" > "),
+            if (notPassed && notPassed.outcome !== "failed") refused.push({file, title: original.titlePath.join(" > "),
               reason: `previously failing test became ${notPassed.outcome ?? "unexecuted"}`});
           }
         }
@@ -310,7 +321,7 @@ try {
         {stdio: "inherit", env: {...process.env, OSD_SUITE_TIMINGS_FILE: path}});
       const metadata = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
       return {...metadata, status: child.status ?? 1, crashed: Boolean(child.error || child.signal)};
-    }, {group: groupName});
+    }, {group: groupName, stopEarly: extra.some((arg) => arg === "-b" || /^--bail(?:=|$)/.test(arg))});
     const save = (path, value) => {
       mkdirSync(dirname(path), {recursive: true});
       writeFileSync(path, value);

@@ -104,7 +104,13 @@ failing files means no retries. A second failure, crash, missing/incomplete
 failure report or unattributed failure stays red. Even a zero process exit
 requires the reporter's completion marker, consistent zero failures, and per-file
 registered/passed/pending counts. Empty files and empty retries stay red; files
-whose registered tests are all explicitly pending remain valid. Isolation recoveries keep the
+whose registered tests are all explicitly pending remain valid. Every attempt records each
+test's full title path and outcome. Recovery requires the retry to retain all
+original identities (including duplicate registrations), and every previously
+failing test must pass; a vanished or newly pending failure stays red and is
+named in the report. Bail options (`--bail`, `-b`, or Mocha configuration) disable
+retries entirely. Unexecuted tests outside the retry set also prevent recovery.
+Isolation recoveries keep the
 shard green and write this line to `$GITHUB_STEP_SUMMARY` and the PR comment:
 
 ```text

@@ -5,11 +5,11 @@
 import {expect} from "chai";
 import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment, runWithRetries, runWithRetries as realRunWithRetries} from "../tools/osd-suites.mjs";
 import {mergeTimings} from "../tools/osd-suites-timings.mjs";
-import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync} from "node:fs";
+import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync, symlinkSync} from "node:fs";
 import {createRequire} from "node:module";
 import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
-import {join, relative} from "node:path";
+import {join, relative, resolve} from "node:path";
 
 describe("tools/osd-suites: a run says what it could not see", () => {
   it("names every absent input and why it mattered", () => {
@@ -232,7 +232,7 @@ function fixtureRun(source, options = {}) {
       const output = join(dir, `report-${reports.length}.json`);
       const child = spawnSync(process.execPath, ["node_modules/mocha/bin/mocha.js", ...files,
         "--reporter", "tools/osd-suite-timing-reporter.cjs", "--retries", "0",
-        ...(options.allowInternalRetries ? [] : ["--require", "tools/osd-suite-no-retries.cjs"])],
+        ...(options.allowInternalRetries ? [] : ["--require", "tools/osd-suite-no-retries.cjs"]), ...(options.extra ?? [])],
         {encoding: "utf8", env: {...process.env, OSD_SUITE_TIMINGS_FILE: output}});
       const metadata = existsSync(output) ? JSON.parse(readFileSync(output, "utf8")) : {};
       reports.push({...metadata, stdout: child.stdout});
@@ -318,6 +318,62 @@ describe("fail closed regressions", () => {
       expect(runWithRetries(["a"], () => metadata).status).to.equal(1);
     }
   });
+});
+
+describe("early-stop CLI regressions", () => {
+  it("disables bail retries even when only the failing file was selected", () => {
+    const {result, reports} = fixtureRun(`import {existsSync, writeFileSync} from "node:fs";
+      const marker = new URL("./marker", import.meta.url);
+      describe("single bail", () => { it("transient", () => {
+        if (!existsSync(marker)) { writeFileSync(marker, "failed"); throw Error("first"); }
+      }); });`, {extra: ["--bail"]});
+    expect(result.status).to.equal(1);
+    expect(reports).to.have.length(1);
+    expect(reports[0].bail).to.equal(true);
+  });
+  it("refuses recovery when another file has unaccounted tests without a bail flag", () => {
+    const result = runWithRetries(["a", "z"], (files, phase) => ({
+      status: phase === "first" ? 1 : 0, completed: true, internalRetries: [],
+      totalFailures: phase === "first" ? 1 : 0,
+      failures: phase === "first" ? [{file: "a", title: "transient"}] : [],
+      fileTests: Object.fromEntries(files.map((file) => [file, {registered: 1,
+        passed: phase === "retry" ? 1 : 0, failed: phase === "first" && file === "a" ? 1 : 0, pending: 0}])),
+      tests: Object.fromEntries(files.map((file) => [file, [{titlePath: [file === "a" ? "transient" : "unexecuted"],
+        outcome: phase === "retry" ? "passed" : file === "a" ? "failed" : null}]])),
+    }));
+    expect(result.status).to.equal(1);
+    expect(result.retries).to.deep.equal([]);
+    expect(result.lines.join("\n")).to.contain("unexecuted").and.contain("z");
+  });
+  for (const option of ["--bail", "-b", "--bail=true", "config"]) {
+    it(`disables recovery for ${option}, retaining an unexecuted later failure`, function () {
+      this.timeout(10000);
+      const dir = mkdtempSync(join(tmpdir(), "osd-bail-cli-"));
+      try {
+        mkdirSync(join(dir, "tools"));
+        mkdirSync(join(dir, "test", "suites.d"), {recursive: true});
+        for (const file of ["osd-suites.mjs", "osd-suite-timing-reporter.cjs", "osd-suite-no-retries.cjs"])
+          copyFileSync(join("tools", file), join(dir, "tools", file));
+        symlinkSync(resolve("node_modules"), join(dir, "node_modules"), "dir");
+        writeFileSync(join(dir, "test", "suites.d", "fixtures.json"), JSON.stringify({files: ["test/a.mjs", "test/z.mjs"]}));
+        writeFileSync(join(dir, "test", "suites.timings.json"), "{}");
+        writeFileSync(join(dir, "test", "a.mjs"), `import {existsSync, writeFileSync} from "node:fs";
+          const marker = new URL("./marker", import.meta.url);
+          describe("early", () => { it("transient", () => {
+            if (!existsSync(marker)) { writeFileSync(marker, "failed"); throw Error("first"); }
+          }); });`);
+        writeFileSync(join(dir, "test", "z.mjs"), 'describe("later", () => { it("persistent failure", () => { throw Error("persistent"); }); });');
+        if (option === "config") writeFileSync(join(dir, ".mocharc.json"), JSON.stringify({bail: true}));
+        const child = spawnSync(process.execPath, ["tools/osd-suites.mjs", ...(option === "config" ? [] : [option]), "--timings", "first.json"],
+          {cwd: dir, encoding: "utf8", env: {...process.env, GITHUB_STEP_SUMMARY: ""}});
+        const first = JSON.parse(readFileSync(join(dir, "first.json"), "utf8"));
+        expect(first.fileTests["test/z.mjs"]).to.deep.equal({registered: 1, passed: 0, pending: 0, failed: 0});
+        expect(child.status, child.stdout + child.stderr).to.equal(1);
+        expect(child.stdout).not.to.contain("osd-suites: retry");
+        expect(child.stdout).not.to.contain("passed once");
+      } finally { rmSync(dir, {recursive: true, force: true}); }
+    });
+  }
 });
 
 describe("Mocha file reports", () => {

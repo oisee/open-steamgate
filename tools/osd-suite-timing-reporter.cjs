@@ -61,6 +61,7 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
         measuredAt: new Date().toISOString(),
         note: "Wall time including hooks and inter-file work; excludes module loading before the first suite.",
         completed: true,
+        bail: Boolean(runner.suite._bail),
         fileTests,
         tests,
         failures,
