@@ -105,6 +105,69 @@ describe("tools/osd-runtime: the process that can be replaced", function () {
       });
     });
   };
+  // Round 3's recovery/reopen probes, with readiness released by IPC
+  // rather than a boot delay: every follow-up lands after spawn captured env.
+  for (const change of ["reopen", "close", "move", "stop"]) {
+    it(`reconciles an inspector ${change} requested during replacement boot`, async () => {
+      const command = [process.execPath, "--input-type=module", "-e", [
+        "import inspector from 'node:inspector';",
+        "process.on('message', m => {",
+        "  if (m.type === 'release') process.send({type: 'ready', port: 1, pid: process.pid, ms: 0});",
+        "  if (m.type === 'quiesce') process.exit(0);",
+        "  if (m.type === 'inspector') { inspector.open(m.port, '127.0.0.1'); process.send({type: 'inspector-done', id: m.id, ok: true, open: true, port: m.port}); }",
+        "});",
+        "process.send({type: 'booting', phase: 'gated'});",
+      ].join("\n")];
+      const runtime = new ServingRuntime({command});
+      const gated = async () => {
+        const deadline = Date.now() + 5000;
+        while (runtime.booting?.phase !== "gated") {
+          if (Date.now() >= deadline) throw new Error("child never reached boot gate");
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      };
+      let release;
+      try {
+        const starting = runtime.start();
+        await gated();
+        runtime.bootingChild.send({type: "release"});
+        await starting;
+        const one = await freePort();
+        const two = await freePort();
+        const three = await freePort();
+        await runtime.inspector({open: true, port: one});
+        await runtime.inspector(change === "reopen" ? {open: false} : {open: true, port: two});
+        await gated();
+        const desired = change === "close" ? {open: false} : {open: true, port: three};
+        expect(await runtime.inspector(desired)).to.include({pending: true});
+        if (change === "stop") {
+          const recovering = runtime.start().catch((error) => error);
+          await runtime.stop();
+          expect(await recovering).to.be.an("error");
+          expect(runtime.running).to.equal(false);
+          expect(runtime.bootingChild).to.equal(undefined);
+          return;
+        }
+        // Release this child and any further replacement needed for a close/move.
+        release = setInterval(() => {
+          if (runtime.booting?.phase === "gated" && runtime.bootingChild?.connected) {
+            runtime.bootingChild.send({type: "release"});
+          }
+        }, 5);
+        await runtime.start();
+        expect(runtime.child.osdInspectPort).to.equal(desired.open ? three : undefined);
+        if (desired.open) {
+          expect((await fetch(`http://127.0.0.1:${three}/json/list`)).status).to.equal(200);
+        } else {
+          expect(await fetch(`http://127.0.0.1:${two}/json/list`).then(() => true, () => false)).to.equal(false);
+        }
+      } finally {
+        clearInterval(release);
+        await runtime.stop();
+      }
+    });
+  }
+
   // a WebSocket upgrade on the inspector, and then silence: the close frame
   // the inspector sends when it closes is never answered
   const silentDebugger = async (port) => {

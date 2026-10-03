@@ -297,9 +297,10 @@ export class ServingRuntime {
       throw new Error(`invalid inspector port: ${port}`);
     }
     const before = this.inspecting;
-    this.inspecting = open === true ? {port} : null;
+    const requested = open === true ? {port} : null;
+    this.inspecting = requested;
     const child = this.child;
-    if (this.running !== true || child === undefined) {
+    if (this.running !== true || child === undefined || this.starting !== undefined || this.stopping !== undefined) {
       return {open: open === true, port: open === true ? port : undefined, pending: true};
     }
     // what the serving child has open: the port it was started with, or the
@@ -316,12 +317,21 @@ export class ServingRuntime {
       await gone;
       return {open: open === true, port: open === true ? port : undefined, url: undefined, recycled: true, recovering: true};
     }
+    return this.#openInspector(child, port).catch((error) => {
+      // A failed older request must not undo a newer desired state.
+      if (this.inspecting === requested) this.inspecting = before;
+      throw error;
+    });
+  }
+
+  #openInspector(child, port) {
+    const current = child.osdInspectPort;
     const id = (this.inspectSeq = (this.inspectSeq ?? 0) + 1);
     // counted as open from the moment it is asked: a request a busy child
     // answers after the timeout below still opens it, and a close must then
     // still recycle rather than believe there is nothing to close
     child.osdInspectPort = port;
-    const done = await new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         child.off("message", onMessage);
         reject(new Error("the serving process did not answer the inspector request within 10 s"));
@@ -341,13 +351,10 @@ export class ServingRuntime {
       };
       child.on("message", onMessage);
       child.send({type: "inspector", id, open: true, port});
-    }).catch((error) => {
-      // not changed: the next child does what it would have done before
-      this.inspecting = before;
-      throw error;
+    }).then((done) => {
+      child.osdInspectPort = done.port;
+      return {open: done.open, port: done.port, url: done.url};
     });
-    child.osdInspectPort = done.port;
-    return {open: done.open, port: done.port, url: done.url};
   }
 
   // a cold transpile of the same inputs gave the same bytes (osd-warm verify)
@@ -465,7 +472,30 @@ export class ServingRuntime {
       }
       return this.starting;
     }
-    const starting = this.#spawnOne(options);
+    const stops = this.stops;
+    const starting = (async () => {
+      let answer = await this.#spawnOne();
+      // Spawn captures the inspector env, but requests can change it while
+      // that child boots. Read the desired state again before announcing
+      // readiness, and repeat if another request arrives during reconciliation.
+      for (;;) {
+        if (this.stops !== stops) throw new NotServing("stopped while starting");
+        const desired = this.inspecting === null ? undefined
+          : this.inspecting?.port ?? inspectPortOf(process.env.OSD_INSPECT);
+        const current = this.child?.osdInspectPort;
+        if (current === desired) break;
+        if (current === undefined) {
+          await this.#openInspector(this.child, desired);
+        } else {
+          await this.#stopChild();
+          if (this.stops !== stops) throw new NotServing("stopped while starting");
+          answer = await this.#spawnOne();
+        }
+      }
+      this.ready = Promise.resolve(answer);
+      options.announce?.resolve(answer);
+      return answer;
+    })();
     this.starting = starting;
     const clear = () => {
       if (this.starting === starting) this.starting = undefined;
@@ -474,7 +504,7 @@ export class ServingRuntime {
     return starting;
   }
 
-  #spawnOne(options = {}) {
+  #spawnOne() {
     // Capture at spawn, before child IPC. The temporary parent provider
     // reads both SQLite tables in one statement without queuing behind a
     // publication step that can itself be waiting for this boot.
@@ -672,8 +702,6 @@ export class ServingRuntime {
           pid: message.pid, port: this.port, generation, root: this.root, database: this.database ?? "memory", since: new Date().toISOString(),
         }]);
         const answer = {url: this.url, port: this.port, generation, epoch, pid: message.pid, ms: message.ms, started: true};
-        this.ready = Promise.resolve(answer);
-        options.announce?.resolve(answer);
         resolve(answer);
       };
       child.on("message", onMessage);

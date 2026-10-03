@@ -504,14 +504,14 @@ function runToCompletion(cwd, script, args, env, onLine, onChild) {
   });
 }
 
-/** POST {open, port} to the system's /osd/inspector door (test/start.mjs,
+/** POST {open, port}, or GET its state without a body, to /osd/inspector (test/start.mjs,
  *  tools/osd-inspector.mjs): the debugger on demand. Resolves the answer,
  *  rejects with the system's own reason. */
 function inspectorOnce(port, body, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
-    const payload = JSON.stringify(body);
-    const req = request({hostname: "127.0.0.1", port, path: "/osd/inspector", method: "POST", timeout: timeoutMs,
-      headers: {"content-type": "application/json", "content-length": Buffer.byteLength(payload)}}, (res) => {
+    const payload = body === undefined ? undefined : JSON.stringify(body);
+    const req = request({hostname: "127.0.0.1", port, path: "/osd/inspector", method: payload === undefined ? "GET" : "POST", timeout: timeoutMs,
+      headers: payload === undefined ? {} : {"content-type": "application/json", "content-length": Buffer.byteLength(payload)}}, (res) => {
       let text = "";
       res.on("data", (d) => (text += d));
       res.on("end", () => {
@@ -525,6 +525,9 @@ function inspectorOnce(port, body, timeoutMs = 15000) {
         else reject(new Error(answer?.error ?? `the inspector door answered ${res.statusCode}`));
       });
     });
+    // A socket timeout alone can be prolonged by a trickling response.
+    const timer = setTimeout(() => req.destroy(new Error(`the inspector door did not answer within ${timeoutMs} ms`)), timeoutMs);
+    req.once("close", () => clearTimeout(timer));
     req.on("error", reject);
     req.on("timeout", () => req.destroy(new Error(`the inspector door did not answer within ${timeoutMs} ms`)));
     req.end(payload);
@@ -535,9 +538,9 @@ function inspectorOnce(port, body, timeoutMs = 15000) {
  *  the way every other `/osd/*` door is), or `undefined` when nothing
  *  answers yet -- refused, reset, or the connection simply is not there.
  *  Never throws: "not up yet" is the expected answer for most of a build. */
-function servingOnce(port) {
+function servingOnce(port, timeoutMs = 2000) {
   return new Promise((resolve) => {
-    const req = request({hostname: "127.0.0.1", port, path: "/osd/serving", method: "GET", timeout: 2000}, (res) => {
+    const req = request({hostname: "127.0.0.1", port, path: "/osd/serving", method: "GET", timeout: timeoutMs}, (res) => {
       let body = "";
       res.on("data", (d) => (body += d));
       res.on("end", () => {
@@ -552,7 +555,10 @@ function servingOnce(port) {
         }
       });
     });
+    const timer = setTimeout(() => req.destroy(), timeoutMs);
+    req.once("close", () => clearTimeout(timer));
     req.on("error", () => resolve(undefined));
+    req.on("close", () => resolve(undefined));
     req.on("timeout", () => {
       req.destroy();
       resolve(undefined);
@@ -1458,7 +1464,24 @@ class Launcher extends EventEmitter {
       this.inspectPort = await pickInspectorPort();
     }
     const answer = await inspectorOnce(this.port, {open: true, port: this.inspectPort});
-    this.inspectorOpen = answer.open === true;
+    if (answer.pending === true || answer.recovering === true) {
+      const deadline = Date.now() + 15000;
+      for (;;) {
+        if (this.state !== "running") throw new Error("osd stopped while opening the inspector");
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error("the requested inspector was not ready within 15000 ms");
+        const serving = await servingOnce(this.port, Math.min(2000, remaining));
+        if (serving?.ready === true && Date.now() < deadline) {
+          const state = await inspectorOnce(this.port, undefined, Math.max(1, deadline - Date.now()));
+          if (state.open === true && state.port === this.inspectPort && state.pending !== true && state.recovering !== true) break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, Math.min(100, Math.max(0, deadline - Date.now()))));
+      }
+    } else if (answer.open !== true || answer.port !== this.inspectPort) {
+      throw new Error("the inspector door did not confirm the requested endpoint");
+    }
+    if (this.state !== "running") throw new Error("osd stopped while opening the inspector");
+    this.inspectorOpen = true;
     return this.inspectPort;
   }
 
