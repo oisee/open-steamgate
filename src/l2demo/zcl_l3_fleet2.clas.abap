@@ -1519,6 +1519,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     DATA ls_row TYPE zosd_l3_alert.
     DATA lt_rows TYPE zif_l3_fleet2_alerts=>tt_rows.
     DATA ls_group TYPE zif_l3_fleet2_alerts=>ty_group.
+    DATA lt_remote_report TYPE tt_doctor.
     DATA li_sink TYPE REF TO zif_l3_fleet2_alerts.
     DATA lv_alert TYPE string.
     DATA lv_count TYPE i.
@@ -1587,6 +1588,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       cs_rule-open_alerts = zcl_l3_fleet2_alerts_remote=>answer-open_alerts.
       cs_rule-budget_alerts = zcl_l3_fleet2_alerts_remote=>answer-budget_alerts.
       cs_rule-failed = lines( lt_rows ) - lv_count.
+      IF zcl_l3_fleet2_alerts_remote=>failure_text IS NOT INITIAL.
+        act( EXPORTING iv_run = iv_run iv_date = iv_date iv_stage = cs_rule-stage_no
+                       iv_rule = cs_rule-rule iv_pile = iv_pile iv_action = cs_rule-status
+                       iv_reason = zcl_l3_fleet2_alerts_remote=>failure_text
+             CHANGING ct_report = lt_remote_report ).
+      ENDIF.
       RETURN.
     ENDIF.
     " the fuse: the alerts the rule's DONE piles of this run wrote, and this
@@ -3930,7 +3937,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF sy-subrc <> 0.
       SELECT SINGLE * FROM zl3_fleet2_rcpt INTO rs_result
         WHERE set_name = c_set AND run_id = is_header-run_id AND rule_name = is_header-rule_name
-          AND pile_no = is_header-pile_no AND attempt = is_header-attempt.
+          AND pile_no = is_header-pile_no.
       RETURN.
     ENDIF.
     SELECT SINGLE * FROM zl3_fleet2_rlink INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id.
@@ -4016,7 +4023,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       MODIFY zl3_fleet2_rcpt FROM rs_result.
     ELSE.
       DELETE FROM zl3_fleet2_rcpt WHERE set_name = c_set AND run_id = is_header-run_id
-        AND rule_name = is_header-rule_name AND pile_no = is_header-pile_no AND attempt = is_header-attempt.
+        AND rule_name = is_header-rule_name AND pile_no = is_header-pile_no.
     ENDIF.
   ENDMETHOD.
 ENDCLASS.

@@ -4,6 +4,7 @@ CLASS {{class}} DEFINITION PUBLIC FINAL CREATE PUBLIC.
     INTERFACES {{iface}}.
     CLASS-DATA header TYPE {{header}}.
     CLASS-DATA answer TYPE {{receipt}}.
+    CLASS-DATA failure_text TYPE string.
 ENDCLASS.
 CLASS {{class}} IMPLEMENTATION.
   METHOD {{iface}}~put.
@@ -15,8 +16,9 @@ CLASS {{class}} IMPLEMENTATION.
     DATA ls_stage TYPE zosd_l3_stage.
     DATA ls_link TYPE {{link}}.
     DATA lv_dest TYPE string.
+    DATA lv_msg TYPE string.
     DATA ls_settings TYPE {{conf}}=>ty_state.
-    CLEAR answer.
+    CLEAR: answer, failure_text.
     SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
       WHERE run_id = header-run_id AND rule_name = header-rule_name AND pile_no = header-pile_no.
     header-attempt = ls_pile-attempt.
@@ -52,12 +54,16 @@ CLASS {{class}} IMPLEMENTATION.
     CALL FUNCTION '{{function}}' DESTINATION lv_dest
       EXPORTING is_header = header it_rows = lt_wire
       IMPORTING es_result = answer
-      EXCEPTIONS system_failure = 1 communication_failure = 2 snapshot_mismatch = 3 OTHERS = 4.
+      EXCEPTIONS system_failure = 1 MESSAGE lv_msg
+                 communication_failure = 2 MESSAGE lv_msg
+                 snapshot_mismatch = 3 OTHERS = 4.
     CASE sy-subrc.
       WHEN 1.
         answer-status = 'RFC-SYSFAIL'.
+        failure_text = lv_msg.
       WHEN 2.
         answer-status = 'RFC-COMM'.
+        failure_text = lv_msg.
       WHEN 3.
         answer-status = 'SNAP-MISMATCH'.
       WHEN 4.

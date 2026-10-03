@@ -29,6 +29,38 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-03-none-dump-luw -- Local NONE leaves receiver partial writes pending
+
+- Status: `open`
+- Discovery date: `2026-10-03`
+- Affected versions: `@abaplint/runtime 2.13.93`, local `tools/rfc-replay.mjs`.
+- Affected runtime API: `localClient`, synchronous `CALL FUNCTION ... DESTINATION 'NONE'`.
+- Minimal ABAP reproducer: copied receiver in `test/dsl-l3-remote.mjs`, "NONE dump isolation anomaly" (INSERT then ASSERT).
+- Exact command used to run it: `OSD_HEAVY_RANGE=40-49 tools/osd-heavy.sh npx mocha test/dsl-l3-remote.mjs --grep 'NONE dump isolation anomaly'`.
+- Expected SAP behaviour: a separate RFC session rolls back a dumping module's uncommitted writes; the caller's pending writes survive.
+- Actual open-abap behaviour: the module shares the caller's connection; caught SYSTEM_FAILURE leaves its partial writes pending, and the caller's next commit persists them.
+- Impact on open-steamgate: NONE is an emulation without session isolation, including on failure. It cannot prove receiver dump atomicity.
+- Smallest safe workaround: none across the supported DatabaseClient adapters. Whole-connection rollback also erases caller writes (the copied rollback mutant demonstrates this); portable nested transactions/savepoints across module COMMIT are unavailable. Use independent RFC sessions for isolation; SL.0 remains planned.
+- Upstream issue: not reported; local work only authorized.
+- Regression-test location: `test/dsl-l3-remote.mjs`, "NONE dump isolation anomaly".
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-03-rfc-message -- Transpiler drops RFC exception MESSAGE targets
+
+- Status: `workaround`
+- Discovery date: `2026-10-03`
+- Affected versions: `@abaplint/transpiler 2.13.93`, `@abaplint/runtime 2.13.93`.
+- Affected ABAP statement: `CALL FUNCTION ... DESTINATION ... EXCEPTIONS system_failure = 1 MESSAGE lv_msg communication_failure = 2 MESSAGE lv_msg`.
+- Minimal ABAP reproducer: `recipes/l3-remote/client.tpl`, exercised by `test/dsl-l3-remote.mjs`.
+- Exact command used to run it: `OSD_HEAVY_RANGE=40-49 tools/osd-heavy.sh npx mocha test/dsl-l3-remote.mjs --grep 'far-side text'`.
+- Expected SAP behaviour: MESSAGE receives the remote failure text.
+- Actual open-abap behaviour: exception lowering sets only sy-subrc, silently ignoring MESSAGE; local dump conversion also discards the original text.
+- Impact on open-steamgate: the doctor sees a failure code without the far-side explanation.
+- Smallest safe workaround: local CallFunction transpiler adapter assigns the caught error's message to the parsed MESSAGE target for the two RFC failures; localClient preserves dump text on the classic error. Both normal transpile and generated-copy loader use modulesOf and the adapter.
+- Upstream issue: not reported; local work only authorized.
+- Regression-test location: `test/dsl-l3-remote.mjs`, "far-side text", including MESSAGE-removal copies.
+- Upstream version containing a fix: unknown.
+
 ### ANOMALY-2026-10-02-repl009-subrc-text -- Oracle return-code text carries an extra sign blank
 
 - Status: `workaround`

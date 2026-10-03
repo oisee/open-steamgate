@@ -227,6 +227,10 @@ CLASS zcl_l3_fleet2_ports IMPLEMENTATION.
         EXPORTING iv_port = lv_replay_port
                   iv_reason = 'the variant replaces the table content, a run in jobs cannot'.
     ENDIF.
+    IF lv_replay_port IS NOT INITIAL AND variant( iv_port = 'alerts' iv_bind = iv_bind ) = 'remote'.
+      RAISE EXCEPTION TYPE zcx_l3_fleet2_port
+        EXPORTING iv_port = lv_replay_port iv_reason = 'a replay cannot bind remote alerts: every synchronous RFC commits the caller DB LUW'.
+    ENDIF.
     IF lv_replay_port IS NOT INITIAL AND lv_hand_port IS NOT INITIAL.
       RAISE EXCEPTION TYPE zcx_l3_fleet2_port
         EXPORTING iv_port = lv_hand_port

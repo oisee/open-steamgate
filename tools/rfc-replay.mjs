@@ -355,7 +355,9 @@ function localFailure(error, signature) {
     return;
   }
   if (classic) throw error;
-  throw new globalThis.abap.ClassicError({classic: 'system_failure'});
+  const failure = new globalThis.abap.ClassicError({classic: 'system_failure'});
+  failure.message = error?.message ?? String(error);
+  throw failure;
 }
 
 /** the function modules of this process, what DESTINATION 'NONE' means */

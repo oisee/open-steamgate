@@ -41,6 +41,7 @@ export function remoteOverlay(model, text) {
   text = text.replace('  METHOD release.\n', '  METHOD release.\n' + readFileSync('recipes/l3-remote/release.tpl','utf8'));
   const heal = '    heal( EXPORTING iv_run = ls_lock-run_id';
   text = text.replace(heal, readFileSync('recipes/l3-remote/resume.tpl','utf8') + heal);
+  text = text.replace('    DATA ls_group TYPE {{iface}}=>ty_group.', '    DATA ls_group TYPE {{iface}}=>ty_group.\n    DATA lt_remote_report TYPE tt_doctor.');
   const anchor = '    ls_group-pile_no = iv_pile.\n';
   if (!text.includes(anchor)) throw new Error('remote overlay needs piled write group');
   text = text.replace(anchor, anchor + readFileSync('recipes/l3-remote/send.tpl','utf8'));
@@ -64,7 +65,7 @@ export async function renderRemote(model, {classXml}) {
     field('check_date','DATS',8),field('pile_no','INT4',10),field('attempt','INT4',10),field('stage_no','INT4',10),field('rule_no','INT4',10),
     field('snap_id','CHAR',32),field('content_hash','CHAR',64),field('row_count','INT4',10),field('key_offset','INT4',10),field('key_length','INT4',10),
     field('rule_class','CHAR',30),field('rule_file','CHAR',128),field('rule_line','INT4',10)];
-  const receipt = [field('set_name','CHAR',16,true),field('run_id','CHAR',32,true),field('rule_name','CHAR',60,true),field('pile_no','INT4',10,true),field('attempt','INT4',10,true),
+  const receipt = [field('set_name','CHAR',16,true),field('run_id','CHAR',32,true),field('rule_name','CHAR',60,true),field('pile_no','INT4',10,true),field('attempt','INT4',10),
     field('remote_run','CHAR',32),field('status','CHAR',16),field('alerts','INT4',10),field('closed','INT4',10),field('open_alerts','INT4',10),field('budget_alerts','INT4',10)];
   files[`${r.header}.tabl.xml`] = ddic(r.header,heads);
   files[`${r.row}.tabl.xml`] = ddic(r.row,r.fields);

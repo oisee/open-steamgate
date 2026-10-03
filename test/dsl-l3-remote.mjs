@@ -4,10 +4,12 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
 import yaml from 'js-yaml';
-import {compileSet, renderSet, checkSet, explainAlert, SetError} from '../tools/dsl-l3.mjs';
+import {compileSet, renderSet, checkSet, explainAlert, SetError, scanGeneratedUnits} from '../tools/dsl-l3.mjs';
 import {loadGenerated} from '../tools/dsl-l3-load.mjs';
 import {functionModules} from '../tools/osd-fm-registry.mjs';
 import {localClient, toJson, fromJson} from '../tools/rfc-replay.mjs';
+import {runConvertedBatch} from '../tools/osd-batch-runs.mjs';
+import {jobInputJson} from '../tools/osd-job-input.mjs';
 import {cockpitService} from '../tools/dsl-l3-cockpit-service.mjs';
 const SET = 'src/l2demo/fleet2.l3.yaml';
 const source = readFileSync(SET,'utf8');
@@ -154,20 +156,114 @@ describe('DSL L3 remote alert seam', function () {
     expect(read(`SELECT * FROM ${model.remote.receipt}`)).to.have.length(1);
     expect(read('SELECT consumed FROM zosd_l3_budget')[0].consumed).to.equal(1);
   });
-  it('a lost reply after commit is safe to retry',async()=>{
-    const prior=abap.context.RFCDestinations.NONE;let lost=false;
+  async function doctorLostReply() {
+    const prior=abap.context.RFCDestinations.NONE;let lost=false, first, retried;
     abap.context.RFCDestinations.NONE={call:async(name,sig)=>{
       await localClient().call(name,sig);
-      if(!lost) {lost=true;(()=>{throw new abap.ClassicError({classic:'communication_failure'});})();}
+      const h=plain(sig.exporting.is_header);
+      if(!lost) {
+        lost=true;first={header:h,answer:plain(sig.importing.es_result)};
+        const error=new abap.ClassicError({classic:'communication_failure'});error.message='reply lost after commit';throw error;
+      }
+      if(first && h.rule_name===first.header.rule_name && h.pile_no===first.header.pile_no) retried={header:h,answer:plain(sig.importing.es_result)};
     }};
-    try {await run();}finally{abap.context.RFCDestinations.NONE=prior;}
-    const receipt=read(`SELECT * FROM ${model.remote.receipt}`)[0];expect(receipt).to.exist;
-    const before=read('SELECT * FROM zosd_l3_alert');
-    const header=abap.Classes[model.remote.class.toUpperCase()].header.clone();
-    // Retry that exact recorded request (the final pile's payload also has a receipt).
-    const rows=typ(model.remote.rows);fromJson(rows,before.filter((r)=>r.rule_name===plain(header).rule_name).map((r)=>Object.fromEntries(Object.entries(r).map(([k,v])=>[k.toUpperCase(),v]))));
-    const retry=await call(header,rows);expect(retry.answer.status).to.equal('DONE');
-    expect(read('SELECT * FROM zosd_l3_alert')).to.deep.equal(before);
+    let writes=0;const update=client.update;
+    try {
+      const result=plain(await run());
+      const before=read('SELECT * FROM zosd_l3_alert');
+      await dialogStep(()=>abap.Classes.ZCL_L3_FLEET2.doctor({}));
+      const pile=read('SELECT * FROM zosd_l3_pile WHERE run_id=? AND rule_name=? AND pile_no=?',result.run_id,first.header.rule_name,first.header.pile_no)[0];
+      expect(pile.status).to.equal('PLANNED');expect(pile.attempt).to.be.greaterThan(first.header.attempt);
+      expect(read("SELECT * FROM zosd_l3_doctor WHERE run_id=? AND doc_action='RESUBMIT' AND reason='RETRY'",result.run_id)).not.to.have.length(0);
+      client.update=async function(options){if(/zosd_l3_alert/i.test(JSON.stringify(options))) writes++;return update.call(this,options);};
+      // Execute the actual report with the selection values the doctor persisted in SUBMIT.
+      const step=read(`SELECT s.program,s.input_json FROM zosd_job_step s JOIN zosd_job_outbox o ON s.intent_id=o.intent_id
+        WHERE o.jobname=? AND o.jobcount=?`,pile.job_name,pile.job_count)[0];
+      expect(step).to.exist;
+      const outcome=await runConvertedBatch(process.cwd(),step.program,jobInputJson(step.input_json));
+      expect(outcome.status,outcome.detail).to.equal('COMPLETED');
+      return {first,retried,before,after:read('SELECT * FROM zosd_l3_alert'),writes};
+    } finally {client.update=update;abap.context.RFCDestinations.NONE=prior;}
+  }
+  it('real doctor retry after a lost reply returns the first receipt without writing again',async()=>{
+    const proof=await doctorLostReply();
+    expect(proof.retried.header.attempt).to.be.greaterThan(proof.first.header.attempt);
+    expect(proof.retried.answer).to.deep.equal(proof.first.answer);
+    expect(proof.after).to.deep.equal(proof.before);expect(proof.writes).to.equal(0);
+    expect(read(`SELECT * FROM ${model.remote.receipt} WHERE run_id=? AND rule_name=? AND pile_no=?`,
+      proof.first.header.run_id,proof.first.header.rule_name,proof.first.header.pile_no)).to.have.length(1);
+  });
+  it('mutant: attempt-dependent receipt identity fails the real doctor retry contract',async()=>{
+    const name=`${model.class}.clas.abap`;
+    const text=files[name].replace('    ls_claim-pile_no = is_header-pile_no.', '    ls_claim-pile_no = is_header-pile_no + is_header-attempt * 1000000.');
+    expect(text).not.to.equal(files[name]);await copy({...files,[name]:text},[model.class]);
+    const proof=await doctorLostReply();expect(proof.writes).to.be.greaterThan(0);
+    expect(proof.retried.answer).not.to.deep.equal(proof.first.answer);
+  });
+  it('replay sources refuse remote alerts for every destination, even with opt-in; a guard copy fails',async()=>{
+    const name=`${model.ports_class}.clas.abap`;
+    const refusal=async()=>{
+      try {await abap.Classes[model.ports_class.toUpperCase()].check({iv_bind:str('ships=capture,alerts=remote'),iv_allow_replay:str('X')});return '';}
+      catch(error){return error.reason?.get()??String(error);}
+    };
+    for(const destination of ['NONE','FAR_SIDE']) {
+      await dialogStep(()=>abap.Classes.ZCL_L3_FLEET2_CONF.set_setting({iv_param:str('remote.destination'),iv_value:str(destination),iv_note:str('guard test')}));
+      expect(await refusal()).to.match(/every synchronous RFC commits/);
+    }
+    const text=files[name].replace("IF lv_replay_port IS NOT INITIAL AND variant( iv_port = 'alerts' iv_bind = iv_bind ) = 'remote'.",'IF abap_false = abap_true.');
+    expect(text).not.to.equal(files[name]);await copy({...files,[name]:text},[model.ports_class]);
+    expect(await refusal()).to.equal('');
+  });
+  it('the remote client participates in the LUW scan with only its named RFC exempted',()=>{
+    const name=`${model.remote.class}.clas.abap`;
+    const scan=(text)=>scanGeneratedUnits(model,files[`${model.class}.clas.abap`],[],{[name]:text});
+    expect(()=>scan(files[name])).not.to.throw();
+    for(const statement of ['COMMIT WORK.',"CALL FUNCTION 'Z_OTHER' DESTINATION lv_dest.","CALL FUNCTION '"+model.remote.function+"' IN BACKGROUND TASK DESTINATION lv_dest."]) {
+      const copied=files[name].replace('    CLEAR: answer, failure_text.',`    ${statement}\n    CLEAR: answer, failure_text.`);
+      expect(()=>scan(copied)).to.throw(/nothing generated may end/);
+      // The old omitted-client scan is killed by these same copies.
+      expect(()=>scanGeneratedUnits(model,files[`${model.class}.clas.abap`],[],{})).not.to.throw();
+    }
+  });
+  it('far-side text reaches doctor audit for both RFC failures; MESSAGE-removal copies fail',async()=>{
+    const name=`${model.remote.class}.clas.abap`, prior=abap.context.RFCDestinations.NONE;
+    try {
+      for(const classic of ['system_failure','communication_failure']) {
+        const text=classic==='system_failure'?'receiver dump detail':'receiver connection detail';
+        abap.context.RFCDestinations.NONE={call:async()=>{const e=new abap.ClassicError({classic});e.message=text;throw e;}};
+        await run();
+        expect(read('SELECT * FROM zosd_l3_doctor WHERE reason=?',text)).not.to.have.length(0);
+        await sql('DELETE FROM zosd_l3_doctor','DELETE FROM zosd_l3_run');
+        const copied=files[name].replace(/ MESSAGE lv_msg/g,'');
+        await copy({...files,[name]:copied},[model.remote.class]);
+        await run();expect(read('SELECT * FROM zosd_l3_doctor WHERE reason=?',text)).to.have.length(0);
+        restore();await sql('DELETE FROM zosd_l3_doctor','DELETE FROM zosd_l3_run');
+      }
+    } finally {abap.context.RFCDestinations.NONE=prior;}
+  });
+  it('NONE dump isolation anomaly: partial writes persist; rollback copy also destroys caller writes',async()=>{
+    const name=`${model.remote.group}.fugr.${model.remote.function.toLowerCase()}.abap`;
+    const text=files[name].replace(`FUNCTION ${model.remote.function.toLowerCase()}.`, `FUNCTION ${model.remote.function.toLowerCase()}.\n  DATA ls_partial TYPE zosd_l2_ship.\n  ls_partial-ship_id = 'RCVR'.\n  INSERT zosd_l2_ship FROM ls_partial.\n  ASSERT 1 = 0.`);
+    await copy({...files,[name]:text},[model.remote.group]);
+    const {header,rows}=await payload();
+    const invoke=async(rfc)=>dialogStep(async()=>{
+      await client.beginTransaction();
+      await client.execute("INSERT INTO zosd_l2_ship (ship_id) VALUES ('CLLR')");
+      await rfc.call(model.remote.function,{exporting:{is_header:header,it_rows:rows},importing:{es_result:typ(model.remote.receipt)},exceptions:{system_failure:1}});
+      expect(abap.builtin.sy.get().subrc.get()).to.equal(1);
+    });
+    await invoke(localClient());
+    expect(read("SELECT ship_id FROM zosd_l2_ship WHERE ship_id IN ('CLLR','RCVR') ORDER BY ship_id")).to.deep.equal([{ship_id:'CLLR'},{ship_id:'RCVR'}]);
+    await sql("DELETE FROM zosd_l2_ship WHERE ship_id IN ('CLLR','RCVR')");
+    // Copy the local client's code; adding an unconditional dump rollback loses the caller too.
+    const path=join(dir,'rollback-local.mjs');
+    const localSource=readFileSync('tools/rfc-replay.mjs','utf8');
+    const rollbackSource=localSource.replace('        localFailure(error, signature);','        await globalThis.abap.context.databaseConnections.DEFAULT.rollback();\n        localFailure(error, signature);');
+    expect(rollbackSource).not.to.equal(localSource);
+    // Preserve imports relative to tools for the copy.
+    writeFileSync(path,rollbackSource.replace(/from "(\.\/[^"]+)"/g,(_,p)=>`from "${join(process.cwd(),'tools',p)}"`));
+    const rollback=await import(path);await invoke(rollback.localClient());
+    expect(read("SELECT ship_id FROM zosd_l2_ship WHERE ship_id IN ('CLLR','RCVR')")).to.have.length(0);
   });
   it('POST /call/<NAME> marshals the flat payload through the existing RFC channel',async()=>{
     const {header,rows}=await payload();

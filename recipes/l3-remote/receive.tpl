@@ -25,7 +25,7 @@
     IF sy-subrc <> 0.
       SELECT SINGLE * FROM {{receipt}} INTO rs_result
         WHERE set_name = c_set AND run_id = is_header-run_id AND rule_name = is_header-rule_name
-          AND pile_no = is_header-pile_no AND attempt = is_header-attempt.
+          AND pile_no = is_header-pile_no.
       RETURN.
     ENDIF.
     SELECT SINGLE * FROM {{link}} INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id.
@@ -111,7 +111,7 @@
       MODIFY {{receipt}} FROM rs_result.
     ELSE.
       DELETE FROM {{receipt}} WHERE set_name = c_set AND run_id = is_header-run_id
-        AND rule_name = is_header-rule_name AND pile_no = is_header-pile_no AND attempt = is_header-attempt.
+        AND rule_name = is_header-rule_name AND pile_no = is_header-pile_no.
     ENDIF.
   ENDMETHOD.
 {{/remote}}

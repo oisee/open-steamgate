@@ -21,6 +21,12 @@
       cs_rule-open_alerts = {{class}}=>answer-open_alerts.
       cs_rule-budget_alerts = {{class}}=>answer-budget_alerts.
       cs_rule-failed = lines( lt_rows ) - lv_count.
+      IF {{class}}=>failure_text IS NOT INITIAL.
+        act( EXPORTING iv_run = iv_run iv_date = iv_date iv_stage = cs_rule-stage_no
+                       iv_rule = cs_rule-rule iv_pile = iv_pile iv_action = cs_rule-status
+                       iv_reason = {{class}}=>failure_text
+             CHANGING ct_report = lt_remote_report ).
+      ENDIF.
       RETURN.
     ENDIF.
 {{/remote}}

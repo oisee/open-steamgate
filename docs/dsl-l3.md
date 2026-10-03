@@ -2828,8 +2828,30 @@ to `NONE` and reads the detecting system's setting at each send, so an operator
 can repair a destination before retrying. OSG's `NONE` uses the same session,
 connection and LUW as the detector: the receiving module's COMMIT also commits
 pending local work. It supplies no real isolation. SL.0's loopback transport
-will provide independent sessions; this slice does not implement it. Avoid
-remote/NONE while a source adapter has temporarily replaced persistent input.
+will provide independent sessions; this slice does not implement it. On a
+real system every synchronous RFC commits the caller's database LUW, for any
+destination, including NONE. The ports check therefore refuses any replay or
+capture source together with remote alerts, even with iv_allow_replay. The
+remote client participates in the generated LUW scan: only its explicitly
+named synchronous RFC is exempt, because the call is the seam and the replay
+refusal is its guard.
+
+The call sits in write( ) after the alert rows are assembled in memory and
+before the pile's local alert writes, budget reservations, object ledger and
+closing. Earlier detector writes are orchestration state (run/snapshot/plan,
+RUNNING and simulated-work audit), which may safely commit: the doctor can
+recover a RUNNING pile after a lost reply or dump, and the durable receiver
+receipt prevents another write on retry. No detector business writes precede
+the call. This binding does not promise atomicity with other business writes
+in an enclosing caller's LUW; use it from its own orchestration step.
+
+NONE also lacks dump isolation: a dumping module's partial writes remain on
+the shared connection, and the caller's subsequent commit persists them.
+Rolling back that connection would erase the caller's own pending writes too.
+The supported adapters expose no portable nested transaction that survives a
+module COMMIT. This remains ANOMALY-2026-10-03-none-dump-luw in ANORMALIES.md;
+the reproducer and rollback-copy counterexample are in test/dsl-l3-remote.mjs.
+Independent RFC sessions are required for receiver dump atomicity.
 
 The generated `RHEAD` structure carries set, detecting run, model hash, S/P
 mode, rule, pile and attempt, snapshot ID, full hash and count, and the rule's
@@ -2849,7 +2871,11 @@ snapshot mismatch and other classic exceptions to `RFC-SYSFAIL`, `RFC-COMM`,
 `SNAP-MISMATCH` and `RFC-OTHER`; its pile becomes FAILED with that reason,
 visible to the existing doctor retry policy. The local RFC client preserves
 classic exception names for the pinned transpiler's call-site catch and
-converts an unhandled module dump to SYSTEM_FAILURE.
+converts an unhandled module dump to SYSTEM_FAILURE, preserving its text.
+Both RFC failure handlers use MESSAGE lv_msg and persist that text in a doctor
+audit row with the failure code as DOC_ACTION (REASON is bounded to 40 chars).
+The local transpiler adapter supplies the MESSAGE assignment the pinned
+transpiler omits; see ANOMALY-2026-10-03-rfc-message.
 
 The receiver reuses the generated runner's write path, explicitly bound to its
 own log and its own default closing adapter. It loads its own settings and
@@ -2864,13 +2890,14 @@ continues to enforce its own policy. Receiving stage rows describe
 the work that has arrived, rather than a second detection plan. They make the
 receiving run visible to its cockpit without copying the orchestrator.
 
-`RCPT` atomically claims `(set, detecting run, rule, pile, attempt)` before
+`RCPT` atomically claims `(set, detecting run, rule, pile)` before
 writing. Rule is included because pile numbers repeat across rules. Its DONE
 receipt, alert writes and budget changes commit together. A duplicate returns
 the receipt without rewriting log rows or reserving again, including a retry
 after a lost reply. Refusals do not retain a DONE receipt. The existing
-synchronous first attempt is numbered zero; that exact identity crosses the
-seam. `RLINK` retains the receiving run reference on both sides. Explain
+synchronous first attempt is numbered zero; attempt remains a receipt column
+for audit, recording the first successful delivery, and is never a key. The
+real doctor's retry increments attempt and still returns that first receipt. `RLINK` retains the receiving run reference on both sides. Explain
 prints the link and the cockpit service exposes read-only `RunSet.RemoteRun`.
 No application UI changes are required. Receipts and links are durable;
 retention of this additional ledger is not implemented in this slice.

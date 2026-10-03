@@ -723,7 +723,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
   it('manifest validation names the line; job-only retains legacy runner and job bytes', async () => {
     const file=`src/l2demo/zz_autodoctor_${process.pid}.l3.yaml`;
     // the doctor without a daemon cannot release by event (refused below): those variants pin release: submit
-    const text=readFileSync(SET,'utf8'), submit=text.replace('piles: {release: event}','piles: {release: submit}').replace(', piles.lanes]',']');
+    const text=readFileSync(SET,'utf8'), submit=text.replace('piles: {release: event}','piles: {release: submit}').replace(/, piles\.lanes(?=[,\]])/, '');
     expect(submit).not.to.equal(text);
     try {
       for(const [from,to] of [['tick: 10','tick: 0'],['[daemon]','[daemon, daemon]'],['[daemon]','[unknown]']]) {

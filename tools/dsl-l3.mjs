@@ -80,10 +80,19 @@ const WRITES = new Map([[abaplint.Statements.ModifyDatabase, "MODIFY"], [abaplin
   [abaplint.Statements.UpdateDatabase, "UPDATE"], [abaplint.Statements.DeleteDatabase, "DELETE"], [abaplint.Statements.MergeDatabase, "MERGE"]]);
 const COMMITTING_FM = /^'(DB_COMMIT|DB_ROLLBACK|BAPI_TRANSACTION_COMMIT|BAPI_TRANSACTION_ROLLBACK)'$/i;
 
+export function scanGeneratedUnits(model, runnerText, extraResults, remoteFiles = {}) {
+  // nothing the runner or a generated variant holds may end the unit of work while a table is swapped
+  for (const [name, text] of [[`${model.class}.clas.abap`, runnerText], ...extraResults.map(([n, r]) => [n, r.text]),
+    ...Object.entries(remoteFiles).filter(([n]) => n === `${model.remote?.class}.clas.abap`)]) {
+    const [first] = unitFindings(text, name, {writes: true, remoteSeam: name === `${model.remote?.class}.clas.abap` ? model.remote.function : undefined, jobs: name === `${model.class}.clas.abap`, waits: [model.simulate?.work_class, model.replay?.work_class].some((c) => name === `${c}.clas.abap`)});
+    if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
+  }
+}
+
 // [{line, what}] for each statement of the source that ends the unit of work, writes (when
 // writes is false), registers an update task or runs native SQL
 // waits: the simulated work, whose WAIT is its job (a replay never binds it: the factory refuses)
-export function unitFindings(text, name, {writes = false, jobs = false, waits = false} = {}) {
+export function unitFindings(text, name, {writes = false, jobs = false, waits = false, remoteSeam = undefined} = {}) {
   const registry = new abaplint.Registry();
   registry.addFile(new abaplint.MemoryFile(name, text));
   registry.parse();
@@ -96,6 +105,10 @@ export function unitFindings(text, name, {writes = false, jobs = false, waits = 
         const source = statement.concatTokens().replace(/\s+/g, " ");
         if (ENDS_UNIT.has(type) && !(jobs && type === S0.Submit) && !(waits && type === S0.Wait)) found.push({line, what: `${ENDS_UNIT.get(type)} statement`});
         else if (!writes && WRITES.has(type)) found.push({line, what: `${WRITES.get(type)} database statement`});
+        // The named synchronous RFC is the seam; the factory's replay refusal is its guard.
+        // No helper, update/background/task call or other RFC receives this exemption.
+        else if (type === S0.CallFunction && remoteSeam && source.toUpperCase().startsWith(`CALL FUNCTION '${remoteSeam}' DESTINATION `)
+          && !/\bIN UPDATE TASK\b|\bIN BACKGROUND\b|\bSTARTING NEW TASK\b/i.test(source)) continue;
         else if (type === abaplint.Statements.CallFunction && (/\bIN UPDATE TASK\b|\bIN BACKGROUND\b|\bDESTINATION\b|\bSTARTING NEW TASK\b/i.test(source) || COMMITTING_FM.test((source.split(" ")[2] ?? "").replace(/\.$/, "")))) found.push({line, what: "CALL FUNCTION that registers an update or ends the unit"});
         else if (type === abaplint.Statements.SetUpdateTask) found.push({line, what: "SET UPDATE TASK statement"});
         else if (type === abaplint.Statements.CallDatabase) found.push({line, what: "native SQL"});
@@ -613,11 +626,8 @@ export async function renderSet(model) {
   const known = linesById(model);
   const nodeLine = (nodeId) => known.get(nodeId) ?? model.set_line;
   const extra = await renderPorts(model);
-  // nothing the runner or a generated variant holds may end the unit of work while a table is swapped
-  for (const [name, text] of [[`${model.class}.clas.abap`, runner.text], ...extra.results.map(([n, r]) => [n, r.text])]) {
-    const [first] = unitFindings(text, name, {writes: true, jobs: name === `${model.class}.clas.abap`, waits: [model.simulate?.work_class, model.replay?.work_class].some((c) => name === `${c}.clas.abap`)});
-    if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
-  }
+  const remoteFiles = model.remote ? await renderRemote(model, {classXml}) : {};
+  scanGeneratedUnits(model, runner.text, extra.results, remoteFiles);
   const results = [[`${model.class}.clas.abap`, runner], [`${model.report}.prog.abap`, job], ...extra.results];
   const doctor = await renderDoctor(model, {renderRecipe, sidecar, progXml, classXml});
   results.push(...doctor.results);
@@ -644,7 +654,7 @@ export async function renderSet(model) {
   return {
     files: {
       ...extra.files,
-      ...(model.remote ? await renderRemote(model, {classXml}) : {}),
+      ...remoteFiles,
       ...(model.cockpit ? await renderCockpit(model) : {}),
       ...(model.settings ? Object.fromEntries(results.slice(-2).flatMap(([name, result]) => [
         [name, result.text], [name.replace(/\.(clas|prog)\.abap$/, ".$1.xml"), name.endsWith(".clas.abap")

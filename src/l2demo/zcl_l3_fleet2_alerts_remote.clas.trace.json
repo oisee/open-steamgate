@@ -40,27 +40,27 @@
     {
       "line": 8,
       "template_line": 8,
-      "path": "/class"
+      "path": "/"
     },
     {
       "line": 9,
       "template_line": 9,
-      "path": "/iface"
+      "path": "/class"
     },
     {
       "line": 10,
       "template_line": 10,
-      "path": "/rows"
+      "path": "/iface"
     },
     {
       "line": 11,
       "template_line": 11,
-      "path": "/row"
+      "path": "/rows"
     },
     {
       "line": 12,
       "template_line": 12,
-      "path": "/"
+      "path": "/row"
     },
     {
       "line": 13,
@@ -80,17 +80,17 @@
     {
       "line": 16,
       "template_line": 16,
-      "path": "/link"
+      "path": "/"
     },
     {
       "line": 17,
       "template_line": 17,
-      "path": "/"
+      "path": "/link"
     },
     {
       "line": 18,
       "template_line": 18,
-      "path": "/conf"
+      "path": "/"
     },
     {
       "line": 19,
@@ -100,7 +100,7 @@
     {
       "line": 20,
       "template_line": 20,
-      "path": "/"
+      "path": "/conf"
     },
     {
       "line": 21,
@@ -224,28 +224,28 @@
     },
     {
       "line": 45,
-      "template_line": 46,
-      "path": "/conf"
+      "template_line": 45,
+      "path": "/"
     },
     {
       "line": 46,
-      "template_line": 47,
-      "path": "/setting"
+      "template_line": 46,
+      "path": "/"
     },
     {
       "line": 47,
-      "template_line": 52,
-      "path": "/function"
+      "template_line": 48,
+      "path": "/conf"
     },
     {
       "line": 48,
-      "template_line": 53,
-      "path": "/"
+      "template_line": 49,
+      "path": "/setting"
     },
     {
       "line": 49,
       "template_line": 54,
-      "path": "/"
+      "path": "/function"
     },
     {
       "line": 50,
@@ -335,7 +335,7 @@
     {
       "line": 67,
       "template_line": 72,
-      "path": "/link"
+      "path": "/"
     },
     {
       "line": 68,
@@ -350,6 +350,36 @@
     {
       "line": 70,
       "template_line": 75,
+      "path": "/"
+    },
+    {
+      "line": 71,
+      "template_line": 76,
+      "path": "/"
+    },
+    {
+      "line": 72,
+      "template_line": 77,
+      "path": "/"
+    },
+    {
+      "line": 73,
+      "template_line": 78,
+      "path": "/link"
+    },
+    {
+      "line": 74,
+      "template_line": 79,
+      "path": "/"
+    },
+    {
+      "line": 75,
+      "template_line": 80,
+      "path": "/"
+    },
+    {
+      "line": 76,
+      "template_line": 81,
       "path": "/"
     }
   ]

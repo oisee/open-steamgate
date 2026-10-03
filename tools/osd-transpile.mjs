@@ -24,6 +24,7 @@ import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {hostModules} from "./osd-host.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
+import {installRfcMessage} from "./osd-rfc-message.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
 
 // the transpiler package in use by this tree, and the core it was built
@@ -43,6 +44,7 @@ export function modulesOf(root) {
   const fromTranspiler = createRequire(join(where, "package.json"));
   const {Transpiler, Chunk} = fromTranspiler(where);
   const core = fromTranspiler("@abaplint/core");
+  installRfcMessage(fromTranspiler(join(where, 'build/src/statements/call_function.js')).CallFunctionTranspiler, Chunk, core);
   let plugin;
   try {
     // the CLI's optional plugin, resolved from the project as it does it

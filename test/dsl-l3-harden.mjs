@@ -14,8 +14,9 @@ import {givenText, fill} from "../tools/osd-destination.mjs";
 
 const OUT = "src/l2demo", DATE = "20261001";
 const sets = ["fleet", "fleet2"];
-const tables = l3TableDependencies().map((file) => basename(file));
-const scoped = new Set(tables.filter((f) => /<FIELDNAME>SET_NAME<\/FIELDNAME>/.test(readFileSync(join("src/dsl", f), "utf8"))).map((f) => f.split(".")[0]));
+const tablePaths = l3TableDependencies().filter((file) => file.endsWith('.tabl.xml') && /<TABCLASS>TRANSP<\/TABCLASS>/.test(readFileSync(file,'utf8')));
+const tables = tablePaths.map((file) => basename(file));
+const scoped = new Set(tablePaths.filter((file) => /<FIELDNAME>SET_NAME<\/FIELDNAME>/.test(readFileSync(file, "utf8"))).map((file) => basename(file).split(".")[0]));
 // Parse statements so comments, multiline SQL and strings cannot hide a write.
 function writeFindings(text, name) {
   const reg = new core.Registry().addFile(new core.MemoryFile(`${name}.clas.abap`, text)).parse();
@@ -57,8 +58,8 @@ describe("DSL L3 hardening: claims, set-scoped writes and unschedule refusals", 
   it("a staged set without resilience also claims only PLANNED piles of the latest held run", async () => {
     const file = `${OUT}/zz_harden_plain_${process.pid}.l3.yaml`;
     // without resilience there is no daemon, so no event release either
-    const text = readFileSync(`${OUT}/fleet2.l3.yaml`, "utf8").replace("piles: {release: event}\n", "").replace(", piles.lanes]", "]")
-      .replace(/^governor:\n(  .*\n)+/m, "").replace(/^resilience:\n(  .*\n)+/m, "")
+    const text = readFileSync(`${OUT}/fleet2.l3.yaml`, "utf8").replace("piles: {release: event}\n", "").replace(/, piles\.lanes(?=[,\]])/, '')
+      .replace(/^      remote:.*\n/gm, '').replace(/^governor:\n(  .*\n)+/m, "").replace(/^resilience:\n(  .*\n)+/m, "")
       .replace(/^settings:\n(  .*\n)+/m, "").replace(/^simulate:\n(  .*\n)+/m, "")
       .replace(/^  work:\n(    .*\n)+/m, "").replace("      sim: generated\n", "").replace("  work: real\n", "");
     writeFileSync(file, text);

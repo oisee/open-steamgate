@@ -4,6 +4,7 @@ CLASS zcl_l3_fleet2_alerts_remote DEFINITION PUBLIC FINAL CREATE PUBLIC.
     INTERFACES zif_l3_fleet2_alerts.
     CLASS-DATA header TYPE zl3_fleet2_rhead.
     CLASS-DATA answer TYPE zl3_fleet2_rcpt.
+    CLASS-DATA failure_text TYPE string.
 ENDCLASS.
 CLASS zcl_l3_fleet2_alerts_remote IMPLEMENTATION.
   METHOD zif_l3_fleet2_alerts~put.
@@ -15,8 +16,9 @@ CLASS zcl_l3_fleet2_alerts_remote IMPLEMENTATION.
     DATA ls_stage TYPE zosd_l3_stage.
     DATA ls_link TYPE zl3_fleet2_rlink.
     DATA lv_dest TYPE string.
+    DATA lv_msg TYPE string.
     DATA ls_settings TYPE zcl_l3_fleet2_conf=>ty_state.
-    CLEAR answer.
+    CLEAR: answer, failure_text.
     SELECT SINGLE * FROM zosd_l3_pile INTO ls_pile
       WHERE run_id = header-run_id AND rule_name = header-rule_name AND pile_no = header-pile_no.
     header-attempt = ls_pile-attempt.
@@ -47,12 +49,16 @@ CLASS zcl_l3_fleet2_alerts_remote IMPLEMENTATION.
     CALL FUNCTION 'Z_L3_FLEET2_ALERTS' DESTINATION lv_dest
       EXPORTING is_header = header it_rows = lt_wire
       IMPORTING es_result = answer
-      EXCEPTIONS system_failure = 1 communication_failure = 2 snapshot_mismatch = 3 OTHERS = 4.
+      EXCEPTIONS system_failure = 1 MESSAGE lv_msg
+                 communication_failure = 2 MESSAGE lv_msg
+                 snapshot_mismatch = 3 OTHERS = 4.
     CASE sy-subrc.
       WHEN 1.
         answer-status = 'RFC-SYSFAIL'.
+        failure_text = lv_msg.
       WHEN 2.
         answer-status = 'RFC-COMM'.
+        failure_text = lv_msg.
       WHEN 3.
         answer-status = 'SNAP-MISMATCH'.
       WHEN 4.
