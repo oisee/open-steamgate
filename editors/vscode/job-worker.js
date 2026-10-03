@@ -141,7 +141,7 @@ function jobsStatus(running, counts = {}) {
 function jobsStatusBar(vscode, context, controller) {
   const output = vscode.window.createOutputChannel('OSD jobs');
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 9);
-  item.command = 'osd.showJobs'; item.show();
+  item.command = 'osd.showRunning';
   context.subscriptions.push(output, item, vscode.commands.registerCommand('osd.showJobs', () => output.show(true)));
   const sessions = new Set(controller.debugSessions ?? []);
   const isSystemSession = (session) => {
@@ -164,7 +164,10 @@ function jobsStatusBar(vscode, context, controller) {
       observedLauncher = launcher; lastKnown = undefined; resetMisses();
     }
     try {
-      if (launcher?.jobWorker?.otherWindow) { resetMisses(); lastKnown = undefined; item.text = 'OSD jobs: jobs handled by another window'; item.backgroundColor = undefined; return; }
+      if (!workerEnabled(launcher?.jobsWorkerMode, launcher?.env)) { item.hide(); return; }
+      item.show();
+      item.tooltip = 'Job worker — click for system and worker actions';
+      if (launcher?.jobWorker?.otherWindow) { resetMisses(); lastKnown = undefined; item.text = 'OSD jobs: other window'; item.backgroundColor = undefined; return; }
       if (!launcher?.jobWorker?.running) { resetMisses(); lastKnown = undefined; item.text = jobsStatus(false); item.backgroundColor = undefined; return; }
       const answer = await fetch(`http://127.0.0.1:${launcher.port}/osd/job-counts`,
         {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}, signal:AbortSignal.timeout(3000)});
@@ -191,8 +194,10 @@ function jobsStatusBar(vscode, context, controller) {
   if (vscode.debug?.onDidTerminateDebugSession) context.subscriptions.push(
     vscode.debug.onDidTerminateDebugSession(session => { sessions.delete(session); tick(); }));
   controller.jobsOutput = output;
+  const off = controller.onDidChange(tick);
   const timer = setInterval(tick, 2000); tick();
-  context.subscriptions.push({dispose:() => clearInterval(timer)});
+  context.subscriptions.push({dispose:() => { clearInterval(timer); off.dispose(); }});
+  return tick;
 }
 module.exports = {JobWorker, workerEnabled, jobsStatus, jobsStatusBar};
 if (require.main === module && process.argv[2] === '--guard') {

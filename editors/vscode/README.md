@@ -18,6 +18,8 @@ Start a bundled ABAP runtime, explore its OData services, run ABAP Unit, and ope
 2. Open the **OSD** Activity Bar view and select **Start**. The first start builds the bundled system; later starts reuse its cache.
 3. Try the services in the tree, or open an ABAP project such as [osg-demo](https://github.com/oisee/osg-demo) as a workspace layer.
 
+The status bar shows **OSD running/stopped**, the serving **OSD generation**, and **OSD jobs** (when enabled for a file SQLite database). Click the system or jobs item for start actions, job output, or **System overview**.
+
 VS Code 1.101 or newer is required. The system runs locally on desktop or in a Remote-WSL or Remote-SSH workspace. It does not need a SAP or ADT connection.
 
 ## What works

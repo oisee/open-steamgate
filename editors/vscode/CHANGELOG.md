@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Activation now sends `method=activate`; a server from this release answers activation without it with 400 "Parameter method could not be found.", as an SAP system does. The extension and its bundled server update together.
+- Label system state, serving generation, and job worker status separately. System and jobs status clicks offer state-specific start actions and the overview; hide jobs when disabled or unsupported.
 
 - Start and supervise background job workers with the local system (`osd.jobs.worker`), with an OSD jobs status bar and output channel. The default SQLite file database runs jobs without a terminal.
 - SAP kernel rejections now appear as red squiggles while typing, with a Problems link to the support section. `osg.kernelStrict` defaults to `error` and allows runs; choose `warning`, `off`, or `refuse` (also stops object runs and tests). Desktop VSIX installs include the scanner and its dependencies.

@@ -3968,3 +3968,150 @@ describe("editors/vscode: T7 warm status and build text", function () {
     expect(closureTestsText(undefined)).to.equal(undefined);
   });
 });
+
+// Exercise the real status item and command callbacks with a small VS Code API.
+function runningStatusApi() {
+  const commands = new Map(), items = [], executed = [];
+  let pick;
+  const api = {
+    StatusBarAlignment: {Left: 1},
+    TreeItem: class {},
+    commands: {
+      registerCommand(id, fn) { commands.set(id, fn); return {dispose() {}}; },
+      async executeCommand(id) { executed.push(id); return commands.get(id)?.(); },
+    },
+    window: {
+      createStatusBarItem() {
+        const item = {show() { this.visible = true; }, hide() { this.visible = false; }, dispose() {}};
+        items.push(item); return item;
+      },
+      createOutputChannel() { return {show() {}, appendLine() {}, dispose() {}}; },
+      async showQuickPick(entries) { api.entries = entries; return pick?.(entries); },
+    },
+  };
+  return {api, items, commands, executed, choose(fn) { pick = fn; }};
+}
+
+describe("editors/vscode: running parts status and actions", () => {
+  it("shows each system state without a click and keeps one action menu", () => {
+    const h = runningStatusApi();
+    const {startStopStatusBar} = loadExtension(h.api);
+    let refresh;
+    const controller = {onDidChange(fn) { refresh = fn; return {dispose() {}}; }};
+    const context = {subscriptions: []};
+    const item = startStopStatusBar(context, controller);
+    expect(item.text).to.equal("$(play) OSD stopped");
+    expect(item.command).to.equal("osd.showRunning");
+    for (const state of ["running", "building", "starting", "stopping", "stopped"]) {
+      controller.launcher = {state, port: 8060, databaseLabel: "SQLite"};
+      refresh();
+      expect(item.text).to.include(`OSD ${state}`);
+      expect(item.tooltip).to.include(`OSD system: ${state}`);
+      expect(item.command).to.equal("osd.showRunning");
+    }
+    context.subscriptions.forEach(s => s.dispose());
+  });
+
+  it("maps system/worker state combinations to the right click actions", async () => {
+    const h = runningStatusApi();
+    const {startStopStatusBar, runningParts} = loadExtension(h.api);
+    const controller = {onDidChange() { return {dispose() {}}; }};
+    const context = {subscriptions: []};
+    startStopStatusBar(context, controller);
+    let starts = 0;
+    for (const state of ["stopped", "starting", "running", "stopping"]) {
+      for (const running of [false, true]) {
+        controller.launcher = {state, jobsWorkerMode: "auto", env: {STG_DB: "file", STG_DB_PATH: "jobs.sqlite"},
+          jobWorker: {running, start() { starts++; }}};
+        const parts = runningParts(controller);
+        expect(parts[0].command).to.equal(state === "stopped" ? "osd.start" : "osd.openSystemOverview");
+        expect(parts[1].description).to.equal(running ? "running" : "stopped");
+        expect(parts[1].command).to.equal(running ? "osd.showJobs" : state === "running" ? "osd.startJobWorker" : state === "stopped" ? "osd.start" : "osd.openSystemOverview");
+        for (const label of ["OSD system", "Job worker", "System overview"]) {
+          h.choose(entries => entries.find(e => e.label === label));
+          await h.commands.get("osd.showRunning")();
+          expect(h.executed.at(-1)).to.equal(parts.find(e => e.label === label).command);
+        }
+      }
+    }
+    expect(starts).to.equal(1);
+    controller.launcher.jobWorker.otherWindow = true;
+    expect(runningParts(controller)[1]).to.include({description: "running in another window", command: "osd.showJobs"});
+    controller.launcher.jobsWorkerMode = "off";
+    expect(runningParts(controller).map(e => e.label)).not.to.include("Job worker");
+    controller.launcher.jobsWorkerMode = "auto";
+    controller.launcher.env.STG_DB = "duckdb";
+    expect(runningParts(controller).map(e => e.label)).not.to.include("Job worker");
+    const before = h.executed.length;
+    h.choose(() => undefined);
+    await h.commands.get("osd.showRunning")();
+    expect(h.executed).to.have.length(before);
+    context.subscriptions.forEach(s => s.dispose());
+  });
+
+  it("hides unused jobs and keeps idle, stopped, active and other-window states visible", async () => {
+    const h = runningStatusApi();
+    const {jobsStatusBar} = require("../editors/vscode/job-worker.js");
+    const controller = {onDidChange() { return {dispose() {}}; }};
+    const context = {subscriptions: []};
+    const tick = jobsStatusBar(h.api, context, controller);
+    const item = h.items[0];
+    const originalFetch = globalThis.fetch;
+    try {
+      expect(item.visible).to.equal(false);
+      controller.launcher = {port: 8060, jobsWorkerMode: "auto", env: {STG_DB: "file", STG_DB_PATH: "jobs.sqlite"}, jobWorker: {running: false}};
+      await tick();
+      expect(item.visible).to.equal(true);
+      expect(item.text).to.equal("OSD jobs: worker stopped");
+      expect(item.command).to.equal("osd.showRunning");
+      controller.launcher.jobWorker.running = true;
+      for (const counts of [{running: 0, queued: 0}, {running: 2, queued: 1}]) {
+        globalThis.fetch = async () => ({ok: true, json: async () => ({counts})});
+        await tick();
+        expect(item.text).to.equal(counts.running ? "OSD jobs: running 2, queued 1" : "OSD jobs: idle");
+      }
+      globalThis.fetch = async () => { throw Error("offline"); };
+      await tick();
+      expect(item.text).to.equal("OSD jobs: status unavailable");
+      controller.launcher.jobWorker.otherWindow = true;
+      await tick();
+      expect(item.text).to.equal("OSD jobs: other window");
+      for (const [mode, db] of [["off", "file"], ["auto", "sqlite"], ["auto", "duckdb"]]) {
+        controller.launcher.jobsWorkerMode = mode;
+        controller.launcher.env.STG_DB = db;
+        await tick();
+        expect(item.visible).to.equal(false);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      context.subscriptions.forEach(s => s.dispose());
+    }
+  });
+});
+
+describe("editors/vscode: serving generation status", () => {
+  it("preserves generation, database, dump action and kernel findings tooltip", async () => {
+    const h = runningStatusApi();
+    h.api.workspace = {getConfiguration() { return {get: (_, fallback) => fallback}; }};
+    const {statusBar} = loadExtension(h.api);
+    const originalFetch = globalThis.fetch;
+    const context = {subscriptions: []};
+    try {
+      globalThis.fetch = async url => ({ok: true, json: async () => url.endsWith("/osd/dumps") ? [{id: 1}]
+        : {generation: "abcdefgh123", databaseIdentity: {engine: "sqlite"}, pid: 123}});
+      const item = statusBar(context);
+      // statusBar starts its first asynchronous poll immediately.
+      for (let i = 0; i < 20 && !item.tooltip?.includes("OSD kernel:"); i++) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+      expect(item.text).to.include("OSD generation abcdefgh · SQLite");
+      expect(item.text).to.include("$(bug) 1");
+      expect(item.tooltip).to.include("OSD kernel: 0 finding(s)");
+      expect(item.command).to.equal("osd.showDumps");
+      item.dispose();
+    } finally {
+      context.subscriptions.forEach(s => s.dispose());
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

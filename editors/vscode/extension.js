@@ -6,7 +6,7 @@
 // the language server; this adds only what needs a running system.
 "use strict";
 
-const {jobsStatusBar} = require("./job-worker");
+const {jobsStatusBar, workerEnabled} = require("./job-worker");
 const vscode = require("vscode");
 const {registerKernelDiagnostics, resolveKernelObjectFile} = require("./kernel-diagnostics.js");
 let kernelDiagnostics;
@@ -2511,34 +2511,52 @@ async function openEntitySetMethod(dpcName, set, line, output, sourceFile) {
   }
 }
 
-/** The ▶/■ status bar item: a second one from Q2's own generation display
- *  above, because the two answer different questions -- "what is this osd
- *  serving" versus "is a system running at all, and shall I start or stop
- *  one" -- and B0 must work even when nothing is serving yet, which Q2's
- *  item already assumes something is. */
+/** Keep launch state separate from the serving generation and job counts:
+ *  each is labelled, and the system/jobs clicks share the same actions. */
+function runningParts(controller) {
+  const launcher = controller.launcher;
+  const state = launcher?.state ?? "stopped";
+  const items = [{label: "OSD system", description: state,
+    detail: state === "stopped" ? "Start system" : "Show overview",
+    command: state === "stopped" ? "osd.start" : "osd.openSystemOverview"}];
+  if (workerEnabled(launcher?.jobsWorkerMode, launcher?.env)) {
+    const worker = launcher.jobWorker;
+    const other = worker?.otherWindow;
+    items.push({label: "Job worker", description: other ? "running in another window" : worker?.running ? "running" : "stopped",
+      detail: other || worker?.running ? "Show jobs" : state === "running" ? "Start worker" : state === "stopped" ? "Start system" : "Show overview",
+      command: other || worker?.running ? "osd.showJobs" : state === "running" ? "osd.startJobWorker" : state === "stopped" ? "osd.start" : "osd.openSystemOverview"});
+  }
+  items.push({label: "System overview", detail: "Show overview", command: "osd.openSystemOverview"});
+  return items;
+}
+
+async function showRunning(controller) {
+  const picked = await vscode.window.showQuickPick(runningParts(controller), {title: "OSD: What is running?"});
+  if (picked) await vscode.commands.executeCommand(picked.command);
+}
+
 function startStopStatusBar(context, controller) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 11);
+  item.command = "osd.showRunning";
   const refresh = () => {
     const state = controller.launcher?.state ?? "stopped";
     const source = homeSourceText(controller.homeSource);
-    const sourceSuffix = source === undefined ? "" : ` · ${source}`;
-    if (state === "running") {
-      item.text = `$(primitive-square) osd${sourceSuffix}`;
-      item.tooltip = `osd is running on :${controller.launcher.port} · ${controller.launcher.databaseLabel}${source === undefined ? "" : `, ${source}`} -- click to stop`;
-      item.command = "osd.stop";
-    } else if (state === "stopped") {
-      item.text = `$(play) osd${sourceSuffix}`;
-      item.tooltip = `click to build and start osd (B0)${source === undefined ? "" : `, ${source}`}`;
-      item.command = "osd.start";
-    } else {
-      item.text = `$(sync~spin) osd ${state}${sourceSuffix}`;
-      item.tooltip = `osd is ${state}${source === undefined ? "" : `, ${source}`}`;
-      item.command = undefined;
-    }
+    item.text = state === "running" ? "$(server) OSD running"
+      : state === "stopped" ? "$(play) OSD stopped" : `$(sync~spin) OSD ${state}`;
+    item.tooltip = `OSD system: ${state}${source === undefined ? "" : ` · ${source}`}\n` +
+      (state === "running" ? `Port ${controller.launcher.port} · ${controller.launcher.databaseLabel}\n` : "") +
+      "Click for system and worker actions";
   };
   refresh();
   const off = controller.onDidChange(refresh);
   item.show();
+  context.subscriptions.push(vscode.commands.registerCommand("osd.showRunning", () => showRunning(controller)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.startJobWorker", () => {
+    const launcher = controller.launcher;
+    if (launcher?.state === "running" && workerEnabled(launcher.jobsWorkerMode, launcher.env)) {
+      launcher.jobWorker?.start();
+    }
+  }));
   context.subscriptions.push({dispose: () => {
     off.dispose();
     item.dispose();
@@ -2856,7 +2874,7 @@ function statusBar(context) {
       const warmText = warmStatusText(warm);
       const engine = serving.databaseIdentity?.engine;
       const dbLabel = DB_ENGINE_LABEL[engine] ?? engine;
-      item.text = `$(server) osd ${generation}${dbLabel ? ` · ${dbLabel}` : ""}${warmText ? ` · ${warmText}` : ""}${swaps ? ` +${swaps}` : ""}${dumps.length ? `  $(bug) ${dumps.length}` : ""}`;
+      item.text = `$(server) OSD generation ${generation}${dbLabel ? ` · ${dbLabel}` : ""}${warmText ? ` · ${warmText}` : ""}${swaps ? ` +${swaps}` : ""}${dumps.length ? `  $(bug) ${dumps.length}` : ""}`;
       const lastVerify = warm?.lastVerify === undefined ? "never"
         : `${warm.lastVerify.verdict ?? "?"} at ${warm.lastVerify.at ?? "?"}`;
       item.tooltip = `${osd().url}\ngeneration ${serving.generation}\ndatabase ${dbLabel ?? "unknown"}\npid ${serving.pid}` +
@@ -4510,7 +4528,7 @@ async function deactivate() {
 }
 
 module.exports = {WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
-  httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands,
+  httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands, startStopStatusBar, runningParts, showRunning,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
   wirePageTabs, openDetailsMetadata, serviceCardFiles};
