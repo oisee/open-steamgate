@@ -1,0 +1,941 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l3",
+  "generator_version": "0.7",
+  "lines": [
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 1
+        },
+        {
+          "invocation": 1,
+          "path": "/source",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/source"},
+          "template": "main",
+          "template_line": 1
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 1,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/source",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 1
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/port",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/port"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/set",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/set"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/table",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/table"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/variant",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/variant"},
+          "template": "main",
+          "template_line": 2
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 2,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/port",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 2
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 3
+        },
+        {
+          "invocation": 1,
+          "path": "/key",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/key"},
+          "template": "main",
+          "template_line": 3
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 3,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/key",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 3
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 4
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 4,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 4
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 5
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/class"},
+          "template": "main",
+          "template_line": 5
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 5,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/class",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 5
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 6
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 6,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 6
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 7
+        },
+        {
+          "invocation": 1,
+          "path": "/iface",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/iface"},
+          "template": "main",
+          "template_line": 7
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 7,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/iface",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 7
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 8
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 8,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 8
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 9
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 9,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 9
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 10
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 10,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 10
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 11
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 11,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 11
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 12
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 12,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 12
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 13
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 13,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 13
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 14
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 14,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 14
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 15
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 15,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 15
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 16
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 16,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 16
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 17
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/class"},
+          "template": "main",
+          "template_line": 17
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 17,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/class",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 17
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 18
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 18,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 18
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 19
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 19,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 19
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 20
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 20,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 20
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 21
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 21,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 21
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 22
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 22,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 22
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 23
+        },
+        {
+          "invocation": 1,
+          "path": "/iface",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/iface"},
+          "template": "main",
+          "template_line": 23
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 23,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/iface",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 23
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 24
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 24,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 24
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 25
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 25,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 25
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 26
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 26,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 26
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 27
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 27,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 27
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 28
+        },
+        {
+          "invocation": 1,
+          "path": "/iface",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/iface"},
+          "template": "main",
+          "template_line": 28
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 28,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/iface",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 28
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 29
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 29,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 29
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 30
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 30,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 30
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 31
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 31,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 31
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 32
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 32,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 32
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 33
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 33,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 33
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 34,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 35
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 35,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 35
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 36
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 36,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 36
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 37
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 37,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 37
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 38
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 38,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 38
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 39
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 39,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 39
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 40
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 40,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 40
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 41
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 41,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 41
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 42
+        },
+        {
+          "invocation": 1,
+          "path": "/table",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/table"},
+          "template": "main",
+          "template_line": 42
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 42,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/table",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 42
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 43
+        },
+        {
+          "invocation": 1,
+          "path": "/key",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/key"},
+          "template": "main",
+          "template_line": 43
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 43,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/key",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 43
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 44
+        },
+        {
+          "invocation": 1,
+          "path": "/key",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/key"},
+          "template": "main",
+          "template_line": 44
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 44,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/key",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 44
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 45
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 45,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 45
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/worklist", "selector": "/"},
+          "template": "main",
+          "template_line": 46
+        }
+      ],
+      "file": "zcl_l3_fleet2_ships_worklist.clas.abap",
+      "line": 46,
+      "node": "set/fleet2/port/ships/variant/worklist",
+      "path": "/",
+      "set_line": 46,
+      "template": "main",
+      "template_line": 46
+    }
+  ],
+  "model": "sha256:0d668b4d414b541c9b8117ee559e7d6115414b4a966f8ba0b6c53dbfa371831c",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "zcl_l3_fleet2_ships_worklist.clas.abap", "hash": "sha256:9d9de11902ac0b25ed66e988e2d38c47ed4944c18442e51c2026f43b43b3015f"}
+  ],
+  "set": "src/l2demo/fleet2.l3.yaml",
+  "template": "recipes/l3-ports/source-worklist.tpl",
+  "templates": {"recipes/l3-ports/source-worklist.tpl": "sha256:e7d51c613abfad7d856544e7a3bc88ebb891bb43d2ba6454d09154d9fd80df59"}
+}

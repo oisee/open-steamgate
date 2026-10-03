@@ -376,6 +376,8 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
 * own template line, not the line the token starts on.
     DATA ls_result TYPE zcl_osd_tpl=>ty_result.
     DATA ls_trace TYPE zcl_osd_tpl=>ty_trace.
+    DATA lt_contributors TYPE zcl_osd_tpl=>tt_contributions.
+    DATA ls_contributor TYPE zcl_osd_tpl=>ty_contribution.
     ls_result = zcl_osd_tpl=>render(
       iv_template = `{{x}}` && nl( ) && `a` && nl( ) && `b` && nl( ) && `c`
       ii_data     = data( `{"x":"1"}` )
@@ -383,6 +385,17 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
     cl_abap_unit_assert=>assert_equals( exp = 4 act = lines( ls_result-trace ) ).
     LOOP AT ls_result-trace INTO ls_trace.
       cl_abap_unit_assert=>assert_equals( exp = sy-tabix act = ls_trace-template_line ).
+      CLEAR lt_contributors.
+      ls_contributor-template = `blk`.
+      ls_contributor-template_line = ls_trace-line.
+      ls_contributor-invocation = 1.
+      IF ls_trace-line = 1.
+        ls_contributor-path = `/x`.
+        APPEND ls_contributor TO lt_contributors.
+      ENDIF.
+      ls_contributor-path = `/`.
+      APPEND ls_contributor TO lt_contributors.
+      cl_abap_unit_assert=>assert_equals( exp = lt_contributors act = ls_trace-contributors ).
     ENDLOOP.
   ENDMETHOD.
 
@@ -391,6 +404,7 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
     DATA ls_result TYPE zcl_osd_tpl=>ty_result.
     DATA lt_exp TYPE zcl_osd_tpl=>tt_trace.
     DATA ls_exp TYPE zcl_osd_tpl=>ty_trace.
+    DATA ls_contributor TYPE zcl_osd_tpl=>ty_contribution.
     DATA lv_template TYPE string.
     lv_template = `CLASS x.` && nl( )
       && `{{#methods}}` && nl( )
@@ -402,22 +416,44 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
       ii_data     = data( `{"methods":[{"name":"a"},{"name":"b"}]}` )
       iv_name     = `cls` ).
 
+* All emitting paths contribute, including literal text in a loop's context.
+* Repeated tokens with the same path and invocation contribute only once.
+    ls_contributor-template = `cls`.
+    ls_contributor-invocation = 1.
     ls_exp-template = `cls`.
     ls_exp-line = 1.
     ls_exp-template_line = 1.
     ls_exp-path = `/`.
+    ls_contributor-template_line = 1.
+    ls_contributor-path = `/`.
+    APPEND ls_contributor TO ls_exp-contributors.
     APPEND ls_exp TO lt_exp.
     ls_exp-line = 2.
     ls_exp-template_line = 3.
     ls_exp-path = `/methods/1/name`.
+    CLEAR ls_exp-contributors.
+    ls_contributor-template_line = 3.
+    ls_contributor-path = `/methods/1`.
+    APPEND ls_contributor TO ls_exp-contributors.
+    ls_contributor-path = `/methods/1/name`.
+    APPEND ls_contributor TO ls_exp-contributors.
     APPEND ls_exp TO lt_exp.
     ls_exp-line = 3.
     ls_exp-template_line = 3.
     ls_exp-path = `/methods/2/name`.
+    CLEAR ls_exp-contributors.
+    ls_contributor-path = `/methods/2`.
+    APPEND ls_contributor TO ls_exp-contributors.
+    ls_contributor-path = `/methods/2/name`.
+    APPEND ls_contributor TO ls_exp-contributors.
     APPEND ls_exp TO lt_exp.
     ls_exp-line = 4.
     ls_exp-template_line = 5.
     ls_exp-path = `/`.
+    CLEAR ls_exp-contributors.
+    ls_contributor-template_line = 5.
+    ls_contributor-path = `/`.
+    APPEND ls_contributor TO ls_exp-contributors.
     APPEND ls_exp TO lt_exp.
     cl_abap_unit_assert=>assert_equals( exp = lt_exp act = ls_result-trace ).
     cl_abap_unit_assert=>assert_equals( exp = 4 act = lines( ls_result-lines ) ).
@@ -426,11 +462,19 @@ CLASS ltcl_osd_tpl IMPLEMENTATION.
   METHOD trace_value_keeps_tag_line.
     DATA ls_result TYPE zcl_osd_tpl=>ty_result.
     DATA ls_trace TYPE zcl_osd_tpl=>ty_trace.
+    DATA lt_contributors TYPE zcl_osd_tpl=>tt_contributions.
+    DATA ls_contributor TYPE zcl_osd_tpl=>ty_contribution.
     ls_result = zcl_osd_tpl=>render(
       iv_template = `{{v}}`
       ii_data     = data( `{"v":"a\nb"}` ) ).
     cl_abap_unit_assert=>assert_equals( exp = 2 act = lines( ls_result-trace ) ).
+    ls_contributor-template = `main`.
+    ls_contributor-template_line = 1.
+    ls_contributor-path = `/v`.
+    ls_contributor-invocation = 1.
+    APPEND ls_contributor TO lt_contributors.
     LOOP AT ls_result-trace INTO ls_trace.
+      cl_abap_unit_assert=>assert_equals( exp = lt_contributors act = ls_trace-contributors ).
       cl_abap_unit_assert=>assert_equals( exp = 1 act = ls_trace-template_line ).
       cl_abap_unit_assert=>assert_equals( exp = `/v` act = ls_trace-path ).
     ENDLOOP.

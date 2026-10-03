@@ -48,9 +48,12 @@ export function compileSnapshots(doc, model, {line, fail, columnsOf}) {
   if (doc.input !== undefined) model.snapshot_inputs.push(input(doc.input, 'input', '0'));
   for (const [i, s] of (doc.stages ?? []).entries()) if (s.input !== undefined) model.snapshot_inputs.push(input(s.input, `stages/${i}/input`, String(i + 1)));
 }
-export function snapshotOverlay(model, text) {
+export function snapshotOverlay(model, text, observe) {
+  let previous=text;
+  const record=(recipe="tools/dsl-l3-snapshot.mjs")=>{observe?.(previous,text,recipe);previous=text;};
   if (!model.snapshots) return text;
   text = text.replace('  PUBLIC SECTION.\n', '  PUBLIC SECTION.\n' + readFileSync('recipes/l3-snapshot/public.tpl', 'utf8'));
+  record("recipes/l3-snapshot/public.tpl");
   if (model.resilience && !model.settings) {
     text = text.replace('  PRIVATE SECTION.\n', '  PRIVATE SECTION.\n    CLASS-DATA gv_snapshot_dry TYPE abap_bool.\n');
     const dry = '{{#settings}}\n    gv_dry = abap_true.\n{{/settings}}';
@@ -64,6 +67,10 @@ export function snapshotOverlay(model, text) {
   if (!text.includes(anchor)) throw new Error('snapshot recipe needs installed-source anchor');
   const settings = '{{#settings}}\n    IF lv_dry = abap_false.\n      {{settings.class}}=>snapshot( iv_run = rs_result-run_id is_state = gs_settings ).\n    ENDIF.\n{{/settings}}\n';
   text = text.replace(settings, '');
+  record();
   text = text.replace(anchor, '{{/sources}}\n' + readFileSync('recipes/l3-snapshot/run.tpl', 'utf8') + settings.replace(/^    /gm, '        ') + '{{^planned}}');
-  return text.replace(/ENDCLASS\.\s*$/, readFileSync('recipes/l3-snapshot/methods.tpl', 'utf8') + 'ENDCLASS.\n');
+  record("recipes/l3-snapshot/run.tpl");
+  text = text.replace(/ENDCLASS\.\s*$/, readFileSync('recipes/l3-snapshot/methods.tpl', 'utf8') + 'ENDCLASS.\n');
+  record("recipes/l3-snapshot/methods.tpl");
+  return text;
 }

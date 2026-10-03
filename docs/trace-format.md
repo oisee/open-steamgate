@@ -1,8 +1,8 @@
 # Trace format v1
 
 Contract agreed per review. Phase 1 is Release 0.7, Must; Phase 2 adds named
-anchors per writer in 0.8. This document specifies planned behavior; the
-writers and readers below still use the unversioned formats.
+anchors per writer in 0.8. Phase 1 is implemented: writers default to v1 and readers accept both v1
+and the unversioned formats. Named anchors remain planned for 0.8.
 
 A consumer that commits generated code and provenance should not acquire a
 diff when a template moves and the generated file stays byte-identical,
@@ -178,8 +178,11 @@ Physical `rule_line`, `param_rule_line`, `set_line` and compiled `path` are
 navigation hints in metadata. Readers resolve selectors against the current
 or historical source; they must not silently jump to a different node.
 
-Serialization is UTF-8, two-space JSON indentation, LF, final newline, no
-timestamps. Integers use decimal digits, no exponent and no leading zeros
+Serialization is UTF-8, two-space JSON; scalar arrays and flat objects inline;
+LF, final newline, no timestamps. Arrays whose elements are all scalars and
+objects whose values are all scalars use one line, with `, ` between items
+and `: ` after keys. Containers holding a non-scalar stay multi-line.
+Integers use decimal digits, no exponent and no leading zeros
 except the value `0`. Key order is exactly the examples' order at every level;
 `lines` replaces `line` in the same position for a range record.
 Sort outputs by `file`, line records by numeric first line, sources by
@@ -240,6 +243,10 @@ when a writer converts in 0.8.
 Write optional `<stem>.trace.meta.json` separately, with
 `"format": "osd-trace-meta/1"`. Only operational/history consumers commit
 metadata; code-and-trace-only consumers commit `.trace.json` and omit meta.
+In this repository, retain metadata only for L3 outputs and the L2 check
+classes referenced by L3 sets, whose rule versions drive L3 staleness checks
+and alert history. Other metadata, including L2 testclass companions, is
+ignored and regenerated locally for navigation tests.
 Metadata contains output content SHA-256 for pairing, whole-model hash,
 generator name/version, template/partial/overlay content hashes, rule-version
 hashes, physical filenames, `template_line`, `rule_line`, `param_rule_line`,
@@ -247,7 +254,8 @@ hashes, physical filenames, `template_line`, `rule_line`, `param_rule_line`,
 fields move out of the stable trace in Phase 1. Metadata paths are also
 project-relative. Use `sha256:<lowercase hex>` over UTF-8 bytes for file
 content; declare the model serialization used for model hashes. Canonicalize
-metadata keys lexically and arrays by identity; use the same integer
+metadata keys lexically and arrays by identity; serialize as two-space JSON;
+scalar arrays and flat objects inline, using the same serializer and integer
 formatting as the stable trace. Reject mismatched output hashes for
 navigation; missing metadata does not prevent stable provenance reads.
 
@@ -301,7 +309,8 @@ its main include and line 1, and asserts that the file/line pair directly
 selects the first provenance record above. Include a testclasses include
 fixture using `zcl_example.clas.testclasses.abap` to check include naming too.
 Register new `test/*.mjs` suites in `test/suites.d/*.json`.
-These are specified checks, not tests executed for this documentation change.
+The contract and Phase 1 invariants are exercised by `test/trace-v1.mjs`;
+writer-specific navigation and history checks remain in the DSL suites.
 
 ## Migration and decisions
 

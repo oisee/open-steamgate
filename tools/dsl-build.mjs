@@ -412,6 +412,7 @@ export async function renderWithEngine(template, data, partials = {}, name = "ma
   }
   const text = (await abap.Classes.ZCL_OSD_TPL.to_string({is_result: result})).get();
   const trace = result.get().trace.array().map((entry) => ({
+    contributors: entry.get().contributors.array().map(c => ({invocation:c.get().invocation.get(),template: c.get().template.get(), template_line: c.get().template_line.get(), path: c.get().path.get()})),
     line: entry.get().line.get(), template: entry.get().template.get(),
     template_line: entry.get().template_line.get(), path: entry.get().path.get(),
   }));

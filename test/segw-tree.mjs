@@ -1,3 +1,4 @@
+import {readTraceMap} from "./trace-reader.mjs";
 import {expect} from "chai";
 import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -268,19 +269,19 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
       const expected = {...oracle.files, ...oracle.ext};
       const traceName = Object.keys(made).find((file) => file.endsWith("_mpc.clas.trace.json"));
       expect(traceName, `${name}: MPC trace sidecar`).to.be.a("string");
-      const sidecar = JSON.parse(made[traceName]);
+      const sidecar = readTraceMap(made, traceName);
       const mpcName = traceName.replace(".clas.trace.json", ".clas.abap");
       expect(sidecar.lines.length, `${name}: one trace per MPC line`).to.equal(made[mpcName].trimEnd().split("\n").length);
       expect(sidecar.lines.every((line, index) => line.line === index + 1 && line.node), `${name}: named trace lines`).to.equal(true);
       const dpcTraceName = Object.keys(made).find((file) => file.endsWith("_dpc.clas.trace.json"));
       if (Object.keys(expected).some((file) => file.endsWith("_dpc.clas.abap"))) {
         expect(dpcTraceName, `${name}: DPC trace sidecar`).to.be.a("string");
-        const dpcSidecar = JSON.parse(made[dpcTraceName]);
+        const dpcSidecar = readTraceMap(made, dpcTraceName);
         expect(dpcSidecar.generator, `${name}: DPC sidecar from the DSL`).to.equal("dsl-dpc");
         expect(dpcSidecar.lines.length, `${name}: one trace per DPC line`).to.equal(made[dpcTraceName.replace(".clas.trace.json", ".clas.abap")].trimEnd().split("\n").length);
       }
       // The ABAP generator adds provenance; the JS twin still supplies the class oracle.
-      expect(Object.keys(made).filter((file) => file !== traceName && file !== dpcTraceName).sort(), name).to.deep.equal(Object.keys(expected).sort());
+      expect(Object.keys(made).filter((file) => file !== traceName && file !== dpcTraceName && !file.endsWith(".trace.meta.json")).sort(), name).to.deep.equal(Object.keys(expected).sort());
       for (const [file, content] of Object.entries(expected)) {
         const a = content.split("\n");
         const b = made[file].split("\n");
@@ -311,7 +312,7 @@ describe("tools/segw-tree push / pull through ZSTG_SEGW_SRV", function () {
     await pushFunctionGroups(DEFAULT_URL, "src/demo");
     await pushFile(DEFAULT_URL, compiled.iwpr);
     const repo = await repoFiles(DEFAULT_URL, "ZSTG_DEMO");
-    expect(Object.keys(repo).some((name) => name.endsWith(".clas.trace.json"))).to.equal(false);
+    expect(Object.keys(repo).some((name) => /\.clas\.trace(?:\.meta)?\.json$/.test(name))).to.equal(false);
 
     expect(Object.keys(repo)).to.include(".abapgit.xml");
     expect(Object.keys(repo)).to.include("src/package.devc.xml");

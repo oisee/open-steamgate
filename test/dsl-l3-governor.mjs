@@ -1,3 +1,4 @@
+import {readJSONFile} from "./trace-reader.mjs";
 import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // Slice 5c-1: exercise generated ABAP, actual SQL admissions, and job chains.
@@ -13,7 +14,7 @@ import {modulesOf} from "../tools/osd-transpile.mjs";
 import {lowerNarrowSubmit} from "../tools/osd-narrow-submit.mjs";
 
 const OUT = "src/l2demo", CORE = ".local/lars/open-abap-core/src";
-const model = compileSet("src/l2demo/fleet2.l3.yaml");
+let model;
 const SET = "src/l2demo/fleet2.l3.yaml", DATE = "20261001", RUNNER = "zcl_l3_fleet2";
 const TABLES = ["zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor",
   "zosd_l3_kill", "zosd_l3_conf", "zosd_l3_conf_log", "zosd_l3_run_conf", "zosd_l3_budget", "zosd_l3_event", "zosd_l3_object"];
@@ -22,6 +23,7 @@ const trim = (s) => typeof s === "string" ? s.trim() : s;
 
 describe("DSL L3 slice 5c-1: governor", function () {
   this.timeout(900000);
+  before(() => { model = compileSet(SET); });
   it("fresh generation, and the set without a governor keeps every byte", async () => {
     expect(await checkSet(SET, "src/l2demo")).to.deep.equal([]);
     expect(await checkSet("src/l2demo/fleet.l3.yaml", "src/l2demo")).to.deep.equal([]);
@@ -47,7 +49,7 @@ describe("DSL L3 slice 5c-1: governor", function () {
   });
   it("every governor method and admission line traces to governor:", () => {
     const text = readFileSync("src/l2demo/zcl_l3_fleet2.clas.abap", "utf8").split("\n");
-    const trace = JSON.parse(readFileSync("src/l2demo/zcl_l3_fleet2.clas.trace.json", "utf8"));
+    const trace = readJSONFile("src/l2demo/zcl_l3_fleet2.clas.trace.json", "utf8");
     const line = readFileSync(SET, "utf8").split("\n").findIndex((l) => l === "governor:") + 1;
     const remoteLine = readFileSync(SET, "utf8").split("\n").findIndex((l) => l.includes("remote: {function:")) + 1;
     for (const re of [/METHOD budget_/, /METHOD break_glass/, /METHOD continue_glass/, /METHOD release_pile/,
@@ -59,7 +61,7 @@ describe("DSL L3 slice 5c-1: governor", function () {
       for (const t of matches) expect(t.set_line, text[t.line - 1]).to.equal(t.node.endsWith("/variant/remote") ? remoteLine : line);
     }
     const factory = readFileSync("src/l2demo/zcl_l3_fleet2_ports.clas.abap", "utf8").split("\n");
-    const factoryTrace = JSON.parse(readFileSync("src/l2demo/zcl_l3_fleet2_ports.clas.trace.json", "utf8"));
+    const factoryTrace = readJSONFile("src/l2demo/zcl_l3_fleet2_ports.clas.trace.json", "utf8");
     const closeLine = readFileSync(SET, "utf8").split("\n").findIndex((l) => l === "  close:") + 1;
     for (const t of factoryTrace.lines.filter((t) => /(?:CLASS-METHODS|METHOD) get_close/.test(factory[t.line - 1]))) {
       expect(t.set_line).to.equal(closeLine);

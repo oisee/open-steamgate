@@ -1,3 +1,4 @@
+import {convertFiles, legacyTrace, legacyEntries} from "./dsl-trace.mjs";
 // Opt-in cockpit: the service compiler owns the model; recipes own the extension.
 import {readFileSync} from "node:fs";
 import {createHash} from "node:crypto";
@@ -35,9 +36,9 @@ export function compileCockpit(doc, model, {line, fail}) {
     title: spec.title, project: project.toUpperCase()};
 }
 
-export function cockpitRunnerTemplate(model, text, kind = "runner") {
+export function cockpitRunnerTemplate(model, text, kind = "runner", observe) {
   if (!model.cockpit) return text;
-  return governorTemplate(text, JSON.parse(readFileSync(`recipes/l3-cockpit/${kind}.patch.json`, "utf8")));
+  return governorTemplate(text, JSON.parse(readFileSync(`recipes/l3-cockpit/${kind}.patch.json`, "utf8")), observe, `recipes/l3-cockpit/${kind}.patch.json`);
 }
 
 export async function renderCockpit(model) {
@@ -59,7 +60,7 @@ export async function renderCockpit(model) {
   const objects = Object.entries({...result.files, ...result.classes, ...result.ext}).map(([name, text]) =>
     `  ${JSON.stringify(name)}: [\n` + text.trimEnd().split("\n").map((_, i) =>
       "   " + JSON.stringify({line: i + 1, template_line: i + 1, node: c["@id"], set_line: c.set_line})).join(",\n") + "\n  ]");
-  files[`${c.project.toLowerCase()}.service.trace.json`] = `{"generator":"dsl-l3-cockpit","set":${JSON.stringify(model.source)},\n "objects": {\n${objects.join(",\n")}\n }\n}\n`;
+  files[`${c.project.toLowerCase()}.service.trace.json`] = `{"generator":"dsl-l3-cockpit","set":${JSON.stringify(model.source)},${legacyTrace() ? "" : '"template":"tools/dsl-l3-cockpit-service.mjs",'}\n "objects": {\n${objects.join(",\n")}\n }\n}\n`;
   // stg-compile's base objects have no per-line source map. The entire service
   // is owned by the cockpit node; the recipe extension also retains its path.
   for (const [name, text] of Object.entries({...files})) {
@@ -67,8 +68,8 @@ export async function renderCockpit(model) {
     const traced = name === `${root.class}.clas.abap` ? ext.trace : text.trimEnd().split("\n").map((_, i) => ({line: i + 1, template_line: i + 1}));
     files[`${name}.trace.json`] = JSON.stringify({generator: "dsl-l3-cockpit", set: model.source,
       model: `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`,
-      template: name === `${root.class}.clas.abap` ? "recipes/l3-cockpit/dpc.tpl" : name.endsWith(".stg.yaml") ? "dsl-l3-cockpit-service" : name.startsWith(`cockpit/${c.set_app}/`) ? `recipes/l3-cockpit/set/${name.split("/").at(-1)}` : name.includes("cockpit/") ? `recipes/l3-cockpit/${name.split("/").at(-1)}` : "stg-compile",
-      lines: traced.map((t) => ({...t, node: c["@id"], set_line: c.set_line}))}, null, 1) + "\n";
+      template: name === `${root.class}.clas.abap` ? "recipes/l3-cockpit/dpc.tpl" : name.endsWith(".stg.yaml") ? (legacyTrace() ? "dsl-l3-cockpit-service" : "tools/dsl-l3-cockpit-service.mjs") : name.startsWith(`cockpit/${c.set_app}/`) ? `recipes/l3-cockpit/set/${name.split("/").at(-1)}` : name.includes("cockpit/") ? `recipes/l3-cockpit/${name.split("/").at(-1)}` : (legacyTrace() ? "stg-compile" : "tools/stg-compile.mjs"),
+      lines: (legacyTrace() ? legacyEntries(traced).map(({template,...e})=>e) : traced).map((t) => ({...t, node: c["@id"], set_line: c.set_line}))}, null, 1) + "\n";
   }
-  return files;
+  return convertFiles(files, {model: root, objects: {...result.files, ...result.classes, ...result.ext}});
 }
