@@ -37,7 +37,7 @@ handoff values, not credentials; the class comment documents that limit.
 - `test/adt-abap-a3b.mjs`: live Node/ABAP diff over one store.
 - `test/adt-abap-coverage.mjs`: only A3b's pending block removed.
 - `test/suites.d/adt.json`: new suite registered beside the ADT ABAP suites.
-- `ANORMALIES.md`: long-timestamp subtraction failure and UTC arithmetic workaround.
+- `docs/backlog/adt.md` ("Reentrance ticket: timestamp arithmetic"): whole-second SUBTRACT on the locked substrate and the route's UTC millisecond arithmetic (not an SAP/open-abap discrepancy; nothing measured on a system).
 - `docs/adt-abap-port/slice-a3b.md`: this report.
 
 ## Validation
