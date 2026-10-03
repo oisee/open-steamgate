@@ -7,6 +7,34 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
   constructor(runner, options) {
     super(runner, options);
     const timings = {};
+    const failures = [];
+    const internalRetries = [];
+    runner.on("retry", (test) => {
+      internalRetries.push({title: test.fullTitle()});
+      console.error(`osd-suites: forbidden internal retry: ${test.fullTitle()}`);
+    });
+    const fileTests = {};
+    const tests = {};
+    const records = new Map();
+    const fileOf = (test) => test.file && (isAbsolute(test.file) ? relative(process.cwd(), test.file) : test.file).replace(/^\.\//, "");
+    runner.suite.eachTest((test) => {
+      const file = fileOf(test);
+      if (file) {
+        (fileTests[file] ??= {registered: 0, passed: 0, pending: 0, failed: 0}).registered++;
+        const record = {titlePath: test.titlePath(), outcome: null};
+        (tests[file] ??= []).push(record);
+        records.set(test, record);
+      }
+    });
+    for (const [event, field] of [["pass", "passed"], ["pending", "pending"], ["fail", "failed"]]) {
+      runner.on(event, (test) => {
+        if (test.type !== "test") return;
+        const counts = fileTests[fileOf(test)];
+        if (counts) counts[field]++;
+        const record = records.get(test);
+        if (record) record.outcome = field;
+      });
+    }
     let current;
     let began;
     const finish = () => {
@@ -20,11 +48,25 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
       current = file;
       began = process.hrtime.bigint();
     });
+    runner.on("fail", (test) => {
+      let owner = test;
+      while (owner && !owner.file) owner = owner.parent;
+      const path = owner?.file;
+      const file = path ? (isAbsolute(path) ? relative(process.cwd(), path) : path).replace(/^\.\//, "") : null;
+      failures.push({file, title: test.fullTitle()});
+    });
     runner.on("end", () => {
       finish();
       writeFileSync(process.env.OSD_SUITE_TIMINGS_FILE, JSON.stringify({
         measuredAt: new Date().toISOString(),
-        note: "Local wall time; relative weights only. Includes suite hooks and work between files.",
+        note: "Wall time including hooks and inter-file work; excludes module loading before the first suite.",
+        completed: true,
+        bail: Boolean(runner.suite._bail),
+        fileTests,
+        tests,
+        failures,
+        internalRetries,
+        totalFailures: runner.failures,
         seconds: Object.fromEntries(Object.entries(timings).sort(([a], [b]) => a.localeCompare(b))),
       }, null, 2) + "\n");
     });

@@ -3,11 +3,13 @@
 // does -- and a reporter checked only where everything is present reports on
 // the specimen made for it.
 import {expect} from "chai";
-import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment} from "../tools/osd-suites.mjs";
-import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
+import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment, runWithRetries, runWithRetries as realRunWithRetries} from "../tools/osd-suites.mjs";
+import {mergeTimings} from "../tools/osd-suites-timings.mjs";
+import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync, symlinkSync} from "node:fs";
+import {createRequire} from "node:module";
 import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, relative, resolve} from "node:path";
 
 describe("tools/osd-suites: a run says what it could not see", () => {
   it("names every absent input and why it mattered", () => {
@@ -108,7 +110,7 @@ describe("the suite list against the tree", () => {
 describe("suite sharding", () => {
   it("partitions the real list into four disjoint shards", () => {
     const files = loadSuites().files;
-    const seconds = JSON.parse(readFileSync("test/suite-timings.json", "utf8")).seconds;
+    const seconds = JSON.parse(readFileSync("test/suites-timings.json", "utf8"));
     const all = assignShards(files, seconds, 4).flatMap((shard) => shard.files);
     expect(all.slice().sort()).to.deep.equal(files.slice().sort());
     expect(new Set(all).size).to.equal(files.length);
@@ -129,5 +131,395 @@ describe("suite sharding", () => {
     expect(shards.reduce((sum, shard) => sum + shard.seconds, 0)).to.equal(40);
     expect(assignShards(files.slice().reverse(), {a: 20, b: 8, c: 4, d: 2}, 4).map((s) => s.files.slice().sort()))
       .to.deep.equal(shards.map((s) => s.files.slice().sort()));
+  });
+});
+
+
+describe("bounded file retries", () => {
+  const execute = realRunWithRetries;
+  const runWithRetries = (files, run, options) => execute(files, (selected, phase) => ({
+    ...run(selected, phase),
+    fileTests: Object.fromEntries(selected.map((file) => [file, {registered: 1, passed: 1, pending: 0, failed: 0}])),
+    tests: Object.fromEntries(selected.map((file) => [file, [{titlePath: ["first failure"], outcome: "passed"}]])),
+  }), options);
+  const failed = (files) => ({status: 1, completed: true, internalRetries: [], totalFailures: files.length,
+    failures: files.map((file) => ({file, title: "first failure"}))});
+  const passed = {status: 0, completed: true, internalRetries: [], totalFailures: 0, failures: []};
+  it("retries a whole group together rather than recovering files separately", () => {
+    const calls = [];
+    const result = runWithRetries(["a", "b"], (files, phase) => {
+      calls.push(files);
+      return phase === "first" || files.length === 2 ? failed(["a"]) : passed;
+    }, {group: "shared"});
+    expect(result.status).to.equal(1);
+    expect(calls).to.deep.equal([["a", "b"], ["a", "b"]]);
+  });
+  it("does not rerun a passing shard", () => {
+    const calls = [];
+    expect(runWithRetries(["a"], (files) => { calls.push(files); return passed; }).status).to.equal(0);
+    expect(calls).to.deep.equal([["a"]]);
+  });
+  it("retries each failing file once alone, preserving its first title", () => {
+    const calls = [];
+    const result = runWithRetries(["a", "b", "c"], (files, phase) => {
+      calls.push(files);
+      return phase === "first" ? failed(["b", "c"]) : passed;
+    });
+    expect(calls).to.deep.equal([["a", "b", "c"], ["b"], ["c"]]);
+    expect(result.status).to.equal(0);
+    expect(result.lines.join("\n")).to.contain("flaky / order-dependent: `b` — first failure");
+  });
+  it("keeps a persistent failure red even when another file recovers", () => {
+    const result = runWithRetries(["a", "b"], (files, phase) => phase === "first" ? failed(files) : files[0] === "a" ? passed : failed(files));
+    expect(result.status).to.equal(1);
+    expect(result.retries).to.have.length(2);
+    expect(result.lines).to.have.length(1);
+  });
+  it("permits exactly three failing files but refuses four", () => {
+    for (const count of [3, 4]) {
+      const files = Array.from({length: count}, (_, i) => String(i));
+      const result = runWithRetries(files, (selected, phase) => phase === "first" ? failed(selected) : passed);
+      expect(result.retries.length).to.equal(count === 3 ? 3 : 0);
+      expect(result.status).to.equal(count === 3 ? 0 : 1);
+    }
+  });
+  it("fails closed on a crash, missing metadata or unattributed hook failures", () => {
+    for (const first of [{status: 1}, {...failed(["a"]), crashed: true}, {...failed(["a"]), completed: false}, failed([null]),
+      failed(["unknown"]), {...failed(["a"]), totalFailures: 2}]) {
+      const result = runWithRetries(["a"], () => first);
+      expect(result.status).to.equal(1);
+      expect(result.retries).to.deep.equal([]);
+    }
+  });
+  it("does not accept a retry without a complete zero-failure report", () => {
+    const result = runWithRetries(["a"], (_, phase) => phase === "first" ? failed(["a"]) : {status: 0});
+    expect(result.status).to.equal(1);
+  });
+  it("deduplicates test and hook failures in one file", () => {
+    const result = runWithRetries(["a"], (_, phase) => phase === "first" ? failed(["a", "a"]) : passed);
+    expect(result.retries).to.have.length(1);
+    expect(result.status).to.equal(0);
+  });
+});
+
+describe("timing weights", () => {
+  it("uses longest first with deterministic ties and preserves execution order", () => {
+    const shards = assignShards(["c", "b", "a", "d"], {a: 10, b: 10, c: 2, d: 2}, 2);
+    expect(shards).to.deep.equal([{files: ["c", "a"], seconds: 12}, {files: ["b", "d"], seconds: 12}]);
+  });
+  it("uses a median for invalid or absent timings and one second for an empty seed", () => {
+    expect(assignShards(["a", "b", "c"], {a: 2, b: -1}, 1)[0].seconds).to.equal(6);
+    expect(assignShards(["a"], {}, 1)[0].seconds).to.equal(1);
+    expect(() => assignShards([], {}, 0)).to.throw("positive");
+  });
+  it("merges partial artifacts, using the median across runs and ignoring retry metadata", () => {
+    expect(mergeTimings({"test/old.mjs": 7}, [
+      {seconds: {"test/a.mjs": 4}, retries: [{seconds: 999}]},
+      {seconds: {"test/a.mjs": 8}},
+    ])).to.deep.equal({"test/a.mjs": 6, "test/old.mjs": 7});
+    expect(() => mergeTimings({}, [{seconds: {"test/a.mjs": -1}}])).to.throw("invalid timing");
+  });
+});
+
+
+function fixtureRun(source, options = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "osd-fail-closed-"));
+  const file = relative(process.cwd(), join(dir, "fixture.mjs"));
+  writeFileSync(file, source);
+  const reports = [];
+  try {
+    const result = runWithRetries([file], (files) => {
+      const output = join(dir, `report-${reports.length}.json`);
+      const child = spawnSync(process.execPath, ["node_modules/mocha/bin/mocha.js", ...files,
+        "--reporter", "tools/osd-suite-timing-reporter.cjs", "--retries", "0",
+        ...(options.allowInternalRetries ? [] : ["--require", "tools/osd-suite-no-retries.cjs"]), ...(options.extra ?? [])],
+        {encoding: "utf8", env: {...process.env, OSD_SUITE_TIMINGS_FILE: output}});
+      const metadata = existsSync(output) ? JSON.parse(readFileSync(output, "utf8")) : {};
+      reports.push({...metadata, stdout: child.stdout});
+      return {...metadata, status: child.status};
+    }, options);
+    return {result, reports};
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+}
+
+describe("fail closed regressions", () => {
+  it("keeps packaging failures red without an unpublished recovery", () => {
+    const {result, reports} = fixtureRun('import {existsSync, writeFileSync} from "node:fs"; const marker = new URL("./marker", import.meta.url); describe("packaging", () => { it("transient failure", () => { if (!existsSync(marker)) { writeFileSync(marker, "failed"); throw Error("first"); } }); });', {group: "packaging"});
+    expect(result.status).to.equal(1);
+    expect(reports).to.have.length(1);
+    expect(result.lines).to.deep.equal([]);
+  });
+  it("accepts explicitly all-pending files and records their counts", () => {
+    const {result, reports} = fixtureRun('describe.skip("optional", () => { it("requires local data", () => {}); });');
+    expect(result.status).to.equal(0);
+    expect(Object.values(reports[0].fileTests)).to.deep.equal([{registered: 1, passed: 0, pending: 1, failed: 0}]);
+  });
+  it("rejects an empty first run", () => {
+    expect(fixtureRun('describe("empty", () => {});').result.status).to.equal(1);
+  });
+  it("rejects recovery when the isolated retry registers zero tests", () => {
+    const {result, reports} = fixtureRun('import {existsSync, writeFileSync} from "node:fs"; const marker = new URL("./marker", import.meta.url); describe("empty retry", () => { if (!existsSync(marker)) it("first failure", () => { writeFileSync(marker, "failed"); throw Error("first"); }); });');
+    expect(reports).to.have.length(2);
+    expect(result.status).to.equal(1);
+    expect(result.lines).to.deep.equal([]);
+  });
+  for (const replacement of [false, true]) {
+    it(`rejects a vanished failing test${replacement ? " even when replaced at the same count" : ""}`, () => {
+      const {result, reports} = fixtureRun(`import {existsSync, writeFileSync} from "node:fs";
+        const marker = new URL("./marker", import.meta.url);
+        const retried = existsSync(marker);
+        describe("identity fixture", () => {
+          it("always passes", () => {});
+          if (!retried) it("original failure", () => { writeFileSync(marker, "failed"); throw Error("first"); });
+          ${replacement ? 'if (retried) it("replacement", () => {});' : ''}
+        });`);
+      expect(reports).to.have.length(2);
+      expect(Object.values(reports[0].fileTests)[0].registered).to.equal(2);
+      expect(Object.values(reports[1].fileTests)[0].registered).to.equal(replacement ? 2 : 1);
+      expect(result.status).to.equal(1);
+      expect(result.lines.join("\n")).to.contain("vanished").and.contain("original failure");
+      expect(result.lines.join("\n")).not.to.contain("passed once");
+    });
+  }
+  for (const group of [undefined, "shared"]) {
+    it(`rejects a previously failing test that turns pending on ${group ? "group" : "isolated"} retry`, () => {
+      const {result, reports} = fixtureRun(`import {existsSync, writeFileSync} from "node:fs";
+        const marker = new URL("./marker", import.meta.url);
+        describe("pending recovery", () => { it("must pass", function () {
+          if (existsSync(marker)) this.skip();
+          writeFileSync(marker, "failed"); throw Error("first");
+        }); });`, {group});
+      expect(reports).to.have.length(2);
+      expect(Object.values(reports[1].fileTests)[0]).to.deep.equal({registered: 1, passed: 0, pending: 1, failed: 0});
+      expect(result.status).to.equal(1);
+      expect(result.lines.join("\n")).to.contain("pending").and.contain("must pass");
+      expect(result.lines.join("\n")).not.to.contain("passed once");
+    });
+  }
+  it("prevents test-level retries from silently recovering", () => {
+    const {result} = fixtureRun('let attempts = 0; describe("retry fixture", function () { this.retries(2); it("recovers internally", function () { this.retries(2); if (++attempts < 3) throw Error("retry"); }); });');
+    expect(result.status).to.equal(1);
+    expect(result.lines).to.deep.equal([]);
+  });
+  it("fails red and names any internal retry observed by the reporter", () => {
+    const {result, reports} = fixtureRun('let attempts = 0; describe("retry event", () => { it("unexpected retry", function () { this.retries(2); if (++attempts < 3) throw Error("retry"); }); });', {allowInternalRetries: true});
+    expect(result.status).to.equal(1);
+    expect(reports[0].internalRetries[0].title).to.equal("retry event unexpected retry");
+  });
+  it("rejects a failing test followed by process.exit(0)", () => {
+    const {result, reports} = fixtureRun('describe("exit fixture", () => { it("fails", () => { throw Error("failure"); }); after(() => process.exit(0)); });');
+    expect(reports[0].completed).to.equal(undefined);
+    expect(result.status).to.equal(1);
+    expect(result.lines).to.deep.equal([]);
+  });
+  it("rejects zero exit with inconsistent failure metadata", () => {
+    for (const metadata of [{status: 0}, {status: 0, completed: true, failures: [], totalFailures: 1},
+      {status: 0, completed: true, failures: [{file: "a", title: "bad"}], totalFailures: 0}]) {
+      expect(runWithRetries(["a"], () => metadata).status).to.equal(1);
+    }
+  });
+});
+
+describe("early-stop CLI regressions", () => {
+  it("disables bail retries even when only the failing file was selected", () => {
+    const {result, reports} = fixtureRun(`import {existsSync, writeFileSync} from "node:fs";
+      const marker = new URL("./marker", import.meta.url);
+      describe("single bail", () => { it("transient", () => {
+        if (!existsSync(marker)) { writeFileSync(marker, "failed"); throw Error("first"); }
+      }); });`, {extra: ["--bail"]});
+    expect(result.status).to.equal(1);
+    expect(reports).to.have.length(1);
+    expect(reports[0].bail).to.equal(true);
+  });
+  it("refuses recovery when another file has unaccounted tests without a bail flag", () => {
+    const result = runWithRetries(["a", "z"], (files, phase) => ({
+      status: phase === "first" ? 1 : 0, completed: true, internalRetries: [],
+      totalFailures: phase === "first" ? 1 : 0,
+      failures: phase === "first" ? [{file: "a", title: "transient"}] : [],
+      fileTests: Object.fromEntries(files.map((file) => [file, {registered: 1,
+        passed: phase === "retry" ? 1 : 0, failed: phase === "first" && file === "a" ? 1 : 0, pending: 0}])),
+      tests: Object.fromEntries(files.map((file) => [file, [{titlePath: [file === "a" ? "transient" : "unexecuted"],
+        outcome: phase === "retry" ? "passed" : file === "a" ? "failed" : null}]])),
+    }));
+    expect(result.status).to.equal(1);
+    expect(result.retries).to.deep.equal([]);
+    expect(result.lines.join("\n")).to.contain("unexecuted").and.contain("z");
+  });
+  for (const option of ["--bail", "-b", "--bail=true", "config"]) {
+    it(`disables recovery for ${option}, retaining an unexecuted later failure`, function () {
+      this.timeout(10000);
+      const dir = mkdtempSync(join(tmpdir(), "osd-bail-cli-"));
+      try {
+        mkdirSync(join(dir, "tools"));
+        mkdirSync(join(dir, "test", "suites.d"), {recursive: true});
+        for (const file of ["osd-suites.mjs", "osd-suite-timing-reporter.cjs", "osd-suite-no-retries.cjs"])
+          copyFileSync(join("tools", file), join(dir, "tools", file));
+        symlinkSync(resolve("node_modules"), join(dir, "node_modules"), "dir");
+        writeFileSync(join(dir, "test", "suites.d", "fixtures.json"), JSON.stringify({files: ["test/a.mjs", "test/z.mjs"]}));
+        writeFileSync(join(dir, "test", "suites-timings.json"), "{}");
+        writeFileSync(join(dir, "test", "a.mjs"), `import {existsSync, writeFileSync} from "node:fs";
+          const marker = new URL("./marker", import.meta.url);
+          describe("early", () => { it("transient", () => {
+            if (!existsSync(marker)) { writeFileSync(marker, "failed"); throw Error("first"); }
+          }); });`);
+        writeFileSync(join(dir, "test", "z.mjs"), 'describe("later", () => { it("persistent failure", () => { throw Error("persistent"); }); });');
+        if (option === "config") writeFileSync(join(dir, ".mocharc.json"), JSON.stringify({bail: true}));
+        const child = spawnSync(process.execPath, ["tools/osd-suites.mjs", ...(option === "config" ? [] : [option]), "--timings", "first.json"],
+          {cwd: dir, encoding: "utf8", env: {...process.env, GITHUB_STEP_SUMMARY: ""}});
+        const first = JSON.parse(readFileSync(join(dir, "first.json"), "utf8"));
+        expect(first.fileTests["test/z.mjs"]).to.deep.equal({registered: 1, passed: 0, pending: 0, failed: 0});
+        expect(child.status, child.stdout + child.stderr).to.equal(1);
+        expect(child.stdout).not.to.contain("osd-suites: retry");
+        expect(child.stdout).not.to.contain("passed once");
+      } finally { rmSync(dir, {recursive: true, force: true}); }
+    });
+  }
+});
+
+describe("Mocha file reports", () => {
+  it("captures an order failure and retries the whole file with a fresh process", function () {
+    this.timeout(10000);
+    const dir = mkdtempSync(join(tmpdir(), "osd-reporter-"));
+    try {
+      const before = relative(process.cwd(), join(dir, "before.mjs"));
+      const victim = relative(process.cwd(), join(dir, "victim.mjs"));
+      writeFileSync(before, 'describe("before", () => { it("sets state", () => { globalThis.dirty = true; }); });');
+      writeFileSync(victim, 'describe("victim", () => { it("clean state", () => { if (globalThis.dirty) throw Error("dirty"); }); it("also runs", () => {}); });');
+      const reports = [];
+      const result = runWithRetries([before, victim], (files) => {
+        const output = join(dir, `report-${reports.length}.json`);
+        const run = spawnSync(process.execPath, ["node_modules/mocha/bin/mocha.js", ...files,
+          "--reporter", "tools/osd-suite-timing-reporter.cjs", "--retries", "0"],
+          {encoding: "utf8", env: {...process.env, OSD_SUITE_TIMINGS_FILE: output}});
+        const report = JSON.parse(readFileSync(output, "utf8"));
+        reports.push(report);
+        return {...report, status: run.status};
+      });
+      expect(result.status).to.equal(0);
+      expect(reports).to.have.length(2);
+      expect(reports[0].failures).to.deep.equal([{file: victim, title: "victim clean state"}]);
+      expect(Object.keys(reports[0].seconds)).to.deep.equal([before, victim]);
+      expect(reports[1].totalFailures).to.equal(0);
+      expect(result.lines[0]).to.contain("order-dependent");
+    } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
+  it("attributes before hooks to their file", function () {
+    this.timeout(10000);
+    const dir = mkdtempSync(join(tmpdir(), "osd-hook-report-"));
+    try {
+      const file = relative(process.cwd(), join(dir, "hook.mjs"));
+      const output = join(dir, "report.json");
+      writeFileSync(file, 'describe("hook fixture", () => { before(() => { throw Error("hook failed"); }); it("never runs", () => {}); });');
+      const run = spawnSync(process.execPath, ["node_modules/mocha/bin/mocha.js", file,
+        "--reporter", "tools/osd-suite-timing-reporter.cjs"],
+        {encoding: "utf8", env: {...process.env, OSD_SUITE_TIMINGS_FILE: output}});
+      expect(run.status).to.equal(1);
+      const report = JSON.parse(readFileSync(output, "utf8"));
+      expect(report.completed).to.equal(true);
+      expect(report.failures[0].file).to.equal(file);
+      expect(report.failures[0].title).to.contain('"before all" hook');
+    } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
+});
+
+
+describe("required PR retry reports", () => {
+  const workflow = readFileSync(".github/workflows/tests.yml", "utf8");
+  const script = workflow.split("          script: |\n").at(-1).split("\n").map((line) => line.replace(/^            /, "")).join("\n");
+  const execute = async (mode, attempt = 1, canComment = true) => {
+    const nativeRequire = createRequire(import.meta.url);
+    const fs = nativeRequire("node:fs");
+    const current = [1, 2, 3, 4].map((i) => `suite-results-${i}-attempt-${attempt}`);
+    const mockedFs = {...fs,
+      readdirSync: () => {
+        if (mode === "missing-directory") throw Error("ENOENT suite-results");
+        if (mode === "missing-shard") return current.slice(0, 1);
+        if (mode === "missing-rerun-report") return [1, 2, 3, 4].map((i) => `suite-results-${i}-attempt-1`);
+        if (mode === "retained") return ["suite-results-1-attempt-2", ...[1, 2, 3, 4].map((i) => `suite-results-${i}-attempt-1`)];
+        return current;
+      },
+      readFileSync: (file) => {
+        if (mode === "unreadable") throw Error("unreadable report");
+        return mode === "retained" && file.includes("suite-results-1-attempt-1") ? "flaky: earlier isolation recovery" : "";
+      },
+    };
+    let body;
+    const calls = [];
+    const github = {
+      paginate: async (method, args) => {
+        if (method === github.rest.issues.listComments) return [];
+        calls.push(args);
+        if (args.attempt_number === 1 && attempt > 1) {
+          if (mode === "api-error") throw Error("fixture API error");
+          return [{name: "suites (1)", conclusion: "failure"}];
+        }
+        return [{name: "suites (1)", conclusion: "success"}];
+      },
+      rest: {actions: {listJobsForWorkflowRunAttempt() {}}, issues: {
+        listComments() {}, createComment(args) { body = args.body; }, updateComment(args) { body = args.body; },
+      }},
+    };
+    const context = {repo: {owner: "fixture", repo: "fixture"}, payload: {pull_request: {head: {sha: "12345678"}}}, issue: {number: 1}, runId: 1};
+    try {
+      await new (Object.getPrototypeOf(async function () {}).constructor)("require", "github", "context", "process", "console", script)(
+        (name) => name === "node:fs" ? mockedFs : nativeRequire(name), github, context,
+        {env: {EXPECTED_SHARDS: "1,2,3,4", GITHUB_RUN_ATTEMPT: String(attempt), CAN_COMMENT: String(canComment), JOB_RESULTS: JSON.stringify({build: {result: "success"}, suites: {result: "success"}, packaging: {result: "skipped"}, e2e: {result: "success"}, "osgo-host": {result: "success"}}), VSIX_PROFILE: "fast"}},
+        {log() {}, error() {}});
+    } catch (error) {
+      error.body = body;
+      throw error;
+    }
+    return {body, calls};
+  };
+  for (const mode of ["missing-directory", "missing-shard", "unreadable"]) {
+    it(`fails publication for ${mode}`, async () => {
+      let error;
+      try { await execute(mode); } catch (caught) { error = caught; }
+      expect(error, "publication must fail closed").to.be.instanceOf(Error);
+    });
+  }
+  it("accepts four readable empty reports", async () => { await execute("complete"); });
+  it("shows failed jobs recovered by a GitHub rerun and retained flaky reports", async () => {
+    const {body, calls} = await execute("retained", 2);
+    expect(body).to.contain("flaky: rerun suites (1) failed in attempt 1, passed in attempt 2");
+    expect(body).to.contain("flaky: earlier isolation recovery");
+    expect(calls.map((c) => c.attempt_number)).to.deep.equal([2, 1]);
+    expect(calls.every((c) => c.owner === "fixture" && c.repo === "fixture" && c.run_id === 1)).to.equal(true);
+    expect(workflow).to.contain("name: suite-results-${{ matrix.shard }}-attempt-${{ github.run_attempt }}");
+  });
+  it("does not let retained evidence hide a missing report from a rerun shard", async () => {
+    let error;
+    try { await execute("missing-rerun-report", 2); } catch (caught) { error = caught; }
+    expect(error).to.be.instanceOf(Error);
+    expect(error.message).to.equal("Missing current-attempt shard report 1");
+  });
+  it("queries every earlier attempt even without retained artifacts", async () => {
+    const {body, calls} = await execute("complete", 3);
+    expect(calls.map((c) => c.attempt_number)).to.deep.equal([3, 1, 2]);
+    expect(body).to.contain("flaky: rerun suites (1) failed in attempt 1, passed in attempt 2");
+  });
+  for (const canComment of [true, false]) {
+    it(`fails closed on unreadable earlier attempts (comments ${canComment})`, async () => {
+      let error;
+      try { await execute("api-error", 2, canComment); } catch (caught) { error = caught; }
+      expect(error).to.be.instanceOf(Error);
+      expect(error.message).to.equal("rerun: earlier attempts unreadable");
+      if (canComment) {
+        expect(error.body).to.contain("flaky: rerun: earlier attempts unreadable");
+        expect(error.body).to.contain("### PR tests: 🔴 fail");
+      }
+    });
+  }
+  it("keeps expected reports in step with the shard matrix", () => {
+    const shards = workflow.match(/shard: \[(.*?)\]/)[1].split(',').map((s) => s.trim());
+    expect(workflow).to.contain(`EXPECTED_SHARDS: '${shards.join(',')}'`);
+  });
+  it("makes publication a PR prerequisite of the required test gate", () => {
+    const gate = workflow.split("  test:\n")[1].split("  # One comment")[0];
+    expect(gate).to.contain("pr-report]");
+    expect(gate).to.contain('"$REPORT_RESULT" == success');
+    const report = workflow.split("  pr-report:\n")[1];
+    expect(report).not.to.contain("continue-on-error: true");
+    expect(report).not.to.contain("needs: [test]");
   });
 });
