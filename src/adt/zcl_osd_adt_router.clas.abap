@@ -194,6 +194,9 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/oo/classrun/:name`
       iv_handler = `ZCL_OSD_ADT_CLASSRUN` iv_served_by = lv_classrun_by
       CHANGING ct_routes = rt_routes ).
+*   A10: SEGW entity set map.
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/segw/entitysets`
+      iv_handler = `ZCL_OSD_ADT_ENTITYSETS` CHANGING ct_routes = rt_routes ).
 *   everything else is still the Node facade's, until its group moves
     add( EXPORTING iv_method = `*` iv_pattern = `/sap/bc/adt/*` iv_served_by = c_host
          CHANGING ct_routes = rt_routes ).
