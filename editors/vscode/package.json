@@ -378,11 +378,11 @@
         "title": "Getting started with osd",
         "description": "Start a local ABAP system, see what runs, and try the editor tools.",
         "steps": [
-          {"id": "quickStart", "title": "TL;DR — I trust you, use the defaults", "description": "One click starts the bundled copy (or the open-steamgate checkout), SQLite, and warm activation when the host has enough memory. It opens System overview when ready.", "media": {"markdown": "./walkthrough/quick-start.md"}, "completionEvents": ["onCommand:osd.quickStart"]},
-          {"id": "startSystem", "title": "Start the system", "description": "The OSD view owns the build, listener, and stop controls.", "media": {"markdown": "./walkthrough/start-system.md"}},
+          {"id": "quickStart", "title": "TL;DR — I trust you, use the defaults", "description": "One click starts the bundled copy (or the open-steamgate checkout), SQLite, and warm activation when the host has enough memory. It opens System overview when ready.\n\n[Start with the defaults](command:osd.quickStart)", "media": {"markdown": "./walkthrough/quick-start.md"}, "completionEvents": ["onCommand:osd.quickStart"]},
+          {"id": "startSystem", "title": "Start the system", "description": "The OSD view owns the build, listener, and stop controls.\n\n[Start the system](command:osd.start)", "media": {"markdown": "./walkthrough/start-system.md"}},
           {"id": "whereThingsLive", "title": "Where things live", "description": "The base system and your workspace layers are separate places.", "media": {"markdown": "./walkthrough/where-things-live.md"}},
           {"id": "keys", "title": "Keys", "description": "The default ABAP keymap follows familiar ADT actions.", "media": {"markdown": "./walkthrough/keys.md"}},
-          {"id": "tryIt", "title": "Try the tools", "description": "Run tests, use a lens, preview data, and open the launchpad.", "media": {"markdown": "./walkthrough/try-it.md"}},
+          {"id": "tryIt", "title": "Try the tools", "description": "Run tests, use a lens, preview data, and open the launchpad.\n\n[New SQL notebook](command:osd.newSqlNotebook)", "media": {"markdown": "./walkthrough/try-it.md"}},
           {"id": "reinstall", "title": "Reinstall the extension", "description": "Build and install a fresh VSIX when the extension changes.", "media": {"markdown": "./walkthrough/reinstall.md"}}
         ]
       }

@@ -1379,7 +1379,18 @@ describe("editors/vscode: the extension's logic", function () {
     for (const walkthrough of walkthroughs) {
       expect(walkthrough.steps[0].id).to.equal("quickStart");
       for (const step of walkthrough.steps) {
-        expect(readFileSync(path.join(ROOT, "editors/vscode", step.media.markdown), "utf8")).not.to.equal("");
+        const media = readFileSync(path.join(ROOT, "editors/vscode", step.media.markdown), "utf8");
+        expect(media).not.to.equal("");
+        // Media can disappear with both sidebars open. Every action offered
+        // there must also be reachable in the always-visible step description.
+        for (const link of media.matchAll(/\[[^\]]+\]\((command:osd\.[^)]+)\)/g)) {
+          expect(step.description, `${step.id}: ${link[1]}`).to.contain(`](${link[1]})`);
+        }
+        if (step.id === "quickStart") {
+          expect(step.description).to.contain("[Start with the defaults](command:osd.quickStart)");
+          expect(media).to.contain("[Start with the defaults](command:osd.quickStart)");
+        }
+        if (step.id === "startSystem") expect(step.description).to.contain("](command:osd.start)");
       }
     }
   });
