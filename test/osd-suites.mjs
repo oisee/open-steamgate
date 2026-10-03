@@ -6,6 +6,7 @@ import {expect} from "chai";
 import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment, runWithRetries, runWithRetries as realRunWithRetries} from "../tools/osd-suites.mjs";
 import {mergeTimings} from "../tools/osd-suites-timings.mjs";
 import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync} from "node:fs";
+import {createRequire} from "node:module";
 import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, relative} from "node:path";
@@ -328,5 +329,45 @@ describe("Mocha file reports", () => {
       expect(report.failures[0].file).to.equal(file);
       expect(report.failures[0].title).to.contain('"before all" hook');
     } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
+});
+
+
+describe("required PR retry reports", () => {
+  const workflow = readFileSync(".github/workflows/tests.yml", "utf8");
+  const script = workflow.split("          script: |\n").at(-1).split("\n").map((line) => line.replace(/^            /, "")).join("\n");
+  const execute = async (mode) => {
+    const nativeRequire = createRequire(import.meta.url);
+    const fs = nativeRequire("node:fs");
+    const mockedFs = {...fs,
+      existsSync: () => mode !== "missing-directory",
+      readdirSync: () => { if (mode === "missing-directory") throw Error("ENOENT suite-results"); return mode === "missing-shard" ? ["suite-results-1"] : [1, 2, 3, 4].map((i) => `suite-results-${i}`); },
+      readFileSync: (file) => { if (mode === "unreadable") throw Error("unreadable report"); return ""; },
+    };
+    const github = {paginate: async () => [], rest: {actions: {listJobsForWorkflowRunAttempt() {}}, issues: {listComments() {}, createComment() {}, updateComment() {}}}};
+    const context = {repo: {owner: "fixture", repo: "fixture"}, payload: {pull_request: {head: {sha: "12345678"}}}, issue: {number: 1}, runId: 1};
+    await new (Object.getPrototypeOf(async function () {}).constructor)("require", "github", "context", "process", script)(
+      (name) => name === "node:fs" ? mockedFs : nativeRequire(name), github, context,
+      {env: {EXPECTED_SHARDS: "1,2,3,4", JOB_RESULTS: JSON.stringify({build: {result: "success"}, suites: {result: "success"}, packaging: {result: "skipped"}, e2e: {result: "success"}, "osgo-host": {result: "success"}}), VSIX_PROFILE: "fast"}});
+  };
+  for (const mode of ["missing-directory", "missing-shard", "unreadable"]) {
+    it(`fails publication for ${mode}`, async () => {
+      let error;
+      try { await execute(mode); } catch (caught) { error = caught; }
+      expect(error, "publication must fail closed").to.be.instanceOf(Error);
+    });
+  }
+  it("accepts four readable empty reports", async () => { await execute("complete"); });
+  it("keeps expected reports in step with the shard matrix", () => {
+    const shards = workflow.match(/shard: \[(.*?)\]/)[1].split(',').map((s) => s.trim());
+    expect(workflow).to.contain(`EXPECTED_SHARDS: '${shards.join(',')}'`);
+  });
+  it("makes publication a PR prerequisite of the required test gate", () => {
+    const gate = workflow.split("  test:\n")[1].split("  # One comment")[0];
+    expect(gate).to.contain("pr-report]");
+    expect(gate).to.contain('"$REPORT_RESULT" == success');
+    const report = workflow.split("  pr-report:\n")[1];
+    expect(report).not.to.contain("continue-on-error: true");
+    expect(report).not.to.contain("needs: [test]");
   });
 });

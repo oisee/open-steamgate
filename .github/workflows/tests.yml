@@ -424,7 +424,7 @@ jobs:
 
   test:
     if: always()
-    needs: [build, suites, packaging, e2e, osgo-host]
+    needs: [build, suites, packaging, e2e, osgo-host, pr-report]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job to pass
@@ -435,7 +435,12 @@ jobs:
           OSGO_RESULT: ${{ needs.osgo-host.result }}
           PACKAGING_RESULT: ${{ needs.packaging.result }}
           VSIX_PROFILE: ${{ needs.build.outputs.vsix_profile }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPORT_RESULT: ${{ needs.pr-report.result }}
         run: |
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            [[ "$REPORT_RESULT" == success ]] || exit 1
+          fi
           [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success && "$OSGO_RESULT" == success ]]
           case "$VSIX_PROFILE:$PACKAGING_RESULT" in
             full:success|fast:skipped) ;;
@@ -447,10 +452,10 @@ jobs:
   # A green rollup and a job that never ran look alike in the checks list; a
   # table that names every job, its result and its duration does not. The rows
   # come from this run's own job list, so a new job appears without editing
-  # this step. Same-repository PRs only: a fork's token cannot write comments.
+  # this step. All PRs validate artifacts; only same-repository PRs write comments.
   pr-report:
-    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    needs: [test]
+    if: always() && github.event_name == 'pull_request'
+    needs: [build, suites, packaging, e2e, osgo-host]
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -458,23 +463,33 @@ jobs:
     steps:
       - name: Download shard retry reports
         uses: actions/download-artifact@v4
-        continue-on-error: true
         with:
           pattern: suite-results-*
           path: suite-results
       - name: Update one PR comment with this run's jobs
         uses: actions/github-script@v7
         env:
-          GATE_RESULT: ${{ needs.test.result }}
+          EXPECTED_SHARDS: '1,2,3,4'
+          JOB_RESULTS: ${{ toJSON(needs) }}
+          VSIX_PROFILE: ${{ needs.build.outputs.vsix_profile }}
+          CAN_COMMENT: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           script: |
             const fs = require('node:fs');
             const path = require('node:path');
-            const reports = fs.existsSync('suite-results')
-              ? fs.readdirSync('suite-results').sort().flatMap((dir) => {
-                  const file = path.join('suite-results', dir, 'flaky.md');
-                  return fs.existsSync(file) ? [fs.readFileSync(file, 'utf8').trim()].filter(Boolean) : [];
-                }) : [];
+            // The matrix above must supply one readable report per shard, even
+            // when empty. A missing artifact is missing evidence, never clean.
+            const expected = process.env.EXPECTED_SHARDS.split(',').map((i) => `suite-results-${i}`);
+            const actual = fs.readdirSync('suite-results').sort();
+            if (JSON.stringify(actual) !== JSON.stringify(expected.slice().sort())) {
+              throw new Error(`Expected shard reports ${expected.join(', ')}; got ${actual.join(', ')}`);
+            }
+            const reports = expected.map((dir) => fs.readFileSync(path.join('suite-results', dir, 'flaky.md'), 'utf8').trim()).filter(Boolean);
+            if (process.env.CAN_COMMENT === 'false') return;
+            const results = JSON.parse(process.env.JOB_RESULTS);
+            const gatePassed = ['build', 'suites', 'e2e', 'osgo-host'].every((job) => results[job].result === 'success') &&
+              (process.env.VSIX_PROFILE === 'full' ? results.packaging.result === 'success' :
+                process.env.VSIX_PROFILE === 'fast' && results.packaging.result === 'skipped');
             const marker = '<!-- osd-pr-test-report -->';
             const icon = (v) => v === 'success' ? '🟢 pass' : v === 'failure' ? '🔴 fail' : v === 'cancelled' ? '⚫ cancelled' : v === 'skipped' ? '⚪ skipped' : '⚪ ' + (v || 'not run');
             const { owner, repo } = context.repo;
@@ -487,7 +502,7 @@ jobs:
             const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId}`;
             const body = [
               marker,
-              `### PR tests: ${icon(process.env.GATE_RESULT)}`,
+              `### PR tests: ${icon(gatePassed ? 'success' : 'failure')}`,
               `Commit: \`${context.payload.pull_request.head.sha.slice(0, 8)}\` · [Full test log](${runUrl})`,
               '',
               '| Job | Result | Time |',

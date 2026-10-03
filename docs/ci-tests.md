@@ -96,9 +96,15 @@ Retries never replace first-run weights. Local runs can write the same artifacts
 with `--timings <artifact.json> --report <flaky.md>`.
 
 After a failed shard, up to three distinct failing files each run once in a
-fresh Mocha process; test-level retries are forced to zero. More than three
+fresh Mocha process; a named group retries together in one process. Packaging
+never retries, so a packaging failure stays red. Test-level and suite-level
+retries are forced to zero by a root hook; any observed internal retry stays red
+and names the test. More than three
 failing files means no retries. A second failure, crash, missing/incomplete
-failure report or unattributed failure stays red. Isolation recoveries keep the
+failure report or unattributed failure stays red. Even a zero process exit
+requires the reporter's completion marker, consistent zero failures, and per-file
+registered/passed/pending counts. Empty files and empty retries stay red; files
+whose registered tests are all explicitly pending remain valid. Isolation recoveries keep the
 shard green and write this line to `$GITHUB_STEP_SUMMARY` and the PR comment:
 
 ```text
@@ -107,11 +113,13 @@ shard green and write this line to `$GITHUB_STEP_SUMMARY` and the PR comment:
 
 The label flags possible order dependence: isolation success cannot distinguish
 an ordering dependency from a transient flake. Investigate recurring lines.
-PR comments retain the existing same-repository restriction.
+All pull requests require four readable shard reports, including empty
+`flaky.md` files for clean shards. Download, validation or publication failures
+fail `pr-report`, which the required `test` gate depends on for PRs. Comment
+writes retain the same-repository restriction; fork PRs still validate reports.
 
 Alice's merge policy (2026-10-03): **required checks are `test` + `scan` only**.
-Docker, gogen, preview, size and queue are advisory on PRs. This slice leaves
-the `test` rollup's own required jobs unchanged.
+Docker, gogen, preview, size and queue are advisory on PRs. The `test` rollup also requires retry-report validation/publication on PRs.
 
 ### Per-file integration timing, 2026-09-29
 
