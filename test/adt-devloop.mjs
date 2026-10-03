@@ -7,6 +7,7 @@ import {request} from "node:http";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {Data} from "../tools/osd-data.mjs";
+import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {undoOnExit} from "./helpers/undo-on-exit.mjs";
 import {adtAbap} from "./helpers/adt-abap.mjs";
 import {SESSION_COOKIE} from "../tools/adt-session.mjs";
@@ -54,6 +55,7 @@ describe("tools/adt-facade: the development loop", () => {
   let store;
   let token;
   let context;
+  let data;
 
   before(async function () {
     this.timeout(120000);
@@ -96,7 +98,8 @@ describe("tools/adt-facade: the development loop", () => {
     app.disable("x-powered-by");
     app.use(express.raw({type: "*/*", limit: "16mb"}));
     // LOCK and UNLOCK are ABAP's unless OSD_ADT=js (ADR 0007, slice 2)
-    const facade = adtRouter({transpileOnActivate: false, data: new Data({client}), abap: await adtAbap()});
+    data = new Data({client});
+    const facade = adtRouter({transpileOnActivate: false, data, abap: await adtAbap()});
     store = facade.store;
     // registered here, not at load, so a run that filters this suite out
     // installs no signal listener on its behalf
@@ -946,11 +949,20 @@ describe("tools/adt-facade: the development loop", () => {
     // tree when this suite's `before()` booted is.
     it("a class that writes and then dumps: the output before it survives, the dump is recorded, nothing half-written", async function () {
       this.timeout(30000);
+      const dumpSql = "SELECT dump_id, runtime_error FROM zosd_dump WHERE objname = 'ZCL_OSD_CLASSRUN_DUMPER'";
+      const readDumps = () => dialogStep(async () => (await data.query(dumpSql, {max: 10000})).rows, "Q6b inspect dumps");
+      const before = await readDumps();
+      const beforeIds = new Set(before.map(row => row.dump_id));
       const res = await call("/oo/classrun/ZCL_OSD_CLASSRUN_DUMPER", {method: "POST"});
       expect(res.status).to.equal(200);
       const text = await res.text();
       expect(text).to.contain("before the dump");
       expect(text).to.match(/Runtime error:.*ZERODIVIDE/i);
+
+      const after = await readDumps();
+      const created = after.filter(row => !beforeIds.has(row.dump_id));
+      expect(created, `classrun must create a new dump (before ${before.length}, after ${after.length})`).to.have.length(1);
+      expect(created[0].runtime_error.toUpperCase()).to.contain("ZERODIVIDE");
 
       // the same table Q4's hotspots and Q6a's own notebook read
       // (tools/osd-dumps.mjs ZOSD_DUMP): the dump this run just caused is in it

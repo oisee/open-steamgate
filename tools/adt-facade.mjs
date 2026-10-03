@@ -34,6 +34,7 @@ import {RemoteSessions} from "./adt-remote-sessions.mjs";
 import {sessionRoutes} from "./adt-session-routes.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
 import {abapSession, statelessLock} from "./adt-enq.mjs";
+import {createDumpRecorder} from "./osd-dumps.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict, InvalidName} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
@@ -728,11 +729,15 @@ export function adtRouter(options = {}) {
   // ADR 0007: every request enters ZCL_OSD_ADT_HANDLER (adt-abap-front.mjs),
   // which resolves the session, gates and answers or hands over; locks go
   // to ENQ (adt-enq.mjs)
+  const inlineDumps = options.abap !== undefined && options.abap.remote === undefined
+    ? createDumpRecorder({connection: () => globalThis.abap.context.databaseConnections.DEFAULT,
+      generation: () => liveHash(store.root)}) : undefined;
   if (options.abap !== undefined) pass("abap-front", [BASE, "/sap/public/bc/icf/logoff"], abapFront({...options.abap, served: options.abapServed, refuse, store, facadeOptions: options,
     miss: (req, kind, detail) => record(req, kind, detail, (req.originalUrl ?? req.url).split("?")[0]),
     generation: () => liveHash(store.root),
-    sessions, ...abapSession(sessions, (kind, name) => {
+    sessions, ...abapSession(sessions, (kind, name, _req, json) => {
       if (kind === "IDENTITY") return identity;
+      if (kind === "DUMP") return inlineDumps?.system(json);
       return undefined;
     })}));
 

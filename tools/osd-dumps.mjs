@@ -3,20 +3,13 @@
 // Writing a dump is the kernel's job, not the application's -- an AS ABAP
 // writes the dump *after* the LUW has been rolled back, in its own
 // statement and its own commit, never inside the failed one. This is the
-// one place that happens: `persistDump` is called from tools/osd-serve.mjs's
-// dump() only after the request's own dialogStep() has already rolled back
-// (its catch runs on a rejected `await`, and `exclusive()`'s `finally`
-// has released the work process by then), and it runs its insert through a
-// fresh `dialogStep()` of its own -- a new step, a new commit.
-//
-// "A rule for what every host must do lives in a module they all import"
-// (CLAUDE.md): this module is that import for the dump table. Only
-// tools/osd-serve.mjs calls it today, because it is the only host with a
-// dump() at all -- test/start.mjs's inline front catches a runtime error
-// and logs it, with no ring and no /osd/dumps, so there is nothing there to
-// wire this into (left alone, on purpose; see docs/vscode-extension.md).
+// shared persistence seam for Node classrun and SYSTEM DUMP in both the
+// inline and serving-child hosts. SYSTEM DUMP arrives inside the failed
+// step: createDumpRecorder detaches its context and queues a fresh step
+// behind it, so rollback finishes before the dump row is committed.
 import {basename} from "node:path";
-import {dialogStep} from "./osd-dialog-step.mjs";
+import {dialogStep, outsideStepContext} from "./osd-dialog-step.mjs";
+import {dumpOf} from "./osd-where.mjs";
 
 // the last N kept, the same shape ST22's ring has: capped so the table
 // cannot grow without bound in a process left running
@@ -133,4 +126,28 @@ export async function persistDump(connection, d, options = {}) {
     );
   }, "write a dump");
   return row;
+}
+
+/** The host's SYSTEM DUMP service: map, retain and persist in one place.
+ * connection/generation are read per call so warm generations stay current.
+ * Persistence is queued, never awaited inside the failed dialog step. */
+export function createDumpRecorder({connection, generation = () => "0", onDump = () => {}}) {
+  const dumps = [];
+  function dump(error, request) {
+    const d = dumpOf(error, {request});
+    dumps.push(d);
+    if (dumps.length > 100) dumps.shift();
+    onDump(d, request);
+    outsideStepContext(() => persistDump(connection(), d, {request, generation: generation()}))
+      .catch(e => console.error(`ZOSD_DUMP: ${e?.message ?? e}`));
+    return d;
+  }
+  function system(json) {
+    const input = JSON.parse(json || "{}");
+    if (input.operation !== "record") return dumps.slice().reverse();
+    const error = {constructor: {name: input.name || ""}, message: input.message, stack: input.stack};
+    const recorded = dump(error, input.request);
+    return {where: recorded.where, frames: recorded.frames};
+  }
+  return {dump, system, dumps};
 }
