@@ -107,9 +107,12 @@
             lv_seconds = cl_abap_tstmp=>subtract( tstmp1 = ls_pile-ended tstmp2 = ls_pile-started ).
             APPEND lv_seconds TO lt_seconds.
             lv_total = lv_total + lv_seconds.
-          WHEN 'FAILED' OR 'FUSED'. ls_stat-piles_failed = ls_stat-piles_failed + 1.
-          WHEN 'RUNNING'. ls_stat-piles_running = ls_stat-piles_running + 1.
-          WHEN 'HELD'. ls_stat-piles_held = ls_stat-piles_held + 1.
+          WHEN 'FAILED' OR 'FUSED'.
+            ls_stat-piles_failed = ls_stat-piles_failed + 1.
+          WHEN 'RUNNING'.
+            ls_stat-piles_running = ls_stat-piles_running + 1.
+          WHEN 'HELD'.
+            ls_stat-piles_held = ls_stat-piles_held + 1.
         ENDCASE.
       ENDLOOP.
       SORT lt_seconds.
@@ -144,9 +147,11 @@
     UPDATE zosd_l3_watch SET next_tick = lv_next WHERE set_name = c_set.
   ENDMETHOD.
   METHOD doctor_tick.
-    rv_secs = {{tick}}.
 {{#settings.doctor_tick}}
     DATA ls_conf TYPE {{settings.class}}=>ty_state.
+{{/settings.doctor_tick}}
+    rv_secs = {{tick}}.
+{{#settings.doctor_tick}}
     ls_conf = {{settings.class}}=>load( ).
     rv_secs = ls_conf-vals-doctor_tick.
 {{/settings.doctor_tick}}

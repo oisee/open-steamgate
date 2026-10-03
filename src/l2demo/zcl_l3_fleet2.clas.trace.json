@@ -24412,22 +24412,22 @@
   },
   {
    "line": 3475,
-   "template_line": 4385,
-   "path": "/daemon",
+   "template_line": 4383,
+   "path": "/autodoctor",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
    "line": 3476,
-   "template_line": 4386,
-   "path": "/daemon",
+   "template_line": 4384,
+   "path": "/autodoctor",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
    "line": 3477,
-   "template_line": 4387,
-   "path": "/daemon",
+   "template_line": 4385,
+   "path": "/autodoctor",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
@@ -24469,510 +24469,531 @@
   {
    "line": 3483,
    "template_line": 4393,
-   "path": "/daemon/tick",
+   "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
    "line": 3484,
-   "template_line": 4395,
-   "path": "/settings/class",
-   "node": "set/fleet2/settings",
-   "set_line": 111
+   "template_line": 4394,
+   "path": "/daemon",
+   "node": "set/fleet2/resilience/doctor",
+   "set_line": 72
   },
   {
    "line": 3485,
-   "template_line": 4396,
-   "path": "/settings/class",
-   "node": "set/fleet2/settings",
-   "set_line": 111
+   "template_line": 4395,
+   "path": "/daemon",
+   "node": "set/fleet2/resilience/doctor",
+   "set_line": 72
   },
   {
    "line": 3486,
    "template_line": 4397,
-   "path": "/settings/doctor_tick",
+   "path": "/settings/class",
    "node": "set/fleet2/settings",
    "set_line": 111
   },
   {
    "line": 3487,
    "template_line": 4399,
-   "path": "/daemon",
+   "path": "/daemon/tick",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
    "line": 3488,
-   "template_line": 4400,
-   "path": "/daemon",
-   "node": "set/fleet2/resilience/doctor",
-   "set_line": 72
+   "template_line": 4401,
+   "path": "/settings/class",
+   "node": "set/fleet2/settings",
+   "set_line": 111
   },
   {
    "line": 3489,
-   "template_line": 4401,
-   "path": "/daemon",
-   "node": "set/fleet2/resilience/doctor",
-   "set_line": 72
+   "template_line": 4402,
+   "path": "/settings/doctor_tick",
+   "node": "set/fleet2/settings",
+   "set_line": 111
   },
   {
    "line": 3490,
-   "template_line": 4402,
-   "path": "/daemon",
-   "node": "set/fleet2/resilience/doctor",
-   "set_line": 72
-  },
-  {
-   "line": 3491,
-   "template_line": 4403,
-   "path": "/daemon",
-   "node": "set/fleet2/resilience/doctor",
-   "set_line": 72
-  },
-  {
-   "line": 3492,
    "template_line": 4404,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3493,
+   "line": 3491,
    "template_line": 4405,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3494,
+   "line": 3492,
    "template_line": 4406,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3495,
+   "line": 3493,
    "template_line": 4407,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3496,
+   "line": 3494,
    "template_line": 4408,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3497,
+   "line": 3495,
    "template_line": 4409,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3498,
+   "line": 3496,
    "template_line": 4410,
-   "path": "/daemon/daemon_class_upper",
+   "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3499,
+   "line": 3497,
    "template_line": 4411,
-   "path": "/daemon/name",
+   "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3500,
+   "line": 3498,
    "template_line": 4412,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3501,
+   "line": 3499,
    "template_line": 4413,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3502,
+   "line": 3500,
    "template_line": 4414,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3503,
+   "line": 3501,
    "template_line": 4415,
    "path": "/daemon/daemon_class_upper",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3504,
+   "line": 3502,
    "template_line": 4416,
-   "path": "/daemon",
+   "path": "/daemon/name",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3505,
+   "line": 3503,
    "template_line": 4417,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3506,
+   "line": 3504,
    "template_line": 4418,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3507,
+   "line": 3505,
    "template_line": 4419,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3508,
+   "line": 3506,
    "template_line": 4420,
-   "path": "/daemon",
+   "path": "/daemon/daemon_class_upper",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3509,
+   "line": 3507,
    "template_line": 4421,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3510,
+   "line": 3508,
    "template_line": 4422,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3511,
+   "line": 3509,
    "template_line": 4423,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3512,
+   "line": 3510,
    "template_line": 4424,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3513,
+   "line": 3511,
    "template_line": 4425,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3514,
+   "line": 3512,
    "template_line": 4426,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3515,
+   "line": 3513,
    "template_line": 4427,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3516,
+   "line": 3514,
    "template_line": 4428,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3517,
+   "line": 3515,
    "template_line": 4429,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3518,
+   "line": 3516,
    "template_line": 4430,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3519,
+   "line": 3517,
    "template_line": 4431,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3520,
+   "line": 3518,
    "template_line": 4432,
-   "path": "/daemon/daemon_class_upper",
+   "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3521,
+   "line": 3519,
    "template_line": 4433,
-   "path": "/daemon/name",
+   "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3522,
+   "line": 3520,
    "template_line": 4434,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3523,
+   "line": 3521,
    "template_line": 4435,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3524,
+   "line": 3522,
    "template_line": 4436,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3525,
+   "line": 3523,
    "template_line": 4437,
-   "path": "/daemon",
+   "path": "/daemon/daemon_class_upper",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3526,
+   "line": 3524,
    "template_line": 4438,
-   "path": "/daemon",
+   "path": "/daemon/name",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3527,
+   "line": 3525,
    "template_line": 4439,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3528,
+   "line": 3526,
    "template_line": 4440,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3529,
+   "line": 3527,
    "template_line": 4441,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3530,
+   "line": 3528,
    "template_line": 4442,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3531,
+   "line": 3529,
    "template_line": 4443,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3532,
+   "line": 3530,
    "template_line": 4444,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3533,
+   "line": 3531,
    "template_line": 4445,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3534,
+   "line": 3532,
    "template_line": 4446,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3535,
+   "line": 3533,
    "template_line": 4447,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3536,
+   "line": 3534,
    "template_line": 4448,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3537,
+   "line": 3535,
    "template_line": 4449,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3538,
+   "line": 3536,
    "template_line": 4450,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3539,
+   "line": 3537,
    "template_line": 4451,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3540,
+   "line": 3538,
    "template_line": 4452,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3541,
+   "line": 3539,
    "template_line": 4453,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3542,
+   "line": 3540,
    "template_line": 4454,
-   "path": "/daemon/daemon_class_upper",
+   "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3543,
+   "line": 3541,
    "template_line": 4455,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3544,
+   "line": 3542,
    "template_line": 4456,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3545,
+   "line": 3543,
    "template_line": 4457,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3546,
+   "line": 3544,
    "template_line": 4458,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3547,
+   "line": 3545,
    "template_line": 4459,
-   "path": "/daemon/name",
+   "path": "/daemon/daemon_class_upper",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3548,
+   "line": 3546,
    "template_line": 4460,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3549,
+   "line": 3547,
    "template_line": 4461,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3550,
+   "line": 3548,
    "template_line": 4462,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3551,
+   "line": 3549,
    "template_line": 4463,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3552,
+   "line": 3550,
    "template_line": 4464,
-   "path": "/daemon",
+   "path": "/daemon/name",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3553,
+   "line": 3551,
    "template_line": 4465,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
-   "line": 3554,
+   "line": 3552,
    "template_line": 4466,
    "path": "/daemon",
    "node": "set/fleet2/resilience/doctor",
    "set_line": 72
   },
   {
+   "line": 3553,
+   "template_line": 4467,
+   "path": "/daemon",
+   "node": "set/fleet2/resilience/doctor",
+   "set_line": 72
+  },
+  {
+   "line": 3554,
+   "template_line": 4468,
+   "path": "/daemon",
+   "node": "set/fleet2/resilience/doctor",
+   "set_line": 72
+  },
+  {
    "line": 3555,
-   "template_line": 4639,
+   "template_line": 4469,
+   "path": "/daemon",
+   "node": "set/fleet2/resilience/doctor",
+   "set_line": 72
+  },
+  {
+   "line": 3556,
+   "template_line": 4470,
+   "path": "/daemon",
+   "node": "set/fleet2/resilience/doctor",
+   "set_line": 72
+  },
+  {
+   "line": 3557,
+   "template_line": 4471,
+   "path": "/daemon",
+   "node": "set/fleet2/resilience/doctor",
+   "set_line": 72
+  },
+  {
+   "line": 3558,
+   "template_line": 4644,
    "path": "/",
    "node": "set/fleet2",
    "set_line": 15

@@ -3445,9 +3445,12 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
             lv_seconds = cl_abap_tstmp=>subtract( tstmp1 = ls_pile-ended tstmp2 = ls_pile-started ).
             APPEND lv_seconds TO lt_seconds.
             lv_total = lv_total + lv_seconds.
-          WHEN 'FAILED' OR 'FUSED'. ls_stat-piles_failed = ls_stat-piles_failed + 1.
-          WHEN 'RUNNING'. ls_stat-piles_running = ls_stat-piles_running + 1.
-          WHEN 'HELD'. ls_stat-piles_held = ls_stat-piles_held + 1.
+          WHEN 'FAILED' OR 'FUSED'.
+            ls_stat-piles_failed = ls_stat-piles_failed + 1.
+          WHEN 'RUNNING'.
+            ls_stat-piles_running = ls_stat-piles_running + 1.
+          WHEN 'HELD'.
+            ls_stat-piles_held = ls_stat-piles_held + 1.
         ENDCASE.
       ENDLOOP.
       SORT lt_seconds.
@@ -3480,8 +3483,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     UPDATE zosd_l3_watch SET next_tick = lv_next WHERE set_name = c_set.
   ENDMETHOD.
   METHOD doctor_tick.
-    rv_secs = 10.
     DATA ls_conf TYPE zcl_l3_fleet2_conf=>ty_state.
+    rv_secs = 10.
     ls_conf = zcl_l3_fleet2_conf=>load( ).
     rv_secs = ls_conf-vals-doctor_tick.
   ENDMETHOD.
