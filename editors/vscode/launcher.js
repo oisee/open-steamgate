@@ -515,6 +515,10 @@ function inspectorOnce(port, body, timeoutMs = 15000) {
     const req = request({hostname: "127.0.0.1", port, path: "/osd/inspector", method: payload === undefined ? "GET" : "POST", timeout: timeoutMs,
       headers: payload === undefined ? {} : {"content-type": "application/json", "content-length": Buffer.byteLength(payload)}}, (res) => {
       let text = "";
+      // Once headers arrive, a truncated response can close the request
+      // without a request error or an end event. Settle that path too.
+      res.on("error", reject);
+      res.on("aborted", () => reject(new Error("the inspector door closed before its answer was complete")));
       res.on("data", (d) => (text += d));
       res.on("end", () => {
         let answer;

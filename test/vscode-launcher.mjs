@@ -1623,6 +1623,25 @@ describe("editors/vscode/launcher.js: the inspector on demand", function () {
     });
   }
 
+  it("rejects an inspector answer whose socket closes after headers", async () => {
+    const {createServer} = await import("node:http");
+    server = createServer((req, res) => {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, {"content-type": "application/json", "content-length": 100});
+        res.write('{"open":');
+        // Wait until the client has received headers, then truncate the body.
+        res.socket.end();
+      });
+    });
+    await listen();
+    const launcher = makeLauncher();
+    launcher.state = "running";
+    launcher.port = server.address().port;
+    await bounded(rejects(launcher.openInspector(), /closed before its answer was complete/), "truncated inspector response rejection");
+    expect(launcher.inspectorOpen).not.to.equal(true);
+  });
+
   it("bounds recovery readiness and leaves the inspector unopened on timeout", async function () {
     this.timeout(20000);
     const {createServer} = await import("node:http");
