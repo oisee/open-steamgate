@@ -1887,7 +1887,6 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       WITH s_11 = gs_settings-vals-simulate_seed
       WITH s_12 = gs_settings-vals-simulate_time_scale
       WITH s_13 = gs_settings-vals-piles_checks_size
-      WITH s_14 = gs_settings-vals-remote_destination
       WITH p_active = is_params-active_status
       VIA JOB lv_jobname NUMBER lv_jobcount
       AND RETURN.

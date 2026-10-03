@@ -30,7 +30,6 @@ PARAMETERS s_10 TYPE c LENGTH 40 LOWER CASE.
 PARAMETERS s_11 TYPE c LENGTH 40 LOWER CASE.
 PARAMETERS s_12 TYPE c LENGTH 40 LOWER CASE.
 PARAMETERS s_13 TYPE c LENGTH 40 LOWER CASE.
-PARAMETERS s_14 TYPE c LENGTH 40 LOWER CASE.
 PARAMETERS p_active TYPE zosd_l2_ship-status.
 PARAMETERS p_mode TYPE c LENGTH 1 DEFAULT 'R'.
 
@@ -51,7 +50,6 @@ START-OF-SELECTION.
   ls_settings-simulate_seed = s_11.
   ls_settings-simulate_time_scale = s_12.
   ls_settings-piles_checks_size = s_13.
-  ls_settings-remote_destination = s_14.
   DATA ls_params TYPE zcl_l3_fleet2=>ty_params.
   DATA ls_result TYPE zcl_l3_fleet2=>ty_result.
   DATA ls_deleted TYPE zcl_l3_fleet2=>ty_unschedule.

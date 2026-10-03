@@ -61,7 +61,7 @@ function ddic(name, fields, table=false) {
 }
 export async function renderRemote(model, {classXml}) {
   const r = model.remote, files = {};
-  const heads = [field('set_name','CHAR',16),field('run_id','CHAR',32),field('rule_name','CHAR',60),field('model_hash','CHAR',71),field('mode','CHAR',1),
+  const heads = [field('set_name','CHAR',16),field('run_id','CHAR',32),field('rule_name','CHAR',60),field('model_hash','CHAR',71),field('run_mode','CHAR',1),
     field('check_date','DATS',8),field('pile_no','INT4',10),field('attempt','INT4',10),field('stage_no','INT4',10),field('rule_no','INT4',10),
     field('snap_id','CHAR',32),field('content_hash','CHAR',64),field('row_count','INT4',10),field('key_offset','INT4',10),field('key_length','INT4',10),
     field('rule_class','CHAR',30),field('rule_file','CHAR',128),field('rule_line','INT4',10)];

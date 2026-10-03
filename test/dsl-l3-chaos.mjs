@@ -119,7 +119,9 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
       }
       // none of them takes a selection field of the pile job (a job step carries at most 20), nor does piles.lanes, read live
       expect(model.settings.entries.filter((e) => e.chaos).map((e) => e.name)).to.have.length(6);
-      expect(model.settings.entries.filter((e) => e.unscreened && !e.chaos).map((e) => e.name)).to.deep.equal(["piles.lanes"]);
+      // remote.destination is the one new setting: read live at send/retry, with no extra job input.
+      expect(entry("remote.destination")).to.include({live: true, unscreened: true, scoped: false});
+      expect(model.settings.entries.filter((e) => e.unscreened && !e.chaos).map((e) => e.name)).to.deep.equal(["piles.lanes", "remote.destination"]);
       expect(model.settings.entries.filter((e) => !e.unscreened).map((e) => e.screen)).to.deep.equal(Array.from({length: 13}, (_, i) => `s_${i + 1}`));
       expect(model.settings.chaos_outcomes.map((e) => e.name)).to.deep.equal(["simulate.dump", "simulate.hang", "simulate.slow"]);
       // a manifest narrows an override: never more than 30 per cent dumps from the cockpit
@@ -151,13 +153,16 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
       if (git(["cat-file", "-e", `${BEFORE}:${SET}`]).status !== 0) this.skip();
       // the manifest as it was: no profiles, none of the six settings
       // Restore the pre-chaos manifest and explicitly retain its scheduled job doctor.
-      // Normalize the 5e additions, the snapshots and the event release of the lanes slice; all other live
+      // Normalize the 5e additions, snapshots, event release and the later remote seam; all other live
       // manifest bytes stay in the oracle.
-      const slice6c = SET_TEXT.replace(/^# Bounded concurrency[^\n]*\n(# [^\n]*\n){3}/m, "").replace("piles: {release: event}\n", "").replace(", piles.lanes]", "]").replace("  doctor: {as: [daemon], tick: 10}\n", "").replace("[doctor.tick, ", "[")
+      const slice6c = SET_TEXT
+        // The remote variant and its one live setting did not exist in the pre-chaos oracle.
+        .replace("      remote: {function: Z_L3_FLEET2_ALERTS, destination: remote.destination, group: ZL3_FLEET2_RFC}\n", "")
+        .replace(", remote.destination]", "]").replace(/^# Bounded concurrency[^\n]*\n(# [^\n]*\n){3}/m, "").replace("piles: {release: event}\n", "").replace(", piles.lanes]", "]").replace("  doctor: {as: [daemon], tick: 10}\n", "").replace("[doctor.tick, ", "[")
         .replace(/^snapshots:\n(  .*\n)+/m, "").replace(/^    input:.*\n/gm, "")
         .replace("# takes over a silent pile or gate after 15 minutes; the daemon doctor is\n# armed by every parallel run;",
           "# takes over a lock, a pile or a gate left for 15 minutes and runs as a job of\n# the schedule;");
-      expect(slice6c, "only the doctor and snapshot additions since 6c").to.equal(git(["show", `8f032a432:${SET}`]).stdout);
+      expect(slice6c, "only the explicit later additions since 6c").to.equal(git(["show", `8f032a432:${SET}`]).stdout);
       const before = slice6c.replace(PROFILES, "").replace(/^  # Chaos profiles[^\n]*\n(  #[^\n]*\n)*/m, "")
         .replace(/, simulate\.(profile|dump|hang|slow|hits_mean|autoclose)/g, "");
       expect(before, "the set before the slice").to.equal(git(["show", `${BEFORE}:${SET}`]).stdout);

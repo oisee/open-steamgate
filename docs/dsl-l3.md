@@ -2825,8 +2825,9 @@ settings:
 
 A literal destination such as `NONE` also works. `remote.destination` defaults
 to `NONE` and reads the detecting system's setting at each send, so an operator
-can repair a destination before retrying. OSG's `NONE` uses the same session,
-connection and LUW as the detector: the receiving module's COMMIT also commits
+can repair a destination before retrying. It is live and unscreened: it adds
+no selection field to the pile job's 20-field input limit. OSG's `NONE` uses the
+same session, connection and LUW as the detector: the receiving module's COMMIT also commits
 pending local work. It supplies no real isolation. SL.0's loopback transport
 will provide independent sessions; this slice does not implement it. On a
 real system every synchronous RFC commits the caller's database LUW, for any
@@ -2854,8 +2855,9 @@ the reproducer and rollback-copy counterexample are in test/dsl-l3-remote.mjs.
 Independent RFC sessions are required for receiver dump atomicity.
 
 The generated `RHEAD` structure carries set, detecting run, model hash, S/P
-mode, rule, pile and attempt, snapshot ID, full hash and count, and the rule's
-alert-key layout and trace. `RROW` is derived from the alert log's DDIC row,
+mode (`RUN_MODE`, avoiding the reserved DDIC name `MODE`), rule, pile and
+attempt, snapshot ID, full hash and count, and the rule's alert-key layout and
+trace. `RROW` is derived from the alert log's DDIC row,
 with its deep alert text replaced by CHAR(1024). The client refuses longer
 text as `RFC-PAYLOAD` before conversion. `RROWS` is its standard table type.
 All module parameters are DDIC structures or a DDIC table of flat scalars.

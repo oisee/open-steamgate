@@ -374,7 +374,11 @@ describe("DSL L3 slice 5b: settings", function () {
       };
       try { await seed(); } finally { client.select = real; }
       expect(raced).to.equal(true);
-      expect(rows().map((r) => trim(r.changed_by))).to.deep.equal(Array(20).fill("OTHER"));
+      // The original 20 settings plus remote.destination; the racing run remains the only seeder.
+      const entries = compileSet(SET).settings.entries;
+      expect(entries.filter((e) => e.name !== "remote.destination")).to.have.length(20);
+      expect(entries.filter((e) => e.name === "remote.destination")).to.have.length(1);
+      expect(rows().map((r) => trim(r.changed_by))).to.deep.equal(Array(21).fill("OTHER"));
       expect(logs()).to.have.length(0);
     });
 

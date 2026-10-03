@@ -41,7 +41,7 @@ describe('DSL L3 remote alert seam', function () {
     const snapshot=plain(await dialogStep(()=>abap.Classes.ZCL_L3_FLEET2.snapshot({iv_name:str('ships_ref')})));
     const rule=model.rules.find((r)=>r.name==='maintenance-ship-no-future-voyage');
     const header=typ(model.remote.header), rows=typ(model.remote.rows);
-    fromJson(header,{SET_NAME:'fleet2',RUN_ID:'DETECTING',RULE_NAME:rule.name,MODEL_HASH:rule.hash,MODE:'S',CHECK_DATE:'20261003',
+    fromJson(header,{SET_NAME:'fleet2',RUN_ID:'DETECTING',RULE_NAME:rule.name,MODEL_HASH:rule.hash,RUN_MODE:'S',CHECK_DATE:'20261003',
       PILE_NO:1,ATTEMPT:1,STAGE_NO:2,RULE_NO:Number(rule.index),SNAP_ID:snapshot.snap_id,CONTENT_HASH:snapshot.content_hash,
       ROW_COUNT:snapshot.row_count,KEY_OFFSET:Number(rule.governed.offset),KEY_LENGTH:Number(rule.governed.length),
       RULE_CLASS:rule.check_class,RULE_FILE:rule.file,RULE_LINE:rule.rule_line??1});
@@ -317,7 +317,7 @@ describe('DSL L3 remote alert seam', function () {
     await dialogStep(()=>abap.Classes.ZCL_L3_FLEET2_CONF.set_setting({iv_param:str('remote.destination'),iv_value:str(dest),iv_note:str('receiving system')}));
     abap.context.RFCDestinations[dest]={call:async(name,sig)=>{
       calls++;expect(name).to.equal(model.remote.function);
-      const h=plain(sig.exporting.is_header);expect(h.mode).to.equal('S');expect(h.snap_id).to.have.length(32);
+      const h=plain(sig.exporting.is_header);expect(h.run_mode).to.equal('S');expect(h.snap_id).to.have.length(32);
       fromJson(sig.importing.es_result,{SET_NAME:h.set_name,RUN_ID:h.run_id,RULE_NAME:h.rule_name,PILE_NO:h.pile_no,ATTEMPT:h.attempt,
         REMOTE_RUN:'FAR_RUN',STATUS:'DONE',ALERTS:sig.exporting.it_rows.array().length});
     }};

@@ -2,7 +2,7 @@
 import {CHAOS_SETTINGS} from "./dsl-l3-sim.mjs";
 const INT4 = 2147483647;
 // settings no job step carries: read live from the settings table by their one reader
-const LIVE_ONLY = ["piles.lanes"];
+const LIVE_ONLY = ["piles.lanes", "remote.destination"];
 const integerRanges = {INT1: [0n, 255n], INT2: [-32768n, 32767n], INT4: [-2147483648n, 2147483647n],
   INT8: [-9223372036854775808n, 9223372036854775807n]};
 const characterTypes = new Set(["CHAR", "CLNT", "LANG", "CUKY", "UNIT", "ACCP", "NUMC", "DATS", "TIMS"]);
@@ -90,7 +90,7 @@ export function compileSettings(doc, model, {line, fail}) {
   const seen = new Set();
   // a job step carries at most 20 selection values: the chaos settings are not among them, the pile job reads
   // them from its run's snapshot, so they take no selection field; nor does a setting only read live
-  // (LIVE_ONLY: piles.lanes, which lanes( ) loads at every release pass)
+  // (LIVE_ONLY: piles.lanes at every release pass; remote.destination at every send, so a retry can use a repaired destination)
   let screenNo = 0;
   const entries = spec.tunable.map((name, i) => {
     const at = line(`settings/tunable/${i}`);

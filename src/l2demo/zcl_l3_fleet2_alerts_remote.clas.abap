@@ -24,9 +24,9 @@ CLASS zcl_l3_fleet2_alerts_remote IMPLEMENTATION.
     header-attempt = ls_pile-attempt.
     SELECT SINGLE * FROM zosd_l3_stage INTO ls_stage
       WHERE run_id = header-run_id AND stage_no = header-stage_no.
-    header-mode = 'S'.
+    header-run_mode = 'S'.
     IF ls_pile-job_count IS NOT INITIAL.
-      header-mode = 'P'.
+      header-run_mode = 'P'.
     ENDIF.
     SELECT SINGLE * FROM zosd_l3_run_snap INTO ls_snap
       WHERE run_id = header-run_id AND stage_no = header-stage_no.
