@@ -81,6 +81,7 @@
     "osd:git": "node tools/osd-git.mjs",
     "osd:runtime": "node tools/osd-runtime.mjs",
     "osd:unit": "node tools/osd-unit.mjs",
+    "osg:support": "node tools/osg-support.mjs",
     "osgo:unit": "node tools/osgo-unit.mjs",
     "osgjs:unit": "node tools/osgjs-unit.mjs",
     "bench:cube": "node tools/bench-cube.mjs",

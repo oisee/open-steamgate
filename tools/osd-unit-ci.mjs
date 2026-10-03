@@ -6,10 +6,16 @@ import {basename, join, resolve} from "node:path";
 
 const ownerOf = (file) => basename(file).split(".")[0].replaceAll("#", "/").toUpperCase();
 
-export function kernelWarnings(input) {
-  // Test seam: OSD_KERNEL_SCANNER_FAIL=1 throws inside the runners' scanner-only
-  // try/catch, exercising advisory failure handling without affecting compilers.
+export const kernelWarningForms = Object.freeze([
+  ...["BIT-AND", "BIT-OR", "BIT-XOR", "BIT-NOT"].map((operator) => Object.freeze({
+    operator, form: `${operator} on non-byte operands`,
+  })),
+  Object.freeze({form: "offset/length write on xstring"}),
+]);
+
+export function kernelWarnings(input, registry) {
   if (process.env.OSD_KERNEL_SCANNER_FAIL === "1") throw new Error("forced scanner failure");
+
   // Resolve lazily: ordinary transpilation and a compiled host need no checkout-only scanner.
   // Use the transpiler's copy throughout: its AST nodes use instanceof checks.
   const require = createRequire(import.meta.url);
@@ -28,12 +34,15 @@ export function kernelWarnings(input) {
 
   // Registries live in child processes in both runners. This focused pass reads
   // only input objects, including synthesized metadata, and never lint rules.
-  const reg = new core.Registry(new core.Config(JSON.stringify({
+  // Inventory callers can reuse their focused parse rather than hold two ASTs.
+  const reg = registry ?? new core.Registry(new core.Config(JSON.stringify({
     global: {files: "/**/*.*"}, syntax: {version: core.Version.OpenABAP}, rules: {},
   })));
-  for (const file of readdirSync(input).filter((f) => /\.(abap|xml)$/.test(f)).sort())
-    reg.addFile(new core.MemoryFile(file, readFileSync(join(input, file), "utf8")));
-  reg.parse();
+  if (!registry) {
+    for (const file of readdirSync(input).filter((f) => /\.(abap|xml)$/.test(f)).sort())
+      reg.addFile(new core.MemoryFile(file, readFileSync(join(input, file), "utf8")));
+    reg.parse();
+  }
   const warnings = [], seen = new Set();
   const warn = (file, node, form) => {
     const line = node.getFirstToken().getRow();
@@ -63,10 +72,10 @@ export function kernelWarnings(input) {
         const children = node.getChildren();
         if (expr(node, E.Source)) {
           const operator = children.find((c) => expr(c, E.ArithOperator)
-            && ["BIT-AND", "BIT-OR", "BIT-XOR"].includes(c.concatTokens().toUpperCase()));
+            && kernelWarningForms.slice(0, 3).some((f) => f.operator === c.concatTokens().toUpperCase()));
           const prefix = children.slice(0, 3);
           const unary = prefix.every((c) => c instanceof Nodes.TokenNode)
-            && prefix.map((c) => c.getFirstToken().getStr()).join("").toUpperCase() === "BIT-NOT";
+            && prefix.map((c) => c.getFirstToken().getStr()).join("").toUpperCase() === kernelWarningForms[3].operator;
           const syntax = operator || unary ? syntaxFor(node) : undefined;
           if (syntax) {
             const split = operator ? children.indexOf(operator) : children.length;
@@ -76,7 +85,7 @@ export function kernelWarnings(input) {
               if (knownType(type) && !byteType(type))
                 warn(filename, location, `${op} on ${type.toABAP().replace(/\s+/g, " ")}`);
             };
-            if (unary) check(children.slice(3, split), "BIT-NOT", node);
+            if (unary) check(children.slice(3, split), kernelWarningForms[3].operator, node);
             if (operator) {
               const op = operator.concatTokens().toUpperCase();
               check(children.slice(unary ? 3 : 0, split), op, operator);
@@ -91,7 +100,7 @@ export function kernelWarnings(input) {
             const base = new Nodes.ExpressionNode(new E.Target()).setChildren(children.filter((c) =>
               !expr(c, E.FieldOffset) && !expr(c, E.FieldLength)));
             if (Target.runSyntax(base, syntax) instanceof T.XStringType)
-              warn(filename, node, "offset/length write on xstring");
+              warn(filename, node, kernelWarningForms[4].form);
           }
         }
         for (const child of children) if (!(child instanceof Nodes.TokenNode)) visit(child);

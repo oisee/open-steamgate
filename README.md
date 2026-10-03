@@ -164,6 +164,29 @@ Each invocation owns its output and database; parallel runs leave the input
 folder, `output/` and `build/live` untouched. The Go command additionally accepts
 `--jobs N` (default 4) and needs Go 1.26.
 
+[The generated support page](docs/osg-support.md) inventories statements, built-ins,
+elementary declarations and conversions, joins per-class results for both runtimes,
+and lists kernel compatibility warnings. It is evidence from a corpus, not a specification.
+Regenerate from a read-only ABAPiti checkout with the commands below; flatten the
+split fixtures as the ABAPiti CI does, and repeat the two runtime commands for
+any extra `qjs`, `mono` and `int8` folders under `.local/abapiti`. Omit a folder's
+JSON if that run fails or exceeds 20 minutes; it then has no evidence.
+
+```sh
+mkdir -p .local/support-work/go-cache .local/support-work/go-tmp
+export GOTOOLCHAIN=go1.26.0 GOFLAGS=-buildvcs=false
+export GOCACHE="$PWD/.local/support-work/go-cache" GOTMPDIR="$PWD/.local/support-work/go-tmp"
+export ABAPITI_TEST_OUT="$PWD/.local/support-work/corpus"
+OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'cd .local/abapiti-src && go test ./wasm -run "^TestOSD_EmitUnitClasses$" -count=1'
+cp .local/support-work/corpus/TestOSD_EmitUnitClasses/split/*.abap .local/support-work/corpus/TestOSD_EmitUnitClasses/
+rm -r .local/support-work/corpus/TestOSD_EmitUnitClasses/split
+OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'timeout 1200 npm run -s osgo:unit -- .local/support-work/corpus/TestOSD_EmitUnitClasses --json > .local/support-work/osgo-corpus.json'
+OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'timeout 1200 npm run -s osgjs:unit -- .local/support-work/corpus/TestOSD_EmitUnitClasses --json > .local/support-work/osgjs-corpus.json'
+npm run osg:support -- .local/support-work/corpus/TestOSD_EmitUnitClasses --osgo .local/support-work/osgo-corpus.json --osgjs .local/support-work/osgjs-corpus.json --out docs/osg-support.md --json .local/support-work/support.json
+# Append extra input folders and successful --osgo/--osgjs files to that command.
+# Replace --out with --check docs/osg-support.md to compare without writing.
+```
+
 ## Architecture
 
 ```mermaid
