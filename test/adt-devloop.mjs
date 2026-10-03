@@ -217,7 +217,9 @@ describe("tools/adt-facade: the development loop", () => {
       }
     });
 
-    it("a write with the handle lands, and reads back", async () => {
+    it("a write with the handle lands, and reads back", async function () {
+      // Variant C primes the whole-tree outline registry on the host save.
+      this.timeout(30000);
       const {handle} = await lock();
       const changed = SOURCE.replace("'hello'", "'changed'");
       const res = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: changed});
@@ -246,7 +248,9 @@ describe("tools/adt-facade: the development loop", () => {
       }
     });
 
-    it("accepts a write whose If-Match still names the stored source", async () => {
+    it("accepts a write whose If-Match still names the stored source", async function () {
+      // Variant C primes the whole-tree outline registry on the host save.
+      this.timeout(30000);
       store.write("CLAS", SCRATCH, SOURCE);
       const opened = await call(`/oo/classes/${SCRATCH}/source/main`);
       const tag = opened.headers.get("etag");

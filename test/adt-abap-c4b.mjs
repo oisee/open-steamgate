@@ -39,10 +39,10 @@ describe('C4b modelled DDIC and CDS preview', function () {
     try {expect((await pair.request(1,'GET','/sap/bc/adt/datapreview/cds/zc_stg_travel/metadata')).status).to.equal(501);}
     finally {COMMANDS.splice(index,0,'PARSE');}
   });
-  it('PARSE DDLS uses the bound store and rejects other kinds',async()=>{
+  it('PARSE DDLS uses the bound store and rejects unknown kinds',async()=>{
     const answer=await storeCall('PARSE',{kind:'DDLS',name:'ZC_STG_TRAVEL'},pair.shared);
     expect(JSON.parse(answer.EV_JSON).found).to.equal(true);
-    for(const kind of ['OUTLINE','BOGUS','']) {const refused=await storeCall('PARSE',{kind},pair.shared);expect(JSON.parse(refused.EV_JSON).error.code).to.equal('NOT_SUPPORTED');expect(refused.EV_ERROR).to.equal(`unknown PARSE kind ${kind}`);}
+    for(const kind of ['BOGUS','']) {const refused=await storeCall('PARSE',{kind},pair.shared);expect(JSON.parse(refused.EV_JSON).error.code).to.equal('NOT_SUPPORTED');expect(refused.EV_ERROR).to.equal(`unknown PARSE kind ${kind}`);}
     const absent=await storeCall('PARSE',{kind:'DDLS',name:'ZUNKNOWN'},pair.shared);expect(JSON.parse(absent.EV_JSON)).to.deep.equal({found:false});
   });
   for(const [method,path,body] of [['GET','/sap/bc/adt/datapreview/ddic/zstg_demo/metadata',''],['POST','/sap/bc/adt/datapreview/ddic?ddicEntityName=zstg_demo',''],

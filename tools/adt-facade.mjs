@@ -2087,6 +2087,7 @@ export function adtRouter(options = {}) {
           if (await stillHeld(req, res, () => store.write(type, req.params.name, body.toString("utf8"), include)) === false) {
             return;
           }
+          warmOutline();
           // The tag of what was just written, computed from what a read now
           // returns so that it is the tag the next GET will carry. The
           // client files it beside the source it saved; a save answered
@@ -2128,12 +2129,20 @@ export function adtRouter(options = {}) {
           if (await stillHeld(req, res, () => store.write(type, req.params.name, "", include)) === false) {
             return;
           }
+          warmOutline();
           res.status(201)
             .set("Location", `${BASE}/${adt}/${encodeURIComponent(current.name.toLowerCase())}/includes/${include}`)
             .end();
         });
       });
     }
+  }
+
+  // Variant C keeps mutations on the host. Prime the outline registry here,
+  // before another request enters an ABAP step; compiler warm() is separate.
+  function warmOutline() {
+    try { store.registry?.(); }
+    catch (error) { console.error(`outline: pre-warm failed: ${error.message}`); }
   }
 
   // SYNTAX CHECK. The source arrives inline, because a client checks what a
@@ -2385,6 +2394,7 @@ export function adtRouter(options = {}) {
         // nothing: checkExecuted, activationExecuted and generationExecuted,
         // all true, under chkl:messages (a4h-adt.jsonl:489). The note that used
         // to stand here, that a clean activation "answers nothing at all", was wrong.
+        warmOutline();
         res.status(200).type("application/xml").send(activationSuccessDocument());
       }
       return;
@@ -2436,6 +2446,7 @@ export function adtRouter(options = {}) {
       // nothing: checkExecuted, activationExecuted and generationExecuted,
       // all true, under chkl:messages (a4h-adt.jsonl:489). The note that used
       // to stand here, that a clean activation "answers nothing at all", was wrong.
+      warmOutline();
       res.status(200).type("application/xml").send(activationSuccessDocument());
     } catch (e) {
       res.status(200).type("application/xml").send(activationFailureDocument(

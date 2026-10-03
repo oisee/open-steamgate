@@ -1,5 +1,6 @@
 {
   "files": [
+    "test/adt-abap-b2b.mjs",
     "test/adt-abap-b5.mjs",
     "test/adt-abap-b6-cost.mjs",
     "test/adt-abap-b6.mjs",

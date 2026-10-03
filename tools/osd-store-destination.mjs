@@ -44,6 +44,14 @@ export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILI
 export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
 
 const PARSE_KINDS = {
+  OUTLINE: async (store, input) => {
+    const {structureOf} = await import("./adt-documents.mjs");
+    const outline = structureOf(store, String(input.type ?? "").toUpperCase(), input.name ?? "");
+    const rows = (node) => ({...node,
+      extra: Object.entries(node.extra ?? {}).map(([name, value]) => ({name, value})),
+      links: node.links ?? [], children: (node.children ?? []).map(rows)});
+    return outline === undefined ? {found: false} : {found: true, ...rows(outline)};
+  },
   DDLS: async (store, input) => {
     const {entityHeadOf} = await import("./adt-cds.mjs");
     const head = entityHeadOf(store, input.name ?? "");
