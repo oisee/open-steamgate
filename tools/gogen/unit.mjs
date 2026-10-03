@@ -128,9 +128,11 @@ while (sourceQueue.length) {
   }
 }
 let registry;
+const session = {};
+timingMs.frontendClosureCounts = [];
 for (let round = 0; round < 12; round++) {
   const started = performance.now();
-  program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners), skip, registry});
+  program = compileProgram({folders, objects: [...wanted], tolerant: true, includeTests: new Set(owners), skip, registry, session});
   registry = program.reg;
   const refs = new Set([...referencedClasses(program), ...program.missing]);
   for (const name of wanted) {
@@ -143,6 +145,7 @@ for (let round = 0; round < 12; round++) {
   }
   const more = [...refs].filter((x) => available.has(x) && !wanted.has(x) && !x.includes(":"));
   timingMs.frontendClosureRounds.push(Math.round(performance.now() - started));
+  timingMs.frontendClosureCounts.push({...program.frontendCounts, added: more.length, selected: wanted.size});
   if (!more.length) break;
   for (const x of more) wanted.add(x);
   if (round === 11) throw new Error(`dependency closure did not settle: ${more.join(", ")}`);

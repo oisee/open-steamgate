@@ -338,7 +338,7 @@ ENDCLASS.
 });
 
 test("GET RUN TIME FIELD lowers an i target to monotonic microseconds", () => {
-  const sourceDir = mkdtempSync(join(here, ".out", "gogen-runtime-"));
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-runtime-"));
   try {
     const file = join(sourceDir, "zcl_runtime.clas.abap");
     const source = (type) => `CLASS zcl_runtime DEFINITION PUBLIC FINAL CREATE PUBLIC.

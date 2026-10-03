@@ -12,6 +12,7 @@
 // guess. A method whose body or signature is outside it is skipped and says
 // why; a method that calls a skipped one is refused in turn.
 import {resolveStatic as lowerStatic, staticSlot} from "./frontend-static.mjs";
+import {prepareSession, finishSession, compileClass} from "./frontend-session.mjs";
 import {syntaxDiagnostics} from "./frontend-diagnostics.mjs";
 import {sourceOwnershipSafety} from "./frontend-owned.mjs";
 import {lowerBoolx} from "./frontend-boolx.mjs";
@@ -21,7 +22,7 @@ import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
-import {parseSamc} from "../osd-amc.mjs";
+import {samcOf, cdsSqlViews, rearrangedClass, inlineTableLocals} from "./frontend-analysis.mjs";
 import {lowerNarrowSubmit} from "../osd-narrow-submit.mjs";
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync, existsSync} from "node:fs";
@@ -100,27 +101,7 @@ const cdsViewsByRegistry = new WeakMap();
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-/**
- * The AMC channels of the SAMC objects in the program's folders, the later
- * folder winning a name both hold (as tools/osd-amc.mjs amcChannels reads
- * the layers): what the Go broker is defined with (go/amc)
- */
-function samcOf(folders) {
-  const byName = new Map();
-  const walk = (dir) => {
-    let entries;
-    try { entries = readdirSync(dir, {withFileTypes: true}); } catch { return; }
-    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (e.isDirectory()) walk(join(dir, e.name));
-      else if (e.name.toLowerCase().endsWith(".samc.xml")) byName.set(e.name.toUpperCase(), join(dir, e.name));
-    }
-  };
-  for (const f of folders) walk(f);
-  const rows = [...byName.values()].flatMap((file) => parseSamc(readFileSync(file, "utf8"), file));
-  return [...new Map(rows.map((r) => [`${r.applicationId}|${r.path}`, r])).values()];
-}
-
-export function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry}) {
+export function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
@@ -146,8 +127,10 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
           && !includeTests?.has?.(objName(e.name).toUpperCase())) continue;
       else if (/\.(abap|xml)$/i.test(e.name)) {
         const source = readFileSync(path, "utf8");
-        reg.addFile(new abaplint.MemoryFile(e.name, wanted.includes(objName(e.name))
-          ? lowerNarrowSubmit(lowerBoolx(source, e.name, abaplint), e.name, abaplint) : source));
+        // Later rounds can select any loaded object. Normalize once before
+        // parsing so newly selected app classes match a fresh final registry.
+        reg.addFile(new abaplint.MemoryFile(e.name,
+          lowerNarrowSubmit(lowerBoolx(source, e.name, abaplint), e.name, abaplint)));
       }
       // a CDS view's source: its SQL view name, for the table registry
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
@@ -159,7 +142,8 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
     cdsViewsByRegistry.set(reg, cdsSqlViews(ddls));
   }
   REG = reg;
-  const diagnostics = syntaxDiagnostics(reg, (fn) => wanted.includes(objName(fn)), objName);
+  prepareSession(session, reg);
+  const diagnostics = syntaxDiagnostics(reg, (fn) => wanted.includes(objName(fn)), objName, session);
   // Tolerant surveys leave broken objects out, retaining their diagnostics.
   if (diagnostics.length && !tolerant) throw new Error(diagnostics.map((d) => d.message).join("\n"));
   const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
@@ -191,8 +175,12 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
     }
   }
 
-  const program = {structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
-    diagnostics, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
+  // Eager collections keep first writes inside the replay proxies. Anonymous
+  // type identities use a Map so their ordered effects can be replayed too;
+  // these keys already belong to the registry retained for this compilation.
+  const program = {anonStructs: new Map(), badStructs: new Map(), ddicOutputLen: new Map(),
+    excAttrs: new Set(), dynStatics: new Set(), intfOwnAttrs: new Map(), interfaceAttrs: new Map(), structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
+    diagnostics, frontendCounts: {lowered: 0, reused: 0, loweredClasses: [], reusedClasses: []}, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
   program.supplied = suppliedParams(reg, program.wanted);
   PROGRAM = program;
   const ctx0 = {reg, program};
@@ -237,10 +225,15 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
       return false;
     }
   });
+  const lowerClass = (ctx, obj) => {
+    const saved = PROGRAM;
+    PROGRAM = ctx.program; // Global type helpers must use the tracked program too.
+    try { return classIr(ctx, obj); } finally { PROGRAM = saved; }
+  };
   for (const obj of reg.getObjects()) {
-    if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(classIr(ctx0, obj));
+    if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(compileClass(ctx0, obj, lowerClass, session));
   }
-  for (const l of localDefs) program.classes.push(classIr(ctx0, l));
+  for (const l of localDefs) program.classes.push(compileClass(ctx0, l, lowerClass, session));
   for (const g of readable) program.classes.push(functionGroupIr(ctx0, g));
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
@@ -267,7 +260,8 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   program.exceptionSupers = exceptionSupers(reg, program);
   program.cdsViews = cdsViewsByRegistry.get(reg) ?? {};
   program.tables = tableRegistry(reg, program);
-  return Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: sourceOwnershipSafety(reg)});
+  finishSession(session, reg);
+  return Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: session ? (session.ownershipSafety ??= sourceOwnershipSafety(reg)) : sourceOwnershipSafety(reg)});
 }
 
 /**
@@ -282,19 +276,6 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
  * the same DDIC facts the SELECT path reads (dbTable), after the classes, so
  * that the row types it adds change nothing they compiled.
  */
-/** CDS name -> SQL view name, read off each DDLS source
- * (`@AbapCatalog.sqlViewName: 'ZV...'` and `define [root] view NAME`); a
- * view entity has no SQL view and is left out */
-function cdsSqlViews(sources) {
-  const out = {};
-  for (const src of sources) {
-    const sql = /@AbapCatalog\.sqlViewName\s*:\s*'([^']+)'/i.exec(src)?.[1];
-    const cds = /\bdefine\s+(?:root\s+)?view\s+(?!entity\b)([\w\/]+)/i.exec(src)?.[1];
-    if (sql && cds) out[upper(cds)] = upper(sql);
-  }
-  return out;
-}
-
 /** the table registry as the column registry of the dynamic Open SQL
  * condition parser: {NAME: {view, client, key, columns: [{name, kind, len,
  * dec, key, type}]}}, JSON as it stands (README "The table registry") */
@@ -1239,7 +1220,7 @@ function typeOf(t, where, program) {
     // OF a parameter: it keeps the name it was first given, or the places
     // that share it name two Go types
     if (!q) {
-      const seen = (program.anonStructs ??= new WeakMap()).get(t);
+      const seen = program.anonStructs.get(t);
       if (seen !== undefined) go = seen;
       else program.anonStructs.set(t, go);
     }
@@ -1257,7 +1238,7 @@ function typeOf(t, where, program) {
         // a field outside the subset: the structure is not in the program,
         // and every later use of it is refused with the same reason
         program.structs.delete(go);
-        (program.badStructs ??= new Map()).set(go, e.message);
+        program.badStructs.set(go, e.message);
         throw e;
       }
     }
@@ -1285,7 +1266,7 @@ function typeOf(t, where, program) {
  * left out, and RTTI keeps refusing it.
  */
 function ddicOutputLength(name) {
-  const map = (PROGRAM.ddicOutputLen ??= new Map());
+  const map = PROGRAM.ddicOutputLen;
   if (map.has(name) || name.includes("-") || !REG) return;
   const xmlOf = (type, n) => REG.getObject(type, n)?.getXMLFile?.()?.getRaw?.() ?? "";
   const tag = (xml, t) => new RegExp(`<${t}>([^<]*)</${t}>`).exec(xml)?.[1];
@@ -1338,7 +1319,7 @@ function classIr(ctx0, obj) {
   const def = obj.getDefinition();
   // a local class (localClasses) is read in the scopes of its owner
   const spaghetti = new abaplint.SyntaxLogic(reg, obj.obj ?? obj).run().spaghetti;
-  const tree = new Rearranger().run("CLAS", file.getStructure());
+  const tree = rearrangedClass(file.getStructure(), Rearranger);
   const className = upper(obj.getName());
   const scopeName = obj.local ?? className;
   if (obj.local !== undefined && def.getSuperClass()) throw new Error(`${className}: a local class with a superclass is not compiled (LOCAL_CLASSES)`);
@@ -1385,7 +1366,7 @@ function classIr(ctx0, obj) {
     // an inherited attribute lives in the superclass's part of the object
     if (!ownAttrs.has(name)) continue;
     if (excInto.has(name)) {
-      (program.excAttrs ??= new Set()).add(`${className}|${name}`);
+      program.excAttrs.add(`${className}|${name}`);
       attributes.push({name, type: EXC, static: meta.includes("static")});
       continue;
     }
@@ -1553,11 +1534,12 @@ function classIr(ctx0, obj) {
       const body = node.findDirectStructure(Structures.Body);
       const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
       ctx.fieldSymbols = new Map();
+      const inlineTables = inlineTableLocals(body);
       for (const [vname, id] of Object.entries(scope.getData().vars)) {
         if (known.has(vname) || vname === "ME" || vname === "SUPER") continue;
         // abaplint leaves SELECT ... INTO TABLE @DATA(x) without a row type.
         // The SELECT field list supplies it when the statement is lowered.
-        if (body && new RegExp(`\\bINTO\\s+TABLE\\s+@DATA\\s*\\(\\s*${vname}\\s*\\)`, "i").test(body.concatTokens())) continue;
+        if (inlineTables.has(vname)) continue;
         const t = typeOf(id.getType(), `${className}=>${name} ${vname}`, program);
         // a field symbol points into a row: only rows of structures, whose
         // reference both backends can hold (a pointer, an object)
@@ -2807,7 +2789,7 @@ function statement(node, ctx) {
     const args = (mp?.findAllExpressions(Expressions.ParameterS) ?? []).map((p) => ({name: upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()),
       value: convert(source(p.findDirectExpression(Expressions.Source), ctx), {k: "data"})}));
     const method = upper(kids[2].concatTokens());
-    (ctx.program.dynStatics ??= new Set()).add(method);
+    ctx.program.dynStatics.add(method);
     return {s: "call_dyn_static", cls, method, args};
   }
   if (isStmt(node, Statements.CallFunction)) return callFunction(node, ctx, text);
@@ -3426,7 +3408,6 @@ function rowOf(place, te, ctx) {
 
 /** the DATA and CLASS-DATA of one interface (not of those it includes), cached */
 function ownInterfaceAttributes(program, intf) {
-  program.intfOwnAttrs ??= new Map();
   if (program.intfOwnAttrs.has(intf)) return program.intfOwnAttrs.get(intf);
   const obj = program.reg.getObject("INTF", intf);
   const def = obj?.getDefinition();
@@ -3481,7 +3462,6 @@ function ownInterfaceAttributes(program, intf) {
 
 /** the attributes of an interface and of every interface it includes */
 function interfaceAttributes(program, intf) {
-  program.interfaceAttrs ??= new Map();
   if (!program.interfaceAttrs.has(intf)) {
     program.interfaceAttrs.set(intf, [intf, ...componentInterfaces(program.reg, intf)].flatMap((i) => ownInterfaceAttributes(program, i)));
   }
