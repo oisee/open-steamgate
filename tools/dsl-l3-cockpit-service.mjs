@@ -98,6 +98,7 @@ export function cockpitService(m, {tableSource = (table) => readFileSync(`src/ds
     if (!["Run", "Setting", "Change"].includes(name)) doc.associations[`RunTo${name}`] = {from: "Run", to: name,
       cardinality: "1:N", constraint: {RunId: "RunId"}, navigation: {Run: `to_${name}`}};
   }
+  if (m.remote) doc.entities.Run.properties.RemoteRun = {type: "String(32)", field: "REMOTE_RUN", label: "Receiving run", readonly: true, sortable: false, filterable: false};
   doc.entities.Answer = {keys: ["RunId"], properties: {RunId: {type: "String(32)", field: "RUN_ID"}, Answer: "String"}, creatable: false, updatable: false, deletable: false, operations: []};
   for (const a of cockpitActions(m)) doc.functions[a.name] = {method: a.get ? "GET" : "POST", returns: {entity: "Answer", multiplicity: "1"}, parameters: a.params};
   doc.annotations.Run = {...doc.annotations.Run, header: {typeName: "Run", typeNamePlural: "Runs", title: "RunId", description: "Status"},

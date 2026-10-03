@@ -22,6 +22,7 @@
 import * as runtime from "@abaplint/runtime";
 import * as core from "@abaplint/core";
 import {Transpiler, Chunk} from "@abaplint/transpiler";
+import {CallFunctionTranspiler} from "@abaplint/transpiler/build/src/statements/call_function.js";
 import * as guiConverter from "../.local/lars/open-abap-gui/converter/src/api.mjs";
 import * as setup from "../test/setup.mjs";
 import {pathToFileURL} from "node:url";
@@ -84,7 +85,7 @@ if (typeof Bun !== "undefined") {
     },
   });
 }
-setHostModules({Transpiler, Chunk, core, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
+setHostModules({Transpiler, Chunk, core, CallFunctionTranspiler, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
 
 const GENERATORS = {
   "gogen-unit.mjs": () => import(pathToFileURL(resolve(process.cwd(), "tools/gogen/unit.mjs")).href),

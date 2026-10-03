@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-settings/report.tpl",
- "model": "sha256:973f08be27e25b050890c09a41c873a7fad872c1dd982c1bd1423f50f979e698",
+ "model": "sha256:e74459b7c3e8cc54bf4785dd9a25424cfbb2f4495c658fbbac579ee8d5327540",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",
@@ -46,7 +46,7 @@
    "template_line": 1,
    "path": "/settings/report",
    "node": "set/fleet2/settings",
-   "set_line": 119
+   "set_line": 120
   },
   {
    "line": 2,
@@ -95,7 +95,7 @@
    "template_line": 8,
    "path": "/settings/class",
    "node": "set/fleet2/settings",
-   "set_line": 119
+   "set_line": 120
   },
   {
    "line": 9,

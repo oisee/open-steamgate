@@ -151,6 +151,12 @@ CLASS {{ports_class}} IMPLEMENTATION.
         EXPORTING iv_port = lv_replay_port
                   iv_reason = 'the variant replaces the table content, a run in jobs cannot'.
     ENDIF.
+{{#remote}}
+    IF lv_replay_port IS NOT INITIAL AND variant( iv_port = 'alerts' iv_bind = iv_bind ) = '{{variant}}'.
+      RAISE EXCEPTION TYPE {{exception}}
+        EXPORTING iv_port = lv_replay_port iv_reason = 'a replay cannot bind remote alerts: every synchronous RFC commits the caller DB LUW'.
+    ENDIF.
+{{/remote}}
     IF lv_replay_port IS NOT INITIAL AND lv_hand_port IS NOT INITIAL.
       RAISE EXCEPTION TYPE {{exception}}
         EXPORTING iv_port = lv_hand_port

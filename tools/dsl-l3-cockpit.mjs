@@ -46,7 +46,7 @@ export async function renderCockpit(model) {
   const result = compile(source, {file: `${c.project.toLowerCase()}.stg.yaml`});
   const root = {...c, set: model.set, "set@type": {built_in: "CHAR", length: 16}, runner: model.class, base: result.model.classes.dpc.toLowerCase(),
     class: result.model.classes.dpcExt.toLowerCase(), mpc: result.model.classes.mpc.toLowerCase(),
-    settings_class: model.settings?.class, stage_count: String(model.stages.length), resilience: Boolean(model.resilience), governed: Boolean(model.governor), scheduled: Boolean(model.schedule), entities: service.entities,
+    remote: model.remote, settings_class: model.settings?.class, stage_count: String(model.stages.length), resilience: Boolean(model.resilience), governed: Boolean(model.governor), scheduled: Boolean(model.schedule), entities: service.entities,
     // the calls sit inside TRY ... CASE: four more spaces per continuation line
     actions: cockpitActions(model).map((a) => ({...a, call: a.call.replaceAll("\n", "\n    ")})),
     // the run page's computed fields (tools/dsl-l3-cockpit-ui.mjs): constants written as ABAP literals
@@ -55,7 +55,7 @@ export async function renderCockpit(model) {
   const error = ext.findings.find((f) => f.severity === "E");
   if (error) throw new Error(`cockpit DPC line ${error.line}: ${error.text}`);
   const files = {[`${c.project.toLowerCase()}.stg.yaml`]: source, [`${root.class}.clas.xml`]: result.ext[`${root.class}.clas.xml`],
-    [`${root.class}.clas.abap`]: ext.text, ...await cockpitPages({...model, daemon: undefined, settings: model.settings ? {...model.settings, entries: model.settings.entries.filter((e) => e.name !== "doctor.tick")} : undefined})};
+    [`${root.class}.clas.abap`]: ext.text, ...await cockpitPages({...model, daemon: undefined, settings: model.settings ? {...model.settings, entries: model.settings.entries.filter((e) => e.name !== "doctor.tick" && e.name !== "remote.destination")} : undefined})};
   const objects = Object.entries({...result.files, ...result.classes, ...result.ext}).map(([name, text]) =>
     `  ${JSON.stringify(name)}: [\n` + text.trimEnd().split("\n").map((_, i) =>
       "   " + JSON.stringify({line: i + 1, template_line: i + 1, node: c["@id"], set_line: c.set_line})).join(",\n") + "\n  ]");

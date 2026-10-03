@@ -78,6 +78,8 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lv_preliminary TYPE btch0000-char1.
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = 'fleet2' AND run_id = cs_run-run_id.
+    SELECT SINGLE remote_run FROM zl3_fleet2_rlink INTO cs_run-remote_run
+      WHERE set_name = 'fleet2' AND run_id = cs_run-run_id.
     cs_run-run_mode = 'S'.
     cs_run-piles = lines( lt_piles ).
     LOOP AT lt_piles INTO ls_pile.
@@ -369,18 +371,18 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lt_run_id TYPE RANGE OF zosd_l3_run-run_id.
     DATA lt_status TYPE RANGE OF zosd_l3_run-status.
     DATA lt_started TYPE RANGE OF zosd_l3_run-started.
-    CONCATENATE lv_computed_fields 'TITLE RUN_LABEL RUN_MODE TWIN IS_OPEN' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_fields 'PILES PILES_FINAL PILES_DONE PILES_RUNNING PILES_FAILED' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_fields 'PILES_HELD PILES_ORPHANED PCT_FINAL STATUS_CRIT CAN_CONTINUE' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_fields 'CAN_RESUME RESERVED GLASS WARN_LEVEL NARROW_LEVEL' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_fields 'HIDE_STAGE HIDE_PILE HIDE_BUDGET HIDE_EVENT HIDE_DOCTOR' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_fields 'HIDE_RUNSTAT HIDE_SNAPSHOT' INTO lv_computed_fields SEPARATED BY space.
-    CONCATENATE lv_computed_props 'Title RunLabel Mode Twin Open' INTO lv_computed_props SEPARATED BY space.
-    CONCATENATE lv_computed_props 'Piles PilesFinal PilesDone PilesRunning PilesFailed' INTO lv_computed_props SEPARATED BY space.
-    CONCATENATE lv_computed_props 'PilesHeld PilesOrphaned PctFinal StatusCriticality CanContinue' INTO lv_computed_props SEPARATED BY space.
-    CONCATENATE lv_computed_props 'CanResume Reserved Glass WarnLevel NarrowLevel' INTO lv_computed_props SEPARATED BY space.
-    CONCATENATE lv_computed_props 'HideStage HidePile HideBudget HideEvent HideDoctor' INTO lv_computed_props SEPARATED BY space.
-    CONCATENATE lv_computed_props 'HideRunStat HideSnapshot' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'REMOTE_RUN TITLE RUN_LABEL RUN_MODE TWIN' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'IS_OPEN PILES PILES_FINAL PILES_DONE PILES_RUNNING' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'PILES_FAILED PILES_HELD PILES_ORPHANED PCT_FINAL STATUS_CRIT' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'CAN_CONTINUE CAN_RESUME RESERVED GLASS WARN_LEVEL' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'NARROW_LEVEL HIDE_STAGE HIDE_PILE HIDE_BUDGET HIDE_EVENT' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_fields 'HIDE_DOCTOR HIDE_RUNSTAT HIDE_SNAPSHOT' INTO lv_computed_fields SEPARATED BY space.
+    CONCATENATE lv_computed_props 'RemoteRun Title RunLabel Mode Twin' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'Open Piles PilesFinal PilesDone PilesRunning' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'PilesFailed PilesHeld PilesOrphaned PctFinal StatusCriticality' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'CanContinue CanResume Reserved Glass WarnLevel' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'NarrowLevel HideStage HidePile HideBudget HideEvent' INTO lv_computed_props SEPARATED BY space.
+    CONCATENATE lv_computed_props 'HideDoctor HideRunStat HideSnapshot' INTO lv_computed_props SEPARATED BY space.
     lo_computed_filter = io_tech_request_context->get_filter( ).
     refuse_computed( iv_where = io_tech_request_context->get_osql_where_clause( ) iv_filter = lo_computed_filter->get_filter_string( )
       it_options = it_filter_select_options it_order = it_order iv_fields = lv_computed_fields iv_properties = lv_computed_props ).

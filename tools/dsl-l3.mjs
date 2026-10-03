@@ -30,6 +30,7 @@ import {doctorOverlay, renderDoctor} from "./dsl-l3-doctor-overlay.mjs";
 import {replayOverlay} from "./dsl-l3-replay-overlay.mjs";
 import {compileReplay} from "./dsl-l3-replay.mjs";
 import {compileCockpit, renderCockpit, cockpitRunnerTemplate} from "./dsl-l3-cockpit.mjs";
+import {remoteVariant, compileRemote, remoteOverlay, renderRemote} from "./dsl-l3-remote.mjs";
 import {compileSnapshots, snapshotOverlay} from "./dsl-l3-snapshot.mjs";
 import {compileSettings} from "./dsl-l3-settings.mjs";
 import {CHAOS_SETTINGS, compileSimulate, POISSON1, simPorts, simVariant, WORK_PORT} from "./dsl-l3-sim.mjs";
@@ -79,10 +80,19 @@ const WRITES = new Map([[abaplint.Statements.ModifyDatabase, "MODIFY"], [abaplin
   [abaplint.Statements.UpdateDatabase, "UPDATE"], [abaplint.Statements.DeleteDatabase, "DELETE"], [abaplint.Statements.MergeDatabase, "MERGE"]]);
 const COMMITTING_FM = /^'(DB_COMMIT|DB_ROLLBACK|BAPI_TRANSACTION_COMMIT|BAPI_TRANSACTION_ROLLBACK)'$/i;
 
+export function scanGeneratedUnits(model, runnerText, extraResults, remoteFiles = {}) {
+  // nothing the runner or a generated variant holds may end the unit of work while a table is swapped
+  for (const [name, text] of [[`${model.class}.clas.abap`, runnerText], ...extraResults.map(([n, r]) => [n, r.text]),
+    ...Object.entries(remoteFiles).filter(([n]) => n === `${model.remote?.class}.clas.abap`)]) {
+    const [first] = unitFindings(text, name, {writes: true, remoteSeam: name === `${model.remote?.class}.clas.abap` ? model.remote.function : undefined, jobs: name === `${model.class}.clas.abap`, waits: [model.simulate?.work_class, model.replay?.work_class].some((c) => name === `${c}.clas.abap`)});
+    if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
+  }
+}
+
 // [{line, what}] for each statement of the source that ends the unit of work, writes (when
 // writes is false), registers an update task or runs native SQL
 // waits: the simulated work, whose WAIT is its job (a replay never binds it: the factory refuses)
-export function unitFindings(text, name, {writes = false, jobs = false, waits = false} = {}) {
+export function unitFindings(text, name, {writes = false, jobs = false, waits = false, remoteSeam = undefined} = {}) {
   const registry = new abaplint.Registry();
   registry.addFile(new abaplint.MemoryFile(name, text));
   registry.parse();
@@ -95,6 +105,10 @@ export function unitFindings(text, name, {writes = false, jobs = false, waits = 
         const source = statement.concatTokens().replace(/\s+/g, " ");
         if (ENDS_UNIT.has(type) && !(jobs && type === S0.Submit) && !(waits && type === S0.Wait)) found.push({line, what: `${ENDS_UNIT.get(type)} statement`});
         else if (!writes && WRITES.has(type)) found.push({line, what: `${WRITES.get(type)} database statement`});
+        // The named synchronous RFC is the seam; the factory's replay refusal is its guard.
+        // No helper, update/background/task call or other RFC receives this exemption.
+        else if (type === S0.CallFunction && remoteSeam && source.toUpperCase().startsWith(`CALL FUNCTION '${remoteSeam}' DESTINATION `)
+          && !/\bIN UPDATE TASK\b|\bIN BACKGROUND\b|\bSTARTING NEW TASK\b/i.test(source)) continue;
         else if (type === abaplint.Statements.CallFunction && (/\bIN UPDATE TASK\b|\bIN BACKGROUND\b|\bDESTINATION\b|\bSTARTING NEW TASK\b/i.test(source) || COMMITTING_FM.test((source.split(" ")[2] ?? "").replace(/\.$/, "")))) found.push({line, what: "CALL FUNCTION that registers an update or ends the unit"});
         else if (type === abaplint.Statements.SetUpdateTask) found.push({line, what: "SET UPDATE TASK statement"});
         else if (type === abaplint.Statements.CallDatabase) found.push({line, what: "native SQL"});
@@ -344,11 +358,13 @@ export function compileSet(file, {ddic, registry, out} = {}) {
       const vkey = `${key}/variants/${vname}`;
       const vat = implicit || (injected.port && name === WORK_PORT) ? at : line(vkey);
       if (!PORT_NAME.test(vname)) fail(vat, `variant ${JSON.stringify(vname)} is a lower-case name of 1 to 12 letters, digits and _ starting with a letter`);
+      const remote = remoteVariant(value, {kind, vname, vkey, line, fail});
+      if (remote) value = "generated";
       if (typeof value !== "string" || !/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) fail(vat, `variant ${vname} is generated or the name of a class`);
       let className, generated = value === "generated";
       const sim = simVariant({kind, vname, generated, simulate: doc.simulate !== undefined, at: vat, fail});
       if (generated) {
-        if (!GENERATED[kind].includes(vname)) fail(vat, `a generated variant of a ${kind} is one of ${GENERATED[kind].join(", ")}; ${vname} needs a class of its own (${vname}: <class>)`);
+        if (!remote && !GENERATED[kind].includes(vname)) fail(vat, `a generated variant of a ${kind} is one of ${GENERATED[kind].join(", ")}; ${vname} needs a class of its own (${vname}: <class>)`);
         className = `zcl_l3_${set}_${name}_${vname}`;
         if (vname === "replay" && className.length > 30) className = `zcl_l3_${set}_${name}_rpl`;
         tooLong(className, vkey);
@@ -358,7 +374,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
       }
       return {
         "@id": `${id}/port/${name}/variant/${vname}`, set_line: vat,
-        name: vname, "name@type": CHAR(30), class: className, generated,
+        name: vname, "name@type": CHAR(30), class: className, generated, ...(remote ? {remote, is_remote: true} : {}),
         is_table: generated && vname === "table", is_log: generated && vname === "log",
         is_dummy: generated && vname === "dummy", is_capture: generated && vname === "capture",
         // what the factory knows of a variant without creating it: a hand-written class counts as live
@@ -479,7 +495,9 @@ export function compileSet(file, {ddic, registry, out} = {}) {
   if (doc.simulate !== undefined) model.simulate = compileSimulate(doc, model, all, {line, fail, bindings: bindingDocs});
   if (doc.simulate?.profile !== undefined) compileReplay(doc.simulate, model.simulate, model, {file, line, fail});
   compileSnapshots(doc, model, {line, fail, columnsOf});
+  compileRemote(model, {line, fail, columnsOf});
   if (doc.settings !== undefined) model.settings = compileSettings(doc, model, {line, fail});
+  if (model.remote && (!model.settings || (model.remote.setting && !model.settings.entries.some((e) => e.name === "remote.destination")))) fail(model.remote.set_line, "remote receiver needs settings; remote.destination must be tunable when named");
   // a tunable seed is the run's: the chance autoclose reads it from the run's snapshot
   if (model.simulate && model.settings?.simulate_seed) model.simulate.seed_conf = {"@id": model.simulate["@id"], set_line: model.simulate.set_line, conf: model.settings.class};
   if (model.replay) model.replay.seed_conf = model.simulate.seed_conf;
@@ -515,6 +533,7 @@ function sidecar(model, template, rendered) {
     ...(rendered.simOverlays?.length ? {sim_overlay: rendered.simOverlays} : {}),
     ...(rendered.replayOverlays?.length ? {replay_overlay: rendered.replayOverlays} : {}),
     ...(model.snapshots && template === SET_TEMPLATE ? {snapshot_overlay: ["recipes/l3-snapshot/public.tpl", "recipes/l3-snapshot/run.tpl", "recipes/l3-snapshot/methods.tpl"]} : {}),
+    ...(model.remote && template === SET_TEMPLATE ? {remote_overlay: ["public", "send", "receive", "counts", "release", "resume"].map((n) => `recipes/l3-remote/${n}.tpl`)} : {}),
     model: `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`,
     ...(model.rules ? {rules: Object.fromEntries(model.rules.map((r) => [r.name, {file: r.file, class: r.check_class, model: r.hash}]))} : {}),
     lines: rendered.trace.map((entry) => ({line: entry.line, template_line: entry.template_line, path: entry.path,
@@ -586,6 +605,7 @@ async function renderWith(model, template, patches) {
   const {renderRecipe} = await import("./dsl-abap.mjs");
   let over = overlaid(model, template, patches);
   if (model.snapshots && template === SET_TEMPLATE) over = {...(over ?? {sim: [], replay: []}), templateText: snapshotOverlay(model, over?.templateText ?? readFileSync(template, "utf8"))};
+  if (model.remote && template === SET_TEMPLATE) over = {...(over ?? {sim: [], replay: []}), templateText: remoteOverlay(model, over?.templateText ?? readFileSync(template, "utf8"))};
   const result = await renderRecipe(model, template, {profile: "abap", ...(over ? {templateText: over.templateText} : {})});
   return over?.sim.length ? {...result, simOverlays: over.sim, replayOverlays: over.replay} : result;
 }
@@ -606,11 +626,8 @@ export async function renderSet(model) {
   const known = linesById(model);
   const nodeLine = (nodeId) => known.get(nodeId) ?? model.set_line;
   const extra = await renderPorts(model);
-  // nothing the runner or a generated variant holds may end the unit of work while a table is swapped
-  for (const [name, text] of [[`${model.class}.clas.abap`, runner.text], ...extra.results.map(([n, r]) => [n, r.text])]) {
-    const [first] = unitFindings(text, name, {writes: true, jobs: name === `${model.class}.clas.abap`, waits: [model.simulate?.work_class, model.replay?.work_class].some((c) => name === `${c}.clas.abap`)});
-    if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
-  }
+  const remoteFiles = model.remote ? await renderRemote(model, {classXml}) : {};
+  scanGeneratedUnits(model, runner.text, extra.results, remoteFiles);
   const results = [[`${model.class}.clas.abap`, runner], [`${model.report}.prog.abap`, job], ...extra.results];
   const doctor = await renderDoctor(model, {renderRecipe, sidecar, progXml, classXml});
   results.push(...doctor.results);
@@ -637,6 +654,7 @@ export async function renderSet(model) {
   return {
     files: {
       ...extra.files,
+      ...remoteFiles,
       ...(model.cockpit ? await renderCockpit(model) : {}),
       ...(model.settings ? Object.fromEntries(results.slice(-2).flatMap(([name, result]) => [
         [name, result.text], [name.replace(/\.(clas|prog)\.abap$/, ".$1.xml"), name.endsWith(".clas.abap")
@@ -686,7 +704,7 @@ async function renderPorts(model) {
     await one(port.iface, "intf", portRoot, port.is_autoclose ? "iface-autoclose" : port.is_work ? "iface-work" : port.is_source ? "iface-source" : "iface-sink", `L3 port ${port.name} of ${model.set}`, true);
     for (const variant of variants) {
       // a hand-written class is its author's; the work's real variant is the runner's own calls
-      if (!variant.generated || variant.is_inline) continue;
+      if (!variant.generated || variant.is_inline || variant.is_remote) continue;
       const root = {...portRoot, "@id": variant["@id"], set_line: variant.set_line, variant: variant.name, ...(port.is_work ? {"variant@type": CHAR(30)} : {}), class: variant.class,
         capture: variant.is_capture, dummy: variant.is_dummy, ...(variant.is_replay ? {sim: model.replay, replay: model.replay} : {})};
       const template = port.is_autoclose ? (variant.is_sim ? "autoclose-sim" : "autoclose") : port.is_work ? "work-sim"
@@ -797,7 +815,10 @@ function alertRow(db, key) {
         AND check_date = ? AND pile_no = ? AND alert_seq = ?`).get(key.set, key.rule, `sha256:${key.hash}%`, key.date, key.pile, key.seq);
       // the plan row of the alert's pile, by its run (an older database has no plan table)
       let pile;
-      let settings = [], events = [], budget, snapshots = [];
+      let settings = [], events = [], budget, snapshots = [], remote;
+      try {
+        if (alert && /^[a-z][a-z0-9_]{0,12}$/.test(key.set)) remote = handle.prepare(`SELECT * FROM zl3_${key.set}_rlink WHERE set_name = ? AND (run_id = ? OR remote_run = ?)`).get(key.set, alert.run_id, alert.run_id);
+      } catch { remote = undefined; }
       try {
         pile = alert && handle.prepare(`SELECT * FROM zosd_l3_pile WHERE set_name = ? AND run_id = ? AND rule_name = ? AND pile_no = ?`)
           .get(key.set, alert.run_id, key.rule, key.pile);
@@ -815,7 +836,7 @@ function alertRow(db, key) {
       try {
         if (alert) snapshots = handle.prepare(`SELECT * FROM zosd_l3_run_snap WHERE set_name = ? AND run_id = ? ORDER BY stage_no`).all(key.set, alert.run_id);
       } catch { snapshots = []; }
-      return alert && {...alert, pile, settings, events, budget, snapshots};
+      return alert && {...alert, pile, settings, events, budget, snapshots, remote};
     } finally { handle.close(); }
   });
 }
@@ -854,6 +875,7 @@ export async function explainAlert(key, {sets = setFiles(), db, row} = {}) {
   const out = [
     `alert   ${k.set}/${k.rule}/sha256:${k.hash.slice(0, 12)}.../${k.date}/${k.pile}/${k.seq}`,
     ...(alertRowFound ? [`text    ${String(alertRowFound.alert_text).trimEnd()}`, `run     ${String(alertRowFound.run_id).trim()} at ${alertRowFound.run_ts}`] : []),
+    ...(alertRowFound?.remote ? [`remote  ${String(alertRowFound.remote.remote_run).trim()} (detecting run ${String(alertRowFound.remote.run_id).trim()})`] : []),
     ...(alertRowFound?.snapshots ?? []).map((s) => `snapshot ${String(s.snap_name).trim()}: id ${String(s.snap_id).trim()}, SHA256 ${String(s.content_hash).trim()}, rows ${s.row_count}, stage ${s.stage_no}`),
     ...(alertRowFound?.settings?.length ? ["settings effective for this run:", ...alertRowFound.settings.map((s) =>
       `  ${String(s.param_name).trim()} = ${String(s.param_val).trim()} (${String(s.origin).trim()}, DSL ${String(s.dsl_value).trim()}${String(s.origin).trim() === "USER" ? `; ${String(s.changed_by).trim()} at ${s.changed_at}` : ""})`)] : []),

@@ -33,6 +33,13 @@ entities:
         label: Started
         readonly: true
         typeName: TIMESTAMP
+      RemoteRun:
+        type: String(32)
+        field: REMOTE_RUN
+        label: Remote run
+        readonly: true
+        sortable: false
+        filterable: false
       Title:
         type: String(40)
         field: TITLE
@@ -1531,6 +1538,8 @@ annotations:
     label: Run ID
   Run/Started:
     label: Started
+  Run/RemoteRun:
+    label: Remote run
   Run/Title:
     label: Run
   Run/RunLabel:

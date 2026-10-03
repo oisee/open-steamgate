@@ -24,6 +24,7 @@ import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {hostModules} from "./osd-host.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
+import {installRfcMessage} from "./osd-rfc-message.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
 
 // the transpiler package in use by this tree, and the core it was built
@@ -43,6 +44,7 @@ export function modulesOf(root) {
   const fromTranspiler = createRequire(join(where, "package.json"));
   const {Transpiler, Chunk} = fromTranspiler(where);
   const core = fromTranspiler("@abaplint/core");
+  const {CallFunctionTranspiler} = fromTranspiler(join(where, 'build/src/statements/call_function.js'));
   let plugin;
   try {
     // the CLI's optional plugin, resolved from the project as it does it
@@ -50,7 +52,16 @@ export function modulesOf(root) {
   } catch {
     plugin = undefined;
   }
-  return {Transpiler, Chunk, core, plugin, where, version: JSON.parse(readFileSync(join(where, "package.json"), "utf8")).version};
+  return prepareModules({Transpiler, Chunk, core, CallFunctionTranspiler, plugin, where, version: JSON.parse(readFileSync(join(where, "package.json"), "utf8")).version});
+}
+
+// Install on the selected copy, including bundled hosts and explicit modules.
+function prepareModules(modules) {
+  installRfcMessage(modules.CallFunctionTranspiler, modules.Chunk, modules.core);
+  return modules;
+}
+export function selectedModules(root, explicit) {
+  return prepareModules(explicit ?? hostModules() ?? modulesOf(root));
 }
 
 function packageRootOf(file) {
@@ -236,7 +247,7 @@ export async function transpile(options = {}) {
   const log = options.log ?? (() => {});
   const started = Date.now();
   // a binary registered its bundled transpiler and core; a checkout resolves them
-  const {Transpiler, Chunk, core, plugin, version} = options.modules ?? hostModules() ?? modulesOf(root);
+  const {Transpiler, Chunk, core, plugin, version} = selectedModules(root, options.modules);
   if (config.write_source_map === true) mapStatementStarts(Chunk);
   const {files, skipped} = await loadFiles(root, config, core, options.onRead);
   log(`${files.length} files added from source, ${skipped} skipped`);
