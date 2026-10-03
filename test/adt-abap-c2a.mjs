@@ -87,7 +87,7 @@ describe("C2a PARSE dispatcher destination",() => {
     const signature={exporting:{iv_command:box("PARSE"),iv_json:box(JSON.stringify(input))},importing:{ev_json:box(""),ev_error:box("")}};
     await withSystem(() => ({}),() => destination.call("ZOSD_STORE",signature),{store});return answerOf(signature);
   }
-  for (const kind of ["OUTLINE","DDLS","unknown","toString","__proto__",undefined]) it(`unsupported kind ${kind}`,async () => {
+  for (const kind of ["OUTLINE","BOGUS","unknown","toString","__proto__",undefined]) it(`unsupported kind ${kind}`,async () => {
     const result=await call(new StoreDestination({store:() => {throw new Error("unsupported kind must not open a store");}}),{kind});expect(JSON.parse(result.EV_JSON).error.code).to.equal("NOT_SUPPORTED");
   });
   for (const json of ["", "{", "null"]) it(`bad PARSE JSON ${JSON.stringify(json)} refuses without opening a store`,async () => {

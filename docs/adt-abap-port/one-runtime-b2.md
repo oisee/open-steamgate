@@ -113,3 +113,10 @@ durability for an in-memory database. Default behavior remains switched off.
 - ADT now shares the child's recycle: a request inside the child when a
   publish recycles it gets about 2 s to finish, then a GET is retried and a
   write answers 500. That is the cost of option B, by design.
+
+C4 preview SQL uses `rawMessage` in its JSON envelope: SYSTEM's existing
+`raw` key means EV_SOURCE and would remove the preview error text from JSON.
+The child runs preview on its active connection inside the current dialog
+step, without `lockedClient` or a nested step. PostgreSQL SQLCHECK prepares
+on a separate physical session so a bad editor query cannot abort the
+serving session's pending LUW.

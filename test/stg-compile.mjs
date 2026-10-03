@@ -250,6 +250,46 @@ describe("tools/stg-compile: Fiori annotations in the model", () => {
   it("names a target that is not in the model", () => {
     expect(() => readModel("project: X\nservice: Y\nentities:\n  A:\n    properties: {Id: String}\nannotations:\n  A/Nope: {label: x}\n")).to.throw("A has no property Nope");
   });
+
+  // the run cockpit's terms (DSL L3 slice 6a): a coloured status, header micro
+  // charts, a section hidden by a boolean, a drop-down value list
+  it("writes UI.DataPoint, UI.Chart, a DataField's Criticality, UI.Hidden on a facet and fixed value lists", () => {
+    const ann = compile(`project: ZX
+service: ZX_SRV
+entities:
+  R:
+    keys: [Id]
+    properties: {Id: String(8), Status: String(8), Crit: Byte, Done: Int32, All: Int32, Used: Int32, Max: Int32, Warn: Int32, Narrow: Int32, NoRows: Boolean}
+annotations:
+  R:
+    lineItem: [{value: Status, label: Status, criticality: Crit}]
+    headerFacets: [{id: Final, label: Final, target: "@UI.Chart#Final"}]
+    facets: [{id: Rows, label: Rows, target: "@UI.FieldGroup#Rows", hidden: NoRows}]
+    dataPoints:
+      Final: {value: Done, title: Final, targetValue: All}
+      Budget: {value: Used, minimumValue: 0, maximumValue: Max,
+        criticalityCalculation: {improvementDirection: Minimize, toleranceRangeHighValue: Warn, deviationRangeHighValue: Narrow}}
+    charts:
+      Final: {type: Donut, measures: [Done], measureAttributes: [{measure: Done, dataPoint: Final}]}
+      Bar: {type: BarStacked, dimensions: [Status], measures: [Done]}
+  R/Status: {valueListFixed: true}
+`).classes["zcl_zx_mpc_ann.clas.abap"];
+    const UI = "com.sap.vocabularies.UI.v1.";
+    expect(ann).to.contain("lo_item->create_property( 'Criticality' )->create_simple_value( )->set_path( 'Crit' ).");
+    expect(ann).to.contain(`lo_item->create_property( 'Target' )->create_simple_value( )->set_annotation_path( '@${UI}Chart#Final' ).`);
+    expect(ann).to.contain(`lo_item->create_annotation( '${UI}Hidden' )->create_simple_value( )->set_path( 'NoRows' ).`);
+    expect(ann).to.contain(`  iv_term      = '${UI}DataPoint'\n      iv_qualifier = 'Final' ).\n    lo_record = lo_annotation->create_record( '${UI}DataPointType' ).`);
+    expect(ann).to.contain("lo_record->create_property( 'TargetValue' )->create_simple_value( )->set_path( 'All' ).");
+    expect(ann).to.contain("lo_record->create_property( 'MinimumValue' )->create_simple_value( )->set_decimal( '0' ).");
+    expect(ann).to.contain(`lo_item->create_property( 'ImprovementDirection' )->create_simple_value( )->set_enum_member_by_name( '${UI}ImprovementDirectionType/Minimize' ).`);
+    expect(ann).to.contain("lo_item->create_property( 'ToleranceRangeHighValue' )->create_simple_value( )->set_path( 'Warn' ).");
+    expect(ann).to.contain("lo_item->create_property( 'DeviationRangeHighValue' )->create_simple_value( )->set_path( 'Narrow' ).");
+    expect(ann).to.contain(`lo_record->create_property( 'ChartType' )->create_simple_value( )->set_enum_member_by_name( '${UI}ChartType/Donut' ).`);
+    expect(ann).to.contain(`set_enum_member_by_name( '${UI}ChartType/BarStacked' ).`);
+    expect(ann).to.contain("lo_collection = lo_record->create_property( 'Dimensions' )->create_collection( ).\n    lo_collection->create_simple_value( )->set_property_path( 'Status' ).");
+    expect(ann).to.contain(`lo_item->create_property( 'DataPoint' )->create_simple_value( )->set_annotation_path( '@${UI}DataPoint#Final' ).`);
+    expect(ann).to.contain("lo_annotation = lo_target->create_annotation( 'com.sap.vocabularies.Common.v1.ValueListWithFixedValues' ).\n    lo_annotation->create_simple_value( )->set_boolean( abap_true ).");
+  });
 });
 
 describe("tools/stg-compile: complex types", () => {

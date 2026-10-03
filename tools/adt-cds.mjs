@@ -28,7 +28,7 @@ function columnOf(element) {
 // Walk the parse for `<column> as <Alias>` pairs. abaplint's parsed data
 // gives the element names and keys but not the column behind each one, so
 // the tree supplies that half.
-function elementsOf(tree, parsed) {
+export function elementsOf(tree, parsed) {
   const nodeName = (n) => n.get?.().constructor?.name ?? "";
   const kids = (n) => n.getChildren?.() ?? [];
   const find = (n, name) => {
@@ -62,18 +62,19 @@ function elementsOf(tree, parsed) {
 
 // The entity: its names, and a field list shaped like tableFieldsOf's, so
 // the same document generator can render either.
+export function entityHeadOf(store, name) {
+  const object = store.registry().getObject("DDLS", String(name).toUpperCase());
+  const parsed = object?.getParsedData?.();
+  if (parsed?.tree === undefined) return undefined;
+  return {name: object.getName().toUpperCase(), sqlView: (parsed.sqlViewName ?? object.getName()).toUpperCase(),
+    description: parsed.description ?? "", sources: (parsed.sources ?? []).map(s => String(s.name ?? s).toUpperCase()),
+    elements: elementsOf(parsed.tree, parsed)};
+}
+
 export function cdsEntityOf(store, name) {
-  const registry = store.registry();
-  const object = registry.getObject("DDLS", String(name).toUpperCase());
-  if (object === undefined) {
-    return undefined;
-  }
-  const parsed = object.getParsedData?.();
-  if (parsed?.tree === undefined) {
-    return undefined;
-  }
-  const sources = (parsed.sources ?? []).map((s) => String(s.name ?? s).toUpperCase());
-  const elements = elementsOf(parsed.tree, parsed);
+  const head = entityHeadOf(store, name);
+  if (head === undefined) return undefined;
+  const {sources, elements} = head;
 
   // the base table's DDIC metadata, when there is exactly one base. With a
   // join there is no single table to ask, so the columns keep their names
@@ -106,9 +107,9 @@ export function cdsEntityOf(store, name) {
   });
 
   return {
-    name: object.getName().toUpperCase(),
-    sqlView: (parsed.sqlViewName ?? object.getName()).toUpperCase(),
-    description: parsed.description ?? "",
+    name: head.name,
+    sqlView: head.sqlView,
+    description: head.description,
     source: sources[0],
     fields,
   };

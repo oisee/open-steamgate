@@ -106,17 +106,16 @@ export async function bodyOf(req) {
 
 const text = (value) => String(value?.get?.() ?? value ?? "");
 
-/** whether the router's own table gives the request an ABAP row; its table
- *  is read once per router class (a warm load is a new one) */
-let table = {router: undefined, rows: undefined};
+/** Routes depend on the current STORE binding and profile, even when the
+ *  router class has not changed. Read them inside this request's step. */
 export async function abapServes(method, path) {
   const a = globalThis.abap;
   const router = a.Classes.ZCL_OSD_ADT_ROUTER;
   if (router === undefined) return true;
-  if (table.router !== router) table = {router, rows: await router.routes()};
+  const rows = await router.routes();
   const found = new a.types.Character(1);
   const route = router.METHODS.MATCH.parameters.ES_ROUTE.type();
-  await router.match({it_routes: table.rows, iv_method: new a.types.String().set(String(method).toUpperCase()),
+  await router.match({it_routes: rows, iv_method: new a.types.String().set(String(method).toUpperCase()),
     iv_path: new a.types.String().set(path), ev_found: found, es_route: route});
   return found.get() === "X" && text(route.get().served_by) !== "HOST";
 }

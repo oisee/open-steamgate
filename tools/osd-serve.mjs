@@ -1,3 +1,4 @@
+import {previewSQL} from "./adt-preview-sql.mjs";
 // The serving half of OSD, on its own, in a process that can be replaced.
 //
 // This is the OData front and nothing else: the transpiled runtime, the
@@ -13,7 +14,7 @@
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
 import {timingSafeEqual} from "node:crypto";
-import {dialogStep, exclusive, workProcess} from "./osd-dialog-step.mjs";
+import {dialogStep, exclusive, outsideStepContext, workProcess} from "./osd-dialog-step.mjs";
 import {bootGuard} from "./osd-boot-guard.mjs";
 import {HotLoader, applyRuntimeHotSwap, warmVerdict} from "./osd-hot.mjs";
 import {ensureDemoData} from "./osd-demo-data.mjs";
@@ -272,12 +273,12 @@ function dump(error, request) {
     console.error(`    at ${f.file}:${f.line}${f.text ? "  " + f.text : ""}`);
   }
   // ZOSD_DUMP, the table (tools/osd-dumps.mjs): a kernel job, so it happens
-  // here and not in the ABAP, and after this request's own step has already
-  // rolled back -- dump() only runs from a catch of a rejected dialogStep(),
-  // and persistDump() commits through a fresh one of its own. Not awaited:
+  // here and not in the ABAP. SYSTEM DUMP can arrive inside the failed
+  // step, so detach its context and queue persistence behind that step.
+  // persistDump() commits through a fresh step of its own. Not awaited:
   // the response above does not wait on the table, and a table write that
   // fails is still a dump the ring and the log already have.
-  persistDump(globalThis.abap.context.databaseConnections.DEFAULT, d, {request, generation: generationLabel()})
+  outsideStepContext(() => persistDump(globalThis.abap.context.databaseConnections.DEFAULT, d, {request, generation: generationLabel()}))
     .catch((e) => console.error(`ZOSD_DUMP: ${e?.message ?? e}`));
   return d;
 }
@@ -353,9 +354,15 @@ if (childStoreIPC !== undefined) {
     const previous = currentSystemAnswers();
     return withSystem(async (kind, name, json) => {
       const input = JSON.parse(json || "{}");
+      if ((kind === "SQL" || kind === "SQLCHECK") && Object.hasOwn(input, "statement")) return previewSQL(connection(), kind, input);
       if (kind === "SQL" || kind === "XREF") return data.query(input.sql ?? name, {max: input.max ?? 100});
       if (kind === "SQLCHECK") { await data.check(input.sql ?? name); return {ok: true}; }
-      if (kind === "DUMP") return dumps.slice().reverse();
+      if (kind === "DUMP") {
+        if (input.operation !== "record") return dumps.slice().reverse();
+        const error = {constructor: {name: input.name || ""}, message: input.message, stack: input.stack};
+        const recorded = dump(error, input.request);
+        return {where: recorded.where, frames: recorded.frames};
+      }
       if (kind === "SERVICES") return servicesFromRows(await currentRows(connection()));
       if (kind === "TRANSACTIONS") return data.query("SELECT * FROM tstc", {max: 1000});
       if (kind === "CLASSRUN") {
@@ -411,7 +418,7 @@ hostNodes.classrun = (a, node) => a.post(node.path, async function (req, res) {
     const {runClassrun} = await import("./osd-classrun.mjs");
     res.json(await runClassrun(root, String(asked.name ?? ""), {generation: generationLabel()}));
   } catch (e) {
-    res.status(e?.code === "NOT_TRANSPILED" ? 503 : e?.code === "NOT_CLASSRUN" ? 400 : 500)
+    res.status(["NOT_TRANSPILED", "NOT_BUILT"].includes(e?.code) ? 503 : e?.code === "NOT_CLASSRUN" ? 400 : 500)
       .json({error: {code: e?.code ?? "FAILED", message: String(e?.message ?? e)}});
   }
 });

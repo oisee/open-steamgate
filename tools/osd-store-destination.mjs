@@ -44,6 +44,11 @@ export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILI
 export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
 
 const PARSE_KINDS = {
+  DDLS: async (store, input) => {
+    const {entityHeadOf} = await import("./adt-cds.mjs");
+    const head = entityHeadOf(store, input.name ?? "");
+    return head === undefined ? {found: false} : {found: true, ...head};
+  },
   UNIT_PLAN: async (store, input) => {
     const {unitPlan} = await import("./osd-unit.mjs");
     return unitPlan(store, String(input.type ?? "").toUpperCase(),
@@ -95,8 +100,13 @@ export function withSystem(answers, work, {store, deferActivate, oneRuntime} = {
 }
 
 export const currentSystemAnswers = () => systemCalls?.getStore()?.answers;
+export const oneRuntimeEnabled = () => (typeof process !== "undefined" && process.env?.OSD_ADT_ONE_RUNTIME === "1")
+  || systemCalls?.getStore()?.oneRuntime === true;
 
 export class StoreDestination {
+  // Read the current request binding, never cache it on the destination.
+  oneRuntimeEnabled() { return oneRuntimeEnabled(); }
+
   /**
    * @param {object} options
    * @param {object} [options.store] the ObjectStore, or nothing where there
@@ -265,7 +275,7 @@ export class StoreDestination {
   }
 
   async #system(kind, name, json) {
-    if (SYSTEM_KINDS.includes(kind) === false && !((process.env.OSD_ADT_ONE_RUNTIME === "1" || systemCalls?.getStore()?.oneRuntime === true) && (PARENT_SYSTEM_KINDS.has(kind) || CHILD_SYSTEM_KINDS.has(kind)))) {
+    if (SYSTEM_KINDS.includes(kind) === false && !(oneRuntimeEnabled() && (PARENT_SYSTEM_KINDS.has(kind) || CHILD_SYSTEM_KINDS.has(kind)))) {
       return {EV_ERROR: `unknown SYSTEM kind ${kind || "(none)"}`};
     }
     const bound = systemCalls?.getStore();

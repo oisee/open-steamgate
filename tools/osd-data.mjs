@@ -10,6 +10,7 @@
 // Booting the transpiled runtime is how we get that database rather than a
 // second one beside it: OSD has exactly one system, and a read through the
 // façade sees what a program running inside sees.
+import {singleSelect, selectSQLiteOne} from './adt-single-select.mjs';
 import {existsSync} from "node:fs";
 import {join} from "node:path";
 import {runsAs} from "./osd-main.mjs";
@@ -98,6 +99,7 @@ export class Data {
   // is applied here rather than trusted to the statement, because a client
   // that forgets it should not be able to read a million rows.
   async query(sql, options = {}) {
+    sql = singleSelect(sql, word => new NotAllowed(word));
     const max = options.max ?? 100;
     if (this.runtime !== undefined) {
       return this.#throughTheDoor(sql, max);
@@ -108,7 +110,10 @@ export class Data {
       throw new NotAllowed(text.split(/\s+/)[0] ?? "");
     }
     const limited = / LIMIT \d+/i.test(text) ? text : `${text} LIMIT ${max}`;
-    const answer = await client.select({select: limited});
+    let answer;
+    if (client.selectOne) answer = await client.selectOne(limited, max);
+    else if (client.name === 'sqlite' && client.openCursor) answer = await selectSQLiteOne(client, limited, max);
+    else answer = await client.select({select: limited});
     const rows = (answer.rows ?? []).slice(0, max);
     return {
       sql: limited,
@@ -124,6 +129,7 @@ export class Data {
   // that the runtime adapters erase, so query(..., {max: 0}) is not a safe
   // substitute for prepare-only validation.
   async check(sql) {
+    sql = singleSelect(sql, word => new NotAllowed(word));
     if (this.runtime !== undefined) {
       await this.runtime.ensure();
       const answer = await fetch(`${this.runtime.url}/osd/sql`, {

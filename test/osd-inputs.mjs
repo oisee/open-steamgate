@@ -68,6 +68,17 @@ describe("osd-inputs", () => {
       expect(r.clashes.map((c) => c.object)).to.deep.equal(["CLAS ZCL_TWO"]);
     });
 
+    it("a web page's trace sidecar is no object, so two generated apps in one input are no duplicate", () => {
+      for (const app of ["src/cockpit/zrun", "src/cockpit/zrun_s"]) {
+        for (const f of ["Component.js.trace.json", "manifest.json.trace.json", "index.html.trace.json", "i18n.properties.trace.json"]) write(app, f);
+      }
+      write("src/cockpit/zrun", "zcl_two.clas.trace.json");
+      write("src/cockpit/zrun_s", "zcl_two.clas.trace.json");
+      const r = report(join(root, "abap_transpile.json"), {root});
+      // an ABAP object's sidecar still is its object's
+      expect(r.duplicates.map((d) => d.object)).to.deep.equal(["CLAS ZCL_TWO"]);
+    });
+
     it("a package file is its folder's, so package.devc.xml everywhere is no duplicate", () => {
       write("src/a", "package.devc.xml");
       write("src/b", "package.devc.xml");
