@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
 import {cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
+import {KERNEL_FORMS, kernelWarnings} from "../tools/osd-kernel-compat.mjs";
 import {generate, inventory, evidence} from "../tools/osg-support.mjs";
 
 const root = resolve(import.meta.dirname, "..");
@@ -10,6 +11,61 @@ describe("generated corpus support evidence", function () {
   let temp;
   before(() => { mkdirSync(join(root, ".local"), {recursive: true}); temp = mkdtempSync(join(root, ".local/support-test-")); });
   after(() => rmSync(temp, {recursive: true, force: true}));
+  it("imports the standalone scanner for an unsaved buffer with stable locations and anchors", () => {
+    const file = "zcl_kernel_bits.clas.abap";
+    const source = readFileSync(join(root, "tools/testdata-kernel-bits", file), "utf8");
+    const warnings = kernelWarnings([{file, source}]);
+    assert.deepEqual(warnings.map((w) => [w.file, w.line, w.form, w.supportAnchor]), [
+      [file, 9, "BIT-AND on i", "docs/osg-support.md#kernel-bit-and-operand-not-x"],
+      [file, 10, "BIT-OR on int8", "docs/osg-support.md#kernel-bit-or-operand-not-x"],
+      [file, 11, "BIT-XOR on i", "docs/osg-support.md#kernel-bit-xor-operand-not-x"],
+      [file, 12, "BIT-NOT on int8", "docs/osg-support.md#kernel-bit-not-operand-not-x"],
+    ]);
+    assert.deepEqual(kernelWarnings({file, source}), warnings);
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e",
+      'import {kernelWarnings} from "./tools/osd-kernel-compat.mjs"; kernelWarnings([]);'],
+    {cwd: root, encoding: "utf8", env: {...process.env, OSD_KERNEL_SCANNER_FAIL: "1"}});
+    assert.notEqual(child.status, 0); assert.match(child.stderr, /forced scanner failure/);
+  });
+  it("commits a unique explicit anchor for every known kernel form", () => {
+    const page = readFileSync(join(root, "docs/osg-support.md"), "utf8");
+    const anchors = [...page.matchAll(/<a id="([^"]+)"><\/a>/g)].map((m) => m[1]);
+    assert.equal(new Set(anchors).size, anchors.length);
+    assert.equal(new Set(KERNEL_FORMS.map((f) => f.anchor)).size, KERNEL_FORMS.length);
+    for (const {anchor} of KERNEL_FORMS) assert.equal(anchors.filter((a) => a === anchor).length, 1, anchor);
+  });
+  it("credits helpers only from declared successful full-folder runs and preserves partial results", () => {
+    const dir = join(temp, "helpers"); mkdirSync(dir);
+    for (const cls of ["pass", "fail", "helper"])
+      writeFileSync(join(dir, `zcl_${cls}.clas.abap`), `CLASS zcl_${cls} DEFINITION PUBLIC. ENDCLASS.
+CLASS zcl_${cls} IMPLEMENTATION. ENDCLASS.
+`);
+    const file = join(temp, "helpers.json"), manifest = join(temp, "runs.json");
+    const rows = [{class: "ZCL_PASS", status: "SUCCESS", method: "CHECK"},
+      {class: "ZCL_FAIL", status: "SUCCESS", method: "CHECK"}];
+    writeFileSync(file, JSON.stringify({rows}));
+    writeFileSync(manifest, JSON.stringify([{folder: "helpers", runtime: "osgo", file: "helpers.json"},
+      {folder: "helpers", runtime: "osgjs", reason: "runner crashed: heap exhausted"}]));
+    const paths = {osgo: [], osgjs: [], runs: [manifest]};
+    const all = generate([dir], paths);
+    assert.ok(all.report.constructs.every((c) => c.osgo.status === "runs"));
+    assert.match(all.markdown, /ZCL_HELPER: exercised by 2 tests in the same run/);
+    assert.match(all.markdown, /helpers \/ osgjs: no evidence: runner crashed: heap exhausted/);
+    assert.equal(all.report.runtime.osgo.classes, 3);
+    rows[1] = {...rows[1], status: "FAILURE", message: "expected 2, got 1\nstack trace"};
+    writeFileSync(file, JSON.stringify({rows}));
+    const partial = generate([dir], paths);
+    const result = partial.report.constructs[0].osgo;
+    assert.equal(result.status, "fails");
+    assert.equal(result.missing.length, 0);
+    assert.ok(result.failures.some((f) => f.class === "ZCL_HELPER" && f.status === "unknown"));
+    assert.ok(result.failures.some((f) => f.class === "ZCL_FAIL" && f.message === "expected 2, got 1"));
+    assert.equal(evidence(["ZCL_PASS"], {rows: new Map([["ZCL_PASS", [rows[0]]]])}).status, "runs");
+    // A selected class result alone cannot confer full-folder credit.
+    assert.ok(generate([dir], {osgo: [file], osgjs: []}).report.constructs.every((c) => c.osgo.missing.includes("ZCL_HELPER")));
+    writeFileSync(file, JSON.stringify({rows: []}));
+    assert.ok(generate([dir], paths).report.constructs.every((c) => c.osgo.status === "no evidence"));
+  });
   it("resolves statement, builtin, elementary declaration and assignment types without guessing", () => {
     const dir = join(temp, "types"); mkdirSync(dir);
     writeFileSync(join(dir, "zcl_types.clas.abap"), `CLASS zcl_types DEFINITION PUBLIC.

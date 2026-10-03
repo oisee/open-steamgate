@@ -169,8 +169,21 @@ elementary declarations and conversions, joins per-class results for both runtim
 and lists kernel compatibility warnings. It is evidence from a corpus, not a specification.
 Regenerate from a read-only ABAPiti checkout with the commands below; flatten the
 split fixtures as the ABAPiti CI does, and repeat the two runtime commands for
-any extra `qjs`, `mono` and `int8` folders under `.local/abapiti`. Omit a folder's
-JSON if that run fails or exceeds 20 minutes; it then has no evidence.
+any extra `qjs`, `mono` and `int8` folders under `.local/abapiti`. Retain JSON from partial runs so passing and failing classes keep their results.
+Declare full-folder runs using `--runs <manifest.json>`; each array entry has
+`folder` (input basename), `runtime` (`osgo` or `osgjs`) and `file` (relative to
+that manifest), or `reason` for a crash without class results. All-success
+full-folder runs credit helper classes as exercised by their tests; partial
+runs leave helpers fails/unknown. Plain `--osgo`/`--osgjs` files give per-class
+evidence only, which is safe for runs restricted with `--class`.
+
+Editors can import `kernelWarnings` and `KERNEL_FORMS` from
+`tools/osd-kernel-compat.mjs`, then call `kernelWarnings([{file, source}])` on
+unsaved buffers. Each finding includes file, line, form, message and
+`supportAnchor`, a stable link into this page; `KERNEL_FORMS` lists the fixed
+anchors and titles. Show findings as Error diagnostics by default while allowing
+the code to run. `osg.kernelStrict: "refuse"` opts into refusal, matching the
+unit runners' `--kernel-strict` mode.
 
 ```sh
 mkdir -p .local/support-work/go-cache .local/support-work/go-tmp
@@ -183,7 +196,17 @@ rm -r .local/support-work/corpus/TestOSD_EmitUnitClasses/split
 OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'timeout 1200 npm run -s osgo:unit -- .local/support-work/corpus/TestOSD_EmitUnitClasses --json > .local/support-work/osgo-corpus.json'
 OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'timeout 1200 npm run -s osgjs:unit -- .local/support-work/corpus/TestOSD_EmitUnitClasses --json > .local/support-work/osgjs-corpus.json'
 npm run osg:support -- .local/support-work/corpus/TestOSD_EmitUnitClasses --osgo .local/support-work/osgo-corpus.json --osgjs .local/support-work/osgjs-corpus.json --out docs/osg-support.md --json .local/support-work/support.json
-# Append extra input folders and successful --osgo/--osgjs files to that command.
+# Append extra input folders and partial or successful --osgo/--osgjs files.
+# To credit helpers, create a full-folder manifest (paths relative to this JSON):
+cat > .local/support-work/runs.json <<'JSON'
+[
+  {"folder":"TestOSD_EmitUnitClasses","runtime":"osgo","file":"osgo-corpus.json"},
+  {"folder":"TestOSD_EmitUnitClasses","runtime":"osgjs","reason":"memory access out of bounds; no class results"}
+]
+JSON
+# Replace the reason with file: "osgjs-corpus.json" when class results exist.
+# Add records for each extra folder/runtime, then generate all supplied folders:
+npm run osg:support -- .local/support-work/corpus/TestOSD_EmitUnitClasses --runs .local/support-work/runs.json --out docs/osg-support.md
 # Replace --out with --check docs/osg-support.md to compare without writing.
 ```
 

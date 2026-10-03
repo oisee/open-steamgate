@@ -2,8 +2,9 @@
 import {createRequire} from "node:module";
 import {execFileSync} from "node:child_process";
 import {readFileSync, readdirSync, writeFileSync, existsSync} from "node:fs";
-import {basename, join, resolve} from "node:path";
-import {kernelWarnings, kernelWarningForms, stageInput} from "./osd-unit-ci.mjs";
+import {basename, dirname, join, resolve} from "node:path";
+import {stageInput} from "./osd-unit-ci.mjs";
+import {kernelWarnings, KERNEL_FORMS} from "./osd-kernel-compat.mjs";
 import {rmSync} from "node:fs";
 import {runsAs} from "./osd-main.mjs";
 
@@ -101,9 +102,10 @@ export function inventory(directory) {
   } finally { if (staged.staging) rmSync(staged.staging, {recursive: true, force: true}); }
 }
 
-function readRuns(paths) {
-  const rows = new Map();
-  for (const path of [...paths].sort(order)) {
+function readRuns(paths, folderRuns = []) {
+  const rows = new Map(), helpers = new Map();
+  paths = [...paths, ...folderRuns.filter((r) => r.file).map((r) => r.file)];
+  for (const path of [...new Set(paths)].sort(order)) {
     const result = JSON.parse(readFileSync(path, "utf8"));
     if (!Array.isArray(result.rows)) throw new Error(`run JSON has no rows: ${basename(path)}`);
     for (const row of result.rows) {
@@ -114,22 +116,28 @@ function readRuns(paths) {
       rows.get(cls).push(row);
     }
   }
-  return {rows};
+  return {rows, helpers, folderRuns};
 }
 
 export function evidence(classes, run) {
-  const failures = [], refusals = [], missing = [];
+  const failures = [], refusals = [], missing = [], reasons = [];
   for (const cls of classes) {
     const rows = run.rows.get(cls);
-    if (!rows?.length) { missing.push(cls); continue; }
+    if (!rows?.length) {
+      const helper = run.helpers?.get(cls);
+      if (helper?.status === "runs") reasons.push({class: cls, reason: helper.reason});
+      else if (helper) failures.push({class: cls, status: "unknown", message: helper.reason});
+      else missing.push(cls);
+      continue;
+    }
     for (const row of rows) {
-      if (row.status === "FAILURE" || row.status === "ERROR") failures.push({class: cls, status: row.status});
+      if (row.status === "FAILURE" || row.status === "ERROR") failures.push({class: cls, status: row.status, message: String(row.message ?? "").split(/\r?\n/)[0]});
       if (row.status === "NOT_COMPILED") refusals.push({class: cls, message: String(row.message ?? "").split(/\r?\n/)[0]});
     }
   }
   // A failure takes precedence, but retain all refusals and missing owners too.
   return {status: failures.length ? "fails" : refusals.length ? "refused" : missing.length ? "no evidence" : "runs",
-    failures, refusals, missing};
+    failures, refusals, missing, reasons};
 }
 const git = (cwd, format) => execFileSync("git", ["log", "-1", `--format=${format}`], {cwd, encoding: "utf8"}).trim();
 const safe = (value) => String(value).replaceAll("|", "\\|").replace(/[\r\n]/g, " ");
@@ -139,7 +147,18 @@ const sectionOf = (r) => r.osgo.status === "fails" || r.osgjs.status === "fails"
   : r.osgo.status === "runs" || r.osgjs.status === "runs" ? "one" : "none";
 
 export function generate(directories, paths) {
-  const runs = {osgo: readRuns(paths.osgo), osgjs: readRuns(paths.osgjs)};
+  // Explicit full-folder provenance prevents a --class subset from crediting helpers.
+  const folderRuns = (paths.runs ?? []).flatMap((file) => {
+    const entries = JSON.parse(readFileSync(file, "utf8"));
+    if (!Array.isArray(entries)) throw new Error("run manifest must be an array");
+    return entries.map((r) => {
+      if (!["osgo", "osgjs"].includes(r.runtime) || !r.folder || (!r.file && !r.reason))
+        throw new Error("run manifest needs runtime, folder and file or crash reason");
+      return {...r, file: r.file ? resolve(dirname(file), r.file) : undefined};
+    });
+  });
+  const runs = Object.fromEntries(["osgo", "osgjs"].map((name) =>
+    [name, readRuns(paths[name], folderRuns.filter((r) => r.runtime === name))]));
   const merged = new Map(), folders = [], warnings = new Map(), owners = new Set(), classLines = new Map();
   for (const directory of [...directories].sort(order)) {
     const inv = inventory(directory);
@@ -147,7 +166,27 @@ export function generate(directories, paths) {
       if (owners.has(cls)) throw new Error(`duplicate class across input folders: ${cls}`);
       owners.add(cls); classLines.set(cls, inv.classLines.get(cls));
     }
-    folders.push({name: basename(directory), classes: inv.classes.length, lines: inv.lines});
+    if (folders.some((f) => f.name === basename(directory))) throw new Error("duplicate folder name");
+    const folder = {name: basename(directory), classes: inv.classes.length, lines: inv.lines, evidence: {}};
+    for (const [name, run] of Object.entries(runs)) {
+      const full = run.folderRuns.filter((r) => r.folder === folder.name);
+      if (full.length > 1) throw new Error(`duplicate full-folder run: ${folder.name}/${name}`);
+      if (!full.length) continue;
+      const entry = full[0];
+      if (!entry.file) { folder.evidence[name] = `no evidence: ${entry.reason}`; continue; }
+      const rows = JSON.parse(readFileSync(entry.file, "utf8")).rows;
+      if (rows.some((r) => !inv.classes.includes(r.class.replaceAll("#", "/").toUpperCase())))
+        throw new Error(`run contains class outside folder: ${folder.name}/${name}`);
+      const tests = rows.filter((r) => r.method).length;
+      const passed = tests > 0 && rows.every((r) => r.status === "SUCCESS");
+      folder.evidence[name] = passed ? `all ${tests} tests SUCCESS` : "partial run; class rows retained; helpers fail/unknown";
+      if (tests || rows.length) for (const cls of inv.classes) {
+        if (rows.some((r) => r.class.replaceAll("#", "/").toUpperCase() === cls)) continue;
+        run.helpers.set(cls, {status: passed ? "runs" : "unknown", reason: passed
+          ? `exercised by ${tests} tests in the same run` : "fails/unknown: some rows in the same run did not succeed"});
+      }
+    }
+    folders.push(folder);
     for (const [key, c] of inv.constructs) {
       if (!merged.has(key)) merged.set(key, {kind: c.kind, name: c.name, count: 0, classes: new Set(), lines: 0});
       const m = merged.get(key); m.count += c.count; m.lines += c.lines.size;
@@ -155,19 +194,21 @@ export function generate(directories, paths) {
     }
     for (const w of inv.warnings) warnings.set(w.form, (warnings.get(w.form) ?? 0) + 1);
   }
+  for (const r of folderRuns) if (!folders.some((f) => f.name === r.folder))
+    throw new Error(`run manifest names unknown folder: ${r.folder}`);
   const constructs = [...merged.values()].map((c) => ({...c, classes: [...c.classes].sort(order),
     osgo: evidence([...c.classes].sort(order), runs.osgo), osgjs: evidence([...c.classes].sort(order), runs.osgjs)}))
     .sort((a, b) => order(`${a.kind}: ${a.name}`, `${b.kind}: ${b.name}`));
   const runtime = Object.fromEntries(Object.entries(runs).map(([name, run]) => [name, {
-    classes: [...owners].filter((cls) => run.rows.has(cls)).length,
-    lines: [...owners].filter((cls) => run.rows.has(cls)).reduce((sum, cls) => sum + classLines.get(cls), 0),
+    classes: [...owners].filter((cls) => (run.rows.has(cls) || run.helpers.get(cls)?.status === "runs")).length,
+    lines: [...owners].filter((cls) => (run.rows.has(cls) || run.helpers.get(cls)?.status === "runs")).reduce((sum, cls) => sum + classLines.get(cls), 0),
     tests: [...owners].flatMap((cls) => run.rows.get(cls) ?? []).filter((r) => r.method).length,
   }]));
   const abapiti = join(root, ".local/abapiti-src");
   const report = {abapiti: existsSync(abapiti) ? git(abapiti, "%H") : "unavailable",
     openSteamgate: git(root, "%H"), date: git(root, "%cs"), folders: folders.sort((a, b) => order(a.name, b.name)), runtime,
     constructs, warnings: [...warnings].sort(([a], [b]) => order(a, b)).map(([form, count]) => ({form, count})),
-    knownWarnings: kernelWarningForms.map((f) => f.form)};
+    knownWarnings: KERNEL_FORMS.map(({form, anchor, title}) => ({form, anchor, title}))};
   return {report, markdown: render(report)};
 }
 
@@ -175,13 +216,16 @@ function render(report) {
   const out = ["# OSG support evidence", "", `ABAPiti commit: ${report.abapiti}.`,
     `open-steamgate commit: ${report.openSteamgate}. Date: ${report.date}.`, "",
     "Generated from the ABAPiti corpus; a construct marked runs means its using classes passed their rows, not that the construct is correct or specified.", "",
-    "Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. Helper classes without Unit rows have no evidence; results are not propagated through dependencies.", "",
+    "Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. In a declared full-folder run where every row is SUCCESS, helpers without Unit rows count as runs: exercised by the tests in the same run. In partial runs, passing classes retain their results and helpers are fails/unknown. A crash without class results is no evidence.", "",
     "Folders: " + report.folders.map((f) => `${safe(f.name)} (${f.classes} classes, ${f.lines} lines)`).join("; ") + ".", "",
-    "| Runtime | Classes with rows | Lines in classes with rows | Tests |", "|---|---:|---:|---:|"];
+    "| Runtime | Classes with evidence | Lines in classes with evidence | Tests |", "|---|---:|---:|---:|"];
   for (const [name, r] of Object.entries(report.runtime)) out.push(`| ${name} | ${r.classes} | ${r.lines} | ${r.tests} |`);
+  out.push("", "Folder run evidence:", "");
+  for (const folder of report.folders) for (const name of ["osgo", "osgjs"])
+    out.push(`- ${safe(folder.name)} / ${name}: ${safe(folder.evidence[name] ?? "per-class rows only; no full-folder run declared")}`);
   const warned = () => {
     out.push("", "## Warned", "", "The shared kernel compatibility scanner knows these forms (including forms absent from this corpus):", "");
-    for (const form of report.knownWarnings) out.push(`- ${form}`);
+    for (const {anchor, title} of report.knownWarnings) out.push(`<a id="${anchor}"></a>`, `- ${title}`, "");
     out.push("", "| Observed form | Findings |", "|---|---:|");
     for (const w of report.warnings) out.push(`| ${safe(w.form)} | ${w.count} |`);
     if (!report.warnings.length) out.push("| None | 0 |");
@@ -191,7 +235,8 @@ function render(report) {
     const rows = report.constructs.filter((r) => sectionOf(r) === section);
     out.push("", `## ${title} (${rows.length})`, "", "| Construct | Occurrences | Classes | Lines | osgo | osgjs |", "|---|---:|---:|---:|---|---|");
     const describe = (e) => [e.status,
-      ...e.failures.map((f) => `${f.class}: ${f.status}`),
+      ...e.failures.map((f) => `${f.class}: ${f.status}${f.message ? ": " + f.message : ""}`),
+      ...e.reasons.map((f) => `${f.class}: ${f.reason}`),
       ...e.refusals.map((f) => `${f.class}: ${f.message}`),
       ...(e.missing.length ? [`missing: ${e.missing.join(", ")}`] : [])].map(safe).join("; ");
     for (const r of rows) out.push(`| ${safe(r.kind + ": " + r.name)} | ${r.count} | ${r.classes.length} | ${r.lines} | ${describe(r.osgo)} | ${describe(r.osgjs)} |`);
@@ -202,16 +247,16 @@ function render(report) {
 
 export function main(args = process.argv.slice(2)) {
   if (args.includes("--help")) {
-    console.log("Usage: npm run osg:support -- <dir>... [--osgo <json>]... [--osgjs <json>]... [--out <file.md>] [--json <file>] [--check <file.md>]"); return 0;
+    console.log("Usage: npm run osg:support -- <dir>... [--osgo <json>]... [--osgjs <json>]... [--out <file.md>] [--json <file>] [--check <file.md>] [--runs <manifest.json>]"); return 0;
   }
   try {
-    const directories = [], paths = {osgo: [], osgjs: []}, options = {};
+    const directories = [], paths = {osgo: [], osgjs: [], runs: []}, options = {};
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
-      if (["--osgo", "--osgjs", "--out", "--json", "--check"].includes(arg)) {
+      if (["--osgo", "--osgjs", "--out", "--json", "--check", "--runs"].includes(arg)) {
         const value = args[++i];
         if (!value || value.startsWith("--")) throw new Error(`${arg} needs a file`);
-        if (arg === "--osgo" || arg === "--osgjs") paths[arg.slice(2)].push(value);
+        if (arg === "--osgo" || arg === "--osgjs" || arg === "--runs") paths[arg.slice(2)].push(value);
         else options[arg.slice(2)] = value;
       } else if (arg.startsWith("-")) throw new Error(`unexpected argument: ${arg}`);
       else directories.push(resolve(arg));
