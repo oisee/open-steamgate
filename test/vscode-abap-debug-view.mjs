@@ -50,7 +50,7 @@ describe("VS Code ABAP values (serialized js-debug generators)", () => {
     expect(describeValue(props(value).nested)).to.equal("{…} (structure)");
     expect(describeValue(props(nested).amount)).to.equal("12.50 (p8,2)");
   });
-  for (const type of ["STANDARD", "SORTED", "HASHED"]) {
+  for (const type of ["STANDARD", "SORTED"]) {
     it(`shows ${type.toLowerCase()} rows from 1 and caps expansion at 100`, () => {
       const options = {primaryKey: {name: "primary_key", type, keyFields: ["TABLE_LINE"], isUnique: true}};
       const value = type === "HASHED" ? new t.HashedTable(new t.Integer(), options) : new t.Table(new t.Integer(), options);
@@ -68,6 +68,46 @@ describe("VS Code ABAP values (serialized js-debug generators)", () => {
       expect(shown["…more"]).to.equal("3 more rows (first 100 shown)");
     });
   }
+  it("does not enumerate or count hashed backing storage even for a preview", () => {
+    const value = new t.HashedTable(new t.Integer());
+    let enumerations = 0;
+    let methodCalls = 0;
+    value.value = new Proxy({}, {ownKeys() {enumerations++; throw Error("unbounded enumeration");}});
+    value.getArrayLength = () => {methodCalls++; throw Error("unbounded count");};
+    value.array = () => {methodCalls++; throw Error("unbounded copy");};
+    expect(describeValue(value)).to.equal("[rows not enumerated] (hashed table)");
+    expect(Object.keys(props(value))).to.deep.equal(["…rows"]);
+    expect(enumerations).to.equal(0);
+    expect(methodCalls).to.equal(0);
+  });
+  it("uses only the first 100 indexed standard/sorted rows", () => {
+    for (const type of ["STANDARD", "SORTED"]) {
+      const value = new t.Table(new t.Integer(), {primaryKey: {type}});
+      const rows = Array.from({length: 1000}, () => new t.Integer().set(42));
+      let reads = 0;
+      let enumerations = 0;
+      value.value = new Proxy(rows, {
+        ownKeys() {enumerations++; throw Error("enumeration");},
+        getOwnPropertyDescriptor(target, key) {
+          if (key !== "length") {reads++; if (Number(key) >= 100) throw Error("past cap");}
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+      });
+      const shown = props(value);
+      expect(shown["100"]).to.equal(rows[99]);
+      expect(shown["…more"]).to.equal("900 more rows (first 100 shown)");
+      expect(reads).to.equal(100);
+      expect(enumerations).to.equal(0);
+    }
+  });
+  it("caps scalar previews before escaping, trimming or uppercasing", () => {
+    for (const value of [new t.String().set("'".repeat(1000000)), new t.XString().set("AB".repeat(500000)), new t.Character(1000000).set("A")]) {
+      expect(describeValue(value).length).to.be.lessThan(550);
+      expect(describeValue(value)).to.include("…");
+      expect(props(value)).to.deep.equal({});
+      expect(Object.getOwnPropertyDescriptor(value, "value").value.length).to.equal(1000000);
+    }
+  });
   it("keeps a table header visible separately from rows", () => {
     const value = new t.Table(new t.Integer(), {withHeader: true});
     expect(props(value).header).to.equal(value.header);

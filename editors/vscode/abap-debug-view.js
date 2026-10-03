@@ -42,6 +42,7 @@ function abapDebugDescription(defaultValue, helpers) {
     const {data, kind, constructor} = helpers;
     // Avoid RegExp operations: V8 rejects their shared match-state mutation in
     // js-debug's side-effect-free child previews.
+    const preview = (value) => value.slice(0, 256) + (value.length > 256 ? "…" : "");
     const quote = (value) => "'" + value.split("'").join("''").split("\r").join("\\r").split("\n").join("\\n").split("\t").join("\\t") + "'";
     const trimChar = (value) => {
       let end = value.length;
@@ -59,8 +60,8 @@ function abapDebugDescription(defaultValue, helpers) {
         return text === undefined ? "-> (" + (name === "FieldSymbol" ? "field symbol" : "data reference") + ")" : "-> " + text;
       }
       switch (name) {
-        case "Character": return quote(trimChar(raw)) + " (c" + data(value, "length") + ")";
-        case "String": return quote(raw) + " (string)";
+        case "Character": return quote(raw.length > 256 ? preview(raw) : trimChar(raw)) + " (c" + data(value, "length") + ")";
+        case "String": return quote(preview(raw)) + " (string)";
         case "Integer": return raw + " (i)";
         case "Integer8": return raw.toString() + " (int8)";
         case "Packed": {
@@ -76,11 +77,11 @@ function abapDebugDescription(defaultValue, helpers) {
         }
         case "Date": return raw.slice(0, 4) + "-" + raw.slice(4, 6) + "-" + raw.slice(6, 8) + " (d)";
         case "Time": return raw.slice(0, 2) + ":" + raw.slice(2, 4) + ":" + raw.slice(4, 6) + " (t)";
-        case "XString": return raw.toUpperCase() + " (xstring)";
-        case "Hex": return raw.toUpperCase() + " (x" + data(value, "length") + ")";
+        case "XString": return preview(raw).toUpperCase() + " (xstring)";
+        case "Hex": return preview(raw).toUpperCase() + " (x" + data(value, "length") + ")";
         case "Structure": return "{…} (structure)";
         case "Table": return "[" + data(raw, "length") + " rows] (" + (data(data(data(value, "options"), "primaryKey"), "type") === "SORTED" ? "sorted" : "standard") + " table)";
-        case "HashedTable": return "[" + Object.keys(raw).length + " rows] (hashed table)";
+        case "HashedTable": return "[rows not enumerated] (hashed table)";
         case "ABAPObject": return raw === undefined ? "initial (object)" : (data(constructor(raw), "INTERNAL_NAME") || data(value, "qualifiedName") || "object") + " (object)";
         case "class": return data(constructor(value), "INTERNAL_NAME") + " (object)";
         default: return undefined;
@@ -107,15 +108,16 @@ function abapDebugProperties(helpers) {
     if (name === "Table" || name === "HashedTable") {
       const result = Object.create(null);
       const rows = data(this, "value");
-      let count = 0;
-      for (const key in rows) {
-        const row = Object.getOwnPropertyDescriptor(rows, key);
-        if (!row || !("value" in row)) continue;
-        result[++count] = row.value;
-        if (count === 100) break;
+      if (name === "HashedTable") {
+        // The installed runtime stores rows in an object, with neither a maintained
+        // count nor a bounded iterator. Even for-in can enumerate all keys in V8.
+        result["…rows"] = "Row preview unavailable without bounded runtime iteration";
+      } else {
+        const length = data(rows, "length");
+        const count = Math.min(length, 100);
+        for (let index = 0; index < count; index++) result[index + 1] = data(rows, index);
+        if (length > count) result["…more"] = (length - count) + " more rows (first 100 shown)";
       }
-      const remaining = (name === "Table" ? data(rows, "length") : Object.keys(rows).length) - count;
-      if (remaining > 0) result["…more"] = remaining + " more rows (first 100 shown)";
       if (data(this, "header") !== undefined) result.header = data(this, "header");
       return result;
     }
