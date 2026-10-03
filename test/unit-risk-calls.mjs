@@ -3,6 +3,7 @@ import * as core from "@abaplint/core";
 import {createRequire} from "node:module";
 import {UnitRun} from "../tools/osd-unit.mjs";
 import {UnitRisk} from "../tools/osd-unit-risk.mjs";
+import {STATEMENT_KINDS, statementKindOf} from "../tools/osd-unit-risk-statements.mjs";
 import {CrossReference} from "../tools/osd-xref.mjs";
 const {riskWarning} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 const harmless = {riskLevelDeclared: true, riskLevel: "harmless", schedule: "dangerous"};
@@ -38,6 +39,156 @@ function fixture(body = "zcl_report=>read( ).", implementations = {}) {
 const warning = (result) => riskWarning(harmless, {object: {name: "ZCL_TEST"}, writesTotal: result.total, ...result});
 
 describe("ABAP Unit executable call closure", () => {
+  it("classifies every kind from abaplint's statement registry explicitly", () => {
+    const unclassified = core.ArtifactsABAP.getStatements().map((s) => s.constructor.name)
+      .filter((kind) => !Object.hasOwn(STATEMENT_KINDS, kind));
+    expect(unclassified, "audit new statement kinds; never silently default to harmless").to.deep.equal([]);
+    for (const kind of ["Unknown", "MacroCall", "MacroContent", "MacroRecursion", "NativeSQL", "Comment", "Empty"])
+      expect(Object.hasOwn(STATEMENT_KINDS, kind), kind).to.equal(true);
+    expect(statementKindOf("FutureStatement")).to.equal("unknown");
+    expect(statementKindOf("constructor")).to.equal("unknown");
+  });
+
+  it("critic r2: RAISE EXCEPTION TYPE follows the writing constructor", async () => {
+    const result = await fixture("TRY. RAISE EXCEPTION TYPE zcx_write. CATCH zcx_write. ENDTRY.", {
+      "zcx_write.clas.abap": `CLASS zcx_write DEFINITION PUBLIC. PUBLIC SECTION. METHODS constructor.
+        ENDCLASS. CLASS zcx_write IMPLEMENTATION. METHOD constructor. COMMIT WORK. ENDMETHOD. ENDCLASS.`,
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(1);
+    expect(result.dynamicCallsTotal).to.equal(0);
+    expect(warning(result)).to.contain("ZCX_WRITE=>CONSTRUCTOR").and.contain("COMMIT WORK");
+  });
+
+  it("critic r2: EXEC SQL INSERT is a database write", async () => {
+    const result = await fixture("EXEC SQL.\nINSERT INTO ztab VALUES (1)\nENDEXEC.").risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(1);
+    expect(warning(result)).to.contain("Native SQL").and.contain("zcl_test.clas.testclasses.abap:");
+  });
+
+  for (const body of [
+    "RAISE RESUMABLE EXCEPTION TYPE zcx_write.",
+    "RAISE SHORTDUMP TYPE zcx_write.",
+    "DATA(n) = COND i( WHEN 1 = 2 THEN 1 ELSE THROW zcx_write( ) ).",
+    "DATA(n) = COND i( WHEN 1 = 2 THEN 1 ELSE THROW RESUMABLE zcx_write( ) ).",
+    "RAISE EXCEPTION NEW zcx_write( ).",
+    "DATA(lo) = CAST zcx_write( NEW zcx_write( ) ).",
+    "DATA(lo) = CONV zcx_write( NEW zcx_write( ) ).",
+  ]) it(`exception/expression construction follows superclass constructors: ${body}`, async () => {
+    const result = await fixture(body, {
+      "zcx_base.clas.abap": `CLASS zcx_base DEFINITION PUBLIC. PUBLIC SECTION. METHODS constructor.
+        CLASS-METHODS class_constructor. ENDCLASS. CLASS zcx_base IMPLEMENTATION.
+        METHOD constructor. COMMIT WORK. ENDMETHOD. METHOD class_constructor. ROLLBACK WORK. ENDMETHOD. ENDCLASS.`,
+      "zcx_write.clas.abap": `CLASS zcx_write DEFINITION PUBLIC INHERITING FROM zcx_base. PUBLIC SECTION.
+        METHODS constructor. ENDCLASS. CLASS zcx_write IMPLEMENTATION. METHOD constructor. ENDMETHOD. ENDCLASS.`,
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(2);
+    expect(result.dynamicCallsTotal).to.equal(0);
+    expect(result.writes.map((w) => w.method)).to.have.members(["ZCX_BASE=>CONSTRUCTOR", "ZCX_BASE=>CLASS_CONSTRUCTOR"]);
+  });
+
+  it("casting an existing reference and raising it do not construct another object", async () => {
+    const result = await fixture("DATA lo TYPE REF TO zcx_write. DATA(cast) = CAST zcx_write( lo ). RAISE EXCEPTION cast.", {
+      "zcx_write.clas.abap": `CLASS zcx_write DEFINITION PUBLIC. PUBLIC SECTION. METHODS constructor.
+        ENDCLASS. CLASS zcx_write IMPLEMENTATION. METHOD constructor. COMMIT WORK. ENDMETHOD. ENDCLASS.`,
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(0);
+    expect(result.dynamicCallsTotal).to.equal(0);
+  });
+
+  for (const body of ["RAISE EXCEPTION TYPE zcx_missing.", "DATA(n) = COND i( WHEN 1 = 2 THEN 1 ELSE THROW zcx_missing( ) )."])
+    it(`unavailable exception constructors remain uncertain: ${body}`, async () => {
+      const result = await fixture(body).risk.writesReached("ZCL_TEST");
+      expect(result.total).to.equal(0);
+      expect(result.dynamicCallsTotal).to.equal(1);
+      expect(warning(result)).to.contain("may reach a database write");
+    });
+
+  for (const [body, kind] of [
+    ["future execution.", "Unknown"], ["CALL 'example'.", "CallKernel"],
+    ["PERFORM post.", "Perform"], ["RAISE EVENT done.", "RaiseEvent"],
+  ]) it(`unknown ${kind} gives a weaker warning naming the kind and source`, async () => {
+    const result = await fixture(body).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(0);
+    expect(result.dynamicCalls[0].kind).to.equal(`an unknown ${kind} statement`);
+    expect(warning(result)).to.contain(`through an unknown ${kind} statement in LTCL_TEST=>RUN (zcl_test.clas.testclasses.abap:`);
+  });
+
+  it("a future parser kind also produces a weaker warning without an audit entry", async () => {
+    const {risk, store} = fixture("future execution.");
+    for (const file of store.registry().getObject("CLAS", "ZCL_TEST").getABAPFiles())
+      for (const statement of file.getStatements()) if (statement.get().constructor.name === "Unknown")
+        statement.get = () => new (class FutureExecution {})();
+    const result = await risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(0);
+    expect(warning(result)).to.contain("an unknown FutureExecution statement");
+  });
+
+  for (const [body, operation] of [
+    ["UPDATE ztab SET field = 1.", "UPDATE"], ["DELETE FROM ztab.", "DELETE"],
+    ["ROLLBACK WORK.", "ROLLBACK WORK"], ["SET UPDATE TASK LOCAL.", "SET UPDATE TASK LOCAL"],
+    ["CALL TRANSACTION 'Z_TEST'.", "CALL TRANSACTION"], ["SUBMIT zreport AND RETURN.", "SUBMIT"],
+    ["EXPORT item = item TO DATABASE ztab(ab) ID 'key'.", "EXPORT TO DATABASE"],
+    ["INSERT REPORT 'Z_TEST' FROM lines.", "INSERT REPORT"], ["DELETE REPORT 'Z_TEST'.", "DELETE REPORT"],
+    ["CALL DATABASE PROCEDURE (name) EXPORTING x = y.", "CALL DATABASE PROCEDURE"],
+  ]) it(`nonlocal/database write remains visible: ${operation}`, async () => {
+    const result = await fixture(body).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(1);
+    expect(warning(result)).to.contain(operation);
+  });
+
+  it("EXPORT to memory and pure/read/control statements keep the fleet fixture quiet", async () => {
+    const result = await fixture(`DATA n TYPE i. n = 1. ADD 1 TO n. IF n > 0.
+      EXPORT n = n TO MEMORY ID 'key'. IMPORT n = n FROM MEMORY ID 'key'.
+      zcl_report=>read( ). ENDIF.`).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(0);
+    expect(result.dynamicCallsTotal).to.equal(0);
+    expect(warning(result)).to.equal(undefined);
+  });
+
+  it("database/dynamic keywords in literal arguments do not change the statement verdict", async () => {
+    const result = await fixture(`EXPORT text = 'TO DATABASE' TO MEMORY ID 'key'.
+      CALL FUNCTION 'Z_READ' EXPORTING text = 'IN UPDATE TASK'.
+      DATA lo TYPE REF TO zcl_worker. CREATE OBJECT lo EXPORTING text = 'TYPE (lv_class)'.`, {
+      "zfg_risk.fugr.z_read.abap": "FUNCTION z_read. ENDFUNCTION.",
+      "zcl_worker.clas.abap": `CLASS zcl_worker DEFINITION PUBLIC. PUBLIC SECTION.
+        METHODS constructor IMPORTING text TYPE string. ENDCLASS.
+        CLASS zcl_worker IMPLEMENTATION. METHOD constructor. COMMIT WORK. ENDMETHOD. ENDCLASS.`,
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(1);
+    expect(result.dynamicCallsTotal).to.equal(0);
+    expect(result.writes[0].method).to.equal("ZCL_WORKER=>CONSTRUCTOR");
+  });
+
+  for (const body of ["cl_sql_statement=>execute_update( ).", "DATA lo TYPE REF TO cl_sql_statement. lo->execute_update( )."])
+    it(`ADBC is a database escape even when the library body is unavailable: ${body}`, async () => {
+      const result = await fixture(body).risk.writesReached("ZCL_TEST");
+      expect(result.total).to.equal(1);
+      expect(warning(result)).to.contain("ADBC call");
+    });
+
+  it("inherited ADBC calls remain database escapes without the parent library body", async () => {
+    const result = await fixture("DATA lo TYPE REF TO zcl_statement. lo->execute_update( ).", {
+      "zcl_statement.clas.abap": `CLASS zcl_statement DEFINITION PUBLIC INHERITING FROM cl_sql_statement.
+        ENDCLASS. CLASS zcl_statement IMPLEMENTATION. ENDCLASS.`,
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(1);
+    expect(warning(result)).to.contain("ADBC call");
+  });
+
+  it("AMDP calls count one database escape rather than opaque body chunks", async () => {
+    const result = await fixture("zcl_amdp=>post( ).", {
+      "zcl_amdp.clas.abap": `CLASS zcl_amdp DEFINITION PUBLIC. PUBLIC SECTION. CLASS-METHODS post.
+        ENDCLASS. CLASS zcl_amdp IMPLEMENTATION.
+        METHOD post BY DATABASE PROCEDURE FOR HDB LANGUAGE SQLSCRIPT.
+        INSERT INTO ztab VALUES (1);
+        UPDATE ztab SET field = 2;
+        ENDMETHOD. ENDCLASS.`,
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(1);
+    expect(result.dynamicCallsTotal).to.equal(0);
+    expect(warning(result)).to.contain("AMDP call in ZCL_AMDP");
+  });
+
   it("fleet fixture: reads three tables without reaching type-only writers or unused methods", async () => {
     const {risk, store} = fixture();
     const result = await risk.writesReached("ZCL_TEST");

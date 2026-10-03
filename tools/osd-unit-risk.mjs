@@ -1,6 +1,7 @@
 // ABAP Unit risk follows executable method bodies, not WBCROSSGT type
 // dependencies. See docs/unit-risk.md for dispatch and unknown-target policy.
 import {BuiltIn, Expressions, SyntaxLogic, BasicTypes} from "@abaplint/core";
+import {statementKindOf} from "./osd-unit-risk-statements.mjs";
 
 const WRITES = {
   InsertDatabase: "INSERT",
@@ -8,18 +9,35 @@ const WRITES = {
   ModifyDatabase: "MODIFY",
   DeleteDatabase: "DELETE",
   Commit: "COMMIT WORK",
+  Rollback: "ROLLBACK WORK",
+  MergeDatabase: "MERGE",
+  CommitEntities: "COMMIT ENTITIES",
+  RollbackEntities: "ROLLBACK ENTITIES",
+  ModifyEntities: "MODIFY ENTITIES",
+  ExecSQL: "Native SQL (EXEC SQL)",
+  NativeSQL: "Native SQL",
+  CallDatabase: "CALL DATABASE PROCEDURE",
+  SetUpdateTask: "SET UPDATE TASK LOCAL",
+  CallTransaction: "CALL TRANSACTION",
+  Submit: "SUBMIT",
+  DeleteCluster: "DELETE FROM DATABASE",
+  InsertReport: "INSERT REPORT",
+  DeleteReport: "DELETE REPORT",
+  InsertTextpool: "INSERT TEXTPOOL",
+  DeleteTextpool: "DELETE TEXTPOOL",
 };
 
 /** One statement's verdict: the write it is, or undefined. Exported because
  *  the rule is the interesting half and needs no registry to check. */
-export function writeKindOf(statementType, text) {
-  if (WRITES[statementType] !== undefined) return WRITES[statementType];
+export function writeKindOf(statementType, text, code = text) {
+  if (Object.hasOwn(WRITES, statementType)) return WRITES[statementType];
+  if (statementType === "Export" && /\bTO\s+DATABASE\b/i.test(code)) return "EXPORT TO DATABASE";
   if (statementType === "CallFunction") {
-    if (/\bIN\s+UPDATE\s+TASK\b/i.test(text)) return "CALL FUNCTION IN UPDATE TASK";
+    if (/\bIN\s+UPDATE\s+TASK\b/i.test(code)) return "CALL FUNCTION IN UPDATE TASK";
     if (!/^CALL\s+FUNCTION\s+'/i.test(text)) return "a dynamic CALL FUNCTION";
   }
-  if (statementType === "Call" && /(?:->|=>)\(|^CALL METHOD \(|\(\w+\)=>|\(\w+\)->/i.test(text)) return "a dynamic method call";
-  if (statementType === "CreateObject" && /\bTYPE\s+\(/i.test(text)) return "a dynamic CREATE OBJECT";
+  if (statementType === "Call" && /(?:->|=>)\(|^CALL METHOD \(|\(\w+\)=>|\(\w+\)->/i.test(code)) return "a dynamic method call";
+  if (statementType === "CreateObject" && /\bTYPE\s+\(/i.test(code)) return "a dynamic CREATE OBJECT";
   return undefined;
 }
 
@@ -34,6 +52,15 @@ export function scheduledRisk(testClass, writes = []) {
 }
 
 const upper = (s = "") => s.toUpperCase();
+const adbc = (type) => ["CL_SQL_STATEMENT", "CL_SQL_PREPARED_STATEMENT", "CL_SQL_CONNECTION"].includes(type);
+const adbcOwner = (graph, owner) => {
+  const seen = new Set();
+  for (let c = owner; c && !seen.has(c.key); c = graph.lookup(c, c.parent)) {
+    seen.add(c.key);
+    if (adbc(c.name) || adbc(c.parent)) return true;
+  }
+  return false;
+};
 // Expressions contain argument literals too. Their text must never become an
 // edge (for example a scanner test passing `lo->write( )` as input).
 const executableText = (expression) => upper(expression.getTokens().map((token) => {
@@ -90,7 +117,8 @@ export class UnitRisk {
             const name = text.match(/^(?:METHOD|FUNCTION)\s+([^ .]+)/)?.[1];
             const owner = currentClass ?? {key: classKey(objectName, objectName), name: objectName, object: objectName, types: new Map()};
             currentNode = {key: `${owner.key}:${name}`, object: objectName, className: owner.name, owner,
-              name, file: file.getFilename().split(/[\\/]/).pop(), registryObject: object, fullFile: file.getFilename(), statements: [], types: new Map(currentClass?.signatures.get(name)), at: statement};
+              name, file: file.getFilename().split(/[\\/]/).pop(), registryObject: object, fullFile: file.getFilename(), statements: [], types: new Map(currentClass?.signatures.get(name)), at: statement,
+              amdp: /\bBY DATABASE (?:PROCEDURE|FUNCTION)\b/.test(text)};
             nodes.set(currentNode.key, currentNode);
             if (currentClass) currentClass.methods.set(name, currentNode);
             else functions.set(name, currentNode);
@@ -134,6 +162,9 @@ export class UnitRisk {
     if (node.body) return node.body;
     const types = new Map([...node.owner.types, ...node.types]), ops = [];
     const emit = (statement, op) => ops.push({statement, ...op});
+    // Native bodies have no ABAP call AST; even an empty or READ-ONLY AMDP is
+    // a database escape, as are ADBC calls without available library bodies.
+    if (node.amdp) emit(node.at, {action: "write", kind: "AMDP call"});
     const declaredReturn = (type, method) => {
       const owner = graph.lookup(node.owner, type);
       const target = this.#resolve(graph, owner, method);
@@ -189,6 +220,8 @@ export class UnitRisk {
         } else if (kind === "MethodCall" || kind === "AttributeName" && i === children.length - 1) {
           const method = upper((child.findDirectExpression?.(Expressions.MethodName) ?? child).concatTokens());
           emit(statement, {action: "call", ...receiver, method});
+          if (adbc(receiver.type) || adbcOwner(graph, graph.lookup(node.owner, receiver.type)))
+            emit(statement, {action: "write", kind: "ADBC call"});
           returned = declaredReturn(receiver.type ?? node.owner.name, method);
           receiver = {mode: "virtual", type: returned};
         } else if (kind === "AttributeName" || kind === "ComponentName") {
@@ -203,16 +236,22 @@ export class UnitRisk {
       }
       return returned;
     };
+    let nativeBlock = false;
     for (const statement of node.statements) {
       const text = upper(statement.concatTokens()), kind = statement.get().constructor.name;
       const executable = executableText(statement);
-      const verdict = writeKindOf(kind, kind === "Call" ? executable : text);
+      const verdict = writeKindOf(kind, text, executable);
       if (verdict?.startsWith("a dynamic")) emit(statement, {action: "unknown", reason: verdict});
-      else if (verdict) emit(statement, {action: "write", kind: verdict});
+      // A native block/AMDP is one escape finding, not another write for
+      // each parser chunk of its SQL body in addition to the entry marker.
+      else if (verdict && !(kind === "NativeSQL" && (nativeBlock || node.amdp))) emit(statement, {action: "write", kind: verdict});
+      if (kind === "ExecSQL") nativeBlock = true;
+      if (kind === "EndExec") nativeBlock = false;
       const dynamicMethod = /(?:->|=>)\s*\(/.test(executable) || /^CALL METHOD\s+\(/.test(executable);
       if (dynamicMethod) emit(statement, {action: "unknown", reason: "a dynamic method call"});
-      if (["Unknown", "RaiseEvent", "SetHandler", "Perform", "Submit", "CallTransaction", "CallTransformation"].includes(kind))
-        emit(statement, {action: "unknown", reason: "an unresolved executable statement"});
+      const classification = statementKindOf(kind);
+      if (classification === "unknown" || classification === "write" && !verdict)
+        emit(statement, {action: "unknown", reason: `an unknown ${kind} statement`});
 
       // Static component references are initialization, including constants
       // conservatively. TypeName nodes are declarations, not executable access.
@@ -238,6 +277,12 @@ export class UnitRisk {
         emit(statement, {action: "new", type});
         if (type && !types.has(variable)) types.set(variable, type);
       }
+      // RAISE ... TYPE constructs an exception; RAISE an existing reference
+      // does not. SHORTDUMP and RESUMABLE share this parser kind and path.
+      if (kind === "Raise" && /\b(?:EXCEPTION|SHORTDUMP)\s+TYPE\b/.test(executable))
+        emit(statement, {action: "new", type: upper(statement.findDirectExpression(Expressions.ClassName)?.concatTokens())});
+      for (const expression of statement.findAllExpressions(Expressions.Throw))
+        emit(statement, {action: "new", type: upper(expression.findDirectExpression(Expressions.ClassName)?.concatTokens())});
       const variable = executable.match(/^(?:DATA\(\s*)?(\w+)\s*\)?\s*=/)?.[1];
       for (const expression of statement.findAllExpressions(Expressions.NewObject)) {
         const name = upper(expression.findDirectExpression(Expressions.TypeNameOrInfer).concatTokens());
@@ -310,6 +355,10 @@ export class UnitRisk {
       }
     };
     const call = (owner, method, state, statement, runtime = owner) => {
+      if (adbcOwner(graph, owner)) {
+        const at = location(state.node, statement);
+        writes.set(`${state.node.key}:${at.line}:${at.column}`, {...at, kind: "ADBC call", path: link(state.path, at)});
+      }
       const target = this.#resolve(graph, owner, method);
       if (target) add(target, runtime, state.path, location(state.node, statement));
       else if (!["CONSTRUCTOR", "CLASS_CONSTRUCTOR"].includes(method)) uncertain(state.node, statement, state.path, "an unresolved method call");

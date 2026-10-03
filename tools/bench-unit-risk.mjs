@@ -6,7 +6,7 @@ import {performance} from "node:perf_hooks";
 import {resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {Registry, MemoryFile} from "@abaplint/core";
-const {UnitRisk} = await import(process.argv[2] ? pathToFileURL(resolve(process.argv[2])).href : "../../tools/osd-unit-risk.mjs");
+const {UnitRisk} = await import(process.argv[2] ? pathToFileURL(resolve(process.argv[2])).href : "./osd-unit-risk.mjs");
 
 for (const count of (process.env.OSD_RISK_BENCH_SIZES ?? "100,200,400,1000").split(",").map(Number)) {
   const registry = new Registry();

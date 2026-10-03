@@ -25,7 +25,8 @@ constructors, preserving the concrete receiver through `super->constructor`.
 Assertion methods are followed when
 called; the test runner is not implicitly a root.
 
-`CREATE OBJECT`, `NEW` and constructions inside reachable factories contribute
+`CREATE OBJECT`, `NEW`, `RAISE EXCEPTION TYPE` (including RESUMABLE and
+SHORTDUMP), expression `THROW` and constructions inside reachable factories contribute
 concrete receiver classes. A worklist processes each (method body, concrete
 receiver class) state once. Calls subscribe to an index of compatible receiver
 types, so a factory visited after an interface call can still supply its
@@ -58,6 +59,34 @@ unavailable bodies, unknown types, dynamic targets, parser recovery and event
 dispatch produce uncertainty. Events are not expanded to all system handlers.
 Analysis failure is also visible as a weaker warning and runs serially.
 Runtime values and arbitrary dynamic names are not guessed.
+
+## Statement audit and database escapes
+
+`tools/osd-unit-risk-statements.mjs` explicitly classifies every kind in
+abaplint's statement registry. Known declarations, assignments, reads and
+control flow are harmless at the statement level; their expression trees
+are still scanned for calls, static initialization and construction. `CAST`
+and `CONV` do not themselves instantiate a class; nested `NEW`, `THROW` or
+factory calls do, and are followed even inside those expressions. Raising an
+existing exception reference does not construct another exception.
+
+An unmodeled statement is **unknown**, including any future parser kind.
+It produces the weaker "may reach a database write through an unknown
+<kind> statement" warning with its method and file:line. Macros, event dispatch,
+kernel calls and unmodeled nonlocal execution remain uncertain. The registry
+coverage test fails on an upstream kind with no explicit classification; the
+runtime fallback stays unknown even before that audit is updated.
+
+Writes include Open SQL data changes, COMMIT/ROLLBACK WORK, update-task
+registration, SET UPDATE TASK LOCAL, CALL TRANSACTION, SUBMIT, EXPORT TO
+DATABASE, and report/textpool/cluster changes. EXPORT to memory is harmless.
+Native SQL, ADBC and AMDP are conservatively classified as database escapes,
+even when SQL text, a library body or a database procedure is unavailable, or
+the query claims to be read-only. An EXEC SQL block or AMDP body contributes
+one escape finding, rather than counting each opaque parser chunk too.
+ADBC calls also recognize inherited SQL statement/connection classes.
+This policy preserves uncertainty for unknown execution without expanding to
+unrelated classes or turning a database escape into a silent read.
 
 ## Reproduction and red proof
 
@@ -117,7 +146,7 @@ object expansion again yielded the fleet fixture's **5 objects / 2 writes**,
 and its no-warning test failed. The current fixture still has **2 objects /
 0 writes / 0 uncertainties**.
 
-`test/scratch/unit-risk-bench.mjs` provides a reproducible sparse chain: each
+`tools/bench-unit-risk.mjs` provides a reproducible sparse chain: each
 class constructs and calls the next through its declared reference type. It
 checks one reachable write and `N + 1` reached objects. Parsing is outside the
 timer; each of five samples measures a fresh graph plus closure, and the
@@ -125,7 +154,29 @@ reported value is the median. This workload has a linear number of executable
 edges. A system whose reachable calls actually dispatch to many compatible
 receivers can have more edges and correspondingly more work.
 
-Run it with `OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh node
-test/scratch/unit-risk-bench.mjs`. The optional module argument permits the
-same workload against an older analyzer. Counts and measured timings are
-recorded in the fix commit message.
+Run it with:
+
+```sh
+OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh node tools/bench-unit-risk.mjs
+```
+
+The optional module argument permits the same workload against an older
+analyzer. `OSD_RISK_BENCH_SIZES=100,200,400,1000` selects the chain lengths.
+Counts and measured timings are recorded in the fix commit message.
+
+## Round 3 regression proof
+
+The two critic reproducers were added before changing `87e44923`'s analyzer
+(rebased as `182deed0`).
+`--grep 'critic r2'` gave **0 passing / 2 failing**: both exception construction
+and native SQL reported zero writes. With the statement audit and construction
+fix, both pass. The exception constructor is on the concrete write path; the
+native block contributes one escape. The fleet fixture still has **2 reached
+objects / 0 writes / 0 uncertainties**; none of its statement kinds needed an
+unknown-default exemption. The registry test audits all **317** registered
+kinds, plus the parser's synthetic kinds (including NativeSQL and Unknown).
+
+```sh
+OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh node node_modules/mocha/bin/mocha.js \
+  test/unit-risk-calls.mjs --grep 'critic r2|fleet fixture|statement registry'
+```
