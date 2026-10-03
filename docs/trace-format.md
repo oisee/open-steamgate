@@ -1,11 +1,13 @@
 # Trace format v1
 
-Draft for review. Release 0.7, Must. This document proposes a contract;
-the writers and readers below still use the unversioned formats.
+Contract agreed per review. Phase 1 is Release 0.7, Must; Phase 2 adds named
+anchors per writer in 0.8. This document specifies planned behavior; the
+writers and readers below still use the unversioned formats.
 
 A consumer that commits generated code and provenance should not acquire a
-diff when a template moves and the generated file stays byte-identical.
-Absolute template lines and whole-model hashes currently prevent this.
+diff when a template moves and the generated file stays byte-identical,
+within the phased stability scope below. Absolute template lines and
+whole-model hashes currently prevent this.
 
 ## Inventory at the branch base
 
@@ -129,117 +131,212 @@ belongs in this file.
 
 `file` paths use `/` and are relative to a declared project root, never an
 absolute worktree path. The consumer supplies that root; moving a checkout
-does not change the trace. Output `line` is 1-based, one record per physical
-line, including blank lines; a final newline does not add a record. Multiple
-contributors are represented by `sources`/`locations`, not discarded.
+does not change the trace. For ABAP, `outputs[].file` is the abapGit file name
+the object store serves, including the include suffix, with the same naming
+and 1-based physical `line` as the runtime and debugger. Execution traces
+recording ABAP object, include and line join provenance on this file and line
+without a mapping table.
+
+Every physical output line, including blank lines, has provenance; a final
+newline does not add a line. A single-line record uses `"line": 1`. Consecutive
+lines with identical sources and location identities use a run-length range
+instead, with inclusive endpoints:
+
+```json
+{
+  "lines": [1, 3],
+  "sources": [
+    {"file": "example.l2.yaml", "node": "rule/example", "selector": "/class"}
+  ],
+  "locations": [
+    {"recipe": "recipes/l2-check/template.tpl", "anchor": "<partial>", "offset": 0}
+  ]
+}
+```
+
+A record has exactly one of `line` or `lines`. In a range, each location's
+`offset` is the offset of the first line; line `n` has offset
+`offset + n - a` for `"lines": [a, b]`. Coalesce maximal consecutive runs
+with the same source tuples and recipe/anchor identities only when every
+location offset advances by one per line. Do not coalesce across invocations
+or slot boundaries. Singletons use `line`; ranges require `a < b`. Readers
+expand ranges for line lookup, preserving the same information as individual
+records while reducing committed JSON size.
+
+Multiple contributors are represented by `sources`/`locations`, not discarded.
 `sources` may be empty for generator-owned text. Every line has a location.
+A source node may appear more than once on a line with different selectors;
+deduplicate sources by the full `(file, node, selector)` tuple.
 
 A source location identifies a manifest/rule file, a persistent semantic
 node and a selector relative to that node. Named rule/entity/parameter IDs
-replace indexes in compiled models. Ordered anonymous clauses need explicit
-persistent IDs assigned in the source; ordinal IDs are not stable on insert.
+replace indexes in compiled models. Anonymous clauses require author-assigned
+persistent IDs only where clauses are reorderable; otherwise their ID is the
+ordinal within the parent node. Inserting into an ordinal list can change
+later identities; reorderable lists use persistent IDs to avoid that churn.
 Physical `rule_line`, `param_rule_line`, `set_line` and compiled `path` are
 navigation hints in metadata. Readers resolve selectors against the current
 or historical source; they must not silently jump to a different node.
 
 Serialization is UTF-8, two-space JSON indentation, LF, final newline, no
-timestamps. Key order is exactly the example's order at every level.
-Sort outputs by `file`, lines by numeric `line`, sources by
+timestamps. Integers use decimal digits, no exponent and no leading zeros
+except the value `0`. Key order is exactly the examples' order at every level;
+`lines` replaces `line` in the same position for a range record.
+Sort outputs by `file`, line records by numeric first line, sources by
 `(file, node, selector)`, locations by `(recipe, anchor, offset)`; strings use
-Unicode code point order, not host locale. Deduplicate identical contributors.
-Arrays describe provenance sets, not execution order. Reject duplicate output
-files/line records and unsupported format versions.
+Unicode code point order, not host locale. Deduplicate locations by the full
+`(recipe, anchor, offset)` tuple. Arrays describe provenance sets, not
+execution order. Reject duplicate output files, duplicate or overlapping line
+records, invalid ranges and unsupported format versions.
 
 ### Template location identity
 
-The author assigns explicit, non-emitting named anchors to emission slots,
-such as `class.header`, `method.check.select`, or `ports.factory.case`.
-Syntax for template directives and patch records remains to be agreed;
-the renderer must validate unique names and require an anchor for all emitted
-text. Initial adoption names existing slots once. Never derive anchor names
-from physical lines, template hashes or traversal sequence numbers.
-The generator attaches the enclosing anchor to each emitting token and carries
-it through rendering; patch insertions must declare their own named slots.
+In Phase 1 (0.7), a writer without real named anchors uses the recipe/partial
+file plus one implicit slot per partial: `"anchor": "<partial>"`. The offset
+counts emitted lines inside that partial for the source-node invocation.
+The top-level recipe is treated as a partial too. This coarse location avoids
+physical template lines without requiring all nine writers to adopt named
+slots before 0.7 can ship.
+
+In Phase 2 (0.8), writers adopt real named anchors one at a time. The author
+assigns explicit, non-emitting anchors to emission slots, such as
+`class.header`, `method.check.select`, or `ports.factory.case`. Anchors use the
+engine's existing `{{! ... }}` non-emitting comment-tag form, already present
+in `src/dsl/dpc-templates/class.tpl` and other recipe partials:
+`{{! anchor class.header }}`. Patch insertions use the same tag in inserted
+template text. Interpret the `anchor` comment convention without a new lexer.
+For each converted writer, the renderer validates unique names within each
+recipe/partial and requires named anchors for all emitted text. Initial
+adoption names existing slots once. Never derive anchor names from physical
+lines, template hashes or traversal sequence numbers. The generator attaches
+the enclosing anchor to each emitting token and carries it through rendering;
+patch insertions declare their own named slots.
 
 `recipe` is the recipe's persistent project-relative file identity. A file
-move keeps that identity as an alias within the minor version; metadata names
-the current physical file. ABAP-embedded templates and imperative emitters
-must declare a corresponding logical recipe file and named slots explicitly.
-Partials and overlays retain their own recipe/anchor identities rather than
-being numbered in the concatenated template. F's coarse service mappings use
-declared service/object slots, not fabricated template line numbers.
+move keeps that identity through a recipe-move alias map in metadata, mapping
+the old identity to the current physical file, valid for one minor version.
+After that window, changing the identity is a provenance change.
+ABAP-embedded templates and imperative emitters declare a corresponding
+logical recipe file, initially with `<partial>` and then explicit named slots
+when their writer converts. Partials and overlays retain their own
+recipe/anchor identities rather than being numbered in the concatenated
+template. F's coarse service mappings use logical recipe files with
+`<partial>` initially, then declared service/object slots, not fabricated
+template line numbers.
 
-`offset` is a zero-based emitted-line ordinal within the named slot for that
+`offset` is a zero-based emitted-line ordinal within the slot for that
 source-node invocation, not a count of template lines or tokens. Repeat
-invocations are distinguished by source node, never loop index. A slot has
-one contiguous emission per invocation. Split a large section into named
+invocations are distinguished by source node, never loop index. A named slot
+has one contiguous emission per invocation. Split a large section into named
 slots before independently editable emissions would shift other offsets.
 Non-emitting comments, whitespace and control tags do not consume offsets.
 Keep existing slot identities when expressions or control structure are
-refactored without changing output. Anchor renames are contract changes.
+refactored without changing output. Anchor renames are contract changes;
+the planned replacement of `<partial>` with named slots can change provenance
+when a writer converts in 0.8.
 
 ### Metadata
 
 Write optional `<stem>.trace.meta.json` separately, with
-`"format": "osd-trace-meta/1"`. Consumers may commit only `.trace.json`.
+`"format": "osd-trace-meta/1"`. Only operational/history consumers commit
+metadata; code-and-trace-only consumers commit `.trace.json` and omit meta.
 Metadata contains output content SHA-256 for pairing, whole-model hash,
 generator name/version, template/partial/overlay content hashes, rule-version
-hashes, physical filenames/lines and compiled paths. Use `sha256:<lowercase
-hex>` over UTF-8 bytes for file content; declare the model serialization used
-for model hashes. Canonicalize metadata keys lexically and arrays by identity.
-Reject mismatched output hashes for navigation; missing metadata does not
-prevent stable provenance reads.
+hashes, physical filenames, `template_line`, `rule_line`, `param_rule_line`,
+`set_line`, compiled `path` and the recipe-move alias map. These volatile
+fields move out of the stable trace in Phase 1. Metadata paths are also
+project-relative. Use `sha256:<lowercase hex>` over UTF-8 bytes for file
+content; declare the model serialization used for model hashes. Canonicalize
+metadata keys lexically and arrays by identity; use the same integer
+formatting as the stable trace. Reject mismatched output hashes for
+navigation; missing metadata does not prevent stable provenance reads.
 
 Whole-model hashes retain their current meaning during migration. They are
 needed for L3 stale checks and alert history; moving them is not permission
 to redefine rule versions or change the hash constants in generated ABAP.
-An operational/history consumer must retain metadata for each rule version.
-A code-and-trace-only consumer can omit it and use source selectors, but then
-cannot promise lookup of alerts by historical model hash alone.
+An operational/history consumer commits metadata for each rule version.
+A code-and-trace-only consumer uses source selectors, but cannot promise
+lookup of alerts by historical model hash alone.
 
 ## Stability and CI
 
-Within a minor version, a template edit that does not change a generated file
-does not change its stable trace.
+Phase 1 (0.7) ships the v1 shape, metadata split, project-relative paths,
+deterministic serialization, legacy-plus-v1 readers and the CI invariant.
+Named anchors across all writers are not a 0.7 prerequisite. With coarse
+`<partial>` locations, the invariant covers edits outside the partial whose
+provenance is being compared: unchanged output keeps unchanged provenance
+for untouched partials. A whole-file stable trace must remain byte-identical
+when the edited partial contributes no lines to that output. Edits inside a
+contributing partial can change its coarse locations even if output is
+unchanged; Phase 1 does not promise stability within that touched partial.
 
-This comparison holds for fixed source rules/manifests and recipe identities,
-across supported generator patch versions. More generally the stable trace
-changes only when output bytes or the contributing source rule/provenance
-changes. An unrelated manifest edit, source comment or source line movement
-must not change this file's trace. A deliberate source-node reassignment can
-change provenance even if the generated bytes happen to match.
+Phase 2 (0.8) converts writers A–I one at a time to named anchors. Once a
+writer is converted, a template edit that does not change a generated file
+does not change its stable trace within a minor version, with slot identities
+held fixed. Each conversion gets its own invariant checks.
+
+These comparisons hold for fixed source rules/manifests and recipe identities,
+across supported generator patch versions. Within the applicable phase scope,
+the stable trace changes only when output bytes or contributing source
+rule/provenance changes. An unrelated manifest edit, source comment or source
+line movement must not change this file's trace. A deliberate source-node
+reassignment can change provenance even if generated bytes happen to match.
 
 CI must render representative outputs from every writer above in isolated
-temporary trees, then edit non-emitting template whitespace/comments before
-and inside anchors, including partials/overlays. First assert generated bytes
-are equal, then assert stable trace bytes are equal; metadata may differ.
-Use real renderers and serialization, without caches or dropping locations.
-Also test unrelated manifest edits/line movement, repeated nodes, host/order
-independence, emitted-line coverage, and a positive output-changing edit.
+temporary trees. In Phase 1, edit non-emitting whitespace/comments outside
+the partial being compared, including parent recipes and sibling
+partials/overlays. First assert generated bytes are equal, then assert stable
+provenance for untouched partials is equal; compare whole stable trace bytes
+when the touched partial contributes no output lines. For each named-anchor
+writer in Phase 2, also edit before and inside anchors and compare the whole
+stable trace byte-for-byte. Metadata may differ in either phase. Use real
+renderers and serialization, without caches or dropping locations.
+Also test unrelated manifest edits/line movement, repeated nodes with distinct
+selectors, host/order independence, emitted-line coverage, maximal ranges and
+their offset expansion, and a positive output-changing edit.
 Reader fixtures cover both legacy shapes and v1, plus missing/mismatched
-metadata. Register new `test/*.mjs` suites in `test/suites.d/*.json`.
-These are proposed checks, not tests executed for this documentation draft.
+metadata. An execution-join fixture serves `zcl_example.clas.abap` through the
+object store, records a runtime/debugger position for object `ZCL_EXAMPLE`,
+its main include and line 1, and asserts that the file/line pair directly
+selects the first provenance record above. Include a testclasses include
+fixture using `zcl_example.clas.testclasses.abap` to check include naming too.
+Register new `test/*.mjs` suites in `test/suites.d/*.json`.
+These are specified checks, not tests executed for this documentation change.
 
-## Migration and review
+## Migration and decisions
 
-Proposed window: readers accept unversioned objects, report bare arrays and
-v1 throughout 0.7 and 0.8; remove legacy acceptance no earlier than 0.9.
-Ship readers before switching writers. During the window, an explicit legacy
-writer mode preserves old shapes for consumers that have not upgraded; do
-not mix legacy volatile fields into the stable v1 file.
+Ship readers before switching writers. Readers accept unversioned objects,
+report bare arrays and v1 throughout 0.7 and 0.8; remove legacy acceptance no
+earlier than 0.9. At the 0.7 writer switch, v1 is the default. Legacy writing
+is an explicit opt-in via `OSD_TRACE_LEGACY=1` or a `--trace-legacy` flag for
+one minor version (0.7); remove the writer opt-in in 0.8. Do not mix legacy
+volatile fields into the stable v1 file.
+
+### Breaking for consumers
+
+The 0.7 default writer switch changes the unversioned shapes to
+`"format": "osd-trace/1"` with `outputs`, source selectors and coarse locations.
+Line records can contain inclusive ranges. Hashes and physical navigation
+fields move to `.trace.meta.json`. Consumers must upgrade their readers or
+explicitly opt into legacy writing during 0.7. The current external consumer,
+osg-demo, pins a tag in `book/baseline.yaml`; it must migrate before advancing
+that pin to the writer switch. This repository's field readers and fixtures
+must migrate too.
 
 L3 compilation reads model hashes from metadata with legacy fallback. Explain
 searches committed metadata and old sidecars for rule hashes, pairs them with
 the historical output/source, then uses selectors/nodes instead of stored
 absolute lines. Preserve history tests for both paths. Update L2's template
-reconstruction tests to resolve anchors through metadata. Cockpit field tests
-and service aggregate handling adopt `outputs`; its UI needs no current
-parser migration. Future VS Code provenance support consumes v1 through the
-same reader; existing stack-trace navigation remains a separate facility.
-Filename consumers must recognize/exclude metadata companions as appropriate.
+reconstruction tests to resolve coarse locations and then named anchors
+through metadata. Cockpit field tests and service aggregate handling adopt
+`outputs`; its UI needs no current parser migration. Future VS Code provenance
+support consumes v1 through the same reader; existing stack-trace navigation
+uses the same output file/line key. Filename consumers must recognize/exclude
+metadata companions as appropriate.
 
-Review decisions still needed: concrete anchor syntax for templates/patches;
-persistent IDs for anonymous source clauses; the legacy-mode default at the
-0.7 writer switch; and how operational consumers retain historical metadata
-when their ordinary code commits intentionally omit it. The compatibility
-window and recipe-move alias policy also need agreement.
+The review decisions are settled: 0.7 uses coarse partial anchors and 0.8
+adopts named anchors per writer; anchor syntax uses the existing `{{! ... }}`
+non-emitting tags; reorderable anonymous clauses use author-assigned IDs and
+other anonymous clauses use parent ordinals; v1 is the default with one minor
+version of legacy writer opt-in; only operational consumers commit metadata;
+and recipe moves use a metadata alias map valid for one minor version.
