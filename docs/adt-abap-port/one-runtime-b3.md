@@ -24,7 +24,10 @@ The same window exists when the 120 s STORE IPC timer rolls back the child
 step and frees its FIFO while parent work is still running. A timeout or failed
 session step invalidates the parent callback context over IPC, refusing further
 callbacks. Already-running work may still write; completion after invalidation
-is logged as an uncertain write and its result is refused.
+is logged as an uncertain write and its result is refused. There is an
+unlogged gap between the child's 120 s timer firing and the parent receiving
+`store-context-ended`: parent work that completes in that interval still sees
+a valid context, so its late write is not logged.
 
 No ADT route body, ABAP class or STORE command changes. The session call sites
 in `adt-facade.mjs` and `adt-abap-front.mjs` are byte-unchanged from main
@@ -67,6 +70,32 @@ carry cases. The B0 session/front checks passed another 7 tests. Public
 isolation now runs against the real parent port in `test/osd-child.mjs`;
 removing the internal-node exclusion made both door checks fail (403 instead
 of 404), and the exclusion was restored before the final green run. Deletion
-ordering records `deleteDone` before `ended` without a sleep. Dedicated checks
+ordering records `deleteDone` before `ended` without a sleep; round 2 adds
+a positive queue-depth signal before releasing deletion. Dedicated checks
 exercise the 1 MB session body limit and fire the IPC timeout directly to
 verify context invalidation, refusal of further callbacks and late-work logging.
+
+
+## Round-2 review fixes
+
+The callback-crash test waits for the killed child's exit before calling
+`ensure()`: rejection of the pending HTTP call can precede that exit. Every
+test that reads the child URL obtains it after its own `ensure()`.
+
+`/osd/serving` now reports the existing work-process status (`held`, `waiting`,
+`heldMs`) without taking the FIFO. The delete callback test waits until logoff
+has reached the child and queued behind deletion before releasing parent work,
+then checks `deleteDone` before `ended`. Temporarily bypassing remote
+`deleteObject` with direct parent deletion makes this test fail (0 passed,
+1 failed: the queue condition never settles); the mutation was restored.
+
+Ten consecutive runs of `test/osd-adt-one-runtime.mjs`, each through
+`OSD_HEAVY_RANGE=80-89 tools/osd-heavy.sh npx mocha --exit`, passed:
+**32, 32, 32, 32, 32, 32, 32, 32, 32, 32**, with zero failures.
+
+The full targeted set (`osd-adt-one-runtime`, `osd-child`, `osd-routes`,
+`store-destination`) passed **81 tests**, including the three B0 child carry
+cases (SQLite, DuckDB and file SQLite). B0 session/front checks passed **7**;
+carry IPC compatibility (`osd-adt-fork`) passed **3**. All ran through the
+same heavy wrapper. Final process inspection found no `osd-serve.mjs` children
+left from this clone.

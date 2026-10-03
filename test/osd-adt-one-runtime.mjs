@@ -3,7 +3,7 @@ import express from "express";
 import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {EventEmitter} from "node:events";
+import {EventEmitter, once} from "node:events";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {RemoteSessions} from "../tools/adt-remote-sessions.mjs";
 import {abapFront, abapRunner} from "../tools/adt-abap-front.mjs";
@@ -17,7 +17,7 @@ import {Data} from "../tools/osd-data.mjs";
 const BASE = "/sap/bc/adt";
 const listen = (app) => new Promise(resolve => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
 const until = async (work) => {
-  for (let i = 0; i < 200; i++) { if (work()) return; await new Promise(r => setTimeout(r, 10)); }
+  for (let i = 0; i < 200; i++) { if (await work()) return; await new Promise(r => setTimeout(r, 10)); }
   throw new Error("condition did not settle");
 };
 
@@ -72,6 +72,8 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
   });
 
   it("LOCK shares the child's ENQ table and its data preview; HOST write uses the same handle", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
     const login = await request(remote, "HEAD", BASE + "/core/discovery", {"x-csrf-token": "fetch", "x-sap-adt-sessiontype": "stateful"});
     const cookie = login.cookies.map(c => c.split(";")[0]).join("; ");
     const headers = {cookie, "x-csrf-token": login.token, "x-sap-adt-sessiontype": "stateful"};
@@ -83,7 +85,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     const rows = await db.query("SELECT id FROM zosd_adt_sess");
     expect(rows.rows.length).to.be.greaterThan(0);
     expect((await db.query("SELECT handle FROM zosd_adt_shdl")).rows.map(r => r.handle.trim())).to.include(handle);
-    const probe = await fetch(runtime.url + "/osd/classrun", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_ENQ_PROBE"})});
+    const probe = await fetch(url + "/osd/classrun", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_ENQ_PROBE"})});
     expect((await probe.json()).text.trim()).to.equal("1");
     const written = await request(remote, "PUT", object + `/source/main?lockHandle=${handle}`, {...headers, "content-type": "text/plain"}, "REPORT zosd_remote.\n* remote write\n");
     expect(written.status, written.body).to.equal(200);
@@ -192,6 +194,8 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
   });
 
   it("B3: delete callback holds the FIFO through parent deletion and releases its handle", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
     const {session} = await logon();
     const taken = await nodeSessions.lock(session, "PROG", "ZOSD_DELETE");
     let enter, release;
@@ -206,6 +210,13 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     try {
       await entered;
       off = nodeSessions.end(session.id).then(() => { events.push("ended"); });
+      // The only other step is logoff: prove it reached the child FIFO.
+      await until(async () => {
+        const response = await fetch(url + "/osd/serving");
+        const {workProcess} = await response.json();
+        return workProcess.held && workProcess.waiting === 1;
+      });
+      expect(events).to.deep.equal([]);
       release();
       expect(await deleting).to.deep.equal({gone: {type: "PROG", name: "ZOSD_DELETE"}});
       await off;
@@ -241,6 +252,8 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       const child = runtime.child;
       child.kill("SIGKILL");
       expect(await pending).to.equal("rejected");
+      // A socket error can precede exit; ensure must see a departed child.
+      if (child.exitCode === null && child.signalCode === null) await once(child, "exit");
       expect(runtime.adtContexts.size).to.equal(0);
       await runtime.ensure();
       expect(runtime.child.pid).to.not.equal(child.pid);
@@ -250,25 +263,31 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
   });
 
   it("B3: the session door refuses invalid operations and the ABAP door refuses session envelopes", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
     for (const [door, input] of [
       ["adt-sessions", {method: "constructor", args: []}],
       ["adt-sessions", {method: "end", args: []}],
       ["adt-step", {view: {sessionCall: "end", args: ["absent"]}}],
     ]) {
-      const response = await fetch(runtime.url + "/osd/" + door, {method: "POST",
+      const response = await fetch(url + "/osd/" + door, {method: "POST",
         headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input)});
       expect(response.status).to.equal(400);
     }
   });
 
   it("B3: the session door bounds its JSON body to 1 MB", async () => {
-    const response = await fetch(runtime.url + "/osd/adt-sessions", {method: "POST",
+    await runtime.ensure();
+    const url = runtime.url;
+    const response = await fetch(url + "/osd/adt-sessions", {method: "POST",
       headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey},
       body: JSON.stringify({method: "get", args: ["x".repeat(1024 * 1024)]})});
     expect(response.status).to.equal(413);
   });
 
   it("ACTIVATE says live after the step and cannot publish while the child is held", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
     let release, entered, publishes = 0;
     const held = new Promise(r => { entered = r; });
     const go = new Promise(r => { release = r; });
@@ -278,7 +297,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       publish: async () => { publishes++; return {ok: true, recycled: true}; }}});
     runtime.systemAnswers = async kind => { if (kind === "BUILD") { entered(); await go; return {ok: true}; } };
     try {
-      const pending = fetch(runtime.url + "/osd/classrun", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_STORE_PROBE"})});
+      const pending = fetch(url + "/osd/classrun", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_STORE_PROBE"})});
       await held;
       expect(publishes, "publish has not started inside the held child step").to.equal(0);
       release();
@@ -292,6 +311,8 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
   });
 
   it("the G.8 editor activates through the parent and recycles only after its step", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
     const before = runtime.child.pid;
     const overrides = {activate: store.activate, publish: store.publish, completeActivation: store.completeActivation};
     let publishes = 0;
@@ -299,7 +320,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     store.completeActivation = () => true;
     store.publish = async () => { publishes++; await runtime.recycle(); return {ok: true, recycled: true}; };
     try {
-      const response = await fetch(runtime.url + "/sap/bc/osd/edit/", {method: "POST",
+      const response = await fetch(url + "/sap/bc/osd/edit/", {method: "POST",
         headers: {"content-type": "application/x-www-form-urlencoded"},
         body: new URLSearchParams({type: "PROG", name: "ZOSD_REMOTE", change: "x", do: "activate", src: "REPORT zosd_remote.\n* G8\n"})});
       expect(response.status).to.equal(200);
@@ -323,25 +344,31 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     ["text/plain", "text/plain", "valid", 415],
   ]) {
     it(`the internal door refuses ${name}`, async () => {
+      await runtime.ensure();
+      const url = runtime.url;
       const headers = {"content-type": type};
       if (key) headers["x-osd-adt-step-key"] = key === "valid" ? runtime.adtStepKey : key;
       for (const door of ["adt-step", "adt-sessions"]) {
-        const response = await fetch(runtime.url + "/osd/" + door, {method: "POST", headers, body: "{}"});
+        const response = await fetch(url + "/osd/" + door, {method: "POST", headers, body: "{}"});
         expect(response.status).to.equal(status);
       }
     });
   }
 
   it("the door accepts an ABAP body larger than 8 MB", async () => {
-    const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST",
+    await runtime.ensure();
+    const url = runtime.url;
+    const response = await fetch(url + "/osd/adt-step", {method: "POST",
       headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey},
       body: JSON.stringify({view: {method: "GET", path: BASE + "/core/http/systeminformation", url: BASE + "/core/http/systeminformation", headers: {}}, bodyHex: "00".repeat(9 * 1024 * 1024)})});
     expect(response.status).to.equal(200);
   });
 
   it("the internal door rejects invalid views and byte hex", async () => {
+    await runtime.ensure();
+    const url = runtime.url;
     for (const input of [{}, {view: {}}, {view: {method: "GET", path: BASE, url: BASE, headers: {}}, bodyHex: "f"}]) {
-      const response = await fetch(runtime.url + "/osd/adt-step", {method: "POST", headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input)});
+      const response = await fetch(url + "/osd/adt-step", {method: "POST", headers: {"content-type": "application/json", "x-osd-adt-step-key": runtime.adtStepKey}, body: JSON.stringify(input)});
       expect(response.status).to.equal(400);
     }
   });

@@ -13,7 +13,7 @@
 // it is asked to. Started by hand it works too, which is how it is
 // debugged: `node tools/osd-serve.mjs 3099`.
 import {timingSafeEqual} from "node:crypto";
-import {dialogStep, exclusive} from "./osd-dialog-step.mjs";
+import {dialogStep, exclusive, workProcess} from "./osd-dialog-step.mjs";
 import {bootGuard} from "./osd-boot-guard.mjs";
 import {HotLoader, applyRuntimeHotSwap, warmVerdict} from "./osd-hot.mjs";
 import {ensureDemoData} from "./osd-demo-data.mjs";
@@ -238,6 +238,7 @@ const hostNodes = {};
 hostNodes.serving = (a, node) => a.get(node.path, function (req, res) {
   res.json({
     ready: true,
+    workProcess: workProcess(),
     pid: process.pid,
     since: started,
     generation: generationLabel(),
