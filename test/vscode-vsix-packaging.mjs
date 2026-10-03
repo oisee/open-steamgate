@@ -45,6 +45,23 @@ describe("packaging changed seed content", function () {
 
       const firstExtension = join(firstUnzip, "extension");
       const secondExtension = join(secondUnzip, "extension");
+      const noticesText = readFileSync(join(firstExtension, "THIRD-PARTY-NOTICES.md"), "utf8");
+      const checkLicenses = (dir) => {
+        for (const entry of readdirSync(dir, {withFileTypes: true})) {
+          if (!entry.isDirectory()) continue;
+          const pkgDir = join(dir, entry.name);
+          if (entry.name.startsWith("@")) {checkLicenses(pkgDir); continue;}
+          const meta = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8"));
+          const license = readdirSync(pkgDir).find((name) => /^licen[cs]e(?:\..*)?$/i.test(name));
+          expect(license, `${meta.name} in kernel-runtime must carry its licence`).to.be.a("string");
+          const text = readFileSync(join(pkgDir, license), "utf8").trim();
+          expect(text).to.match(/copyright/i);
+          const section = noticesText.split("## ").find((part) => part.startsWith(`${meta.name} — node_modules/${meta.name}\n`));
+          expect(section, `${meta.name} notice`).to.contain(text);
+          if (meta.name === "@abaplint/core") expect(text).to.contain("Copyright (c) 2015 Lars Hvam");
+        }
+      };
+      checkLicenses(join(firstExtension, "kernel-runtime/node_modules"));
       // Exercise the actual archive outside the checkout, before seed extraction.
       const {scanObject} = createRequire(import.meta.url)(join(firstExtension, "kernel-diagnostics.js"));
       const bufferFile = join(scratch, "zkernel.prog.abap");

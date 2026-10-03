@@ -453,6 +453,9 @@ export function copySeedTree(seedRoot, selectedPacks) {
       copyReal(source, dest);
     }
   }
+  for (const name of ["@abaplint/core", "@nodable/entities"]) {
+    stageDependencyLicense(join(seedRoot, "node_modules", name), name);
+  }
   log(`node_modules: ${modules.length} packages traced from package-lock.json`);
 
   // These are dependency distribution maps. The ABAP debugger's maps are
@@ -613,6 +616,17 @@ export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = f
   return {seedId, modules, selectedPacks, generation};
 }
 
+// These npm distributions omit their repository licences.
+// Upstream text: https://github.com/abaplint/abaplint/blob/main/LICENSE
+// Entities: https://github.com/nodable/val-parsers/blob/main/LICENSE
+// Keep the grants in the seed (for notices) and in the standalone scanner.
+function stageDependencyLicense(dir, name) {
+  if (readdirSync(dir).some((file) => /^licen[cs]e(?:\..*)?$/i.test(file))) return;
+  const fallback = {"@abaplint/core": "abaplint-core", "@nodable/entities": "nodable-entities"}[name];
+  if (!fallback) throw new Error(`build-vsix: missing licence text for ${name}`);
+  copyReal(join(ROOT, `scripts/licenses/${fallback}.LICENSE.txt`), join(dir, "LICENSE.txt"));
+}
+
 /** Ship the unchanged scanner independently of the compressed system seed.
  * Only Rearranger and its core dependency closure are needed, not the compiler.
  * Read from the staged seed so the core is the same copy used by the transpiler. */
@@ -629,6 +643,7 @@ export function stageKernelScanner(seedRoot, extensionDir) {
     copied.add(name);
     const source = join(seedRoot, "node_modules", name);
     copyReal(source, join(runtime, "node_modules", name));
+    stageDependencyLicense(join(runtime, "node_modules", name), name);
     const metadata = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
     for (const dependency of Object.keys(metadata.dependencies ?? {})) copyDependency(dependency);
   };
