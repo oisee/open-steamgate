@@ -10,10 +10,7 @@
 // skipped, since the point of this test is that the reason is SURFACED, not
 // that warm is available.
 //
-// Port budget for this task: 3621-3629 only, never 3531 (the extension's
-// own B0 range, test/vscode-launcher.mjs's end to end test) and never any
-// of the other reserved ports this repository's other suites and running
-// instances use.
+// Use the instance's port from tools/osd-heavy.sh, as test/start.mjs does.
 import {expect} from "chai";
 import {spawn} from "node:child_process";
 import {randomUUID} from "node:crypto";
@@ -25,7 +22,7 @@ import {createRequire} from "node:module";
 
 const {Osd} = createRequire(import.meta.url)("../editors/vscode/lib.js");
 
-const PORT = 3621;
+const PORT = Number(process.env.STG_PORT ?? 3621);
 const BASE = `http://localhost:${PORT}`;
 const CLASS_FILE = "src/demo/zcl_zstg_demo_dpc_ext.clas.abap";
 
