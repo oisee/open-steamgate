@@ -359,7 +359,11 @@ and `42` rather than `[object Object]` or throwing.
   the time a debugger attaches. `OSD_INSPECT_BRK` would be the same change
   with `--inspect-brk`; not added for the serving child. Detached debug tests
   use `--inspect-brk` because their test methods can finish before an attach.
-- **The VS Code UI is still unverified here.** `test/vscode-debug.mjs` starts
+- **The VS Code UI and js-debug DAP generator path are still unverified here.**
+  No automated harness launching js-debug exists in this repository. The value
+  test calls the configured generators through CDP, including descriptions with
+  `throwOnSideEffect` and property projection without that guard. It covers
+  CASTING children, but does not launch the js-debug adapter. `test/vscode-debug.mjs` starts
   a detached ABAP Unit child, attaches to it over CDP, sets a breakpoint
   from the test method's source map and asserts that the child pauses on that
   line. This verifies the inspector and source-map path without a UI; whether

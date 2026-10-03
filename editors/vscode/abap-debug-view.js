@@ -132,7 +132,7 @@ function abapDebugDescription(defaultValue, helpers) {
         }
         case "Float": {
           const parts = raw.toExponential(16).split("e");
-          return parts[0].split(".").join(",") + "E" + parts[1][0] + parts[1].slice(1).padStart(2, "0") + " (f)";
+          return parts[0] + "E" + parts[1][0] + parts[1].slice(1).padStart(2, "0") + " (f)";
         }
         case "Date": return raw.slice(0, 4) + "-" + raw.slice(4, 6) + "-" + raw.slice(6, 8) + " (d)";
         case "Time": return raw.slice(0, 2) + ":" + raw.slice(2, 4) + ":" + raw.slice(4, 6) + " (t)";

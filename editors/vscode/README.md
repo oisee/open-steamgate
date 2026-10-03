@@ -32,20 +32,28 @@ VS Code 1.101 or newer is required. The system runs locally on desktop or in a R
 When stopped on an ABAP line, Variables, Watch and hover show ABAP values:
 `'ABC' (c20)`, `12.50 (p8,2)`, `42 (i)`, `9223372036854775807 (int8)`,
 `2026-10-03 (d)`, `12:34:56 (t)`, and `ABCDEF (xstring)`. Character values
-omit trailing padding; strings preserve it. Float values use the runtime's
-scientific notation, and fixed hex includes its byte length (`ABCD0000 (x4)`).
+omit trailing padding; strings preserve it. Float values use scientific notation with a locale-independent decimal point, and fixed hex includes its byte length (`ABCD0000 (x4)`).
 
 Expand `{…} (structure)` to see its declared lowercase components. Tables
-show `[3 rows] (standard table)` (or sorted/hashed) and expand to rows `1`,
+show `[3 rows] (standard table)` (or sorted) and expand to rows `1`,
 `2`, `3`. Field symbols and data references show `->` followed by the target
 value and expand through a `->` child. Unassigned/initial references say so.
 Objects show their class name and expand to ABAP attributes, including private
 attributes exposed by the transpiler.
 
-The view shows the first 100 table rows, with a `…more` count for the rest;
-that node does not load more rows. Hashed row numbers are display positions,
-not ABAP table indexes. Reference previews stop after eight links or a cycle.
-Dates use ISO order rather than a user-specific SAP date format. Unknown values
+The view shows the first 100 standard/sorted table rows, with a `…more` count
+for the rest; that node does not load more rows. Hashed tables show a summary
+without enumerating rows: the installed runtime has no bounded iterator or
+maintained count. Text and hex previews stop after 256 storage characters.
+CHAR previews omit trailing padding, so the projected view is not an exact
+padded-storage display; inspecting never changes that storage. CASTING field
+symbols use their declared type for supported hex/character reinterpretations. Reference previews stop after eight links or a cycle.
+Dates use ISO order rather than a user-specific SAP date format. Float fixtures
+are derived from SAP's [scientific type-f formatting rules](https://help.sap.com/doc/abapdocu_816_index_htm/8.16/en-US/ABENWRITE_FORMATS.html),
+with a fixed decimal point; they are not captured SAP debugger output or a
+claim of exact parity across debugger versions and locales. Bundled constructors
+must have their runtime names restored by `bin/osd.mjs`; the tests bundle the
+runtime and execute that exact startup block. Unknown values
 and failed formatting keep VS Code's default rendering. The view uses the
 built-in Node debugger's [custom generator options](https://github.com/microsoft/vscode-js-debug/blob/main/OPTIONS.md),
 which js-debug currently marks deprecated. It applies to desktop system and

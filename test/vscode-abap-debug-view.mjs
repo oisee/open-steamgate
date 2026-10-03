@@ -1,5 +1,9 @@
 import {expect} from "chai";
 import runtime from "@abaplint/runtime";
+import {readFileSync, mkdtempSync, writeFileSync, rmSync} from "node:fs";
+import {execFileSync} from "node:child_process";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {createRequire} from "node:module";
 const require = createRequire(import.meta.url);
 const {customDescriptionGenerator, customPropertiesGenerator} = require("../editors/vscode/abap-debug-view.js");
@@ -19,7 +23,7 @@ describe("VS Code ABAP values (serialized js-debug generators)", () => {
     ["Packed", () => new t.Packed({length: 8, decimals: 2}).set("12.50"), "12.50 (p8,2)"],
     ["large Packed", () => new t.Packed({length: 16, decimals: 2}).set("12345678901234567890.12"), "12345678901234567890.12 (p16,2)"],
     ["negative Packed", () => new t.Packed({length: 8, decimals: 2}).set("-0.05"), "-0.05 (p8,2)"],
-    ["Float", () => new t.Float().set(1.5), new t.Float().set(1.5).get() + " (f)"],
+    ["Float", () => new t.Float().set(1.5), "1.5000000000000000E+00 (f)"],
     ["Date", () => new t.Date().set("20261003"), "2026-10-03 (d)"],
     ["Time", () => new t.Time().set("123456"), "12:34:56 (t)"],
     ["XString", () => new t.XString().set("ABCDEF"), "ABCDEF (xstring)"],
@@ -263,6 +267,53 @@ describe("VS Code ABAP values (serialized js-debug generators)", () => {
       symbol.setCasting();
       expect(describeValue(symbol)).to.equal("-> " + buffer.toString("hex").toUpperCase() + " (x8)");
     }
+  });
+  it("uses independent documented scientific-format fixtures, regardless of runtime get()", () => {
+    // SAP's WRITE formatting rules describe scientific notation for f. These
+    // literals use our locale-independent period policy, not a SAP GUI capture.
+    const fixtures = JSON.parse(readFileSync(new URL("./fixtures/abap-debug-formats.json", import.meta.url)));
+    for (const {input, expected} of fixtures.float) {
+      const value = new t.Float().set(input);
+      value.get = () => {throw Error("fixture must not derive from get()");};
+      expect(describeValue(value)).to.equal(expected);
+    }
+    const char = new t.Character(5).set("AB");
+    expect(describeValue(char)).to.equal("'AB' (c5)");
+    expect(Object.getOwnPropertyDescriptor(char, "value").value).to.equal("AB   ");
+  });
+  it("renders renamed bundled runtime constructors after the binary's actual name restoration", function () {
+    this.timeout(30000);
+    const dir = mkdtempSync(join(tmpdir(), "osd-debug-bundle-"));
+    try {
+      const binary = readFileSync(new URL("../bin/osd.mjs", import.meta.url), "utf8");
+      const begin = binary.indexOf("for (const [key, value] of Object.entries(runtime.types");
+      const end = binary.indexOf('\nif (typeof Bun', begin);
+      expect(begin).to.be.greaterThan(0);
+      expect(end).to.be.greaterThan(begin);
+      const restore = binary.slice(begin, end);
+      const input = join(dir, "fixture.mjs");
+      const output = join(dir, "bundle.cjs");
+      writeFileSync(input, `import runtime from ${JSON.stringify(require.resolve("@abaplint/runtime"))};
+const t = runtime.types;
+const description = (${customDescriptionGenerator});
+const properties = (${customPropertiesGenerator});
+// Force the collision observed in the binary, even if a bundler version keeps it.
+Object.defineProperty(t.Date, "name", {value: "Date2", configurable: true});
+Object.defineProperty(t.String, "name", {value: "String2", configurable: true});
+const date = new t.Date().set("20261003");
+const string = new t.String().set("ABC  ");
+const before = [description.call(date, "default JS"), properties.call(date) === date];
+${restore}
+console.log(JSON.stringify({before, names: [t.Date.name, t.String.name],
+  descriptions: [description.call(date), description.call(string)],
+  children: [Object.keys(properties.call(date)), Object.keys(properties.call(string))]}));`);
+      execFileSync("bun", ["build", input, "--target=node", "--outfile", output], {stdio: "pipe"});
+      const result = JSON.parse(execFileSync(process.execPath, [output], {encoding: "utf8"}));
+      expect(result.before).to.deep.equal(["default JS", true]);
+      expect(result.names).to.deep.equal(["Date", "String"]);
+      expect(result.descriptions).to.deep.equal(["2026-10-03 (d)", "'ABC  ' (string)"]);
+      expect(result.children).to.deep.equal([[], []]);
+    } finally {rmSync(dir, {recursive: true, force: true});}
   });
   it("installs both executable generators for system and ABAP Unit sessions", () => {
     for (const target of ["system", "unit"]) {

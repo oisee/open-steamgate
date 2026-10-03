@@ -233,6 +233,9 @@ const structure = new t.Structure({name: new t.Character(20).set('ABC'), amount:
 const table = new t.Table(structure);
 table.append(structure);
 const reference = new t.DataReference(structure).assign(structure);
+const casting = new t.FieldSymbol(new t.Hex({length: 8}));
+casting.assign(new t.Float().set(1.5));
+casting.setCasting();
 const scalars = [new t.String().set('ABC  '), new t.Integer().set(-42), new t.Integer8().set('9223372036854775807'), new t.Float().set(1.5), new t.Date().set('20261003'), new t.Time().set('123456'), new t.XString().set('ABCDEF'), new t.Hex({length: 4}).set('ABCD'), new t.Packed({length: 16, decimals: 2}).set('12345678901234567890.12')];
 debugger;
 `);
@@ -281,11 +284,15 @@ debugger;
       expect(await render(fields[0].value.objectId)).to.equal("'ABC' (c20)");
       expect(await render(fields[1].value.objectId)).to.equal("12.50 (p8,2)");
       const expectedScalars = ["'ABC  ' (string)", "-42 (i)", "9223372036854775807 (int8)",
-        "1,5000000000000000E+00 (f)", "2026-10-03 (d)", "12:34:56 (t)", "ABCDEF (xstring)",
+        "1.5000000000000000E+00 (f)", "2026-10-03 (d)", "12:34:56 (t)", "ABCDEF (xstring)",
         "ABCD0000 (x4)", "12345678901234567890.12 (p16,2)"];
       for (const [index, expected] of expectedScalars.entries()) {
         expect(await render(await evaluate(`scalars[${index}]`))).to.equal(expected);
       }
+      const castingId = await evaluate("casting");
+      expect(await render(castingId)).to.equal("-> 000000000000F83F (x8)");
+      const castChildren = await children(castingId);
+      expect(await render(castChildren[0].value.objectId)).to.equal("000000000000F83F (x8)");
       const tableId = await evaluate("table");
       expect(await render(tableId)).to.equal("[1 rows] (standard table)");
       expect((await children(tableId)).map((row) => row.name)).to.deep.equal(["1"]);
