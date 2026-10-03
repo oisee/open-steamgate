@@ -80,6 +80,7 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     DATA lt_types TYPE zcl_osd_adt_types=>tt_type.
     DATA ls_type TYPE zcl_osd_adt_types=>ty_type.
     DATA lv_pattern TYPE string.
+    DATA lv_classrun_by TYPE string.
 
     add( EXPORTING iv_method = `HEAD` iv_pattern = `/sap/bc/adt/compatibility/graph` iv_handler = `ZCL_OSD_ADT_GRAPH`
          CHANGING ct_routes = rt_routes ).
@@ -165,6 +166,14 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
       add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/datapreview/cds`
                      iv_handler = `ZCL_OSD_ADT_PREVIEW` CHANGING ct_routes = rt_routes ).
     ENDIF.
+*   Only ADT on one runtime can bind the serving generation and DUMP.
+    lv_classrun_by = c_host.
+    IF zcl_osd_kernel_guard=>has_generation( ) = abap_true.
+      lv_classrun_by = c_abap.
+    ENDIF.
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/oo/classrun/:name`
+      iv_handler = `ZCL_OSD_ADT_CLASSRUN` iv_served_by = lv_classrun_by
+      CHANGING ct_routes = rt_routes ).
 *   everything else is still the Node facade's, until its group moves
     add( EXPORTING iv_method = `*` iv_pattern = `/sap/bc/adt/*` iv_served_by = c_host
          CHANGING ct_routes = rt_routes ).

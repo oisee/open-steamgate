@@ -50,6 +50,8 @@ INTERFACE zif_osd_adt_route PUBLIC.
            headers      TYPE tihttpnvp,
            body         TYPE string,
            continuation TYPE ty_continuation,
+*          FENCE consumes this after dispatch; the route never rolls back.
+           rollback     TYPE abap_bool,
          END OF ty_response.
 
   METHODS handle

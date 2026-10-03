@@ -6,6 +6,7 @@
     "test/adt-abap-b8a.mjs",
     "test/adt-abap-b8b.mjs",
     "test/adt-abap-c1.mjs",
+    "test/adt-abap-c5.mjs",
     "test/adt-abap-c2a.mjs",
     "test/adt-abap-c4-runtime.mjs",
     "test/adt-abap-c4a.mjs",
