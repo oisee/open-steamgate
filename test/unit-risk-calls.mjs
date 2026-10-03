@@ -189,4 +189,142 @@ describe("ABAP Unit executable call closure", () => {
     expect(result.dynamicCallsTotal).to.equal(0);
   });
 
+  for (const body of ["DATA(n) = zcl_cache=>count.", "zcl_cache=>count = 1.", "DATA(n) = zcl_cache=>const."])
+    it(`static component initialization: ${body}`, async () => {
+      const result = await fixture(body, {
+        "zcl_cache.clas.abap": `CLASS zcl_cache DEFINITION PUBLIC. PUBLIC SECTION.
+          CLASS-DATA count TYPE i. CONSTANTS const TYPE i VALUE 1. CLASS-METHODS class_constructor.
+          ENDCLASS. CLASS zcl_cache IMPLEMENTATION. METHOD class_constructor. COMMIT WORK. ENDMETHOD. ENDCLASS.`,
+      }).risk.writesReached("ZCL_TEST");
+      expect(result.total).to.equal(1);
+      expect(warning(result)).to.contain("ZCL_CACHE=>CLASS_CONSTRUCTOR");
+    });
+
+  for (const body of ["DATA(lo) = NEW zcl_child( ).", "DATA(n) = zcl_child=>count."])
+    it(`superclass initialization chain: ${body}`, async () => {
+      const result = await fixture(body, {
+        "zcl_grandparent.clas.abap": `CLASS zcl_grandparent DEFINITION PUBLIC. PUBLIC SECTION.
+          CLASS-METHODS class_constructor. ENDCLASS. CLASS zcl_grandparent IMPLEMENTATION.
+          METHOD class_constructor. COMMIT WORK. ENDMETHOD. ENDCLASS.`,
+        "zcl_base.clas.abap": `CLASS zcl_base DEFINITION PUBLIC INHERITING FROM zcl_grandparent. PUBLIC SECTION.
+          CLASS-DATA count TYPE i. CLASS-METHODS class_constructor. METHODS constructor.
+          ENDCLASS. CLASS zcl_base IMPLEMENTATION.
+          METHOD class_constructor. ENDMETHOD. METHOD constructor. COMMIT WORK. ENDMETHOD. ENDCLASS.`,
+        "zcl_child.clas.abap": `CLASS zcl_child DEFINITION PUBLIC INHERITING FROM zcl_base. PUBLIC SECTION.
+          CLASS-METHODS class_constructor. METHODS constructor.
+          ENDCLASS. CLASS zcl_child IMPLEMENTATION.
+          METHOD class_constructor. ENDMETHOD. METHOD constructor. super->constructor( ). ENDMETHOD. ENDCLASS.`,
+      }).risk.writesReached("ZCL_TEST");
+      expect(result.total).to.equal(body.includes("NEW") ? 2 : 1);
+      expect(result.writes.some((w) => w.method === "ZCL_GRANDPARENT=>CLASS_CONSTRUCTOR")).to.equal(true);
+      expect(result.dynamicCallsTotal).to.equal(0);
+    });
+
+  for (const call of ["post( ).", "me->post( ).", "CALL METHOD post."])
+    it(`implicit inherited virtual dispatch: ${call}`, async () => {
+      const result = await fixture("DATA lo TYPE REF TO zcl_base. CREATE OBJECT lo TYPE zcl_child. lo->run( ).", {
+        "zcl_base.clas.abap": `CLASS zcl_base DEFINITION PUBLIC. PUBLIC SECTION. METHODS run. METHODS post.
+          ENDCLASS. CLASS zcl_base IMPLEMENTATION. METHOD run. ${call} ENDMETHOD. METHOD post. ENDMETHOD. ENDCLASS.`,
+        "zcl_child.clas.abap": `CLASS zcl_child DEFINITION PUBLIC INHERITING FROM zcl_base. PUBLIC SECTION.
+          METHODS post REDEFINITION. ENDCLASS. CLASS zcl_child IMPLEMENTATION. METHOD post. COMMIT WORK. ENDMETHOD. ENDCLASS.`,
+      }).risk.writesReached("ZCL_TEST");
+      expect(result.total).to.equal(1);
+      expect(warning(result)).to.contain("ZCL_BASE=>RUN").and.contain("ZCL_CHILD=>POST");
+      expect(result.dynamicCallsTotal).to.equal(0);
+    });
+
+  for (const call of [
+    "FIELD-SYMBOLS <lo> TYPE REF TO zcl_worker. ASSIGN lo TO <lo>. <lo>->post( ).",
+    "FIELD-SYMBOLS <lo> TYPE REF TO zcl_worker. ASSIGN lo TO <lo>. CALL METHOD <lo>->post.",
+    "TYPES ty_worker TYPE REF TO zcl_worker. FIELD-SYMBOLS <lo> TYPE ty_worker. ASSIGN lo TO <lo>. <lo>->post( ).",
+    "DATA lt_objs TYPE STANDARD TABLE OF REF TO zcl_worker WITH DEFAULT KEY. APPEND lo TO lt_objs. lt_objs[ 1 ]->post( ).",
+    "TYPES: BEGIN OF ty_row, obj TYPE REF TO zcl_worker, END OF ty_row. DATA row TYPE ty_row. row-obj = lo. row-obj->post( ).",
+    "CAST zcl_worker( lo )->post( ).",
+    "zcl_worker=>make( )->post( ).",
+    "NEW zcl_worker( )->post( ).",
+  ]) it(`AST receiver dispatch: ${call}`, async () => {
+    const result = await fixture(`DATA(lo) = NEW zcl_worker( ). ${call}`, {
+      "zcl_worker.clas.abap": `CLASS zcl_worker DEFINITION PUBLIC. PUBLIC SECTION. METHODS post.
+        CLASS-METHODS make RETURNING VALUE(ro) TYPE REF TO zcl_worker.
+        ENDCLASS. CLASS zcl_worker IMPLEMENTATION. METHOD post. COMMIT WORK. ENDMETHOD.
+        METHOD make. ro = NEW zcl_worker( ). ENDMETHOD. ENDCLASS.`,
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(1);
+    expect(result.dynamicCallsTotal).to.equal(0);
+  });
+
+  for (const body of ["<unknown>->post( ).", "lt_unknown[ 1 ]->post( ).", "CALL METHOD lo->(name).",
+    "CALL METHOD (name).", "CALL FUNCTION (name).", "CREATE OBJECT <lo> TYPE (name).",
+    "RAISE EVENT done.", "SET HANDLER lo->post FOR sender."])
+    it(`unresolved execution never stays harmless: ${body}`, async () => {
+      const result = await fixture(body).risk.writesReached("ZCL_TEST");
+      expect(result.total).to.equal(0);
+      expect(result.dynamicCallsTotal).to.be.greaterThan(0);
+      expect(warning(result)).to.contain("may reach a database write");
+    });
+
+  it("IN UPDATE TASK is a confirmed write even without the module body", async () => {
+    const result = await fixture("CALL FUNCTION 'Z_POST' IN UPDATE TASK.").risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(1);
+    expect(warning(result)).to.contain("CALL FUNCTION IN UPDATE TASK");
+  });
+
+  it("type-only static components do not initialize classes", async () => {
+    const result = await fixture("DATA row TYPE zcl_cache=>ty_row.", {
+      "zcl_cache.clas.abap": `CLASS zcl_cache DEFINITION PUBLIC. PUBLIC SECTION. TYPES ty_row TYPE i.
+        CLASS-METHODS class_constructor. ENDCLASS. CLASS zcl_cache IMPLEMENTATION.
+        METHOD class_constructor. COMMIT WORK. ENDMETHOD. ENDCLASS.`,
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(0);
+    expect(result.dynamicCallsTotal).to.equal(0);
+  });
+
+  it("missing initialization bodies and missing superclasses remain uncertain", async () => {
+    for (const definition of ["CLASS-METHODS class_constructor.", "METHODS constructor."]) {
+      const result = await fixture("DATA(lo) = NEW zcl_incomplete( ).", {
+        "zcl_incomplete.clas.abap": `CLASS zcl_incomplete DEFINITION PUBLIC. PUBLIC SECTION.
+          ${definition} ENDCLASS. CLASS zcl_incomplete IMPLEMENTATION. ENDCLASS.`,
+      }).risk.writesReached("ZCL_TEST");
+      expect(warning(result)).to.contain("may reach a database write");
+    }
+    const result = await fixture("DATA(lo) = NEW zcl_incomplete( ).", {
+      "zcl_incomplete.clas.abap": "CLASS zcl_incomplete DEFINITION PUBLIC INHERITING FROM zcl_missing. ENDCLASS. CLASS zcl_incomplete IMPLEMENTATION. ENDCLASS.",
+    }).risk.writesReached("ZCL_TEST");
+    expect(warning(result)).to.contain("may reach a database write");
+  });
+
+  it("analysis failure is visible in the weaker warning", () => {
+    expect(riskWarning(harmless, {riskError: "registry unavailable"})).to.contain("may reach a database write").and.contain("registry unavailable");
+  });
+
+  it("function bodies retain builtin expressions and report unavailable calls", async () => {
+    const result = await fixture("CALL FUNCTION 'Z_POST'.", {
+      "zfg_risk.fugr.z_post.abap": "FUNCTION z_post. DATA(n) = strlen( 'x' ). missing( ). ENDFUNCTION.",
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(0);
+    expect(result.dynamicCallsTotal).to.equal(1);
+    expect(warning(result)).to.contain("may reach a database write");
+  });
+
+  it("a declared test whose body is unavailable stays uncertain", async () => {
+    const result = await fixture("", {
+      "zcl_test.clas.testclasses.abap": "CLASS ltcl_test DEFINITION FOR TESTING RISK LEVEL HARMLESS. PRIVATE SECTION. METHODS run FOR TESTING. ENDCLASS.",
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(0);
+    expect(warning(result)).to.contain("may reach a database write");
+  });
+
+  it("one inherited body is visited for each possible runtime receiver", async () => {
+    const result = await fixture("DATA(a) = NEW zcl_reader_child( ). a->run( ). DATA(b) = NEW zcl_writer_child( ). b->run( ).", {
+      "zcl_base.clas.abap": `CLASS zcl_base DEFINITION PUBLIC. PUBLIC SECTION. METHODS run. METHODS post.
+        ENDCLASS. CLASS zcl_base IMPLEMENTATION. METHOD run. post( ). ENDMETHOD. METHOD post. ENDMETHOD. ENDCLASS.`,
+      ...Object.fromEntries(["reader", "writer"].map((name) => [`zcl_${name}_child.clas.abap`,
+        `CLASS zcl_${name}_child DEFINITION PUBLIC INHERITING FROM zcl_base. PUBLIC SECTION. METHODS post REDEFINITION.
+        ENDCLASS. CLASS zcl_${name}_child IMPLEMENTATION. METHOD post. ${name === "writer" ? "COMMIT WORK." : ""} ENDMETHOD. ENDCLASS.`])),
+    }).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(1);
+    expect(result.writes[0].object).to.equal("ZCL_WRITER_CHILD");
+    expect(result.dynamicCallsTotal).to.equal(0);
+  });
+
 });

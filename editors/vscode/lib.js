@@ -384,6 +384,8 @@ function riskWarning(testClass, found = {}) {
   if (testClass?.riskLevelDeclared !== true || testClass.riskLevel !== "harmless" || testClass.schedule === "harmless") return undefined;
   const first = found.writes?.[0];
   if (first === undefined) {
+    if (found.riskError !== undefined)
+      return `RISK LEVEL HARMLESS, but the tests may reach a database write: call analysis could not complete (${found.riskError}). It runs one at a time while the target is unknown.`;
     const dynamic = found.dynamicCalls?.[0];
     if (dynamic === undefined) return undefined;
     const reason = dynamic.kind?.includes("dynamic") ? "a dynamic call" : "an unresolved call";

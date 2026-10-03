@@ -1,6 +1,6 @@
 // ABAP Unit risk follows executable method bodies, not WBCROSSGT type
 // dependencies. See docs/unit-risk.md for dispatch and unknown-target policy.
-import {BuiltIn, Expressions} from "@abaplint/core";
+import {BuiltIn, Expressions, SyntaxLogic, BasicTypes} from "@abaplint/core";
 
 const WRITES = {
   InsertDatabase: "INSERT",
@@ -33,14 +33,14 @@ export function scheduledRisk(testClass, writes = []) {
   return testClass.riskLevel;
 }
 
-const upper = (s) => s.toUpperCase();
+const upper = (s = "") => s.toUpperCase();
 // Expressions contain argument literals too. Their text must never become an
 // edge (for example a scanner test passing `lo->write( )` as input).
 const executableText = (expression) => upper(expression.getTokens().map((token) => {
   const value = token.getStr();
   return /^['`|]/.test(value) ? " " : value;
 }).join(" ")).replace(/\s*(->|=>|~)\s*/g, "$1");
-const referenceTypes = (text) => new Map([...text.matchAll(/(?:VALUE\(\s*)?([\w]+)\s*\)?\s+TYPE\s+REF\s+TO\s+([/\w]+)/g)].map((m) => [m[1], m[2]]));
+const referenceTypes = (text) => new Map([...text.matchAll(/(?:VALUE\(\s*)?(<[^>]+>|[\w]+)\s*\)?\s+TYPE\s+REF\s+TO\s+([/\w]+)/g)].map((m) => [m[1], m[2]]));
 const location = (node, statement) => ({object: node.object, method: `${node.className}=>${node.name}`,
   file: node.file, line: statement.getStart().getRow(), column: statement.getStart().getCol()});
 
@@ -67,6 +67,8 @@ export class UnitRisk {
             if (kind === "ClassDefinition") {
               currentClass.parent = text.match(/INHERITING FROM\s+([^ .]+)/)?.[1];
               currentClass.testing = /FOR TESTING/.test(text);
+              currentClass.at = statement;
+              currentClass.file = file.getFilename().split(/[\\/]/).pop();
             }
           } else if (kind === "EndClass") {
             currentClass = undefined;
@@ -88,7 +90,7 @@ export class UnitRisk {
             const name = text.match(/^(?:METHOD|FUNCTION)\s+([^ .]+)/)?.[1];
             const owner = currentClass ?? {key: classKey(objectName, objectName), name: objectName, object: objectName, types: new Map()};
             currentNode = {key: `${owner.key}:${name}`, object: objectName, className: owner.name, owner,
-              name, file: file.getFilename().split(/[\\/]/).pop(), statements: [], types: new Map(currentClass?.signatures.get(name)), at: statement};
+              name, file: file.getFilename().split(/[\\/]/).pop(), registryObject: object, fullFile: file.getFilename(), statements: [], types: new Map(currentClass?.signatures.get(name)), at: statement};
             nodes.set(currentNode.key, currentNode);
             if (currentClass) currentClass.methods.set(name, currentNode);
             else functions.set(name, currentNode);
@@ -108,129 +110,277 @@ export class UnitRisk {
     return this.graph;
   }
 
-  /** Fixed point: factories reached through calls contribute their NEW / CREATE
-   * targets before interface dispatch is repeated. Unknown receivers never
-   * expand to all implementers; they produce a separate uncertainty instead. */
+  // Cache inherited lookup and compile each body once. Runtime receiver context
+  // belongs to the traversal state, not the body: one inherited method can run
+  // on several concrete classes with different redefinitions.
+  #resolve(graph, owner, method) {
+    if (!owner) return undefined;
+    graph.resolved ??= new Map();
+    const key = `${owner.key}:${method}`;
+    if (graph.resolved.has(key)) return graph.resolved.get(key);
+    let current = owner;
+    const seen = new Set();
+    while (current && !seen.has(current.key)) {
+      seen.add(current.key);
+      const found = current.methods?.get(current.aliases?.get(method) ?? method);
+      if (found) { graph.resolved.set(key, found); return found; }
+      current = graph.lookup(current, current.parent);
+    }
+    graph.resolved.set(key, undefined);
+    return undefined;
+  }
+
+  #body(graph, node) {
+    if (node.body) return node.body;
+    const types = new Map([...node.owner.types, ...node.types]), ops = [];
+    const emit = (statement, op) => ops.push({statement, ...op});
+    const declaredReturn = (type, method) => {
+      const owner = graph.lookup(node.owner, type);
+      const target = this.#resolve(graph, owner, method);
+      return target?.owner.returns.get(target.name) ?? owner?.returns?.get(method);
+    };
+    // Syntax scopes are lazy and cached per object; simple declared references
+    // do not pay for a whole syntax pass. Complex fields use abaplint's types.
+    const fieldType = (expression) => {
+      const children = expression.getChildren();
+      const first = children[0];
+      const variable = upper(first?.concatTokens() ?? "");
+      if (children.length === 1 && types.has(variable)) return types.get(variable);
+      try {
+        node.scope ??= new SyntaxLogic(graph.registry, node.registryObject).run().spaghetti
+          .lookupPosition(node.statements[0]?.getStart() ?? node.at.getStart(), node.fullFile);
+        let type = node.scope?.findVariable(variable)?.getType();
+        for (const child of children.slice(1)) {
+          const kind = child.get().constructor.name;
+          if (kind === "TableExpression") type = type?.getRowType?.();
+          else if (kind === "ComponentName") type = type?.getComponentByName?.(upper(child.concatTokens()));
+          else if (kind === "AttributeName") {
+            const className = type?.getIdentifierName?.();
+            const owner = graph.lookup(node.owner, upper(className ?? ""));
+            return owner?.types.get(upper(child.concatTokens()));
+          }
+        }
+        return type instanceof BasicTypes.ObjectReferenceType ? upper(type.getIdentifierName()) : undefined;
+      } catch { return undefined; } // caller records uncertainty, never silence
+    };
+    const receiverOf = (expression) => {
+      const kind = expression?.get().constructor.name;
+      if (kind === "NewObject") return {mode: "virtual", type: upper(expression.findDirectExpression(Expressions.TypeNameOrInfer).concatTokens())};
+      if (kind === "Cast") return {mode: "virtual", type: upper(expression.findDirectExpression(Expressions.TypeNameOrInfer).concatTokens())};
+      const text = upper(expression?.concatTokens() ?? "");
+      if (text === "ME") return {mode: "self"};
+      if (text === "SUPER") return {mode: "super"};
+      if (kind === "ClassName") return {mode: "static", type: text};
+      return {mode: "virtual", type: expression ? fieldType(expression) : undefined};
+    };
+    const chain = (expression, statement) => {
+      const children = expression.getChildren();
+      if (expression.get().constructor.name === "MethodSource" && children.length === 1
+          && children[0].get().constructor.name === "SourceField") {
+        const method = upper(children[0].concatTokens());
+        emit(statement, {action: "call", mode: "self", method});
+        return declaredReturn(node.owner.name, method);
+      }
+      let receiver = {mode: "self"}, returned;
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i], kind = child.get().constructor.name;
+        if (["ClassName", "FieldChain", "SourceField", "SourceFieldSymbol", "NewObject", "Cast"].includes(kind)) {
+          receiver = receiverOf(child);
+        } else if (kind === "MethodCall" || kind === "AttributeName" && i === children.length - 1) {
+          const method = upper((child.findDirectExpression?.(Expressions.MethodName) ?? child).concatTokens());
+          emit(statement, {action: "call", ...receiver, method});
+          returned = declaredReturn(receiver.type ?? node.owner.name, method);
+          receiver = {mode: "virtual", type: returned};
+        } else if (kind === "AttributeName" || kind === "ComponentName") {
+          // Attributes between chained calls require a typed result. If absent,
+          // the next call retains an unknown receiver and reports uncertainty.
+          const owner = graph.lookup(node.owner, receiver.type);
+          receiver = {mode: "virtual", type: owner?.types.get(upper(child.concatTokens()))};
+        } else if (kind === "Dynamic") {
+          emit(statement, {action: "unknown", reason: "a dynamic method call"});
+          return undefined;
+        }
+      }
+      return returned;
+    };
+    for (const statement of node.statements) {
+      const text = upper(statement.concatTokens()), kind = statement.get().constructor.name;
+      const executable = executableText(statement);
+      const verdict = writeKindOf(kind, kind === "Call" ? executable : text);
+      if (verdict?.startsWith("a dynamic")) emit(statement, {action: "unknown", reason: verdict});
+      else if (verdict) emit(statement, {action: "write", kind: verdict});
+      const dynamicMethod = /(?:->|=>)\s*\(/.test(executable) || /^CALL METHOD\s+\(/.test(executable);
+      if (dynamicMethod) emit(statement, {action: "unknown", reason: "a dynamic method call"});
+      if (["Unknown", "RaiseEvent", "SetHandler", "Perform", "Submit", "CallTransaction", "CallTransformation"].includes(kind))
+        emit(statement, {action: "unknown", reason: "an unresolved executable statement"});
+
+      // Static component references are initialization, including constants
+      // conservatively. TypeName nodes are declarations, not executable access.
+      const scanStatic = (expression) => {
+        if (expression.get().constructor.name === "TypeName") return;
+        const children = expression.getChildren?.() ?? [];
+        for (let i = 0; i < children.length; i++) {
+          if (children[i].get().constructor.name === "StaticArrow") {
+            const previous = children[i - 1];
+            if (previous?.get().constructor.name === "ClassName")
+              emit(statement, {action: "init", type: upper(previous.concatTokens())});
+            else emit(statement, {action: "unknown", reason: "an unresolved static access"});
+          }
+          if (children[i].getChildren) scanStatic(children[i]);
+        }
+      };
+      scanStatic(statement);
+      if (kind === "CreateObject" && !verdict?.startsWith("a dynamic")) {
+        const target = statement.findDirectExpression(Expressions.Target);
+        const name = statement.findDirectExpression(Expressions.ClassName)?.concatTokens();
+        const variable = upper(target?.concatTokens() ?? "");
+        const type = name ? upper(name) : types.get(variable);
+        emit(statement, {action: "new", type});
+        if (type && !types.has(variable)) types.set(variable, type);
+      }
+      const variable = executable.match(/^(?:DATA\(\s*)?(\w+)\s*\)?\s*=/)?.[1];
+      for (const expression of statement.findAllExpressions(Expressions.NewObject)) {
+        const name = upper(expression.findDirectExpression(Expressions.TypeNameOrInfer).concatTokens());
+        const type = name === "#" ? types.get(variable) : name;
+        // NEW can construct data as well as objects. Known data types do not
+        // execute constructors; unknown object/data targets remain uncertain.
+        if (graph.lookup(node.owner, type) || !BuiltIn.searchBuiltin(type ?? "")) emit(statement, {action: "new", type});
+        if (variable && type && !types.has(variable)) types.set(variable, type);
+      }
+      if (kind === "CallFunction") {
+        const name = text.match(/^CALL FUNCTION\s+'([^']+)'/)?.[1];
+        if (name) emit(statement, {action: "function", name});
+      }
+      const expressions = [...statement.findAllExpressions(Expressions.MethodCallChain), ...statement.findAllExpressions(Expressions.MethodSource)];
+      for (const expression of expressions) {
+        const result = chain(expression, statement);
+        if (variable && result && !types.has(variable)) types.set(variable, result);
+      }
+      // Parser recovery must not turn an unsupported CALL into no edges.
+      if (kind === "Call" && expressions.length === 0 && !dynamicMethod)
+        emit(statement, {action: "unknown", reason: "an unresolved method call"});
+    }
+    node.body = ops;
+    return ops;
+  }
+
+  /** A worklist of (body, runtime receiver) states. A new concrete class only
+   * wakes calls indexed by its ancestors/interfaces; no repeated whole-graph
+   * scans. Paths use linked predecessors so long chains are linear too. */
   async writesReached(objectName, {limit = 5} = {}) {
     const graph = this.#graph(), start = upper(String(objectName));
-    const reached = new Map(), instantiated = new Set();
+    const reached = new Map(), states = new Set(), queue = [], objects = new Set([start]);
+    const instantiated = new Set(), candidates = new Map(), callers = new Map();
+    const writes = new Map(), unknown = new Map(), waiting = [];
+    const link = (prev, at) => ({prev, at});
+    const pathOf = (path) => { const out = []; for (; path; path = path.prev) out.push(path.at); return out.reverse(); };
+    const add = (node, runtime, path, site) => {
+      if (!node) return;
+      const key = `${node.key}:${runtime?.key ?? "static"}`;
+      if (states.has(key)) return;
+      states.add(key);
+      const next = link(path, {...location(node, node.at), ...(site ? {callSite: site} : {})});
+      if (!reached.has(node.key)) reached.set(node.key, next);
+      objects.add(node.object);
+      queue.push({node, runtime, path: next});
+    };
+    const uncertain = (node, statement, path, reason) => {
+      const at = location(node, statement), key = `${node.key}:${at.line}:${at.column}`;
+      // One finding per source statement, preferring the dynamic explanation.
+      if (!unknown.has(key) || reason.includes("dynamic")) unknown.set(key, {...at, kind: reason, path: link(path, at)});
+    };
+    const lineage = (owner) => {
+      if (owner.lineage) return owner.lineage;
+      const out = [], seen = new Set();
+      for (let c = owner; c && !seen.has(c.key); c = graph.lookup(c, c.parent)) { seen.add(c.key); out.push(c); }
+      owner.lineage = out;
+      return out;
+    };
+    const typeKey = (owner, name) => graph.lookup(owner, name)?.key ?? name;
+    const initialize = (owner, state, statement, instance = false) => {
+      if (!owner) { uncertain(state.node, statement, state.path, "an unresolved construction or static access"); return; }
+      for (const c of [...lineage(owner)].reverse()) {
+        for (const method of instance ? ["CLASS_CONSTRUCTOR", "CONSTRUCTOR"] : ["CLASS_CONSTRUCTOR"]) {
+          const target = c.methods?.get(method);
+          add(target, method === "CONSTRUCTOR" ? owner : undefined, state.path, location(state.node, statement));
+          if (!target && c.signatures?.has(method))
+            uncertain(state.node, statement, state.path, "an unresolved initialization method");
+        }
+        if (c.parent && !graph.lookup(c, c.parent)) uncertain(state.node, statement, state.path, "an unresolved superclass initialization");
+      }
+    };
+    const call = (owner, method, state, statement, runtime = owner) => {
+      const target = this.#resolve(graph, owner, method);
+      if (target) add(target, runtime, state.path, location(state.node, statement));
+      else if (!["CONSTRUCTOR", "CLASS_CONSTRUCTOR"].includes(method)) uncertain(state.node, statement, state.path, "an unresolved method call");
+      initialize(owner, state, statement);
+    };
+    const dispatch = (subscription, owner) => {
+      const {op, state} = subscription;
+      const qualified = `${op.type}~${op.method}`;
+      call(owner, this.#resolve(graph, owner, qualified) ? qualified : op.method, state, op.statement, owner);
+      subscription.matched = true;
+    };
+    const instantiate = (owner, state, statement) => {
+      initialize(owner, state, statement, true);
+      if (!owner || instantiated.has(owner.key)) return;
+      instantiated.add(owner.key);
+      const keys = new Set();
+      for (const c of lineage(owner)) {
+        keys.add(c.key);
+        for (const intf of c.interfaces) keys.add(intf);
+      }
+      for (const key of keys) {
+        if (!candidates.has(key)) candidates.set(key, new Set());
+        candidates.get(key).add(owner);
+        for (const subscriber of callers.get(key) ?? []) dispatch(subscriber, owner);
+      }
+    };
     const roots = [...graph.classes.values()].filter((c) => c.object === start && c.testing);
-    const add = (node, path = [], at) => {
-      if (!node || reached.has(node.key)) return false;
-      reached.set(node.key, [...path, at ?? location(node, node.at)]);
-      return true;
-    };
-    const resolve = (owner, method, visited = new Set()) => {
-      if (!owner || visited.has(owner.key)) return undefined;
-      visited.add(owner.key);
-      return owner.methods.get(owner.aliases.get(method) ?? method) ?? resolve(graph.lookup(owner, owner.parent), method, visited);
-    };
-    const isA = (candidate, target, visited = new Set()) => {
-      if (!candidate || visited.has(candidate.key)) return false;
-      visited.add(candidate.key);
-      return candidate.name === target || candidate.interfaces.includes(target)
-        || isA(graph.lookup(candidate, candidate.parent), target, visited);
-    };
     for (const c of roots) {
-      instantiated.add(c.key);
-      for (const name of [...(c.tests ?? []), "SETUP", "TEARDOWN", "CLASS_SETUP", "CLASS_TEARDOWN", "CONSTRUCTOR", "CLASS_CONSTRUCTOR"]) add(resolve(c, name));
+      const rootNode = c.methods.values().next().value ?? {key: `${c.key}:<TEST>`, owner: c,
+        object: c.object, className: c.name, name: "<TEST>", file: c.file, at: c.at};
+      const state = {node: rootNode, runtime: c};
+      instantiate(c, state, rootNode.at);
+      for (const name of [...(c.tests ?? []), "SETUP", "TEARDOWN", "CLASS_SETUP", "CLASS_TEARDOWN"]) {
+        const target = this.#resolve(graph, c, name);
+        add(target, c);
+        if (!target && (c.tests?.has(name) || c.signatures.has(name)))
+          uncertain(rootNode, rootNode.at, undefined, "an unresolved test method");
+      }
     }
-    let changed = true;
-    let unknown = new Map();
-    while (changed) {
-      changed = false;
-      unknown = new Map();
-      for (const [key, path] of reached) {
-        const node = graph.nodes.get(key);
-        const types = new Map([...node.owner.types, ...node.types]);
-        const uncertain = (statement, reason) => {
+    for (let next = 0; next < queue.length; next++) {
+      const state = queue[next], {node, runtime, path} = state;
+      for (const op of this.#body(graph, node)) {
+        const {statement} = op;
+        if (op.action === "write") {
           const at = location(node, statement);
-          unknown.set(`${key}:${at.line}:${at.column}:${reason}`, {...at, kind: reason, path: [...path, at]});
-        };
-        const call = (owner, method, statement) => {
-          const target = resolve(owner, method);
-          if (target) changed = add(target, path, {...location(target, target.at), callSite: location(node, statement)}) || changed;
-          else if (!["CONSTRUCTOR", "CLASS_CONSTRUCTOR"].includes(method)) uncertain(statement, "an unresolved method call");
-          // An inherited class constructor can execute before any static call.
-          const init = resolve(owner, "CLASS_CONSTRUCTOR");
-          if (init && init !== target) changed = add(init, path, {...location(init, init.at), callSite: location(node, statement)}) || changed;
-        };
-        const instantiate = (name, statement) => {
-          const owner = graph.lookup(node.owner, name);
-          if (!owner) { uncertain(statement, "an unresolved construction"); return; }
-          if (!instantiated.has(owner.key)) { instantiated.add(owner.key); changed = true; }
-          call(owner, "CONSTRUCTOR", statement);
-        };
-        for (const statement of node.statements) {
-          const text = upper(statement.concatTokens()), kind = statement.get().constructor.name;
-          const executable = executableText(statement);
-          const verdict = writeKindOf(kind, kind === "Call" ? executable : text);
-          if (verdict?.startsWith("a dynamic")) uncertain(statement, verdict);
-          // Some dynamic expressions have no MethodCallChain in the parser.
-          // Token evidence still establishes uncertainty, never a concrete edge.
-          if (/(?:->|=>)\s*\(/.test(executable)) uncertain(statement, "a dynamic method call");
-          const assignment = executableText(statement).match(/^(?:DATA\(\s*)?(\w+)\s*\)?\s*=\s*([/\w]+)=>([/\w~]+)\s*\(/);
-          if (assignment && !types.has(assignment[1])) {
-            const factory = graph.lookup(node.owner, assignment[2]);
-            const returnType = factory?.returns.get(assignment[3]);
-            if (returnType) types.set(assignment[1], returnType);
-          }
-          if (kind === "CreateObject" && !verdict?.startsWith("a dynamic")) {
-            const m = text.match(/^CREATE OBJECT\s+(\w+)(?:\s+TYPE\s+([/\w]+))?/);
-            if (m) { const name = m[2] ?? types.get(m[1]); if (name) { if (!types.has(m[1])) types.set(m[1], name); instantiate(name, statement); } else uncertain(statement, "an unresolved construction"); }
-          }
-          for (const expression of statement.findAllExpressions(Expressions.NewObject)) {
-            const name = upper(expression.concatTokens()).match(/^NEW\s+([/\w]+|#)/)?.[1];
-            const variable = text.match(/^(?:DATA\(\s*)?(\w+)\s*\)?\s*=/)?.[1];
-            const concrete = name === "#" ? types.get(variable) : name;
-            if (concrete) { if (variable && !types.has(variable)) types.set(variable, concrete); instantiate(concrete, statement); }
-            else uncertain(statement, "an unresolved construction");
-          }
-          if (kind === "CallFunction") {
-            const name = text.match(/^CALL FUNCTION\s+'([^']+)'/)?.[1];
-            if (name) {
-              const target = graph.functions.get(name);
-              if (target) changed = add(target, path, {...location(target, target.at), callSite: location(node, statement)}) || changed;
-              else uncertain(statement, "an unresolved function call");
-            }
-          }
-          const expressions = [...statement.findAllExpressions(Expressions.MethodCallChain), ...statement.findAllExpressions(Expressions.MethodSource)];
-          for (const expression of expressions) {
-            const source = executableText(expression);
-            if (/(?:->|=>)\s*\(/.test(source)) { uncertain(statement, "a dynamic method call"); continue; }
-            const newChain = source.match(/^NEW\s+([/\w]+)\s*\([^)]*\)\s*->\s*([/\w~]+)\s*\(/);
-            if (newChain) call(graph.lookup(node.owner, newChain[1]), newChain[2], statement);
-            if (/\)\s*->/.test(source) && !newChain) uncertain(statement, "an unresolved virtual call");
-            const qualified = [...source.matchAll(/([/\w]+)\s*(=>|->)\s*([/\w~]+)(?=\s*\(|\s*$)/g)];
-            if (qualified.length === 0) {
-              const method = source.match(/^([\w~]+)(?:\s*\(|\s*$)/)?.[1];
-              if (method && (resolve(node.owner, method) || !BuiltIn.searchBuiltin(method))) call(node.owner, method, statement);
-            }
-            for (const [, receiver, arrow, method] of qualified) {
-              if (arrow === "=>") { call(graph.lookup(node.owner, receiver), method, statement); continue; }
-              if (receiver === "SUPER") { call(graph.lookup(node.owner, node.owner.parent), method, statement); continue; }
-              const type = receiver === "ME" ? node.owner.name : types.get(receiver);
-              const candidates = [...instantiated].map((k) => graph.classes.get(k)).filter((c) => type && isA(c, type));
-              if (candidates.length === 0) { uncertain(statement, "an unresolved virtual call"); continue; }
-              for (const c of candidates) call(c, resolve(c, `${type}~${method}`) ? `${type}~${method}` : method, statement);
-            }
-          }
+          writes.set(`${node.key}:${at.line}:${at.column}`, {...at, kind: op.kind, path: link(path, at)});
+        } else if (op.action === "unknown") uncertain(node, statement, path, op.reason);
+        else if (op.action === "init") initialize(graph.lookup(node.owner, op.type), state, statement);
+        else if (op.action === "new") instantiate(graph.lookup(node.owner, op.type), state, statement);
+        else if (op.action === "function") {
+          const target = graph.functions.get(op.name);
+          if (target) add(target, undefined, path, location(node, statement));
+          else uncertain(node, statement, path, "an unresolved function call");
+        } else if (op.mode === "static") call(graph.lookup(node.owner, op.type), op.method, state, statement, undefined);
+        else if (op.mode === "super") call(graph.lookup(node.owner, node.owner.parent), op.method, state, statement, runtime);
+        else if (op.mode === "self") {
+          if (this.#resolve(graph, runtime ?? node.owner, op.method) || !BuiltIn.searchBuiltin(op.method))
+            call(runtime ?? node.owner, op.method, state, statement, runtime);
+        } else if (!op.type || op.type === "#") uncertain(node, statement, path, "an unresolved virtual call");
+        else {
+          const key = typeKey(node.owner, op.type), subscription = {op, state, matched: false};
+          if (!callers.has(key)) callers.set(key, []);
+          callers.get(key).push(subscription);
+          waiting.push(subscription);
+          for (const owner of candidates.get(key) ?? []) dispatch(subscription, owner);
         }
       }
     }
-    const writes = new Map();
-    for (const [key, path] of reached) {
-      const node = graph.nodes.get(key);
-      for (const statement of node.statements) {
-        const kind = writeKindOf(statement.get().constructor.name, statement.concatTokens());
-        if (kind && !kind.startsWith("a dynamic")) {
-          const at = location(node, statement);
-          writes.set(`${key}:${at.line}:${at.column}:${kind}`, {...at, kind, path: [...path, at]});
-        }
-      }
-    }
-    return {writes: [...writes.values()].slice(0, limit), total: writes.size,
-      dynamicCalls: [...unknown.values()].slice(0, limit), dynamicCallsTotal: unknown.size,
-      reached: new Set([start, ...[...reached.keys()].map((k) => graph.nodes.get(k).object)]).size};
+    for (const {op, state, matched} of waiting) if (!matched) uncertain(state.node, op.statement, state.path, "an unresolved virtual call");
+    const findings = (map) => [...map.values()].slice(0, limit).map((finding) => ({...finding, path: pathOf(finding.path)}));
+    return {writes: findings(writes), total: writes.size,
+      dynamicCalls: findings(unknown), dynamicCallsTotal: unknown.size, reached: objects.size};
   }
 }
