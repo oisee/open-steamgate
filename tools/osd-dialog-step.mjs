@@ -1,6 +1,6 @@
 import {selectSQLiteOne} from './adt-single-select.mjs';
 
-import {inDaemon} from "./osd-daemon-host.mjs";
+import {inDaemon} from "./osd-daemon-context.mjs";
 // The end of a dialog step, for every host that runs the ABAP.
 //
 // An AS ABAP commits the database implicitly when a request's work is done

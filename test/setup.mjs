@@ -477,7 +477,7 @@ async function setupDatabase(abap, schemas, insert) {
   const {JobDestination} = await import(/* webpackIgnore: true */ "../tools/osd-job-port.mjs");
   const jobs = new JobDestination(process.cwd(), process.env);
   abap.context.RFCDestinations["JOBS"] = jobs;
-  const {installCapacity} = await import("../tools/osd-capacity-host.mjs");
+  const {installCapacity} = await import(/* webpackIgnore: true */ "../tools/osd-capacity-host.mjs");
   installCapacity(abap, jobs);
   abap.context.osdGeneration = jobs.generation;
   // AMDP: a method whose body is SQLScript has been rewritten by

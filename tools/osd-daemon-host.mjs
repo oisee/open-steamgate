@@ -1,9 +1,8 @@
 // Clean-room subset of the measured daemon contract used by the L3 watcher.
 // One mailbox per instance; callbacks are separate, committing dialog steps.
-import {AsyncLocalStorage} from 'node:async_hooks';
-import {randomUUID} from 'node:crypto';
 import {dialogStep, outsideStepContext} from './osd-dialog-step.mjs';
-const active = new AsyncLocalStorage();
+import {daemonContext as active, inDaemon} from './osd-daemon-context.mjs';
+export {inDaemon};
 const hosts = new WeakMap();
 const wall = {now: () => Date.now(), setTimer: (fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); return t; }, clearTimer: clearTimeout};
 const value = (x) => x?.get?.() ?? x;
@@ -16,7 +15,6 @@ function program() {
   }
   return 'HOST';
 }
-export const inDaemon = () => active.getStore() !== undefined;
 export function daemonHost(abap) { return hosts.get(abap); }
 export function installDaemons(abap) {
   const Manager = abap.Classes.CL_ABAP_DAEMON_CLIENT_MANAGER;
@@ -70,7 +68,7 @@ export function installDaemons(abap) {
   Manager.start = async (input) => {
     const className = value(input.i_class_name).trim().toUpperCase();
     if (!abap.Classes[className]) return exception();
-    const id = randomUUID();
+    const id = globalThis.crypto.randomUUID(); // Web Crypto: in Node and in a service worker alike
     const row = {id, name: value(input.i_name).trim(), className, creator: program(),
       client: abap.builtin.sy.get().mandt.get(), user: abap.builtin.sy.get().uname.get(), started: clock.now(),
       object: await new abap.Classes[className]().constructor_(), pending: 0, queue: Promise.resolve(), timers: new Map()};
