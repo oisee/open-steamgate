@@ -1,6 +1,6 @@
 // Compare per-method outcomes from the instrumented Node Unit lifecycle
 // with gogen's. Run `npm run transpile` first, or pass --node-json <file>.
-import {spawnSync} from "../osd-child-process.mjs";
+import {spawnSync} from "node:child_process";
 import {closeSync, existsSync, mkdtempSync, openSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";

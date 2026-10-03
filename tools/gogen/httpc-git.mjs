@@ -24,7 +24,7 @@
 // ultra/bytecmp (after the A4H measurement): REFS equals Node's, CLONE
 // stops in ZCL_ABAPGIT_GIT_PACK=>DECODE (GET_TYPE, a generic TYPE x
 // parameter); README "Byte-like comparisons" lists the rest of the path.
-import {execFile, execFileSync, spawn} from "../osd-child-process.mjs";
+import {execFile, execFileSync, spawn} from "node:child_process";
 import {mkdirSync, rmSync, writeFileSync} from "node:fs";
 import {createServer} from "node:net";
 import {join} from "node:path";

@@ -1,6 +1,6 @@
 // Time the full, unequal sets separately: Node's ordinary Unit entry point
 // and every Go binary the isolated inventory built. Invoke under flock.
-import {spawnSync} from "../osd-child-process.mjs";
+import {spawnSync} from "node:child_process";
 import {mkdtempSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";

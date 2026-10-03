@@ -1,6 +1,6 @@
 // Time an exact, green class intersection. Invoke under
 // `flock /tmp/osd-heavy.lock` and with no other heavy workload.
-import {spawnSync} from "../osd-child-process.mjs";
+import {spawnSync} from "node:child_process";
 import {mkdtempSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";

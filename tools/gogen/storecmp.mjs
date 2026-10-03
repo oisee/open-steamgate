@@ -12,7 +12,7 @@
 // are compared too. EV_MS is a stopwatch and is left out; so is the time of
 // a file one of the writes touched, since the two hosts wrote it at two
 // different moments.
-import {execFileSync} from "../osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {home} from "./home.mjs";

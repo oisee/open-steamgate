@@ -14,7 +14,7 @@
 // and it starts a fresh handler per recording, as o4d-record opens a fresh
 // socket per scene. The frames the ABAP writes are compared with the
 // recording number by number.
-import {execFileSync} from "../osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";

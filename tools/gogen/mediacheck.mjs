@@ -5,7 +5,7 @@
 // go/abap/w3mi.go, and compared with the pack's file.
 //
 //   node tools/gogen/mediacheck.mjs
-import {execFileSync} from "../osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {mkdirSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {compileProgram} from "./frontend.mjs";

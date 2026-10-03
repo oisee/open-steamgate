@@ -16,7 +16,7 @@
 //
 //   node tools/sqlscript/check-corpus.mjs [.local/a4h-export]
 import {readFileSync, readdirSync, mkdirSync} from "node:fs";
-import {execFileSync} from "../osd-child-process.mjs";
+import {execFileSync} from "node:child_process";
 import {basename,join} from "node:path";
 import {lex} from "./lexer.mjs";
 import {parse} from "./combi.mjs";

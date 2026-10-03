@@ -16,7 +16,7 @@
 // and both what the server received and what the ABAP printed must be the
 // same. --node runs the Node side alone and prints it (to read what Node
 // sends), --keep leaves .out/httpc-js/ for a look.
-import {execFile, execFileSync} from "../osd-child-process.mjs";
+import {execFile, execFileSync} from "node:child_process";
 import {mkdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {createServer} from "node:net";
 import {join} from "node:path";

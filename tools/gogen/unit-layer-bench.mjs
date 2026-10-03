@@ -1,6 +1,6 @@
 // Measure the complete Unit build with one generated binary. Invoke under
 // flock /tmp/osd-heavy.lock. Source edits are restored even on failure.
-import {spawnSync} from "../osd-child-process.mjs";
+import {spawnSync} from "node:child_process";
 import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
