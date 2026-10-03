@@ -550,6 +550,12 @@ const server = app.listen(wanted, "127.0.0.1", () => {
     console.log(`serving on http://127.0.0.1:${port}/sap/opu/odata/sap/ after ${Date.now() - started} ms`);
   }
 });
+// The parent reuses keep-alive sockets to this listener (fetch pools them).
+// Node's default keepAliveTimeout (5 s) closes an idle socket the parent may
+// pick up for the next door call at that moment ("other side closed", seen on
+// Node 22 between data previews); outlive the client's idle limit instead.
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 66_000;
 
 // asked to go away: stop taking requests, let the ones in flight finish,
 // and exit. The database writes itself on the way out (tools/osd-persist.mjs

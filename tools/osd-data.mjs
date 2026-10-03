@@ -25,6 +25,18 @@ import {runsAs} from "./osd-main.mjs";
 // The tilde is the database client's to translate. "UP TO n ROWS" is the
 // Open SQL row limit and becomes the SQL one. Nothing else is rewritten;
 // a WHERE clause the client writes travels as written.
+/** A read through a door of the serving child, retried once when the pooled
+ *  keep-alive socket was closed under it (undici UND_ERR_SOCKET, "other side
+ *  closed"). Only for doors that do not write: /osd/sql runs one SELECT. */
+export async function readDoor(url, init, fetchImpl = fetch) {
+  try {
+    return await fetchImpl(url, init);
+  } catch (error) {
+    if (error?.cause?.code !== "UND_ERR_SOCKET") throw error;
+    return fetchImpl(url, init);
+  }
+}
+
 export function openSqlToSql(text) {
   let out = text;
   const head = /^(select\s+(?:distinct\s+)?)(.+?)(\s+from\s+)/is.exec(out);
@@ -132,7 +144,7 @@ export class Data {
     sql = singleSelect(sql, word => new NotAllowed(word));
     if (this.runtime !== undefined) {
       await this.runtime.ensure();
-      const answer = await fetch(`${this.runtime.url}/osd/sql`, {
+      const answer = await readDoor(`${this.runtime.url}/osd/sql`, {
         method: "POST",
         headers: {"content-type": "application/json"},
         body: JSON.stringify({sql: String(sql), check: true}),
@@ -177,7 +189,7 @@ export class Data {
 
   async #throughTheDoor(sql, max) {
     await this.runtime.ensure();
-    const answer = await fetch(`${this.runtime.url}/osd/sql`, {
+    const answer = await readDoor(`${this.runtime.url}/osd/sql`, {
       method: "POST",
       headers: {"content-type": "application/json"},
       body: JSON.stringify({sql: String(sql), max}),

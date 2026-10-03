@@ -1,7 +1,7 @@
 import {expect} from "chai";
 import initSqlJs from "sql.js";
 import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
-import {Data, NotAllowed, openSqlToSql} from "../tools/osd-data.mjs";
+import {Data, NotAllowed, openSqlToSql, readDoor} from "../tools/osd-data.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {tableFieldsOf} from "../tools/adt-documents.mjs";
 import {cdsEntityOf} from "../tools/adt-cds.mjs";
@@ -195,5 +195,28 @@ describe("web worker read engine", function () {
       body: new TextEncoder().encode(JSON.stringify({sql: "DELETE FROM zstg_demo"}))});
     expect(refused.status).to.equal(400);
     expect(JSON.parse(new TextDecoder().decode(refused.body)).error.code).to.equal("NOT_ALLOWED");
+  });
+});
+
+// Node 22 closed an idle keep-alive socket to the serving child just as the
+// parent reused it for /osd/sql ("other side closed"): osg-demo's CI saw a
+// CDS data preview answer 400 "fetch failed" after three table previews.
+describe("tools/osd-data: a read door survives a closed keep-alive socket", () => {
+  const closed = () => Object.assign(new TypeError("fetch failed"), {cause: {code: "UND_ERR_SOCKET"}});
+  it("retries once when the pooled socket was closed under it", async () => {
+    let calls = 0;
+    const answer = await readDoor("http://x/osd/sql", {}, async () => { calls += 1; if (calls === 1) throw closed(); return "ok"; });
+    expect(answer).to.equal("ok");
+    expect(calls).to.equal(2);
+  });
+  it("does not retry any other failure, and gives up after one retry", async () => {
+    let calls = 0;
+    const other = await readDoor("http://x", {}, async () => { calls += 1; throw new TypeError("fetch failed"); }).catch((e) => e);
+    expect(other).to.be.instanceOf(TypeError);
+    expect(calls).to.equal(1);
+    calls = 0;
+    const twice = await readDoor("http://x", {}, async () => { calls += 1; throw closed(); }).catch((e) => e);
+    expect(twice.cause.code).to.equal("UND_ERR_SOCKET");
+    expect(calls).to.equal(2);
   });
 });
