@@ -5,7 +5,7 @@ import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
 import {chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {basename, isAbsolute, join, win32} from "node:path";
-import {copySeedTree, excludeStagedPackSources, loadSeedDependencies, shipsTestPath} from "../scripts/build-vsix.mjs";
+import {copySeedTree, excludeStagedPackSources, excludeTestOnlyIncludes, loadSeedDependencies, shipsTestPath, TEST_ONLY_ABAP} from "../scripts/build-vsix.mjs";
 import {inventoryThirdParties} from "../scripts/third-party-notices.mjs";
 import {tilesOf} from "../tools/osd-packs.mjs";
 import {root, currentVsixFile, packagedSeedEntries, packagedPacks, testScratch, buildTestVsix, packagedController, timeVsixTests} from "./helpers/vsix.mjs";
@@ -82,6 +82,35 @@ describe("packaging changed seed content", function () {
 
 describe("packaging: test-only ABAP stays out of a system seed", function () {
   this.timeout(120000);
+
+  it("drops dependent test includes anywhere in a temporary seed, keeping main sources", () => {
+    const scratch = mkdtempSync(join(root, ".local", "test-only-includes-"));
+    const excluded = ["unit/zcl_osd_adt_session_mem.clas.abap", "unit/zcl_osd_adt_store_probe.clas.xml"];
+    expect(excluded.every((path) => TEST_ONLY_ABAP.some((pattern) => pattern.test(path)))).to.equal(true);
+    const files = {
+      "src/nested/zcl_example.clas.testclasses.abap": "DATA double TYPE REF TO ZCL_OSD_ADT_SESSION_MEM.",
+      "packs/example/src/zcl_other.clas.testclasses.abap": "zcl_osd_adt_store_probe=>run( ).",
+      "test/unit/zcl_third.clas.testclasses.abap": "NEW zcl_osd_adt_session_mem( ).",
+      "src/zcl_keep.clas.testclasses.abap": "DATA value TYPE string.",
+      "src/zcl_boundary.clas.testclasses.abap": "DATA zcl_osd_adt_session_memory TYPE string.",
+      "src/zcl_comment.clas.testclasses.abap": '* ZCL_OSD_ADT_SESSION_MEM\nWRITE 1. " zcl_osd_adt_store_probe',
+      "src/zcl_main.clas.abap": '* zcl_osd_adt_session_mem\nCLASS zcl_main DEFINITION. ENDCLASS.',
+    };
+    try {
+      for (const [path, source] of Object.entries(files)) {
+        mkdirSync(join(scratch, path, ".."), {recursive: true});
+        writeFileSync(join(scratch, path), source);
+      }
+      excludeTestOnlyIncludes(scratch, excluded);
+      for (const path of Object.keys(files)) {
+        const kept = /zcl_(keep|boundary|main)\./.test(path);
+        expect(existsSync(join(scratch, path)), path).to.equal(kept);
+        if (kept) expect(readFileSync(join(scratch, path), "utf8")).to.equal(files[path]);
+      }
+    } finally {
+      rmSync(scratch, {recursive: true, force: true});
+    }
+  });
 
   it("the staging filter names the session double and the fleet reports", () => {
     for (const rel of ["unit/zcl_osd_adt_session_mem.clas.abap", "unit/zcl_osd_adt_session_mem.clas.xml",

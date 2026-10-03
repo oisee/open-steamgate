@@ -345,6 +345,31 @@ export function shipsTestPath(rel) {
   return TEST_ONLY_ABAP.every((pattern) => pattern.test(rel) === false);
 }
 
+/** Drop test includes that name a class omitted by TEST_ONLY_ABAP. Match
+ * whole words case-insensitively, including comments and strings: a mention
+ * there conservatively drops the include too. Main class sources stay.
+ * Names come from the rejected paths, never a second object-name list. */
+export function excludeTestOnlyIncludes(seedRoot, excludedPaths) {
+  const names = new Set(excludedPaths.flatMap((path) => {
+    const match = basename(path).match(/^(.+)\.clas\./i);
+    return match ? [match[1].toLowerCase()] : [];
+  }));
+  const visit = (dir) => {
+    for (const entry of readdirSync(dir, {withFileTypes: true})) {
+      const file = join(dir, entry.name);
+      if (entry.isDirectory()) visit(file);
+      else if (/\.clas\.testclasses\.abap$/i.test(entry.name)) {
+        const words = readFileSync(file, "utf8").toLowerCase().match(/\b[a-z_][a-z0-9_]*\b/g) ?? [];
+        const references = [...new Set(words.filter((word) => names.has(word)))];
+        if (references.length === 0) continue;
+        rmSync(file);
+        log(`drop ${relative(seedRoot, file)}: references excluded test-only class ${references.join(", ")}`);
+      }
+    }
+  };
+  visit(seedRoot);
+}
+
 export function copySeedTree(seedRoot, selectedPacks) {
   mkdirSync(seedRoot, {recursive: true});
 
@@ -356,11 +381,6 @@ export function copySeedTree(seedRoot, selectedPacks) {
 
   for (const dir of ["src", "webapp", "tools", "data"]) {
     copyReal(join(ROOT, dir), join(seedRoot, dir));
-  }
-  // These unit-test includes use the session double excluded below. Keep the
-  // product classes, but omit their checkout-only tests from both seed formats.
-  for (const name of ["sessions", "logoff"]) {
-    rmSync(join(seedRoot, "src", "adt", `zcl_osd_adt_${name}.clas.testclasses.abap`), {force: true});
   }
   mkdirSync(join(seedRoot, "packs"), {recursive: true});
   for (const pack of selectedPacks) {
@@ -381,10 +401,16 @@ export function copySeedTree(seedRoot, selectedPacks) {
   // narrower read (a `test/unit/*.clas.testclasses.abap` never in the tree)
   // rather than by re-deriving it from a static import graph, which a
   // non-JS file can never appear in.
+  const excludedPaths = [];
   cpSync(join(ROOT, "test"), join(seedRoot, "test"), {
     recursive: true,
-    filter: (src) => shipsTestPath(relative(join(ROOT, "test"), src)),
+    filter: (src) => {
+      const rel = relative(join(ROOT, "test"), src);
+      if (TEST_ONLY_ABAP.some((pattern) => pattern.test(rel))) excludedPaths.push(rel);
+      return shipsTestPath(rel);
+    },
   });
+  excludeTestOnlyIncludes(seedRoot, excludedPaths);
 
   for (const lib of libEntries()) {
     const srcDir = libraryPath(ROOT, lib.name);
