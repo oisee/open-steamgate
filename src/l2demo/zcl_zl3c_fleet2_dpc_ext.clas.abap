@@ -962,7 +962,6 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
             ls_answer-answer = ls_run-status.
             IF ls_run-status = 'SUBMITTED'.
               ls_answer-answer = ls_answer-answer && ': background jobs carry the piles (on open-steamgate they need node tools/osd-batch-runs.mjs worker)'.
-              WRITE '@KERNEL if (typeof process !== "undefined" && process.env.OSD_JOB_WORKER === "extension") ls_answer.get().answer.set("SUBMITTED: background jobs carry the piles (OSD extension worker)");'.
             ENDIF.
           WHEN 'ReleasePile'.
             lv_ok = zcl_l3_fleet2=>release_pile( iv_run = lv_run iv_rule = lv_rule iv_pile = lv_pile iv_per_pile = lv_cap iv_reason = lv_reason ).
