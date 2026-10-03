@@ -1,3 +1,4 @@
+import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, jobDoctorModel, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 3b (docs/dsl-l3.md, "Stages, filters and a schedule"): a set
 // in ordered stages. A filter stage's rules (L2 keys: true) fill a worklist,
@@ -116,7 +117,7 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
       expect(error, "refused").to.be.instanceOf(SetError);
       expect(error.message.slice(where(file).length), error.message).to.match(new RegExp(`^:${line}: ${message.source}`));
     };
-    const STAGE2 = '  - stage: checks\n    piles: {source: "worklist:busy", size: 2}\n';
+    const STAGE2 = '  - stage: checks\n    input: ships_ref\n    piles: {source: "worklist:busy", size: 2}\n';
 
     it("a filter stage whose rule has no keys: true, at the rule's line", () => refusedAt(manifest("nokeys",
       [["      - rule: ship_busy.l2.yaml\n", "      - rule: ship_busy.l2.yaml\n      - rule: ship_max_cargo.l2.yaml\n"]]),
@@ -577,7 +578,7 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
       expect(edited, `${name} differs from ${real}`).to.not.equal(text);
       const files = {[`${name}.clas.abap`]: edited, [`${name}.clas.xml`]: readFileSync(join(OUT, `${real}.clas.xml`), "utf8").replace(real.toUpperCase(), name.toUpperCase())};
       for (const [f, t] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(t, f, core)));
-      const deps = [...daemonDependencies(),...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
+      const deps = [...daemonDependencies(),...l3TableDependencies(), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
         "gen/gui/zcl_osd_batch_report.clas.abap", "src/jobs/zcl_osd_submit_semantics.clas.abap", "src/jobs/zcl_osd_submit_ranges.clas.abap",
         ".local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),

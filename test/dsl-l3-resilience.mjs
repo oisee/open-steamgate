@@ -1,3 +1,4 @@
+import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 5a (docs/dsl-l3.md, "Resilience"): a run that heals itself
 // and stops itself, every property from the set's `resilience:` block. The
@@ -77,8 +78,8 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
       };
       const file = join(OUT, `zz_plain_${process.pid}.l3.yaml`);
       // This oracle compares pre-resilience bytes, so remove every later opt-in and what it needs:
-      // the cockpit (slice 6), the governor, settings, and slice 5d's twin (its block, the work port, the sim variant)
-      writeFileSync(file, SET_TEXT.replace(/^cockpit:.*\n/m, "").replace(/^governor:\n(  .*\n)+/m, "").replace(/^resilience:\n(  .*\n)+/m, "").replace(/^settings:\n(  .*\n|    .*\n)+/m, "")
+      // snapshots, the cockpit (slice 6), the governor, settings, and slice 5d's twin
+      writeFileSync(file, SET_TEXT.replace(/^snapshots:\n(  .*\n)+/m, "").replace(/^    input:.*\n/gm, "").replace(/^cockpit:.*\n/m, "").replace(/^governor:\n(  .*\n)+/m, "").replace(/^resilience:\n(  .*\n)+/m, "").replace(/^settings:\n(  .*\n|    .*\n)+/m, "")
         .replace(/^simulate:\n(  .*\n)+/m, "").replace(/^  work:\n(    .*\n)+/m, "").replace("      sim: generated\n", "").replace("  work: real\n", ""));
       try {
         const model = compileSet(file);
@@ -313,7 +314,7 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
       expect(edited, `${name} differs from ${real}`).to.not.equal(text);
       const files = {[`${name}.clas.abap`]: edited, [`${name}.clas.xml`]: readFileSync(join(OUT, `${real}.clas.xml`), "utf8").replace(real.toUpperCase(), name.toUpperCase())};
       for (const [f, t] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(t, f, core)));
-      const deps = [...daemonDependencies(),...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
+      const deps = [...daemonDependencies(),...l3TableDependencies(), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
         "gen/gui/zcl_osd_batch_report.clas.abap", "src/jobs/zcl_osd_submit_semantics.clas.abap", "src/jobs/zcl_osd_submit_ranges.clas.abap",
         ".local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),

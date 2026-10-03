@@ -1,3 +1,4 @@
+import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 import {expect} from 'chai';
 import {readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync, mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -68,6 +69,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
       }
     };
     for(const folder of ['.local/lars/open-abap-core/src','.local/lars/open-abap-apc/src','src','gen'])walk(folder);
+    for(const path of l3TableDependencies())deps.set(path.split('/').pop(),path);
     deps.set('zif_gg_selection_screen_types.intf.abap','.local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap');
     for(const [name,path] of deps)if(!name.startsWith(`${model.class}.`))registry.addDependency(new core.MemoryFile(name,readFileSync(path,'utf8')));
     for(const ext of ['abap','xml']) {

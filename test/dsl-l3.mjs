@@ -1,3 +1,4 @@
+import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 import {daemonHost} from "../tools/osd-daemon-host.mjs";
 // DSL L3, slice 1 (docs/dsl-l3.md): a set of L2 rules run as one unit. The
 // manifest compiles (and refuses what it should, at its line); the committed
@@ -966,7 +967,7 @@ ENDCLASS.
       const files = {[`${name}.clas.abap`]: abapSource, [`${name}.clas.xml`]: readFileSync(join(OUT, `${RUNNER}.clas.xml`), "utf8")
         .replace(RUNNER.toUpperCase(), name.toUpperCase()), ...extra};
       for (const [f, text] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(text, f, core)));
-      const deps = ["src/dsl/zosd_l3_alert.tabl.xml", "src/dsl/zosd_l3_pile.tabl.xml", "src/dsl/zosd_l3_run.tabl.xml", "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
+      const deps = [...l3TableDependencies(), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
         "gen/gui/zcl_osd_batch_report.clas.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),
         // the ports the runner binds: their interfaces, variants, factory and exception

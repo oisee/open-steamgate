@@ -115,6 +115,29 @@ describe('DSL L3 input snapshots', function () {
     const key=`fleet2/${trim(alert.rule_name)}/${trim(alert.model_hash).replace('sha256:','')}/20261003/${alert.pile_no}/${alert.alert_seq}`;
     const explained=await explainAlert(key,{sets:[SET],db:dbPath});expect(explained.text).to.include(trim(recorded.snap_id)).and.include(trim(recorded.content_hash));
   });
+  it('repeated mismatches retain the caller run and existing doctor actions',async()=>{
+    const s=await snap();s.get().content_hash.set('bad');
+    await exec("INSERT INTO zosd_l3_doctor (mandt,run_id,seq,set_name,doc_action) VALUES ('123','CALLER',4,'fleet2','RETRY')");
+    for(let i=0;i<2;i++) expect(trim((await dialogStep(()=>cls().check_snapshot({is_expected:s,iv_run:str('CALLER')}))).get())).to.equal('');
+    const rows=read("SELECT * FROM zosd_l3_doctor WHERE run_id='CALLER' ORDER BY seq");
+    expect(rows.map((r)=>[r.seq,trim(r.doc_action)])).to.deep.equal([[4,'RETRY'],[5,'SNAP-MISMATCH'],[6,'SNAP-MISMATCH']]);
+  });
+  it('dry runs skip input capture with and without settings',async()=>{
+    await dialogStep(()=>cls().run({iv_date:new abap.types.Date().set('20261003'),iv_dry_run:new abap.types.Character(1).set('X')}));
+    for(const table of ['zosd_l3_snap','zosd_l3_snapk','zosd_l3_run_snap','zosd_l3_run_conf']) expect(read(`SELECT * FROM ${table}`),table).to.have.length(0);
+    const manifest=join(dir,'dry-no-settings.l3.yaml');
+    writeFileSync(manifest,text.replace(/^settings:\n(  .*\n|    .*\n)+/m,'').replace(/^  profiles:\n(    .*\n)+/m,'')
+      .replace(/rule: ([a-z_]+\.l2\.yaml)/g,(_,file)=>`rule: ${join(process.cwd(),'src/l2demo',file)}`));
+    const withoutSettings=compileSet(manifest);
+    const rendered=await renderSet(withoutSettings), original=cls();
+    await loadGenerated(rendered.files,[withoutSettings.class],join(dir,'dry-no-settings'),withoutSettings);
+    try {
+      await dialogStep(()=>cls().run({iv_date:new abap.types.Date().set('20261004'),iv_dry_run:new abap.types.Character(1).set('X')}));
+      for(const table of ['zosd_l3_snap','zosd_l3_snapk','zosd_l3_run_snap']) expect(read(`SELECT * FROM ${table}`),table).to.have.length(0);
+      await dialogStep(()=>cls().run({iv_date:new abap.types.Date().set('20261005'),iv_mode:new abap.types.Character(1).set('S')}));
+      expect(read('SELECT * FROM zosd_l3_run_snap')).to.have.length(1);
+    } finally {abap.Classes.ZCL_L3_FLEET2=original;}
+  });
   it('validates snapshot fields, sources, canonical mode and input with manifest line numbers',()=>{
     const file=join(dir,'invalid.l3.yaml');
     const absolute=text.replace(/rule: ([a-z_]+\.l2\.yaml)/g,(_,f)=>`rule: ${join(process.cwd(),'src/l2demo',f)}`);
@@ -168,6 +191,14 @@ describe('DSL L3 input snapshots', function () {
       ['reuse',"IF sy-subrc = 0.\n      RETURN.\n    ENDIF.\n    rs_snap-set_name", "IF sy-subrc = 0.\n      CLEAR rs_snap-snap_id.\n      RETURN.\n    ENDIF.\n    rs_snap-set_name",async()=>{const a=plain(await snap());return plain(await snap()).snap_id===a.snap_id;},true],
       ['handshake','AND ls_stored-row_count = is_expected-row_count.','AND abap_true = abap_true.',async()=>{const s=await snap();s.get().row_count.set(99);return trim((await dialogStep(()=>cls().check_snapshot({is_expected:s}))).get());},''],
       ['audit','INSERT zosd_l3_doctor FROM ls_audit.','RETURN.',async()=>{const s=await snap();s.get().row_count.set(99);await dialogStep(()=>cls().check_snapshot({is_expected:s}));return read('SELECT * FROM zosd_l3_doctor').length;},1],
+      ['audit-run','ls_audit-run_id = iv_run.\n    IF ls_audit-run_id IS INITIAL.','CLEAR ls_audit-run_id.\n    IF ls_audit-run_id IS INITIAL.',async()=>{
+        const s=await snap();s.get().row_count.set(99);await dialogStep(()=>cls().check_snapshot({is_expected:s,iv_run:str('CALLER')}));
+        return trim(read('SELECT * FROM zosd_l3_doctor')[0].run_id);
+      },'CALLER'],
+      ['dry-capture','IF lv_dry = abap_false.\n          record_snapshot','IF abap_true = abap_true.\n          record_snapshot',async()=>{
+        await dialogStep(()=>cls().run({iv_date:new abap.types.Date().set('20261006'),iv_dry_run:new abap.types.Character(1).set('X')}));
+        return read('SELECT * FROM zosd_l3_run_snap').length;
+      },0],
       ['record','INSERT zosd_l3_run_snap FROM ls_input.','RETURN.',async()=>{await dialogStep(()=>cls().record_snapshot({iv_run:str('RUN'),iv_name:str('ships_ref'),iv_stage:new abap.types.Integer().set(2)}));return read('SELECT * FROM zosd_l3_run_snap').length;},1],
       ['stale', 'IF sy-subrc = 0.\n      RETURN.\n    ENDIF.\n    ls_snap = snapshot', 'IF sy-subrc = 0.\n      DELETE FROM zosd_l3_run_snap WHERE run_id = iv_run AND stage_no = iv_stage.\n    ENDIF.\n    ls_snap = snapshot', async()=>{
         const args={iv_run:str('STALE'),iv_name:str('ships_ref'),iv_stage:new abap.types.Integer().set(2)};

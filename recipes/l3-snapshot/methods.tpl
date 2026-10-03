@@ -136,10 +136,20 @@
     ls_audit-stored_hash = ls_stored-content_hash.
     ls_audit-stored_count = ls_stored-row_count.
     GET TIME STAMP FIELD ls_audit-acted.
-    TRY.
-        ls_audit-run_id = cl_system_uuid=>create_uuid_c32_static( ).
-      CATCH cx_uuid_error.
+    ls_audit-run_id = iv_run.
+    IF ls_audit-run_id IS INITIAL.
+      TRY.
+          ls_audit-run_id = cl_system_uuid=>create_uuid_c32_static( ).
+        CATCH cx_uuid_error.
+          RETURN.
+      ENDTRY.
+    ENDIF.
+    SELECT MAX( seq ) FROM zosd_l3_doctor INTO ls_audit-seq WHERE run_id = ls_audit-run_id.
+    DO 10 TIMES.
+      ls_audit-seq = ls_audit-seq + 1.
+      INSERT zosd_l3_doctor FROM ls_audit.
+      IF sy-subrc = 0.
         RETURN.
-    ENDTRY.
-    INSERT zosd_l3_doctor FROM ls_audit.
+      ENDIF.
+    ENDDO.
   ENDMETHOD.

@@ -1,3 +1,4 @@
+import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 import {expect} from "chai";
 import {mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
@@ -13,7 +14,7 @@ import {givenText, fill} from "../tools/osd-destination.mjs";
 
 const OUT = "src/l2demo", DATE = "20261001";
 const sets = ["fleet", "fleet2"];
-const tables = readdirSync("src/dsl").filter((f) => /^zosd_l3_.*\.tabl\.xml$/.test(f));
+const tables = l3TableDependencies().map((file) => basename(file));
 const scoped = new Set(tables.filter((f) => /<FIELDNAME>SET_NAME<\/FIELDNAME>/.test(readFileSync(join("src/dsl", f), "utf8"))).map((f) => f.split(".")[0]));
 // Parse statements so comments, multiline SQL and strings cannot hide a write.
 function writeFindings(text, name) {
@@ -137,7 +138,7 @@ describe("DSL L3 hardening: claims, set-scoped writes and unschedule refusals", 
         reg.addFile(new parser.MemoryFile(f, lowerNarrowSubmit(t, f, parser)));
       }
       const coreDir = ".local/lars/open-abap-core/src";
-      const deps = [...daemonDependencies(),...tables.map((f) => join("src/dsl", f)),
+      const deps = [...daemonDependencies(),...l3TableDependencies(),
         ...["tbtcjob.tabl.xml", "btcselect.tabl.xml", "btch0000.tabl.xml", "zcl_osd_submit_semantics.clas.abap", "zcl_osd_submit_ranges.clas.abap"].map((f) => join("src/jobs", f)),
         "gen/gui/zcl_osd_batch_report.clas.abap", ".local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap",
         // the cockpit's DPC_EXT (zcl_zl3c_*) needs its gen/stg base and the Gateway; the mutants do not

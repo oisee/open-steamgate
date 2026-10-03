@@ -51,6 +51,14 @@ export function compileSnapshots(doc, model, {line, fail, columnsOf}) {
 export function snapshotOverlay(model, text) {
   if (!model.snapshots) return text;
   text = text.replace('  PUBLIC SECTION.\n', '  PUBLIC SECTION.\n' + readFileSync('recipes/l3-snapshot/public.tpl', 'utf8'));
+  if (model.resilience && !model.settings) {
+    text = text.replace('  PRIVATE SECTION.\n', '  PRIVATE SECTION.\n    CLASS-DATA gv_snapshot_dry TYPE abap_bool.\n');
+    const dry = '{{#settings}}\n    gv_dry = abap_true.\n{{/settings}}';
+    if (!text.includes(dry)) throw new Error('snapshot recipe needs dry-run anchor');
+    text = text.replace(dry, dry + '\n    gv_snapshot_dry = abap_true.');
+    text = text.replace('    DATA lx_error TYPE REF TO cx_root.\n', '    DATA lx_error TYPE REF TO cx_root.\n    DATA lv_snapshot_dry TYPE abap_bool.\n');
+    text = text.replace('    IF iv_mode = c_parallel.\n', '    lv_snapshot_dry = gv_snapshot_dry.\n    CLEAR gv_snapshot_dry.\n    IF iv_mode = c_parallel.\n');
+  }
   // Capture the installed source once, inside the existing swap/restore fence.
   const anchor = '{{/sources}}\n{{^planned}}';
   if (!text.includes(anchor)) throw new Error('snapshot recipe needs installed-source anchor');

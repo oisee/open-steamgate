@@ -1,3 +1,4 @@
+import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
 // DSL L3 settings: application-data defaults, tuning, read-once runs and trace.
 import {expect} from "chai";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
@@ -152,7 +153,7 @@ describe("DSL L3 slice 5b: settings", function () {
       reg.addFile(new core.MemoryFile(`${name}.clas.abap`, source));
       reg.addFile(new core.MemoryFile(`${name}.clas.xml`, readFileSync(`src/l2demo/${real}.clas.xml`, "utf8")
         .replaceAll(real.toUpperCase(), name.toUpperCase())));
-      for (const dep of ["src/dsl/zosd_l3_conf.tabl.xml", "src/dsl/zosd_l3_conf_log.tabl.xml", "src/dsl/zosd_l3_run_conf.tabl.xml", "src/dsl/zosd_l3_run_snap.tabl.xml",
+      for (const dep of [...l3TableDependencies(),
         ".local/lars/open-abap-core/src/ddic/ttyp/string_table.ttyp.xml",
         ".local/lars/open-abap-core/src/ddic/dtel/mandt.dtel.xml",
         ]) {

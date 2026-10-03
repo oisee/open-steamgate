@@ -2615,7 +2615,8 @@ Stage inputs are captured at run start, after the source rows have been
 installed and before detection. They identify that run's reference input,
 including a stage that opens later. The side table `ZOSD_L3_RUN_SNAP` preserves
 run ID, stage number, snapshot ID, content hash and count across later runs.
-Capture is insert-only for a run/stage pair. The settings snapshot rows also
+Capture is insert-only for a run/stage pair. Dry runs skip input capture,
+including sets with resilience but no settings. The settings snapshot rows also
 carry the first declared input identity; every stage identity remains in the
 side table. Explain follows an alert's run ID into that table and prints the
 snapshot ID, full hash, count and stage. A later edit of the source does not
@@ -2649,10 +2650,12 @@ names a stable business key; changing a declared content field changes the
 hash. Scalar character, integer and fixed decimal types are supported;
 other DDIC types are rejected with the manifest line.
 
-`check_snapshot( is_expected )` returns true only when a READY snapshot of
+`check_snapshot( is_expected, iv_run )` returns true only when a READY snapshot of
 this set has the same ID, full content hash and count. It checks persisted
 identity, without rereading live content. A mismatch inserts a DOCTOR row
 with `DOC_ACTION = SNAP-MISMATCH`, full expected/stored IDs, hashes and counts.
+The optional `iv_run` ties the audit to the caller's run, with a new sequence
+number for each mismatch. Without it, the audit gets its own UUID.
 An unknown ID has an initial stored side. The future RFC seam can use this
 method as its precondition. Failed checks never create an alert.
 
