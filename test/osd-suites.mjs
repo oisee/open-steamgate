@@ -140,6 +140,7 @@ describe("bounded file retries", () => {
   const runWithRetries = (files, run, options) => execute(files, (selected, phase) => ({
     ...run(selected, phase),
     fileTests: Object.fromEntries(selected.map((file) => [file, {registered: 1, passed: 1, pending: 0, failed: 0}])),
+    tests: Object.fromEntries(selected.map((file) => [file, [{titlePath: ["first failure"], outcome: "passed"}]])),
   }), options);
   const failed = (files) => ({status: 1, completed: true, internalRetries: [], totalFailures: files.length,
     failures: files.map((file) => ({file, title: "first failure"}))});
@@ -262,6 +263,24 @@ describe("fail closed regressions", () => {
     expect(result.status).to.equal(1);
     expect(result.lines).to.deep.equal([]);
   });
+  for (const replacement of [false, true]) {
+    it(`rejects a vanished failing test${replacement ? " even when replaced at the same count" : ""}`, () => {
+      const {result, reports} = fixtureRun(`import {existsSync, writeFileSync} from "node:fs";
+        const marker = new URL("./marker", import.meta.url);
+        const retried = existsSync(marker);
+        describe("identity fixture", () => {
+          it("always passes", () => {});
+          if (!retried) it("original failure", () => { writeFileSync(marker, "failed"); throw Error("first"); });
+          ${replacement ? 'if (retried) it("replacement", () => {});' : ''}
+        });`);
+      expect(reports).to.have.length(2);
+      expect(Object.values(reports[0].fileTests)[0].registered).to.equal(2);
+      expect(Object.values(reports[1].fileTests)[0].registered).to.equal(replacement ? 2 : 1);
+      expect(result.status).to.equal(1);
+      expect(result.lines.join("\n")).to.contain("vanished").and.contain("original failure");
+      expect(result.lines.join("\n")).not.to.contain("passed once");
+    });
+  }
   it("prevents test-level retries from silently recovering", () => {
     const {result} = fixtureRun('let attempts = 0; describe("retry fixture", function () { this.retries(2); it("recovers internally", function () { this.retries(2); if (++attempts < 3) throw Error("retry"); }); });');
     expect(result.status).to.equal(1);

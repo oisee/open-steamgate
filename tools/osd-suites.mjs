@@ -159,9 +159,15 @@ export function runWithRetries(files, run, {group} = {}) {
   const first = run(files, "first");
   const complete = (report, selected) => !report.crashed && report.completed === true &&
     report.fileTests && Object.keys(report.fileTests).length === selected.length &&
+    report.tests && Object.keys(report.tests).length === selected.length &&
     selected.every((file) => {
       const counts = report.fileTests[file];
-      return counts && [counts.registered, counts.passed, counts.pending, counts.failed].every((n) => Number.isInteger(n) && n >= 0) &&
+      const tests = report.tests[file];
+      return Array.isArray(tests) && counts && tests.length === counts.registered &&
+        tests.every((test) => test && Array.isArray(test.titlePath) && test.titlePath.length > 0 &&
+          test.titlePath.every((title) => typeof title === "string") && [null, "passed", "failed", "pending"].includes(test.outcome)) &&
+        ["passed", "failed", "pending"].every((outcome) => tests.filter((test) => test.outcome === outcome).length === counts[outcome]) &&
+        [counts.registered, counts.passed, counts.pending, counts.failed].every((n) => Number.isInteger(n) && n >= 0) &&
         counts.registered > 0 && counts.passed + counts.pending + counts.failed <= counts.registered;
     }) &&
     Array.isArray(report.failures) && Number.isInteger(report.totalFailures) &&
@@ -179,19 +185,35 @@ export function runWithRetries(files, run, {group} = {}) {
   if (!complete(first, files) || !failures.length ||
       failedFiles.some((file) => !files.includes(file)) || failedFiles.length > 3) return result;
   const retrySets = group ? [files] : failedFiles.map((file) => [file]);
+  let recovered = 0;
+  const clean = (value) => String(value).replace(/[\r\n`|<>]/g, " ");
   for (const retryFiles of retrySets) {
     const file = retryFiles[0];
     const retry = run(retryFiles, "retry");
-    result.retries.push({file, status: retry.status});
-    if (passed(retry, retryFiles)) {
+    result.retries.push({...retry, file});
+    const vanished = [];
+    if (complete(retry, retryFiles)) {
+      for (const file of retryFiles) {
+        // Compare paths as arrays: flattened titles can collide. Consume matches
+        // so duplicate titles cannot conceal a lost registration either.
+        const remaining = [...retry.tests[file]];
+        for (const original of first.tests[file]) {
+          const at = remaining.findIndex((test) => JSON.stringify(test.titlePath) === JSON.stringify(original.titlePath));
+          if (at < 0) vanished.push({file, title: original.titlePath.join(" > ")});
+          else remaining.splice(at, 1);
+        }
+      }
+    }
+    for (const missing of vanished) result.lines.push(`- recovery refused: \`${clean(missing.file)}\` — vanished test: ${clean(missing.title)}`);
+    if (passed(retry, retryFiles) && vanished.length === 0) {
       for (const file of group ? failedFiles : retryFiles) {
-      const title = failures.find((failure) => failure.file === file).title;
-      const clean = (value) => String(value).replace(/[\r\n`|<>]/g, " ");
-      result.lines.push(`- flaky / order-dependent: \`${clean(file)}\` — ${clean(title)} (passed once ${group ? "with the whole group" : "in isolation"})`);
+        const title = failures.find((failure) => failure.file === file).title;
+        recovered++;
+        result.lines.push(`- flaky / order-dependent: \`${clean(file)}\` — ${clean(title)} (passed once ${group ? "with the whole group" : "in isolation"})`);
       }
     }
   }
-  if (result.lines.length === failedFiles.length) result.status = 0;
+  if (recovered === failedFiles.length) result.status = 0;
   return result;
 }
 
