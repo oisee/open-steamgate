@@ -28,11 +28,24 @@
     },
     {
       "id": "zosd_fleet2",
-      "title": "Fleet run cockpit",
+      "title": "Runs fleet2",
       "pack": "zosd_fleet2",
-      "type": "static",
+      "type": "dynamic",
       "icon": "sap-icon://process",
-      "url": "/app/zosd_fleet2/index.html"
+      "url": "/app/zosd_fleet2/index.html",
+      "subtitle": "Fleet run cockpit",
+      "serviceUrl": "/sap/opu/odata/sap/ZL3C_FLEET2_SRV/RunSet/$count?$filter=Status%20ne%20'DONE'%20and%20Status%20ne%20'PARTIAL'%20and%20Status%20ne%20'FAILED'%20and%20Status%20ne%20'NOT-RUN'",
+      "serviceRefreshInterval": "30",
+      "numberUnit": "open"
+    },
+    {
+      "id": "zosd_fleet2_s",
+      "title": "Set fleet2",
+      "pack": "zosd_fleet2_s",
+      "type": "static",
+      "icon": "sap-icon://action-settings",
+      "url": "/app/zosd_fleet2_s/index.html",
+      "subtitle": "Settings, schedule, kill switch, doctor"
     }
   ],
   "applications": {
