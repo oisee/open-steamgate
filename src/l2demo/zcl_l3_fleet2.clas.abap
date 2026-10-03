@@ -219,6 +219,10 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING iv_param TYPE csequence iv_note TYPE csequence RETURNING VALUE(rv_ok) TYPE abap_bool.
     CLASS-METHODS cockpit_schedule_status RETURNING VALUE(rv_status) TYPE string.
     CLASS-METHODS count_runs.
+    CLASS-METHODS release_claim RETURNING VALUE(rt_claimed) TYPE tt_pile.
+    CLASS-METHODS release_raise IMPORTING it_claimed TYPE tt_pile.
+    CLASS-METHODS lanes EXPORTING ev_lanes TYPE i ev_source TYPE string.
+    CLASS-METHODS lanes_status RETURNING VALUE(rv_status) TYPE string.
     CLASS-METHODS watcher_pass RETURNING VALUE(rv_open) TYPE abap_bool.
     CLASS-METHODS watcher_audit IMPORTING iv_action TYPE csequence.
     CLASS-METHODS start_daemon RETURNING VALUE(rv_ok) TYPE abap_bool.
@@ -696,6 +700,9 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ENDIF.
     IF iv_mode = c_parallel AND rs_result-status = 'SUBMITTED'.
       start_daemon( ).
+      " a daemon that is stopping is found and not started again; the run's first
+      " release must not wait for it: a pass job of its own releases the first lanes
+      watcher_pass( ).
     ENDIF.
   ENDMETHOD.
 
@@ -1757,6 +1764,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     " one job per pile: JOB_OPEN, SUBMIT ... VIA JOB, JOB_CLOSE started at
     " once, named L3_<SET>_<nn>_<pppp> (the last four digits of the pile);
     " the job finds its range in the plan row by set, run, rule and pile
+    DATA lv_release_param TYPE c LENGTH 64.
     DATA lv_jobname TYPE tbtcjob-jobname.
     DATA lv_jobcount TYPE tbtcjob-jobcount.
     DATA lv_released TYPE btch0000-char1.
@@ -1793,14 +1801,6 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     IF sy-subrc <> 0 OR ls_guard-state = 'GLASS'.
       RETURN.
     ENDIF.
-    IF ls_guard-state = 'NARROW'.
-      SELECT COUNT(*) FROM zosd_l3_pile INTO lv_chains
-        WHERE run_id = iv_run AND set_name = c_set
-          AND ( status = 'RUNNING' OR ( status = 'PLANNED' AND ( job_count <> '' OR reason = 'GOV-CLAIM' ) ) ).
-      IF lv_chains > 0.
-        RETURN.
-      ENDIF.
-    ENDIF.
     UPDATE zosd_l3_pile SET reason = 'GOV-CLAIM'
       WHERE set_name = c_set AND run_id = iv_run AND rule_name = cs_pile-rule_name AND pile_no = cs_pile-pile_no
         AND status = 'PLANNED' AND job_count = '' AND reason <> 'GOV-CLAIM'.
@@ -1824,6 +1824,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
     ENDIF.
     cs_pile-job_name = lv_jobname.
     cs_pile-job_count = lv_jobcount.
+    lv_release_param = |{ lv_jobname }/{ lv_jobcount }|.
+    cs_pile-reason = 'EVENT-WAIT'.
     save_pile( cs_pile ).
     SUBMIT zl3_fleet2
       WITH p_rule = cs_pile-rule_name
@@ -1851,7 +1853,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       EXPORTING
         jobname = lv_jobname
         jobcount = lv_jobcount
-        strtimmed = 'X'
+        event_id = 'ZOSD_L3_RELEASE'
+        event_param = lv_release_param
       IMPORTING
         job_was_released = lv_released
       EXCEPTIONS
@@ -2613,7 +2616,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       IF ls_guard-state = 'NARROW'.
         SELECT COUNT(*) FROM zosd_l3_pile INTO lv_chains
           WHERE run_id = iv_run AND set_name = c_set
-            AND ( status = 'RUNNING' OR ( status = 'PLANNED' AND ( job_count <> '' OR reason = 'GOV-CLAIM' ) ) ).
+            AND ( status = 'RUNNING' OR ( status = 'PLANNED' AND ( reason = 'EVENT-SENT' OR reason = 'GOV-CLAIM' ) ) ).
         IF lv_chains > 0.
           CONTINUE.
         ENDIF.
@@ -3565,6 +3568,134 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       CATCH cx_abap_daemon_error.
       CATCH cx_ac_message_type_pcp_error.
     ENDTRY.
+  ENDMETHOD.
+  METHOD lanes.
+    " The lanes in force: three quarters, rounded down, of the background work
+    " processes this set may use, which are the idle ones (TH_WPINFO) and the ones
+    " its own RUNNING piles hold; a set lane count (piles.lanes) caps that number,
+    " and it is never below one, so a system whose background processes are all
+    " busy with other work still runs the set, one pile at a time.
+    DATA lt_wp TYPE STANDARD TABLE OF wplist WITH DEFAULT KEY.
+    DATA ls_wp TYPE wplist.
+    DATA lv_free TYPE i.
+    DATA lv_running TYPE i.
+    DATA lv_cap TYPE i.
+    DATA ls_conf TYPE zcl_l3_fleet2_conf=>ty_state.
+    CALL FUNCTION 'TH_WPINFO' TABLES wplist = lt_wp EXCEPTIONS OTHERS = 1.
+    " measured on a system: a background process is BGD (BTC on older kernels),
+    " an idle one is Waiting (Wait on older kernels)
+    LOOP AT lt_wp INTO ls_wp WHERE ( wp_typ = 'BGD' OR wp_typ = 'BTC' ) AND ( wp_status = 'Waiting' OR wp_status = 'Wait' ).
+      lv_free = lv_free + 1.
+    ENDLOOP.
+    SELECT COUNT(*) FROM zosd_l3_pile INTO lv_running WHERE set_name = c_set AND status = 'RUNNING'.
+    ev_lanes = ( lv_free + lv_running ) * 3 DIV 4.
+    ev_source = 'COMPUTED'.
+    lv_cap = 0.
+    ls_conf = zcl_l3_fleet2_conf=>load( ).
+    lv_cap = ls_conf-vals-piles_lanes.
+    IF lv_cap > 0 AND lv_cap <= ev_lanes.
+      ev_lanes = lv_cap.
+      ev_source = 'SET'.
+    ENDIF.
+    IF ev_lanes < 1.
+      ev_lanes = 1.
+      ev_source = 'FLOOR'.
+    ENDIF.
+  ENDMETHOD.
+  METHOD lanes_status.
+    DATA lv_lanes TYPE i.
+    DATA lv_source TYPE string.
+    DATA lv_active TYPE i.
+    DATA lv_waiting TYPE i.
+    lanes( IMPORTING ev_lanes = lv_lanes ev_source = lv_source ).
+    SELECT COUNT(*) FROM zosd_l3_pile INTO lv_active WHERE set_name = c_set
+      AND ( status = 'RUNNING' OR ( status = 'PLANNED' AND reason = 'EVENT-SENT' ) ).
+    SELECT COUNT(*) FROM zosd_l3_pile INTO lv_waiting WHERE set_name = c_set AND status = 'PLANNED' AND reason = 'EVENT-WAIT'.
+    rv_status = |LANES { lv_lanes } { lv_source } RELEASED { lv_active } WAITING { lv_waiting }|.
+  ENDMETHOD.
+  METHOD release_claim.
+    " Release by event, in two steps with a commit between them, which the caller
+    " (a job report) does: nothing here ends the unit of work. This step, under the
+    " watcher row's lock, counts the set's active piles against the lanes in force
+    " and claims waiting piles (EVENT-WAIT to EVENT-SENT, stamped in STARTED) up to
+    " the lanes. The caller commits the claims before release_raise( ) raises any
+    " event: BP_EVENT_RAISE survives a rollback and an uncommitted claim does not,
+    " so a raise ahead of its committed claim could start a job whose lane the next
+    " pass counts as free. The commit also ends the lock, after the claims.
+    DATA lt_piles TYPE tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA ls_run TYPE zosd_l3_run.
+    DATA lv_active TYPE i.
+    DATA lv_lanes TYPE i.
+    DATA ls_watch TYPE zosd_l3_watch.
+    DATA lv_now TYPE timestamp.
+    DATA ls_budget TYPE zosd_l3_budget.
+    IF killed( ) = abap_true.
+      RETURN.
+    ENDIF.
+    GET TIME STAMP FIELD lv_now.
+    SELECT SINGLE FOR UPDATE * FROM zosd_l3_watch INTO ls_watch WHERE set_name = c_set.
+    lanes( IMPORTING ev_lanes = lv_lanes ).
+    SELECT * FROM zosd_l3_pile INTO TABLE lt_piles WHERE set_name = c_set AND reason = 'EVENT-WAIT' ORDER BY PRIMARY KEY.
+    SELECT COUNT(*) FROM zosd_l3_pile INTO lv_active WHERE set_name = c_set
+      AND ( status = 'RUNNING' OR ( status = 'PLANNED' AND reason = 'EVENT-SENT' ) ).
+    LOOP AT lt_piles INTO ls_pile.
+      IF lv_active >= lv_lanes.
+        EXIT.
+      ENDIF.
+      " the run's lock row by its full key (set and date; the pile carries the date)
+      SELECT SINGLE FOR UPDATE * FROM zosd_l3_run INTO ls_run WHERE set_name = c_set AND check_date = ls_pile-check_date.
+      IF sy-subrc <> 0 OR ls_run-run_id <> ls_pile-run_id OR ls_run-status <> 'HELD'.
+        CONTINUE.
+      ENDIF.
+      SELECT SINGLE * FROM zosd_l3_budget INTO ls_budget WHERE set_name = c_set AND run_id = ls_pile-run_id.
+      IF ls_budget-state = 'GLASS' OR ( ls_budget-state = 'NARROW' AND lv_active > 0 ).
+        CONTINUE.
+      ENDIF.
+      UPDATE zosd_l3_pile SET reason = 'EVENT-SENT' started = lv_now WHERE set_name = c_set AND run_id = ls_pile-run_id
+        AND rule_name = ls_pile-rule_name AND pile_no = ls_pile-pile_no AND status = 'PLANNED' AND reason = 'EVENT-WAIT'.
+      IF sy-dbcnt <> 1.
+        CONTINUE.
+      ENDIF.
+      APPEND ls_pile TO rt_claimed.
+      lv_active = lv_active + 1.
+    ENDLOOP.
+  ENDMETHOD.
+  METHOD release_raise.
+    " One raise per committed claim of it_claimed. A committed claim is never put
+    " back, whatever happens to its raise: another pass may already have raised it
+    " again (below), and a claim put back would leave a released job outside the
+    " count. Under the kill switch nothing is raised and the claims stay; a failed
+    " raise leaves its claim too. Either is delivered by a later pass: a claim
+    " still PLANNED and EVENT-SENT a minute after it was made, its job still
+    " waiting for the event, is raised again (never under the kill switch). A
+    " raise for a job that has left the wait matches no waiter and does nothing.
+    DATA lt_piles TYPE tt_pile.
+    DATA ls_pile TYPE zosd_l3_pile.
+    DATA lv_param TYPE c LENGTH 64.
+    DATA lv_now TYPE timestamp.
+    DATA lv_grace TYPE timestamp.
+    DATA lv_waiting TYPE btch0000-char1.
+    IF killed( ) = abap_true.
+      RETURN.
+    ENDIF.
+    LOOP AT it_claimed INTO ls_pile.
+      lv_param = |{ ls_pile-job_name }/{ ls_pile-job_count }|.
+      CALL FUNCTION 'BP_EVENT_RAISE' EXPORTING eventid = 'ZOSD_L3_RELEASE' eventparm = lv_param EXCEPTIONS OTHERS = 1.
+    ENDLOOP.
+    GET TIME STAMP FIELD lv_now.
+    lv_grace = ago( iv_now = lv_now iv_secs = 60 ).
+    SELECT * FROM zosd_l3_pile INTO TABLE lt_piles WHERE set_name = c_set AND status = 'PLANNED'
+      AND reason = 'EVENT-SENT' AND started <= lv_grace ORDER BY PRIMARY KEY.
+    LOOP AT lt_piles INTO ls_pile.
+      CLEAR lv_waiting.
+      CALL FUNCTION 'SHOW_JOBSTATE' EXPORTING jobname = ls_pile-job_name jobcount = ls_pile-job_count
+        IMPORTING scheduled = lv_waiting EXCEPTIONS OTHERS = 1.
+      IF sy-subrc = 0 AND lv_waiting = 'X'.
+        lv_param = |{ ls_pile-job_name }/{ ls_pile-job_count }|.
+        CALL FUNCTION 'BP_EVENT_RAISE' EXPORTING eventid = 'ZOSD_L3_RELEASE' eventparm = lv_param EXCEPTIONS OTHERS = 1.
+      ENDIF.
+    ENDLOOP.
   ENDMETHOD.
   METHOD snapshot.
     DATA lv_text TYPE string.

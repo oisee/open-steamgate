@@ -1168,12 +1168,8 @@ include `daemon` or `job`: an event alone cannot catch a hung live job. `tick` i
 1..3600 seconds (default 10); `every` is 1..99 minutes (default 15). Unknown keys,
 duplicate mechanisms and invalid numbers are refused at their YAML lines.
 `doctor.tick` is available to `settings.tunable`; it is loaded again at every arm,
-not frozen in the run snapshot. Explicit `piles.lanes` can also be tuned. Omitting
-`lanes` uses three quarters of the free background processes, rounded down;
-zero free lanes release nothing. The local `TH_WPINFO` subset uses
-`OSD_BG_WORKERS` (default 4) minus active local jobs; the system supplies its
-kernel work-process list. The filter uses `WPLIST-WP_TYP = 'BTC'` and
-`WPLIST-WP_STATUS = 'Wait'`; the lead should verify those values on deployment.
+not frozen in the run snapshot. `piles.lanes` can be tuned as well (see
+"Release by event" for what it caps).
 
 **Daemon support needs ABAP 7.52 or later.** The recipes still emit 7.02 syntax,
 7-bit ASCII and lines shorter than 255 characters. On a 7.02 system choose
@@ -1257,8 +1253,83 @@ piles as `EVENT-SENT` and calls `BP_EVENT_RAISE` at most up to the free lane cou
 The shared watcher row serializes lane claims across runs of the same set. HELD
 piles are not released; GLASS and the kill switch block releases; NARROW has at
 most one active chain. Next-stage jobs use the same release path. The event's
-local delivery is commit-bound through the existing job outbox. A failed raise
-puts its conditional claim back to `EVENT-WAIT`.
+local delivery is commit-bound through the existing job outbox. A committed
+claim is never put back (see "Claim, commit, raise").
+
+**Lanes in force.** A release pass counts the set's active piles (RUNNING, or
+PLANNED and `EVENT-SENT`) against the lanes in force, computed in `lanes( )`:
+
+- *computed*: three quarters, rounded down, of the background work processes
+  the set may use, which are the idle ones from `TH_WPINFO` plus the ones the
+  set's own RUNNING piles hold. Counting only the idle ones would shrink the
+  lanes as the set's own piles start (4 idle give 3 lanes; once those 3 run, 1 is
+  idle and would give 0); counting the own ones keeps the quarter for the rest
+  of the system.
+- *set*: `piles.lanes` in the manifest, or the setting `piles.lanes` when it is
+  tunable, caps the computed value (the smaller of the two stands). The setting's
+  0 means no cap. This is the operator's knob: it is read at every pass, not
+  frozen in a run's snapshot.
+- *floor*: never below one. A system whose background processes are all busy
+  with other work still runs the set, one pile at a time, instead of waiting for
+  a free process forever.
+
+Measured on the sandbox (2026-10-03), `TH_WPINFO` answers one `WPLIST` row per
+work process: background processes have `WP_TYP = 'BGD'`, an idle one
+`WP_STATUS = 'Waiting'` (dialog `DIA`, update `UPD`/`UP2`, spool `SPO`). The
+filter also accepts `BTC` and `Wait`, the values of older kernels; a filter on
+`BTC`/`Wait` alone counted no lanes there. With the measured 15 processes (7 DIA,
+1 UPD, 5 BGD of which 4 Waiting, 1 SPO, 1 UP2) and nothing of the set running,
+the lanes in force are 3. The local `TH_WPINFO` subset answers the same shape:
+one idle `DIA` row and `OSD_BG_WORKERS` (default 4) `BGD` rows, `Waiting` minus
+the active local jobs, the rest `Running`.
+
+Releases come from three places, each taking the watcher row first: the daemon
+doctor's pass, the tail of every pile job (its lane is free; the tail commits the
+next stage's plans and then releases, so the set does not wait for a pass), and
+the first pass job a parallel run submits itself (a daemon that is stopping is
+found by `start_daemon( )` and not started again; the run's first release must
+not wait for it).
+
+**Claim, commit, raise.** A release is two methods with a commit between them,
+and the commit belongs to the job report that calls them (the runner class ends
+no unit of work): `release_claim( )` takes the watcher row, counts and claims
+(`EVENT-WAIT` to `EVENT-SENT`, the claim time in `STARTED`); the report commits;
+`release_raise( )` raises one event per claim; the report commits again. The
+order is forced by the measured contract of `BP_EVENT_RAISE`: it survives a
+rollback, a claim does not. Raised before its claim is committed, a step that
+dumps after the raise starts a job whose row still says `EVENT-WAIT`, and the
+next pass counts that lane as free and releases more than the lanes. Committed
+first, the claim is the reservation; the commit also ends the watcher row's lock,
+after the claims, so the next releaser counts them. What a dump between the two
+commits leaves is a claim without its raise: a pile `EVENT-SENT` whose job still
+waits for the event. Every `release_raise( )` outside the kill switch looks for
+those a minute after their claim and raises again when `SHOW_JOBSTATE` still says the job is
+scheduled. A raise for a job that already left the wait matches no waiter (the
+parameter is that job's name and count) and does nothing. A committed claim is never put back to `EVENT-WAIT`: not when
+its raise fails, and not under the kill switch, where nothing is raised and the
+claims stay. Another pass may already have raised that claim again, and a claim
+put back would leave its released job outside the count, so the lanes could be
+exceeded once the kill is cleared. The doctor report
+(`ZL3_<SET>_DOC`, the daemon's pass and the run's first pass), the doctor's
+`H` job and every pile's tail call the pair; the cockpit's `Doctor` action heals
+in the service call and submits a pass job for the release (`watcher_pass( )`),
+since a commit belongs to a job and not to an OData request.
+
+Every `SELECT SINGLE FOR UPDATE` names the whole primary key of its table (the
+ABAP documentation gives `sy-subrc = 8` for a partial key; not measured here): the run row is locked
+by set and date, which the pile carries, and its run and status are checked on
+the row read. `test/dsl-l3-autodoctor.mjs` checks every such statement of the
+generated sources against the key fields of the table definitions.
+
+**On a system, the event must exist first.** `ZOSD_L3_RELEASE` is a user event:
+create it in SM64 (it is a row of BTCUEV) before the first run with
+`release: event`. Without it the jobs are still planned, but `BP_EVENT_RAISE`
+fails, the claims stay `EVENT-SENT` and hold their lanes, every pass raises them
+again after the grace, and the run waits. On the sandbox
+the event exists and `BP_EVENT_RAISE` answers 0. The fleet2 demo releases by
+event (`piles: {release: event}`, `piles.lanes` tunable, 0 by default).
+`ScheduleStatus` of the cockpit ends with the lanes in force:
+`LANES <n> COMPUTED|SET|FLOOR RELEASED <active> WAITING <piles waiting for release>`.
 
 `ZOSD_L3_RUNSTAT` has one row per client, set and run: DONE/FAILED (including
 FUSED)/RUNNING/HELD pile counts, mean and median seconds of DONE piles, and

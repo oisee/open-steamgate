@@ -37,7 +37,7 @@ export function doctorOverlay(model, text, kind) {
     });
     if (model.release_event) text = governorTemplate(text, JSON.parse(readFileSync("recipes/l3-doctor/release.patch.json", "utf8")).filter((p) => !p.governor || model.governor));
     if (model.autodoctor.arm_job) text = text.replace(/(  METHOD run\.[\s\S]*?)(  ENDMETHOD\.)/, "$1    IF iv_mode = c_parallel AND rs_result-status = 'SUBMITTED'.\n      arm_doctor_job( ).\n    ENDIF.\n$2");
-    if (model.daemon) text = text.replace(/(  METHOD run\.[\s\S]*?)(  ENDMETHOD\.)/, "$1{{#daemon}}\n    IF iv_mode = c_parallel AND rs_result-status = 'SUBMITTED'.\n      start_daemon( ).\n    ENDIF.\n{{/daemon}}\n$2");
+    if (model.daemon) text = text.replace(/(  METHOD run\.[\s\S]*?)(  ENDMETHOD\.)/, "$1{{#daemon}}\n    IF iv_mode = c_parallel AND rs_result-status = 'SUBMITTED'.\n      start_daemon( ).\n{{#release_event}}\n      \" a daemon that is stopping is found and not started again; the run's first\n      \" release must not wait for it: a pass job of its own releases the first lanes\n      watcher_pass( ).\n{{/release_event}}\n    ENDIF.\n{{/daemon}}\n$2");
     if (model.daemon) {
       const wake = "{{#daemon}}\n    start_daemon( ).\n{{/daemon}}\n";
       for (const method of ["clear_kill", "release_pile"]) {

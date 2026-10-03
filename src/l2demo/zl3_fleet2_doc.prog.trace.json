@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-doctor/report.tpl",
- "model": "sha256:3aacbf40da6b2a1b73e1ed8502b186a29681054e924e0d9fc3bbb80f4a363a28",
+ "model": "sha256:973f08be27e25b050890c09a41c873a7fad872c1dd982c1bd1423f50f979e698",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",
@@ -46,35 +46,84 @@
    "template_line": 1,
    "path": "/autodoctor/doctor_report",
    "node": "set/fleet2/resilience/doctor",
-   "set_line": 75
+   "set_line": 80
   },
   {
    "line": 2,
    "template_line": 2,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 3,
    "template_line": 3,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 4,
    "template_line": 4,
    "path": "/class",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 5,
    "template_line": 5,
    "path": "/class",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
+  },
+  {
+   "line": 6,
+   "template_line": 7,
+   "path": "/release_event",
+   "node": "set/fleet2/piles/release",
+   "set_line": 43
+  },
+  {
+   "line": 7,
+   "template_line": 8,
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 19
+  },
+  {
+   "line": 8,
+   "template_line": 9,
+   "path": "/release_event",
+   "node": "set/fleet2/piles/release",
+   "set_line": 43
+  },
+  {
+   "line": 9,
+   "template_line": 10,
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 19
+  },
+  {
+   "line": 10,
+   "template_line": 11,
+   "path": "/release_event",
+   "node": "set/fleet2/piles/release",
+   "set_line": 43
+  },
+  {
+   "line": 11,
+   "template_line": 12,
+   "path": "/class",
+   "node": "set/fleet2",
+   "set_line": 19
+  },
+  {
+   "line": 12,
+   "template_line": 13,
+   "path": "/release_event",
+   "node": "set/fleet2/piles/release",
+   "set_line": 43
   }
  ]
 }

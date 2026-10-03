@@ -1678,9 +1678,9 @@ CLASS {{class}} IMPLEMENTATION.
 {{/planned}}
       WITH p_bind = iv_bind
 {{#settings.entries}}
-{{^chaos}}
+{{^unscreened}}
       WITH {{screen}} = gs_settings-vals-{{field}}
-{{/chaos}}
+{{/unscreened}}
 {{/settings.entries}}
 {{#params}}
       WITH {{screen}} {{#is_selopt}}IN{{/is_selopt}}{{^is_selopt}}={{/is_selopt}} is_params-{{name}}

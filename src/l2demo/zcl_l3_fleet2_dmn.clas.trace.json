@@ -2,7 +2,7 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-doctor/daemon.tpl",
- "model": "sha256:3aacbf40da6b2a1b73e1ed8502b186a29681054e924e0d9fc3bbb80f4a363a28",
+ "model": "sha256:973f08be27e25b050890c09a41c873a7fad872c1dd982c1bd1423f50f979e698",
  "rules": {
   "ship-busy": {
    "file": "src/l2demo/ship_busy.l2.yaml",
@@ -46,504 +46,504 @@
    "template_line": 1,
    "path": "/daemon/daemon_class",
    "node": "set/fleet2/resilience/doctor",
-   "set_line": 75
+   "set_line": 80
   },
   {
    "line": 2,
    "template_line": 2,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 3,
    "template_line": 3,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 4,
    "template_line": 4,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 5,
    "template_line": 5,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 6,
    "template_line": 6,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 7,
    "template_line": 7,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 8,
    "template_line": 8,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 9,
    "template_line": 9,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 10,
    "template_line": 10,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 11,
    "template_line": 11,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 12,
    "template_line": 12,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 13,
    "template_line": 13,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 14,
    "template_line": 14,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 15,
    "template_line": 15,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 16,
    "template_line": 16,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 17,
    "template_line": 17,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 18,
    "template_line": 18,
    "path": "/daemon/daemon_class",
    "node": "set/fleet2/resilience/doctor",
-   "set_line": 75
+   "set_line": 80
   },
   {
    "line": 19,
    "template_line": 19,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 20,
    "template_line": 20,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 21,
    "template_line": 21,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 22,
    "template_line": 22,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 23,
    "template_line": 23,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 24,
    "template_line": 24,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 25,
    "template_line": 25,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 26,
    "template_line": 26,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 27,
    "template_line": 27,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 28,
    "template_line": 28,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 29,
    "template_line": 29,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 30,
    "template_line": 30,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 31,
    "template_line": 31,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 32,
    "template_line": 32,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 33,
    "template_line": 33,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 34,
    "template_line": 34,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 35,
    "template_line": 35,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 36,
    "template_line": 36,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 37,
    "template_line": 37,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 38,
    "template_line": 38,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 39,
    "template_line": 39,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 40,
    "template_line": 40,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 41,
    "template_line": 41,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 42,
    "template_line": 42,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 43,
    "template_line": 43,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 44,
    "template_line": 44,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 45,
    "template_line": 45,
    "path": "/class",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 46,
    "template_line": 46,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 47,
    "template_line": 47,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 48,
    "template_line": 48,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 49,
    "template_line": 49,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 50,
    "template_line": 50,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 51,
    "template_line": 51,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 52,
    "template_line": 52,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 53,
    "template_line": 53,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 54,
    "template_line": 54,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 55,
    "template_line": 55,
    "path": "/class",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 56,
    "template_line": 56,
    "path": "/class",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 57,
    "template_line": 57,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 58,
    "template_line": 58,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 59,
    "template_line": 59,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 60,
    "template_line": 60,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 61,
    "template_line": 61,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 62,
    "template_line": 62,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 63,
    "template_line": 63,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 64,
    "template_line": 64,
    "path": "/class",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 65,
    "template_line": 65,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 66,
    "template_line": 66,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 67,
    "template_line": 67,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 68,
    "template_line": 68,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 69,
    "template_line": 69,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 70,
    "template_line": 70,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 71,
    "template_line": 71,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   },
   {
    "line": 72,
    "template_line": 72,
    "path": "/",
    "node": "set/fleet2",
-   "set_line": 15
+   "set_line": 19
   }
  ]
 }

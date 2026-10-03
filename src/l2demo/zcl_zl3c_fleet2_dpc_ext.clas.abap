@@ -977,6 +977,8 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
             ENDLOOP.
           WHEN 'Doctor'.
             lt_report = zcl_l3_fleet2=>doctor(  ).
+            " the release: a pass job of its own (it commits its claims before it raises)
+            zcl_l3_fleet2=>watcher_pass( ).
             LOOP AT lt_report INTO ls_report.
               ls_answer-answer = ls_answer-answer && ls_report-doc_action && ':' && ls_report-reason && cl_abap_char_utilities=>newline.
             ENDLOOP.
@@ -1030,6 +1032,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
           WHEN 'ScheduleStatus'.
             ls_answer-answer = zcl_l3_fleet2=>cockpit_schedule_status( ).
             ls_answer-answer = ls_answer-answer && ' / ' && zcl_l3_fleet2=>daemon_status( ).
+            ls_answer-answer = ls_answer-answer && ` / ` && zcl_l3_fleet2=>lanes_status( ).
           WHEN OTHERS.
             RAISE EXCEPTION TYPE /iwbep/cx_mgw_not_impl_exc
               EXPORTING method = iv_action_name.

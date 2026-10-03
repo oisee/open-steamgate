@@ -424,7 +424,7 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     if (spec.lanes !== undefined && (!/^[1-9][0-9]{0,3}$/.test(String(spec.lanes)) || +spec.lanes > 9999)) fail(line("piles/lanes"), "piles.lanes is 1..9999");
     if (spec.release === "event") {
       if (!resilience?.doctor.daemon) fail(line("piles/release"), "event release needs a daemon doctor");
-      releaseEvent = {"@id": `${id}/piles/release`, set_line: line("piles/release"), lanes: String(spec.lanes ?? "0"), automatic: spec.lanes === undefined};
+      releaseEvent = {"@id": `${id}/piles/release`, set_line: line("piles/release"), lanes: String(spec.lanes ?? "0")};
     }
   }
   const SET = set.toUpperCase();

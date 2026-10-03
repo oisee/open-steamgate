@@ -72,6 +72,13 @@ START-OF-SELECTION.
     lt_report = zcl_l3_fleet2=>doctor( ).
     lv_actions = lines( lt_report ).
     WRITE: / 'doctor', lv_actions.
+    " then the release: the claims are committed before their events are raised
+    DATA lt_released_h TYPE zcl_l3_fleet2=>tt_pile.
+    COMMIT WORK.
+    lt_released_h = zcl_l3_fleet2=>release_claim( ).
+    COMMIT WORK.
+    zcl_l3_fleet2=>release_raise( lt_released_h ).
+    COMMIT WORK.
     RETURN.
   ENDIF.
   ls_params-active_status = p_active.
@@ -91,4 +98,13 @@ START-OF-SELECTION.
       is_params = ls_params
       iv_bind = lv_bind ).
   ENDIF.
+* the lane this pile held is free: the tail releases the next waiting pile itself,
+* after the next stage's jobs are committed, so the set does not wait for a pass;
+* the claims are committed before their events are raised (a raise outlives a rollback)
+  DATA lt_released TYPE zcl_l3_fleet2=>tt_pile.
+  COMMIT WORK.
+  lt_released = zcl_l3_fleet2=>release_claim( ).
+  COMMIT WORK.
+  zcl_l3_fleet2=>release_raise( lt_released ).
+  COMMIT WORK.
   zcl_l3_fleet2=>pile_done( iv_run = p_run iv_pile = p_pile ).

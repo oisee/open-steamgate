@@ -1,4 +1,4 @@
-// Local TH_WPINFO subset: configurable background capacity minus active jobs.
+// Local TH_WPINFO subset: configurable background capacity, idle minus active jobs.
 // The system's kernel provides the complete WPLIST instead.
 import {BatchRuns} from './osd-batch-runs.mjs';
 export function installCapacity(abap, jobs) {
@@ -14,9 +14,14 @@ export function installCapacity(abap, jobs) {
     try { busy = store.db.prepare("SELECT COUNT(*) AS n FROM batch_runs WHERE state='RUNNING'").get().n; }
     finally {store.close();}
     table.clear();
-    for (let i=0; i<Math.max(0,capacity-busy); i++) {
+    // the shape a system answers (measured 2026-10-03): a background process is BGD, an idle one
+    // Waiting, a busy one Running; one dialog process stands for the rest, so a filter that counts
+    // every idle process instead of the idle background ones counts one too many
+    const add = (type, status) => {
       const row = table.getRowType().clone();
-      row.get().wp_typ.set('BTC');row.get().wp_status.set('Wait');table.append(row);
-    }
+      row.get().wp_typ.set(type);row.get().wp_status.set(status);table.append(row);
+    };
+    add('DIA', 'Waiting');
+    for (let i=0; i<capacity; i++) add('BGD', i < Math.max(0, capacity-busy) ? 'Waiting' : 'Running');
   };
 }

@@ -56,7 +56,8 @@ describe("DSL L3 hardening: claims, set-scoped writes and unschedule refusals", 
   }
   it("a staged set without resilience also claims only PLANNED piles of the latest held run", async () => {
     const file = `${OUT}/zz_harden_plain_${process.pid}.l3.yaml`;
-    const text = readFileSync(`${OUT}/fleet2.l3.yaml`, "utf8")
+    // without resilience there is no daemon, so no event release either
+    const text = readFileSync(`${OUT}/fleet2.l3.yaml`, "utf8").replace("piles: {release: event}\n", "").replace(", piles.lanes]", "]")
       .replace(/^governor:\n(  .*\n)+/m, "").replace(/^resilience:\n(  .*\n)+/m, "")
       .replace(/^settings:\n(  .*\n)+/m, "").replace(/^simulate:\n(  .*\n)+/m, "")
       .replace(/^  work:\n(    .*\n)+/m, "").replace("      sim: generated\n", "").replace("  work: real\n", "");

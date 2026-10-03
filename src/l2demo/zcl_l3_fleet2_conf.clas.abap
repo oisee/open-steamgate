@@ -22,6 +22,7 @@ CLASS zcl_l3_fleet2_conf DEFINITION PUBLIC FINAL CREATE PUBLIC.
              simulate_hits_mean TYPE i,
              simulate_autoclose TYPE i,
              piles_checks_size TYPE i,
+             piles_lanes TYPE i,
            END OF ty_values.
     TYPES tt_conf TYPE STANDARD TABLE OF zosd_l3_conf WITH DEFAULT KEY.
     TYPES: BEGIN OF ty_state,
@@ -172,6 +173,11 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     ls_spec-param_name = 'piles.checks.size'.
     ls_spec-dsl_value = '2'.
     APPEND ls_spec TO rt_specs.
+    CLEAR ls_spec.
+    ls_spec-set_name = 'fleet2'.
+    ls_spec-param_name = 'piles.lanes'.
+    ls_spec-dsl_value = '0'.
+    APPEND ls_spec TO rt_specs.
   ENDMETHOD.
 
   METHOD defaults.
@@ -194,6 +200,7 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     rs_vals-simulate_hits_mean = '-1'.
     rs_vals-simulate_autoclose = '-1'.
     rs_vals-piles_checks_size = '2'.
+    rs_vals-piles_lanes = '0'.
   ENDMETHOD.
 
   METHOD sane.
@@ -367,6 +374,15 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
     ENDIF.
     IF valid( iv_param = 'piles.checks.size' iv_value = lv_text ) = abap_false.
       rs_vals-piles_checks_size = ls_def-piles_checks_size.
+    ENDIF.
+    lv_number = is_vals-piles_lanes.
+    lv_text = abs( lv_number ).
+    CONDENSE lv_text.
+    IF lv_number < 0.
+      CONCATENATE '-' lv_text INTO lv_text.
+    ENDIF.
+    IF valid( iv_param = 'piles.lanes' iv_value = lv_text ) = abap_false.
+      rs_vals-piles_lanes = ls_def-piles_lanes.
     ENDIF.
   ENDMETHOD.
 
@@ -746,6 +762,19 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
           RETURN.
         ENDIF.
         rv_ok = abap_true.
+      WHEN 'piles.lanes'.
+        IF lv_text IS INITIAL OR strlen( lv_text ) > 20.
+          RETURN.
+        ENDIF.
+        FIND REGEX '^-?[0-9]+$' IN lv_text.
+        IF sy-subrc <> 0.
+          RETURN.
+        ENDIF.
+        lv_number = lv_text.
+        IF lv_number < 0 OR lv_number > 9999.
+          RETURN.
+        ENDIF.
+        rv_ok = abap_true.
     ENDCASE.
   ENDMETHOD.
 
@@ -917,6 +946,8 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
           rs_state-vals-simulate_autoclose = lv_effective.
         WHEN 'piles.checks.size'.
           rs_state-vals-piles_checks_size = lv_effective.
+        WHEN 'piles.lanes'.
+          rs_state-vals-piles_lanes = lv_effective.
       ENDCASE.
     ENDLOOP.
   ENDMETHOD.
