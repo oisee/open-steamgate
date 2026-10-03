@@ -47,6 +47,10 @@ the inline adapter's END would instead delete parent rows, leaving the child's
 CSRF/RESUME session and ENQ locks alive, including across recycle. This bridge
 does not resolve a replacement session or depend on a test route table.
 The remaining B3 operations and internal doors stay in place for Node callers.
+**This bridge depends on one-runtime B5.** While the parent kernel exists
+(the switch off, or a step before the serving child is up), a Node caller can
+still end a session, and only the bridge takes that end to the child's owner.
+It can be removed together with B5, when every ABAP step runs in the child.
 
 The A3a compatibility follow-up ran all 37 files of `test/suites.d/adt.json`
 in one Mocha invocation in manifest order per mode: **1739 passing** with
