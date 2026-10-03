@@ -75,7 +75,9 @@ CLASS {{class}} IMPLEMENTATION.
     ENDIF.
     ls_link-set_name = header-set_name.
     ls_link-run_id = header-run_id.
+    ls_link-dest = lv_dest.
     ls_link-remote_run = answer-remote_run.
+    GET TIME STAMP FIELD ls_link-linked.
     MODIFY {{link}} FROM ls_link.
     rv_count = answer-alerts.
   ENDMETHOD.

@@ -1,4 +1,4 @@
-import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
+import {l3TableDependencies, l3TableNames} from "./helpers/dsl-l3-tables.mjs";
 // DSL L3 settings: application-data defaults, tuning, read-once runs and trace.
 import {expect} from "chai";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
@@ -13,8 +13,7 @@ import {modulesOf} from "../tools/osd-transpile.mjs";
 
 const SET = "src/l2demo/fleet2.l3.yaml";
 const DATE = "20261001";
-const TABLES = ["zosd_l3_budget", "zosd_l3_event", "zosd_l3_object", "zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor",
-  "zosd_l3_kill", "zosd_l3_conf", "zosd_l3_conf_log", "zosd_l3_run_conf"];
+const TABLES = l3TableNames();
 const FLEET = {
   zosd_l2_ship: [["S001", "Albatross", "M"], ["S002", "Bluebird", "A"], ["S003", "Condor", "A"], ["S004", "Dove", "A"]],
   zosd_l2_voy: [["V00001", "S001", "20261005"], ["V00002", "S002", "20261010"], ["V00003", "S002", "20261011"],

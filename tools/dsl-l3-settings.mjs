@@ -132,7 +132,7 @@ export function compileSettings(doc, model, {line, fail}) {
     stage.piles.settings_field = `piles_${stage.name}_size`;
   }
   return {"@id": `${model["@id"]}/settings`, set_line: line("settings"), entries, has_scoped: entries.some((e) => e.scoped),
-    class: `zcl_l3_${model.set}_conf`, report: `zl3_${model.set}_conf`,
+    has_list: entries.some((e) => e.list), class: `zcl_l3_${model.set}_conf`, report: `zl3_${model.set}_conf`,
     ...(model.governor ? {budget_glass: has("budget.glass"), budget_warn: has("budget.warn"),
       budget_narrow_at: has("budget.narrow_at"), budget_per_pile: has("budget.per_pile")} : {}),
     pile_lanes: has("piles.lanes"), doctor_tick: has("doctor.tick"), retry_max: has("retry.max"), retry_backoff: has("retry.backoff"), stale: has("stale"),

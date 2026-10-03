@@ -338,6 +338,38 @@ describe('DSL L3 remote alert seam', function () {
       await run();expect(read(`SELECT * FROM ${model.remote.link}`)).to.have.length(0); // The reference assertion goes red.
     } finally {delete abap.context.RFCDestinations[dest];}
   });
+  it('a retry through another destination keeps each receiver reference; the cockpit shows the latest',async()=>{
+    const stub=(dest,remote)=>{abap.context.RFCDestinations[dest]={call:async(name,sig)=>{
+      const h=plain(sig.exporting.is_header);
+      fromJson(sig.importing.es_result,{SET_NAME:h.set_name,RUN_ID:h.run_id,RULE_NAME:h.rule_name,PILE_NO:h.pile_no,ATTEMPT:h.attempt,
+        REMOTE_RUN:remote,STATUS:'DONE',ALERTS:sig.exporting.it_rows.array().length});
+    }};};
+    const setDest=(d)=>dialogStep(()=>abap.Classes.ZCL_L3_FLEET2_CONF.set_setting({iv_param:str('remote.destination'),iv_value:str(d),iv_note:str('retry elsewhere')}));
+    const clean=()=>sql('DELETE FROM zosd_l3_run','DELETE FROM zosd_l3_stage','DELETE FROM zosd_l3_pile','DELETE FROM zosd_l3_work','DELETE FROM zosd_l3_alert','DELETE FROM zosd_l3_budget','DELETE FROM zosd_l3_event','DELETE FROM zosd_l3_object');
+    const twice=async()=>{
+      await sql(`DELETE FROM ${model.remote.link}`);await clean();
+      await setDest('FLEET_RCV_A');const first=plain(await frozenRun());
+      await clean();await setDest('FLEET_RCV_B');const second=plain(await frozenRun());
+      expect(second.run_id).to.equal(first.run_id);return second.run_id;
+    };
+    stub('FLEET_RCV_A','FAR_A');stub('FLEET_RCV_B','FAR_B');
+    try {
+      const id=await twice();
+      const rows=read(`SELECT dest,remote_run FROM ${model.remote.link} WHERE run_id=? ORDER BY dest`,id);
+      expect(rows).to.deep.equal([{dest:'FLEET_RCV_A',remote_run:'FAR_A'},{dest:'FLEET_RCV_B',remote_run:'FAR_B'}]);
+      const response=await fetch(`http://localhost:${process.env.STG_PORT??3030}/sap/opu/odata/sap/ZL3C_FLEET2_SRV/RunSet?$format=json`);
+      expect((await response.json()).d.results.find((r)=>r.RunId===id).RemoteRun).to.equal('FAR_B'); // the latest
+      // a copy whose link ignores the destination loses the first receiver again
+      const name=`${model.remote.class}.clas.abap`;
+      expect(files[name]).to.include('ls_link-dest = lv_dest.');
+      await copy({...files,[name]:files[name].replace('ls_link-dest = lv_dest.','CLEAR ls_link-dest.')},[model.remote.class]);
+      await twice();
+      expect(read(`SELECT * FROM ${model.remote.link}`)).to.have.length(1); // two references fails against the mutant
+    } finally {
+      restore();delete abap.context.RFCDestinations.FLEET_RCV_A;delete abap.context.RFCDestinations.FLEET_RCV_B;
+      await dialogStep(()=>abap.Classes.ZCL_L3_FLEET2_CONF.reset_setting({iv_param:str('remote.destination')}));
+    }
+  });
   it('a copied failure mapper is killed by the dump outcome assertion',async()=>{
     const module=`${model.remote.group}.fugr.${model.remote.function.toLowerCase()}.abap`, adapter=`${model.remote.class}.clas.abap`;
     await copy({...files,[module]:files[module].replace(`FUNCTION ${model.remote.function.toLowerCase()}.`, `FUNCTION ${model.remote.function.toLowerCase()}.\n  ASSERT 1 = 0.`),

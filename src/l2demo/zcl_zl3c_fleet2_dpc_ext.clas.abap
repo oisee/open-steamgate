@@ -67,6 +67,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA ls_pile TYPE zosd_l3_pile.
     DATA ls_lock TYPE zosd_l3_run.
     DATA ls_stage TYPE zosd_l3_stage.
+    DATA ls_remote_link TYPE zl3_fleet2_rlink.
     DATA ls_budget TYPE zosd_l3_budget.
     DATA lv_date TYPE string.
     DATA lv_count TYPE i.
@@ -78,8 +79,12 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
     DATA lv_preliminary TYPE btch0000-char1.
     SELECT * FROM zosd_l3_pile INTO TABLE lt_piles
       WHERE set_name = 'fleet2' AND run_id = cs_run-run_id.
-    SELECT SINGLE remote_run FROM zl3_fleet2_rlink INTO cs_run-remote_run
-      WHERE set_name = 'fleet2' AND run_id = cs_run-run_id.
+    " one row per receiving destination; the page shows the latest reference
+    SELECT * FROM zl3_fleet2_rlink INTO ls_remote_link UP TO 1 ROWS
+      WHERE set_name = 'fleet2' AND run_id = cs_run-run_id
+      ORDER BY linked DESCENDING.
+      cs_run-remote_run = ls_remote_link-remote_run.
+    ENDSELECT.
     cs_run-run_mode = 'S'.
     cs_run-piles = lines( lt_piles ).
     LOOP AT lt_piles INTO ls_pile.

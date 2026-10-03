@@ -1,1 +1,1 @@
-{"files": ["test/dsl-l3-remote.mjs", "test/rfc-message-host.mjs"]}
+{"files": ["test/dsl-l3-remote.mjs", "test/rfc-message-host.mjs", "test/rfc-message-soft.mjs"]}

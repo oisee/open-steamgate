@@ -100,12 +100,12 @@
     {
       "line": 20,
       "template_line": 20,
-      "path": "/"
+      "path": "/conf"
     },
     {
       "line": 21,
       "template_line": 21,
-      "path": "/conf"
+      "path": "/"
     },
     {
       "line": 22,
@@ -234,23 +234,23 @@
     },
     {
       "line": 47,
-      "template_line": 47,
-      "path": "/"
+      "template_line": 48,
+      "path": "/conf"
     },
     {
       "line": 48,
       "template_line": 49,
-      "path": "/conf"
+      "path": "/setting"
     },
     {
       "line": 49,
-      "template_line": 50,
-      "path": "/setting"
+      "template_line": 54,
+      "path": "/function"
     },
     {
       "line": 50,
       "template_line": 55,
-      "path": "/function"
+      "path": "/"
     },
     {
       "line": 51,
@@ -370,12 +370,12 @@
     {
       "line": 74,
       "template_line": 79,
-      "path": "/link"
+      "path": "/"
     },
     {
       "line": 75,
       "template_line": 80,
-      "path": "/"
+      "path": "/link"
     },
     {
       "line": 76,
@@ -385,6 +385,11 @@
     {
       "line": 77,
       "template_line": 82,
+      "path": "/"
+    },
+    {
+      "line": 78,
+      "template_line": 83,
       "path": "/"
     }
   ]

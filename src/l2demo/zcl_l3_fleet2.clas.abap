@@ -6,6 +6,7 @@ CLASS zcl_l3_fleet2 DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS snapshot IMPORTING iv_name TYPE csequence iv_bind TYPE csequence OPTIONAL
       it_exclude TYPE tt_snap_keys OPTIONAL iv_installed TYPE abap_bool DEFAULT abap_false RETURNING VALUE(rs_snap) TYPE zosd_l3_snap.
     CLASS-METHODS check_snapshot IMPORTING is_expected TYPE zosd_l3_snap iv_run TYPE csequence OPTIONAL
+      EXPORTING ev_audit_lost TYPE abap_bool
       RETURNING VALUE(rv_ok) TYPE abap_bool.
     CLASS-METHODS record_snapshot IMPORTING iv_run TYPE csequence iv_name TYPE csequence
       iv_stage TYPE i iv_bind TYPE csequence OPTIONAL iv_installed TYPE abap_bool DEFAULT abap_false.
@@ -3877,6 +3878,8 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
   METHOD check_snapshot.
     DATA ls_stored TYPE zosd_l3_snap.
     DATA ls_audit TYPE zosd_l3_doctor.
+    DATA ls_lost TYPE zosd_l3_event.
+    ev_audit_lost = abap_false.
     SELECT SINGLE * FROM zosd_l3_snap INTO ls_stored
       WHERE set_name = c_set AND snap_id = is_expected-snap_id AND state = 'READY'.
     IF sy-subrc = 0 AND ls_stored-content_hash = is_expected-content_hash
@@ -3909,6 +3912,17 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
         RETURN.
       ENDIF.
     ENDDO.
+    " The mismatch audit could not be written. Never silent: flag it to the caller
+    " and leave one event row a reader finds under the same run.
+    ev_audit_lost = abap_true.
+    ls_lost-run_id = ls_audit-run_id.
+    ls_lost-set_name = c_set.
+    ls_lost-kind = 'SNAPAUDLOST'.
+    ls_lost-reason = 'snapshot mismatch audit lost after 10 insert attempts'.
+    ls_lost-acted = ls_audit-acted.
+    SELECT MAX( seq ) FROM zosd_l3_event INTO ls_lost-seq WHERE run_id = ls_lost-run_id.
+    ls_lost-seq = ls_lost-seq + 1.
+    INSERT zosd_l3_event FROM ls_lost.
   ENDMETHOD.
   METHOD remote_receive.
     DATA ls_link TYPE zl3_fleet2_rlink.
@@ -3939,7 +3953,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
           AND pile_no = is_header-pile_no.
       RETURN.
     ENDIF.
-    SELECT SINGLE * FROM zl3_fleet2_rlink INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id.
+    SELECT SINGLE * FROM zl3_fleet2_rlink INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id AND dest = ''.
     IF sy-subrc <> 0.
       ls_link-set_name = c_set.
       ls_link-run_id = is_header-run_id.
@@ -3950,7 +3964,7 @@ CLASS zcl_l3_fleet2 IMPLEMENTATION.
       ENDTRY.
       INSERT zl3_fleet2_rlink FROM ls_link.
       IF sy-subrc <> 0.
-        SELECT SINGLE * FROM zl3_fleet2_rlink INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id.
+        SELECT SINGLE * FROM zl3_fleet2_rlink INTO ls_link WHERE set_name = c_set AND run_id = is_header-run_id AND dest = ''.
       ENDIF.
     ENDIF.
     ls_saved = gs_settings.

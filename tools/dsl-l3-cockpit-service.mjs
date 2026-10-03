@@ -22,8 +22,8 @@ export function cockpitActions(m) {
     actions[0].call = `IF lv_work IS NOT INITIAL.\n          lv_work = |work={ lv_work }|.\n        ENDIF.\n        ` + actions[0].call.replace("iv_mode = lv_mode", "iv_mode = lv_mode iv_bind = lv_work");
   }
   // the runner answers abap_false without an exception when it declines; the operator gets words, not a blank
-  const boolean = (name, method, params, args, reason = false, refused = "the runner declined it") => actions.push({name, method, params, reason,
-    call: `lv_ok = ${m.class}=>${method}( ${args} ).\n        IF lv_ok = abap_true.\n          ls_answer-answer = 'OK'.\n        ELSE.\n          ls_answer-answer = 'REFUSED: ${name}: ${refused}'.\n        ENDIF.`});
+  const boolean = (name, method, params, args, reason = false, refused = "the runner declined it", why = "") => actions.push({name, method, params, reason,
+    call: `${why ? `CLEAR ${why}.\n        ` : ""}lv_ok = ${m.class}=>${method}( ${args} ).\n        IF lv_ok = abap_true.\n          ls_answer-answer = 'OK'.\n        ELSE.\n          ls_answer-answer = 'REFUSED: ${name}: ${refused}'.${why ? `\n          IF ${why} IS NOT INITIAL.\n            ls_answer-answer = ls_answer-answer && ' (' && ${why} && ')'.\n          ENDIF.` : ""}\n        ENDIF.`});
   if (m.governor) {
     boolean("ReleasePile", "release_pile", {RunId: "String(32)", RuleName: "String(60)", PileNo: "Int32", PerPile: "Int32", Reason: "String(80)"},
       "iv_run = lv_run iv_rule = lv_rule iv_pile = lv_pile iv_per_pile = lv_cap iv_reason = lv_reason", true, "the pile is not HELD, the run or its budget does not allow a release (GLASS, not open), the per-pile cap is lowered, the pile is locked, or the reason is empty or over 80 characters");
@@ -46,7 +46,7 @@ export function cockpitActions(m) {
   }
   if (m.settings) {
     boolean("SetSetting", "set_setting", {Param: "String(30)", Value: "String(40)", Note: "String(80)"}, "iv_param = lv_param iv_value = lv_value iv_note = lv_note", true,
-      `unknown setting, a value outside its range, budget.warn above budget.narrow_at, ${m.settings.chaos_sum ? "simulate dump + hang + slow above 1000, " : ""}or the note is empty or over 80 characters`);
+      `unknown setting, a value outside its range, budget.warn above budget.narrow_at, ${m.settings.chaos_sum ? "simulate dump + hang + slow above 1000, " : ""}or the note is empty or over 80 characters`, m.settings.has_list ? `${m.settings.class}=>refusal` : "");
     boolean("ResetSetting", "cockpit_reset_setting", {Param: "String(30)", Note: "String(80)"}, "iv_param = lv_param iv_note = lv_note", true, "unknown setting, or the note is empty or over 80 characters");
   }
   if (m.schedule) {

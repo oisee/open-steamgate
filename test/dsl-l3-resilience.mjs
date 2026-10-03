@@ -1,4 +1,4 @@
-import {l3TableDependencies} from "./helpers/dsl-l3-tables.mjs";
+import {l3TableDependencies, l3TableNames} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 5a (docs/dsl-l3.md, "Resilience"): a run that heals itself
 // and stops itself, every property from the set's `resilience:` block. The
@@ -43,7 +43,7 @@ const FLEET = {
 };
 const COLUMNS = {zosd_l2_ship: ["ship_id", "name", "status"], zosd_l2_voy: ["voyage_id", "ship_id", "dep_date"],
   zosd_l2_crew: ["crew_id", "ship_id", "role", "since"], zosd_l2_cargo: ["cargo_id", "ship_id", "weight"]};
-const TABLES = ["zosd_l3_budget", "zosd_l3_event", "zosd_l3_object", "zosd_l3_alert", "zosd_l3_pile", "zosd_l3_run", "zosd_l3_stage", "zosd_l3_work", "zosd_l3_doctor", "zosd_l3_kill", "zosd_l3_conf", "zosd_l3_conf_log", "zosd_l3_run_conf"];
+const TABLES = l3TableNames();
 // the sections of this slice in the templates
 const SECTIONS = ["resilience", "fused", "killable"];
 
