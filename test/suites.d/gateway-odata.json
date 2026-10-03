@@ -21,6 +21,7 @@
     "test/sql-trace-buffer.mjs",
     "test/sql-trace.mjs",
     "test/sqlite-file-client.mjs",
+    "test/sqlite-heap-execute.mjs",
     "test/store-destination.mjs",
     "test/store-exclusions.mjs",
     "test/transaction.mjs",

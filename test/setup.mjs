@@ -1,4 +1,4 @@
-import {SQLiteDatabaseClient} from "@abaplint/database-sqlite";
+import {SQLiteDatabaseClient} from "../tools/sqlite-heap-client.mjs";
 import {randomBytes} from "node:crypto";
 import {bootIdentity} from "../tools/osd-identity.mjs";
 import {installTrim} from "../tools/sql-literals.mjs";
