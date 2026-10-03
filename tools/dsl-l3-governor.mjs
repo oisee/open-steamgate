@@ -54,11 +54,13 @@ export function compileGovernor(doc, model, rules, {line, fail}) {
 // An opt-in recipe overlay keeps the legacy template and its trace line
 // numbers byte-stable. Each checked anchor applies exactly once; a template
 // edit that invalidates one fails loudly instead of dropping safety code.
-export function governorTemplate(template, patches) {
+export function governorTemplate(template, patches, observe, recipe = "tools/dsl-l3-governor.mjs") {
   for (const patch of patches) {
     const before = patch.before.join(""), after = patch.after.join("");
     if (template.split(before).length !== 2) throw new Error("governor recipe anchor must occur exactly once");
+    const previous = template;
     template = template.replace(before, after);
+    observe?.(previous, template, recipe);
   }
   return template;
 }

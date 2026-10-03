@@ -1,3 +1,4 @@
+import {readJSONFile, readTraceMap} from "./trace-reader.mjs";
 // DSL L2, slices 1 and 2 (docs/dsl-l2.md): a rule compiled to L1, rendered to
 // ABAP as one query, proven by its own examples and by cases derived from its
 // conditions, each run against the nested reference form. The committed class
@@ -7,12 +8,12 @@
 // reaches the rule line.
 import {expect} from "chai";
 import {spawnSync} from "node:child_process";
-import {copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {existsSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, relative, sep} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DEFAULT_DDIC, registryFor} from "../tools/dsl-ddic.mjs";
-import {buildRule, capWarning, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, RuleError, rulePath, stepValue} from "../tools/dsl-l2.mjs";
+import {buildRule, capWarning, checkRule, compileRule, describeCases, evaluate, misfit, parseCondition, renderRule, RuleError, rulePath, stepValue} from "../tools/dsl-l2.mjs";
 import {ruleKeys} from "../tools/dsl-l2-range.mjs";
 import {bump, caseDiscriminates, compareValues, conditionOf, defaultValue, shiftDate, staleDiscriminates, structureDiscriminates, thresholdDiscriminates, windowOffsetDiscriminates} from "../tools/dsl-l2-eval.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
@@ -99,9 +100,18 @@ function traceLineMismatch(entry, template, output) {
 describe("DSL L2: a rule, its generated check, its examples and its derived cases", function () {
   this.timeout(180000);
   let scratch, registry;
-  before(() => {
+  before(async () => {
     scratch = mkdtempSync(join(tmpdir(), "dsl-l2-test-"));
     registry = registryFor(DEFAULT_DDIC, []);
+    // A fresh checkout has no optional navigation companions. Render them
+    // without rewriting the committed code/traces checked by the suite.
+    for (const rule of DEMO_RULES) {
+      const {files} = await renderRule(compileRule(rule, {registry, out: OUT}));
+      for (const [name, text] of Object.entries(files)) {
+        const file = join(OUT, name);
+        if (name.endsWith('.trace.meta.json') && !existsSync(file)) writeFileSync(file, text);
+      }
+    }
   });
   after(() => rmSync(scratch, {recursive: true, force: true}));
 
@@ -128,7 +138,7 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
         const name = compileRule(rule, {registry}).class;
         for (const kind of ["clas", "clas.testclasses"]) {
           const prefix = join(OUT, `${name}.${kind}`);
-          const sidecar = JSON.parse(readFileSync(`${prefix}.trace.json`, "utf8"));
+          const sidecar = readJSONFile(`${prefix}.trace.json`, "utf8");
           const template = readFileSync(sidecar.template, "utf8").split("\n");
           const output = readFileSync(`${prefix}.abap`, "utf8").split("\n");
           expect(sidecar.rule, `${name}.${kind} belongs to ${rule}`).to.equal(rule);
@@ -155,7 +165,7 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
 
     it("a sidecar template line shifted by one is rejected in memory", () => {
       const prefix = join(OUT, `${CLASS}.clas`);
-      const sidecar = JSON.parse(readFileSync(`${prefix}.trace.json`, "utf8"));
+      const sidecar = readJSONFile(`${prefix}.trace.json`, "utf8");
       const template = readFileSync(sidecar.template, "utf8").split("\n");
       const output = readFileSync(`${prefix}.abap`, "utf8").split("\n");
       const original = sidecar.lines[1]; // the rule/title line has two value holes
@@ -168,7 +178,7 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
 
     it("an entry pointed at a tag-only template line is rejected, so a faked sidecar cannot pass", () => {
       const prefix = join(OUT, `${CLASS}.clas.testclasses`);
-      const sidecar = JSON.parse(readFileSync(`${prefix}.trace.json`, "utf8"));
+      const sidecar = readJSONFile(`${prefix}.trace.json`, "utf8");
       const template = readFileSync(sidecar.template, "utf8").split("\n");
       const output = readFileSync(`${prefix}.abap`, "utf8").split("\n");
       const tagOnly = template.findIndex((line) => line.trim() !== "" && templateLinePattern(line) === null) + 1;
@@ -221,7 +231,7 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
     });
 
     it("the range line traces to the rule's range: line", () => {
-      const trace = JSON.parse(readFileSync(join(OUT, `${CLASS}.clas.trace.json`), "utf8"));
+      const trace = readJSONFile(join(OUT, `${CLASS}.clas.trace.json`), "utf8");
       const lines = readFileSync(join(OUT, `${CLASS}.clas.abap`), "utf8").split("\n");
       const entry = trace.lines.find((e) => /IN it_range/.test(lines[e.line - 1]));
       expect(entry).to.include({node: "rule/maintenance-ship-no-future-voyage/range", rule_line: at(RULE, /^range:/)});
@@ -320,13 +330,13 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
     });
 
     it("the keys method traces to the rule's keys: line, its query to the rule's own lines", () => {
-      const trace = JSON.parse(readFileSync(join(OUT, `${BUSY_CLASS}.clas.trace.json`), "utf8"));
+      const trace = readJSONFile(join(OUT, `${BUSY_CLASS}.clas.trace.json`), "utf8");
       const lines = readFileSync(join(OUT, `${BUSY_CLASS}.clas.abap`), "utf8").split("\n");
       const of = (re) => trace.lines.find((e) => re.test(lines[e.line - 1]));
       expect(of(/^  METHOD keys\.$/)).to.include({node: "rule/ship-busy/keys", rule_line: at(BUSY, /^keys:/)});
       expect(of(/^    CLASS-METHODS keys$/)).to.include({node: "rule/ship-busy/keys", rule_line: at(BUSY, /^keys:/)});
       expect(of(/SELECT DISTINCT/).rule_line).to.be.within(1, BUSY_TEXT.split("\n").length);
-      const tests = JSON.parse(readFileSync(join(OUT, `${BUSY_CLASS}.clas.testclasses.trace.json`), "utf8"));
+      const tests = readJSONFile(join(OUT, `${BUSY_CLASS}.clas.testclasses.trace.json`), "utf8");
       const testLines = readFileSync(join(OUT, `${BUSY_CLASS}.clas.testclasses.abap`), "utf8").split("\n");
       const given = tests.lines.filter((e) => /=>keys\(/.test(testLines[e.line - 1]));
       expect(given.length, "every test asserts keys( )").to.be.greaterThan(5);
@@ -519,8 +529,11 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
   });
 
   describe("trace", () => {
-    const abap = readFileSync(join(OUT, `${CLASS}.clas.abap`), "utf8").split("\n");
-    const trace = JSON.parse(readFileSync(join(OUT, `${CLASS}.clas.trace.json`), "utf8"));
+    let abap, trace;
+    before(() => {
+      abap = readFileSync(join(OUT, `${CLASS}.clas.abap`), "utf8").split("\n");
+      trace = readJSONFile(join(OUT, `${CLASS}.clas.trace.json`), "utf8");
+    });
     const entry = (re) => {
       const line = abap.findIndex((l) => re.test(l)) + 1;
       expect(line, `a line matching ${re}`).to.be.greaterThan(0);
@@ -557,8 +570,11 @@ describe("DSL L2: a rule, its generated check, its examples and its derived case
   });
 
   describe("trace of the test class", () => {
-    const abap = readFileSync(join(OUT, `${CLASS}.clas.testclasses.abap`), "utf8").split("\n");
-    const trace = JSON.parse(readFileSync(join(OUT, `${CLASS}.clas.testclasses.trace.json`), "utf8"));
+    let abap, trace;
+    before(() => {
+      abap = readFileSync(join(OUT, `${CLASS}.clas.testclasses.abap`), "utf8").split("\n");
+      trace = readJSONFile(join(OUT, `${CLASS}.clas.testclasses.trace.json`), "utf8");
+    });
     const ruleLineOf = (re) => {
       const line = abap.findIndex((l) => re.test(l)) + 1;
       expect(line, `a line matching ${re}`).to.be.greaterThan(0);
@@ -885,7 +901,7 @@ examples:
       for (const suffix of ["clas", "clas.testclasses"]) {
         const base = join(OUT, `zcl_l2_ship_voyage_limit.${suffix}`);
         const source = readFileSync(`${base}.abap`, "utf8").split("\n");
-        const trace = JSON.parse(readFileSync(`${base}.trace.json`, "utf8"));
+        const trace = readJSONFile(`${base}.trace.json`, "utf8");
         const at = (pattern) => trace.lines.find((e) => pattern.test(source[e.line - 1]));
         expect(at(/SELECT \* FROM zosd_l2_voy|INNER JOIN zosd_l2_voy/).rule_line).to.equal(text.split("\n").findIndex((l) => /^  count:/.test(l)) + 1);
         expect(at(/IF lv_count > 2\./).rule_line).to.equal(text.split("\n").findIndex((l) => /^  more_than:/.test(l)) + 1);
@@ -1264,14 +1280,14 @@ examples:
       for (const suffix of ["clas", "clas.testclasses"]) {
         const base = join(OUT, `zcl_l2_ship_min_crew.${suffix}`);
         const source = readFileSync(`${base}.abap`, "utf8").split("\n");
-        const trace = JSON.parse(readFileSync(`${base}.trace.json`, "utf8"));
+        const trace = readJSONFile(`${base}.trace.json`, "utf8");
         const at = (pattern) => trace.lines.find((e) => pattern.test(source[e.line - 1]));
         expect(at(/SELECT \* FROM zosd_l2_crew|INNER JOIN zosd_l2_crew/).rule_line).to.equal(text.split("\n").findIndex((l) => /^  count:/.test(l)) + 1);
         expect(at(/IF lv_count < 2\./).rule_line).to.equal(text.split("\n").findIndex((l) => /^  fewer_than:/.test(l)) + 1);
       }
       // the read of the for rows traces to the for line, its WHERE to the when line
       const source = readFileSync(join(OUT, "zcl_l2_ship_min_crew.clas.abap"), "utf8").split("\n");
-      const trace = JSON.parse(readFileSync(join(OUT, "zcl_l2_ship_min_crew.clas.trace.json"), "utf8"));
+      const trace = readJSONFile(join(OUT, "zcl_l2_ship_min_crew.clas.trace.json"), "utf8");
       const into = trace.lines.find((e) => /INTO CORRESPONDING FIELDS OF TABLE lt_for/.test(source[e.line - 1]));
       expect(into.rule_line).to.equal(text.split("\n").findIndex((l) => /^for:/.test(l)) + 1);
       expect(trace.lines.find((e) => e.line === into.line + 1).rule_line).to.equal(text.split("\n").findIndex((l) => /^when:/.test(l)) + 1);
@@ -2412,7 +2428,7 @@ examples:
     it("the traces of the new constructs reach their own rule lines", () => {
       const at = (file, re) => {
         const abap = readFileSync(file, "utf8").split("\n");
-        const trace = JSON.parse(readFileSync(file.replace(/\.abap$/, ".trace.json"), "utf8"));
+        const trace = readJSONFile(file.replace(/\.abap$/, ".trace.json"), "utf8");
         const n = abap.findIndex((l) => re.test(l)) + 1;
         expect(n, `a line matching ${re}`).to.be.greaterThan(0);
         return trace.lines.find((e) => e.line === n);
@@ -2866,10 +2882,10 @@ examples:
       };
       const a = build(here, join(scratch, "path-a"));
       const b = build(alt, join(scratch, "path-b"));
-      expect(Object.keys(a)).to.have.length(5);
+      expect(Object.keys(a)).to.have.length(7);
       expect(b).to.deep.equal(a);
       expect(a[`${CLASS}.clas.abap`].split("\n")[0]).to.equal(`* Generated by tools/dsl-l2.mjs from ${RULE}; do not edit.`);
-      expect(JSON.parse(a[`${CLASS}.clas.trace.json`]).rule).to.equal(RULE);
+      expect(readTraceMap(a, `${CLASS}.clas.trace.json`).rule).to.equal(RULE);
     });
 
     it("a rule in another git repository records its path in that repository; outside one, relative to --out", () => {
@@ -2925,7 +2941,7 @@ examples:
       const abap = readFileSync(join(OUT, "zcl_l2_recent_voyage.clas.abap"), "utf8").split("\n");
       expect(abap.filter((line) => /lv_window_1 = iv_date - iv_max_days\./.test(line))).to.have.length(1);
       expect(abap).to.include("            AND voy~dep_date >= lv_window_1");
-      const trace = JSON.parse(readFileSync(join(OUT, "zcl_l2_recent_voyage.clas.trace.json"), "utf8"));
+      const trace = readJSONFile(join(OUT, "zcl_l2_recent_voyage.clas.trace.json"), "utf8");
       const usage = trace.lines.find((entry) => /voy~dep_date >= lv_window_1/.test(abap[entry.line - 1]));
       const paramLine = source.split("\n").findIndex((line) => /max_days:/.test(line)) + 1;
       const whereLine = source.split("\n").findIndex((line) => /where:/.test(line)) + 1;
@@ -3168,7 +3184,7 @@ examples:
       expect(model.when.conditions[1]).to.include({op: "NOT IN", lhs: "ship~ship_id", sref: "lt_p_exempt", text: "ship.ship_id not in $exempt"});
       expect(exempt.default_rows.map((r) => [r.sign, r.option, r.low, r.high])).to.deep.equal([["I", "BT", "S900", "S999"]]);
       const abap = readFileSync(join(OUT, "zcl_l2_ship_restricted.clas.abap"), "utf8").split("\n");
-      const trace = JSON.parse(readFileSync(join(OUT, "zcl_l2_ship_restricted.clas.trace.json"), "utf8"));
+      const trace = readJSONFile(join(OUT, "zcl_l2_ship_restricted.clas.trace.json"), "utf8");
       const usage = trace.lines.find((entry) => /ship~status IN lt_p_restricted/.test(abap[entry.line - 1]));
       expect(usage).to.include({rule_line: lineIn(TEXT, WHEN_AT), param_rule_line: lineIn(TEXT, PARAM_AT)});
       const filled = trace.lines.find((entry) => /ls_p_restricted-low = 'D'/.test(abap[entry.line - 1]));

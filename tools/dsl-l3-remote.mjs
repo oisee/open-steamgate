@@ -1,3 +1,4 @@
+import {convertFiles, legacyTrace, legacyEntries} from "./dsl-trace.mjs";
 // Synchronous alert seam: flat DDIC, durable receipts, receiver-owned budget.
 import {readFileSync} from 'node:fs';
 import {renderRecipe} from './dsl-abap.mjs';
@@ -34,25 +35,39 @@ export function compileRemote(model, {line, fail, columnsOf}) {
   });
   model.remote = r;
 }
-export function remoteOverlay(model, text) {
+export function remoteOverlay(model, text, observe) {
+  let previous=text;
+  const record=(recipe="tools/dsl-l3-remote.mjs")=>{observe?.(previous,text,recipe);previous=text;};
   if (!model.remote) return text;
   text = text.replace('             status TYPE c LENGTH 12,', '             status TYPE c LENGTH 16,');
+  record();
   text = text.replace('  PRIVATE SECTION.\n', readFileSync('recipes/l3-remote/public.tpl','utf8') + '  PRIVATE SECTION.\n');
+  record("recipes/l3-remote/public.tpl");
   text = text.replace('  METHOD release.\n', '  METHOD release.\n' + readFileSync('recipes/l3-remote/release.tpl','utf8'));
+  record("recipes/l3-remote/release.tpl");
   const heal = '    heal( EXPORTING iv_run = ls_lock-run_id';
+  record();
   text = text.replace(heal, readFileSync('recipes/l3-remote/resume.tpl','utf8') + heal);
+  record("recipes/l3-remote/resume.tpl");
   text = text.replace('    DATA ls_group TYPE {{iface}}=>ty_group.', '    DATA ls_group TYPE {{iface}}=>ty_group.\n    DATA lt_remote_report TYPE tt_doctor.');
   const anchor = '    ls_group-pile_no = iv_pile.\n';
   if (!text.includes(anchor)) throw new Error('remote overlay needs piled write group');
+  record();
   text = text.replace(anchor, anchor + readFileSync('recipes/l3-remote/send.tpl','utf8'));
+  record("recipes/l3-remote/send.tpl");
   const counts = '    FIELD-SYMBOLS <ls_rule> TYPE ty_rule.\n    LOOP AT ct_rules ASSIGNING <ls_rule>.';
   if (!text.includes(counts)) throw new Error('remote overlay needs governor count anchor');
+  record();
   text = text.replace(counts, '    FIELD-SYMBOLS <ls_rule> TYPE ty_rule.\n' + readFileSync('recipes/l3-remote/counts.tpl','utf8') + '    LOOP AT ct_rules ASSIGNING <ls_rule>.');
+  record("recipes/l3-remote/counts.tpl");
   // A receiving pile owns no detecting date lock (NONE shares that same table).
   const marker = '    SELECT SINGLE status FROM zosd_l3_run INTO lv_reason\n      WHERE set_name = c_set AND check_date = ls_pile-check_date AND run_id = iv_run.\n';
   if (!text.includes(marker)) throw new Error('remote overlay needs release lock anchor');
   text = text.replace(marker, marker + `{{#remote}}\n    IF sy-subrc <> 0.\n      SELECT SINGLE remote_run FROM {{link}} INTO lv_reason WHERE set_name = c_set AND remote_run = iv_run.\n      IF sy-subrc = 0.\n        lv_reason = 'HELD'.\n      ENDIF.\n    ENDIF.\n{{/remote}}\n`);
-  return text.replace(/ENDCLASS\.\s*$/,  readFileSync('recipes/l3-remote/receive.tpl','utf8') + 'ENDCLASS.\n');
+  record();
+  text = text.replace(/ENDCLASS\.\s*$/,  readFileSync('recipes/l3-remote/receive.tpl','utf8') + 'ENDCLASS.\n');
+  record("recipes/l3-remote/receive.tpl");
+  return text;
 }
 function ddic(name, fields, table=false) {
   const int = {CHAR:'C',NUMC:'N',DATS:'D',TIMS:'T',INT4:'X',INT2:'s',INT1:'b',DEC:'P',CURR:'P',QUAN:'P'};
@@ -87,8 +102,8 @@ export async function renderRemote(model, {classXml}) {
     const error = rendered.findings.find((f)=>f.severity==='E');
     if (error) throw new Error(`remote ${name}:${error.line}: ${error.text}`);
     files[name] = rendered.text;
-    files[name.replace(/\.abap$/,'.trace.json')] = JSON.stringify({source:model.source,recipe:`recipes/l3-remote/${tpl}.tpl`,lines:rendered.trace},null,2)+'\n';
+    files[name.replace(/\.abap$/,'.trace.json')] = JSON.stringify({source:model.source,recipe:`recipes/l3-remote/${tpl}.tpl`,lines:legacyTrace()?legacyEntries(rendered.trace).map(({template,...e})=>e):rendered.trace},null,2)+'\n';
   }
   files[`${r.class}.clas.xml`] = classXml(model,r.class,'Remote alert sink');
-  return files;
+  return convertFiles(files, {model: {...model,...r}, generator: "dsl-l3-remote"});
 }

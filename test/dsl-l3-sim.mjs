@@ -1,3 +1,4 @@
+import {readJSONFile} from "./trace-reader.mjs";
 import {l3TableDependencies, l3TableNames} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 5d (docs/dsl-l3.md, "Simulated twin: the work as a port"):
@@ -38,7 +39,7 @@ const where = (file) => relative(process.cwd(), file).split(sep).join("/");
 const git = (args) => spawnSync("git", args, {encoding: "utf8", maxBuffer: 64 * 1024 * 1024});
 const TABLES = l3TableNames();
 const SOURCES = ["zosd_l2_ship", "zosd_l2_voy", "zosd_l2_crew", "zosd_l2_cargo"];
-const model = compileSet(SET);
+let model;
 const ruleOf = (name) => model.simulate.rules.find((r) => r.rule === name);
 // the 1-based numbers of the lines of `after` that a longest common
 // subsequence with `before` leaves out: what `after` adds
@@ -60,6 +61,7 @@ function addedLines(before, after) {
 
 describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () {
   this.timeout(900000);
+  before(() => { model = compileSet(SET); });
   let scratch;
   before(() => { scratch = mkdtempSync(join(tmpdir(), "dsl-l3-sim-")); });
   after(() => rmSync(scratch, {recursive: true, force: true}));
@@ -113,7 +115,11 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       try {
         const stripped = compileSet(file);
         expect([stripped.simulate, stripped.ports.some((p) => p.is_work)]).to.deep.equal([undefined, false]);
-        const {files} = await renderSet(stripped);
+        const previousTraceMode = process.env.OSD_TRACE_LEGACY;
+        process.env.OSD_TRACE_LEGACY = "1";
+        let files;
+        try { ({files} = await renderSet(stripped)); }
+        finally { if (previousTraceMode === undefined) delete process.env.OSD_TRACE_LEGACY; else process.env.OSD_TRACE_LEGACY = previousTraceMode; }
         let compared = 0;
         for (const [name, text] of Object.entries(files)) {
           const before = git(["show", `${base}:${OUT}/${name}`]);
@@ -234,7 +240,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       try { plainRunner = (await renderSet(compileSet(file))).files[`${RUNNER}.clas.abap`].replaceAll(basename(file), "fleet2.l3.yaml").split("\n"); } finally { rmSync(file, {force: true}); }
       const simLine = setLine(/^simulate:/), workLine = setLine(/^  work:$/);
       const text = (f) => readFileSync(join(OUT, f), "utf8").split("\n");
-      const trace = (f) => JSON.parse(readFileSync(join(OUT, f.replace(/\.abap$/, ".trace.json")), "utf8"));
+      const trace = (f) => readJSONFile(join(OUT, f.replace(/\.abap$/, ".trace.json")), "utf8");
       // the lines of the runner that the set without simulate: does not have: a
       // longest common subsequence of the two, line by line
       const runner = text(`${RUNNER}.clas.abap`);
@@ -242,7 +248,7 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       expect(added.length).to.be.greaterThan(80);
       const ruleLines = new Map(model.rules.map((r) => [r.name, r.set_line]));
       const t = trace(`${RUNNER}.clas.abap`);
-      expect(t.sim_overlay).to.deep.equal(["recipes/l3-sim/runner.patch.json", "recipes/l3-sim/runner-governed.patch.json"]);
+      expect(t.sim_overlay).to.deep.equal(["recipes/l3-sim/runner-governed.patch.json", "recipes/l3-sim/runner.patch.json"]);
       for (const n of added) {
         const entry = t.lines.find((e) => e.line === n);
         const moved = /=>(check|keys)\( |LOOP AT lt_keys_|APPEND ls_key_|ENDLOOP\.|iv_key_offset = lv_key_offset/.test(runner[n - 1]);
@@ -651,7 +657,8 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
       return t;
     };
     // a table of inputs: every rule, runs, piles, attempts, seeds, scales and key sets
-    const INPUTS = (() => {
+    let INPUTS;
+    before(() => {
       const out = [];
       const runs = ["0123456789ABCDEF0123456789ABCDEF", "FEDCBA9876543210FEDCBA9876543210"];
       const keySets = [[], ["S001"], ships(10), ships(7).slice(3)];
@@ -661,8 +668,8 @@ describe("DSL L3 slice 5d: a simulated twin of the work of a pile", function () 
         out.push({run, rule: r.rule, pile, attempt, seed, scale, stale: [60, 900, 3600][i % 3], keys, filter: r.rule === "ship-busy"});
         i++;
       }
-      return out;
-    })();
+      INPUTS = out;
+    });
     async function drawProblems(className = SIM, {chaos, inputs = INPUTS} = {}) {
       const problems = [];
       for (const input of inputs.map((i) => (chaos ? {...i, chaos} : i))) {

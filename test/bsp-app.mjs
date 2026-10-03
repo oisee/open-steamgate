@@ -71,7 +71,7 @@ describe("tools/osd-bsp-app: a folder of web files as a BSP application", () => 
     expect(() => longLine("List.controller.js", Buffer.from(`a\r\n${"b".repeat(256)}\n`))).to.throw(/List\.controller\.js:2: a line of 256 characters/);
     expect(() => longLine("logo.png", Buffer.from("c".repeat(1000)))).to.not.throw();
     // the generated cockpit of the demo set stays under it, page by page
-    for (const f of readdirSync("src/l2demo/cockpit/zosd_fleet2").filter((f) => !f.endsWith(".trace.json"))) {
+    for (const f of readdirSync("src/l2demo/cockpit/zosd_fleet2").filter((f) => !/\.trace(?:\.meta)?\.json$/.test(f))) {
       if (f !== "i18n") longLine(f, readFileSync(join("src/l2demo/cockpit/zosd_fleet2", f)));
     }
   });

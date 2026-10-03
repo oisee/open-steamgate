@@ -61,3 +61,24 @@ packs/*/upstream
 packs/*/games
 packs/*/.osd-fetched.json
 docker/workbench/ide-password.txt
+
+# Trace navigation companions are generated locally. Only L3 operational
+# outputs and the check-class versions its stale/history readers use are kept.
+*.trace.meta.json
+!/src/l2demo/zcl_l3_*.trace.meta.json
+!/src/l2demo/zcx_l3_*.trace.meta.json
+!/src/l2demo/zif_l3_*.trace.meta.json
+!/src/l2demo/zl3_*.trace.meta.json
+!/src/l2demo/zl3c_*.trace.meta.json
+!/src/l2demo/zcl_zl3c_*.trace.meta.json
+!/src/l2demo/cockpit/**/*.trace.meta.json
+# L2 check classes referenced by fleet{,2,3}.l3.yaml (not their testclasses).
+!/src/l2demo/zcl_l2_maintenance_ship.clas.trace.meta.json
+!/src/l2demo/zcl_l2_grounded_ship_crew.clas.trace.meta.json
+!/src/l2demo/zcl_l2_ship_captain.clas.trace.meta.json
+!/src/l2demo/zcl_l2_ship_voyage_limit.clas.trace.meta.json
+!/src/l2demo/zcl_l2_ship_min_crew.clas.trace.meta.json
+!/src/l2demo/zcl_l2_ship_cargo_limit.clas.trace.meta.json
+!/src/l2demo/zcl_l2_ship_max_cargo.clas.trace.meta.json
+!/src/l2demo/zcl_l2_ship_busy.clas.trace.meta.json
+!/src/l2demo/zcl_l2_ship_restricted.clas.trace.meta.json

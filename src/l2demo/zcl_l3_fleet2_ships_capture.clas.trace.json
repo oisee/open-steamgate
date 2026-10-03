@@ -1,260 +1,219 @@
 {
- "generator": "dsl-l3",
- "set": "src/l2demo/fleet2.l3.yaml",
- "template": "recipes/l3-ports/source-mem.tpl",
- "model": "sha256:a9072df4ab834797b2a25df07b0d7a1761d5f5ef8e3a6cd1e22f1f00e1c43b59",
- "lines": [
-  {
-   "line": 1,
-   "template_line": 1,
-   "path": "/source",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 2,
-   "template_line": 2,
-   "path": "/port",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 3,
-   "template_line": 3,
-   "path": "/class",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 4,
-   "template_line": 4,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 5,
-   "template_line": 5,
-   "path": "/iface",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 6,
-   "template_line": 6,
-   "path": "/iface",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 7,
-   "template_line": 8,
-   "path": "/capture",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 8,
-   "template_line": 10,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 9,
-   "template_line": 11,
-   "path": "/iface",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 10,
-   "template_line": 12,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 11,
-   "template_line": 14,
-   "path": "/capture",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 12,
-   "template_line": 15,
-   "path": "/capture",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 13,
-   "template_line": 17,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 14,
-   "template_line": 18,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 15,
-   "template_line": 19,
-   "path": "/class",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 16,
-   "template_line": 20,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 17,
-   "template_line": 21,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 18,
-   "template_line": 22,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 19,
-   "template_line": 23,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 20,
-   "template_line": 24,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 21,
-   "template_line": 25,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 22,
-   "template_line": 27,
-   "path": "/capture",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 23,
-   "template_line": 29,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 24,
-   "template_line": 31,
-   "path": "/capture",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 25,
-   "template_line": 32,
-   "path": "/capture",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 26,
-   "template_line": 33,
-   "path": "/capture",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 27,
-   "template_line": 34,
-   "path": "/capture",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 28,
-   "template_line": 36,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 29,
-   "template_line": 37,
-   "path": "/iface",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 30,
-   "template_line": 38,
-   "path": "/table",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 31,
-   "template_line": 40,
-   "path": "/capture",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 32,
-   "template_line": 42,
-   "path": "/key",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 33,
-   "template_line": 43,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 34,
-   "template_line": 44,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 35,
-   "template_line": 45,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  },
-  {
-   "line": 36,
-   "template_line": 46,
-   "path": "/",
-   "node": "set/fleet2/port/ships/variant/capture",
-   "set_line": 52
-  }
- ]
+  "format": "osd-trace/1",
+  "outputs": [
+    {
+      "file": "zcl_l3_fleet2_ships_capture.clas.abap",
+      "lines": [
+        {
+          "line": 1,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/source"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 0}
+          ]
+        },
+        {
+          "line": 2,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/port"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/set"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/variant"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 1}
+          ]
+        },
+        {
+          "line": 3,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/class"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 2}
+          ]
+        },
+        {
+          "line": 4,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 3}
+          ]
+        },
+        {
+          "lines": [5, 6],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/iface"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 4}
+          ]
+        },
+        {
+          "line": 7,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/capture"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 6}
+          ]
+        },
+        {
+          "line": 8,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 7}
+          ]
+        },
+        {
+          "line": 9,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/iface"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 8}
+          ]
+        },
+        {
+          "line": 10,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 9}
+          ]
+        },
+        {
+          "lines": [11, 12],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/capture"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 10}
+          ]
+        },
+        {
+          "lines": [13, 14],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 12}
+          ]
+        },
+        {
+          "line": 15,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/class"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 14}
+          ]
+        },
+        {
+          "lines": [16, 21],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 15}
+          ]
+        },
+        {
+          "line": 22,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/capture"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 21}
+          ]
+        },
+        {
+          "line": 23,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 22}
+          ]
+        },
+        {
+          "lines": [24, 27],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/capture"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 23}
+          ]
+        },
+        {
+          "line": 28,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 27}
+          ]
+        },
+        {
+          "line": 29,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/iface"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 28}
+          ]
+        },
+        {
+          "line": 30,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/table"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 29}
+          ]
+        },
+        {
+          "line": 31,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/capture"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 30}
+          ]
+        },
+        {
+          "line": 32,
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"},
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/key"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 31}
+          ]
+        },
+        {
+          "lines": [33, 36],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/port/ships/variant/capture", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-ports/source-mem.tpl", "anchor": "<partial>", "offset": 32}
+          ]
+        }
+      ]
+    }
+  ]
 }

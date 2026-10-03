@@ -1,0 +1,148 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l3-remote",
+  "generator_version": "0.7",
+  "lines": [
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 1},
+        {"invocation": 1, "path": "/function_lower", "template": "main", "template_line": 1}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 1,
+      "path": "/function_lower",
+      "template": "main",
+      "template_line": 1
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 2}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 2,
+      "path": "/",
+      "template": "main",
+      "template_line": 2
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 3}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 3,
+      "path": "/",
+      "template": "main",
+      "template_line": 3
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 4}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 4,
+      "path": "/",
+      "template": "main",
+      "template_line": 4
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 5}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 5,
+      "path": "/",
+      "template": "main",
+      "template_line": 5
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 6}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 6,
+      "path": "/",
+      "template": "main",
+      "template_line": 6
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 7},
+        {"invocation": 1, "path": "/runner", "template": "main", "template_line": 7}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 7,
+      "path": "/runner",
+      "template": "main",
+      "template_line": 7
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 8}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 8,
+      "path": "/",
+      "template": "main",
+      "template_line": 8
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 9}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 9,
+      "path": "/",
+      "template": "main",
+      "template_line": 9
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 10}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 10,
+      "path": "/",
+      "template": "main",
+      "template_line": 10
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 11},
+        {"invocation": 1, "path": "/runner", "template": "main", "template_line": 11}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 11,
+      "path": "/runner",
+      "template": "main",
+      "template_line": 11
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 12}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 12,
+      "path": "/",
+      "template": "main",
+      "template_line": 12
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 13}
+      ],
+      "file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap",
+      "line": 13,
+      "path": "/",
+      "template": "main",
+      "template_line": 13
+    }
+  ],
+  "model_hash": "sha256:3eb0c6d47c97c273e66312645c3b910b3ba3ff021178f22e82954795bdc50318",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "zl3_fleet2_rfc.fugr.z_l3_fleet2_alerts.abap", "hash": "sha256:3674521b846f0e9b63aea633a1481c86a8516415b95e386e7b4b0262bd806531"}
+  ],
+  "recipe": "recipes/l3-remote/module.tpl",
+  "source": "src/l2demo/fleet2.l3.yaml",
+  "templates": {"recipes/l3-remote/module.tpl": "sha256:eea09f898086500ffa226422a8fb3bf4bff2823b088def2a03cdf994e64f250c"}
+}

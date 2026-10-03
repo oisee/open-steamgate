@@ -1,3 +1,4 @@
+import {readJSONFile} from "./trace-reader.mjs";
 import {l3TableDependencies, l3TableNames} from "./helpers/dsl-l3-tables.mjs";
 import {jobDoctor, jobDoctorModel, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 3b (docs/dsl-l3.md, "Stages, filters and a schedule"): a set
@@ -207,7 +208,7 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
 
     it("the trace: every generated line has a manifest line; a stage's lines trace to the stage, the worklist variant to its port, the schedule to schedule:", () => {
       const text = (f) => readFileSync(join(OUT, f), "utf8").split("\n");
-      const trace = (f) => JSON.parse(readFileSync(join(OUT, f.replace(/\.abap$/, ".trace.json")), "utf8"));
+      const trace = (f) => readJSONFile(join(OUT, f.replace(/\.abap$/, ".trace.json")), "utf8");
       for (const f of [`${RUNNER}.clas.abap`, `${REPORT}.prog.abap`, "zcl_l3_fleet2_ships_worklist.clas.abap", "zcl_l3_fleet2_ports.clas.abap"]) {
         const t = trace(f);
         expect(t.lines.length, f).to.equal(text(f).length - 1);
@@ -256,8 +257,11 @@ describe("DSL L3 slice 3b: stages, a filter stage with a worklist, a schedule", 
     };
     const exec = (statements) => dialogStep(async () => { for (const s of statements) await client.execute(s); });
     const clearAll = () => exec(TABLES.map((t) => `DELETE FROM ${t}`));
-    const model = compileSet(SET);
-    const checks = model.rules.filter((r) => !r.filter);
+    let model, checks;
+    before(() => {
+      model = compileSet(SET);
+      checks = model.rules.filter((r) => !r.filter);
+    });
     const log = () => read("SELECT * FROM zosd_l3_alert WHERE set_name = 'fleet2' ORDER BY rule_name, pile_no, alert_seq")
       .map((r) => ({rule: r.rule_name.trim(), pile: Number(r.pile_no), text: String(r.alert_text), run: r.run_id.trim()}));
     const content = (rows) => rows.map(({rule, text}) => `${rule}: ${text}`).sort();

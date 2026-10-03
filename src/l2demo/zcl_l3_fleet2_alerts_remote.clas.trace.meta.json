@@ -1,0 +1,819 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l3-remote",
+  "generator_version": "0.7",
+  "lines": [
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 1},
+        {"invocation": 1, "path": "/source", "template": "main", "template_line": 1}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 1,
+      "path": "/source",
+      "template": "main",
+      "template_line": 1
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 2},
+        {"invocation": 1, "path": "/class", "template": "main", "template_line": 2}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 2,
+      "path": "/class",
+      "template": "main",
+      "template_line": 2
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 3}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 3,
+      "path": "/",
+      "template": "main",
+      "template_line": 3
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 4},
+        {"invocation": 1, "path": "/iface", "template": "main", "template_line": 4}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 4,
+      "path": "/iface",
+      "template": "main",
+      "template_line": 4
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 5},
+        {"invocation": 1, "path": "/header", "template": "main", "template_line": 5}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 5,
+      "path": "/header",
+      "template": "main",
+      "template_line": 5
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 6},
+        {"invocation": 1, "path": "/receipt", "template": "main", "template_line": 6}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 6,
+      "path": "/receipt",
+      "template": "main",
+      "template_line": 6
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 7}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 7,
+      "path": "/",
+      "template": "main",
+      "template_line": 7
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 8}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 8,
+      "path": "/",
+      "template": "main",
+      "template_line": 8
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 9},
+        {"invocation": 1, "path": "/class", "template": "main", "template_line": 9}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 9,
+      "path": "/class",
+      "template": "main",
+      "template_line": 9
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 10},
+        {"invocation": 1, "path": "/iface", "template": "main", "template_line": 10}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 10,
+      "path": "/iface",
+      "template": "main",
+      "template_line": 10
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 11},
+        {"invocation": 1, "path": "/rows", "template": "main", "template_line": 11}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 11,
+      "path": "/rows",
+      "template": "main",
+      "template_line": 11
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 12},
+        {"invocation": 1, "path": "/row", "template": "main", "template_line": 12}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 12,
+      "path": "/row",
+      "template": "main",
+      "template_line": 12
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 13}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 13,
+      "path": "/",
+      "template": "main",
+      "template_line": 13
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 14}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 14,
+      "path": "/",
+      "template": "main",
+      "template_line": 14
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 15}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 15,
+      "path": "/",
+      "template": "main",
+      "template_line": 15
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 16}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 16,
+      "path": "/",
+      "template": "main",
+      "template_line": 16
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 17},
+        {"invocation": 1, "path": "/link", "template": "main", "template_line": 17}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 17,
+      "path": "/link",
+      "template": "main",
+      "template_line": 17
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 18}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 18,
+      "path": "/",
+      "template": "main",
+      "template_line": 18
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 19}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 19,
+      "path": "/",
+      "template": "main",
+      "template_line": 19
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 20}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 20,
+      "path": "/",
+      "template": "main",
+      "template_line": 20
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 21},
+        {"invocation": 1, "path": "/conf", "template": "main", "template_line": 21}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 21,
+      "path": "/conf",
+      "template": "main",
+      "template_line": 21
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 22}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 22,
+      "path": "/",
+      "template": "main",
+      "template_line": 22
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 23}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 23,
+      "path": "/",
+      "template": "main",
+      "template_line": 23
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 24}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 24,
+      "path": "/",
+      "template": "main",
+      "template_line": 24
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 25}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 25,
+      "path": "/",
+      "template": "main",
+      "template_line": 25
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 26}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 26,
+      "path": "/",
+      "template": "main",
+      "template_line": 26
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 27}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 27,
+      "path": "/",
+      "template": "main",
+      "template_line": 27
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 28}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 28,
+      "path": "/",
+      "template": "main",
+      "template_line": 28
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 29}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 29,
+      "path": "/",
+      "template": "main",
+      "template_line": 29
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 30}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 30,
+      "path": "/",
+      "template": "main",
+      "template_line": 30
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 31}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 31,
+      "path": "/",
+      "template": "main",
+      "template_line": 31
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 32}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 32,
+      "path": "/",
+      "template": "main",
+      "template_line": 32
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 33}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 33,
+      "path": "/",
+      "template": "main",
+      "template_line": 33
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 34}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 34,
+      "path": "/",
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 35}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 35,
+      "path": "/",
+      "template": "main",
+      "template_line": 35
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 36}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 36,
+      "path": "/",
+      "template": "main",
+      "template_line": 36
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 37}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 37,
+      "path": "/",
+      "template": "main",
+      "template_line": 37
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 38}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 38,
+      "path": "/",
+      "template": "main",
+      "template_line": 38
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 39}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 39,
+      "path": "/",
+      "template": "main",
+      "template_line": 39
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 40}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 40,
+      "path": "/",
+      "template": "main",
+      "template_line": 40
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 41}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 41,
+      "path": "/",
+      "template": "main",
+      "template_line": 41
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 42}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 42,
+      "path": "/",
+      "template": "main",
+      "template_line": 42
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 43}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 43,
+      "path": "/",
+      "template": "main",
+      "template_line": 43
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 44}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 44,
+      "path": "/",
+      "template": "main",
+      "template_line": 44
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 45}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 45,
+      "path": "/",
+      "template": "main",
+      "template_line": 45
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 46}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 46,
+      "path": "/",
+      "template": "main",
+      "template_line": 46
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 47}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 47,
+      "path": "/",
+      "template": "main",
+      "template_line": 47
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/conf", "template": "main", "template_line": 49},
+        {"invocation": 1, "path": "/setting", "template": "main", "template_line": 49}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 48,
+      "path": "/conf",
+      "template": "main",
+      "template_line": 49
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/setting", "template": "main", "template_line": 50}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 49,
+      "path": "/setting",
+      "template": "main",
+      "template_line": 50
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 55},
+        {"invocation": 1, "path": "/function", "template": "main", "template_line": 55}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 50,
+      "path": "/function",
+      "template": "main",
+      "template_line": 55
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 56}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 51,
+      "path": "/",
+      "template": "main",
+      "template_line": 56
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 57}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 52,
+      "path": "/",
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 58}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 53,
+      "path": "/",
+      "template": "main",
+      "template_line": 58
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 59}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 54,
+      "path": "/",
+      "template": "main",
+      "template_line": 59
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 60}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 55,
+      "path": "/",
+      "template": "main",
+      "template_line": 60
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 61}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 56,
+      "path": "/",
+      "template": "main",
+      "template_line": 61
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 62}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 57,
+      "path": "/",
+      "template": "main",
+      "template_line": 62
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 63}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 58,
+      "path": "/",
+      "template": "main",
+      "template_line": 63
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 64}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 59,
+      "path": "/",
+      "template": "main",
+      "template_line": 64
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 65}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 60,
+      "path": "/",
+      "template": "main",
+      "template_line": 65
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 66}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 61,
+      "path": "/",
+      "template": "main",
+      "template_line": 66
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 67}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 62,
+      "path": "/",
+      "template": "main",
+      "template_line": 67
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 68}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 63,
+      "path": "/",
+      "template": "main",
+      "template_line": 68
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 69}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 64,
+      "path": "/",
+      "template": "main",
+      "template_line": 69
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 70}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 65,
+      "path": "/",
+      "template": "main",
+      "template_line": 70
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 71}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 66,
+      "path": "/",
+      "template": "main",
+      "template_line": 71
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 72}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 67,
+      "path": "/",
+      "template": "main",
+      "template_line": 72
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 73}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 68,
+      "path": "/",
+      "template": "main",
+      "template_line": 73
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 74}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 69,
+      "path": "/",
+      "template": "main",
+      "template_line": 74
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 75}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 70,
+      "path": "/",
+      "template": "main",
+      "template_line": 75
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 76}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 71,
+      "path": "/",
+      "template": "main",
+      "template_line": 76
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 77}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 72,
+      "path": "/",
+      "template": "main",
+      "template_line": 77
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 78}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 73,
+      "path": "/",
+      "template": "main",
+      "template_line": 78
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 79}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 74,
+      "path": "/",
+      "template": "main",
+      "template_line": 79
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 80}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 75,
+      "path": "/",
+      "template": "main",
+      "template_line": 80
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 81},
+        {"invocation": 1, "path": "/link", "template": "main", "template_line": 81}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 76,
+      "path": "/link",
+      "template": "main",
+      "template_line": 81
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 82}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 77,
+      "path": "/",
+      "template": "main",
+      "template_line": 82
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 83}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 78,
+      "path": "/",
+      "template": "main",
+      "template_line": 83
+    },
+    {
+      "contributors": [
+        {"invocation": 1, "path": "/", "template": "main", "template_line": 84}
+      ],
+      "file": "zcl_l3_fleet2_alerts_remote.clas.abap",
+      "line": 79,
+      "path": "/",
+      "template": "main",
+      "template_line": 84
+    }
+  ],
+  "model_hash": "sha256:3eb0c6d47c97c273e66312645c3b910b3ba3ff021178f22e82954795bdc50318",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "zcl_l3_fleet2_alerts_remote.clas.abap", "hash": "sha256:214a9c11eee59cae2089788b425bda13cddcecd346c18d79ad286baceee66a0f"}
+  ],
+  "recipe": "recipes/l3-remote/client.tpl",
+  "source": "src/l2demo/fleet2.l3.yaml",
+  "templates": {"recipes/l3-remote/client.tpl": "sha256:009eb0636251a5f0a9f06543dbc741070497890938c82f9ed1aa76c7ba81f673"}
+}

@@ -1,0 +1,960 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l3",
+  "generator_version": "0.7",
+  "lines": [
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 1
+        },
+        {
+          "invocation": 1,
+          "path": "/report",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/report"},
+          "template": "main",
+          "template_line": 1
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 1,
+      "node": "set/fleet3",
+      "path": "/report",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 1
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 2
+        },
+        {
+          "invocation": 1,
+          "path": "/source",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/source"},
+          "template": "main",
+          "template_line": 2
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 2,
+      "node": "set/fleet3",
+      "path": "/source",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 2
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 3
+        },
+        {
+          "invocation": 1,
+          "path": "/set",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/set"},
+          "template": "main",
+          "template_line": 3
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 3,
+      "node": "set/fleet3",
+      "path": "/set",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 3
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 4
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/class"},
+          "template": "main",
+          "template_line": 4
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 4,
+      "node": "set/fleet3",
+      "path": "/class",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 4
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/planned",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/piles", "selector": "/"},
+          "template": "main",
+          "template_line": 6
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 5,
+      "node": "set/fleet3/piles",
+      "path": "/planned",
+      "set_line": 15,
+      "template": "main",
+      "template_line": 6
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/planned",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/piles", "selector": "/"},
+          "template": "main",
+          "template_line": 7
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 6,
+      "node": "set/fleet3/piles",
+      "path": "/planned",
+      "set_line": 15,
+      "template": "main",
+      "template_line": 7
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 24
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 7,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 24
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 25
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 8,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 25
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 26
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 9,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 26
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 27
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 10,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 27
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/planned",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/piles", "selector": "/"},
+          "template": "main",
+          "template_line": 29
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 11,
+      "node": "set/fleet3/piles",
+      "path": "/planned",
+      "set_line": 15,
+      "template": "main",
+      "template_line": 29
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 31
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 12,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 31
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/1",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/setting/params.restricted", "selector": "/"},
+          "template": "main",
+          "template_line": 34
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/1/screen",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/setting/params.restricted", "selector": "/screen"},
+          "template": "main",
+          "template_line": 34
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 13,
+      "node": "set/fleet3/setting/params.restricted",
+      "path": "/settings/entries/1/screen",
+      "set_line": 42,
+      "template": "main",
+      "template_line": 34
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/active_status", "selector": "/"},
+          "template": "main",
+          "template_line": 43
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/screen",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/active_status", "selector": "/screen"},
+          "template": "main",
+          "template_line": 43
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/type_name",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/active_status", "selector": "/type_name"},
+          "template": "main",
+          "template_line": 43
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 14,
+      "node": "set/fleet3/param/active_status",
+      "path": "/params/1/screen",
+      "set_line": 12,
+      "template": "main",
+      "template_line": 43
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/is_selopt",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/restricted", "selector": "/is_selopt"},
+          "template": "main",
+          "template_line": 39
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/sel",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/restricted", "selector": "/sel"},
+          "template": "main",
+          "template_line": 39
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/type_name",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/restricted", "selector": "/type_name"},
+          "template": "main",
+          "template_line": 39
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 15,
+      "node": "set/fleet3/param/restricted",
+      "path": "/params/2/sel",
+      "set_line": 13,
+      "template": "main",
+      "template_line": 39
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2/is_selopt",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/restricted", "selector": "/is_selopt"},
+          "template": "main",
+          "template_line": 40
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/screen",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/restricted", "selector": "/screen"},
+          "template": "main",
+          "template_line": 40
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/sel",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/restricted", "selector": "/sel"},
+          "template": "main",
+          "template_line": 40
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 16,
+      "node": "set/fleet3/param/restricted",
+      "path": "/params/2/screen",
+      "set_line": 13,
+      "template": "main",
+      "template_line": 40
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/3/is_selopt",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/exempt", "selector": "/is_selopt"},
+          "template": "main",
+          "template_line": 39
+        },
+        {
+          "invocation": 1,
+          "path": "/params/3/sel",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/exempt", "selector": "/sel"},
+          "template": "main",
+          "template_line": 39
+        },
+        {
+          "invocation": 1,
+          "path": "/params/3/type_name",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/exempt", "selector": "/type_name"},
+          "template": "main",
+          "template_line": 39
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 17,
+      "node": "set/fleet3/param/exempt",
+      "path": "/params/3/sel",
+      "set_line": 14,
+      "template": "main",
+      "template_line": 39
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/3/is_selopt",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/exempt", "selector": "/is_selopt"},
+          "template": "main",
+          "template_line": 40
+        },
+        {
+          "invocation": 1,
+          "path": "/params/3/screen",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/exempt", "selector": "/screen"},
+          "template": "main",
+          "template_line": 40
+        },
+        {
+          "invocation": 1,
+          "path": "/params/3/sel",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/exempt", "selector": "/sel"},
+          "template": "main",
+          "template_line": 40
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 18,
+      "node": "set/fleet3/param/exempt",
+      "path": "/params/3/screen",
+      "set_line": 14,
+      "template": "main",
+      "template_line": 40
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 49
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 19,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 49
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 50
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 20,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 50
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 51
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/class"},
+          "template": "main",
+          "template_line": 51
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 21,
+      "node": "set/fleet3",
+      "path": "/class",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 51
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 52
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 22,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 52
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/settings", "selector": "/"},
+          "template": "main",
+          "template_line": 54
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/class",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/settings", "selector": "/class"},
+          "template": "main",
+          "template_line": 54
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 23,
+      "node": "set/fleet3/settings",
+      "path": "/settings/class",
+      "set_line": 41,
+      "template": "main",
+      "template_line": 54
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings/entries/1",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/setting/params.restricted", "selector": "/"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/1/field",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/setting/params.restricted", "selector": "/field"},
+          "template": "main",
+          "template_line": 57
+        },
+        {
+          "invocation": 1,
+          "path": "/settings/entries/1/screen",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/setting/params.restricted", "selector": "/screen"},
+          "template": "main",
+          "template_line": 57
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 24,
+      "node": "set/fleet3/setting/params.restricted",
+      "path": "/settings/entries/1/field",
+      "set_line": 42,
+      "template": "main",
+      "template_line": 57
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/class",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/class"},
+          "template": "main",
+          "template_line": 62
+        },
+        {
+          "invocation": 1,
+          "path": "/with_params",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/params", "selector": "/"},
+          "template": "main",
+          "template_line": 62
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 25,
+      "node": "set/fleet3",
+      "path": "/class",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 62
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/1",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/active_status", "selector": "/"},
+          "template": "main",
+          "template_line": 103
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/name",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/active_status", "selector": "/name"},
+          "template": "main",
+          "template_line": 103
+        },
+        {
+          "invocation": 1,
+          "path": "/params/1/screen",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/active_status", "selector": "/screen"},
+          "template": "main",
+          "template_line": 103
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 26,
+      "node": "set/fleet3/param/active_status",
+      "path": "/params/1/name",
+      "set_line": 12,
+      "template": "main",
+      "template_line": 103
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/2",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/restricted", "selector": "/"},
+          "template": "main",
+          "template_line": 103
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/is_selopt",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/restricted", "selector": "/is_selopt"},
+          "template": "main",
+          "template_line": 103
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/name",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/restricted", "selector": "/name"},
+          "template": "main",
+          "template_line": 103
+        },
+        {
+          "invocation": 1,
+          "path": "/params/2/screen",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/restricted", "selector": "/screen"},
+          "template": "main",
+          "template_line": 103
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 27,
+      "node": "set/fleet3/param/restricted",
+      "path": "/params/2/name",
+      "set_line": 13,
+      "template": "main",
+      "template_line": 103
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/params/3",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/exempt", "selector": "/"},
+          "template": "main",
+          "template_line": 103
+        },
+        {
+          "invocation": 1,
+          "path": "/params/3/is_selopt",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/exempt", "selector": "/is_selopt"},
+          "template": "main",
+          "template_line": 103
+        },
+        {
+          "invocation": 1,
+          "path": "/params/3/name",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/exempt", "selector": "/name"},
+          "template": "main",
+          "template_line": 103
+        },
+        {
+          "invocation": 1,
+          "path": "/params/3/screen",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/param/exempt", "selector": "/screen"},
+          "template": "main",
+          "template_line": 103
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 28,
+      "node": "set/fleet3/param/exempt",
+      "path": "/params/3/name",
+      "set_line": 14,
+      "template": "main",
+      "template_line": 103
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 105
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 29,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 105
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 106
+        },
+        {
+          "invocation": 1,
+          "path": "/class",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/class"},
+          "template": "main",
+          "template_line": 106
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 30,
+      "node": "set/fleet3",
+      "path": "/class",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 106
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 107
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 31,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 107
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 108
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 32,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 108
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 109
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 33,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 109
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/settings",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/settings", "selector": "/"},
+          "template": "main",
+          "template_line": 111
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 34,
+      "node": "set/fleet3/settings",
+      "path": "/settings",
+      "set_line": 41,
+      "template": "main",
+      "template_line": 111
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/planned",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/piles", "selector": "/"},
+          "template": "main",
+          "template_line": 114
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 35,
+      "node": "set/fleet3/piles",
+      "path": "/planned",
+      "set_line": 15,
+      "template": "main",
+      "template_line": 114
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/with_params",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3/params", "selector": "/"},
+          "template": "main",
+          "template_line": 117
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 36,
+      "node": "set/fleet3/params",
+      "path": "/with_params",
+      "set_line": 11,
+      "template": "main",
+      "template_line": 117
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 119
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 37,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 119
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 120
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 38,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 120
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 141
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 39,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 141
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 142
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 40,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 142
+    },
+    {
+      "contributors": [
+        {
+          "invocation": 1,
+          "path": "/",
+          "source": {"file": "src/l2demo/fleet3.l3.yaml", "node": "set/fleet3", "selector": "/"},
+          "template": "main",
+          "template_line": 143
+        }
+      ],
+      "file": "zl3_fleet3.prog.abap",
+      "line": 41,
+      "node": "set/fleet3",
+      "path": "/",
+      "set_line": 8,
+      "template": "main",
+      "template_line": 143
+    }
+  ],
+  "model": "sha256:e3fae6a570e9d267a412946b6b2afda03a341922f6a185a26311ae444a650133",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "zl3_fleet3.prog.abap", "hash": "sha256:145ad3b636c46078e524a1b0947ffd8cdf9d83588829a07c73ae86c1a80840ba"}
+  ],
+  "rules": {
+    "ship-in-service-has-a-captain": {"class": "zcl_l2_ship_captain", "file": "src/l2demo/ship_captain.l2.yaml", "model": "sha256:c354a2df3f0f895d4132bc9e3f3fadd07b2f7b04066360d8ba6c7fcabd981d99"},
+    "ship-restricted-status-no-voyage": {"class": "zcl_l2_ship_restricted", "file": "src/l2demo/ship_restricted_status.l2.yaml", "model": "sha256:18006270e7dcddf8c40bc565abb3af570fa4cd132647d3710090252ae99418cd"}
+  },
+  "set": "src/l2demo/fleet3.l3.yaml",
+  "template": "recipes/l3-job/template.tpl",
+  "templates": {"recipes/l3-job/template.tpl": "sha256:49b4fa71f60a882358ce5550a4539a0f5b649d26fe5d119216a8e7902d60712a"}
+}

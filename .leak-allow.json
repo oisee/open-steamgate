@@ -2,6 +2,21 @@
   "note": "Совпадения, на которые посмотрели и решили, что это не утечка. Каждому нужна причина: иначе список превращается в способ погасить проверку.",
   "allow": [
     {
+      "file": "src/l2demo/zcl_l3_fleet2.clas.trace.meta.json",
+      "value": "172.30.209.132",
+      "reason": "Packed byte coincidence ac1ed184 in SHA-256 85b9e48413de0e8970035e64ac1ed184ed84fafe5bae45634f7360f76e784844, independently recomputed from recipes/l3-cockpit/runner.patch.json. This is a template digest, not a system address."
+    },
+    {
+      "file": "src/l2demo/zcl_l3_fleet2_conf.clas.trace.meta.json",
+      "value": "172.30.209.132",
+      "reason": "The same independently verified SHA-256 of recipes/l3-cockpit/runner.patch.json is recorded by the settings writer; ac1ed184 is a digest byte coincidence."
+    },
+    {
+      "file": "src/l2demo/zl3c_fleet2.service.trace.meta.json",
+      "value": "172.26.173.35",
+      "reason": "Packed byte coincidence ac1aad23 in deterministic model_hash efb319245157dc29d8ac1aad233edbc03badbcee812b23248230d41ffb309eca. convertTrace hashes JSON.stringify of the synthetic fleet2 cockpit render model; fresh-build tests reproduce this digest. No address is present in the model."
+    },
+    {
       "file": "LICENSE",
       "value": "Vinogradova",
       "reason": "Держатель авторских прав. Имя тут стоит намеренно — это не идентификатор системы."

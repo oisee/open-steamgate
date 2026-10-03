@@ -1,3 +1,4 @@
+import {readJSONFile, readTraceMap} from "./trace-reader.mjs";
 import {expect} from 'chai';
 import {mkdtempSync,readFileSync,writeFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -15,10 +16,11 @@ import {dialogStep} from '../tools/osd-dialog-step.mjs';
 import {BatchRuns} from '../tools/osd-batch-runs.mjs';
 
 const SET = 'src/l2demo/fleet2.l3.yaml';
-const model = compileSet(SET);
+let model;
 const str = (s) => new globalThis.abap.types.String().set(String(s));
 describe('DSL L3 replay: a twin of one night', function () {
   this.timeout(900000);
+  before(() => { model = compileSet(SET); });
   let scratch,sourceProfile,dbPath,abap,client,store,restoreClock,priorContext,priorClasses,priorEnv;
   const manifest = (doc,name) => {
     for (const stage of doc.stages) for (const r of stage.rules) if (!r.rule.startsWith('/')) r.rule = resolve(dirname(SET),r.rule);
@@ -127,8 +129,8 @@ describe('DSL L3 replay: a twin of one night', function () {
     expect(m.replay.rules.find((r) => r.rule === 'ship-cargo-limit').slow_factor.value).to.equal('1');
     expect(files[`${m.replay.work_class}.clas.abap`]).to.include('rv_text = |RPL ');
     expect(files[`${m.class}.clas.abap`]).to.include("CONCATENATE 'rpl256:'").and.include('rv_bind = `work=real`.');
-    expect(JSON.parse(files[`${m.class}.clas.trace.json`]).replay_overlay).to.deep.equal(['recipes/l3-replay/overlay.json']);
-    expect(JSON.parse(files[`${m.ports_class}.clas.trace.json`]).replay_overlay).to.deep.equal(['recipes/l3-replay/overlay.json']);
+    expect(readTraceMap(files, `${m.class}.clas.trace.json`).replay_overlay).to.deep.equal(['recipes/l3-replay/overlay.json']);
+    expect(readTraceMap(files, `${m.ports_class}.clas.trace.json`).replay_overlay).to.deep.equal(['recipes/l3-replay/overlay.json']);
   });
   it('the profile reproduces measured outcome frequencies within 2.5 percentage points, duration CDF within 12.5 points, hits within 0.15', () => {
     expect(distributionProblems(empirical())).to.deep.equal([]);

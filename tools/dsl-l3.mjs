@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import {templateOrigins} from "./dsl-trace-origins.mjs";
+import {convertFiles, enrichTrace, legacyTrace, readTraceFile, traceArgs} from "./dsl-trace.mjs";
 // DSL L3: a set of L2 rules run as one unit, with a durable alert log and a
 // trace from every alert to its rule line (docs/dsl-l3.md). A set is one
 // manifest, `<set>.l3.yaml`, naming its rules by their `.l2.yaml` files; this
@@ -9,6 +11,8 @@
 //   node tools/dsl-l3.mjs build <set.l3.yaml> --out <dir> [--ddic <folder>]...
 //   node tools/dsl-l3.mjs check <set.l3.yaml> --out <dir> [--ddic <folder>]...
 //   node tools/dsl-l3.mjs explain <set>/<rule>/<model hash>/<date>/<pile>/<seq> [--set <set.l3.yaml>]... [--db <sqlite file>]
+import {ruleVersion} from "./dsl-trace-history.mjs";
+export {ruleVersion};
 import {spawnSync} from "node:child_process";
 import {createHash} from "node:crypto";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
@@ -250,17 +254,21 @@ export function compileSet(file, {ddic, registry, out} = {}) {
     twice("class", compiled.class, `class ${compiled.class}`);
     if (compiled.rule.length > WIDTH.rule) fail(at, `rule name ${compiled.rule} is longer than ${WIDTH.rule} characters, the width of ZOSD_L3_ALERT-RULE_NAME`);
     const hash = modelHash(renderModel(compiled));
-    const sidecar = sidecarOf(ruleFile, compiled.class);
-    let committed;
-    try { committed = JSON.parse(readFileSync(sidecar, "utf8")).model; } catch { committed = undefined; }
-    if (committed === undefined) fail(at, `rule ${entry.rule} has no generated class beside it (${path(sidecar)}); build it with node tools/dsl-l2.mjs build ${path(ruleFile)} --out ${path(dirname(ruleFile))}`);
-    if (committed !== hash) fail(at, `the generated class of ${entry.rule} is stale (its trace names ${committed}, the rule compiles to ${hash}); rebuild it with node tools/dsl-l2.mjs build ${path(ruleFile)} --out ${path(dirname(ruleFile))}`);
     // a check class is read-only by construction: a replay runs it with the table swapped
     const classFile = join(dirname(ruleFile), `${compiled.class}.clas.abap`);
     if (existsSync(classFile)) {
       const [first] = unitFindings(readFileSync(classFile, "utf8"), basename(classFile));
       if (first) fail(at, `the generated class of ${entry.rule} (${path(classFile)}:${first.line}) holds a ${first.what}; a check class only reads (a replay swaps table content under it)`);
     }
+    const sidecar = sidecarOf(ruleFile, compiled.class);
+    let committed;
+    try { committed = readTraceFile(sidecar).model; }
+    catch (error) {
+      if (error.message.includes("hash mismatch")) fail(at, `rule ${entry.rule}: ${error.message}; rebuild its check class`);
+      committed = undefined;
+    }
+    if (committed === undefined) fail(at, `rule ${entry.rule} has no generated class beside it (${path(sidecar)}); build it with node tools/dsl-l2.mjs build ${path(ruleFile)} --out ${path(dirname(ruleFile))}`);
+    if (committed !== hash) fail(at, `the generated class of ${entry.rule} is stale (its trace names ${committed}, the rule compiles to ${hash}); rebuild it with node tools/dsl-l2.mjs build ${path(ruleFile)} --out ${path(dirname(ruleFile))}`);
     const recorded = compiled.source;
     if (recorded.length > WIDTH.file) fail(at, `rule path ${recorded} is longer than ${WIDTH.file} characters, the width of ZOSD_L3_ALERT-RULE_FILE`);
     return {at, enabled: enabled === "true", compiled, hash, recorded, s};
@@ -536,7 +544,7 @@ function sidecar(model, template, rendered) {
     ...(model.remote && template === SET_TEMPLATE ? {remote_overlay: ["public", "send", "receive", "counts", "release", "resume"].map((n) => `recipes/l3-remote/${n}.tpl`)} : {}),
     model: `sha256:${createHash("sha256").update(JSON.stringify(model)).digest("hex")}`,
     ...(model.rules ? {rules: Object.fromEntries(model.rules.map((r) => [r.name, {file: r.file, class: r.check_class, model: r.hash}]))} : {}),
-    lines: rendered.trace.map((entry) => ({line: entry.line, template_line: entry.template_line, path: entry.path,
+    lines: enrichTrace(model, rendered.trace).map((entry) => ({...(!legacyTrace() ? entry : {}), line: entry.line, template_line: entry.template_line, path: entry.path,
       ...provenance(model, entry.path)})),
   }, null, 1) + "\n";
 }
@@ -594,19 +602,31 @@ function overlaid(model, template, patches) {
   if (model.cockpit && patches.cockpit) files.push(`${OVERLAY.cockpit}/${patches.cockpit}`);
   if (!files.length && !model.autodoctor && !model.resilience?.doctor.explicit_every) return undefined;
   let text = readFileSync(template, "utf8");
-  for (const file of files) text = governorTemplate(text, JSON.parse(readFileSync(file, "utf8")));
+  const original = text;
+  const tracker = templateOrigins(template,text);
+  for (const file of files) text = governorTemplate(text, JSON.parse(readFileSync(file, "utf8")), tracker.observe, file);
   if (model.replay && patches.simulate) {
-    text = replayOverlay(text, template === PORT_TEMPLATES.factory ? "factory" : "runner");
+    text = replayOverlay(text, template === PORT_TEMPLATES.factory ? "factory" : "runner", tracker.observe);
   }
-  text = doctorOverlay(model, text, template === JOB_TEMPLATE ? "job" : template === SET_TEMPLATE ? "runner" : "port");
-  return {templateText: text, replay: model.replay && patches.simulate ? ["recipes/l3-replay/overlay.json"] : [], sim: files.filter((f) => f.startsWith(OVERLAY.simulate))};
+  text = doctorOverlay(model, text, template === JOB_TEMPLATE ? "job" : template === SET_TEMPLATE ? "runner" : "port", tracker.observe);
+  return {templateText: text, tracker, original, replay: model.replay && patches.simulate ? ["recipes/l3-replay/overlay.json"] : [], sim: files.filter((f) => f.startsWith(OVERLAY.simulate))};
 }
 async function renderWith(model, template, patches) {
   const {renderRecipe} = await import("./dsl-abap.mjs");
   let over = overlaid(model, template, patches);
-  if (model.snapshots && template === SET_TEMPLATE) over = {...(over ?? {sim: [], replay: []}), templateText: snapshotOverlay(model, over?.templateText ?? readFileSync(template, "utf8"))};
-  if (model.remote && template === SET_TEMPLATE) over = {...(over ?? {sim: [], replay: []}), templateText: remoteOverlay(model, over?.templateText ?? readFileSync(template, "utf8"))};
-  const result = await renderRecipe(model, template, {profile: "abap", ...(over ? {templateText: over.templateText} : {})});
+  const base = () => {
+    const original = readFileSync(template,"utf8");
+    return {templateText:original,original,tracker:templateOrigins(template,original),sim:[],replay:[]};
+  };
+  if (model.snapshots && template === SET_TEMPLATE) {
+    over ??= base();
+    over.templateText = snapshotOverlay(model,over.templateText,over.tracker.observe);
+  }
+  if (model.remote && template === SET_TEMPLATE) {
+    over ??= base();
+    over.templateText = remoteOverlay(model,over.templateText,over.tracker.observe);
+  }
+  const result = await renderRecipe(model, template, {profile: "abap", ...(over ? {templateText: over.templateText, templateOrigins: over.templateText === over.original ? undefined : over.tracker.origins} : {})});
   return over?.sim.length ? {...result, simOverlays: over.sim, replayOverlays: over.replay} : result;
 }
 
@@ -636,14 +656,17 @@ export async function renderSet(model) {
     for (const [name, template, kind] of [[model.settings.class, "recipes/l3-settings/class.tpl", "clas"],
       [model.settings.report, "recipes/l3-settings/report.tpl", "prog"]]) {
       // the governor's patch, then the twin's (the sum of the outcome shares), then the cockpit's
-      const patched = () => {
-        let text = readFileSync(template, "utf8");
-        if (model.governor) text = governorTemplate(text, JSON.parse(readFileSync("recipes/l3-governor/settings.patch.json", "utf8")));
-        if (model.settings.chaos_sum) text = governorTemplate(text, JSON.parse(readFileSync("recipes/l3-sim/settings.patch.json", "utf8")));
-        return cockpitRunnerTemplate(model, text, "settings");
-      };
-      const rendered = await renderRecipe(model, template, {profile: "abap", ...((model.governor || model.cockpit || model.settings.chaos_sum) && kind === "clas" ? {templateText: patched()}
-        : model.cockpit && kind === "prog" ? {templateText: cockpitRunnerTemplate(model, readFileSync(template, "utf8"), "settings-report")} : {})});
+      let text = readFileSync(template, "utf8");
+      const original = text;
+      const tracker = templateOrigins(template,text);
+      if (kind === "clas") {
+        for (const file of [
+          ...(model.governor ? ["recipes/l3-governor/settings.patch.json"] : []),
+          ...(model.settings.chaos_sum ? ["recipes/l3-sim/settings.patch.json"] : []),
+        ]) text = governorTemplate(text, JSON.parse(readFileSync(file,"utf8")), tracker.observe, file);
+      }
+      text = cockpitRunnerTemplate(model,text,kind === "clas" ? "settings" : "settings-report",tracker.observe);
+      const rendered = await renderRecipe(model,template,{profile:"abap",templateText:text,templateOrigins:text === original ? undefined : tracker.origins});
       results.push([`${name}.${kind}.abap`, rendered]);
     }
   }
@@ -652,7 +675,7 @@ export async function renderSet(model) {
     if (error) throw new SetError(model.where ?? model.source, nodeLine(error.node), `the generated ${name} line ${error.line}: ${error.text} (${error.rule}, ${error.node})`);
   }
   return {
-    files: {
+    files: convertFiles({
       ...extra.files,
       ...remoteFiles,
       ...(model.cockpit ? await renderCockpit(model) : {}),
@@ -668,7 +691,7 @@ export async function renderSet(model) {
       [`${model.report}.prog.abap`]: job.text,
       [`${model.report}.prog.xml`]: progXml(model),
       [`${model.report}.prog.trace.json`]: sidecar(model, JOB_TEMPLATE, job),
-    },
+    }, {model}),
     findings: [...results.filter(([name]) => /_(dmn\.clas|doc\.prog)\.abap$/.test(name)).flatMap(([name, r]) => r.findings.map((f) => ({...f, file: name}))),
       ...runner.findings.map((f) => ({...f, file: `${model.class}.clas.abap`})),
       ...job.findings.map((f) => ({...f, file: `${model.report}.prog.abap`})),
@@ -779,32 +802,6 @@ function setFiles(root = "src") {
 
 const git = (args) => spawnSync("git", args, {encoding: "utf8", maxBuffer: 64 * 1024 * 1024});
 
-// The rule file and its check class's sidecar as they were when the class
-// carried `hash`: the working tree when it still does, else the commit that
-// wrote it, found by git's pickaxe on the sidecar.
-function ruleVersion(entry, hash, base) {
-  const ruleFile = join(base, entry.file);
-  const sidecarPath = join(dirname(ruleFile), `${entry.check_class}.clas.trace.json`);
-  const inRepo = (file) => relative(base, file).split(sep).join("/");
-  const read = (file) => readFileSync(file, "utf8");
-  const current = existsSync(sidecarPath) ? JSON.parse(read(sidecarPath)) : undefined;
-  if (current?.model.replace(/^sha256:/, "").startsWith(hash)) {
-    return {where: "the working tree", rule: read(ruleFile), check: read(sidecarPath.replace(/\.trace\.json$/, ".abap")), trace: current};
-  }
-  const log = git(["-C", base, "log", "--format=%H", "-S", hash, "--", inRepo(sidecarPath)]);
-  for (const commit of log.status === 0 ? log.stdout.split("\n").filter(Boolean) : []) {
-    const show = (file) => git(["-C", base, "show", `${commit}:${file}`]);
-    const trace = show(inRepo(sidecarPath));
-    if (trace.status !== 0) continue;
-    const parsed = JSON.parse(trace.stdout);
-    if (!parsed.model.replace(/^sha256:/, "").startsWith(hash)) continue;
-    const rule = show(parsed.rule ?? inRepo(ruleFile));
-    const check = show(inRepo(sidecarPath).replace(/\.trace\.json$/, ".abap"));
-    if (rule.status !== 0 || check.status !== 0) continue;
-    return {where: `commit ${commit.slice(0, 12)}`, rule: rule.stdout, check: check.stdout, trace: parsed};
-  }
-  return undefined;
-}
 
 function alertRow(db, key) {
   if (!db) return undefined;
@@ -869,9 +866,14 @@ export async function explainAlert(key, {sets = setFiles(), db, row} = {}) {
   const ruleLines = version.rule.split("\n");
   const ruleLine = alertRowFound?.rule_line ? Number(alertRowFound.rule_line) : Number(entry.alert_line);
   const checkLines = version.check.split("\n");
-  const generated = version.trace.lines.filter((l) => l.rule_line === ruleLine).map((l) => l.line);
-  const runnerTrace = JSON.parse(readFileSync(join(dirname(found.file), `${model.class}.clas.trace.json`), "utf8"));
-  const runnerLines = runnerTrace.lines.filter((l) => l.node === entry["@id"]).map((l) => l.line);
+  const alertNode = `rule/${k.rule}/alert`;
+  const generated = version.trace.lines.filter((l) => version.trace.format === "osd-trace/1"
+    ? l.sources.some(s => s.node === alertNode || s.node.startsWith(`${alertNode}/`))
+    : l.rule_line === ruleLine).map((l) => l.line);
+  const runnerTrace = readTraceFile(join(dirname(found.file), `${model.class}.clas.trace.json`));
+  const runnerLines = runnerTrace.lines.filter((l) => runnerTrace.format === "osd-trace/1"
+    ? l.sources.some(s => s.node === entry["@id"])
+    : l.node === entry["@id"]).map((l) => l.line);
   const out = [
     `alert   ${k.set}/${k.rule}/sha256:${k.hash.slice(0, 12)}.../${k.date}/${k.pile}/${k.seq}`,
     ...(alertRowFound ? [`text    ${String(alertRowFound.alert_text).trimEnd()}`, `run     ${String(alertRowFound.run_id).trim()} at ${alertRowFound.run_ts}`] : []),
@@ -985,7 +987,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // exit only once stdout and stderr have drained: a piped stdout is
   // asynchronous, and process.exit() right after console.log loses the output
   const flushThenExit = (code) => process.stdout.write("", () => process.stderr.write("", () => process.exit(code)));
-  main(process.argv.slice(2)).then(flushThenExit, (error) => {
+  main(traceArgs(process.argv.slice(2))).then(flushThenExit, (error) => {
     console.error(error.message);
     flushThenExit(1);
   });

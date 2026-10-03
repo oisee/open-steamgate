@@ -1,3 +1,4 @@
+import {legacyTrace, legacyFiles, traceArgs} from "./dsl-trace.mjs";
 // SEGW project tree: <project>.iwpr.xml <-> our tables (data/zstg_sb*.tabu.json).
 //
 // import: every table block of the IWPR file becomes rows of ZSTG_<table>
@@ -240,7 +241,8 @@ export async function pullFile(base, project) {
 export async function repoFiles(base, project) {
   const query = `?$filter=${encodeURIComponent(`Project eq '${project}'`)}&$format=json`;
   const json = await odata(base, "GET", `/RepoFileSet${query}`);
-  return Object.fromEntries(json.d.results.map((r) => [r.Name, r.Content]));
+  const files = Object.fromEntries(json.d.results.map((r) => [r.Name, r.Content]));
+  return legacyTrace() ? legacyFiles(files) : files;
 }
 
 /** The repository's objects against deploy/manifest.json: the same check
@@ -273,7 +275,8 @@ export async function repoZip(base, project) {
 export async function generateFiles(base, project) {
   const query = `?$filter=${encodeURIComponent(`Project eq '${project}'`)}&$format=json`;
   const json = await odata(base, "GET", `/GenerateSet${query}`);
-  return Object.fromEntries(json.d.results.map((r) => [r.Name, r.Content]));
+  const files = Object.fromEntries(json.d.results.map((r) => [r.Name, r.Content]));
+  return legacyTrace() ? legacyFiles(files) : files;
 }
 
 // the project's rows, set by set
@@ -415,7 +418,7 @@ export async function main(args) {
 }
 
 if (runsAs("segw-tree.mjs")) {
-  main(process.argv.slice(2)).then((code) => process.exit(code), (e) => {
+  main(traceArgs(process.argv.slice(2))).then((code) => process.exit(code), (e) => {
     console.error(e.message);
     process.exit(1);
   });

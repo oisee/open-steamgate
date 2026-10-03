@@ -257,7 +257,7 @@ CLASS zcl_stg_segw_repo IMPLEMENTATION.
       lt_gen = zcl_stg_segw_gen=>generate( iv_project ).
       LOOP AT lt_gen INTO ls_file.
 *       Trace is a GenerateSet artifact, not an abapGit object.
-        IF ls_file-name CP '*.clas.trace.json' OR ls_file-name CP '*.clas.warnings.json'.
+        IF ls_file-name CP '*.clas.trace.json' OR ls_file-name CP '*.clas.trace.meta.json' OR ls_file-name CP '*.clas.warnings.json'.
           CONTINUE.
         ENDIF.
         ls_file-name = 'src/' && ls_file-name.

@@ -1,3 +1,4 @@
+import {readJSONFile} from "./trace-reader.mjs";
 import {expect} from "chai";
 import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
@@ -45,7 +46,7 @@ describe("DSL L3 run cockpit", function () {
     expect(compiled.model.entities.every((e) => !e.creatable && !e.updatable && !e.deletable)).equal(true);
     expect(compiled.classes["zcl_zl3c_fleet2_mpc_ann.clas.abap"]).include("to_Pile/@com.sap.vocabularies.UI.v1.LineItem");
     const lines = readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap", "utf8").trimEnd().split("\n");
-    const trace = JSON.parse(readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap.trace.json", "utf8"));
+    const trace = readJSONFile("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap.trace.json", "utf8");
     expect(trace.lines).length(lines.length);
     const at = compileSet(SET).cockpit.set_line;
     expect(trace.lines.every((t) => t.set_line === at)).equal(true);
@@ -73,7 +74,7 @@ describe("DSL L3 run cockpit", function () {
       writeFileSync(join(out, "zcl_zl3c_fleet2_dpc_ext.clas.abap"), readFileSync("src/l2demo/zcl_zl3c_fleet2_dpc_ext.clas.abap"));
       // both apps, each with the file list its cockpit.json names
       for (const app of ["zosd_fleet2", "zosd_fleet2_s"]) {
-        const declared = JSON.parse(readFileSync(`src/l2demo/cockpit/${app}/cockpit.json`, "utf8"));
+        const declared = readJSONFile(`src/l2demo/cockpit/${app}/cockpit.json`, "utf8");
         buildApp({from: `src/l2demo/cockpit/${app}`, app: app.toUpperCase(), out, service: SERVICE, only: declared.files});
       }
       const files = readdirSync(out), unit = unitFor(loadManifest(), out, "l3demo");
@@ -142,7 +143,7 @@ describe("DSL L3 run cockpit", function () {
   });
   it("keeps every generated line under 255 characters, the limit a system's BSP and source cut at", () => {
     const files = [];
-    const walk = (dir) => {for (const f of readdirSync(dir)) {const p = join(dir, f); if (statSync(p).isDirectory()) walk(p); else if (!f.endsWith(".trace.json")) files.push(p);}};
+    const walk = (dir) => {for (const f of readdirSync(dir)) {const p = join(dir, f); if (statSync(p).isDirectory()) walk(p); else if (!/\.trace(?:\.meta)?\.json$/.test(f)) files.push(p);}};
     walk("src/l2demo/cockpit");
     expect(files.filter((f) => f.includes("zosd_fleet2_s/")).length).at.least(7);
     const texts = files.map((f) => [f, readFileSync(f, "utf8")]);

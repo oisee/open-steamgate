@@ -30,6 +30,8 @@ CLASS zcl_osd_dsl_mpc DEFINITION PUBLIC FINAL CREATE PRIVATE.
                 iv_method TYPE string
       RETURNING VALUE(rs_result) TYPE zcl_osd_tpl=>ty_result
       RAISING cx_static_check.
+    CLASS-METHODS template_source
+      IMPORTING iv_name TYPE string RETURNING VALUE(rv_text) TYPE string.
     CLASS-METHODS render_class
       IMPORTING is_model TYPE zcl_stg_segw_gen=>ty_model
       RETURNING VALUE(rs_result) TYPE zcl_osd_tpl=>ty_result
@@ -50,6 +52,17 @@ CLASS zcl_osd_dsl_mpc DEFINITION PUBLIC FINAL CREATE PRIVATE.
 ENDCLASS.
 
 CLASS zcl_osd_dsl_mpc IMPLEMENTATION.
+  METHOD template_source.
+    CASE iv_name.
+      WHEN 'mpc_class'.
+        rv_text = class_template( ).
+      WHEN 'entity' OR 'mpc_entity'.
+        rv_text = entity_template( ).
+      WHEN OTHERS.
+        rv_text = method_template( iv_name ).
+    ENDCASE.
+  ENDMETHOD.
+
   METHOD quoted.
     rv_text = `"` && zcl_stg_json=>escape( iv_text ) && `"`.
   ENDMETHOD.

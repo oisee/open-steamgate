@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {convertFiles, enrichTrace, legacyTrace, readTraceFile, readTrace, traceArgs} from "./dsl-trace.mjs";
 // DSL L2: a rule written in the terms of a domain, compiled to an L1 model,
 // rendered to ABAP through ZCL_OSD_TPL and proven by its own examples
 // (docs/dsl-l2.md). This file knows the rule language and the DDIC; it knows
@@ -1285,7 +1286,7 @@ function sidecar(model, template, rendered) {
   return JSON.stringify({
     generator: "dsl-l2", rule: model.source, template,
     model: modelHash(model),
-    lines: rendered.trace.map((entry) => ({line: entry.line, template_line: entry.template_line, path: entry.path,
+    lines: enrichTrace(model, rendered.trace).map((entry) => ({...(!legacyTrace() ? entry : {}), line: entry.line, template_line: entry.template_line, path: entry.path,
       ...provenance(model, entry.path)})),
   }, null, 1) + "\n";
 }
@@ -1338,13 +1339,13 @@ export async function renderRule(compiled) {
   }
   const name = model.class;
   return {
-    files: {
+    files: convertFiles({
       [`${name}.clas.abap`]: check.text,
       [`${name}.clas.testclasses.abap`]: test.text,
       [`${name}.clas.xml`]: classXml(model),
       [`${name}.clas.trace.json`]: sidecar(model, CHECK_TEMPLATE, check),
       [`${name}.clas.testclasses.trace.json`]: sidecar(model, TEST_TEMPLATE, test),
-    },
+    }, {model}),
     findings: [...check.findings.map((f) => ({...f, file: `${name}.clas.abap`})),
       ...test.findings.map((f) => ({...f, file: `${name}.clas.testclasses.abap`}))],
   };
@@ -1367,7 +1368,12 @@ export async function checkRule(file, out, options = {}) {
     const drift = [];
     for (const name of Object.keys(files)) {
       let committed;
-      try { committed = readFileSync(join(out, name)); } catch { drift.push(`${name}: missing in ${out}`); continue; }
+      try { committed = readFileSync(join(out, name)); } catch {
+        // Navigation metadata is optional for code-and-trace-only consumers.
+        // L3 separately requires its operational rule-version companion.
+        if (!name.endsWith(".trace.meta.json")) drift.push(`${name}: missing in ${out}`);
+        continue;
+      }
       if (!committed.equals(readFileSync(join(scratch, name)))) drift.push(`${name}: differs from a fresh build`);
     }
     return drift;
@@ -1412,7 +1418,7 @@ async function main(args) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.argv.slice(2)).then((code) => process.exit(code), (error) => {
+  main(traceArgs(process.argv.slice(2))).then((code) => process.exit(code), (error) => {
     console.error(error.message);
     process.exit(1);
   });

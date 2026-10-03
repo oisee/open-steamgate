@@ -1,3 +1,4 @@
+import {readJSONFile} from "./trace-reader.mjs";
 // Every _MPC method body rendered from L1 equals the SEGW generator's bytes.
 // The fixture trees are imported through ImportSet under this suite's names.
 import {expect} from "chai";
@@ -271,7 +272,7 @@ functions:
       const {abapFile, traceFile, findings, project} = await renderProject(FIXTURES[0], folder);
       expect(project).to.match(/^ZDSL[0-9A-F]{12}$/);
       const source = readFileSync(abapFile, "utf8");
-      const sidecar = JSON.parse(readFileSync(traceFile, "utf8"));
+      const sidecar = readJSONFile(traceFile, "utf8");
       expect(sidecar.generator).to.equal("dsl-mpc");
       expect(sidecar.template).to.equal("mpc_class");
       expect(sidecar.model).to.match(/^sha256:[0-9a-f]{64}$/);

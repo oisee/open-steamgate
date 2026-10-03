@@ -80,7 +80,7 @@ export function objectOf(filename) {
 // the name has three parts and reads like an object, and two generated apps in one
 // input both have one (a set's run cockpit and its Set app, DSL L3 slice 6a); a page
 // is no ABAP object, and neither is its sidecar
-const WEB_SIDECAR = /\.(js|html?|json|properties|css)\.trace\.json$/i;
+const WEB_SIDECAR = /\.(js|html?|json|properties|css)\.trace(?:\.meta)?\.json$/i;
 export function filesIn(base, folder) {
   const out = [];
   const walk = (dir) => {

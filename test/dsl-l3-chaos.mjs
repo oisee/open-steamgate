@@ -24,12 +24,13 @@ const SET_TEXT = readFileSync(SET, "utf8");
 const BEFORE = "28d17e752";
 const where = (file) => relative(process.cwd(), file).split(sep).join("/");
 const git = (args) => spawnSync("git", args, {encoding: "utf8", maxBuffer: 64 * 1024 * 1024});
-const model = compileSet(SET);
+let model;
 const ruleOf = (name) => model.simulate.rules.find((r) => r.rule === name);
 const PROFILES = SET_TEXT.match(/^  profiles:\n(    .*\n)+/m)[0];
 
 describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
   this.timeout(300000);
+  before(() => { model = compileSet(SET); });
   let scratch;
   before(() => { scratch = mkdtempSync(join(tmpdir(), "dsl-l3-chaos-")); });
   after(() => rmSync(scratch, {recursive: true, force: true}));
@@ -138,7 +139,8 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
     it("every generated line of the set stays under 255 characters (a real system cuts a longer one)", async () => {
       const {files} = await renderSet(model);
       const long = [];
-      for (const [name, text] of Object.entries(files)) if (!name.endsWith(".trace.json")) text.split("\n").forEach((l, i) => { if (l.length > 254) long.push(`${name}:${i + 1} ${l.length}`); });
+      // Trace and metadata sidecars are JSON, not code imported into an ABAP system.
+      for (const [name, text] of Object.entries(files)) if (!/\.trace(?:\.meta)?\.json$/.test(name)) text.split("\n").forEach((l, i) => { if (l.length > 254) long.push(`${name}:${i + 1} ${l.length}`); });
       expect(long).to.deep.equal([]);
       // the job's selection screen takes at most 20 values: the chaos settings are not among them
       const job = files["zl3_fleet2.prog.abap"];
@@ -179,7 +181,7 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
         let compared = 0;
         for (const [name, text] of Object.entries(files)) {
           // a sidecar names the recipes' hashes, which this slice changed; every other file is the bytes
-          if (name.endsWith(".trace.json") || cockpit.has(name)) continue;
+          if (/\.trace(?:\.meta)?\.json$/.test(name) || cockpit.has(name)) continue;
           const was = git(["show", `${BEFORE}:${OUT}/${name}`]);
           expect(was.status, `${name} existed before the slice`).to.equal(0);
           expect(text.replaceAll(basename(file), "fleet2.l3.yaml"), name).to.equal(was.stdout);
@@ -206,7 +208,8 @@ describe("DSL L3 slice 6c: chaos profiles and overrides", function () {
       }
       return {...counts, hits, seconds};
     };
-    const rule = ruleOf("ship-cargo-limit");
+    let rule;
+    before(() => { rule = ruleOf("ship-cargo-limit"); });
     // the same seed, 2000 piles: exact numbers per profile (the stream is a pure function of its inputs)
     const EXPECTED = {
       default: {OK: 1861, SLOW: 68, DUMP: 51, HANG: 20, hits: 3981},
