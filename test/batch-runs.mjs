@@ -594,6 +594,10 @@ describe("durable one-shot batch runs", function () {
       expect((await fetch(`${url}/closed`, {headers: auth})).status).to.equal(404);
       expect((await fetch(`${url}/osd/batch-runs`)).status).to.equal(401);
       expect((await fetch(`${url}/osd/batch-runs`, {headers: {Authorization: "Bearer wrong"}})).status).to.equal(401);
+      expect((await fetch(`${url}/osd/batch-runs?counts=1`)).status).to.equal(401);
+      expect((await (await fetch(`${url}/osd/batch-runs?counts=1`, {headers: auth})).json()).counts)
+        .to.deep.equal({running: 0, queued: 0});
+      expect((await fetch(`${url}/osd/batch-runs?counts=1&limit=1`, {headers: auth})).status).to.equal(400);
       const listed = await fetch(`${url}/osd/batch-runs?limit=1`, {headers: auth});
       expect(listed.status).to.equal(200);
       expect(listed.headers.get("cache-control")).to.equal("no-store");
@@ -605,6 +609,14 @@ describe("durable one-shot batch runs", function () {
       const output = await (await fetch(`${url}/osd/batch-runs?id=${run.id}&output=1`, {headers: auth})).json();
       expect(output.output.lines).to.deep.equal(["visible list"]);
       expect((await fetch(`${url}/osd/batch-runs?output=1`, {headers: auth})).status).to.equal(400);
+      const active = new BatchRuns(root, env);
+      try {
+        active.enqueue({program: "ZGG_EX_012", generation: "test-generation"});
+        active.enqueue({program: "ZGG_EX_012", generation: "test-generation"});
+        active.claimNext();
+      } finally { active.close(); }
+      expect((await (await fetch(`${url}/osd/batch-runs?counts=1`, {headers: auth})).json()).counts)
+        .to.deep.equal({running: 1, queued: 1});
       writeFileSync(join(dir, "batch-output", `${run.id}.json`), "tampered");
       expect((await fetch(`${url}/osd/batch-runs?id=${run.id}&output=1`, {headers: auth})).status).to.equal(500);
     } finally {

@@ -31,13 +31,24 @@ export function batchMonitorHandler(root, env = process.env) {
   return function (req, res) {
     if (!authorized(req, res, env)) return;
     const query = req.query;
-    if (Object.keys(query).some((key) => !["id", "output", "limit"].includes(key))) {
+    if (Object.keys(query).some((key) => !["id", "output", "limit", "counts"].includes(key))) {
       res.status(400).json({error: {code: "BAD_QUERY"}});
       return;
     }
     try {
       const store = new BatchRuns(root, env);
       try {
+        if (query.counts !== undefined) {
+          if (query.counts !== "1" || Object.keys(query).length !== 1) {
+            res.status(400).json({error: {code: "BAD_QUERY"}});
+            return;
+          }
+          const counts = store.readSnapshot(() => store.db.prepare(`SELECT
+            COALESCE(SUM(state = 'RUNNING'), 0) AS running,
+            COALESCE(SUM(state = 'QUEUED'), 0) AS queued FROM batch_runs`).get());
+          res.json({counts});
+          return;
+        }
         if (query.id !== undefined) {
           if (query.limit !== undefined || (query.output !== undefined && query.output !== "1")
               || typeof query.id !== "string" || !/^[0-9a-f-]{36}$/.test(query.id)) {
