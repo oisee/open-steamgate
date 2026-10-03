@@ -32,7 +32,7 @@ export async function loadGenerated(files, names, dir, model) {
   addTree('.local/lars/open-abap-apc/src');
   const coreDir = '.local/lars/open-abap-core/src';
   for (const folder of ['src/dsl','src/jobs',...new Set(model.rules.map((r) => dirname(resolve(r.file)))),
-    ...['.','uuid','exceptions','ddic/dtel','ddic/doma','ddic/ttyp','ddic/structures','date_time'].map((d) => join(coreDir,d))]) addFolder(folder);
+    ...['.','abap/hash','uuid','exceptions','ddic/dtel','ddic/doma','ddic/ttyp','ddic/structures','date_time'].map((d) => join(coreDir,d))]) addFolder(folder);
   for (const file of ['gen/gui/zcl_osd_batch_report.clas.abap','.local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap']) deps.set(basename(file),readFileSync(file,'utf8'));
   for (const [f,t] of Object.entries(files)) if (/\.(clas|intf)\.(abap|xml)$/.test(f)) deps.set(f,t);
   for (const [f,t] of deps) if (!selected.has(f)) reg.addDependency(new core.MemoryFile(f,t));

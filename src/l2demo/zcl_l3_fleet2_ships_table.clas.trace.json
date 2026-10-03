@@ -2,91 +2,91 @@
  "generator": "dsl-l3",
  "set": "src/l2demo/fleet2.l3.yaml",
  "template": "recipes/l3-ports/source-table.tpl",
- "model": "sha256:a54a0e40db7c0daa32b18d9326a4e4fa7fb51f88cb142c5435e66f20786f6bff",
+ "model": "sha256:8dd20c8b5126dde8ed915524931011f21bea5b88a33509e493b108bc17d6e768",
  "lines": [
   {
    "line": 1,
    "template_line": 1,
    "path": "/source",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 2,
    "template_line": 2,
    "path": "/port",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 3,
    "template_line": 3,
    "path": "/class",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 4,
    "template_line": 4,
    "path": "/",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 5,
    "template_line": 5,
    "path": "/iface",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 6,
    "template_line": 6,
    "path": "/",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 7,
    "template_line": 7,
    "path": "/",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 8,
    "template_line": 8,
    "path": "/class",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 9,
    "template_line": 9,
    "path": "/iface",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 10,
    "template_line": 10,
    "path": "/table",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 11,
    "template_line": 11,
    "path": "/",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   },
   {
    "line": 12,
    "template_line": 12,
    "path": "/",
    "node": "set/fleet2/port/ships/variant/table",
-   "set_line": 43
+   "set_line": 46
   }
  ]
 }

@@ -924,6 +924,10 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
   METHOD snapshot.
     DATA ls_conf TYPE zosd_l3_conf.
     DATA ls_run TYPE zosd_l3_run_conf.
+    DATA ls_input TYPE zosd_l3_run_snap.
+    SELECT * FROM zosd_l3_run_snap INTO ls_input UP TO 1 ROWS
+      WHERE set_name = 'fleet2' AND run_id = iv_run ORDER BY stage_no.
+    ENDSELECT.
     LOOP AT is_state-rows INTO ls_conf.
       CLEAR ls_run.
       ls_run-run_id = iv_run.
@@ -941,6 +945,9 @@ CLASS zcl_l3_fleet2_conf IMPLEMENTATION.
         ls_run-origin = 'FALLBACK'.
         CLEAR: ls_run-changed_by, ls_run-changed_at.
       ENDIF.
+      ls_run-snap_id = ls_input-snap_id.
+      ls_run-content_hash = ls_input-content_hash.
+      ls_run-row_count = ls_input-row_count.
       INSERT zosd_l3_run_conf FROM ls_run.
     ENDLOOP.
   ENDMETHOD.

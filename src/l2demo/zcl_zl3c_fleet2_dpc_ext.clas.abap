@@ -25,6 +25,8 @@ CLASS zcl_zl3c_fleet2_dpc_ext DEFINITION PUBLIC INHERITING FROM zcl_zl3c_fleet2_
     METHODS settingset_get_entity REDEFINITION.
     METHODS changeset_get_entityset REDEFINITION.
     METHODS changeset_get_entity REDEFINITION.
+    METHODS confsnapset_get_entityset REDEFINITION.
+    METHODS confsnapset_get_entity REDEFINITION.
     METHODS snapshotset_get_entityset REDEFINITION.
     METHODS snapshotset_get_entity REDEFINITION.
     METHODS tallyset_get_entityset REDEFINITION.
@@ -837,7 +839,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
       WHERE set_name = 'fleet2'
         AND change_id = lv_change_id.
   ENDMETHOD.
-  METHOD snapshotset_get_entityset.
+  METHOD confsnapset_get_entityset.
     DATA lv_where TYPE string.
     DATA lv_filter TYPE string.
     DATA lv_run TYPE string.
@@ -867,7 +869,7 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
       DELETE et_entityset FROM lv_count.
     ENDIF.
   ENDMETHOD.
-  METHOD snapshotset_get_entity.
+  METHOD confsnapset_get_entity.
     DATA lv_run_id TYPE zosd_l3_run_conf-run_id.
     DATA lv_param_name TYPE zosd_l3_run_conf-param_name.
     lv_run_id = parameter( it_params = it_key_tab iv_name = 'RunId' ).
@@ -876,6 +878,37 @@ CLASS zcl_zl3c_fleet2_dpc_ext IMPLEMENTATION.
       WHERE set_name = 'fleet2'
         AND run_id = lv_run_id
         AND param_name = lv_param_name.
+  ENDMETHOD.
+  METHOD snapshotset_get_entityset.
+    DATA lv_where TYPE string.
+    DATA lv_filter TYPE string.
+    DATA lv_run TYPE string.
+    DATA lv_count TYPE i.
+    " the set first: a dynamic condition starts with a column on a system
+    " ('1 = 1' parses here and not there), and the OData filter only joins
+    " when there is one
+    lv_where = |SET_NAME = 'fleet2'|.
+    lv_filter = io_tech_request_context->get_osql_where_clause( ).
+    IF lv_filter IS NOT INITIAL.
+      lv_where = |{ lv_where } AND ( { lv_filter } )|.
+    ENDIF.
+    SELECT * FROM zosd_l3_snap INTO CORRESPONDING FIELDS OF TABLE et_entityset
+      WHERE (lv_where).
+    es_response_context-inlinecount = lines( et_entityset ).
+    IF is_paging-skip > 0.
+      DELETE et_entityset FROM 1 TO is_paging-skip.
+    ENDIF.
+    IF is_paging-top > 0 AND lines( et_entityset ) > is_paging-top.
+      lv_count = is_paging-top + 1.
+      DELETE et_entityset FROM lv_count.
+    ENDIF.
+  ENDMETHOD.
+  METHOD snapshotset_get_entity.
+    DATA lv_snap_id TYPE zosd_l3_snap-snap_id.
+    lv_snap_id = parameter( it_params = it_key_tab iv_name = 'SnapId' ).
+    SELECT SINGLE * FROM zosd_l3_snap INTO CORRESPONDING FIELDS OF er_entity
+      WHERE set_name = 'fleet2'
+        AND snap_id = lv_snap_id.
   ENDMETHOD.
   METHOD /iwbep/if_mgw_appl_srv_runtime~execute_action.
     DATA lx_error TYPE REF TO cx_root.

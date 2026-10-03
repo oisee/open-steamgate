@@ -216,7 +216,7 @@ describe("DSL L3 run cockpit", function () {
   });
   describe("Gateway, file DB, real runners and jobs", () => {
     let server, dir, dbPath, prior, context, abap, client, dialogStep, store, drainJobOutbox, workQueuedBatch, clock;
-    const tables = ["alert", "pile", "run", "stage", "work", "doctor", "kill", "conf", "conf_log", "run_conf", "budget", "event", "object", "runstat", "watch"].map((t) => `zosd_l3_${t}`);
+    const tables = ["alert", "pile", "run", "stage", "work", "doctor", "kill", "conf", "conf_log", "run_conf", "budget", "event", "object", "runstat", "watch", "snap"].map((t) => `zosd_l3_${t}`);
     const sources = ["ship", "voy", "crew", "cargo"].map((t) => `zosd_l2_${t}`);
     const read = (sql, ...args) => {const db = new DatabaseSync(dbPath); try {return db.prepare(sql).all(...args).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, trim(v)])));} finally {db.close();}};
     const exec = (sqls) => dialogStep(async () => {for (const sql of sqls) await client.execute(sql);});
@@ -240,7 +240,7 @@ describe("DSL L3 run cockpit", function () {
     });
     beforeEach(async () => {
       await daemonHost(abap).close();
-      await exec([...tables, ...sources].map((t) => `DELETE FROM ${t}`));
+      await exec([...tables, "zosd_l3_snapk", "zosd_l3_run_snap", ...sources].map((t) => `DELETE FROM ${t}`));
       await exec(["INSERT INTO zosd_l2_ship (mandt, ship_id, name, status) VALUES ('123','S001','Maintenance','M'), ('123','S002','Active','A')",
         "INSERT INTO zosd_l2_voy (mandt, voyage_id, ship_id, dep_date) VALUES ('123','V00001','S001','20261005'), ('123','V00002','S002','20261005')"]);
     });
@@ -260,12 +260,14 @@ describe("DSL L3 run cockpit", function () {
       }
       const model = compileSet(SET);
       const {cockpitService} = await import("../tools/dsl-l3-cockpit-service.mjs");
-      for (const e of cockpitService(model).entities) {
+      const service = cockpitService(model);
+      for (const e of service.entities) {
+        const set = service.doc.entities[e.name].set;
         expect(read(`SELECT * FROM ${e.table} WHERE set_name='other'`), e.name + " other fixture").not.length(0);
-        const rows = (await get(e.name + "Set")).results;
+        const rows = (await get(set)).results;
         expect(rows.every((r) => r.SetName === "fleet2"), e.name).equal(true);
-        expect((await get(e.name + "Set?$filter=SetName eq 'other'")).results, e.name).length(0);
-        const write = await fetch(`${BASE}/${e.name}Set`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"}); expect(write.status).equal(405);
+        expect((await get(set + "?$filter=SetName eq 'other'")).results, e.name).length(0);
+        const write = await fetch(`${BASE}/${set}`, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"}); expect(write.status).equal(405);
       }
       expect((await get(`RunSet('${r.RunId}')/to_Pile`)).results).length(7);
       for (const method of ["MERGE", "PATCH", "DELETE"]) {
@@ -342,7 +344,7 @@ describe("DSL L3 run cockpit", function () {
       const run = await get(`RunSet('${r.RunId}')`);
       expect(run).include({Title: "fleet2 / 2026-10-01", RunLabel: "2026-10-01 / Now", Mode: "S", Twin: false, Open: false, Piles: 7,
         PilesDone: 7, PilesFinal: 7, PctFinal: 100, StatusCriticality: 3, CanContinue: false, CanResume: false, HidePile: false, HideStage: false});
-      for (const [section, set] of [["Event", "EventSet"], ["Doctor", "DoctorSet"], ["Snapshot", "SnapshotSet"]]) {
+      for (const [section, set] of [["Event", "EventSet"], ["Doctor", "DoctorSet"], ["Snapshot", "ConfSnapSet"]]) {
         expect(run[`Hide${section}`], section).equal((await get(`${set}?$filter=RunId eq '${r.RunId}'`)).results.length === 0);
       }
       expect(run.HideEvent || run.HideDoctor).equal(true);

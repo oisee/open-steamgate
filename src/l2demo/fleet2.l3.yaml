@@ -25,6 +25,7 @@ stages:
     rules:
       - rule: ship_busy.l2.yaml
   - stage: checks
+    input: ships_ref
     piles: {source: "worklist:busy", size: 2}
     rules:
       - rule: maintenance_ship.l2.yaml
@@ -33,6 +34,8 @@ stages:
       - rule: ship_voyage_limit.l2.yaml
       - rule: ship_min_crew.l2.yaml
       - rule: ship_cargo_limit.l2.yaml
+snapshots:
+  ships_ref: {source: ships, key: [ship_id], canonical: sorted-by-key}
 schedule: {every: 1d, at: "020000"}
 ports:
   ships:
