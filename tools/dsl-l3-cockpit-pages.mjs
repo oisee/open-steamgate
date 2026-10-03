@@ -17,20 +17,40 @@ export async function cockpitPages(m) {
   files[`${prefix}/cockpit.json`] = JSON.stringify({app: c.app, title: c.title, service: c.service}, null, 2) + "\n";
   return files;
 }
+// a run's actions sit in its header and show only when the run's state allows them
+// (applicablePath: a boolean the DPC computes); a pile's release is a table action,
+// enabled only for a selected HELD pile
+function runActions(m) {
+  const names = cockpitActions(m).map((a) => a.name), out = {};
+  for (const [name, path] of [["ContinueGlass", "CanContinue"], ["Resume", "CanResume"]]) {
+    if (names.includes(name)) out[name] = {id: name, text: `{{${name}}}`, press: `ask${name}`, applicablePath: path};
+  }
+  return out;
+}
+function pileActions(m) {
+  if (!cockpitActions(m).some((a) => a.name === "ReleasePile")) return {};
+  return {Pile: {id: "Pile", Actions: {ReleasePile: {id: "ReleasePile", text: "{{ReleasePile}}", press: "askReleasePile",
+    requiresSelection: true, applicablePath: "CanRelease"}}}};
+}
 function manifest(m) {
   const id = `l3.${m.set}`;
   const actions = Object.fromEntries(cockpitActions(m).filter((a) => ["StartRun", "Doctor", "Schedule", "Unschedule"].includes(a.name))
     .map((a) => [a.name, {id: a.name, text: `{{${a.name}}}`, press: `ask${a.name}`, requiresSelection: false, global: true}]));
+  const list = "sap.suite.ui.generic.template.ListReport.view.ListReport", details = "sap.suite.ui.generic.template.ObjectPage.view.Details";
   return {_version: "1.59.0", "sap.app": {id, type: "application", title: "{{appTitle}}", i18n: "i18n/i18n.properties",
     dataSources: {mainService: {uri: `/sap/opu/odata/sap/${m.cockpit.service}/`, type: "OData", settings: {odataVersion: "2.0"}}},
     crossNavigation: {inbounds: {[`${m.cockpit.app}-manage`]: {semanticObject: m.cockpit.app, action: "manage", signature: {parameters: {}, additionalParameters: "allowed"}}}}},
     "sap.ui": {technology: "UI5", deviceTypes: {desktop: true, tablet: true, phone: true}},
-    "sap.ui5": {dependencies: {minUI5Version: "1.120.0", libs: {"sap.m": {}, "sap.ui.generic.app": {}, "sap.suite.ui.generic.template": {}}},
+    "sap.ui5": {dependencies: {minUI5Version: "1.120.0", libs: {"sap.m": {}, "sap.ui.generic.app": {}, "sap.suite.ui.generic.template": {}, "sap.suite.ui.microchart": {lazy: true}}},
       models: {cockpitI18n: {type: "sap.ui.model.resource.ResourceModel", settings: {bundleName: `${id}.i18n.i18n`, supportedLocales: [""], fallbackLocale: ""}},
         "": {dataSource: "mainService", preload: true, settings: {useBatch: false, defaultCountMode: "Inline", defaultBindingMode: "OneWay"}}},
-      extends: {extensions: {"sap.ui.controllerExtensions": {"sap.suite.ui.generic.template.ListReport.view.ListReport": {controllerName: `${id}.List`, "sap.ui.generic.app": {RunSet: {EntitySet: "RunSet", Actions: actions}}}, "sap.suite.ui.generic.template.ObjectPage.view.Details": {controllerName: `${id}.Cockpit`}},
-        "sap.ui.viewExtensions": {"sap.suite.ui.generic.template.ObjectPage.view.Details": {"AfterFacet|RunSet|Pile": {
-          className: "sap.ui.core.Fragment", fragmentName: `${id}.Cockpit`, type: "XML", "sap.ui.generic.app": {title: "{{cockpit}}"}}}}}}},
+      extends: {extensions: {
+        "sap.ui.controllerExtensions": {
+          [list]: {controllerName: `${id}.List`, "sap.ui.generic.app": {RunSet: {EntitySet: "RunSet", Actions: actions}}},
+          [details]: {controllerName: `${id}.Cockpit`, "sap.ui.generic.app": {RunSet: {EntitySet: "RunSet", Header: {Actions: runActions(m)}, Sections: pileActions(m)}}}},
+        // the progress section comes first: what a person opens a run page for
+        "sap.ui.viewExtensions": {[details]: {"BeforeFacet|RunSet|Stage": {
+          className: "sap.ui.core.Fragment", fragmentName: `${id}.Cockpit`, type: "XML", "sap.ui.generic.app": {title: "{{progress}}"}}}}}}},
     "sap.ui.generic.app": {_version: "1.3.0", settings: {flexibilityEnabled: false}, pages: {"ListReport|Run": {entitySet: "RunSet", component: {
       name: "sap.suite.ui.generic.template.ListReport", list: true, settings: {dataLoadSettings: {loadDataOnAppLaunch: "always"}, smartVariantManagement: false}},
       pages: {"ObjectPage|Run": {entitySet: "RunSet", component: {name: "sap.suite.ui.generic.template.ObjectPage", settings: {editableHeaderContent: false}}}}}}}};

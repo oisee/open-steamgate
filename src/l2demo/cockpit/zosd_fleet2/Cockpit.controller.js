@@ -1,6 +1,6 @@
-sap.ui.define(["sap/m/Button", "sap/m/Dialog", "sap/m/Input", "sap/m/Label", "sap/m/VBox", "sap/m/Text",
-  "sap/ui/model/json/JSONModel", "l3/fleet2/Series", "l3/fleet2/Live"],
-function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series, Live) {
+sap.ui.define(["sap/m/Button", "sap/m/Dialog", "sap/m/Input", "sap/m/Label", "sap/m/VBox", "sap/m/HBox", "sap/m/Text",
+  "sap/m/MessageStrip", "sap/ui/model/json/JSONModel", "l3/fleet2/Series", "l3/fleet2/Live"],
+function (Button, Dialog, Input, Label, VBox, HBox, Text, MessageStrip, JSONModel, Series, Live) {
   "use strict";
   var config = {
    "service": "ZL3C_FLEET2_SRV",
@@ -203,8 +203,12 @@ function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series, Live) {
   };
   // a run that still holds its lock may change; a final one does not
   var settled = ["DONE", "PARTIAL", "FAILED", "NOT-RUN", "SKIPPED", "KILLED"];
+  // what the header and the pile table offer; the rest of the run's actions are the set's
+  var onRun = ["StartRun", "ContinueGlass", "Resume", "ReleasePile"];
+  var action = function (name) {return config.actions.find(function (a) {return a.name === name;});};
   return {
-    isOpen: function (run) {return !!run && settled.indexOf(run.Status) < 0;},
+    // the service says whether the run still holds its lock; without it, the status decides
+    isOpen: function (run) {return !!run && (run.Open !== undefined ? run.Open === true : settled.indexOf(run.Status) < 0);},
     errorText: function (e) {
       var text = e && (e.responseText || e.message) || "";
       try {text = JSON.parse(text).error.message.value;} catch (ignored) {/* not a Gateway error body */}
@@ -243,6 +247,41 @@ function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series, Live) {
       var layouts = view.findAggregatedObjects(true, function (c) {return c.isA("sap.uxap.ObjectPageLayout");});
       var title = layouts.length && layouts[0].getHeaderTitle();
       if (title && title.insertAction) this.live.controls.slice().reverse().forEach(function (c) {title.insertAction(c, 0);});
+      // "needs attention": only for a run at the glass, with held or failed piles, and with the one
+      // action that moves it on
+      this.attentionText = new MessageStrip(view.createId("attention"), {type: "Warning", showIcon: true});
+      this.attentionGo = new Button(view.createId("attentionGo"), {type: "Emphasized"});
+      this.attention = new HBox(view.createId("attentionBox"), {alignItems: "Center", visible: false, items: [this.attentionText, this.attentionGo]});
+      this.attentionGo.addStyleClass("sapUiSmallMarginBegin");
+      if (layouts.length) layouts[0].addHeaderContent(this.attention);
+    },
+    attend: function () {
+      var run = this.run || {}, self = this, what = null;
+      if (run.Status === "GLASS" && action("ContinueGlass")) what = ["attentionGlass", "ContinueGlass", "Error"];
+      else if (+run.PilesHeld > 0 && action("ReleasePile")) what = ["attentionHeld", "ReleasePile", "Warning"];
+      else if (+run.PilesFailed > 0 && run.CanResume && action("Resume")) what = ["attentionFailed", "Resume", "Error"];
+      this.attention.setVisible(!!what);
+      if (!what) return;
+      this.attentionText.setType(what[2]).setText(this.text("attention") + ": " + this.text(what[0]).replace("{0}", run.PilesHeld).replace("{1}", run.PilesFailed));
+      this.attentionGo.setText(this.text(what[1]));
+      this.attentionGo.detachPress(this.attendPress, this);
+      this.attendPress = function () {
+        if (what[1] === "ReleasePile") self.byId("cockpitDurations").getParent().setExpanded(true);
+        self["ask" + what[1]]();
+      };
+      this.attentionGo.attachPress(this.attendPress, this);
+    },
+    askContinueGlass: function () {var run = this.run || {}; this.ask(action("ContinueGlass"), {RunId: run.RunId, NewGlass: String(Math.max(+run.Glass * 2, +run.Glass + 1))});},
+    askResume: function () {this.ask(action("Resume"), {RunId: (this.run || {}).RunId});},
+    // the selected pile of the pile table, or the first held one when the attention strip asks
+    askReleasePile: function () {
+      var run = this.run || {}, self = this, pile = null;
+      var tables = this.getView().findAggregatedObjects(true, function (c) {return c.isA("sap.ui.comp.smarttable.SmartTable") && /to_Pile/.test(c.getId());});
+      var selected = tables.length ? this.extensionAPI.getSelectedContexts(tables[0].getId()) : [];
+      if (selected.length) pile = selected[0].getObject();
+      var go = function (p) {self.ask(action("ReleasePile"), {RunId: run.RunId, RuleName: p.RuleName, PileNo: String(p.PileNo), PerPile: "0"});};
+      if (pile) {go(pile); return;}
+      this.read("PileSet", "RunId eq '" + run.RunId + "' and Status eq 'HELD'").then(function (rows) {if (rows.length) go(rows[0]);});
     },
     loaded: function () {
       var bar = this.byId("cockpitActions"), self = this;
@@ -254,21 +293,22 @@ function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series, Live) {
       if (this.shown === run.RunId) return;
       this.shown = run.RunId;
       bar.destroyItems();
-      config.actions.forEach(function (action) {
-        if (action.name !== "StartRun") bar.addItem(new Button({text: self.text(action.name), press: function () {self.ask(action);}}));
+      config.actions.forEach(function (a) {
+        if (onRun.indexOf(a.name) < 0) bar.addItem(new Button({text: self.text(a.name), press: function () {self.ask(a);}}));
       });
       // the answer the start dialog got for this run, in words
       var said = this.memo().getProperty("/answers/" + run.RunId);
       if (said) this.answer(said);
       else this.byId("cockpitAnswer").setVisible(false);
       this.live.set(this.isOpen(run));
+      this.attend();
       this.refresh().then(function () {self.live.mark();});
     },
     refreshAll: function () {
       var self = this, model = this.getView().getModel(), id = this.run && this.run.RunId;
       if (!id) return Promise.resolve();
       var header = new Promise(function (resolve) {
-        model.read("/RunSet('" + id + "')", {success: function (r) {if (self.run && self.run.RunId === r.RunId) self.run = r; resolve();}, error: resolve});
+        model.read("/RunSet('" + id + "')", {success: function (r) {if (self.run && self.run.RunId === r.RunId) {self.run = r; self.attend();} resolve();}, error: resolve});
       });
       this.extensionAPI.refresh();
       return Promise.all([header, this.refresh()]);
@@ -324,12 +364,18 @@ function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series, Live) {
       return Promise.all(reads);
     },
     answer: function (answer) {this.byId("cockpitAnswer").setText(this.human(answer)).setVisible(true);},
-    ask: function (action) {
-      var self = this, inputs = {}, box = new VBox({width: "28rem"}), context = this.getView().getBindingContext();
-      var run = context && context.getObject();
+    // a function import's dialog: what the page already knows is shown as text, the rest is asked
+    ask: function (action, known) {
+      var self = this, inputs = {}, fixed = known || {}, box = new VBox({width: "28rem"});
+      box.addStyleClass("sapUiSmallMargin");
       Object.keys(action.params).forEach(function (p) {
         box.addItem(new Label({text: self.text(p), required: p === "Reason" || p === "Note"}));
-        inputs[p] = new Input({value: p === "RunId" ? run.RunId : p === "Mode" ? "S" : p === "CheckDate" ? new Date().toISOString().slice(0, 10).replace(/-/g, "") : /Int32/.test(action.params[p]) ? "0" : ""});
+        if (fixed[p] !== undefined && p !== "PerPile" && p !== "NewGlass") {
+          box.addItem(new Text({text: fixed[p]}));
+          inputs[p] = {getValue: function () {return fixed[p];}};
+          return;
+        }
+        inputs[p] = new Input({value: fixed[p] !== undefined ? fixed[p] : /Int32/.test(action.params[p]) ? "0" : ""});
         box.addItem(inputs[p]);
       });
       var dialog = new Dialog({title: this.text(action.name), content: box, beginButton: new Button({text: this.text("confirm"), press: function () {

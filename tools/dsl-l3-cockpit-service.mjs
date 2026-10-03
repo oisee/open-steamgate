@@ -1,5 +1,6 @@
 // Model and action-to-runner contract, independent of any particular set.
 import {readFileSync} from "node:fs";
+import {cockpitUi} from "./dsl-l3-cockpit-ui.mjs";
 const pascal = (s) => s.toLowerCase().split("_").map((p) => p[0].toUpperCase() + p.slice(1)).join("");
 const tag = (s, n) => s.match(new RegExp(`<${n}>([\\s\\S]*?)</${n}>`))?.[1];
 const visible = {
@@ -91,5 +92,6 @@ export function cockpitService(m, {tableSource = (table) => readFileSync(`src/ds
   for (const a of cockpitActions(m)) doc.functions[a.name] = {method: a.get ? "GET" : "POST", returns: {entity: "Answer", multiplicity: "1"}, parameters: a.params};
   doc.annotations.Run = {...doc.annotations.Run, header: {typeName: "Run", typeNamePlural: "Runs", title: "RunId", description: "Status"},
     selectionFields: ["CheckDate", "Status"], facets: entities.filter((e) => !["Run", "Setting", "Change"].includes(e.name)).map((e) => ({id: e.name, label: e.name, lineItem: `to_${e.name}`}))};
-  return {doc, entities};
+  // the run page's words, computed fields, charts and value lists (slice 6a)
+  return cockpitUi(m, {doc, entities});
 }

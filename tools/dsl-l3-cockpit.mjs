@@ -8,6 +8,13 @@ import {governorTemplate} from "./dsl-l3-governor.mjs";
 import {cockpitService, cockpitActions} from "./dsl-l3-cockpit-service.mjs";
 import {cockpitPages} from "./dsl-l3-cockpit-pages.mjs";
 
+const abapText = (s) => `'${String(s).replaceAll("'", "''")}'`;
+function cockpitUiRoot(service) {
+  return {hides: service.entities.find((e) => e.name === "Run").hides, tally_text: abapText(service.tally.statuses.join(" ")),
+    criticality: Object.entries(service.tally.criticality).map(([value, list]) => ({value, statuses: list.map(abapText).join(" OR ")})),
+    run_statuses: service.statuses.map(([status, text]) => ({status: abapText(status), text: abapText(text)}))};
+}
+
 export function compileCockpit(doc, model, {line, fail}) {
   const spec = doc.cockpit, at = line("cockpit");
   if (!spec || typeof spec !== "object" || Array.isArray(spec)) fail(at, "cockpit is {app, service, title}");
@@ -36,7 +43,9 @@ export async function renderCockpit(model) {
     class: result.model.classes.dpcExt.toLowerCase(), mpc: result.model.classes.mpc.toLowerCase(),
     settings_class: model.settings?.class, stage_count: String(model.stages.length), resilience: Boolean(model.resilience), governed: Boolean(model.governor), scheduled: Boolean(model.schedule), entities: service.entities,
     // the calls sit inside TRY ... CASE: four more spaces per continuation line
-    actions: cockpitActions(model).map((a) => ({...a, call: a.call.replaceAll("\n", "\n    ")}))};
+    actions: cockpitActions(model).map((a) => ({...a, call: a.call.replaceAll("\n", "\n    ")})),
+    // the run page's computed fields (tools/dsl-l3-cockpit-ui.mjs): constants written as ABAP literals
+    ...cockpitUiRoot(service)};
   const ext = await renderRecipe(root, "recipes/l3-cockpit/dpc.tpl", {profile: "abap"});
   const error = ext.findings.find((f) => f.severity === "E");
   if (error) throw new Error(`cockpit DPC line ${error.line}: ${error.text}`);

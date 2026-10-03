@@ -429,6 +429,36 @@
    "template_line": 71,
    "node": "set/fleet2/cockpit",
    "set_line": 104
+  },
+  {
+   "line": 72,
+   "template_line": 72,
+   "node": "set/fleet2/cockpit",
+   "set_line": 104
+  },
+  {
+   "line": 73,
+   "template_line": 73,
+   "node": "set/fleet2/cockpit",
+   "set_line": 104
+  },
+  {
+   "line": 74,
+   "template_line": 74,
+   "node": "set/fleet2/cockpit",
+   "set_line": 104
+  },
+  {
+   "line": 75,
+   "template_line": 75,
+   "node": "set/fleet2/cockpit",
+   "set_line": 104
+  },
+  {
+   "line": 76,
+   "template_line": 76,
+   "node": "set/fleet2/cockpit",
+   "set_line": 104
   }
  ]
 }

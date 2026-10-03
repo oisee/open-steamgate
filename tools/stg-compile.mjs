@@ -375,10 +375,10 @@ export function readModel(text, file = "stg.yaml") {
 // `annotations:` -> ZCL_<project>_MPC_ANN, a class that writes the vocabulary
 // annotations through vocab_anno_model the way a SEGW-generated _MPC_EXT
 // does; the _MPC_EXT calls it from DEFINE. Terms: UI.HeaderInfo,
-// UI.SelectionFields, UI.LineItem, UI.Facets, UI.HeaderFacets,
-// UI.FieldGroup on an entity;
-// Common.Label, Common.Text (+UI.TextArrangement), Common.ValueList on a
-// property.
+// UI.SelectionFields, UI.LineItem (+ Criticality), UI.Facets and
+// UI.HeaderFacets (+ UI.Hidden), UI.FieldGroup, UI.DataPoint, UI.Chart on an
+// entity; Common.Label, Common.Text (+UI.TextArrangement), Common.ValueList,
+// Common.ValueListWithFixedValues on a property.
 //
 //   annotations:
 //     Travel:
@@ -452,6 +452,78 @@ class AnnotationWriter {
       this.value(into, "SemanticObject", "set_string", item.semanticObject);
       this.value(into, "Action", "set_string", item.action);
     }
+    // the value's colour: a path to a UI.CriticalityType number (0 neutral,
+    // 1 negative, 2 critical, 3 positive)
+    if (item.criticality) {
+      this.value(into, "Criticality", "set_path", item.criticality);
+    }
+  }
+
+  // a number with its context: what a header facet or a micro chart shows
+  dataPoint(qualifier, d) {
+    this.line(`lo_annotation = lo_target->create_annotation(`);
+    this.line(`  iv_term      = ${lit(UI + "DataPoint")}`);
+    this.line(`  iv_qualifier = ${lit(qualifier)} ).`);
+    this.line(`lo_record = lo_annotation->create_record( ${lit(UI + "DataPointType")} ).`);
+    this.value("lo_record", "Value", "set_path", d.value);
+    if (d.title) {
+      this.value("lo_record", "Title", "set_string", d.title);
+    }
+    for (const [key, name] of [["targetValue", "TargetValue"], ["minimumValue", "MinimumValue"], ["maximumValue", "MaximumValue"], ["criticality", "Criticality"]]) {
+      if (d[key] !== undefined) {
+        this.value("lo_record", name, typeof d[key] === "number" ? "set_decimal" : "set_path", String(d[key]));
+      }
+    }
+    if (d.visualization) {
+      this.value("lo_record", "Visualization", "set_enum_member_by_name", `${UI}VisualizationType/${d.visualization}`);
+    }
+    const c = d.criticalityCalculation;
+    if (c) {
+      this.line(`lo_item = lo_record->create_property( 'CriticalityCalculation' )->create_record( ${lit(UI + "CriticalityCalculationType")} ).`);
+      this.value("lo_item", "ImprovementDirection", "set_enum_member_by_name", `${UI}ImprovementDirectionType/${c.improvementDirection ?? "Minimize"}`);
+      for (const name of ["DeviationRangeLowValue", "ToleranceRangeLowValue", "ToleranceRangeHighValue", "DeviationRangeHighValue"]) {
+        const key = name[0].toLowerCase() + name.slice(1);
+        if (c[key] !== undefined) {
+          this.value("lo_item", name, typeof c[key] === "number" ? "set_decimal" : "set_path", String(c[key]));
+        }
+      }
+    }
+  }
+
+  // UI.Chart: a micro chart in an object page header (Donut is the radial
+  // one, Bullet a value against its thresholds, BarStacked a collection's
+  // rows as the segments of one bar)
+  chart(qualifier, c) {
+    this.line(`lo_annotation = lo_target->create_annotation(`);
+    this.line(`  iv_term      = ${lit(UI + "Chart")}`);
+    this.line(`  iv_qualifier = ${lit(qualifier)} ).`);
+    this.line(`lo_record = lo_annotation->create_record( ${lit(UI + "ChartDefinitionType")} ).`);
+    if (c.title) {
+      this.value("lo_record", "Title", "set_string", c.title);
+    }
+    if (c.description) {
+      this.value("lo_record", "Description", "set_string", c.description);
+    }
+    this.value("lo_record", "ChartType", "set_enum_member_by_name", `${UI}ChartType/${c.type}`);
+    for (const [key, name] of [["dimensions", "Dimensions"], ["measures", "Measures"]]) {
+      if (c[key]) {
+        this.line(`lo_collection = lo_record->create_property( ${lit(name)} )->create_collection( ).`);
+        for (const p of c[key]) {
+          this.line(`lo_collection->create_simple_value( )->set_property_path( ${lit(p)} ).`);
+        }
+      }
+    }
+    if (c.measureAttributes) {
+      this.line(`lo_collection = lo_record->create_property( 'MeasureAttributes' )->create_collection( ).`);
+      for (const m of c.measureAttributes) {
+        this.line(`lo_item = lo_collection->create_record( ${lit(UI + "ChartMeasureAttributeType")} ).`);
+        this.value("lo_item", "Measure", "set_property_path", m.measure);
+        this.value("lo_item", "Role", "set_enum_member_by_name", `${UI}ChartMeasureRoleType/${m.role ?? "Axis1"}`);
+        if (m.dataPoint) {
+          this.value("lo_item", "DataPoint", "set_annotation_path", `@${UI}DataPoint#${m.dataPoint}`);
+        }
+      }
+    }
   }
 
   entity(a) {
@@ -507,7 +579,18 @@ class AnnotationWriter {
         // UI./Common. aliases expanded)
         const path = expandAlias(f.fieldGroup ? `@UI.FieldGroup#${f.fieldGroup}` : f.lineItem ? `${f.lineItem}/@UI.LineItem` : f.target);
         this.line(`lo_item->create_property( 'Target' )->create_simple_value( )->set_annotation_path( ${lit(path)} ).`);
+        // a facet that is not shown while a boolean property of the entity is true
+        // (an object page section with nothing in it)
+        if (f.hidden) {
+          this.line(`lo_item->create_annotation( ${lit(UI + "Hidden")} )->create_simple_value( )->set_path( ${lit(f.hidden)} ).`);
+        }
       }
+    }
+    for (const [name, d] of Object.entries(s.dataPoints ?? {})) {
+      this.dataPoint(name, d);
+    }
+    for (const [name, c] of Object.entries(s.charts ?? {})) {
+      this.chart(name, c);
     }
     for (const [name, fields] of Object.entries(s.fieldGroups ?? {})) {
       this.line(`lo_annotation = lo_target->create_annotation(`);
@@ -538,6 +621,10 @@ class AnnotationWriter {
       if (t.arrangement) {
         this.simple(UI + "TextArrangement", "set_enum_member_by_name", `${UI}TextArrangementType/${t.arrangement}`, "lo_annotation", "lo_nested");
       }
+    }
+    // a value list of a few fixed values: a drop-down instead of a search dialog
+    if (s.valueListFixed) {
+      this.simple(COMMON + "ValueListWithFixedValues", "set_boolean", true);
     }
     if (s.valueList) {
       const v = s.valueList;
