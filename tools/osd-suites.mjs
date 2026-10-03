@@ -157,16 +157,20 @@ export function assignShards(files, seconds, count) {
  * Unknown crashes, missing reports and more than three failing files stay red. */
 export function runWithRetries(files, run) {
   const first = run(files, "first");
-  const result = {status: first.status === 0 ? 0 : 1, first, retries: [], lines: []};
+  const complete = (report) => !report.crashed && report.completed === true &&
+    Array.isArray(report.failures) && Number.isInteger(report.totalFailures) &&
+    report.totalFailures >= 0 && report.totalFailures === report.failures.length;
+  const passed = (report) => report.status === 0 && complete(report) && report.totalFailures === 0;
+  const result = {status: passed(first) ? 0 : 1, first, retries: [], lines: []};
   if (first.status === 0) return result;
   const failures = first.failures ?? [];
   const failedFiles = [...new Set(failures.map((failure) => failure.file))];
-  if (first.crashed || !first.completed || !failures.length || first.totalFailures !== failures.length ||
+  if (!complete(first) || !failures.length ||
       failedFiles.some((file) => !files.includes(file)) || failedFiles.length > 3) return result;
   for (const file of failedFiles) {
     const retry = run([file], "retry");
     result.retries.push({file, status: retry.status});
-    if (retry.status === 0 && !retry.crashed && retry.completed && retry.totalFailures === 0) {
+    if (passed(retry)) {
       const title = failures.find((failure) => failure.file === file).title;
       const clean = (value) => String(value).replace(/[\r\n`|<>]/g, " ");
       result.lines.push(`- flaky / order-dependent: \`${clean(file)}\` — ${clean(title)} (passed once in isolation)`);

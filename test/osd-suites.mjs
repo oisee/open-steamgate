@@ -5,7 +5,7 @@
 import {expect} from "chai";
 import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment, runWithRetries} from "../tools/osd-suites.mjs";
 import {mergeTimings} from "../tools/osd-suites-timings.mjs";
-import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
+import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, relative} from "node:path";
@@ -205,6 +205,40 @@ describe("timing weights", () => {
   });
 });
 
+
+function fixtureRun(source, options = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "osd-fail-closed-"));
+  const file = relative(process.cwd(), join(dir, "fixture.mjs"));
+  writeFileSync(file, source);
+  const reports = [];
+  try {
+    const result = runWithRetries([file], (files) => {
+      const output = join(dir, `report-${reports.length}.json`);
+      const child = spawnSync(process.execPath, ["node_modules/mocha/bin/mocha.js", ...files,
+        "--reporter", "tools/osd-suite-timing-reporter.cjs", "--retries", "0"],
+        {encoding: "utf8", env: {...process.env, OSD_SUITE_TIMINGS_FILE: output}});
+      const metadata = existsSync(output) ? JSON.parse(readFileSync(output, "utf8")) : {};
+      reports.push({...metadata, stdout: child.stdout});
+      return {...metadata, status: child.status};
+    }, options);
+    return {result, reports};
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+}
+
+describe("fail closed regressions", () => {
+  it("rejects a failing test followed by process.exit(0)", () => {
+    const {result, reports} = fixtureRun('describe("exit fixture", () => { it("fails", () => { throw Error("failure"); }); after(() => process.exit(0)); });');
+    expect(reports[0].completed).to.equal(undefined);
+    expect(result.status).to.equal(1);
+    expect(result.lines).to.deep.equal([]);
+  });
+  it("rejects zero exit with inconsistent failure metadata", () => {
+    for (const metadata of [{status: 0}, {status: 0, completed: true, failures: [], totalFailures: 1},
+      {status: 0, completed: true, failures: [{file: "a", title: "bad"}], totalFailures: 0}]) {
+      expect(runWithRetries(["a"], () => metadata).status).to.equal(1);
+    }
+  });
+});
 
 describe("Mocha file reports", () => {
   it("captures an order failure and retries the whole file with a fresh process", function () {
