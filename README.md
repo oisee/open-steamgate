@@ -172,9 +172,11 @@ split fixtures as the ABAPiti CI does, and repeat the two runtime commands for
 any extra `qjs`, `mono` and `int8` folders under `.local/abapiti`. Retain JSON from partial runs so passing and failing classes keep their results.
 Declare full-folder runs using `--runs <manifest.json>`; each array entry has
 `folder` (input basename), `runtime` (`osgo` or `osgjs`) and `file` (relative to
-that manifest), or `reason` for a crash without class results. All-success
-full-folder runs credit helper classes as exercised by their tests; partial
-runs leave helpers fails/unknown. Plain `--osgo`/`--osgjs` files give per-class
+that manifest), or `reason` for a crash without class results. Full-folder runs
+covering every test owner with all rows SUCCESS credit helper classes as
+exercised by their tests; partial
+runs with failures leave helpers fails/unknown; missing test owners leave helpers
+and omitted owners with no evidence. Plain `--osgo`/`--osgjs` files give per-class
 evidence only, which is safe for runs restricted with `--class`.
 
 Editors can import `kernelWarnings` and `KERNEL_FORMS` from
@@ -198,17 +200,30 @@ OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh bash -c 'timeout 1200 npm run -s osgjs:
 npm run osg:support -- .local/support-work/corpus/TestOSD_EmitUnitClasses --osgo .local/support-work/osgo-corpus.json --osgjs .local/support-work/osgjs-corpus.json --out docs/osg-support.md --json .local/support-work/support.json
 # Append extra input folders and partial or successful --osgo/--osgjs files.
 # To credit helpers, create a full-folder manifest (paths relative to this JSON):
+# Run each extra folder on both runtimes with the same commands and timeout,
+# writing osgo-{int8,mono,qjs}.json and osgjs-{int8,mono,qjs}.json.
+# The committed page uses the following recorded results (retain crash reasons):
 cat > .local/support-work/runs.json <<'JSON'
 [
   {"folder":"TestOSD_EmitUnitClasses","runtime":"osgo","file":"osgo-corpus.json"},
-  {"folder":"TestOSD_EmitUnitClasses","runtime":"osgjs","reason":"memory access out of bounds; no class results"}
+  {"folder":"TestOSD_EmitUnitClasses","runtime":"osgjs","reason":"memory access out of bounds (73 s; no class results)"},
+  {"folder":"int8","runtime":"osgo","file":"osgo-int8.json"},
+  {"folder":"int8","runtime":"osgjs","file":"osgjs-int8.json"},
+  {"folder":"mono","runtime":"osgo","file":"osgo-mono.json"},
+  {"folder":"mono","runtime":"osgjs","file":"osgjs-mono.json"},
+  {"folder":"qjs","runtime":"osgo","file":"osgo-qjs.json"},
+  {"folder":"qjs","runtime":"osgjs","reason":"SIGABRT: heap exhaustion (439 s; no class results)"}
 ]
 JSON
-# Replace the reason with file: "osgjs-corpus.json" when class results exist.
-# Add records for each extra folder/runtime, then generate all supplied folders:
-npm run osg:support -- .local/support-work/corpus/TestOSD_EmitUnitClasses --runs .local/support-work/runs.json --out docs/osg-support.md
+# Exact command for the committed page:
+npm run osg:support -- .local/support-work/corpus/TestOSD_EmitUnitClasses .local/abapiti/int8 .local/abapiti/mono .local/abapiti/qjs --runs .local/support-work/runs.json --out docs/osg-support.md --json .local/support-work/support.json
 # Replace --out with --check docs/osg-support.md to compare without writing.
 ```
+
+The header defaults to the last commit touching `tools/osg-support.mjs` or
+`tools/osd-kernel-compat.mjs` and that commit's date, so committing the page
+does not invalidate `--check`. To pin historical metadata explicitly, append
+`--osg-rev <commit-sha> --date <yyyy-mm-dd>` to the same generation/check command.
 
 ## Architecture
 

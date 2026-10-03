@@ -42,7 +42,7 @@ export function inventory(directory) {
     const files = readdirSync(input).filter((f) => /\.(abap|xml)$/.test(f)).sort();
     for (const file of files) reg.addFile(new core.MemoryFile(file, readFileSync(join(input, file), "utf8")));
     reg.parse();
-    const constructs = new Map(), classes = new Set(), classLines = new Map();
+    const constructs = new Map(), classes = new Set(), testOwners = new Set(), classLines = new Map();
     let lines = 0;
     const add = (kind, name, filename, token) => {
       if (name === undefined || !/\.clas\.(?:testclasses\.)?abap$/.test(filename)) return;
@@ -55,6 +55,7 @@ export function inventory(directory) {
     };
     for (const file of files.filter((f) => /\.clas\.(?:testclasses\.)?abap$/.test(f))) {
       classes.add(ownerOf(file));
+      if (file.endsWith(".clas.testclasses.abap")) testOwners.add(ownerOf(file));
       const text = readFileSync(join(input, file), "utf8");
       const count = text.split(/\r\n|\n|\r/).length - (/[\r\n]$/.test(text) ? 1 : 0);
       lines += count; classLines.set(ownerOf(file), (classLines.get(ownerOf(file)) ?? 0) + count);
@@ -98,7 +99,7 @@ export function inventory(directory) {
         }
       }
     }
-    return {classes: [...classes].sort(order), classLines, lines, constructs, warnings: kernelWarnings(input, reg)};
+    return {classes: [...classes].sort(order), testOwners: [...testOwners].sort(order), classLines, lines, constructs, warnings: kernelWarnings(input, reg)};
   } finally { if (staged.staging) rmSync(staged.staging, {recursive: true, force: true}); }
 }
 
@@ -146,7 +147,7 @@ const sectionOf = (r) => r.osgo.status === "fails" || r.osgjs.status === "fails"
   : r.osgo.status === "runs" && r.osgjs.status === "runs" ? "both"
   : r.osgo.status === "runs" || r.osgjs.status === "runs" ? "one" : "none";
 
-export function generate(directories, paths) {
+export function generate(directories, paths, options = {}) {
   // Explicit full-folder provenance prevents a --class subset from crediting helpers.
   const folderRuns = (paths.runs ?? []).flatMap((file) => {
     const entries = JSON.parse(readFileSync(file, "utf8"));
@@ -178,10 +179,14 @@ export function generate(directories, paths) {
       if (rows.some((r) => !inv.classes.includes(r.class.replaceAll("#", "/").toUpperCase())))
         throw new Error(`run contains class outside folder: ${folder.name}/${name}`);
       const tests = rows.filter((r) => r.method).length;
-      const passed = tests > 0 && rows.every((r) => r.status === "SUCCESS");
-      folder.evidence[name] = passed ? `all ${tests} tests SUCCESS` : "partial run; class rows retained; helpers fail/unknown";
+      const covered = new Set(rows.map((r) => r.class.replaceAll("#", "/").toUpperCase()));
+      const missingOwners = inv.testOwners.filter((cls) => !covered.has(cls));
+      const passed = tests > 0 && !missingOwners.length && rows.every((r) => r.status === "SUCCESS");
+      folder.evidence[name] = missingOwners.length ? `partial run; missing test owners: ${missingOwners.join(", ")}; helpers have no evidence`
+        : passed ? `all ${tests} tests SUCCESS` : "partial run; class rows retained; helpers fail/unknown";
+      if (missingOwners.length) continue;
       if (tests || rows.length) for (const cls of inv.classes) {
-        if (rows.some((r) => r.class.replaceAll("#", "/").toUpperCase() === cls)) continue;
+        if (inv.testOwners.includes(cls) || covered.has(cls)) continue;
         run.helpers.set(cls, {status: passed ? "runs" : "unknown", reason: passed
           ? `exercised by ${tests} tests in the same run` : "fails/unknown: some rows in the same run did not succeed"});
       }
@@ -205,8 +210,10 @@ export function generate(directories, paths) {
     tests: [...owners].flatMap((cls) => run.rows.get(cls) ?? []).filter((r) => r.method).length,
   }]));
   const abapiti = join(root, ".local/abapiti-src");
+  const [revision, date] = execFileSync("git", ["log", "-1", "--format=%H%n%cs", "--",
+    "tools/osg-support.mjs", "tools/osd-kernel-compat.mjs"], {cwd: root, encoding: "utf8"}).trim().split("\n");
   const report = {abapiti: existsSync(abapiti) ? git(abapiti, "%H") : "unavailable",
-    openSteamgate: git(root, "%H"), date: git(root, "%cs"), folders: folders.sort((a, b) => order(a.name, b.name)), runtime,
+    openSteamgate: options["osg-rev"] ?? revision, date: options.date ?? date, folders: folders.sort((a, b) => order(a.name, b.name)), runtime,
     constructs, warnings: [...warnings].sort(([a], [b]) => order(a, b)).map(([form, count]) => ({form, count})),
     knownWarnings: KERNEL_FORMS.map(({form, anchor, title}) => ({form, anchor, title}))};
   return {report, markdown: render(report)};
@@ -216,7 +223,7 @@ function render(report) {
   const out = ["# OSG support evidence", "", `ABAPiti commit: ${report.abapiti}.`,
     `open-steamgate commit: ${report.openSteamgate}. Date: ${report.date}.`, "",
     "Generated from the ABAPiti corpus; a construct marked runs means its using classes passed their rows, not that the construct is correct or specified.", "",
-    "Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. In a declared full-folder run where every row is SUCCESS, helpers without Unit rows count as runs: exercised by the tests in the same run. In partial runs, passing classes retain their results and helpers are fails/unknown. A crash without class results is no evidence.", "",
+    "Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. In a declared full-folder run where every test owner has rows and every row is SUCCESS, helpers without Unit rows count as runs: exercised by the tests in the same run. In partial runs, passing classes retain their results; omitted test owners and helpers in runs missing owners have no evidence, while helpers in complete runs with failures are fails/unknown. A crash without class results is no evidence.", "",
     "Folders: " + report.folders.map((f) => `${safe(f.name)} (${f.classes} classes, ${f.lines} lines)`).join("; ") + ".", "",
     "| Runtime | Classes with evidence | Lines in classes with evidence | Tests |", "|---|---:|---:|---:|"];
   for (const [name, r] of Object.entries(report.runtime)) out.push(`| ${name} | ${r.classes} | ${r.lines} | ${r.tests} |`);
@@ -247,22 +254,25 @@ function render(report) {
 
 export function main(args = process.argv.slice(2)) {
   if (args.includes("--help")) {
-    console.log("Usage: npm run osg:support -- <dir>... [--osgo <json>]... [--osgjs <json>]... [--out <file.md>] [--json <file>] [--check <file.md>] [--runs <manifest.json>]"); return 0;
+    console.log("Usage: npm run osg:support -- <dir>... [--osgo <json>]... [--osgjs <json>]... [--out <file.md>] [--json <file>] [--check <file.md>] [--runs <manifest.json>] [--osg-rev <sha>] [--date <yyyy-mm-dd>]"); return 0;
   }
   try {
     const directories = [], paths = {osgo: [], osgjs: [], runs: []}, options = {};
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
-      if (["--osgo", "--osgjs", "--out", "--json", "--check", "--runs"].includes(arg)) {
+      if (["--osgo", "--osgjs", "--out", "--json", "--check", "--runs", "--osg-rev", "--date"].includes(arg)) {
         const value = args[++i];
-        if (!value || value.startsWith("--")) throw new Error(`${arg} needs a file`);
+        if (!value || value.startsWith("--")) throw new Error(`${arg} needs a value`);
         if (arg === "--osgo" || arg === "--osgjs" || arg === "--runs") paths[arg.slice(2)].push(value);
         else options[arg.slice(2)] = value;
       } else if (arg.startsWith("-")) throw new Error(`unexpected argument: ${arg}`);
       else directories.push(resolve(arg));
     }
     if (!directories.length) throw new Error("at least one input directory is required");
-    const {report, markdown} = generate(directories, paths);
+    if (options["osg-rev"] && !/^[a-f0-9]{7,40}$/i.test(options["osg-rev"])) throw new Error("--osg-rev needs a commit SHA");
+    if (options.date && (!/^\d{4}-\d{2}-\d{2}$/.test(options.date) ||
+      new Date(options.date).toISOString().slice(0, 10) !== options.date)) throw new Error("--date needs yyyy-mm-dd");
+    const {report, markdown} = generate(directories, paths, options);
     if (options.check) {
       const old = existsSync(options.check) ? readFileSync(options.check, "utf8") : "";
       if (old !== markdown) {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {spawnSync} from "node:child_process";
+import {execFileSync, spawnSync} from "node:child_process";
 import {cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {KERNEL_FORMS, kernelWarnings} from "../tools/osd-kernel-compat.mjs";
@@ -40,6 +40,7 @@ describe("generated corpus support evidence", function () {
       writeFileSync(join(dir, `zcl_${cls}.clas.abap`), `CLASS zcl_${cls} DEFINITION PUBLIC. ENDCLASS.
 CLASS zcl_${cls} IMPLEMENTATION. ENDCLASS.
 `);
+    for (const cls of ["pass", "fail"]) writeFileSync(join(dir, `zcl_${cls}.clas.testclasses.abap`), "");
     const file = join(temp, "helpers.json"), manifest = join(temp, "runs.json");
     const rows = [{class: "ZCL_PASS", status: "SUCCESS", method: "CHECK"},
       {class: "ZCL_FAIL", status: "SUCCESS", method: "CHECK"}];
@@ -65,6 +66,48 @@ CLASS zcl_${cls} IMPLEMENTATION. ENDCLASS.
     assert.ok(generate([dir], {osgo: [file], osgjs: []}).report.constructs.every((c) => c.osgo.missing.includes("ZCL_HELPER")));
     writeFileSync(file, JSON.stringify({rows: []}));
     assert.ok(generate([dir], paths).report.constructs.every((c) => c.osgo.status === "no evidence"));
+  });
+  it("does not credit omitted test owners or helpers from real --class output declared full-folder", () => {
+    const dir = join(root, "test/fixtures/osg-support-selected");
+    const file = join(dir, "osgo-int8x.json"), selected = JSON.parse(readFileSync(file, "utf8"));
+    assert.equal(selected.classes, 1);
+    assert.equal(selected.rows.length, 6);
+    assert.ok(selected.rows.every((r) => r.class === "ZCL_ABAPITI_INT8X" && r.status === "SUCCESS"));
+    const input = join(temp, "selected"); cpSync(dir, input, {recursive: true});
+    writeFileSync(join(input, "zcl_helper.clas.abap"), `CLASS zcl_helper DEFINITION PUBLIC.
+PUBLIC SECTION. CLASS-METHODS check. ENDCLASS.
+CLASS zcl_helper IMPLEMENTATION. METHOD check. RETURN. ENDMETHOD. ENDCLASS.
+`);
+    const manifest = join(temp, "selected-runs.json");
+    writeFileSync(manifest, JSON.stringify([{folder: "selected", runtime: "osgo", file}]));
+    const {report, markdown} = generate([input], {osgo: [], osgjs: [], runs: [manifest]});
+    const omitted = report.constructs.find((c) => c.kind === "type" && c.name === "x LENGTH 2");
+    assert.deepEqual(omitted.classes, ["ZCL_ABAPITI_INT8Y"]);
+    assert.equal(omitted.osgo.status, "no evidence");
+    assert.deepEqual(omitted.osgo.missing, ["ZCL_ABAPITI_INT8Y"]);
+    const helper = report.constructs.find((c) => c.name === "Return");
+    assert.equal(helper.osgo.status, "no evidence");
+    assert.deepEqual(helper.osgo.missing, ["ZCL_HELPER"]);
+    assert.equal(report.runtime.osgo.classes, 1);
+    assert.equal(report.runtime.osgo.tests, 6);
+    assert.match(markdown, /missing test owners: ZCL_ABAPITI_INT8Y/);
+    assert.ok(!markdown.includes("exercised by 6 tests"));
+    assert.equal(evidence(["ZCL_ABAPITI_INT8X"], {rows: new Map([["ZCL_ABAPITI_INT8X", selected.rows]])}).status, "runs");
+  });
+  it("uses the last generator/scanner commit and accepts explicit revision and date", () => {
+    const dir = join(root, "tools/testdata-kernel-valid"), paths = {osgo: [], osgjs: []};
+    const [revision, date] = execFileSync("git", ["log", "-1", "--format=%H%n%cs", "--",
+      "tools/osg-support.mjs", "tools/osd-kernel-compat.mjs"], {cwd: root, encoding: "utf8"}).trim().split("\n");
+    const defaults = generate([dir], paths).report;
+    assert.equal(defaults.openSteamgate, revision); assert.equal(defaults.date, date);
+    const file = join(temp, "explicit.md");
+    const args = ["tools/osg-support.mjs", dir, "--osg-rev", "1234567", "--date", "2026-09-30"];
+    const cli = (more) => spawnSync(process.execPath, [...args, ...more], {cwd: root, encoding: "utf8"});
+    assert.equal(cli(["--out", file]).status, 0);
+    assert.equal(readFileSync(file, "utf8"), generate([dir], paths, {"osg-rev": "1234567", date: "2026-09-30"}).markdown);
+    assert.equal(cli(["--check", file]).status, 0);
+    assert.equal(cli(["--osg-rev", "HEAD"]).status, 2);
+    assert.equal(cli(["--date", "2026-02-30"]).status, 2);
   });
   it("resolves statement, builtin, elementary declaration and assignment types without guessing", () => {
     const dir = join(temp, "types"); mkdirSync(dir);
