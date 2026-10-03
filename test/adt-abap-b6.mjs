@@ -178,6 +178,15 @@ describe("ADT B6: search and virtual folders Node diff", function () {
     try {expect((await diff(base+"virtualfolders/contents","POST",{},"")).status).to.equal(200);}
     finally {abap.Classes.ZCL_AJSON.parse=original;StoreDestination.prototype.call=call;}
   });
+  it("search never parses the package tree through ajson (the round-1 regression)", async () => {
+    const original=abap.Classes.ZCL_AJSON.parse;
+    abap.Classes.ZCL_AJSON.parse=async function(input) {
+      expect(input.iv_json.get().length).to.be.lessThan(1000);
+      return original.call(this,input);
+    };
+    try {expect((await diff(base+"search?operation=quickSearch&query=ZCL*&maxResults=100")).status).to.equal(200);}
+    finally {abap.Classes.ZCL_AJSON.parse=original;}
+  });
   it("VFS invalid UTF-8 and case-sensitive captures", async () => {
     for(const body of [Buffer.from([255]), '<vfs:preselection FACET="package"><vfs:value>$UNKNOWN</vfs:value></vfs:preselection>', '<vfs:facet></vfs:facet>'])
       expect((await diff(base+"virtualfolders/contents","POST",{},body)).status).to.equal(200);

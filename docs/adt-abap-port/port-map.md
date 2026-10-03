@@ -580,6 +580,9 @@ LF, and no fixed-width DDIC fields. Lists retain host order. Escape backslash
 as `\\`, TAB as `\t`, and LF as `\n`; `ZCL_OSD_ADT_JS=>UNESCAPE` decodes
 text fields in one pass (so a literal `\n` stays literal). Repository
 identifiers cannot contain TAB, LF or backslash; descriptions can.
+Records are fixed-arity per kind letter: a new field is a new kind letter
+or a new format name, never an extra column on an existing record (a
+reader that splits into named fields would take it silently).
 
 B6 PACKAGES input `{format:"lines"}` returns
 `P<TAB>name<TAB>parent<TAB>description<TAB>library<TAB>root`.
