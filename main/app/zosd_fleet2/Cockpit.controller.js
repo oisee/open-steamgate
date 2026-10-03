@@ -156,6 +156,42 @@ function (Button, Dialog, Input, Label, VBox, Text, JSONModel, Series) {
      "max": "1000000"
     },
     {
+     "name": "simulate.profile",
+     "default": "default",
+     "min": "1",
+     "max": "20"
+    },
+    {
+     "name": "simulate.dump",
+     "default": "-1",
+     "min": "-1",
+     "max": "1000"
+    },
+    {
+     "name": "simulate.hang",
+     "default": "-1",
+     "min": "-1",
+     "max": "1000"
+    },
+    {
+     "name": "simulate.slow",
+     "default": "-1",
+     "min": "-1",
+     "max": "1000"
+    },
+    {
+     "name": "simulate.hits_mean",
+     "default": "-1",
+     "min": "-1",
+     "max": "100"
+    },
+    {
+     "name": "simulate.autoclose",
+     "default": "-1",
+     "min": "-1",
+     "max": "1000"
+    },
+    {
      "name": "piles.checks.size",
      "default": "2",
      "min": "1",
