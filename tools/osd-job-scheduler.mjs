@@ -132,12 +132,13 @@ export function manualClock(start) {
     setTimer(fn, ms, {wait = false} = {}) {
       const handle = next++;
       const owner = wait ? runs.getStore() : undefined;
-      timers.set(handle, {at: now + Math.max(0, ms), fn, owner});
+      timers.set(handle, {at: now + Math.max(0, ms), fn, owner, wait});
       if (owner) woke?.();
       return handle;
     },
     clearTimer(handle) { timers.delete(handle); },
-    pending: () => [...timers.values()].map((timer) => timer.at).sort((a, b) => a - b),
+    pending: ({waitOnly = false} = {}) => [...timers.values()].filter((timer) => !waitOnly || timer.wait)
+      .map((timer) => timer.at).sort((a, b) => a - b),
     set(ms) { now = ms; },
     async advance(ms) {
       const until = now + ms;

@@ -1,3 +1,4 @@
+import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 import {expect} from "chai";
 import {mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
@@ -112,6 +113,8 @@ describe("DSL L3 hardening: claims, set-scoped writes and unschedule refusals", 
         "INSERT INTO zosd_l2_ship (mandt,ship_id,name,status) VALUES ('123','S001','Albatross','A')",
         "INSERT INTO zosd_l2_voy (mandt,voyage_id,ship_id,dep_date) VALUES ('123','V00001','S001','20261010')"]);
     });
+    const jobModes = {};
+    before(async () => { for (const set of ["fleet", "fleet2"]) jobModes[set] = await jobDoctor(set, join(scratch,`job-doctor-${set}`)); });
     beforeEach(() => exec(tables.map((f) => `DELETE FROM ${f.split(".")[0]}`)));
     after(async () => {
       store?.close();
@@ -128,13 +131,13 @@ describe("DSL L3 hardening: claims, set-scoped writes and unschedule refusals", 
       const out = join(scratch, name); mkdirSync(out);
       const {Transpiler, core: parser} = modulesOf(process.cwd());
       const reg = new parser.Registry();
-      const text = edit(source(set).replace(new RegExp(`\\b${real}\\b`, "g"), name));
+      const text = edit((jobModes[set].files[`zcl_l3_${set}.clas.abap`] ?? source(set)).replace(new RegExp(`\\b${real}\\b`, "g"), name));
       for (const [f, t] of Object.entries({[`${name}.clas.abap`]: text,
         [`${name}.clas.xml`]: readFileSync(`${OUT}/${real}.clas.xml`, "utf8").replaceAll(real.toUpperCase(), name.toUpperCase())})) {
         reg.addFile(new parser.MemoryFile(f, lowerNarrowSubmit(t, f, parser)));
       }
       const coreDir = ".local/lars/open-abap-core/src";
-      const deps = [...tables.map((f) => join("src/dsl", f)),
+      const deps = [...daemonDependencies(),...tables.map((f) => join("src/dsl", f)),
         ...["tbtcjob.tabl.xml", "btcselect.tabl.xml", "btch0000.tabl.xml", "zcl_osd_submit_semantics.clas.abap", "zcl_osd_submit_ranges.clas.abap"].map((f) => join("src/jobs", f)),
         "gen/gui/zcl_osd_batch_report.clas.abap", ".local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap",
         // the cockpit's DPC_EXT (zcl_zl3c_*) needs its gen/stg base and the Gateway; the mutants do not

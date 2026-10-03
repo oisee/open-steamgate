@@ -1,3 +1,4 @@
+import {daemonHost} from "../tools/osd-daemon-host.mjs";
 // DSL L3, slice 1 (docs/dsl-l3.md): a set of L2 rules run as one unit. The
 // manifest compiles (and refuses what it should, at its line); the committed
 // runner and job report are a fresh build; every rule's lines of the runner
@@ -1262,6 +1263,8 @@ ENDCLASS.
           if (method === "governor_glass") glassJobs = new Set(jobsAfter(beforeMethod).map((r) => r.id));
           if (method === "sim_twin") simJobs = jobsAfter(beforeMethod);
         }
+        await daemonHost(abap)?.idle();
+        await settled();
         expect(glassJobs.size, "governor proof ran real jobs").to.be.greaterThan(6);
         // the simulated twin (slice 5d): its dumps are jobs that abort, and the
         // doctor's resubmits of them complete; ten piles of stage 1 and stage 2's
@@ -1277,13 +1280,16 @@ ENDCLASS.
         // and stage 2's six again; doctor_keeps_run_values (slice 5b): the same pile, and
         // stage 2 over three busy ships cut by the run's own size 2, two piles a rule
         const simIds = new Set(simJobs.map((r) => r.id));
-        const staged = all.filter((r) => r.jobName.startsWith("L3_FLEET2_") && !glassJobs.has(r.id) && !simIds.has(r.id));
+        const staged = all.filter((r) => /^L3_FLEET2_[12][0-9]{2}_[0-9]{4}$/.test(r.jobName) && !glassJobs.has(r.id) && !simIds.has(r.id));
         expect(all.filter((r) => glassJobs.has(r.id)).every((r) => r.state === "COMPLETED"), "governor jobs complete").to.equal(true);
         const stage2 = [2, 3, 4, 5, 6, 7].map((n) => `L3_FLEET2_20${n}_0001`);
         const stage2Cut = [2, 3, 4, 5, 6, 7].flatMap((n) => [`L3_FLEET2_20${n}_0001`, `L3_FLEET2_20${n}_0002`]);
         expect(staged.map((r) => r.jobName).sort(), "the two stages' jobs").to.deep.equal([1, 2, 3, 4].map((p) => `L3_FLEET2_101_000${p}`)
           .concat(stage2, ["L3_FLEET2_101_0004"], stage2, ["L3_FLEET2_101_0004"], stage2Cut).sort());
         expect(staged.map((r) => r.state)).to.deep.equal(Array(30).fill("COMPLETED"));
+        const watcherJobs = all.filter((r) => r.jobName === "L3_FLEET2_PASS");
+        expect(watcherJobs.length, "the daemon dispatched doctor passes").to.be.greaterThan(0);
+        expect(watcherJobs.every((r) => r.state === "COMPLETED"), "watcher passes complete").to.equal(true);
         const runs = all.filter((r) => r.jobName.startsWith("L3_FLEET_"));
         expect(runs.map((r) => r.jobName).sort(), "twenty-four jobs ran").to.deep.equal(model.rules.flatMap((_, i) => [1, 2, 3, 4].map((p) => `L3_FLEET_0${i + 1}_000${p}`)));
         expect(runs.map((r) => r.state)).to.deep.equal(Array(24).fill("COMPLETED"));

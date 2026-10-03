@@ -35,3 +35,23 @@ export function doctorOverlay(model, text, kind) {
   }
   return text;
 }
+
+// Keep the watcher artefacts beside their overlays; the main renderer owns XML and traces.
+export async function renderDoctor(model, {renderRecipe, sidecar, progXml, classXml}) {
+  const results = [], files = {};
+  if (model.autodoctor) {
+    const report = await renderRecipe(model, "recipes/l3-doctor/report.tpl", {profile: "abap"});
+    results.push([`${model.autodoctor.doctor_report}.prog.abap`, report]);
+    files[`${model.autodoctor.doctor_report}.prog.trace.json`] = sidecar(model, "recipes/l3-doctor/report.tpl", report);
+    files[`${model.autodoctor.doctor_report}.prog.abap`] = report.text;
+    files[`${model.autodoctor.doctor_report}.prog.xml`] = progXml({...model, report: model.autodoctor.doctor_report});
+    if (model.daemon) {
+      const daemon = await renderRecipe(model, "recipes/l3-doctor/daemon.tpl", {profile: "abap"});
+      results.push([`${model.daemon.daemon_class}.clas.abap`, daemon]);
+      files[`${model.daemon.daemon_class}.clas.trace.json`] = sidecar(model, "recipes/l3-doctor/daemon.tpl", daemon);
+      files[`${model.daemon.daemon_class}.clas.abap`] = daemon.text;
+      files[`${model.daemon.daemon_class}.clas.xml`] = classXml(model, model.daemon.daemon_class);
+    }
+  }
+  return {results, files};
+}

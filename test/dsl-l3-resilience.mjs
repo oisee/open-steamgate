@@ -1,3 +1,4 @@
+import {jobDoctor, daemonDependencies} from "./helpers/dsl-doctor-mode.mjs";
 // DSL L3, slice 5a (docs/dsl-l3.md, "Resilience"): a run that heals itself
 // and stops itself, every property from the set's `resilience:` block. The
 // doctor marks a pile whose job is over FAILED and submits it again after its
@@ -274,8 +275,8 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
         `INSERT INTO ${table} (mandt, ${COLUMNS[table].join(", ")}) VALUES ('123', ${row.map((v) => `'${v}'`).join(", ")})`));
       await exec([...Object.keys(FLEET).map((t) => `DELETE FROM ${t}`), ...inserts]);
     });
-    let classesBefore;
-    before(() => { classesBefore = {...globalThis.abap.Classes}; });
+    let classesBefore, jobMode;
+    before(async () => { classesBefore = {...globalThis.abap.Classes}; jobMode = await jobDoctor("fleet2", join(scratch,"job-doctor")); });
     after(() => {
       const classes = globalThis.abap.Classes;
       for (const key of Object.keys(classes)) if (!(key in classesBefore)) delete classes[key];
@@ -307,12 +308,12 @@ describe("DSL L3 slice 5a: resilience, the doctor, fuses, a dry run and retentio
       mkdirSync(out, {recursive: true});
       const {Transpiler, core} = modulesOf(process.cwd());
       const reg = new core.Registry();
-      const text = readFileSync(join(OUT, `${real}.clas.abap`), "utf8").replace(new RegExp(`\\b${real}\\b`, "g"), name);
+      const text = (jobMode.files[`${real}.clas.abap`] ?? readFileSync(join(OUT, `${real}.clas.abap`), "utf8")).replace(new RegExp(`\\b${real}\\b`, "g"), name);
       const edited = edit(text);
       expect(edited, `${name} differs from ${real}`).to.not.equal(text);
       const files = {[`${name}.clas.abap`]: edited, [`${name}.clas.xml`]: readFileSync(join(OUT, `${real}.clas.xml`), "utf8").replace(real.toUpperCase(), name.toUpperCase())};
       for (const [f, t] of Object.entries(files)) reg.addFile(new core.MemoryFile(f, lowerNarrowSubmit(t, f, core)));
-      const deps = [...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
+      const deps = [...daemonDependencies(),...TABLES.map((t) => `src/dsl/${t}.tabl.xml`), "src/jobs/tbtcjob.tabl.xml", "src/jobs/btcselect.tabl.xml", "src/jobs/btch0000.tabl.xml",
         "gen/gui/zcl_osd_batch_report.clas.abap", "src/jobs/zcl_osd_submit_semantics.clas.abap", "src/jobs/zcl_osd_submit_ranges.clas.abap",
         ".local/lars/open-abap-gui/framework/zif_gg_selection_screen_types.intf.abap",
         ...readdirSync(OUT).filter((f) => /^zosd_l2_.*\.(tabl|dtel)\.xml$/.test(f)).map((f) => join(OUT, f)),

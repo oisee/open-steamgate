@@ -10,7 +10,7 @@ export async function loadGenerated(files, names, dir, model) {
   const {Transpiler,core} = modulesOf(process.cwd());
   const reg = new core.Registry();
   const selected = new Set(names.flatMap((n) => [`${n}.clas.abap`,`${n}.clas.xml`]));
-  for (const f of selected) reg.addFile(new core.MemoryFile(f,lowerNarrowSubmit(files[f],f,core)));
+  for (const f of selected) if (files[f] !== undefined) reg.addFile(new core.MemoryFile(f,lowerNarrowSubmit(files[f],f,core)));
   const deps = new Map();
   const addFolder = (folder) => {
     for (const f of readdirSync(folder).sort()) if (/\.(clas|intf)\.(abap|xml)$|\.(tabl|ttyp|dtel|doma)\.xml$/.test(f)) deps.set(f,readFileSync(join(folder,f),'utf8'));
@@ -23,6 +23,13 @@ export async function loadGenerated(files, names, dir, model) {
     }
   };
   addDdic('src');
+  const addTree = (dir) => {
+    addFolder(dir);
+    for (const e of readdirSync(dir,{withFileTypes:true})) if (e.isDirectory()) addTree(join(dir,e.name));
+  };
+  addTree('src/daemons');
+  addTree('.local/lars/open-abap-gui/framework');
+  addTree('.local/lars/open-abap-apc/src');
   const coreDir = '.local/lars/open-abap-core/src';
   for (const folder of ['src/dsl','src/jobs',...new Set(model.rules.map((r) => dirname(resolve(r.file)))),
     ...['.','uuid','exceptions','ddic/dtel','ddic/doma','ddic/ttyp','ddic/structures','date_time'].map((d) => join(coreDir,d))]) addFolder(folder);

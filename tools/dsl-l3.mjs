@@ -25,7 +25,7 @@ import {DEFAULT_DDIC, registryFor} from "./dsl-ddic.mjs";
 import {compileSchedule, compileStages, explainStage, readStages, worklistVariants} from "./dsl-l3-stages.mjs";
 import {compileResilience, resilienceNodes} from "./dsl-l3-resilience.mjs";
 import {compileGovernor, governorTemplate} from "./dsl-l3-governor.mjs";
-import {doctorOverlay} from "./dsl-l3-doctor-overlay.mjs";
+import {doctorOverlay, renderDoctor} from "./dsl-l3-doctor-overlay.mjs";
 import {replayOverlay} from "./dsl-l3-replay-overlay.mjs";
 import {compileReplay} from "./dsl-l3-replay.mjs";
 import {compileCockpit, renderCockpit, cockpitRunnerTemplate} from "./dsl-l3-cockpit.mjs";
@@ -636,20 +636,9 @@ export async function renderSet(model) {
     if (first) throw new SetError(model.where ?? model.source, model.set_line, `the generated ${name} line ${first.line} holds a ${first.what}; nothing generated may end the unit of work`);
   }
   const results = [[`${model.class}.clas.abap`, runner], [`${model.report}.prog.abap`, job], ...extra.results];
-  if (model.autodoctor) {
-    const report = await renderRecipe(model, "recipes/l3-doctor/report.tpl", {profile: "abap"});
-    results.push([`${model.autodoctor.doctor_report}.prog.abap`, report]);
-    extra.files[`${model.autodoctor.doctor_report}.prog.trace.json`] = sidecar(model, "recipes/l3-doctor/report.tpl", report);
-    extra.files[`${model.autodoctor.doctor_report}.prog.abap`] = report.text;
-    extra.files[`${model.autodoctor.doctor_report}.prog.xml`] = progXml({...model, report: model.autodoctor.doctor_report});
-    if (model.daemon) {
-      const daemon = await renderRecipe(model, "recipes/l3-doctor/daemon.tpl", {profile: "abap"});
-      results.push([`${model.daemon.daemon_class}.clas.abap`, daemon]);
-      extra.files[`${model.daemon.daemon_class}.clas.trace.json`] = sidecar(model, "recipes/l3-doctor/daemon.tpl", daemon);
-      extra.files[`${model.daemon.daemon_class}.clas.abap`] = daemon.text;
-      extra.files[`${model.daemon.daemon_class}.clas.xml`] = classXml(model, model.daemon.daemon_class);
-    }
-  }
+  const doctor = await renderDoctor(model, {renderRecipe, sidecar, progXml, classXml});
+  results.push(...doctor.results);
+  Object.assign(extra.files, doctor.files);
   if (model.settings) {
     for (const [name, template, kind] of [[model.settings.class, "recipes/l3-settings/class.tpl", "clas"],
       [model.settings.report, "recipes/l3-settings/report.tpl", "prog"]]) {

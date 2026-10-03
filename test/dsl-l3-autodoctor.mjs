@@ -151,6 +151,23 @@ describe('DSL L3 5e: autonomous doctor', function () {
     expect(read("SELECT * FROM zosd_l3_run WHERE status='HELD'")).to.have.length(0);
     expect(read("SELECT * FROM zosd_l3_doctor WHERE stage_no=1 AND doc_action='FAILED'").length).to.be.greaterThan(20);
   });
+  it('daemon jobs keep run-scoped chaos overrides after live settings change', async () => {
+    const tune = async (name,value) => {
+      expect((await dialogStep(() => cls().set_setting({iv_param:str(name),iv_value:str(value),iv_note:str('chaos snapshot')}))).get()).to.equal('X');
+    };
+    for (const [name,value] of [['budget.glass','100000'],['retry.max','0'],['simulate.time_scale','0'],
+      ['simulate.dump','0'],['simulate.hang','0'],['simulate.slow','0']]) await tune(name,value);
+    const first = (await run('20261001','work=sim')).get().run_id.get().trim();
+    await tune('simulate.dump','1000');
+    await work();
+    expect(read('SELECT status FROM zosd_l3_pile WHERE run_id=?',first).map(p=>p.status.trim())).to.satisfy(rows=>rows.length>0 && rows.every(s=>s==='DONE'));
+    expect(read("SELECT param_val FROM zosd_l3_run_conf WHERE run_id=? AND param_name='simulate.dump'",first)[0].param_val.trim()).to.equal('0');
+    const second = (await run('20261002','work=sim')).get().run_id.get().trim();
+    await work();await clock.advance(10000);await work();
+    expect(read('SELECT status,attempt FROM zosd_l3_pile WHERE run_id=? AND stage_no=1',second).map(p=>[p.status.trim(),p.attempt])).to.deep.equal([['FAILED',1]]);
+    expect(read("SELECT param_val FROM zosd_l3_run_conf WHERE run_id=? AND param_name='simulate.dump'",second)[0].param_val.trim()).to.equal('1000');
+    expect(daemonHost(abap).errors.map(e=>String(e))).to.deep.equal([]);
+  });
   it('a silent live job stays running before stale and is failed after stale', async () => {
     await run();await daemonHost(abap).idle();await drainJobOutbox(store);
     const pile=read('SELECT * FROM zosd_l3_pile WHERE stage_no=1')[0];
