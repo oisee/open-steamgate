@@ -29,3 +29,8 @@ Small whole-value assignments release backing arrays larger than four times
 the new value.
 Buffers belong to the same serialized ABAP session/object as their variables;
 this package does not add independent concurrency or reference semantics.
+
+Inline fixed-byte locals use `ReadInto` to copy into existing storage, with
+zero padding after a validated span. `Byte` and `StoreByte` specialize W1;
+`StoreFrom` writes wider fixed fields without snapshots or splicing. Each
+operation validates its span before changing either memory or its target.

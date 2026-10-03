@@ -48,3 +48,28 @@ func (b *Buffer) Append(parts ...string) {
 		b.bytes = append(b.bytes, part...)
 	}
 }
+
+// ReadInto checks the span before copying and zero-padding a fixed-x target.
+func (b *Buffer) ReadInto(dst []byte, off, n int32) {
+	from, to := bytesection.Bounds(len(b.bytes), off, n)
+	copied := copy(dst, b.bytes[from:to])
+	clear(dst[copied:])
+}
+
+// StoreFrom validates an equal-length span before copying a wider field.
+func (b *Buffer) StoreFrom(src []byte, off int32) int32 {
+	from, to := bytesection.Bounds(len(b.bytes), off, int32(len(src)))
+	copy(b.bytes[from:to], src)
+	return 0
+}
+
+// Byte and StoreByte avoid string conversions and general copy loops for W1.
+func (b *Buffer) Byte(off int32) byte {
+	from, _ := bytesection.Bounds(len(b.bytes), off, 1)
+	return b.bytes[from]
+}
+func (b *Buffer) StoreByte(value byte, off int32) int32 {
+	from, _ := bytesection.Bounds(len(b.bytes), off, 1)
+	b.bytes[from] = value
+	return 0
+}

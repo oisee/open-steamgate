@@ -135,3 +135,76 @@ func TestSetReleasesLargeCapacity(t *testing.T) {
 		t.Fatal("empty assignment retained backing array")
 	}
 }
+
+func TestInlineReadsAndStores(t *testing.T) {
+	var mem Buffer
+	mem.Set("\x01\xff\x03\x04")
+	var dst [4]byte
+	mem.ReadInto(dst[:], 1, 1)
+	if dst != [4]byte{255, 0, 0, 0} {
+		t.Fatal(dst)
+	}
+	saved := dst
+	mem.StoreFrom(dst[:1], 0)
+	if mem.Snapshot() != "\xff\xff\x03\x04" || dst != saved {
+		t.Fatal("store value semantics")
+	}
+	for _, span := range [][2]int32{{-1, 1}, {4, 1}, {0, -1}, {1, 2147483647}} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Error("missing range error")
+				}
+			}()
+			mem.ReadInto(dst[:], span[0], span[1])
+		}()
+		if dst != saved {
+			t.Fatal("read changed target before validation")
+		}
+	}
+	before := mem.Snapshot()
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("missing range error")
+			}
+		}()
+		mem.StoreFrom(dst[:], 1)
+	}()
+	if mem.Snapshot() != before {
+		t.Fatal("store changed memory before validation")
+	}
+	if n := testing.AllocsPerRun(1000, func() { mem.ReadInto(dst[:1], 1, 1); mem.StoreFrom(dst[:1], 0) }); n != 0 {
+		t.Fatal(n)
+	}
+}
+
+func TestSingleByteBoundsAndStore(t *testing.T) {
+	var mem Buffer
+	mem.Set("\x00\xff")
+	if mem.Byte(1) != 255 {
+		t.Fatal("byte read")
+	}
+	if mem.StoreByte(128, 0) != 0 || mem.Snapshot() != "\x80\xff" {
+		t.Fatal("byte store")
+	}
+	for _, off := range []int32{-1, 2, 2147483647} {
+		before := mem.Snapshot()
+		for _, run := range []func(){func() { mem.Byte(off) }, func() { mem.StoreByte(1, off) }} {
+			func() {
+				defer func() {
+					if recover() == nil {
+						t.Error("missing range error")
+					}
+				}()
+				run()
+			}()
+			if mem.Snapshot() != before {
+				t.Fatal("changed before validation")
+			}
+		}
+	}
+	if n := testing.AllocsPerRun(1000, func() { mem.StoreByte(mem.Byte(1), 0) }); n != 0 {
+		t.Fatal(n)
+	}
+}

@@ -30,8 +30,8 @@ export function analyzeOwnership(program) {
   const attrs = new Map(), locals = new Map(), declarations = new Set();
   for (const cls of classes) {
     const safety = program.ownershipSafety?.get(sourceOwner(cls));
-    const eligible = (v) => safety && v.type?.k === "xstring" && !safety.dynamic && !safety.names.has(v.name);
-    attrs.set(cls.name, new Set((cls.attributes ?? []).filter((a) => eligible(a) && a.private && !a.fromIntf && !cls.stubs?.length && a.value === undefined).map((a) => a.name)));
+    const eligible = (v) => safety && (v.type?.k === "xstring" || (v.type?.k === "x" && v.type.len >= 1 && v.type.len <= 8)) && !safety.dynamic && !safety.names.has(v.name);
+    attrs.set(cls.name, new Set((cls.attributes ?? []).filter((a) => eligible(a) && a.type.k === "xstring" && a.private && !a.fromIntf && !cls.stubs?.length && a.value === undefined).map((a) => a.name)));
     for (const m of methods(cls)) locals.set(localKey(cls, m), new Set(m.locals.filter(eligible).map((v) => v.name)));
   }
   const external = new Set();
@@ -88,7 +88,7 @@ export function analyzeOwnership(program) {
       if (["assign", "clear", "replace_bytes", "concat_bytes"].includes(n.s)) {
         // Reading the target before side-effecting operands needs a snapshot;
         // preserve the ordinary representation for that uncertain form.
-        write(n.target, !(n.s === "replace_bytes" && [n.with, n.off, n.len].some(calls)));
+        write(n.target, !(["replace_bytes", "concat_bytes"].includes(n.s) && n.target?.type?.k === "x") && !(n.s === "replace_bytes" && [n.with, n.off, n.len].some(calls)));
         for (const [k, v] of Object.entries(n)) if (!["target", "pos", "type"].includes(k)) read(v);
       } else if (["if", "case", "do", "while", "seq", "try"].includes(n.s)) {
         // Conditions are reads, bodies contain independently checked writes.
@@ -102,11 +102,38 @@ export function analyzeOwnership(program) {
     statements(m.body);
   }
   for (const names of attrs.values()) for (const name of external) names.delete(name);
+  for (const cls of classes) for (const m of methods(cls)) {
+    const loaded = new Set();
+    const scan = (n) => {
+      if (!n || typeof n !== "object") return;
+      if (n.s === "assign" && n.target?.e === "var") {
+        const v = n.value?.e === "conv" ? n.value.x : n.value;
+        if (v?.e === "substr" && v.len?.e === "int" && v.len.value > 0 && v.len.value <= 8 &&
+            (v.x.e === "attr" ? attrs.get(cls.name).has(v.x.name) : v.x.e === "var" && locals.get(localKey(cls, m)).has(v.x.name) && v.x.type.k === "xstring")) loaded.add(n.target.name);
+      }
+      for (const v of Array.isArray(n) ? n : children(n)) scan(v);
+    };
+    scan(m.body);
+    for (const l of m.locals) if (l.type.k === "x" && !loaded.has(l.name)) locals.get(localKey(cls, m)).delete(l.name);
+  }
   for (const cls of classes) {
     for (const a of cls.attributes ?? []) if (attrs.get(cls.name).has(a.name)) declarations.add(a);
     for (const m of methods(cls)) for (const l of m.locals) if (locals.get(localKey(cls, m)).has(l.name)) declarations.add(l);
   }
-  return {declarations, has(p, ctx) {
+  return {declarations, unescaped(p, ctx) {
+    const safety = program.ownershipSafety?.get(sourceOwner(ctx.cls));
+    const mentions = (n) => n && typeof n === "object" && ((n.e === "var" && n.name === p?.name) || children(n).some(mentions));
+    const escapes = (n) => n && typeof n === "object" &&
+      ((n.e === "wrap" && mentions(n.x)) || (["call", "new"].includes(n.e) && n.args.some(mentions)) ||
+       (["call_fm", "call_dyn_static"].includes(n.s) && mentions(n)) || children(n).some(escapes));
+    return p?.e === "var" && !p.ref && safety && !safety.dynamic && !safety.names.has(p.name) && !escapes(ctx.method.body) &&
+      (ctx.method.locals.some((l) => l.name === p.name) || ctx.method.returning?.name === p.name);
+  }, width(p, ctx) {
+    return p?.e === "var" ? ctx.method.locals.find((v) => v.name === p.name && v.type.k === "x")?.type.len : 0;
+  }, fixed(p, ctx) {
+    const decl = p?.e === "var" && !p.ref ? ctx.method.locals.find((v) => v.name === p.name) : undefined;
+    return decl?.type.k === "x" && declarations.has(decl) ? decl.type.len : 0;
+  }, has(p, ctx) {
     return p?.e === "static" ? p.owner === ctx.cls.name && attrs.get(p.owner)?.has(p.name) : p?.e === "attr" ? attrs.get(ctx.cls.name)?.has(p.name) : p?.e === "var" && !p.ref && locals.get(localKey(ctx.cls, ctx.method))?.has(p.name);
   }};
 }

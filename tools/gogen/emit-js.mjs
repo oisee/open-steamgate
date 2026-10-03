@@ -426,7 +426,6 @@ function stmt(st, ctx, d) {
       return [`${t}${tb}.push(${moved(st.value, ctx)});`, `${t}abap.bumpTable(${tb});`, `${t}s.sy.tabix = ${tb}.length;`, ...(st.fs ? [`${t}${ident(st.fs)} = ${boundRow(st.table.type, tb, `${tb}.length - 1`)};`] : []),
         ...(st.refInto ? [`${t}${place(st.refInto, ctx)} = ${rowRef(st.table.type, tb, `${tb}.length - 1`)};`] : [])];
     }
-    // ultra/events: CONCATENATE, FIND ALL ... MATCH COUNT (emit-go)
     case "concat": {
       const sep = st.sep ? expr(st.sep, ctx) : `""`;
       const joined = st.table ? `${expr(st.table, ctx)}.map((ConcatRow) => ${expr(st.row, ctx)}).join(${sep})` : `[${st.parts.map((x) => expr(x, ctx)).join(", ")}].join(${sep})`;

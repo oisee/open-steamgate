@@ -27,6 +27,10 @@ const EXPECT = {
   ZCL_GOGEN_T_IPOWTEXT: "a42/42a/a42a/a5-/c:10/n:10/5-/2147483648-",
   // Unmeasured: documented integer power and packed assignment rounding.
   ZCL_GOGEN_T_IPOW: "1073741824/overflow/4611686018427387904/3.38/bytes:2/negative:-1/1/0.50/5.0000000000000000E-01/minimum:2147483648-/wide:4611686018427387904/zero-overflow/wide-overflow",
+  // ABAPiti oracle 009, A4H 2026-10-02: fixed-x fitting and sy-subrc.
+  ZCL_GOGEN_T_REPL009: "[12FF rc=2][AB00 rc=0][11A1A2A3 rc=2][11AB4400 rc=0][12FFFF rc=0][12AB rc=0][1234 rc=2][A1A2 rc=2]",
+  // Unmeasured: fixed-x byte fitting and signed integer moves.
+  ZCL_GOGEN_T_SINGLEBYTES: "255/-2147483648/254/255/FE7FFF80",
   // A raised exception retains reference writes and attributes, but discards
   // VALUE output and RETURNING copy-back (the same fixture runs in both hosts).
   // Unmeasured (SAP docs): classic exceptions retain by-reference TABLES writes.
