@@ -237,6 +237,22 @@ const casting = new t.FieldSymbol(new t.Hex({length: 8}));
 casting.assign(new t.Float().set(1.5));
 casting.setCasting();
 const scalars = [new t.String().set('ABC  '), new t.Integer().set(-42), new t.Integer8().set('9223372036854775807'), new t.Float().set(1.5), new t.Date().set('20261003'), new t.Time().set('123456'), new t.XString().set('ABCDEF'), new t.Hex({length: 4}).set('ABCD'), new t.Packed({length: 16, decimals: 2}).set('12345678901234567890.12')];
+class AbapClass {
+  static INTERNAL_TYPE = 'CLAS';
+  static INTERNAL_NAME = 'ZCL_DEBUG_PROBE';
+}
+const object = new AbapClass();
+const wrappedObject = new t.ABAPObject();
+wrappedObject.set(object);
+const sorted = new t.Table(new t.Integer(), {primaryKey: {type: 'SORTED'}});
+const hashed = new t.HashedTable(new t.Integer());
+const symbol = new t.FieldSymbol(new t.Integer());
+symbol.assign(new t.Integer().set(7));
+const extraCases = [object, wrappedObject, new t.ABAPObject(), sorted, hashed, symbol,
+  new t.FieldSymbol(new t.Integer()), new t.DataReference(new t.Integer()),
+  new t.Character(20).set(" A'B\\r\\n\\t"), new t.Packed({length: 8, decimals: 2}).set('-0.05'),
+  new t.Packed({length: 8, decimals: 2}), new t.Hex({length: 4}).set('abcdef'),
+  new t.String().set('x'.repeat(257)), new t.Hex({length: 130}).set('ab'.repeat(130))];
 debugger;
 `);
       const port = await pickInspectorPort();
@@ -288,6 +304,14 @@ debugger;
         "ABCD0000 (x4)", "12345678901234567890.12 (p16,2)"];
       for (const [index, expected] of expectedScalars.entries()) {
         expect(await render(await evaluate(`scalars[${index}]`))).to.equal(expected);
+      }
+      const expectedExtras = ["ZCL_DEBUG_PROBE (object)", "ZCL_DEBUG_PROBE (object)", "initial (object)",
+        "[0 rows] (sorted table)", "[rows not enumerated] (hashed table)", "-> 7 (i)",
+        "-> unassigned (field symbol)", "-> initial (data reference)", "' A''B\\r\\n\\t' (c20)",
+        "-0.05 (p8,2)", "0.00 (p8,2)", "ABCDEF00 (x4)", "'" + "x".repeat(256) + "…' (string)",
+        "AB".repeat(128) + "… (x130)"];
+      for (const [index, expected] of expectedExtras.entries()) {
+        expect(await render(await evaluate(`extraCases[${index}]`)), `extra description ${index}`).to.equal(expected);
       }
       const castingId = await evaluate("casting");
       expect(await render(castingId)).to.equal("-> 000000000000F83F (x8)");

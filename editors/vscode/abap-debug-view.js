@@ -2,6 +2,18 @@
 
 // These helpers are serialized into both generators, never captured as closures.
 function inspection() {
+  const upperHex = (value) => {
+    // Node 22's V8 rejects toUpperCase in debug-evaluate. Hex digits and
+    // the preview ellipsis need only ASCII casing; retain Unicode behavior
+    // for malformed, non-hex storage outside that domain.
+    let result = "";
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i);
+      if (code > 127 && code !== 0x2026) return value.toUpperCase();
+      result += code >= 97 && code <= 122 ? String.fromCharCode(code - 32) : value[i];
+    }
+    return result;
+  };
   const data = (object, key) => {
     if ((typeof object !== "object" && typeof object !== "function") || object === null) return undefined;
     const descriptor = Object.getOwnPropertyDescriptor(object, key);
@@ -84,7 +96,7 @@ function inspection() {
           converted += (bits & 255n).toString(16).padStart(2, "0");
           bits >>= 8n;
         }
-        converted = converted.toUpperCase();
+        converted = upperHex(converted);
       } else if (typeof raw === "string") {
         converted = "";
         // CASTING is little-endian UTF-16 in this runtime. Limit conversion work
@@ -93,7 +105,7 @@ function inspection() {
           const unit = raw.charCodeAt(i);
           converted += (unit & 255).toString(16).padStart(2, "0") + (unit >> 8).toString(16).padStart(2, "0");
         }
-        converted = converted.toUpperCase();
+        converted = upperHex(converted);
       }
     } else if (["Character", "String"].includes(declared) && ["Hex", "XString"].includes(actual)) {
       converted = "";
@@ -108,17 +120,25 @@ function inspection() {
     });
     return view;
   };
-  return {data, kind, constructor, target};
+  return {data, kind, constructor, target, upperHex};
 }
 
 function abapDebugDescription(defaultValue, helpers) {
   "use strict";
   try {
-    const {data, kind, constructor, target: referenceTarget} = helpers;
+    const {data, kind, constructor, target: referenceTarget, upperHex} = helpers;
     // Avoid RegExp operations: V8 rejects their shared match-state mutation in
     // js-debug's side-effect-free child previews.
     const preview = (value) => value.slice(0, 256) + (value.length > 256 ? "…" : "");
-    const quote = (value) => "'" + value.split("'").join("''").split("\r").join("\\r").split("\n").join("\\n").split("\t").join("\\t") + "'";
+    const quote = (value) => {
+      // String.split is also rejected by Node 22's side-effect checker.
+      let result = "'";
+      for (let i = 0; i < value.length; i++) {
+        const char = value[i];
+        result += char === "'" ? "''" : char === "\r" ? "\\r" : char === "\n" ? "\\n" : char === "\t" ? "\\t" : char;
+      }
+      return result + "'";
+    };
     const trimChar = (value) => {
       let end = value.length;
       while (end > 0 && value[end - 1] === " ") end--;
@@ -148,13 +168,15 @@ function abapDebugDescription(defaultValue, helpers) {
           return (negative ? "-" : "") + (decimals ? digits.slice(0, -decimals) + "." + digits.slice(-decimals) : digits) + " (p" + data(value, "length") + "," + decimals + ")";
         }
         case "Float": {
-          const parts = raw.toExponential(16).split("e");
-          return parts[0] + "E" + parts[1][0] + parts[1].slice(1).padStart(2, "0") + " (f)";
+          const text = raw.toExponential(16);
+          const exponent = text.indexOf("e");
+          if (exponent < 0) return undefined;
+          return text.slice(0, exponent) + "E" + text[exponent + 1] + text.slice(exponent + 2).padStart(2, "0") + " (f)";
         }
         case "Date": return raw.slice(0, 4) + "-" + raw.slice(4, 6) + "-" + raw.slice(6, 8) + " (d)";
         case "Time": return raw.slice(0, 2) + ":" + raw.slice(2, 4) + ":" + raw.slice(4, 6) + " (t)";
-        case "XString": return preview(raw).toUpperCase() + " (xstring)";
-        case "Hex": return preview(raw).toUpperCase() + " (x" + data(value, "length") + ")";
+        case "XString": return upperHex(preview(raw)) + " (xstring)";
+        case "Hex": return upperHex(preview(raw)) + " (x" + data(value, "length") + ")";
         case "Structure": return "{…} (structure)";
         case "Table": return "[" + data(raw, "length") + " rows] (" + (data(data(data(value, "options"), "primaryKey"), "type") === "SORTED" ? "sorted" : "standard") + " table)";
         case "HashedTable": return "[rows not enumerated] (hashed table)";
