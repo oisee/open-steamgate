@@ -38,6 +38,10 @@ CLASS zcl_osd_adt_uri IMPLEMENTATION.
     DATA lv_byte TYPE i.
     DATA lv_one TYPE xstring.
     DATA lv_char TYPE string.
+    IF iv_text CO `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()`.
+      rv_text = iv_text.
+      RETURN.
+    ENDIF.
     lv_bytes = utf8( iv_text ).
     DO xstrlen( lv_bytes ) TIMES.
       lv_off = sy-index - 1.

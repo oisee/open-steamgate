@@ -110,6 +110,8 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/ddic/tables/:name/source/main` iv_handler = `ZCL_OSD_ADT_DDIC` CHANGING ct_routes = rt_routes ).
 *   After the B1 statics: packages/settings must match before packages/:name.
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/packages/:name` iv_handler = `ZCL_OSD_ADT_PACKAGE` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/repository/informationsystem/search` iv_handler = `ZCL_OSD_ADT_SEARCH` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/repository/informationsystem/virtualfolders/contents` iv_handler = `ZCL_OSD_ADT_VFS` CHANGING ct_routes = rt_routes ).
     add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/repository/nodepath` iv_handler = `ZCL_OSD_ADT_TREE` CHANGING ct_routes = rt_routes ).
     add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/repository/nodestructure` iv_handler = `ZCL_OSD_ADT_TREE` CHANGING ct_routes = rt_routes ).
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/checkruns/reporters`

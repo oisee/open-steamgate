@@ -32,7 +32,7 @@ import {basename, join} from "node:path";
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
-export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN", "PARSE"];
+export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN", "PARSE", "PACKAGES", "SEARCH"];
 
 /** What this host can do, as the screen asks it (CAPABILITIES, EV_NOTE):
  *  the editor draws a button only for a command named here. Node holds the
@@ -182,6 +182,35 @@ export class StoreDestination {
           return {EV_JSON: JSON.stringify(checkRunReport(store, {type, name,
             include: givenText(signature, "IV_INCLUDE") || undefined,
             source: givenText(signature, "IV_FILTER") === "SOURCE" ? givenText(signature, "IV_SOURCE") : undefined}))};
+        }
+        case "PACKAGES": {
+          const input = JSON.parse(givenText(signature, "IV_JSON"));
+          const packages = store.packages();
+          if (["lines", "vfs-lines"].includes(input.format)) {
+            const field = (value) => String(value ?? "").replaceAll("\\", "\\\\").replaceAll("\t", "\\t").replaceAll("\n", "\\n");
+            const records = [];
+            const row = (...fields) => records.push(fields.map(field).join("\t"));
+            for (const pkg of packages) {
+              row("P", pkg.name, pkg.parent, pkg.description, pkg.library ? "X" : "", pkg.parent === undefined ? "X" : "");
+              if (input.format === "vfs-lines") {
+                for (const child of pkg.subpackages ?? []) row("C", pkg.name, child);
+                for (const object of store.package(pkg.name).objects) {
+                  row("O", pkg.name, object.type, object.name, object.description ?? object.name, object.library ? "X" : "");
+                }
+              }
+            }
+            return {EV_SOURCE: records.join("\n")};
+          }
+          return {EV_JSON: JSON.stringify(packages.map((pkg) => ({
+            name: pkg.name, parent: pkg.parent, description: pkg.description, library: pkg.library, subpackages: pkg.subpackages})))};
+        }
+        case "SEARCH": {
+          const input = JSON.parse(givenText(signature, "IV_JSON"));
+          const rows = store.search(input.seed ?? "", {
+            type: input.type || undefined, max: input.limit === null ? NaN : Number(input.limit),
+          });
+          if (input.format === "lines") return {EV_SOURCE: rows.map((o) => [o.type, o.name, o.library ? "X" : ""].join("\t")).join("\n")};
+          return {EV_JSON: JSON.stringify(rows)};
         }
         case "PACKAGE": {
           const input = JSON.parse(givenText(signature, "IV_JSON"));

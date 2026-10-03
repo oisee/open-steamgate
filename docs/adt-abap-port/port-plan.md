@@ -124,7 +124,7 @@ Every slice is one codex run plus a Claude critic. Every acceptance is `test/adt
 | **B2a** | `ZCL_OSD_ADT_SOURCE` and `ZCL_OSD_ADT_OBJECT`: source/main, both include routes, bare CLAS/PROG/INTF/DDLS documents; 20 generated rows. | Cases (1)-(7) and (12) (Node PUT followed by an ABAP 304); BOM/CRLF/Cyrillic fixture. |
 | **B2b** | The PARSE dispatcher with kind OUTLINE; `ZCL_OSD_ADT_STRUCTURE`; the INCL/SRVD bare alias. **Precondition in this slice: the host warms the registry (`store.warm`) after write and activation**, so no cold parse runs in a step. | Case (8); case (9) records cold and warm latency; Identifier twins; `xml:base` with the query string. |
 | **B5** | STORE PACKAGE (raw/local); `ZCL_OSD_ADT_PACKAGE` and `ZCL_OSD_ADT_TREE` (nodepath, nodestructure). **Fix the Node nodepath URIError first.** | Fixtures `$ZT_A` vs `$ZTA`, namespaced, library, `$TMP` with two users; the `??` chains; node keys; flat root. |
-| **B6** | STORE PACKAGES and SEARCH; `ZCL_OSD_ADT_SEARCH`; `ZCL_OSD_ADT_VFS`. **Fix the Node vfs host-throw hang first.** | maxResults matrix including NaN, seed `max*4`, vfs facet orders; measure ajson cost (vfs is about 19 calls per tree build). |
+| **B6** | Implemented: STORE PACKAGES/SEARCH bulk line replies; ABAP search and VFS filtering/counting/XML; SYSTEM VFS removed. | Live Node diff: maxResults including NaN and huge negatives, `/K`, seed `max*4`, 12-object order and all facet orders. Accepted search 9.24 ms ABAP / 2.14 ms Node; VFS 98.41 ms / 80.65 ms (section 4). |
 | **C1** | Checkruns: STORE CHECKRUN over an extracted shared `checkRunReport()`; reporters; package expansion through PACKAGE raw. | The spec's 15 cases plus a destination test for the bound store and an empty overlay. |
 | **C4a** | Freestyle: STORE SQL and SQLCHECK on the **raw DEFAULT connection inside a savepoint**, shared cell module, `ZCL_OSD_ADT_TABLEDATA`. | Freestyle and checkSyntax matrix on sqlite **and duckdb** (a refused SELECT must not lose the session row); the red proof with `lockedClient` shows the nested-step error. |
 | **C4b** | ddic and cds preview (4 rows); PARSE kind DDLS; `TABLE_FIELDS` with the resolver. | Cases 1-4; measure the per-field READ cost on a wide table. |
@@ -134,6 +134,15 @@ Every slice is one codex run plus a Claude critic. Every acceptance is `test/adt
 | **C5** | Classrun: `ZCL_OSD_ADT_CLASSRUN`, a `ZCL_OSD_KERNEL_GUARD` @KERNEL try/catch (a runtime seam, not a host capability; the note goes in the port-map), SYSTEM DUMP (queued, not awaited), `FENCE` from F1. In the same slice, Node gets a 503 NOT_BUILT before `importFresh`. | Cases 1-14; the red proof without the guard (an ASSERT-todo error gives a 500). |
 
 ## 4. What stays on the host, and what "100%" means
+
+B6 accepted measurements (this clone, Node 26, 159 packages / 1,937 objects,
+20 warm wire samples): search **9.24 ms ABAP vs 2.14 ms Node**, below the
+10 ms target; VFS group drawers **98.41 ms ABAP vs 80.65 ms Node**. Bulk
+package and object facts now cross STORE as line records in EV_SOURCE;
+VFS parsing, filtering, subtree counts and XML are ABAP. SYSTEM VFS is
+removed. The diagnostic ajson parse of the old 202,026-byte full tree costs
+281.84 ms and is no longer on either ABAP route's bulk path. See
+[slice-b6.md](slice-b6.md) for the decision and measurement table.
 
 **Route rows that stay HOST: only the catch-all `* /sap/bc/adt/*`.** None of the 15 families keeps a HOST row. `debugger/listeners`, the static rows and the introspection rows all become ABAP rows. Introspection gets no exemption: under design B a HOST row costs the same ABAP step plus the Node route, so keeping it saves nothing.
 
