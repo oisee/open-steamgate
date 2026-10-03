@@ -115,7 +115,13 @@ export async function runClassrun(root, name, options = {}) {
   // the imports and the interface check happen before the dialog step, not
   // inside it: a wrong request (no such module, not a classrun class) is a
   // 400/503 to answer, not a runtime dump to record and roll back
-  const module = await importFresh(join(outputDir, `${name.toLowerCase()}.clas.mjs`));
+  const file = join(outputDir, `${name.toLowerCase()}.clas.mjs`);
+  if (!existsSync(file)) {
+    const missing = new Error(`${name} is not built: activate it first`);
+    missing.code = "NOT_BUILT";
+    throw missing;
+  }
+  const module = await importFresh(file);
   const [Local] = Object.values(module);
   if (Local === undefined) {
     throw new Error(`${name} is not exported by its own module`);
