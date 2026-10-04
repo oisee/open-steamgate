@@ -337,7 +337,7 @@ run or the request. Two facts govern that wait.
 
 A wait that gives up is reported, and the run or call goes ahead anyway.
 There is no prompt to answer, since an unattended run has nobody to answer
-one. Every step of an attach is written to the **osd system** output channel
+one. Every step of an attach is written to the **OSD: System log** output channel
 as `osd debugger: ...`: the attach configuration, each wait's start and end
 or timeout, which breakpoints matched and why, the sessions asked and their
 verified state, and the live generation. The 0.5.1467 regression showed

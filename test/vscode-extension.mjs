@@ -329,7 +329,7 @@ describe("editors/vscode: the extension's logic", function () {
     });
     client.classrun = async () => ({text: "ok", ms: 1});
     const run = () => loadExtension(api).classrunObject("ZCL_A", {show() {}, appendLine: line => lines.push(line)},
-      false, file, {client: () => client});
+      false, file, {client: () => client, controller: {launcher: {state: "running"}}});
     await run();
     expect(lines[0]).to.include("editor changes are not activated");
     expect(requests[0][0]).to.equal("http://local/sap/bc/adt/oo/classes/zcl_a/source/main?version=active");
@@ -340,6 +340,71 @@ describe("editors/vscode: the extension's logic", function () {
     unavailable = true; lines.length = 0;
     await run();
     expect(lines[0]).to.equal("--- classrun ZCL_A ---");
+  });
+
+  it("normalizes active-source CRLF and terminal newlines for main source and includes", async () => {
+    const api = vscodeStub();
+    const {classrunObject} = loadExtension(api);
+    for (const [suffix, include] of [["abap", "main"], ["locals_imp.abap", "implementations"]]) {
+      const file = `/project/zcl_a.clas.${suffix}`;
+      for (const [active, saved] of [["same", "same\r\n"], ["same\r\n\r\n", "same"],
+        ["one\r\ntwo\r\n", "one\ntwo\n\n"], ["same", "changed\n"]]) {
+        const lines = [], requests = [];
+        api.window.activeTextEditor = {document: {fileName: file, isDirty: false, getText: () => saved}};
+        const client = new Osd("http://local", async url => {
+          requests.push(url);
+          return {ok: true, text: async () => active};
+        });
+        client.classrun = async () => ({text: "ok", ms: 1});
+        await classrunObject("ZCL_A", {show() {}, appendLine: line => lines.push(line)}, false, file,
+          {client: () => client, controller: {launcher: {state: "running"}}});
+        expect(requests).to.deep.equal([`http://local/sap/bc/adt/oo/classes/zcl_a/${include === "main" ? "source/main" : "includes/implementations/source/main"}?version=active`]);
+        expect(lines.some(line => line.includes("not activated")), `${suffix}: ${JSON.stringify([active, saved])}`)
+          .to.equal(saved.startsWith("changed"));
+      }
+    }
+  });
+
+  it("skips the active-source comparison when serving availability is unknown or stopped", async () => {
+    const api = vscodeStub(), file = "/project/zcl_a.clas.abap";
+    api.window.activeTextEditor = {document: {fileName: file, isDirty: false, getText: () => "same"}};
+    const {classrunObject} = loadExtension(api);
+    for (const state of [undefined, "stopped", "starting", "failed", "running"]) {
+      let comparisons = 0, runs = 0;
+      const client = {activeSource: async () => { comparisons++; return "same"; },
+        classrun: async () => { runs++; return {text: "ok", ms: 1}; }};
+      await classrunObject("ZCL_A", {show() {}, appendLine() {}}, false, file,
+        {client: () => client, controller: state === undefined ? undefined : {launcher: {state}}});
+      expect(comparisons, String(state)).to.equal(state === "running" ? 1 : 0);
+      expect(runs).to.equal(1);
+    }
+  });
+
+  it("compares active source for an independently running system after a successful serving poll", async () => {
+    const api = vscodeStub(), file = "/project/zcl_a.clas.abap";
+    api.window.activeTextEditor = {document: {fileName: file, isDirty: false, getText: () => "same"}};
+    api.StatusBarAlignment = {Left: 1};
+    api.window.createStatusBarItem = () => ({show() {}, hide() {}, dispose() {}});
+    const {statusBar, classrunObject} = loadExtension(api);
+    const context = {subscriptions: []};
+    const originalFetch = globalThis.fetch, originalInterval = globalThis.setInterval;
+    let tick, comparisons = 0;
+    try {
+      globalThis.fetch = async url => ({ok: true, json: async () =>
+        String(url).endsWith("/osd/serving") ? {generation: "external", ready: true} : []});
+      globalThis.setInterval = fn => { tick = fn; return undefined; };
+      statusBar(context, () => 0);
+      await tick();
+      await classrunObject("ZCL_A", {show() {}, appendLine() {}}, false, file, {client: () => ({
+        activeSource: async () => { comparisons++; return "same"; },
+        classrun: async () => ({text: "ok", ms: 1}),
+      })});
+      expect(comparisons).to.equal(1);
+    } finally {
+      context.subscriptions.forEach(subscription => subscription.dispose());
+      globalThis.fetch = originalFetch;
+      globalThis.setInterval = originalInterval;
+    }
   });
 
   it("uses paused debug state for ABAP run and stepping keys", () => {
@@ -753,6 +818,106 @@ describe("editors/vscode: the extension's logic", function () {
       expect(events.at(-1)[0]).to.equal("end");
       expect(listeners.size).to.equal(0);
     } finally {
+      explorer?.dispose();
+      Osd.prototype.discover = originalDiscover;
+      Osd.prototype.run = originalRun;
+    }
+  });
+
+  for (const scenario of ["removed", "replaced", "rejected"]) it(`deferred rediscovery handles an object ${scenario} during a run`, async () => {
+    const api = vscodeStub({home: ROOT, "tests.showSystem": false});
+    const source = path.join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+    api.Uri.file = (fsPath) => ({fsPath});
+    api.Range = class { constructor() {} };
+    api.TestMessage = class { constructor(message) { this.message = message; } };
+    api.TestRunProfileKind = {Run: 1, Debug: 2};
+    let files = [api.Uri.file(source)];
+    api.workspace.findFiles = async () => files;
+    api.workspace.getWorkspaceFolder = () => ({uri: api.Uri.file(ROOT)});
+    let changed;
+    api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange(fn) { changed = fn; }, dispose() {}});
+    api.commands = {registerCommand: () => ({dispose() {}})};
+    const collection = (parent) => {
+      const items = new Map();
+      return {
+        get size() { return items.size; },
+        get: (id) => items.get(id),
+        add(item) { item.parent = parent; items.set(item.id, item); },
+        replace(next) { items.clear(); next.forEach((item) => this.add(item)); },
+        [Symbol.iterator]: () => items[Symbol.iterator](),
+      };
+    };
+    const profiles = new Map();
+    const events = [];
+    const controller = {
+      items: collection(undefined),
+      createTestItem(id, label, uri) {
+        const item = {id, label, uri};
+        item.children = collection(item);
+        return item;
+      },
+      createRunProfile(name, kind, handler) { profiles.set(name, handler); },
+      createTestRun() {
+        return Object.fromEntries(["started", "passed", "failed", "skipped", "errored", "appendOutput", "end"]
+          .map((name) => [name, (item) => events.push([name, item?.id])]));
+      },
+      dispose() {},
+    };
+    api.tests = {createTestController: () => controller};
+    const {testExplorer} = loadExtension(api);
+    const originalDiscover = Osd.prototype.discover;
+    const originalRun = Osd.prototype.run;
+    const listeners = new Set();
+    const token = {
+      isCancellationRequested: false,
+      onCancellationRequested(listener) { listeners.add(listener); return {dispose: () => listeners.delete(listener)}; },
+      cancel() { this.isCancellationRequested = true; for (const listener of listeners) listener(); },
+    };
+    const signals = [];
+    Osd.prototype.discover = async () => ({classes: [{name: "LTCL_SCAN", include: "testclasses", line: 1, schedule: "harmless",
+      methods: [{name: "FIRST", line: 2}]}]});
+    let finish;
+    Osd.prototype.run = () => new Promise(resolve => { finish = resolve; });
+    const unhandled = [];
+    const onUnhandled = error => unhandled.push(error);
+    process.on("unhandledRejection", onUnhandled);
+    let explorer;
+    try {
+      const outputLines = [];
+      explorer = testExplorer(controllerContext(), {appendLine: line => outputLines.push(line)}, {});
+      await controller.resolveHandler();
+      const object = controller.items.get("group:project").children.get("CLAS:ZCL_OSD_ABAP_TOKENS");
+      await controller.resolveHandler(object);
+      const methods = [...object.children.get("CLAS:ZCL_OSD_ABAP_TOKENS/LTCL_SCAN").children].map(([, item]) => item);
+      const running = profiles.get("Run")({include: methods}, token);
+      while (!finish) await new Promise(resolve => setImmediate(resolve));
+      changed(api.Uri.file(source));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(object.children.get("CLAS:ZCL_OSD_ABAP_TOKENS/LTCL_SCAN").children.get(methods[0].id),
+        "a watcher must not replace a spinning item").to.equal(methods[0]);
+      files = scenario === "removed" ? [] : files;
+      await controller.refreshHandler();
+      const current = controller.items.get("group:project").children.get(object.id);
+      let discoveries = 0;
+      Osd.prototype.discover = async () => { discoveries++; return {classes: []}; };
+      if (scenario === "rejected") Object.defineProperty(current, "busy", {set() { throw Error("deferred failure"); }});
+      finish({classes: [{name: "LTCL_SCAN", methods: [{name: "FIRST", status: "passed"}]}]});
+      await running;
+      expect(events.filter(([name]) => name === "started")).to.have.length(1);
+      expect(events.filter(([name]) => ["passed", "failed", "skipped", "errored"].includes(name))).to.have.length(1);
+      expect(events.at(-1)[0]).to.equal("end");
+      await new Promise(resolve => setImmediate(resolve));
+      expect(unhandled.map(String)).to.deep.equal([]);
+      if (scenario === "replaced") expect(current.busy).to.equal(false);
+      expect(discoveries).to.equal(scenario === "replaced" ? 1 : 0);
+      if (scenario !== "removed") {
+        expect(current).not.to.equal(object);
+        expect(current.children.size).to.equal(0);
+      }
+      if (scenario === "rejected") expect(outputLines).to.include("deferred failure");
+      expect(listeners.size).to.equal(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
       explorer?.dispose();
       Osd.prototype.discover = originalDiscover;
       Osd.prototype.run = originalRun;

@@ -45,7 +45,7 @@ true before the transpiler fork with `only` landed in the VSIX (0.4.1413). It ha
 artefact. Measure on VSIX 0.4.1414 (bundled system and an opened checkout, Linux x64 and one of macOS arm64 /
 Windows x64): wall time from Start to the first 200 of the demo service, for (1) the first Start in a fresh
 user-data dir, (2) Stop + Start with nothing changed, (3) Stop + Start after touching one class body, and (4) a VS Code
-window reload with the system left running. Read from the "osd system" channel whether the build was reused,
+window reload with the system left running. Read from the "OSD: System log" channel whether the build was reused,
 warm or cold and why, and record the generation id each time. Acceptance: (2) and (4) do not rebuild, and the
 numbers land in `docs/warm-compile.md` next to the save-to-system figures. If (2) rebuilds, find which input changes
 the hash between two Starts (a timestamp, a temp path, readdir order, the storage dir) and fix that, the same way

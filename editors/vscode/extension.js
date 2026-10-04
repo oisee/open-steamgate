@@ -3539,11 +3539,13 @@ async function classrunObject(name, classrunOutput, withDebugger = false, file,
   const document = vscode.window.activeTextEditor?.document;
   if (file && document && path.resolve(document.fileName) === path.resolve(file)) {
     let changed = document.isDirty;
-    if (!changed && typeof document.getText === "function") {
+    const available = controller?.launcher ? controller.launcher.state === "running" : servingAvailable === true;
+    if (!changed && available && typeof document.getText === "function") {
       try {
         const object = adtObjectOf(file);
         const source = await client().activeSource(object);
-        changed = source.replace(/\r\n/g, "\n") !== document.getText().replace(/\r\n/g, "\n");
+        const normalize = text => text.replace(/\r\n/g, "\n").replace(/\n+$/, "");
+        changed = normalize(source) !== normalize(document.getText());
       } catch { /* An unavailable active source leaves the dirty-only hint. */ }
     }
     if (changed) classrunOutput.appendLine("osd: running the active version; your editor changes are not activated yet (Ctrl+F3)");
@@ -4514,10 +4516,12 @@ function testExplorer(context, output, {
       }
       // All selections in this run have finished; publish discoveries only
       // after VS Code has received terminal states for the original items.
-      for (const [id, item] of pendingDiscovery) {
+      for (const [id] of pendingDiscovery) {
         if (runningObjects.has(id)) continue;
         pendingDiscovery.delete(id);
-        void discover(item);
+        const item = controllerFind(id);
+        if (item === undefined || !objects.has(id)) continue;
+        void discover(item).catch(e => output.appendLine(String(e.message ?? e)));
       }
     }
   };

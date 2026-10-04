@@ -47,7 +47,7 @@ Classrun do not reach either type (Q7, below).
 | Ctrl+F3 | Activate | `osd.activate` -- saves the file, then `activation` (~1835-1924); a failure's issues go to Problems, a pass shows the generation that now serves it (`X-OSD-Generation`) | -- |
 | Ctrl+Shift+F3 | Activate all inactive | -- | **left out**: `GET .../activation/inactiveobjects` always answers an empty list by design (`tools/adt-facade.mjs`, "nothing here is ever inactive: an object is what the file says") -- there is no inactive set on the server for this to activate |
 | F8 | Run | `osd.run` -- dispatched by object type (`lib.js` `RUN_TABLE` / `runActionFor`, SE80's own dispatch, table below); runs objects independently of ABAP Unit | see the table below |
-| F9 | Run as ABAP Application (Console) | `osd.classrun` -- the current class against `oo/classrun` (Q6b, below), output in its own Output channel "osd console" | -- |
+| F9 | Run as ABAP Application (Console) | `osd.classrun` -- the current class against `oo/classrun` (Q6b, below), output in its own Output channel "OSD: Console" | -- |
 | Ctrl+Shift+F10 | Run ABAP Unit | the built-in `testing.runCurrentFile`, also used by the beaker title button | -- |
 | F5 / F6 / F7 / F8, while execution is paused | Step Into / Step Over / Return / Continue | the built-in `workbench.action.debug.step{Into,Over,Out}` / `.continue`, remapped only `when debugState == 'stopped' && resourceExtname == .abap`, so an attached but running session leaves F8 and F9 available to run ABAP objects | -- |
 | Ctrl+Shift+B | Toggle breakpoint | the built-in `editor.debug.action.toggleBreakpoint` | -- |
@@ -557,7 +557,7 @@ that is the process actually holding the connection there. Verified live on
 both: inline through the mocha suites below, served (child) mode by hand on
 a throwaway port (5, in the PR).
 
-**F9** (`osd.classrun`, its own Output channel "osd console") runs the
+**F9** (`osd.classrun`, its own Output channel "OSD: Console") runs the
 current class standalone, and **F8** dispatches to it
 (`RUN_TABLE.CLAS`, `ctx.hasClassrun`) for a class that declares the
 interface, even when it has ABAP Unit tests. `ctx.hasClassrun` is
@@ -747,7 +747,7 @@ Each pack BSP app rebases every OData data source whose URI names a service (`..
 Shadowing is already said out loud by the build itself
 (`osd-build: overridden: CLAS X: <hidden files> hidden by <winner>`,
 `tools/osd-build.mjs`), and since the launcher streams the build's stdout
-verbatim into the "osd system" Output channel, that line is already
+verbatim into the "OSD: System log" Output channel, that line is already
 visible there with no extra plumbing. A missing reference (the user's code
 calling something the system lacks) is not yet surfaced as an editor
 diagnostic in this spike — abaplint's own errors reach the build log the
@@ -856,7 +856,7 @@ warm rebuild restarts with the ordinary cached build and warm activation
 enabled; later supported class/interface activations can swap into the
 serving process. Full rebuild passes `--force` to `tools/osd-build.mjs`.
 Both actions can also be reached from the OSD view title bar. **Open log**
-shows Output → `osd system`.
+shows Output → `OSD: System log`.
 
 The page model is pure (`systemOverviewModel` in `lib.js`) and keeps the
 route for each set. The extension reads the existing `SystemSet`,
