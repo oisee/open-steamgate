@@ -185,9 +185,20 @@ describe("editors/vscode: the extension's logic", function () {
     const {contributes} = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
     const menu = contributes.menus["editor/title"];
     expect(menu.map(({command}) => command)).to.deep.equal(["osd.check", "osd.activate", "osd.classrun", "osd.runTitle", "osd.runUnit", "osd.runWithDebugger"]);
-    for (const [command, title, icon] of [["osd.check", "osd: Check (Ctrl+F2)", "$(check)"],
-      ["osd.activate", "osd: Activate (Ctrl+F3)", "$(zap)"]]) {
-      expect(contributes.commands.find((row) => row.command === command)).to.include({title, icon});
+    for (const [command, name] of [["osd.check", "check"], ["osd.activate", "activate"],
+      ["osd.classrun", "run-console"], ["osd.runTitle", "run-console"],
+      ["osd.run", "run-console"], ["osd.runUnit", "beaker"]]) {
+      const {icon} = contributes.commands.find(row => row.command === command);
+      expect(icon).to.deep.equal({light: `resources/icons/${name}-light.svg`, dark: `resources/icons/${name}-dark.svg`});
+      for (const [theme, color] of [["light", "#424242"], ["dark", "#C5C5C5"]]) {
+        const svg = readFileSync(path.join(ROOT, "editors/vscode", icon[theme]), "utf8");
+        expect(svg).to.include('viewBox="0 0 16 16"').and.include('stroke-width="1"').and.include(`stroke="${color}"`);
+        expect(svg).not.to.include("currentColor");
+      }
+    }
+    for (const [command, title] of [["osd.check", "osd: Check (Ctrl+F2)"],
+      ["osd.activate", "osd: Activate (Ctrl+F3)"]]) {
+      expect(contributes.commands.find((row) => row.command === command)).to.include({title});
       const entry = menu.find((row) => row.command === command);
       expect(entry.when).to.include("!isWeb && !osd.web && resourceFilename =~ ");
       expect(entry.group).to.match(/^navigation@/);
@@ -216,7 +227,7 @@ describe("editors/vscode: the extension's logic", function () {
       expect(api.executedCommands).to.deep.include(["setContext", "osd.editorTests", true]);
       const {contributes} = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
       expect(contributes.commands.find(c => c.command === "osd.classrun").title).to.equal("osd: Run classrun (F9)");
-      expect(contributes.commands.find(c => c.command === "osd.runUnit")).to.include({title: "osd: Run ABAP Unit (Ctrl+Shift+F10)", icon: "$(beaker)"});
+      expect(contributes.commands.find(c => c.command === "osd.runUnit")).to.include({title: "osd: Run ABAP Unit (Ctrl+Shift+F10)"});
     } finally { rmSync(dir, {recursive: true, force: true}); }
   });
 
