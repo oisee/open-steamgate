@@ -38,8 +38,9 @@ The tag must equal `vscode-v<stamped version>` or
 `git rev-list --count HEAD`. The workflow checks the tag against that version
 and checks the VSIX filename and packaged manifest. Full git history is
 required for this count. Before installing dependencies or building artifacts,
-tag pushes and stable dispatches query Marketplace and fail clearly if that
-version already exists, including as a prerelease. A prerelease version cannot
+stable releases query Marketplace and fail clearly if that version already
+exists, including as a prerelease (a prerelease rerun is not refused here, so it
+can still repair its GitHub release). A prerelease version cannot
 be republished as stable: use a new commit and its new stamped version.
 
 VS Code users on the stable channel receive stable releases. Users who opt
@@ -89,7 +90,9 @@ selected ref and selected channel; any existing tag must point to that commit.
 The workflow uses `gh release create --draft --target <commit>` with the
 selected channel flags and never runs `git push`. A dispatch with `draft=true` does not change the release's draft
 state. To publish an existing draft through the workflow, push its tag and
-pass tagged tests on that commit, then rerun with `draft=false`. An untagged
+pass tagged tests on that commit, then rerun with `draft=false` (prerelease only: a stable dispatch is
+always a draft for review, and stable is published by pushing a
+`vscode-stable-v<version>` tag). An untagged
 draft cannot be published by dispatch because no tagged test run exists for it.
 A new dispatch must first create the draft. An existing release
 is updated only when its commit matches the run's checkout commit. When the

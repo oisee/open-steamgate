@@ -60,6 +60,7 @@ jobs:
         env:
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_DRAFT: ${{ inputs.draft }}
         run: |
           set -euo pipefail
           channel=prerelease
@@ -67,6 +68,10 @@ jobs:
           if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
             channel="${INPUT_CHANNEL:-prerelease}"
             if [[ "$channel" == stable ]]; then prefix=vscode-stable-v; fi
+            if [[ "$channel" == stable && "${INPUT_DRAFT:-true}" == false ]]; then
+              echo '::error::A stable dispatch is a draft for review only; publish stable with a vscode-stable-v<version> tag'
+              exit 1
+            fi
             tag="${INPUT_TAG:-$(node scripts/release-version.mjs --suggest | sed "s/^vscode-v/$prefix/")}"
             if [[ "$tag" != "$prefix"* ]]; then
               echo '::error::Release tag must match the selected channel'
@@ -80,7 +85,9 @@ jobs:
           fi
           printf 'tag=%s\nchannel=%s\nversion=%s\n' "$tag" "$channel" "$version" >> "$GITHUB_OUTPUT"
       - name: Require a new Marketplace version
-        if: github.event_name == 'push' || inputs.channel == 'stable'
+        # Only stable needs it: a prerelease rerun must still be able to repair
+        # its GitHub release before the Marketplace job reports the duplicate.
+        if: steps.release.outputs.channel == 'stable'
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
         run: |
