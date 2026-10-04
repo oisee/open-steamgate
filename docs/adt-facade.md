@@ -448,6 +448,73 @@ SQL like any other table.
 affine session and the handle is threaded from lock through write to unlock;
 a stateless hop between lock and write retires it.
 
+### Collection-create answers
+
+On 2026-10-03, a SAP system answered `POST /sap/bc/adt/programs/programs`
+with request media `application/vnd.sap.adt.programs.programs.v2+xml` as
+`200`, an empty body, and no `Content-Type`. Program creation now uses that
+answer, without `Location`. A client derives the object URI from the collection
+and the name it sent: collection + `/` + `encodeURIComponent(name.toLowerCase())`.
+Namespaced names are encoded as one segment. Error responses are unchanged.
+
+| Create surface | SAP evidence | Current successful answer |
+| --- | --- | --- |
+| Programs (`programs/programs`) | Observed, 2026-10-03 | `200`, empty body, no `Content-Type` or `Location` |
+| Classes (`oo/classes`) | Not observed | Existing empty `201` + `Location` retained |
+| Interfaces (`oo/interfaces`) | Not observed | Existing empty `201` + `Location` retained |
+| Includes (`programs/includes`) | Not observed | Existing empty `201` + `Location` retained |
+| Class includes (`oo/classes/{name}/includes`) | Not observed | Existing empty `201` + `Location` retained |
+| Packages (`packages`) | Not observed | Existing empty `201` + `Location` retained |
+| DDLS (`ddic/ddl/sources`) | Not observed | Existing empty `201` + `Location` retained |
+| SRVD (`ddic/srvd/sources`) | Not observed | Existing empty `201` + `Location` retained |
+| Other types, including DDIC tables and function groups/modules | Not observed | No new create support or answer alignment |
+
+No other type is aligned by analogy. Storage remains Node host orchestration
+in both `OSD_ADT_ONE_RUNTIME=0` and `1`. After successful program creation, the
+ABAP handler's `PROGRAM_CREATE` continuation returns the empty `200` through
+`RESUME`; `OSD_ADT=js` emits the same answer directly. A failed create never
+calls the success continuation. On native ICF without the Node host, create
+still returns the existing unsupported-path refusal rather than false success.
+
+The client gate below records collection-create consumers at base
+`f861b944caa4b7265f70a16d4982dcea7c074271` (line numbers before this change).
+Search covered `editors/vscode`, all `test/*.mjs`, `tools/*`, and the external
+clean-room `packet/kit`. `201` and `Location` hits for OData creation, redirects,
+and lock responses are separate protocols.
+
+| Client / file:line at the gate | Response use and next action |
+| --- | --- |
+| `editors/vscode/extension.js:2686` | Registers `abapfs-bridge`; no collection-create request or response consumer in the extension. |
+| `editors/vscode/lib.js:551` | Generic request accepts any successful HTTP status; reads body only on errors. No collection-create method. Existing source URIs use the submitted object type/name. |
+| `editors/vscode/abapfs-bridge.js:156` | Supplies connection credentials to ABAP-FS; does not inspect create status, headers or body. |
+| `tools/abapfs-conformance.mjs:293` (`createObject` at `296`) | Ignores successful create result. Derives program URI with `scratchUrl(name)` before POST, reads object structure, deletes, verifies absence. |
+| Pinned `abap-adt-api` 8.4.3, `build/api/objectcreator.js:156` | ABAP-FS's client awaits the generic HTTP request, which raises on failure; does not require `201`, `Location`, or a successful body. Verified via both conformance create/delete scenarios. Dependency source remains outside tracked files. |
+| `test/adt-devloop.mjs:1205` | Requires class `201` and asserts `Location`; consumes body only for failure diagnostics, then reads disk and GETs a URI written from the fixture name. Retained, class not observed. |
+| `test/adt-devloop.mjs:1218` | Reads missing-package error body and requires `404`; no success-path dependency. |
+| `test/adt-devloop.mjs:1224` | Ignores first program answer; repeats same POST and checks `409` error body. |
+| `test/adt-devloop.mjs:1231` | Ignores DDLS create answer; checks disk, deletes by fixture name, verifies removal/`404`. |
+| `test/adt-devloop.mjs:1266`, `1335` | Requires class `201`; subsequent lock/write/delete tests derive URIs from `LOCKED` / `DOOMED`. Retained. |
+| `test/adt-devloop.mjs:1457`, `1470` | Requires class/include `201`, asserts include `Location`, reads body for diagnostics; GETs include using class name and include type, checks duplicate conflict. Retained. |
+| `test/adt-devloop.mjs:1489` | Requires package `201`, asserts `Location`, reads body for diagnostics; searches, locks, reads and deletes via fixture package name, including after rebuild. Retained. |
+| `test/tmp-package.mjs:52`, `79`–`80` | Program helper sends programs.v2; requires success and reads body for diagnostics, then checks files, author metadata and GET by fixture name. Program success assertions changed to `200`. |
+| `test/tmp-package.mjs:95`, `96`, `117`, `164`, `188`, `212`, `222`, `223`, `248`, `300`, `351` | Requires program success, then checks user-filtered trees, package ownership, publishing guards or inactive state. All program success assertions changed to `200`; URIs remain name-derived. |
+| `test/tmp-package.mjs:239` | Refused program create must not return success; negative assertion changed from `201` to `200`, preserving the fail-closed check. |
+| `test/tmp-package.mjs:110`, `134`, `157`, `297`–`299` | Package creates and their success/refusal assertions retained. Package URIs are fixture-derived. |
+| `test/adt-abap-diff.mjs:1115`, `test/adt-abap-sessions.mjs:91` | Class-include create during lock/session tests; compares status/body or checks refusal, with subsequent PUT at an already known include URI. Retained. |
+| `test/adt-abap-helpers.mjs:118` | Tests the create attribute parser, not a create answer. |
+| `test/adt-abap-coverage.mjs:39`, `46`–`59` | Classifies create routes as HOST orchestration; no response-path derivation. Classification retained. |
+| `test/adt-abap-f2.mjs:59`, `72` | Synthetic handler records test replay of `201`/redirect status, body, length and ETag. No collection create or object URI follows; retained for unobserved types. |
+| `tools/adt-abap-front.mjs:353`–`379` | Replays handler status, headers and body onto HTTP. Empty untyped `200` uses `end()`. Does not derive object paths. |
+| External `packet/kit/create.go:123`, `143`–`154` | GETs the fixture URI to check absence, POSTs once, requires exactly `201` and one relative `Location` equal to the already known fixture URI. No source write or follow-up redirect. **Incompatible with the observed SAP answer**; read-only reference left untouched. |
+| External `packet/kit/create_test.go:37`, `69`–`70` | Encodes that old `201` + exact-Location hypothesis in its mock server/tests. Left untouched. |
+| External `packet/kit/main.go:554`–`559` | Marks CREATE-01 inconclusive on the above status/location error; otherwise records creation as observed. The kit needs its hypothesis updated to the measured answer and subsequent verification at its name-derived fixture URI. |
+
+The new regressions in `test/adt-devloop.mjs` and
+`test/osd-adt-one-runtime.mjs` assert all four success properties (status,
+empty body, absent type, absent Location), then read the source at a
+name-derived URI. The latter exercises both direct Node and serving-child
+ABAP responses, plus unchanged invalid-request and duplicate errors.
+
 What a write answers: `405` for a library object, `409` for a missing handle
 or one that holds another object or belongs to another session, and `200`
 with an `ETag` computed from what a read now returns, because a client files

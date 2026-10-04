@@ -113,7 +113,7 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
   after(async () => {if(server) await new Promise(r => server.close(r)); if(runtime) await runtime.stop(); if(root) rmSync(root,{recursive:true,force:true});});
   const post = async (path,body) => {
     const r = await fetch(origin+base+path,{method:"POST",headers:auth,body});
-    return {status:r.status,type:r.headers.get("content-type"),body:await r.text()};
+    return {status:r.status,type:r.headers.get("content-type"),location:r.headers.get("location"),body:await r.text()};
   };
   let sequence = 0;
   const localState = () => dialogStep(async () => {
@@ -155,9 +155,19 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
     if(path !== "packages" && !body.includes("adtcore:packageRef")) body = body.slice(0,-2)+`><adtcore:packageRef adtcore:name="$TMP"/></${/^<([^\s/>]+)/.exec(body)[1]}>`;
     let baseline;
     for(const transform of [x => x,...Object.values(variants)]) {
-      const r = await post(path,transform(body));expect(r.status,r.body).to.equal(201);
-      if(baseline) expect(r).to.deep.equal(baseline);else baseline = r;
-      store.delete(types[path],name);
+      try {
+        const r = await post(path,transform(body));
+        const program = path === "programs/programs";
+        expect(r.status,r.body).to.equal(program ? 200 : 201);
+        if(program) expect(r).to.deep.equal({status:200,type:null,location:null,body:""});
+        else expect(r.location).to.equal(base+path+"/"+encodeURIComponent(name.toLowerCase()));
+        if(baseline) expect(r).to.deep.equal(baseline);else baseline = r;
+      } finally {
+        // PROG and INCL share the on-disk name: an assertion failure must
+        // still remove this variant before the next variant or collection.
+        if(store.find(types[path],name)) store.delete(types[path],name);
+      }
+      expect(store.find(types[path],name)).to.equal(undefined);
     }
   });
   it("F1 admission retains source and fields on a host without a raw body parser",async () => {
@@ -168,7 +178,7 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
       for (const [path,xml] of envelopes) {
         const baseline=await post(path,xml);
         const r=await fetch(bareOrigin+base+path,{method:"POST",headers:auth,body:xml});
-        expect({status:r.status,type:r.headers.get("content-type"),body:await r.text()},path).to.deep.equal(baseline);
+        expect({status:r.status,type:r.headers.get("content-type"),location:r.headers.get("location"),body:await r.text()},path).to.deep.equal(baseline);
       }
       const xml=envelopes.find(([p]) => p === "checkruns")[1].replace("REPORT zxml.","REPORT zxml.\nTHIS IS INVALID ABAP.");
       const r=await fetch(bareOrigin+base+"checkruns",{method:"POST",headers:auth,body:xml});

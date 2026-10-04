@@ -1220,6 +1220,26 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     expect(await res.text()).to.contain("ExceptionResourceNotFound");
   });
 
+  it("program create answers SAP's observed 200 without a representation", async () => {
+    const name = "ZOSD_MADE_EMPTY";
+    const collection = "/programs/programs";
+    const res = await call(collection, {method: "POST",
+      headers: {"content-type": "application/vnd.sap.adt.programs.programs.v2+xml"},
+      body: createBody("PROG", name, "a report", "$STG_DEMO")});
+    expect(res.status).to.equal(200);
+    expect(await res.text()).to.equal("");
+    expect(res.headers.get("content-type")).to.equal(null);
+    expect(res.headers.get("location")).to.equal(null);
+    // The request's collection and name are the client's object identity.
+    const object = `${collection}/${encodeURIComponent(name.toLowerCase())}`;
+    const doc = await call(object);
+    expect(doc.status).to.equal(200);
+    expect(await doc.text()).to.contain(`adtcore:name="${name}"`);
+    const source = await call(object + "/source/main");
+    expect(source.status).to.equal(200);
+    expect(await source.text()).to.contain(`REPORT ${name.toLowerCase()}`);
+  });
+
   it("a second create of the same object is a conflict", async () => {
     await call("/programs/programs", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("PROG", "ZOSD_MADE_REP", "a report", "$STG_DEMO")});
     const again = await call("/programs/programs", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("PROG", "ZOSD_MADE_REP", "a report", "$STG_DEMO")});

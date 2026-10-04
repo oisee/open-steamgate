@@ -77,7 +77,7 @@ describe("$TMP, the local package", () => {
   it("takes a create, which lands in local/tmp and carries its author", async () => {
     const call = await logon("ALICE");
     const res = await createProg(call, "ZOSD_TMP_PROBE");
-    expect(res.status, await res.clone().text()).to.equal(201);
+    expect(res.status, await res.clone().text()).to.equal(200);
     expect(existsSync(join(root, TMP_FOLDER, "zosd_tmp_probe.prog.abap"))).to.equal(true);
     const authors = JSON.parse(readFileSync(join(root, TMP_FOLDER, "tadir.json"), "utf8"));
     expect(authors["PROG ZOSD_TMP_PROBE"].author).to.equal("ALICE");
@@ -92,8 +92,8 @@ describe("$TMP, the local package", () => {
   it("shows its objects to their author only, unless a user is named", async () => {
     const alice = await logon("ALICE");
     const bob = await logon("BOB");
-    expect((await createProg(alice, "ZOSD_TMP_ALICE")).status).to.equal(201);
-    expect((await createProg(bob, "ZOSD_TMP_BOB")).status).to.equal(201);
+    expect((await createProg(alice, "ZOSD_TMP_ALICE")).status).to.equal(200);
+    expect((await createProg(bob, "ZOSD_TMP_BOB")).status).to.equal(200);
     const mine = await treeOf(alice);
     expect(mine, "A4H: the logged-on user's objects").to.include("PROG/P ZOSD_TMP_ALICE");
     expect(mine, "A4H: not another user's").to.not.include("PROG/P ZOSD_TMP_BOB");
@@ -114,7 +114,7 @@ describe("$TMP, the local package", () => {
 
   it("never travels: the deploy gate refuses its objects by name, the zip refuses its folder", async () => {
     const call = await logon("ALICE");
-    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(201);
+    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(200);
     const unit = {name: "probe", objects: ["PROG ZOSD_TMP_PROBE"]};
     const refusals = admit({files: ["zosd_tmp_probe.prog.abap"], read: () => "<NAME>ZOSD_TMP_PROBE</NAME>", unit, root});
     expect(refusals.map((r) => r.rule)).to.include("local-object");
@@ -161,7 +161,7 @@ describe("$TMP, the local package", () => {
     expect(await treeOf(alice)).to.include("DEVC/K $ZOSD_KID");
     expect(await treeOf(bob), "another user's package is not in the tree").to.not.include("DEVC/K $ZOSD_KID");
     // and a program goes into it
-    expect((await createProg(alice, "ZOSD_IN_KID", "$ZOSD_KID")).status).to.equal(201);
+    expect((await createProg(alice, "ZOSD_IN_KID", "$ZOSD_KID")).status).to.equal(200);
     expect(existsSync(join(root, TMP_FOLDER, "$zosd_kid", "zosd_in_kid.prog.abap"))).to.equal(true);
   });
 
@@ -185,7 +185,7 @@ describe("$TMP, the local package", () => {
 
   it("stays out of a preview: OSD_TMP=off drops the layer and the store root, and a generation with it is named", async () => {
     const call = await logon("ALICE");
-    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(201);
+    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(200);
     const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
     expect(inputFoldersOf(root, config, {OSD_TMP: "off"})).to.not.include(TMP_FOLDER);
     const previous = process.env.OSD_TMP;
@@ -209,7 +209,7 @@ describe("$TMP, the local package", () => {
 
   it("shows nothing of $TMP to a caller without a user, nor an object nobody authored", async () => {
     const call = await logon("ALICE");
-    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(201);
+    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(200);
     writeFileSync(join(root, TMP_FOLDER, "zosd_by_hand.prog.abap"), "REPORT zosd_by_hand.\n");
     const {packageOf} = await import("../tools/adt-documents.mjs");
     const store = new ObjectStore({root, libs: []});
@@ -219,8 +219,8 @@ describe("$TMP, the local package", () => {
 
   it("keeps its ownership record whole, and fails closed when it cannot read it", async () => {
     const call = await logon("ALICE");
-    expect((await createProg(call, "ZOSD_TMP_ONE")).status).to.equal(201);
-    expect((await createProg(call, "ZOSD_TMP_TWO")).status).to.equal(201);
+    expect((await createProg(call, "ZOSD_TMP_ONE")).status).to.equal(200);
+    expect((await createProg(call, "ZOSD_TMP_TWO")).status).to.equal(200);
     const {readdirSync} = await import("node:fs");
     expect(readdirSync(join(root, TMP_FOLDER)).filter((f) => f.endsWith(".tmp")), "no temp file left").to.deep.equal([]);
     const record = readFileSync(join(root, TMP_FOLDER, "tadir.json"), "utf8");
@@ -236,7 +236,7 @@ describe("$TMP, the local package", () => {
       const fresh = await logon("ALICE");
       expect(await treeOf(fresh), "nothing of $TMP is shown").to.not.include("PROG/P ZOSD_TMP_ONE");
       expect(errors.join("\n"), "and it says so").to.match(/tadir\.json cannot be read/);
-      expect((await createProg(fresh, "ZOSD_TMP_THREE")).status, "nor overwritten by the next create").to.not.equal(201);
+      expect((await createProg(fresh, "ZOSD_TMP_THREE")).status, "nor overwritten by the next create").to.not.equal(200);
       expect(readFileSync(join(root, TMP_FOLDER, "tadir.json"), "utf8")).to.equal(record.slice(0, 20));
     } finally {
       console.error = original;
@@ -245,7 +245,7 @@ describe("$TMP, the local package", () => {
 
   it("tells ABAP which TADIR rows are local: $TMP only for an object of $TMP", async () => {
     const call = await logon("ALICE");
-    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(201);
+    expect((await createProg(call, "ZOSD_TMP_PROBE")).status).to.equal(200);
     const {tadirWithTmp} = await import("../tools/osd-tmp.mjs");
     const {localObjectKeys} = await import("../tools/osd-deploy-manifest.mjs");
     const row = (type, name) => `INSERT INTO "tadir" ("pgmid", "object", "obj_name", "devclass", "korrnum")\n      VALUES ('R3TR', '${type}', '${name}', '$TMP', '');`;
@@ -297,7 +297,7 @@ describe("$TMP, the local package", () => {
     const made = await alice("/packages", {method: "POST", body:
       `<pack:package xmlns:pack="http://www.sap.com/adt/packages" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="$ZOSD_KID" adtcore:description="x"><pack:superPackage adtcore:name="$TMP"/></pack:package>`});
     expect(made.status).to.equal(201);
-    expect((await createProg(alice, "ZOSD_IN_KID", "$ZOSD_KID")).status).to.equal(201);
+    expect((await createProg(alice, "ZOSD_IN_KID", "$ZOSD_KID")).status).to.equal(200);
     writeFileSync(join(root, TMP_FOLDER, "$zosd_kid", "zosd_kid_by_hand.prog.abap"), "REPORT zosd_kid_by_hand.\n");
     const kid = async (call) => {
       const xml = await (await call("/repository/nodestructure?parent_type=DEVC%2FK&parent_name=%24ZOSD_KID", {method: "POST"})).text();
@@ -348,7 +348,7 @@ describe("$TMP, the local package", () => {
 
   it("is inactive like any object, and its active copies never reach a published build", async () => {
     const call = await logon("ALICE");
-    expect((await createProg(call, "ZOSD_TMP_INACTIVE")).status).to.equal(201);
+    expect((await createProg(call, "ZOSD_TMP_INACTIVE")).status).to.equal(200);
     const store = new ObjectStore({root, libs: []});
     expect(store.inactive.has("PROG ZOSD_TMP_INACTIVE"), "a create is inactive until activated").to.equal(true);
     const overlay = store.overlay();

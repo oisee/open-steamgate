@@ -1952,8 +1952,9 @@ export function adtRouter(options = {}) {
   // CREATE is a POST on the collection, DELETE a DELETE on the object.
   // The create body is the object's own document with nothing in it but a
   // name, a description and the package it goes to (vsp!crud.go
-  // buildCreateObjectBody; Eclipse's wizards send the same); the answer is
-  // 201 with the object's URI in Location, and the client's next move is
+  // buildCreateObjectBody; Eclipse's wizards send the same). Programs answer
+  // an untyped empty 200, observed on SAP on 2026-10-03. Other collections
+  // retain 201 + Location until observed. The client's next move is
   // the ordinary lock / PUT / activate, which is why a create writes a
   // skeleton and not a source. A package is created the same way under
   // /packages, with its parent in pack:superPackage. Function groups and
@@ -1969,7 +1970,7 @@ export function adtRouter(options = {}) {
   for (const {type, adt} of [...SOURCE_TYPES, {type: "DEVC", adt: "packages"}]) {
     router.post(`${BASE}/${adt}`, async (req, res) => {
       const body = await rawBody(req);
-      answer(res, () => {
+      answer(res, async () => {
         const name = attribute(body, undefined, "adtcore:name");
         if (name === undefined || name === "") {
           res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "the create body names no object"));
@@ -1984,6 +1985,11 @@ export function adtRouter(options = {}) {
           // an object of $TMP carries who made it (tools/osd-tmp.mjs)
           author: req.adt.session.user,
         });
+        if (adt === "programs/programs") {
+          if (req.adt.programCreated !== undefined) await req.adt.programCreated();
+          else res.status(200).end();
+          return;
+        }
         res.status(201)
           .set("Location", `${BASE}/${adt}/${encodeURIComponent(made.name.toLowerCase())}`)
           .end();

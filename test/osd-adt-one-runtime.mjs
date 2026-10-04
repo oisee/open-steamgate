@@ -101,6 +101,41 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     }
   });
 
+  it("program creation has the observed empty answer on Node and the serving ABAP runtime", async () => {
+    for (const [i, url] of [node, remote].entries()) {
+      const login = await request(url, "GET", BASE + "/core/discovery", {"x-csrf-token": "fetch"});
+      const headers = {cookie: login.cookies.map(c => c.split(";")[0]).join("; "),
+        "x-csrf-token": login.token, "content-type": "application/vnd.sap.adt.programs.programs.v2+xml"};
+      const name = `ZOSD_CREATE_WIRE_${i}`;
+      const collection = BASE + "/programs/programs";
+      const body = `<program:abapProgram xmlns:program="http://www.sap.com/adt/programs/programs" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="${name}" adtcore:type="PROG/P"><adtcore:packageRef adtcore:name="$TMP"/></program:abapProgram>`;
+      const created = await fetch(url + collection, {method: "POST", headers, body});
+      expect(created.status).to.equal(200);
+      expect(await created.text()).to.equal("");
+      expect(created.headers.get("content-type")).to.equal(null);
+      expect(created.headers.get("location")).to.equal(null);
+      const object = collection + "/" + encodeURIComponent(name.toLowerCase());
+      const read = await request(url, "GET", object + "/source/main", headers);
+      expect(read.status, read.body).to.equal(200);
+      expect(read.body).to.equal(`REPORT ${name.toLowerCase()}.\n`);
+      const duplicate = await request(url, "POST", collection, headers, body);
+      expect(duplicate.status).to.equal(409);
+      expect(duplicate.body).to.contain("ExceptionResourceIsModified");
+      // A valid ADT envelope missing its name reaches the create handler.
+      // Admission rejects malformed XML and a root outside the route's namespace.
+      for (const [badBody, exception] of [
+        [body.replace(` adtcore:name="${name}"`, ""), "ExceptionInvalidRequest"],
+        [body.slice(0, -1), "ExceptionInvalidXML"],
+        ["<program/>", "ExceptionInvalidXML"],
+      ]) {
+        const invalid = await request(url, "POST", collection, headers, badBody);
+        expect(invalid.status, invalid.body).to.equal(400);
+        expect(invalid.body).to.contain(exception);
+      }
+      expect((await request(url, "DELETE", object, headers)).status).to.equal(200);
+    }
+  });
+
   it("static, sysinfo, versions, misses and CSRF refusals equal the Node facade", async () => {
     for (const [method, path] of [
       ["GET", "/core/http/systeminformation"], ["GET", "/compatibility/graph"],
