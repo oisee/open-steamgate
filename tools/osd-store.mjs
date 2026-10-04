@@ -568,7 +568,12 @@ export class ObjectStore {
     const object = this.find(entry.type, entry.name) ?? entry;
     const differs = TYPES[entry.type]?.source === true
       ? this.#filesOfEntry(object).filter((f) => !/\.xml$/.test(f))
-        .some((f) => (existsSync(join(this.root, f)) ? readFileSync(join(this.root, f), "utf8") : "") !== this.#activeSource(f, entry))
+        .some((f) => {
+          const working = join(this.root, f);
+          const active = this.#activeFile(f, entry);
+          if (!existsSync(working)) return active && existsSync(active) && readFileSync(active, "utf8") !== "";
+          return !active || !existsSync(active) || readFileSync(working, "utf8") !== readFileSync(active, "utf8");
+        })
       : this.inactive.has(`${entry.type} ${entry.name}`);
     return {changedAt, version: differs ? "inactive" : "active"};
   }
@@ -831,15 +836,52 @@ export class ObjectStore {
     return this.#sourceVersion({...entry, include, source: readFileSync(join(this.root, entry.file), "utf8")}, version);
   }
 
+  #activeInputs;
+
   #activeFile(file, entry) {
     const hash = (this.served?.running === true ? this.served.generation : undefined) ?? liveHash(this.root);
-    const generation = hash && join(this.root, "build", "by-input", hash, "source");
-    if (generation && existsSync(join(generation, ".complete"))) return join(generation, file);
-    // Trees with no build (and older generations) retain the pre-save copy.
+    const generation = hash && join(this.root, "build", "by-input", hash);
+    const complete = generation && existsSync(join(generation, "source", ".complete"));
+    const snapshot = generation && join(generation, "source", file);
+    if (complete && existsSync(snapshot)) return snapshot;
+    // A pre-save copy also has known provenance, including an empty copy
+    // for a created object which has never been activated.
     const copy = join(this.root, this.#snapshotOf(file));
-    if (existsSync(copy)) return copy;
-    if (this.inactive.has(`${entry.type} ${entry.name}`)) return undefined;
-    return join(this.root, file);
+    if (!complete && existsSync(copy)) return copy;
+    if (!generation || !existsSync(generation)) return undefined;
+    let inputs = this.#activeInputs?.generation === generation ? this.#activeInputs.inputs : undefined;
+    if (inputs === undefined) {
+      try {
+        inputs = JSON.parse(readFileSync(join(generation, "source-inputs.json"), "utf8"));
+      } catch {
+        // Older generations recorded the aggregate input hash only. Matching
+        // that hash proves every input; a partial match proves nothing.
+        try {
+          const manifest = JSON.parse(readFileSync(join(generation, "manifest.json"), "utf8"));
+          const digests = new Map();
+          if (hashOf(this.root, inputsOf(this.root), {digests, transpiler: manifest.transpiler}) !== hash) return undefined;
+          inputs = Object.fromEntries([...digests].map(([path, digest]) => [relative(this.root, path).replaceAll("\\", "/"), digest]));
+          writeFileSync(join(generation, "source-inputs.json"), JSON.stringify(inputs));
+        } catch {return undefined;}
+      }
+      if (inputs === null || typeof inputs !== "object") return undefined;
+      // A generation's proof is immutable. Reuse it for class includes and
+      // repository listings instead of parsing the full input map per part.
+      this.#activeInputs = {generation, inputs};
+    }
+    const digest = inputs[file.replaceAll("\\", "/")];
+    if (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)) return undefined;
+    const shared = join(this.root, "build", "source-by-digest", digest);
+    if (existsSync(join(generation, "source-shared")) && existsSync(shared)) return shared;
+    const target = join(generation, "source", file);
+    if (existsSync(target) && createHash("sha256").update(readFileSync(target)).digest("hex") === digest) return target;
+    const working = join(this.root, file);
+    if (!existsSync(working)) return undefined;
+    const bytes = readFileSync(working);
+    if (createHash("sha256").update(bytes).digest("hex") !== digest) return undefined;
+    mkdirSync(dirname(target), {recursive: true});
+    writeFileSync(target, bytes);
+    return target;
   }
 
   #activeSource(file, entry) {

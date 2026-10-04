@@ -7,6 +7,7 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {activationFailureDocument, ADT_TYPE, uriOf} from "../tools/adt-documents.mjs";
 import {adtAbap} from "./helpers/adt-abap.mjs";
+import {activeFixture} from "./helpers/source-snapshot.mjs";
 
 const SUCCESS = '<?xml version="1.0" encoding="utf-8"?><chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"><chkl:properties checkExecuted="true" activationExecuted="true" generationExecuted="true"/></chkl:messages>';
 const FAILURE = '<?xml version="1.0" encoding="utf-8"?><chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"><chkl:properties checkExecuted="true" activationExecuted="false" generationExecuted="false"/><msg objDescr="" type="W" line="0" href=""><shortText><txt>Activation was cancelled.</txt><txt>"Editing canceled" (EU 202)</txt></shortText></msg>';
@@ -21,6 +22,8 @@ describe("ADT activation: A4H wire bytes", function () {
     mkdirSync(join(root, "src"));
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: "src", libs: []}));
     writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({global: {files: "/src/**/*.*"}, syntax: {version: "v702"}, rules: {check_syntax: true}}));
+    writeFileSync(join(root, "src", "zwire.prog.abap"), SOURCE);
+    activeFixture(root);
     store = new ObjectStore({root, libs: []});
     const app = express();
     app.use(express.raw({type: "*/*"}));

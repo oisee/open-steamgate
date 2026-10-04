@@ -1,4 +1,5 @@
 import {expect} from "chai";
+import {activeFixture} from "./helpers/source-snapshot.mjs";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -384,6 +385,8 @@ ENDCLASS.
     store.write("CLAS", "ZCL_OSD_PROBE", CLASS.replace("'hello'", "'newer'"));
     expect(store.completeActivation(checked)).to.equal(false);
     expect(store.stateOf(store.find("CLAS", "ZCL_OSD_PROBE")).version).to.equal("inactive");
+    // Model successful publication, including its retained source proof.
+    activeFixture(root);
     expect(store.completeActivation(store.activate("CLAS", "ZCL_OSD_PROBE"))).to.equal(true);
     expect(store.stateOf(store.find("CLAS", "ZCL_OSD_PROBE")).version).to.equal("active");
   });

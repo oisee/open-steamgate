@@ -1,13 +1,14 @@
 import {once} from "node:events";
 import {expect} from "chai";
 import express from "express";
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, realpathSync, readFileSync} from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, realpathSync, readFileSync, existsSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join, resolve} from "node:path";
+import {join, resolve, win32} from "node:path";
+import {createHash} from "node:crypto";
 import {pathToFileURL} from "node:url";
 import {execFileSync} from "node:child_process";
 import {ObjectStore} from "../tools/osd-store.mjs";
-import {build, liveHash} from "../tools/osd-build.mjs";
+import {build, gc, liveHash} from "../tools/osd-build.mjs";
 import {HotLoader} from "../tools/osd-hot.mjs";
 import {WarmCompiler} from "../tools/osd-warm.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
@@ -26,6 +27,88 @@ ENDCLASS.\n`;
 const def = 'CLASS lcl_value DEFINITION. PUBLIC SECTION. CLASS-METHODS get RETURNING VALUE(rv) TYPE string. ENDCLASS.\n';
 const imp = value => `CLASS lcl_value IMPLEMENTATION. METHOD get. rv = '${value}'. ENDMETHOD. ENDCLASS.\n`;
 const prog = value => `REPORT zt05.\n\nWRITE '${value}'.\n`;
+
+describe("generation source provenance", function () {
+  this.timeout(180000);
+  it("normalizes Windows overlay paths in the real snapshot helper", () => {
+    const module = readFileSync(join(REPO, "tools/osd-source-snapshot.mjs"), "utf8");
+    const code = module.slice(module.indexOf("export function keepSourceInputs"), module.indexOf("// gen/"))
+      .replace("export function", "function");
+    const bytes = Buffer.from("REPORT ztest. WRITE 'P1'.\n");
+    const written = [];
+    const keep = new Function("createHash", "existsSync", "mkdirSync", "readFileSync", "writeFileSync", "linkSync", "copyFileSync",
+      "dirname", "join", "relative", "resolve", "sep", code + ";return keepSourceInputs;")(
+      createHash, () => true, () => {}, () => bytes, file => written.push(file), () => {}, () => {},
+      win32.dirname, win32.join, win32.relative, win32.resolve, win32.sep);
+    const root = "C:\\repo", target = "C:\\repo\\build\\tmp\\hash";
+    keep(root, target, new Map([["C:/repo/build/inactive/active/src/ztest.prog.abap", createHash("sha256").update(bytes).digest("hex")]]));
+    expect(written).to.include(win32.join(target, "source", "src/ztest.prog.abap"));
+  });
+  for (const front of ["node", "abap"]) describe(`${front}: missing generation snapshot`, () => {
+    let root, store, server, base, hash;
+    const source = value => `CLASS zcl_provenance DEFINITION PUBLIC. PUBLIC SECTION. CLASS-METHODS run RETURNING VALUE(rv) TYPE string. ENDCLASS. CLASS zcl_provenance IMPLEMENTATION. METHOD run. rv = '${value}'. ENDMETHOD. ENDCLASS.\n`;
+    before(async () => {
+      await import("./start.mjs");
+      root = mkdtempSync(join(tmpdir(), "adt-provenance-"));
+      mkdirSync(join(root, "src"));
+      writeFileSync(join(root, "src/zcl_provenance.clas.abap"), source("P1"));
+      writeFileSync(join(root, "package.json"), "{}");
+      symlinkSync(join(REPO, "node_modules"), join(root, "node_modules"));
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: "src", output_folder: "output", libs: [],
+        options: {ignoreSyntaxCheck: false, addCommonJS: true, unknownTypes: "compileError"}}));
+      hash = (await build({root, generators: false})).hash;
+      await import(pathToFileURL(join(root, "output/zcl_provenance.clas.mjs")));
+      store = new ObjectStore({root, libs: []});
+      store.served = {running: true, generation: hash};
+      const app = express();
+      app.use(adtRouter({store, watch: false, abap: front === "abap" ? await adtAbap() : undefined}).router);
+      server = await new Promise(resolve => {const s = app.listen(0, () => resolve(s));});
+      base = `http://localhost:${server.address().port}/sap/bc/adt/oo/classes/zcl_provenance`;
+    });
+    after(async () => {
+      if (server) await new Promise(resolve => server.close(resolve));
+      rmSync(root, {recursive: true, force: true});
+    });
+    const active = async () => {
+      const response = await fetch(base + "/source/main?version=active");
+      expect(response.status).to.equal(200);
+      return response.text();
+    };
+    it("a pre-snapshot generation with matching working bytes still answers active", async () => {
+      rmSync(join(root, "build/by-input", hash, "source"), {recursive: true});
+      rmSync(join(root, "build/by-input", hash, "source-inputs.json"), {force: true});
+      rmSync(join(root, "build/by-input", hash, "source-shared"), {force: true});
+      rmSync(join(root, "build/source-by-digest"), {recursive: true, force: true});
+      expect(await active()).to.equal(source("P1"));
+      expect(await (await fetch(base)).text()).to.include('adtcore:version="active"');
+      // A verified backfill remains the active source after a later edit.
+      writeFileSync(join(root, "src/zcl_provenance.clas.abap"), source("P2"));
+      expect(await active()).to.equal(source("P1"));
+      expect(await (await fetch(base)).text()).to.include('adtcore:version="inactive"');
+      writeFileSync(join(root, "src/zcl_provenance.clas.abap"), source("P1"));
+    });
+    it("missing snapshots never adopt edited bytes or label them active", async () => {
+      rmSync(join(root, "build/by-input", hash, "source"), {recursive: true, force: true});
+      rmSync(join(root, "build/source-by-digest"), {recursive: true, force: true});
+      writeFileSync(join(root, "src/zcl_provenance.clas.abap"), source("P2"));
+      expect((await abap.Classes.ZCL_PROVENANCE.run()).get()).to.equal("P1");
+      expect(await active()).to.equal("");
+      expect(await (await fetch(base)).text()).to.include('adtcore:version="inactive"');
+      expect(existsSync(join(root, "build/by-input", hash, "source/src/zcl_provenance.clas.abap"))).to.equal(false);
+    });
+    it("cleaned build/ keeps P1 execution but returns the defined empty active source", async () => {
+      rmSync(join(root, "build"), {recursive: true});
+      expect((await abap.Classes.ZCL_PROVENANCE.run()).get()).to.equal("P1");
+      expect(await active()).to.equal("");
+      expect(await (await fetch(base)).text()).to.include('adtcore:version="inactive"');
+    });
+    it("an empty unbuilt working source is also inactive", async () => {
+      writeFileSync(join(root, "src/zcl_provenance.clas.abap"), "");
+      expect(await active()).to.equal("");
+      expect(await (await fetch(base)).text()).to.include('adtcore:version="inactive"');
+    });
+  });
+});
 
 for (const front of ["node", "abap"]) describe(`ADT active/inactive: ${front} source routes`, function () {
   this.timeout(180000);
@@ -161,6 +244,15 @@ for (const front of ["node", "abap"]) describe(`ADT active/inactive: ${front} so
     expect(hot.swaps).to.equal(2);
     await versions(object, path, imp("P3"), imp("P3"), "active");
     expect(await classrun()).to.equal("P3");
+    // A warm generation stores changed inputs only. GC must retain the
+    // unchanged main's shared bytes even after dropping the cold snapshot.
+    const current = join(root, "build", "by-input", hot.generation);
+    expect(existsSync(join(current, "source/src/zcl_t05.clas.abap"))).to.equal(false);
+    const unused = createHash("sha256").update(imp("stub")).digest("hex");
+    expect(gc(root, {keep: 1})).to.not.be.empty;
+    expect(store.read("CLAS", "ZCL_T05", "main", "active").source).to.equal(main);
+    expect(store.read("CLAS", "ZCL_T05", "implementations", "active").source).to.equal(imp("P3"));
+    expect(existsSync(join(root, "build/source-by-digest", unused))).to.equal(false);
   });
 });
 

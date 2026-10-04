@@ -11,6 +11,7 @@ import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {undoOnExit} from "./helpers/undo-on-exit.mjs";
 import {adtAbap} from "./helpers/adt-abap.mjs";
 import {SESSION_COOKIE} from "../tools/adt-session.mjs";
+import {activeFixture} from "./helpers/source-snapshot.mjs";
 
 // The state-changing half of the façade: lock, write, unlock, activate.
 //
@@ -1026,7 +1027,7 @@ describe("tools/adt-facade: publication state", function () {
     expect((await failed.text())).to.contain('activationExecuted="false"');
     expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");
 
-    store.publish = async () => ({ok: true, recycled: false});
+    store.publish = async () => {activeFixture(root); return {ok: true, recycled: false};};
     const passed = await activate();
     expect((await passed.text())).to.contain('activationExecuted="true"');
     expect(store.stateOf(store.find("CLAS", name)).version).to.equal("active");
@@ -1067,9 +1068,11 @@ describe("tools/adt-facade: notebook scratch after failed activation", function 
     root = mkdtempSync(join(tmpdir(), "osd-notebook-failure-"));
     for (const layer of roots) mkdirSync(join(root, layer.path), {recursive: true});
     store = new ObjectStore({root, roots, libs: []});
-    store.publish = async () => store.read("CLAS", name).source === invalid
-      ? {ok: false, transpile: {issues: [{issues: [{message: "invalid ABAP"}]}]}}
-      : {ok: true};
+    store.publish = async () => {
+      if (store.read("CLAS", name).source === invalid) return {ok: false, transpile: {issues: [{issues: [{message: "invalid ABAP"}]}]}};
+      activeFixture(root, roots.map(layer => layer.path));
+      return {ok: true};
+    };
     store.classrun = async () => ({run: async () => ({ok: true, text: "hello", ms: 1})});
     const app = express();
     app.use(express.raw({type: "*/*", limit: "16mb"}));

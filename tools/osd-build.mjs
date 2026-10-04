@@ -18,7 +18,7 @@
 //
 // Content hashing takes 105 ms here, 170 ms for the largest library;
 // generations are 44 MB. See docs/generations.md for the design.
-import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot} from "./osd-source-snapshot.mjs";
+import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot, materializeSourceSnapshot, gcSourceInputs} from "./osd-source-snapshot.mjs";
 import {createHash} from "node:crypto";
 import {libraryPath} from "./osd-lib-path.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
@@ -853,6 +853,7 @@ export async function build(options = {}) {
       // replaced the directory gave a consumer pinned to `<hash>` different
       // content under an unchanged name, which is the thing immutability was
       // for.
+      materializeSourceSnapshot(root, target);
       const verdict = compareGenerations(target, tmp);
       if (verdict.same) {
         log(`generation ${hash} rebuilt byte for byte: ${verdict.files} files` +
@@ -912,32 +913,36 @@ export async function build(options = {}) {
 // tmp, and the directories moved aside by the first switch
 export function gc(root, options = {}) {
   const paths = layout(root);
-  const keep = options.keep ?? 5;
-  const live = liveHash(root);
-  const removed = [];
-  const all = generations(root).reverse(); // newest first
-  for (const g of all.slice(keep)) {
-    if (g.hash === live) {
-      continue;
+  const unlock = lock(paths);
+  try {
+    const keep = options.keep ?? 5;
+    const live = liveHash(root);
+    const removed = [];
+    const all = generations(root).reverse(); // newest first
+    for (const g of all.slice(keep)) {
+      if (g.hash === live) {
+        continue;
+      }
+      rmSync(join(paths.byInput, g.hash), {recursive: true, force: true});
+      removed.push(g.hash);
     }
-    rmSync(join(paths.byInput, g.hash), {recursive: true, force: true});
-    removed.push(g.hash);
-  }
-  if (existsSync(paths.tmp)) {
-    for (const e of readdirSync(paths.tmp)) {
-      rmSync(join(paths.tmp, e), {recursive: true, force: true});
-      removed.push(`tmp/${e}`);
-    }
-  }
-  if (existsSync(paths.build)) {
-    for (const e of readdirSync(paths.build)) {
-      if (e.startsWith("legacy-")) {
-        rmSync(join(paths.build, e), {recursive: true, force: true});
-        removed.push(e);
+    if (existsSync(paths.tmp)) {
+      for (const e of readdirSync(paths.tmp)) {
+        rmSync(join(paths.tmp, e), {recursive: true, force: true});
+        removed.push(`tmp/${e}`);
       }
     }
-  }
-  return removed;
+    if (existsSync(paths.build)) {
+      for (const e of readdirSync(paths.build)) {
+        if (e.startsWith("legacy-")) {
+          rmSync(join(paths.build, e), {recursive: true, force: true});
+          removed.push(e);
+        }
+      }
+    }
+    gcSourceInputs(root);
+    return removed;
+  } finally {unlock();}
 }
 
 export async function main(args) {

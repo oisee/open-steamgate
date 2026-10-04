@@ -13,6 +13,7 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {StoreDestination, withSystem, currentSystemAnswers, COMMANDS} from "../tools/osd-store-destination.mjs";
 import {harnessEntries, runAll} from "../tools/osd-unit-all.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
+import {activeFixture} from "./helpers/source-snapshot.mjs";
 
 const base = "/sap/bc/adt/";
 const collections = ["oo/classes", "oo/interfaces", "programs/programs", "ddic/ddl/sources", "ddic/srvd/sources", "programs/includes"];
@@ -127,6 +128,7 @@ describe("ADT B2a source reads and bare documents: live Node byte diff", functio
     for(const [,name,text] of reportBoundaries) file(name,".prog.abap",text);
     for(const [name,text] of [["zentity","define\r\nroot\tview\nentity zentity as select from t {}"],["zclassic","define view zclassic as select from t {}"],["zboundary","redefine view entity2"],["zpunct","define,view entity"]]) file(name,".ddls.asddls",text);
     file("ztf_source",".ddls.asddls","define table function ZTF_ENTITY returns { id: abap.int4; } implemented by method zcl_read=>run;");
+    activeFixture(root);
     store=new ObjectStore({root,libs:[],roots:[{path:"src",package:"$TMP",writable:true}]});
     store.create("CLAS","ZCL_AUTHOR",{package:"$TMP",author:"BUILDER_A"});
     store.write("PROG","ZREPORT","REPORT z.");

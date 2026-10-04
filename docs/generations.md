@@ -46,11 +46,20 @@ no-op; a transpiler upgrade is a new generation, as it should be.
 
 **ADT source versions** — cold and warm builds retain their source inputs at
 `build/by-input/<hash>/source/<working-file-path>`. Cold builds validate the
-copies against the input digests, including generated ABAP inputs; warm builds
-hard-link unchanged copies from their previous generation. These are files,
-not database rows. Active reads select the serving runtime's generation (or
+copies against the input digests, including generated ABAP inputs, and retain
+shared immutable copies at `build/source-by-digest/<sha256>`. Each generation's
+`source-inputs.json` records its logical paths and digests. Warm builds retain
+only changed inputs and reuse the shared copies for unchanged and generated
+sources. GC holds the build lock and removes a shared copy only after no
+retained generation references its digest. These are files, not database rows.
+Active reads select the serving runtime's generation (or
 `build/live` when no runtime serves); inactive and unqualified reads select the
 working file. The versions feed's `00000` content uses the same active read.
+If neither a retained source nor a pre-save copy is available, working bytes
+can backfill the snapshot only when their digest matches the generation's
+recorded input. Older generations with no per-input record require a matching
+aggregate input hash before backfilling. Otherwise the active source is empty,
+as for an object created but never activated, and its document is inactive.
 
 Saving preserves the generation input in `build/inactive/active/` for the
 existing build overlay. Failed activation leaves the active generation source
