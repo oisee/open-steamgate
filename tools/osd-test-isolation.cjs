@@ -139,16 +139,33 @@ let current;
 const costs = [];
 const genCosts = [];
 let genDiffMs = 0;
+let runGen;
 const genSnapshot = () => {
   const started = process.hrtime.bigint();
   const manifest = resources.genManifest();
+  // Keep the first import-entry snapshot even as file baselines and the
+  // digest cache advance. Later files may restore an earlier file's edits.
+  runGen ??= new Map(manifest.map((entry) => [entry.path, entry]));
   genCosts.push({ms: Number(process.hrtime.bigint() - started) / 1e6, files: manifest.length,
     ...(genCosts.length === 0 ? {bytes: manifest.reduce((sum, {size}) => sum + size, 0)} : {})});
   return manifest;
 };
-const genDifference = (before, after, phase) => {
+const genDifference = (before, after, phase, file) => {
   const started = process.hrtime.bigint();
-  try { return resources.genDifference(before, after).map((change) => ({...change, phase})); }
+  try {
+    const changes = resources.genDifference(before, after).map((change) => ({...change, phase}));
+    const restorations = [];
+    const violations = [];
+    for (const change of changes) {
+      const original = runGen.get(change.path);
+      const restored = !change.error && !original?.error && (change.after === null
+        ? !runGen.has(change.path)
+        : original?.sha256 && change.after.sha256 === original.sha256);
+      (restored ? restorations : violations).push(change);
+    }
+    if (restorations.length) console.log(`test-isolation: ${file}: gen restoration: ${JSON.stringify(restorations)}`);
+    return violations;
+  }
   catch (error) { return [{error: error.message, phase}]; }
   finally { genDiffMs += Number(process.hrtime.bigint() - started) / 1e6; }
 };
@@ -210,7 +227,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
   }
   const result = emit.call(this, event, ...args);
   const loading = this.osdLoading;
-  const importGenChanges = genDifference(loading.gen, genSnapshot(), 'import');
+  const importGenChanges = genDifference(loading.gen, genSnapshot(), 'import', file);
   const suites = this.suites.splice(loading.suites);
   const tests = this.tests.splice(loading.tests);
   const fileHooks = Object.fromEntries(hooks.map((key) => [key, this[key].splice(loading.hooks[key])]));
@@ -282,7 +299,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
     const ownedPids = new Set(after.resources.children.map(({pid}) => pid));
     after.serving = after.serving.filter(({pid}) => ownedPids.has(pid));
     const violations = [];
-    const genChanges = [...importGenChanges, ...(before ? genDifference(before.gen, genSnapshot(), 'execution') : [])];
+    const genChanges = [...importGenChanges, ...(before ? genDifference(before.gen, genSnapshot(), 'execution', file) : [])];
     if (genChanges.length) violations.push(['gen', genChanges]);
     if (after.dialog.held || after.dialog.waiting || after.dialog.open.length) violations.push(['dialog', {before: {held: false, waiting: 0, open: []}, after: after.dialog}]);
     const inherited = sameGeneration(lastGeneration, before?.generation ?? after.generation);

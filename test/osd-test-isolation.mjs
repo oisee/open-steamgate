@@ -56,6 +56,65 @@ describe('per-file process isolation detector', function () {
     expect(result.output).not.to.include('0.cjs: gen:');
   });
   for (const phase of ['import', 'execution']) {
+    for (const mutation of ['identical', 'different', 'new-path']) {
+      it(`${phase}: ${mutation === 'identical' ? 'reports restoration' : 'rejects ' + mutation} after an allowed gen removal`, () => {
+        const path = mutation === 'new-path' ? 'gen/stg/zvdb_100/new.abap' : 'gen/stg/zvdb_100/output.abap';
+        const content = mutation === 'different' ? 'different' : 'original';
+        const regenerate = `fs.writeFileSync('${path}','${content}');`;
+        const result = run({
+          'test/shadowed-objects.mjs': "import fs from 'node:fs';fs.rmSync('gen/stg/zvdb_100/output.abap');it('removes output',()=>{});",
+          'test/regenerate.mjs': `import fs from 'node:fs';${phase === 'import' ? regenerate : ''}it('regenerates',()=>{${phase === 'execution' ? regenerate : ''}});`,
+        }, [], undefined,
+        "const fs=require('node:fs');fs.mkdirSync('gen/stg/zvdb_100',{recursive:true});fs.writeFileSync('gen/stg/zvdb_100/output.abap','original');");
+        expect(result.output).to.include('test/shadowed-objects.mjs: gen:').and.include('TEMPORARY ALLOW');
+        if (mutation === 'identical') {
+          expect(result.status, result.output).to.equal(0);
+          expect(result.output).to.include('test/regenerate.mjs: gen restoration:').and.include(`"phase":"${phase}"`);
+          expect(result.output).not.to.include('test/regenerate.mjs: gen:');
+        } else {
+          expect(result.status, result.output).to.be.greaterThan(0);
+          expect(result.output).to.include('test/regenerate.mjs: gen:').and.include(path);
+          expect(result.output).not.to.include('test/regenerate.mjs: gen restoration:');
+        }
+      });
+    }
+    for (const mutation of ['rewrite', 'remove-added']) {
+      it(`${phase}: reports a ${mutation} back to the run-start gen state without excusing the origin`, () => {
+        const path = 'gen/probe.abap';
+        const edit = `fs.writeFileSync('${path}','changed');`;
+        const restore = mutation === 'rewrite' ? `fs.writeFileSync('${path}','original');` : `fs.rmSync('${path}');`;
+        const source = (action) => `const fs=require('node:fs');${phase === 'import' ? action : ''}it('works',()=>{${phase === 'execution' ? action : ''}});`;
+        const result = run([source(edit), source(restore)], [], undefined,
+          `const fs=require('node:fs');fs.mkdirSync('gen');${mutation === 'rewrite' ? "fs.writeFileSync('gen/probe.abap','original');" : ''}`);
+        expect(result.status, result.output).to.be.greaterThan(0);
+        expect(result.output).to.include('0.cjs: gen:');
+        expect(result.output).to.include('1.cjs: gen restoration:').and.include(`"phase":"${phase}"`);
+        expect(result.output).not.to.include('1.cjs: gen:');
+      });
+    }
+  }
+  it('keeps unrelated additions red alongside a gen restoration', () => {
+    const result = run([
+      "require('node:fs').rmSync('gen/probe.abap');it('removes',()=>{});",
+      "it('restores and leaks',()=>{const fs=require('node:fs');fs.writeFileSync('gen/probe.abap','original');fs.writeFileSync('gen/new.abap','new');});",
+    ], [], "allowances['0.cjs']={gen:{reason:'fixture removal',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:[{path:'gen/probe.abap',maxCount:1,phase:'import',kinds:['removed']}]}};",
+    "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/probe.abap','original');");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('1.cjs: gen restoration:').and.include('1.cjs: gen:');
+    const changes = JSON.parse(result.output.match(/test-isolation: 1.cjs: gen: (.*)/)[1]);
+    expect(changes.map(({path}) => path)).to.deep.equal(['gen/new.abap']);
+  });
+  it('reports an import restoration when every test is excluded', () => {
+    const result = run([
+      "require('node:fs').rmSync('gen/probe.abap');it('unselected',()=>{});",
+      "require('node:fs').writeFileSync('gen/probe.abap','original');it('unselected',()=>{});",
+    ], ['--grep', ' selected$'], "allowances['0.cjs']={gen:{reason:'fixture removal',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:[{path:'gen/probe.abap',maxCount:1,phase:'import',kinds:['removed']}]}};",
+    "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/probe.abap','original');");
+    expect(result.status, result.output).to.equal(0);
+    expect(result.output).to.include('0 passing').and.include('1.cjs: gen restoration:');
+    expect(result.output).not.to.include('1.cjs: gen:');
+  });
+  for (const phase of ['import', 'execution']) {
     for (const timestamp of ['newer', 'restored']) {
       for (const content of ['original', 'changed!']) {
         it(`${phase}: ${content === 'original' ? 'accepts identical bytes' : 'rejects same-size different bytes'} with a ${timestamp} gen mtime`, () => {

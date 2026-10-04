@@ -45,7 +45,8 @@ release a lock, rebuild code or switch generations:
   Equal bytes pass and update the cache: legitimate builds regenerate outputs
   with identical bytes and a newer mtime, which is not a leak. Likewise, chmod,
   rename or link operations that touch ctime cost a hash but equal bytes pass.
-  Different bytes are `changed`; added and removed paths still fail. Evidence names each path
+  Different bytes are `changed`; added and removed paths fail unless they
+  restore the run-start state described below. Evidence names each path
   and retains baseline metadata and digests, including for deleted files.
   Hash errors stay red even under an allowance.
   This detects sweeps that the generation hash cannot see: `gen/` is an
@@ -108,7 +109,20 @@ The `gen` check compares both import entry/exit and execution entry/exit
 (after user cleanup). Import-time generator calls therefore belong to the
 file importing them, including files with no selected tests. Each file gets
 its own observation baseline; a downstream file that leaves already missing
-outputs alone passes. Directory symlinks are not traversed; changed symlinks
+outputs alone passes. The first import-entry manifest is also retained as the
+run-start baseline (paths and digests). At each import or execution boundary,
+a change that returns a path to that state is a restoration: re-adding or
+rewriting it with its run-start digest, or removing a path absent at run start.
+Restorations pass without an allowance and print an informational
+`test-isolation: test/example.mjs: gen restoration: [...]` naming the restoring
+file, paths, phase and before/after evidence. They do not excuse the originating
+mutation or any other changes made by the restoring file. Re-adding different
+bytes or adding a path absent at run start remains red. Hash errors cannot
+prove restoration and stay red.
+For example, the allowed import sweep in `shadowed-objects.mjs` can remove
+generated services; a later legitimate build in `vscode-debug.mjs` that puts
+back their run-start bytes reports restorations and passes.
+Directory symlinks are not traversed; changed symlinks
 are hashed by link target. Empty directories are outside this metadata manifest.
 A change and full restore between two boundaries is invisible to a boundary
 observer, by design: changed metadata may trigger a hash, but restored paths
