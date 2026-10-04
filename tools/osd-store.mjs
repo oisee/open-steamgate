@@ -862,7 +862,9 @@ export class ObjectStore {
         try {
           const manifest = JSON.parse(readFileSync(join(generation, "manifest.json"), "utf8"));
           const digests = new Map();
-          if (hashOf(this.root, inputsOf(this.root), {digests, transpiler: manifest.transpiler}) !== hash) return undefined;
+          // New manifests keep identity separate from the diagnostic description;
+          // the older shape used transpiler itself to name the generation.
+          if (hashOf(this.root, inputsOf(this.root), {digests, transpiler: manifest.toolchain ?? manifest.transpiler}) !== hash) return undefined;
           inputs = Object.fromEntries([...digests].map(([path, digest]) => [relative(this.root, path).replaceAll("\\", "/"), digest]));
           writeFileSync(join(generation, "source-inputs.json"), JSON.stringify(inputs));
         } catch {return undefined;}

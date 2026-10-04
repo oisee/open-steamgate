@@ -3,6 +3,7 @@
 //
 //   bun scripts/build-sea.mjs bundle   → build/osd-node/osd.mjs  (node build/osd-node/osd.mjs up)
 //   bun scripts/build-sea.mjs sea      → build/osd-sea            (a Node SEA executable)
+import {buildIdentity} from "../tools/osd-transpiler.mjs";
 import {createRequire} from "node:module";
 import {resolve} from "node:path";
 import {execFileSync} from "node:child_process";
@@ -17,6 +18,7 @@ const bundle = resolve(root, "build", "osd-node", "osd.mjs");
 const result = await Bun.build({
   entrypoints: [resolve(root, "bin", "osd.mjs")],
   target: "node",
+  define: {__OSD_TOOLCHAIN_IDENTITY__: JSON.stringify(buildIdentity(root))},
   format: "esm",
   outdir: resolve(root, "build", "osd-node"),
   naming: "osd.mjs",

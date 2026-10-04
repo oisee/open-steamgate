@@ -5,6 +5,7 @@
 // module — the transpiler resolves its own copy from where it lives and the
 // entry another from here, same version, different files, and the
 // transpiler checks its registry with instanceof.
+import {buildIdentity} from "../tools/osd-transpiler.mjs";
 import {createRequire} from "node:module";
 import {execFileSync} from "node:child_process";
 import {mkdirSync, rmSync} from "node:fs";
@@ -57,7 +58,7 @@ if (seeded) {
 const result = await Bun.build({
   entrypoints: [resolve(root, "bin", "osd.mjs")],
   target: "bun",
-  define: {__OSD_BINARY_SEEDED__: JSON.stringify(seeded)},
+  define: {__OSD_BINARY_SEEDED__: JSON.stringify(seeded), __OSD_TOOLCHAIN_IDENTITY__: JSON.stringify(buildIdentity(root))},
   compile: {...(target ? {target} : {}), outfile, ...(archive ? {assets: [archive]} : {})},
   plugins: [{
     name: "one-core",

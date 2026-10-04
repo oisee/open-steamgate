@@ -27,9 +27,9 @@ import {run} from "./osd-build-command.mjs";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, resolve as resolvePath, sep} from "node:path";
 import {fileURLToPath} from "node:url";
-import {describeBuild} from "./osd-transpiler.mjs";
+import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
-import {transpile} from "./osd-transpile.mjs";
+import {transpile, selectedModules} from "./osd-transpile.mjs";
 import {inputFoldersOf, packsOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
@@ -198,7 +198,11 @@ export function describeMissingLibraries(missing) {
 // test or a note beside the ABAP is not an input, and a hash that counted
 // it would spend ten seconds building the same output again after an edit
 // to a .mjs. Everything in an input folder counts except these.
-const NOT_AN_INPUT = /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap)$/i;
+// Optional DSL navigation metadata is generated beside the source, carries
+// volatile provenance, and is excluded by the transpiler and BSP generator.
+// Creating it (for example in dsl-l2's setup) must not invalidate live code.
+const TRACE_METADATA = /\.trace\.meta\.json$/i;
+const NOT_AN_INPUT = /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap|trace\.meta\.json)$/i;
 
 /**
  * The modules that decide what `gen/` will contain: the generators and
@@ -279,7 +283,7 @@ export function generatorIdentity(root = process.cwd()) {
   const closure = generatorClosure();
   h.update(`generators ${closure.length}\0`);
   for (const f of closure) {
-    h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
+    h.update(relative(TOOLS, f).split(sep).join("/")).update("\0").update(readFileSync(f)).update("\0");
   }
   return "tools:" + h.digest("hex").slice(0, 16);
 }
@@ -325,7 +329,7 @@ function digestOf(file) {
 //   folders    per input folder, the (file, digest) list of an earlier walk,
 //              for a folder a watcher says has not changed since -- the
 //              libraries are 4400 of this tree's 5100 inputs;
-//   transpiler describeBuild(root), when the caller has it already.
+//   transpiler buildIdentity(root), when the caller has it already.
 // None of them changes the name: it is the same hash over the same list.
 //   overlay    the inactive objects an ObjectStore keeps out of the build
 //              (overlayOf below); an empty or absent one changes nothing.
@@ -339,8 +343,14 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
   // prime asking whether its view is the live generation with saves since
   // put back to the bytes they replaced, tools/osd-warm.mjs)
   const substitute = options instanceof Map ? undefined : options.substitute;
-  const h = createHash("sha256");
-  h.update("transpiler\0").update(String(options.transpiler ?? describeBuild(root))).update("\0");
+  const hash = createHash("sha256");
+  // Optional audit of the exact framed inputs, in hashing order.
+  const h = {update(value) {
+    options.trace?.(value);
+    hash.update(value);
+    return this;
+  }, digest: (...args) => hash.digest(...args)};
+  h.update("transpiler\0").update(String(options.transpiler ?? buildIdentity(root))).update("\0");
   // the rule that decides a name held by two inputs is part of what the
   // output is: a generation built under another rule is another generation
   h.update("layers\0later-wins\0");
@@ -374,10 +384,10 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
     folder("active", dir, () => (existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f) && kept(f)).sort() : []));
   }
   for (const dir of inputs.bspFolders ?? []) {
-    folder("bsp", dir, () => walk(dir).sort());
+    folder("bsp", dir, () => walk(dir).filter((f) => !TRACE_METADATA.test(f)).sort());
   }
   for (const dir of inputs.packFolders ?? []) {
-    folder("pack", dir, () => walk(dir).sort());
+    folder("pack", dir, () => walk(dir).filter((f) => !TRACE_METADATA.test(f)).sort());
   }
   for (const file of inputs.packFiles ?? []) {
     h.update(`manifest ${relative(root, file)}\0`).update(digestOf(file)).update("\0");
@@ -691,8 +701,10 @@ export async function build(options = {}) {
   // what each input held when the generation was named: the bytes it is
   // built from (checked as the transpiler reads them, below), and what an
   // activation's completion compares with (ObjectStore#completeActivations)
+  const loaded = selectedModules(root);
+  const identity = assertToolchain(root, loaded);
   const named = new Map();
-  const hash = hashOf(root, inputs, {overlay: options.overlay, digests: named});
+  const hash = hashOf(root, inputs, {overlay: options.overlay, digests: named, transpiler: identity});
   // one spelling of a path for every comparison: a native one from the walk,
   // a forward-slash one from the transpiler's reads on Windows
   const digests = new Map([...named].map(([file, digest]) => [normalPath(file), digest]));
@@ -799,7 +811,7 @@ export async function build(options = {}) {
     // and the next build names what is there then
     const changed = [];
     const generatedDigests = new Map();
-    const made = await transpile({root, config: own, log: (m) => { output += m + "\n"; },
+    const made = await transpile({root, modules: loaded, config: own, log: (m) => { output += m + "\n"; },
       onRead: (file, bytes) => {
         if (normalPath(file).startsWith(normalPath(join(root, "gen")) + "/")) {
           generatedDigests.set(normalPath(file), createHash("sha256").update(bytes).digest("hex"));
@@ -809,6 +821,7 @@ export async function build(options = {}) {
       }});
     // and nothing the generators or the transpiler read was written since
     // it was named
+    assertToolchain(root, loaded);
     changed.push(...watched.filter((file) => stampOf(file) !== stamps.get(file)));
     if (changed.length > 0) throw changedError(root, changed);
     keepSourceInputs(root, tmp, digests, undefined, options.overlay);
@@ -822,6 +835,7 @@ export async function build(options = {}) {
       ms: Date.now() - started,
       objects,
       transpiler: describeBuild(root),
+      toolchain: identity,
       inputs: {folders: inputs.folders.map((f) => relative(root, f)), libs: inputs.libs.map((f) => relative(root, f)),
         // the active copies an overlay added: a publisher reads them too (osd-tmp.mjs)
         overlay: overlayFilesOf(root, options.overlay)},

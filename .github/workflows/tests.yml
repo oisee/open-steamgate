@@ -248,6 +248,7 @@ jobs:
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler-cli packages/cli
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
+          node tools/osd-ci-artifact.mjs verify
       # **What is skipped is reported, not swallowed.** Several suites are
       # guarded on `.local/corpus*`, which is not in this repository and
       # never will be — it holds real customer projects. On a runner those
@@ -301,6 +302,7 @@ jobs:
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler-cli packages/cli
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
+          node tools/osd-ci-artifact.mjs verify
       - name: VSIX packaging group
         run: node tools/osd-suites.mjs --report-skips --group packaging
         env:
@@ -339,6 +341,7 @@ jobs:
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler-cli packages/cli
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
+          node tools/osd-ci-artifact.mjs verify
       # Keep the launchpad's core intents covered on the live Node shape
       # as well as in preview.yml's static Pages check.  This comes after the
       # build, so a broken build fails before browser work;
@@ -408,6 +411,7 @@ jobs:
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler packages/transpiler
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
           TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
+          node tools/osd-ci-artifact.mjs verify
       - name: Go vet and tests of the host packages
         working-directory: tools/gogen/go
         run: |

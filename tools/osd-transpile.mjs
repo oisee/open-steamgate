@@ -16,6 +16,7 @@
 // transpiler and the registry it is handed must come from ONE copy of
 // @abaplint/core, because the transpiler checks its input with instanceof.
 // So core is resolved from where the transpiler package is, not from here.
+import {buildIdentity, assertToolchain} from "./osd-transpiler.mjs";
 import {phase} from "./osgjs-trace.mjs";
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
@@ -32,7 +33,7 @@ import {libraryPath} from "./osd-lib-path.mjs";
 // against. A tree with the library installed resolves it directly; a tree
 // with only the CLI (a linked local build of the monorepo, as here) reaches
 // the library the way the CLI itself does, through the CLI's own location.
-export function modulesOf(root) {
+export function transpilerLocation(root) {
   const fromRoot = createRequire(join(root, "package.json"));
   let main;
   try {
@@ -41,9 +42,18 @@ export function modulesOf(root) {
     const cli = fromRoot.resolve("@abaplint/transpiler-cli/package.json");
     main = createRequire(cli).resolve("@abaplint/transpiler");
   }
-  const where = packageRootOf(main);
+  return packageRootOf(main);
+}
+
+const LOADED_IDENTITIES = new WeakMap();
+export function modulesOf(root) {
+  const fromRoot = createRequire(join(root, "package.json"));
+  const where = transpilerLocation(root);
+  // Capture before require executes the package, once per loaded class.
+  const identity = buildIdentity(root);
   const fromTranspiler = createRequire(join(where, "package.json"));
   const {Transpiler, Chunk} = fromTranspiler(where);
+  if (!LOADED_IDENTITIES.has(Transpiler)) LOADED_IDENTITIES.set(Transpiler, identity);
   const core = fromTranspiler("@abaplint/core");
   const {CallFunctionTranspiler} = fromTranspiler(join(where, 'build/src/statements/call_function.js'));
   let plugin;
@@ -53,7 +63,7 @@ export function modulesOf(root) {
   } catch {
     plugin = undefined;
   }
-  return prepareModules({Transpiler, Chunk, core, CallFunctionTranspiler, plugin, where, version: JSON.parse(readFileSync(join(where, "package.json"), "utf8")).version});
+  return prepareModules({Transpiler, Chunk, core, CallFunctionTranspiler, plugin, where, identityRoot: root, identity: LOADED_IDENTITIES.get(Transpiler), version: JSON.parse(readFileSync(join(where, "package.json"), "utf8")).version});
 }
 
 // Install on the selected copy, including bundled hosts and explicit modules.
@@ -62,7 +72,15 @@ function prepareModules(modules) {
   return modules;
 }
 export function selectedModules(root, explicit) {
-  return prepareModules(explicit ?? hostModules() ?? modulesOf(root));
+  const modules = explicit ?? hostModules() ?? modulesOf(root);
+  // Callers supplying already loaded code must supply its load-time identity,
+  // or use a class captured by modulesOf. Never infer it from disk now.
+  if (modules.identity === undefined) {
+    const identity = LOADED_IDENTITIES.get(modules.Transpiler);
+    if (identity === undefined) throw new Error("transpiler modules need an identity captured when they were loaded");
+    return prepareModules({...modules, identity});
+  }
+  return prepareModules(modules);
 }
 
 function packageRootOf(file) {
@@ -248,7 +266,9 @@ export async function transpile(options = {}) {
   const log = options.log ?? (() => {});
   const started = Date.now();
   // a binary registered its bundled transpiler and core; a checkout resolves them
-  const {Transpiler, Chunk, core, plugin, version} = selectedModules(root, options.modules);
+  const loaded = selectedModules(root, options.modules);
+  assertToolchain(loaded.identityRoot ?? root, loaded);
+  const {Transpiler, Chunk, core, plugin, version} = loaded;
   if (config.write_source_map === true) mapStatementStarts(Chunk);
   const {files, skipped} = await loadFiles(root, config, core, options.onRead);
   log(`${files.length} files added from source, ${skipped} skipped`);

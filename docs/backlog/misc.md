@@ -177,7 +177,7 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
 
 - <a id="isolation-vscode-warm-generation"></a> `test/vscode-warm.mjs` — `generation`; evidence: the shared shard-1 run changed live from 759177bda0d12f33 to ee8b686b9cf3721d, then restored source bytes without restoring the live generation. The final tree still hashes to 759177bda0d12f33. Confirmed on base 11122e9f; fixture owner must restore both. Owner: **stoker**.
 
-- <a id="isolation-dsl-l2-generation"></a> `test/dsl-l2.mjs` — `generation`; evidence: setup at test/dsl-l2.mjs:112 writes 13 previously absent ignored trace.meta.json sidecars under src/l2demo and leaves live at 759177bda0d12f33 while the tree becomes a1e53ac46cfb6ea1. A read-only hash excluding exactly those 13 files returns 759177bda0d12f33. Recorded in shard 2 on base 11122e9f; no cleanup/rebuild is performed by the detector. Owner: **stoker**.
+- <a id="isolation-dsl-l2-generation"></a> **Resolved:** `test/dsl-l2.mjs` — the generation hash now excludes optional navigation metadata and the temporary drift allowance is removed. Original evidence: setup at test/dsl-l2.mjs:112 writes 13 previously absent ignored trace.meta.json sidecars under src/l2demo and leaves live at 759177bda0d12f33 while the tree becomes a1e53ac46cfb6ea1. A read-only hash excluding exactly those 13 files returns 759177bda0d12f33. Recorded in shard 2 on base 11122e9f; no cleanup/rebuild is performed by the detector. Owner: **stoker**.
 
 - <a id="isolation-osd-bsp-temporary-roots"></a> `test/osd-bsp.mjs` — `temporary-roots`; evidence: the osd-bsp fixture creates an osd-bsp-* root and leaves it on disk. Shared shard 2 on base 11122e9f observed one survivor; the fixture owner must remove it. Owner: **stoker**.
 

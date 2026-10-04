@@ -64,11 +64,13 @@ describe('RFC MESSAGE on selected host modules', function () {
           import {createRequire} from 'node:module';
           import {readFileSync, writeFileSync} from 'node:fs';
           import {setHostModules} from ${JSON.stringify(url(join(repo, 'tools/osd-host.mjs')))};
+          import {buildIdentity} from ${JSON.stringify(url(join(repo, 'tools/osd-transpiler.mjs')))};
+          const identity = buildIdentity(${JSON.stringify(repo)});
           const require = createRequire(${JSON.stringify(join(repo, 'package.json'))});
           const {Transpiler, Chunk} = require('@abaplint/transpiler');
           const core = createRequire(require.resolve('@abaplint/transpiler'))('@abaplint/core');
           const {CallFunctionTranspiler} = require('@abaplint/transpiler/build/src/statements/call_function.js');
-          setHostModules({Transpiler, Chunk, core, CallFunctionTranspiler});
+          setHostModules({identity, Transpiler, Chunk, core, CallFunctionTranspiler});
           const root = ${JSON.stringify(root)};
           const check = () => {
             const code = readFileSync(root + '/output/zcl_message_host.clas.mjs', 'utf8');

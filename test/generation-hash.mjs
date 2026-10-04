@@ -1,8 +1,13 @@
 import {expect} from "chai";
-import {writeFileSync, readFileSync, readdirSync, rmSync, mkdirSync, mkdtempSync} from "node:fs";
+import {writeFileSync, readFileSync, readdirSync, rmSync, mkdirSync, mkdtempSync, cpSync, symlinkSync, utimesSync, realpathSync} from "node:fs";
 import {tmpdir} from "node:os";
+import {execFileSync} from "node:child_process";
 import {join} from "node:path";
-import {hashOf, generatorClosure, genHash} from "../tools/osd-build.mjs";
+import {build, liveHash, hashOf, inputsOf, generatorClosure, genHash} from "../tools/osd-build.mjs";
+
+import {WarmCompiler} from "../tools/osd-warm.mjs";
+import {modulesOf} from "../tools/osd-transpile.mjs";
+import {buildIdentity, packageIdentity} from "../tools/osd-transpiler.mjs";
 
 // **A generation's name was a function of the tree AND of how many times the
 // tree had been built.**
@@ -141,4 +146,150 @@ describe("a cache hit does not leave gen/ holding somebody else's edit", () => {
     const manifest = JSON.parse(readFileSync("build/live/manifest.json", "utf8"));
     expect(manifest.gen, "without it a cache hit cannot tell that gen/ drifted").to.be.a("string");
   });
+});
+
+describe("a generation identifies content regardless of location", () => {
+  let scratch, first, second;
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), "osd-tree-identity-"));
+    first = join(scratch, "first");
+    second = join(scratch, "elsewhere", "deeper", "second");
+    mkdirSync(join(first, "src"), {recursive: true});
+    writeFileSync(join(first, "abap_transpile.json"), JSON.stringify({input_folder: "src", libs: []}));
+    writeFileSync(join(first, "src", "zcl_identity.clas.abap"), "* original source\n");
+    for (const name of ["transpiler", "runtime"]) {
+      const pkg = join(first, "local", name);
+      mkdirSync(join(pkg, "build"), {recursive: true});
+      writeFileSync(join(pkg, "package.json"), JSON.stringify({name: `@abaplint/${name}`, version: "1.0.0", main: "build/index.js"}));
+      writeFileSync(join(pkg, "build", "index.js"), "module.exports = {};\n");
+      mkdirSync(join(first, "node_modules", "@abaplint"), {recursive: true});
+      symlinkSync(join("..", "..", "local", name), join(first, "node_modules", "@abaplint", name));
+    }
+    mkdirSync(join(scratch, "elsewhere", "deeper"), {recursive: true});
+    cpSync(first, second, {recursive: true, verbatimSymlinks: true});
+  });
+  afterEach(() => rmSync(scratch, {recursive: true, force: true}));
+
+  it("refuses warm and cold builds after a linked transpiler was rebuilt in this process", async () => {
+    const pkg = join(first, "local", "transpiler");
+    const real = realpathSync(join(process.cwd(), "node_modules", "@abaplint", "transpiler"));
+    mkdirSync(join(pkg, "build", "src", "statements"), {recursive: true});
+    writeFileSync(join(pkg, "build", "src", "statements", "call_function.js"),
+      `module.exports = require(${JSON.stringify(join(real, "build", "src", "statements", "call_function.js"))});\n`);
+    mkdirSync(join(pkg, "node_modules", "@abaplint"), {recursive: true});
+    symlinkSync(join(process.cwd(), "node_modules", "@abaplint", "core"), join(pkg, "node_modules", "@abaplint", "core"));
+    const file = join(pkg, "build", "index.js");
+    const compiler = name => `const real = require(${JSON.stringify(real)}); module.exports = {...real, Transpiler: class ${name} extends real.Transpiler {}};\n`;
+    writeFileSync(file, compiler("Before"));
+    writeFileSync(join(first, "abap_transpile.json"), JSON.stringify({
+      input_folder: "src", output_folder: "output", libs: [], write_source_map: true,
+      options: {addFilenames: true, addCommonJS: true, unknownTypes: "compileError"},
+    }));
+    writeFileSync(join(first, "src", "zcl_identity.clas.abap"),
+      "CLASS zcl_identity DEFINITION PUBLIC. ENDCLASS. CLASS zcl_identity IMPLEMENTATION. ENDCLASS.\n");
+    const before = buildIdentity(first);
+    const loaded = modulesOf(first);
+    expect(loaded.Transpiler.name).to.equal("Before");
+    const baseline = await build({root: first, generators: false});
+    expect(baseline.ok).to.equal(true);
+    const warm = new WarmCompiler({root: first});
+    try {
+      await warm.prime();
+      writeFileSync(file, compiler("After"));
+      expect(buildIdentity(first)).not.to.equal(before);
+      expect(modulesOf(first).Transpiler).to.equal(loaded.Transpiler);
+      expect(modulesOf(first).identity).to.equal(before);
+      for (const attempt of [() => warm.build(), () => warm.prime(), () => build({root: first, generators: false})]) {
+        let refused;
+        try { await attempt(); } catch (error) { refused = error; }
+        expect(refused?.code).to.equal("TOOLCHAIN_CHANGED");
+        expect(refused.message).to.contain("restart the server (or run `osd build`)");
+      }
+      expect(liveHash(first)).to.equal(baseline.hash);
+      expect(readdirSync(join(first, "build", "by-input"))).to.deep.equal([baseline.hash]);
+      expect(JSON.parse(readFileSync(join(first, "build", "live", "manifest.json"))).toolchain).to.equal(before);
+    } finally { warm.drop(); }
+  });
+
+  it("caches a published identity for the process lifetime", () => {
+    const installed = join(first, "node_modules", "@abaplint", "transpiler");
+    rmSync(installed);
+    cpSync(join(first, "local", "transpiler"), installed, {recursive: true});
+    const before = packageIdentity(installed, "@abaplint/transpiler");
+    writeFileSync(join(installed, "build", "index.js"), "module.exports = {changed: true};\n");
+    expect(packageIdentity(installed, "@abaplint/transpiler")).to.equal(before);
+  });
+
+  it("copies with linked packages have the same hash", () => {
+    const a = [], b = [];
+    const firstHash = hashOf(first, undefined, {trace: value => a.push(String(value))});
+    expect(hashOf(second, undefined, {trace: value => b.push(String(value))})).to.equal(firstHash);
+    expect(b, "the exact hashed inputs also match").to.deep.equal(a);
+    expect(a.join(""), "locations never enter the hash").not.to.contain(scratch);
+  });
+  it("a source edit changes the hash", () => {
+    const before = hashOf(first);
+    writeFileSync(join(first, "src", "zcl_identity.clas.abap"), "* changed source\n");
+    expect(hashOf(first)).not.to.equal(before);
+  });
+  for (const folder of ["src", "webapp", "pack-data"]) it(`${folder}: navigation trace metadata does not rename a generation`, () => {
+    mkdirSync(join(first, folder), {recursive: true});
+    const inputs = inputsOf(first);
+    inputs.packFolders = [join(first, "pack-data")];
+    const before = hashOf(first, inputs);
+    const file = join(first, folder, "zcl_identity.clas.trace.meta.json");
+    writeFileSync(file, JSON.stringify({generatedAt: "first", navigation: {line: 1}}));
+    expect(hashOf(first, inputs), "optional navigation metadata is not compiler input").to.equal(before);
+    writeFileSync(file, JSON.stringify({generatedAt: "second", navigation: {line: 2}}));
+    expect(hashOf(first, inputs), "editing metadata leaves generated code unchanged").to.equal(before);
+  });
+  it("a tar/untar and package relink preserve every framed hash input", () => {
+    const trace = root => {
+      const inputs = [];
+      const hash = hashOf(root, undefined, {trace: value => inputs.push(String(value))});
+      return {hash, inputs};
+    };
+    const before = trace(first);
+    const archive = join(scratch, "built-tree.tar");
+    execFileSync("tar", ["--exclude=node_modules", "-cf", archive, "-C", first, "."]);
+    rmSync(second, {recursive: true});
+    mkdirSync(second);
+    execFileSync("tar", ["-xf", archive, "-C", second]);
+    mkdirSync(join(second, "node_modules", "@abaplint"), {recursive: true});
+    for (const name of ["transpiler", "runtime"]) {
+      symlinkSync(join(second, "local", name), join(second, "node_modules", "@abaplint", name));
+    }
+    expect(trace(second)).to.deep.equal(before);
+  });
+  for (const name of ["transpiler", "runtime"]) {
+    it(`a ${name} build edit changes the hash even with the same version`, () => {
+      const before = hashOf(first);
+      writeFileSync(join(first, "local", name, "build", "index.js"), "module.exports = {changed: true};\n");
+      expect(hashOf(first)).not.to.equal(before);
+    });
+    it(`a ${name} edit with restored mtime still changes identity`, () => {
+      const before = hashOf(first);
+      const file = join(first, "local", name, "build", "index.js");
+      writeFileSync(file, "module.exports = [];\n");
+      utimesSync(file, new Date(0), new Date(0));
+      expect(hashOf(first)).not.to.equal(before);
+    });
+    it(`a ${name} version edit changes the hash`, () => {
+      const before = hashOf(first);
+      const file = join(first, "local", name, "package.json");
+      const meta = JSON.parse(readFileSync(file, "utf8"));
+      writeFileSync(file, JSON.stringify({...meta, version: "1.0.1"}));
+      expect(hashOf(first)).not.to.equal(before);
+    });
+    it(`materialising ${name} and changing timestamps preserves identity`, () => {
+      const before = hashOf(first);
+      const installed = join(first, "node_modules", "@abaplint", name);
+      rmSync(installed);
+      cpSync(join(first, "local", name), installed, {recursive: true});
+      utimesSync(join(installed, "build", "index.js"), new Date(0), new Date(0));
+      writeFileSync(join(installed, "build", "index.js.map"), "packaging may remove this map");
+      writeFileSync(join(installed, "build", "index.d.ts"), "export {};");
+      expect(hashOf(first)).to.equal(before);
+    });
+  }
 });
