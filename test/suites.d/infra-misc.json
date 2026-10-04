@@ -27,6 +27,7 @@
     "test/osd-suites.mjs",
     "test/osd-test-isolation.mjs",
     "test/ci-wait-tests.mjs",
+    "test/smoke-binary.mjs",
     "test/preflight.mjs",
     "test/fae-batching.mjs",
     "test/lift-r1.mjs",
