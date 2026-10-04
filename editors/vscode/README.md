@@ -18,7 +18,7 @@ Start a bundled ABAP runtime, explore its OData services, run ABAP Unit, and ope
 2. Open the **OSD** Activity Bar view and select **Start**. The first start builds the bundled system; later starts reuse its cache.
 3. Run **OSD: Open sample** from the command palette or the system status bar. Choose a bundled notebook and run a cell; the command offers to start OSD if needed. In an [osg-demo](https://github.com/oisee/osg-demo) workspace, it also offers **ZOSD_DEMO_HELLO** (press **F9** to run).
 
-The status bar shows **OSD running/stopped**, the serving **OSD generation**, and **OSD jobs** (when enabled for a file SQLite database). Click the system or jobs item for start actions, job output, or **System overview**.
+The status bar shows **OSD running/stopped**, the serving **OSD generation**, and **OSD jobs** (when enabled for a file SQLite database). Click the system item for start actions or **System overview**, and the jobs item to open **OSD Jobs**.
 
 VS Code 1.101 or newer is required. The system runs locally on desktop or in a Remote-WSL or Remote-SSH workspace. It does not need a SAP or ADT connection.
 
@@ -81,7 +81,18 @@ No terminal command is needed.
 it explicitly. Both modes require durable file SQLite. The default `osd.database.system=sqlite` stores a shared file.
 Other backends leave the worker stopped and show one message to use file SQLite.
 The **OSD jobs** status bar shows idle, running/queued counts, or a stopped
-worker. Click it and choose **Show jobs** for a readable **OSD jobs** summary:
+worker. Click it to open **OSD Jobs** in the OSD sidebar. Browse the newest
+200 saved runs grouped by status, filter by name/user/date, and expand a job
+for steps, start condition and duration. Right-click for **Open job log**,
+**Open output** (the API verifies SHA-256), or **Copy job key**. Log and output
+tabs are read-only; missing output is reported explicitly. The panel refreshes
+with the jobs status poll while jobs are active or waiting, retaining its last
+view while the system is busy or paused. Stopped systems and disabled APIs
+show a one-line state with **Start system**. Only imported saved runs are
+listed; unimported reservations are outside this API, and step variants/users
+are shown only when recorded. No cancel, repeat or delete actions are included.
+
+Use **OSD: Show jobs** for a readable **OSD jobs** summary:
 one line per run, newest first, with its name, state, start time, duration,
 step/output counts where available, and failure reason. The summary refreshes
 every two seconds after opening and shows up to 200 recent runs.

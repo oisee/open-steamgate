@@ -4069,7 +4069,7 @@ describe("editors/vscode: running parts status and actions", () => {
       await tick();
       expect(item.visible).to.equal(true);
       expect(item.text).to.equal("OSD jobs: worker stopped");
-      expect(item.command).to.equal("osd.showRunning");
+      expect(item.command).to.equal("osd.openJobsPanel");
       controller.launcher.jobWorker.running = true;
       for (const counts of [{running: 0, queued: 0}, {running: 2, queued: 1}]) {
         globalThis.fetch = async () => ({ok: true, json: async () => ({counts})});

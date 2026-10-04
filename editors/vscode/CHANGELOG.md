@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add the read-only **OSD Jobs** sidebar: status groups, name/user/date filters, step details, job logs, verified saved output and copyable job keys. The jobs status item opens the panel; active jobs refresh through the existing status poll.
+
 - Activation now sends `method=activate`; a server from this release answers activation without it with 400 "Parameter method could not be found.", as an SAP system does. The extension and its bundled server update together.
 - Show readable job summaries by default, with newest runs first, durations, counts and failure reasons. Keep worker JSON behind **Show raw job log**.
 

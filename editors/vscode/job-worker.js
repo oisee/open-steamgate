@@ -191,7 +191,7 @@ function jobsStatusBar(vscode, context, controller) {
     output.clear(); output.appendLine(summary);
   };
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 9);
-  item.command = 'osd.showRunning';
+  item.command = 'osd.openJobsPanel';
   context.subscriptions.push(output, raw, item,
     vscode.commands.registerCommand('osd.showJobs', async () => {
       if (disposed) return;
@@ -209,25 +209,26 @@ function jobsStatusBar(vscode, context, controller) {
     return false;
   };
   const debugging = () => [vscode.debug?.activeDebugSession, ...sessions].some(isSystemSession);
-  let busy = false, misses = 0, firstMiss, lastKnown, observedLauncher;
+  let busy = false, misses = 0, firstMiss, lastKnown, observedLauncher, panelCounts;
   const resetMisses = () => { misses = 0; firstMiss = undefined; };
   const tick = async () => {
     if (disposed || busy) return;
     busy = true;
     const launcher = controller.launcher;
     if (launcher !== observedLauncher) {
-      observedLauncher = launcher; lastKnown = undefined; resetMisses();
+      observedLauncher = launcher; lastKnown = undefined; panelCounts = undefined; resetMisses();
     }
     try {
       if (!workerEnabled(launcher?.jobsWorkerMode, launcher?.env)) { item.hide(); return; }
       item.show();
-      item.tooltip = 'Job worker — click for system and worker actions';
+      item.tooltip = 'Open jobs panel';
       if (!launcher?.jobWorker?.otherWindow && !launcher?.jobWorker?.running) { resetMisses(); lastKnown = undefined; item.text = jobsStatus(false); item.backgroundColor = undefined; return; }
       const answer = await fetch(`http://127.0.0.1:${launcher.port}/osd/job-counts`,
         {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}, signal:AbortSignal.timeout(3000)});
       if (disposed) return;
       if (!answer.ok) throw Error(`job counts: HTTP ${answer.status}`);
       const counts = (await answer.json()).counts;
+      panelCounts = counts;
       if (!disposed && controller.launcher === launcher && workerEnabled(launcher.jobsWorkerMode, launcher.env)) {
         item.text = launcher.jobWorker.otherWindow
           ? `OSD jobs: other window · ${counts.running ?? 0} running, ${counts.queued ?? 0} queued`
@@ -248,7 +249,7 @@ function jobsStatusBar(vscode, context, controller) {
       item.backgroundColor = unavailable ? new vscode.ThemeColor('statusBarItem.errorBackground') : undefined;
       if (unavailable) raw.appendLine(error.message);
     }
-    finally { busy = false; if (!disposed && summaryShown) await refreshSummary(); }
+    finally { busy = false; if (!disposed) await controller.jobsPanelTick?.(panelCounts); if (!disposed && summaryShown) await refreshSummary(); }
   };
   if (vscode.debug?.onDidStartDebugSession) context.subscriptions.push(
     vscode.debug.onDidStartDebugSession(session => sessions.add(session)));
