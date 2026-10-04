@@ -56,7 +56,10 @@ async function registerAbapFsBridge(vscode, context, controller) {
       if (reload) await context.workspaceState.update(RESTART_KEY, true);
       try { await api.connect(CONNECTION_ID); }
       catch {
-        if (reload) await context.workspaceState.update(RESTART_KEY, undefined);
+        // Reload can withdraw/dispose the provider while connect is pending.
+        // Its cancellation must leave recovery armed for the new host.
+        if (reload && !disposed && current) await context.workspaceState.update(RESTART_KEY, undefined);
+        if (disposed || !current) return;
         throw new Error("mount failed");
       }
     })().catch(() => vscode.window.showWarningMessage("osd: Could not open the local ABAP-FS connection."));

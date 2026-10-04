@@ -233,6 +233,19 @@ describe("ABAP-FS local bridge", () => {
     expect(connects).to.equal(0);
     expect(f.workspaceSaved.get("osd.abapfs.local.wasRunning")).not.to.equal(true);
   });
+  it("keeps recovery armed when reload cancels a pending provider mount", async () => {
+    let cancel;
+    const f = fixture({version: 2, registerConnectionProvider: () => ({dispose() {}}),
+      connect: () => new Promise((_resolve, reject) => { cancel = reject; })}, "Open OSD (local) in ABAP-FS");
+    f.vscode.workspace.workspaceFolders = [{}];
+    await registerAbapFsBridge(f.vscode, f.context, f.controller); f.start(); await settled();
+    expect(f.workspaceSaved.get("osd.abapfs.local.wasRunning")).to.equal(true);
+    f.stop();
+    for (const disposable of f.context.subscriptions) disposable.dispose();
+    cancel(Error("provider disposed by reload")); await settled();
+    expect(f.workspaceSaved.get("osd.abapfs.local.wasRunning")).to.equal(true);
+    expect(f.messages).to.have.length(1);
+  });
   it("recovers after reload even if ABAP-FS was removed, and consumes failed recovery", async () => {
     const f = fixture({});
     f.workspaceSaved.set("osd.abapfs.local.wasRunning", true);
