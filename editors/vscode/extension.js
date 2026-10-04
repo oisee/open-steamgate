@@ -4245,7 +4245,13 @@ function testExplorer(context, output, {
     return building;
   };
 
+  const runningObjects = new Map();
+  const pendingDiscovery = new Map();
   const discover = async (item) => {
+    if (runningObjects.has(item.id)) {
+      pendingDiscovery.set(item.id, item);
+      return;
+    }
     const {object, dir} = objects.get(item.id);
     item.busy = true;
     try {
@@ -4273,6 +4279,10 @@ function testExplorer(context, output, {
           classItem.children.add(methodItem);
         }
         classes.push(classItem);
+      }
+      if (runningObjects.has(item.id)) {
+        pendingDiscovery.set(item.id, item);
+        return;
       }
       item.children.replace(classes);
       item.error = undefined;
@@ -4369,108 +4379,114 @@ function testExplorer(context, output, {
 
   const runHandler = async (request, token, forceDebugger = false) => {
     const run = controller.createTestRun(request);
-    const useDebugger = forceDebugger || osdDebugEnabled();
-    // `osd.database.tests` (docs/vscode-extension.md, "Databases"): read
-    // once per run, not once per object -- it does not change mid-run, and
-    // a per-object read would mean one call to context.secrets per object.
-    // `undefined` for "same" sends no dbEnv at all, exactly the route's own
-    // default.
-    const dbEnv = await testsDbEnv(context, activeController?.launcher?.osdHome ?? osdHomeOf());
-    // what was asked, expanded down to (or across) actual objects, then
-    // grouped by object: the server runs one object at a time
-    const asked = request.include ?? [...gather(controller.items)];
-    const selections = [];
-    for (const item of asked) {
-      if (objects.has(item.id)) {
-        selections.push({item, objectItem: item, testClass: undefined, method: undefined});
-        continue;
-      }
-      const ancestor = objectAncestorOf(item);
-      if (ancestor !== undefined) {
-        const suffix = item.id.slice(ancestor.id.length).replace(/^\//, "");
-        const [testClass, method] = suffix === "" ? [undefined, undefined] : suffix.split("/");
-        selections.push({item, objectItem: ancestor, testClass, method});
-        continue;
-      }
-      for (const objItem of objectDescendantsOf(item)) {
-        selections.push({item: objItem, objectItem: objItem, testClass: undefined, method: undefined});
-      }
-    }
-    const byObject = new Map();
-    for (const sel of selections) {
-      if (!byObject.has(sel.objectItem.id)) byObject.set(sel.objectItem.id, []);
-      byObject.get(sel.objectItem.id).push(sel);
-    }
-    // Cancel reaches the request in flight: an ordinary run used to pass no
-    // signal, so a cancelled Test Explorer run waited for the child it had
-    // already started (the façade kills the child when the request aborts)
-    const cancellation = new AbortController();
-    const cancelled = () => token.isCancellationRequested || cancellation.signal.aborted;
-    const subscription = token.onCancellationRequested?.(() => cancellation.abort());
-    const runSelection = async (sel, object, dir) => {
-      const methods = leaves(sel.item);
-      methods.forEach((m) => run.started(m));
-      try {
-        const source = fileOf(dir, object, "main");
-        if (kernelDiagnostics && !(await kernelDiagnostics.allow(source))) {
-          methods.forEach((m) => run.errored(m, new vscode.TestMessage("Kernel strict mode refused this object; see osd output for the finding and support link.")));
-          return;
-        }
-        const inspectPort = useDebugger ? await pickUnitInspectorPort() : undefined;
-        if (cancelled()) {
-          methods.forEach((m) => run.skipped(m));
-          return;
-        }
-        const execute = (signal) => osd().run(object, sel.testClass, sel.method, dbEnv, inspectPort,
-          inspectPort !== undefined, signal);
-        const answer = inspectPort === undefined ? await execute(cancellation.signal) : await runWithDebuggerAttach(
-          () => attachUnitDebugger({type: "unit-started", port: inspectPort}), execute, token);
-        const results = outcomes(answer, methods.map((m) => ({testClass: m.id.split("/")[1], method: m.id.split("/")[2]})));
-        for (const m of methods) {
-          const [, testClass, method] = m.id.split("/");
-          const result = results.find((r) => r.testClass === testClass && r.method === method);
-          if (result === undefined) {
-            run.skipped(m);
-          } else if (result.passed) {
-            run.passed(m, result.ms);
-          } else {
-            run.failed(m, result.alerts.map((a) => message(a, dir, m)), result.ms);
-          }
-        }
-        run.appendOutput(`${object.name}: ${answer.counts?.passed ?? 0} passed, ${answer.counts?.failed ?? 0} failed in ${answer.ms ?? 0} ms\r\n`);
-      } catch (e) {
-        const text = new vscode.TestMessage(String(e.message ?? e));
-        methods.forEach((m) => run.errored(m, text));
-        output.appendLine(String(e.message ?? e));
-      }
-    };
-    // one unit per object: its selections in the order asked, its risk and
-    // duration from the classes it runs (what discover() learned)
-    const units = [];
-    for (const [objectId, sels] of byObject) {
-      if (cancelled()) break;
-      const objectItemOf = sels[0].objectItem;
-      if (objectItemOf.children.size === 0) await discover(objectItemOf);
-      const {object, dir} = objects.get(objectId);
-      const classIds = new Set();
-      for (const sel of sels) {
-        if (sel.testClass !== undefined) classIds.add(`${objectId}/${sel.testClass}`);
-        else for (const [, child] of objectItemOf.children) classIds.add(child.id);
-      }
-      const schedules = [...classIds].map((id) => classSchedules.get(id));
-      units.push({
-        key: objectId,
-        risk: unitRiskOf(schedules),
-        duration: unitDurationOf(schedules),
-        run: async () => {
-          for (const sel of sels) {
-            if (cancelled()) break;
-            await runSelection(sel, object, dir);
-          }
-        },
-      });
-    }
+    let subscription;
+    const runObjectIds = new Set();
     try {
+      const useDebugger = forceDebugger || osdDebugEnabled();
+      // `osd.database.tests` (docs/vscode-extension.md, "Databases"): read
+      // once per run, not once per object -- it does not change mid-run, and
+      // a per-object read would mean one call to context.secrets per object.
+      // `undefined` for "same" sends no dbEnv at all, exactly the route's own
+      // default.
+      const dbEnv = await testsDbEnv(context, activeController?.launcher?.osdHome ?? osdHomeOf());
+      // what was asked, expanded down to (or across) actual objects, then
+      // grouped by object: the server runs one object at a time
+      const asked = request.include ?? [...gather(controller.items)];
+      const selections = [];
+      for (const item of asked) {
+        if (objects.has(item.id)) {
+          selections.push({item, objectItem: item, testClass: undefined, method: undefined});
+          continue;
+        }
+        const ancestor = objectAncestorOf(item);
+        if (ancestor !== undefined) {
+          const suffix = item.id.slice(ancestor.id.length).replace(/^\//, "");
+          const [testClass, method] = suffix === "" ? [undefined, undefined] : suffix.split("/");
+          selections.push({item, objectItem: ancestor, testClass, method});
+          continue;
+        }
+        for (const objItem of objectDescendantsOf(item)) {
+          selections.push({item: objItem, objectItem: objItem, testClass: undefined, method: undefined});
+        }
+      }
+      const byObject = new Map();
+      for (const sel of selections) {
+        if (!byObject.has(sel.objectItem.id)) byObject.set(sel.objectItem.id, []);
+        byObject.get(sel.objectItem.id).push(sel);
+      }
+      // Cancel reaches the request in flight: an ordinary run used to pass no
+      // signal, so a cancelled Test Explorer run waited for the child it had
+      // already started (the façade kills the child when the request aborts)
+      const cancellation = new AbortController();
+      const cancelled = () => token.isCancellationRequested || cancellation.signal.aborted;
+      subscription = token.onCancellationRequested?.(() => cancellation.abort());
+      const runSelection = async (sel, object, dir) => {
+        const methods = leaves(sel.item);
+        if (!runObjectIds.has(sel.objectItem.id)) {
+          runningObjects.set(sel.objectItem.id, (runningObjects.get(sel.objectItem.id) ?? 0) + 1);
+          runObjectIds.add(sel.objectItem.id);
+        }
+        methods.forEach((m) => run.started(m));
+        try {
+          const source = fileOf(dir, object, "main");
+          if (kernelDiagnostics && !(await kernelDiagnostics.allow(source))) {
+            methods.forEach((m) => run.errored(m, new vscode.TestMessage("Kernel strict mode refused this object; see osd output for the finding and support link.")));
+            return;
+          }
+          const inspectPort = useDebugger ? await pickUnitInspectorPort() : undefined;
+          if (cancelled()) {
+            methods.forEach((m) => run.skipped(m));
+            return;
+          }
+          const execute = (signal) => osd().run(object, sel.testClass, sel.method, dbEnv, inspectPort,
+            inspectPort !== undefined, signal);
+          const answer = inspectPort === undefined ? await execute(cancellation.signal) : await runWithDebuggerAttach(
+            () => attachUnitDebugger({type: "unit-started", port: inspectPort}), execute, token);
+          const results = outcomes(answer, methods.map((m) => ({testClass: m.id.split("/")[1], method: m.id.split("/")[2]})));
+          for (const m of methods) {
+            const [, testClass, method] = m.id.split("/");
+            const result = results.find((r) => r.testClass === testClass && r.method === method);
+            if (result === undefined) {
+              run.skipped(m);
+            } else if (result.passed) {
+              run.passed(m, result.ms);
+            } else {
+              run.failed(m, result.alerts.map((a) => message(a, dir, m)), result.ms);
+            }
+          }
+          run.appendOutput(`${object.name}: ${answer.counts?.passed ?? 0} passed, ${answer.counts?.failed ?? 0} failed in ${answer.ms ?? 0} ms\r\n`);
+        } catch (e) {
+          const text = new vscode.TestMessage(String(e.message ?? e));
+          methods.forEach((m) => run.errored(m, text));
+          output.appendLine(String(e.message ?? e));
+        }
+      };
+      // one unit per object: its selections in the order asked, its risk and
+      // duration from the classes it runs (what discover() learned)
+      const units = [];
+      for (const [objectId, sels] of byObject) {
+        if (cancelled()) break;
+        const objectItemOf = sels[0].objectItem;
+        if (objectItemOf.children.size === 0) await discover(objectItemOf);
+        const {object, dir} = objects.get(objectId);
+        const classIds = new Set();
+        for (const sel of sels) {
+          if (sel.testClass !== undefined) classIds.add(`${objectId}/${sel.testClass}`);
+          else for (const [, child] of objectItemOf.children) classIds.add(child.id);
+        }
+        const schedules = [...classIds].map((id) => classSchedules.get(id));
+        units.push({
+          key: objectId,
+          risk: unitRiskOf(schedules),
+          duration: unitDurationOf(schedules),
+          run: async () => {
+            for (const sel of sels) {
+              if (cancelled()) break;
+              await runSelection(sel, object, dir);
+            }
+          },
+        });
+      }
       // a debug run stays one at a time: one debugger, one child. So does a
       // run on a shared database (osd.database.tests = HANA or PostgreSQL):
       // every child there uses the one schema, and even a HARMLESS one
@@ -4480,8 +4496,20 @@ function testExplorer(context, output, {
       await runUnitQueue(units, {poolSize: useDebugger || sharedDatabase ? 1 : unitPoolSize(), cancelled});
     } finally {
       subscription?.dispose?.();
+      run.end();
+      for (const id of runObjectIds) {
+        const count = runningObjects.get(id) - 1;
+        if (count > 0) runningObjects.set(id, count);
+        else runningObjects.delete(id);
+      }
+      // All selections in this run have finished; publish discoveries only
+      // after VS Code has received terminal states for the original items.
+      for (const [id, item] of pendingDiscovery) {
+        if (runningObjects.has(id)) continue;
+        pendingDiscovery.delete(id);
+        void discover(item);
+      }
     }
-    run.end();
   };
   controller.createRunProfile("Run", vscode.TestRunProfileKind.Run, runHandler, true);
   controller.createRunProfile("Debug", vscode.TestRunProfileKind.Debug,

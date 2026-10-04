@@ -626,6 +626,85 @@ describe("editors/vscode: the extension's logic", function () {
     }
   });
 
+  it("keeps running TestItems stable when an activation save triggers rediscovery", async () => {
+    const api = vscodeStub({home: ROOT, "tests.showSystem": false});
+    const source = path.join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+    api.Uri.file = (fsPath) => ({fsPath});
+    api.Range = class { constructor() {} };
+    api.TestMessage = class { constructor(message) { this.message = message; } };
+    api.TestRunProfileKind = {Run: 1, Debug: 2};
+    api.workspace.findFiles = async () => [api.Uri.file(source)];
+    api.workspace.getWorkspaceFolder = () => ({uri: api.Uri.file(ROOT)});
+    let changed;
+    api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange(fn) { changed = fn; }, dispose() {}});
+    api.commands = {registerCommand: () => ({dispose() {}})};
+    const collection = (parent) => {
+      const items = new Map();
+      return {
+        get size() { return items.size; },
+        get: (id) => items.get(id),
+        add(item) { item.parent = parent; items.set(item.id, item); },
+        replace(next) { items.clear(); next.forEach((item) => this.add(item)); },
+        [Symbol.iterator]: () => items[Symbol.iterator](),
+      };
+    };
+    const profiles = new Map();
+    const events = [];
+    const controller = {
+      items: collection(undefined),
+      createTestItem(id, label, uri) {
+        const item = {id, label, uri};
+        item.children = collection(item);
+        return item;
+      },
+      createRunProfile(name, kind, handler) { profiles.set(name, handler); },
+      createTestRun() {
+        return Object.fromEntries(["started", "passed", "failed", "skipped", "errored", "appendOutput", "end"]
+          .map((name) => [name, (item) => events.push([name, item?.id])]));
+      },
+      dispose() {},
+    };
+    api.tests = {createTestController: () => controller};
+    const {testExplorer} = loadExtension(api);
+    const originalDiscover = Osd.prototype.discover;
+    const originalRun = Osd.prototype.run;
+    const listeners = new Set();
+    const token = {
+      isCancellationRequested: false,
+      onCancellationRequested(listener) { listeners.add(listener); return {dispose: () => listeners.delete(listener)}; },
+      cancel() { this.isCancellationRequested = true; for (const listener of listeners) listener(); },
+    };
+    const signals = [];
+    Osd.prototype.discover = async () => ({classes: [{name: "LTCL_SCAN", include: "testclasses", line: 1, schedule: "harmless",
+      methods: [{name: "FIRST", line: 2}]}]});
+    let finish;
+    Osd.prototype.run = () => new Promise(resolve => { finish = resolve; });
+    let explorer;
+    try {
+      explorer = testExplorer(controllerContext(), {appendLine() {}}, {});
+      await controller.resolveHandler();
+      const object = controller.items.get("group:project").children.get("CLAS:ZCL_OSD_ABAP_TOKENS");
+      await controller.resolveHandler(object);
+      const methods = [...object.children.get("CLAS:ZCL_OSD_ABAP_TOKENS/LTCL_SCAN").children].map(([, item]) => item);
+      const running = profiles.get("Run")({include: methods}, token);
+      while (!finish) await new Promise(resolve => setImmediate(resolve));
+      changed(api.Uri.file(source));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(object.children.get("CLAS:ZCL_OSD_ABAP_TOKENS/LTCL_SCAN").children.get(methods[0].id),
+        "a watcher must not replace a spinning item").to.equal(methods[0]);
+      finish({classes: [{name: "LTCL_SCAN", methods: [{name: "FIRST", status: "passed"}]}]});
+      await running;
+      expect(events.filter(([name]) => name === "started")).to.have.length(1);
+      expect(events.filter(([name]) => ["passed", "failed", "skipped", "errored"].includes(name))).to.have.length(1);
+      expect(events.at(-1)[0]).to.equal("end");
+      expect(listeners.size).to.equal(0);
+    } finally {
+      explorer?.dispose();
+      Osd.prototype.discover = originalDiscover;
+      Osd.prototype.run = originalRun;
+    }
+  });
+
   it("a Run over a mixed tree runs the HARMLESS objects at once and the DANGEROUS one alone, after them", async () => {
     const api = vscodeStub({home: ROOT, "tests.showSystem": false});
     const files = ["src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap", "src/demo_data/zcl_osd_demo_random.clas.testclasses.abap",
