@@ -279,6 +279,11 @@ PUT with no Content-Type. OSG now sends that acknowledgement and retains
 the saved source's ETag. Its former empty `text/plain` representation
 coincided with Eclipse clearing the editor after a successful SAVE, while
 the file and subsequent GET still contained the full saved source.
+Source SAVE also leaves the invalidated registry unparsed: the synchronous
+full parse formerly added 4.6–4.9 seconds to PUT on the diagnostic tree.
+The next requested outline or Check/Activate builds a fresh registry;
+dependent checks still use a full fresh parse rather than an incremental
+cache that could retain stale diagnostics.
 
 ## Identity
 

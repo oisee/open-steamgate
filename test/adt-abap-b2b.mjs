@@ -100,7 +100,7 @@ describe("B2b objectstructure live Node byte diff",function () {
     }
     expect(results.Node).to.equal(results.ABAP);delete results.Node;delete results.ABAP;console.log("B2b latency ms",JSON.stringify(results));
   });
-  it("host save and activation prime the registry before the outline step",async () => {
+  it("host save defers parsing to the next outline; activation primes the registry",async () => {
     const url=node.origin+base+"oo/classes/zcl_empty";
     const warm=await fetch(url,{headers:{"x-csrf-token":"fetch"}});await warm.arrayBuffer();
     const headers={cookie:warm.headers.getSetCookie().map((c) => c.split(";")[0]).join("; "),"x-csrf-token":warm.headers.get("x-csrf-token"),"x-sap-adt-sessiontype":"stateful","content-type":"text/plain"};
@@ -108,9 +108,14 @@ describe("B2b objectstructure live Node byte diff",function () {
     const lockXml=await locked.text();const handle=/<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(lockXml)?.[1];expect(handle,lockXml).to.be.a("string");
     try {
       const source=store.read("CLAS","ZCL_EMPTY").source;
-      const saved=await fetch(url+"/source/main?lockHandle="+encodeURIComponent(handle),{method:"PUT",headers,body:source});
-      await saved.arrayBuffer();expect(saved.status).to.equal(200);expect(store.parsed).not.to.equal(undefined);
+      const registry=store.registry;
+      store.registry=() => {throw new Error("SAVE must not parse the project");};
+      try {
+        const saved=await fetch(url+"/source/main?lockHandle="+encodeURIComponent(handle),{method:"PUT",headers,body:source});
+        await saved.arrayBuffer();expect(saved.status).to.equal(200);expect(store.parsed).to.equal(undefined);
+      } finally {store.registry=registry;}
       await diff(base+"oo/classes/zcl_empty/objectstructure");
+      expect(store.parsed).not.to.equal(undefined);
       let calls=0;const original=store.registry;store.registry=function (...args) {calls++;return original.apply(this,args);};
       try {
         const activated=await fetch(node.origin+base+"activation?method=activate",{method:"POST",headers:{...headers,"content-type":"application/xml"},body:`<adtcore:objectReference xmlns:adtcore="http://www.sap.com/adt/core" adtcore:uri="${base}oo/classes/zcl_empty"/>`});

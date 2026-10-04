@@ -2172,7 +2172,8 @@ export function adtRouter(options = {}) {
           if (await stillHeld(req, res, () => store.write(type, req.params.name, body.toString("utf8"), include)) === false) {
             return;
           }
-          warmOutline();
+          // store.write invalidates the registry. SAVE only acknowledges
+          // the text; the next outline, Check or Activate rebuilds it.
           // The tag of what was just written, computed from what a read now
           // returns so that it is the tag the next GET will carry. The
           // client files it beside the source it saved; a save answered
@@ -2225,8 +2226,8 @@ export function adtRouter(options = {}) {
     }
   }
 
-  // Variant C keeps mutations on the host. Prime the outline registry here,
-  // before another request enters an ABAP step; compiler warm() is separate.
+  // Include creation and activation prime the outline registry on the host;
+  // source SAVE leaves it invalidated until requested. Compiler warm() is separate.
   function warmOutline() {
     try { store.registry?.(); }
     catch (error) { console.error(`outline: pre-warm failed: ${error.message}`); }
