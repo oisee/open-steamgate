@@ -11,7 +11,9 @@
 // fourth service with a hand-written twin is covered the day it appears --
 // a list of a closure is the thing this project keeps getting wrong.
 import {expect} from "chai";
-import {readFileSync} from "node:fs";
+import {cpSync, mkdtempSync, readFileSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {compileAll} from "../tools/stg-compile.mjs";
 
 /** `TYPES: BEGIN OF x … END OF x` as {name: [fields]}, plus table types. */
@@ -44,10 +46,19 @@ const KNOWN = {
 };
 
 describe("objects a hand-written file holds out of the generator", () => {
-  const report = compileAll("src", "gen/stg");
-  const pairs = report.flatMap((r) => (r.shadowed ?? [])
-    .filter((s) => s.name.endsWith(".clas.abap") && s.path !== undefined)
-    .map((s) => ({...s, service: r.service})));
+  let root, pairs;
+  before(() => {
+    root = mkdtempSync(join(tmpdir(), "osd-shadowed-objects-"));
+    const src = join(root, "src");
+    cpSync("src", src, {recursive: true});
+    const report = compileAll(src, join(root, "gen/stg"));
+    pairs = report.flatMap((r) => (r.shadowed ?? [])
+      .filter((s) => s.name.endsWith(".clas.abap") && s.path !== undefined)
+      .map((s) => ({...s, service: r.service})));
+  });
+  after(() => {
+    if (root) rmSync(root, {recursive: true, force: true});
+  });
 
   it("there are some, and the pass names them", () => {
     // if this ever reads zero, the check below is passing on nothing
@@ -64,8 +75,10 @@ describe("objects a hand-written file holds out of the generator", () => {
   // select-options, and nothing generated would ever make them.
   const isBase = (name) => /_(mpc|dpc)\.clas\.abap$/i.test(name);
 
-  for (const pair of pairs.filter((p) => isBase(p.name))) {
-    it(`${pair.name} (${pair.service}): every type difference is named`, () => {
+  // Discover pairs in before(), so listing or a nonmatching grep only reads
+  // this file. Both checks still visit every pair the generator reports.
+  it("every base class type difference is named", () => {
+    for (const pair of pairs.filter((p) => isBase(p.name))) {
       const hand = typesOf(readFileSync(pair.path, "utf8"));
       const gen = typesOf(pair.generated);
       const known = KNOWN[pair.name] ?? {};
@@ -74,18 +87,17 @@ describe("objects a hand-written file holds out of the generator", () => {
         .filter((k) => known[k] === undefined);
       expect(differing, `unnamed differences in ${pair.name}: ${differing.join(", ")}`)
         .to.deep.equal([]);
-    });
-
-  }
+    }
+  });
 
   // both kinds: an _EXT may declare more, but never the same name differently
-  for (const pair of pairs) {
-    it(`${pair.name} (${pair.service}): shared types are identical field for field`, () => {
+  it("shared types are identical field for field", () => {
+    for (const pair of pairs) {
       const hand = typesOf(readFileSync(pair.path, "utf8"));
       const gen = typesOf(pair.generated);
       for (const k of Object.keys(hand).filter((k) => gen[k] !== undefined)) {
         expect(gen[k], `${pair.name}: ${k} differs`).to.deep.equal(hand[k]);
       }
-    });
-  }
+    }
+  });
 });
