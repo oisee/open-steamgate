@@ -3,7 +3,7 @@
 // stops the system itself. Pure-function tests first (ports, layer
 // detection, the pack manifest it writes, the readiness poll, terminate()),
 // then one real end-to-end run of the launcher against this checkout, on a
-// free port in 3531-3539, with a temp storage directory -- the same shape
+// slot-specific STG_PORT (or an OS-assigned port), with a temp storage directory -- the same shape
 // test/osd-child.mjs already uses for `node test/run.mjs`, but driven
 // through the launcher rather than by hand.
 import {expect} from "chai";
@@ -34,6 +34,14 @@ const {
   writeTar,
 } = createRequire(import.meta.url)("../editors/vscode/launcher.js");
 
+// osd-heavy holds the instance lock for STG_PORT throughout this suite.
+// A single-port range cannot spill into another parallel slot's instance.
+const testPort = Number(process.env.STG_PORT ?? await pickInspectorPort());
+const testPortRange = {from: testPort, to: testPort};
+function createLauncher(options) {
+  return new Launcher({portRange: testPortRange, ...options});
+}
+
 // No chai-as-promised in this tree's node_modules, so a rejection is caught
 // by hand -- the same shape the rest of this repo's tests already use.
 async function rejects(promise, matching) {
@@ -54,8 +62,8 @@ describe("editors/vscode/launcher.js: ports", function () {
   });
 
   it("finds a free port in a range, and none when every port in it is taken", async () => {
-    const port = await pickPort({from: 3531, to: 3539});
-    expect(port).to.be.within(3531, 3539);
+    const port = await pickPort(testPortRange);
+    expect(port).to.equal(testPort);
     expect(await isFree(port)).to.equal(true);
 
     const server = createServer();
@@ -83,14 +91,14 @@ describe("editors/vscode/launcher.js: ports", function () {
   });
 
   it("classifies an empty-log no-free-port launcher error", async () => {
-    const port = await pickPort({from: PORT_RANGE.from, to: PORT_RANGE.to});
+    const port = await pickPort(testPortRange);
     const server = createServer();
     await new Promise((resolve, reject) => {
       server.once("error", reject);
       server.listen(port, "127.0.0.1", resolve);
     });
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-no-port-"));
-    const launcher = new Launcher({osdHome: process.cwd(), storageDir, portRange: {from: port, to: port}});
+    const launcher = createLauncher({osdHome: process.cwd(), storageDir, portRange: {from: port, to: port}});
     try {
       const error = await rejects(launcher.start());
       expect(error.logText).to.equal("");
@@ -103,14 +111,14 @@ describe("editors/vscode/launcher.js: ports", function () {
   });
 
   it("classifies an empty-log selected-port EADDRINUSE launcher error", async () => {
-    const port = await pickPort({from: PORT_RANGE.from, to: PORT_RANGE.to});
+    const port = await pickPort(testPortRange);
     const server = createServer();
     await new Promise((resolve, reject) => {
       server.once("error", reject);
       server.listen(port, "127.0.0.1", resolve);
     });
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-busy-port-"));
-    const launcher = new Launcher({osdHome: process.cwd(), storageDir});
+    const launcher = createLauncher({osdHome: process.cwd(), storageDir});
     try {
       const error = await rejects(launcher.start({port}));
       expect(error.code).to.equal("EADDRINUSE");
@@ -525,7 +533,7 @@ describe("editors/vscode/launcher.js: waitForServing / servingOnce", function ()
   });
 
   it("servingOnce answers undefined when nothing listens", async () => {
-    const free = await pickPort({from: 3531, to: 3539});
+    const free = await pickPort(testPortRange);
     expect(await servingOnce(free)).to.equal(undefined);
   });
 
@@ -589,7 +597,7 @@ describe("editors/vscode/launcher.js: waitForServing / servingOnce", function ()
   });
 
   it("waitForServing throws when the timeout passes and nothing ever answers", async () => {
-    const free = await pickPort({from: 3531, to: 3539});
+    const free = await pickPort(testPortRange);
     await rejects(waitForServing(free, {timeoutMs: 400, intervalMs: 50}), /never answered ready/);
   });
 });
@@ -697,7 +705,7 @@ describe("editors/vscode/launcher.js: Launcher surfaces a child that exits befor
     writeFileSync(join(osdHome, "test", "run.mjs"),
       "process.stderr.write('Error: Existing HANA database is missing generated tables: T1. " +
       "Use a fresh HANA_SCHEMA, or explicitly recreate it with STG_DB_FRESH=1\\n'); process.exit(1);\n");
-    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 10000});
+    const launcher = createLauncher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 10000});
     const started = Date.now();
     try {
       const error = await rejects(launcher.start(), /STG_DB_FRESH/);
@@ -719,7 +727,7 @@ describe("editors/vscode/launcher.js: stop while building", function () {
     mkdirSync(join(osdHome, "test"), {recursive: true});
     writeFileSync(join(osdHome, "tools", "osd-build.mjs"), "setInterval(() => {}, 1000);\n");
     writeFileSync(join(osdHome, "test", "run.mjs"), `import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(serverMarker)}, 'started');\n`);
-    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: []});
+    const launcher = createLauncher({osdHome, storageDir, workspaceFolders: []});
     try {
       const starting = launcher.start();
       for (let attempt = 0; launcher.buildChild === undefined && attempt < 100; attempt++) {
@@ -760,7 +768,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
     it(`${how}(): no "exit", and the log says it stopped`, async () => {
       const osdHome = fakeHome();
       const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
-      const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+      const launcher = createLauncher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
       const exits = [];
       const lines = [];
       launcher.on("exit", (e) => exits.push(e));
@@ -795,7 +803,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
   it("stop() while starting: start() resolves undefined, no \"exit\"", async () => {
     const osdHome = silentHome();
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
-    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const launcher = createLauncher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
     const exits = [];
     const lines = [];
     launcher.on("exit", (e) => exits.push(e));
@@ -819,7 +827,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
   it("a start that gives up says so, rejects, and is no \"exit\"", async () => {
     const osdHome = silentHome();
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
-    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 1500});
+    const launcher = createLauncher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 1500});
     const exits = [];
     const lines = [];
     launcher.on("exit", (e) => exits.push(e));
@@ -853,7 +861,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
       "});\n" +
       `writeFileSync(${JSON.stringify(armed)}, 'armed');\n`);
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
-    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const launcher = createLauncher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
     const exits = [];
     launcher.on("exit", (e) => exits.push(e));
     try {
@@ -883,7 +891,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
       "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 1500));\n" +
       `writeFileSync(${JSON.stringify(armed)}, 'armed');\n`);
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
-    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 1000});
+    const launcher = createLauncher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 1000});
     const exits = [];
     const lines = [];
     launcher.on("exit", (e) => exits.push(e));
@@ -917,7 +925,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
       "});\n" +
       `writeFileSync(${JSON.stringify(armed)}, 'armed');\n`);
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
-    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 800});
+    const launcher = createLauncher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 800});
     const exits = [];
     const lines = [];
     launcher.on("exit", (e) => exits.push(e));
@@ -946,7 +954,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
     const osdHome = fakeHome();
     writeFileSync(join(osdHome, "test", "run.mjs"), "setTimeout(() => process.exit(3), 100);\n");
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
-    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const launcher = createLauncher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
     const exits = [];
     launcher.on("exit", (e) => exits.push(e));
     try {
@@ -962,7 +970,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
   it("a child killed from outside is still an unexpected exit", async () => {
     const osdHome = fakeHome();
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-stop-storage-"));
-    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
+    const launcher = createLauncher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
     const exits = [];
     launcher.on("exit", (e) => exits.push(e));
     try {
@@ -996,14 +1004,14 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
     process.env.OSD_PACKS = inheritedPacks;
     process.env.OSD_WARM = "1";
     process.env.OSD_INSPECT = "9229";
-    const launcher = new Launcher({osdHome: badHome, storageDir, warm: "off", portRange});
+    const launcher = createLauncher({osdHome: badHome, storageDir, warm: "off", portRange});
     try {
       await rejects(launcher.start());
       expect(launcher.env.OSD_PACKS).to.equal([inheritedPacks, join(storageDir, "packs")].join(delimiter));
       expect(launcher.env.OSD_WARM).to.equal("0");
       expect(launcher.env).not.to.have.property("OSD_INSPECT");
       expect(existsSync(join(storageDir, "packs", "notebook-scratch", "src"))).to.equal(true);
-      const debuggerLauncher = new Launcher({osdHome: badHome, storageDir, warm: "off", debug: true, portRange});
+      const debuggerLauncher = createLauncher({osdHome: badHome, storageDir, warm: "off", debug: true, portRange});
       await rejects(debuggerLauncher.start());
       expect(debuggerLauncher.env.OSD_PACKS).to.equal([inheritedPacks, join(storageDir, "packs")].join(delimiter));
       expect(debuggerLauncher.env.OSD_INSPECT).to.equal(String(debuggerLauncher.inspectPort));
@@ -1021,10 +1029,10 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
     }
   });
 
-  it("starts the real system on a free port in 3531-3539, serves the demo, and stops leaving no process", async function () {
+  it("starts the real system on the test instance port, serves the demo, and stops leaving no process", async function () {
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-e2e-"));
     const osdHome = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-    const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 170000});
+    const launcher = createLauncher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 170000});
     const lines = [];
     launcher.on("log", (l) => lines.push(l));
     const states = [];
@@ -1033,7 +1041,7 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
     let result;
     try {
       result = await launcher.start();
-      expect(result.port).to.be.within(3531, 3539);
+      expect(result.port).to.equal(testPort);
       expect(result.pid).to.be.a("number");
       expect(result.generation).to.be.a("string").and.not.equal("");
       expect(launcher.state).to.equal("running");
@@ -1051,7 +1059,7 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
       const body = await res.json();
       expect(body.d.results.length).to.be.at.least(1);
 
-      // no HTTPS listener outside 3531-3539: OSD_TLS_DIR pointed at an empty
+      // No additional HTTPS listener: OSD_TLS_DIR pointed at an empty
       // storage folder, so plain HTTP is what a fresh install gets
       const serving = await fetch(`http://localhost:${result.port}/osd/serving`).then((r) => r.json());
       expect(serving.ready).to.equal(true);
@@ -1075,7 +1083,7 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
     this.timeout(20000);
     const storageDir = mkdtempSync(join(tmpdir(), "osd-launcher-badhome-"));
     const badHome = mkdtempSync(join(tmpdir(), "osd-launcher-nothome-"));
-    const launcher = new Launcher({osdHome: badHome, storageDir, timeoutMs: 5000});
+    const launcher = createLauncher({osdHome: badHome, storageDir, timeoutMs: 5000});
     try {
       await rejects(launcher.start());
       expect(launcher.state).to.equal("stopped");
@@ -1227,7 +1235,7 @@ describe("editors/vscode/launcher.js: linkOrCopyTree / ensureMaterializedHome (p
     const home = ensureMaterializedHome(seedDir, storageDir);
     mkdirSync(join(home, "tools"));
     writeFileSync(join(home, "tools", "osd-build.mjs"), "setInterval(() => {}, 1000);\n");
-    const launcher = new Launcher({osdHome: home, storageDir: join(storageDir, "instance"), warm: "off"});
+    const launcher = createLauncher({osdHome: home, storageDir: join(storageDir, "instance"), warm: "off"});
     const starting = launcher.start();
     try {
       for (let tries = 0; launcher.buildChild === undefined && tries < 100; tries++) {
@@ -1559,7 +1567,7 @@ describe("editors/vscode/launcher.js: the inspector on demand", function () {
   }
 
   function makeLauncher(storageDir = tmpdir()) {
-    const launcher = new Launcher({osdHome: process.cwd(), storageDir});
+    const launcher = createLauncher({osdHome: process.cwd(), storageDir});
     launchers.push(launcher);
     return launcher;
   }
