@@ -1,0 +1,92 @@
+name: VSIX bare system smoke (advisory)
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Optional published release tag (empty builds this checkout)'
+        type: string
+        default: ''
+  push:
+    tags: ['vscode-v*']
+permissions:
+  contents: read
+jobs:
+  bare-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Check smoke module
+        run: node --test docker/vsix-bare/*.test.mjs
+      - run: npm ci
+        if: inputs.release == ''
+      - name: Prepare pinned toolchain
+        if: inputs.release == ''
+        run: |
+          node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+          echo "TRANSPILER=$RUNNER_TEMP/transpiler" >> "$GITHUB_ENV"
+      - name: Build pinned transpiler
+        if: inputs.release == ''
+        run: bash tools/osd-ci-transpiler-build.sh build
+      - name: Link toolchain and fetch packaged sources
+        if: inputs.release == ''
+        run: |
+          node tools/osd-link.mjs transpiler packages/transpiler
+          node tools/osd-link.mjs transpiler-cli packages/cli
+          node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
+          npm run bootstrap
+          node scripts/build-vsix.mjs
+      - uses: docker/setup-buildx-action@v3
+      - name: Build bare image with Docker cache
+        uses: docker/build-push-action@v6
+        with:
+          context: docker/vsix-bare
+          platforms: linux/amd64
+          load: true
+          tags: osd-vsix-bare:code-1.101.2
+          cache-from: type=gha,scope=vsix-bare-code-1.101.2
+          cache-to: type=gha,mode=max,scope=vsix-bare-code-1.101.2
+      - name: Install, Start, metadata and Stop
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          set -o pipefail
+          mkdir -p bare-evidence
+          if [[ -n "$RELEASE" ]]; then
+            args=(--release "$RELEASE")
+          else
+            version=$(node -p 'require("./build/vsix/stage/extension/package.json").version')
+            args=(--vsix "build/vsix/open-steamgate-$version.vsix")
+          fi
+          node tools/osd-vsix-bare-smoke.mjs --skip-image-build "${args[@]}" 2>&1 | tee bare-evidence/pass.log
+      - name: Bad BTCSELECT field must fail with the build diagnostic
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          set -o pipefail
+          if [[ -n "$RELEASE" ]]; then
+            args=(--release "$RELEASE")
+          else
+            version=$(node -p 'require("./build/vsix/stage/extension/package.json").version')
+            args=(--vsix "build/vsix/open-steamgate-$version.vsix")
+          fi
+          set +e
+          node tools/osd-vsix-bare-smoke.mjs --skip-image-build "${args[@]}" \
+            --layer docker/vsix-bare/fixtures/bad-layer 2>&1 | tee bare-evidence/bad-layer.log
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" -ne 0
+          rg 'osd-build: FAILED:.*check_syntax' bare-evidence/bad-layer.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vsix-bare-evidence
+          path: bare-evidence/
+          if-no-files-found: warn

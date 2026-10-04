@@ -8,4 +8,6 @@ The `osd-store.mjs`, `osd-data.mjs`, `osd-db.mjs`, and `osd-runtime.mjs` files p
 
 The `osd-suites.mjs`, `osd-leak-scan.mjs`, and `osd-naming-scan.mjs` files run integration and publication checks. [CI tests](../docs/ci-tests.md) explains the suite split; `npm run where` rebuilds [the feature map](../docs/where-is.md) from repository inventories.
 
+`osd-vsix-bare-smoke.mjs` installs and starts a VSIX in Ubuntu without Node, npm or Git on PATH. Its self-contained [module and README](../docker/vsix-bare/README.md) cover the harness, optional layers and advisory workflow.
+
 `gogen/` holds the Go backend and its own [README](gogen/README.md). `sqlscript/` holds SQLScript parsing and analysis tools; see [the SQLScript surface](../docs/sqlscript-surface.md).
