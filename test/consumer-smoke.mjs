@@ -66,7 +66,8 @@ describe("consumer smoke runner", function () {
     writeFileSync(join(consumer, ".npmrc"), "install-links=true\n");
     // Exercise explicit forwarding even when npm is configured to hide lifecycle output.
     const installEnv = {...env, npm_config_cache: join(dir, "npm-cache"), npm_config_offline: "true",
-      npm_config_audit: "false", npm_config_foreground_scripts: "false"};
+      npm_config_audit: "false", npm_config_foreground_scripts: "false", npm_config_ignore_scripts: "true",
+      NPM_CONFIG_IGNORE_SCRIPTS: "true"};
     let output = "";
     const install = await runConsumer("npm", ["install"], {
       cwd: consumer, env: installEnv, log: join(dir, "install.log"), output: {write: chunk => { output += chunk; }},

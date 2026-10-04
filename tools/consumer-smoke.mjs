@@ -28,6 +28,10 @@ export async function runConsumer(command, args, {env = process.env, cwd = proce
   // npm install/ci must forward dependency lifecycle output into the fence,
   // even when the caller configures npm to run those scripts in the background.
   safeEnv.npm_config_foreground_scripts = "true";
+  // Our own .npmrc sets ignore-scripts, and `npm run` exports it to children
+  // as npm_config_ignore_scripts. The consumer's install follows its own
+  // configuration, not ours, so the inherited setting is dropped.
+  for (const name of Object.keys(safeEnv)) if (/^npm_config_ignore_scripts$/i.test(name)) delete safeEnv[name];
   const token = randomUUID();
   const start = performance.now();
   let timedOut = false;
