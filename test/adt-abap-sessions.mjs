@@ -142,7 +142,7 @@ describe("AbapSessions on the Node façade", function () {
       expect(opened.user).to.equal("ADAPTER");
       expect((await sessions.get(opened.id)).token).to.equal(opened.token);
       const taken = await sessions.lock(opened, "CLAS", "ZCL_OSD_DIRECT");
-      expect(taken.handle).to.match(/^[a-f0-9-]{36}$/);
+      expect(taken.handle).to.match(/^[a-f0-9]{40}$/);
       expect(await sessions.holds(opened, taken.handle, "clas", "zcl_osd_direct")).to.equal(true);
       expect((await sessions.holderOf("CLAS", "ZCL_OSD_DIRECT")).handle).to.equal(taken.handle);
       await sessions.release("CLAS", "ZCL_OSD_DIRECT");
@@ -208,7 +208,7 @@ describe("AbapSessions on the Node façade", function () {
       const locked = await call(one, "POST", path + "?_action=LOCK&accessMode=MODIFY");
       expect(locked.status, locked.body).to.equal(200);
       const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(locked.body)?.[1];
-      expect(handle).to.match(/^[a-f0-9-]{36}$/);
+      expect(handle).to.match(/^[a-f0-9]{40}$/);
       const refused = await call(two, "POST", path + "?_action=LOCK&accessMode=MODIFY");
       expect(refused.status, refused.body).to.equal(403);
       expect(refused.body).to.contain("ONE");

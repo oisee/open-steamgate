@@ -216,7 +216,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     const one = await logon();
     const locked = await as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`);
     const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
-    expect(handle).to.match(/^[0-9a-f-]{36}$/);
+    expect(handle).to.match(/^[0-9a-f]{40}$/);
     endEnqSession(adtEnqOwner.key(one.id));
     const db = abap.context.databaseConnections.DEFAULT;
     const {snapshotAdtRows, restoreAdtRows, rebuildAdtLocks} = await import("../tools/adt-runtime-state.mjs");
@@ -243,7 +243,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     const one = await logon();
     const locked = await as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`);
     const handle = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await locked.text())?.[1];
-    expect(handle).to.match(/^[0-9a-f-]{36}$/);
+    expect(handle).to.match(/^[0-9a-f]{40}$/);
     endEnqSession(adtEnqOwner.key(one.id));
     const put = await as(one, "PUT", `/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`,
       {headers: {"content-type": "text/plain"}, body: SOURCE + "* not written\n"});
@@ -258,7 +258,7 @@ describe("ADT front in ABAP: every request enters the handler (slice 3, option B
     const relocked = await as(one, "POST", `/oo/classes/${LOCKED}?_action=LOCK&accessMode=MODIFY`);
     expect(relocked.status).to.equal(200);
     const fresh = /<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(await relocked.text())?.[1];
-    expect(fresh).to.match(/^[0-9a-f-]{36}$/);
+    expect(fresh).to.match(/^[0-9a-f]{40}$/);
     expect(fresh, "a relock returns a new handle").to.not.equal(handle);
     const late = await as(one, "PUT", `/oo/classes/${LOCKED}/source/main?lockHandle=${handle}`,
       {headers: {"content-type": "text/plain"}, body: SOURCE + "* not written\n"});

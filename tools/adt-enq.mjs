@@ -17,11 +17,14 @@
 // tools/osd-enq-host.mjs from the dictionary, as an ENQUEUE_ from ABAP builds
 // it, so the two sides cannot disagree on it.
 import {adtEnqOwner} from "./adt-enq-key.mjs";
-import {randomUUID} from "node:crypto";
+import {randomBytes} from "node:crypto";
 import {endEnqSession, enqDrop, enqHolder, enqTake} from "./osd-enq-host.mjs";
 
 export const LOCK_TABLE = "ZOSD_ADT_LOCK";
 export const LOCK_OBJECT = "EZOSD_ADT_OBJ";
+
+/** ADT handles are opaque 40-character values with 160 bits of randomness. */
+export const newLockHandle = () => randomBytes(20).toString("hex");
 
 /** the exporting parameters ZCL_OSD_ADT_LOCK passes, said for the host */
 const argument = (type, name) => ({
@@ -95,7 +98,7 @@ export function abapSession(sessions, other) {
       const session = req.adt?.session;
       if (kind === "LOCK_HANDLE" && session !== undefined) {
         const [type, ...rest] = String(name).split(" ");
-        return {handle: await sessions.adopt(session, type, rest.join(" "), () => randomUUID())};
+        return {handle: await sessions.adopt(session, type, rest.join(" "), newLockHandle)};
       }
       if (kind === "LOCK_RELEASE" && session !== undefined) {
         const lock = await sessions.forget(session, String(name));

@@ -794,7 +794,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     const LOCKED = "ZCL_OSD_LK";
     const DOOMED = "ZCL_OSD_LK_DOOMED";
     const PACKAGE = "$STG_DEMO";
-    const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+    const HANDLE = /\b[0-9a-f]{40}\b/g;
     const roots = [];
 
     const tree = () => {
@@ -887,7 +887,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     const expectResult = (answer) => {
       expect(answer.status).to.equal(200);
       expect(answer.type).to.equal(RESULT_TYPE);
-      expect(answer.handle).to.match(/^[0-9a-f-]{36}$/);
+      expect(answer.handle).to.match(/^[0-9a-f]{40}$/);
       // Independent measured shape: Result has eight children of DATA, with empty
       // modification support. Do not derive this oracle from our serializer.
       expect([...answer.body.matchAll(/<([A-Z_]+)(?:>|\/>)/g)].map((m) => m[1])).to.deep.equal([
@@ -956,6 +956,13 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
               {headers: {"content-type": "text/plain"}, body: source});
             expect(saved.status).to.equal(200);
             expect((await send(one, "GET", `${at(LOCKED)}/source/main`)).body).to.equal(source);
+            expect((await unlock(one, locked.handle)).status).to.equal(200);
+            expect((await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${locked.handle}`,
+              {body: source})).status).to.equal(409);
+            const fresh = await lockOffer(two, result);
+            expectResult(fresh);
+            expect(fresh.handle).not.to.equal(locked.handle);
+            expect((await unlock(two, fresh.handle)).status).to.equal(200);
           });
         }
         it("T04 same-session second LOCK is the same 403 as a foreign session and preserves ownership", async () => {
@@ -1151,11 +1158,11 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     };
 
     const answered = (answers) => answers.map(({handle, ...rest}) => {
-      if (rest.body !== undefined && new RegExp(UUID.source).test(rest.body)) {
+      if (rest.body !== undefined && new RegExp(HANDLE.source).test(rest.body)) {
         expect(rest.etag).to.equal(null);
       }
-      if (rest.body !== undefined) rest.body = rest.body.replace(UUID, "<handle>");
-      return {...rest, handle: handle === undefined ? undefined : handle.replace(UUID, "<handle>")};
+      if (rest.body !== undefined) rest.body = rest.body.replace(HANDLE, "<handle>");
+      return {...rest, handle: handle === undefined ? undefined : handle.replace(HANDLE, "<handle>")};
     });
 
     for (const [title, sequence] of Object.entries(SEQUENCES)) {
@@ -1184,7 +1191,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
           || /^ABAP DELETE \/sap\/bc\/adt\/core\/http\/sessions\/[0-9A-Fa-f]+$/.test(s)
           || s === "ABAP GET /sap/public/bc/icf/logoff"
           || /^ABAP GET \/sap\/bc\/adt\/oo\/classes\/[^/?]+\/source\/main$/.test(s)), byAbap.join("\n")).to.equal(true);
-        // a handle is a UUID on both sides
+        // a handle is opaque 40-character hex on both sides
         for (const answer of [...expected, ...actual]) {
           if (answer.handle !== undefined && answer.handle !== "") expect(answer.handle).to.equal("<handle>");
         }

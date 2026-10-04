@@ -33,7 +33,7 @@ import express from "express";
 import {readFileSync, appendFileSync} from "node:fs";
 import {dirname, join, relative} from "node:path";
 import {fileURLToPath} from "node:url";
-import {randomUUID, randomBytes, createHash, timingSafeEqual} from "node:crypto";
+import {randomBytes, createHash, timingSafeEqual} from "node:crypto";
 import {Sessions, refuseToken} from "./adt-session.mjs";
 import {virtualFoldersDocument} from "./adt-vfs.mjs";
 import {answered, refuse} from "./adt-refusal.mjs";
@@ -42,7 +42,7 @@ import {abapFront} from "./adt-abap-front.mjs";
 import {RemoteSessions} from "./adt-remote-sessions.mjs";
 import {sessionRoutes} from "./adt-session-routes.mjs";
 import {AbapSessions} from "./adt-abap-sessions.mjs";
-import {abapSession, statelessLock} from "./adt-enq.mjs";
+import {abapSession, statelessLock, newLockHandle} from "./adt-enq.mjs";
 import {createDumpRecorder} from "./osd-dumps.mjs";
 import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-properties.mjs";
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict, InvalidName} from "./osd-store.mjs";
@@ -2081,7 +2081,7 @@ export function adtRouter(options = {}) {
         // a lock lives with a stateful session: without one it is refused, not given (statelessLock)
         if (session.stateful !== true) return void refuse(res, 400, "ExceptionInvalidRequest", statelessLock(entry));
         // one holder per object; even its own session's second LOCK is refused
-        const taken = await req.adt.sessions.lock(session, entry.type, entry.name, () => randomUUID());
+        const taken = await req.adt.sessions.lock(session, entry.type, entry.name, newLockHandle);
         if (taken.heldBy !== undefined) {
           res.status(403).type("application/xml").send(lockedByOtherDocument(taken.heldBy.user, entry.name));
           return;

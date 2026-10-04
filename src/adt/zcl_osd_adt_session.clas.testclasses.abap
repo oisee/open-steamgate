@@ -165,7 +165,7 @@ CLASS ltcl_session IMPLEMENTATION.
     lv_handle = mo_api->adopt_handle( iv_id = ms_one-id iv_type = `clas` iv_name = `ztest` ).
     lv_again = mo_api->adopt_handle( iv_id = ms_one-id iv_type = `CLAS` iv_name = `ZTEST` ).
     cl_abap_unit_assert=>assert_equals( act = lv_handle exp = lv_again ).
-    cl_abap_unit_assert=>assert_equals( act = strlen( lv_handle ) exp = 36 ).
+    cl_abap_unit_assert=>assert_equals( act = strlen( lv_handle ) exp = 40 ).
     cl_abap_unit_assert=>assert_true( mo_api->holds(
       iv_id = ms_one-id iv_handle = lv_handle iv_type = `ClAs` iv_name = `Ztest` ) ).
     cl_abap_unit_assert=>assert_false( mo_api->holds(
