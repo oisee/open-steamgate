@@ -95,7 +95,7 @@ describe("portable AMDP Check remains advisory", () => {
       expect(scalarReport).to.contain('chkrun:type="W"');
       expect(scalarReport).to.contain("#start=8,1");
       expect(scalarReport).to.contain("CAST to INTEGER cannot raise");
-      const activated = await fetch(base + "/activation", {method: "POST", headers,
+      const activated = await fetch(base + "/activation?method=activate", {method: "POST", headers,
         body: `<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core"><adtcore:objectReference adtcore:uri="${uri}"/></adtcore:objectReferences>`});
       expect(await activated.text()).to.contain("activationExecuted");
     } finally {

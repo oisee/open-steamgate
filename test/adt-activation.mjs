@@ -118,15 +118,23 @@ describe("tools/adt-facade: a failed activation stays inactive", function () {
     store.write("PROG", "ZOSD_ACT_BAD", BROKEN);
     const failed = await activate("PROG", "ZOSD_ACT_BAD");
     const messages = [...failed.xml.matchAll(/<msg ([^>]*)>([\s\S]*?)<\/msg>/g)];
-    expect(messages.length, failed.xml).to.be.greaterThan(0);
-    for (const [, attrs, body] of messages) {
+    expect(messages[0][1]).to.equal('objDescr="" type="W" line="0" href=""');
+    expect(messages[0][2]).to.equal('<shortText><txt>Activation was cancelled.</txt><txt>"Editing canceled" (EU 202)</txt></shortText>');
+    const diagnostics = messages.slice(1);
+    expect(diagnostics.length, failed.xml).to.be.greaterThan(0);
+    for (const [, attrs, body] of diagnostics) {
+      expect(attrs).to.contain('objDescr="Program ZOSD_ACT_BAD"');
+      expect(attrs).to.contain('line="1"');
+      expect(attrs).to.contain('forceSupported="true"');
       expect(attrs).to.match(/type="E"/);
       expect(attrs).to.match(/href="\/sap\/bc\/adt\/programs\/programs\/zosd_act_bad\/source\/main#start=\d+,\d+"/);
       expect(body).to.match(/<shortText><txt>[^<]+<\/txt><\/shortText>/);
     }
-    // the line of the message is the line of the cause, in the attribute and in the href
-    expect(messages.some(([, attrs]) => /line="2"/.test(attrs) && /#start=2,/.test(attrs)), failed.xml).to.equal(true);
-    expect(failed.xml).to.match(/<ioc:entry>\s*<ioc:object[^>]*>\s*<ioc:ref [^>]*adtcore:name="ZOSD_ACT_BAD"/);
+    // Source positions are in href; the observed checklist line attribute is 1.
+    expect(messages.some(([, attrs]) => /line="1"/.test(attrs) && /#start=2,/.test(attrs)), failed.xml).to.equal(true);
+    expect(failed.xml).not.to.contain("ioc:");
+    expect(failed.xml).not.to.contain("inactiveCtsObjects");
+    expect(failed.xml).to.contain('<chkl:properties checkExecuted="true" activationExecuted="false" generationExecuted="false"/>');
     expect(failed.xml).not.to.contain(root);
     expect(failed.xml).not.to.match(/\/(tmp|home|Users)\//);
   });

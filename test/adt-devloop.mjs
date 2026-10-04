@@ -791,11 +791,8 @@ describe("tools/adt-facade: the development loop", () => {
       const saved = await call(`/oo/classes/${SCRATCH}/source/main?lockHandle=${handle}`, {method: "PUT", body: SOURCE});
       const res = await activate(SCRATCH, {"if-match": saved.headers.get("etag")});
       expect(res.status).to.equal(200);
-      expect(res.headers.get("content-type")).to.contain("application/xml");
-      const xml = await res.text();
-      expect(xml).to.contain("<chkl:messages ");
-      expect(xml).to.match(/<chkl:properties [^>]*activationExecuted="true"/);
-      expect(xml, "no messages for a clean activation").to.not.contain("<chkl:msg");
+      expect(res.headers.get("content-type")).to.equal("application/xml; charset=utf-8");
+      expect(await res.text()).to.equal('<?xml version="1.0" encoding="utf-8"?><chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"><chkl:properties checkExecuted="true" activationExecuted="true" generationExecuted="true"/></chkl:messages>');
     });
 
     it("does not activate bytes that replaced the checked revision", async function () {

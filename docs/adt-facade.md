@@ -670,3 +670,29 @@ one of its modules.
 
 Still in Node, to be ported to ABAP with the ADT façade: the package and
 create routes, the author record and the tree filter.
+
+
+### Activation checklist wire (A4H observations, 2026-10-03)
+
+Activation remains Node host orchestration (variant C, HOST_ALLOWED A6/A7).
+Only POST with `method=activate` activates. A missing `method` (including no
+query) answers 400, `application/xml`, with `ExceptionParameterNotFound` and
+"Parameter method could not be found." (SADT_RESOURCE 017, V1 method). Other
+present values answer 200 with an empty body and no Content-Type. Both refusals
+leave active and inactive state unchanged. `preauditRequested=true` and `false` answer alike.
+
+Both success and syntax failure answer 200, `application/xml; charset=utf-8`,
+with an XML declaration and `chkl:messages`. Its only attribute is the checklist
+namespace. Qualified `chkl:properties` carries unqualified `checkExecuted`,
+`activationExecuted`, and `generationExecuted`: true/true/true on success,
+true/false/false on failure. Success has no messages. Failure starts with the
+unqualified cancellation warning (EU 202), followed by unqualified diagnostic
+`msg` elements with `forceSupported="true"`. There is no inactive-object or
+CTS content in this answer; the inactive-object feed remains separate.
+
+Diagnostic `line="1"` follows the observed case at source line 3; the meaning
+of this attribute is **unconfirmed beyond that case**. Actual source positions
+remain in the href fragment `#start=<line>,<col>`, including class include source URIs.
+The serializer's ADT type table uses the observed words Program and Class.
+For INTF, DDLS and the remaining unmeasured type words, it retains the facade's
+previous name-only description rather than inventing SAP wording.

@@ -2345,11 +2345,19 @@ export function adtRouter(options = {}) {
     }
   };
 
-  // ACTIVATE. An empty body means it activated; a document means it did not.
-  // That is the convention and not our choice, so a document has to mean
-  // failure and nothing else.
+  // ACTIVATE is host orchestration (HOST_ALLOWED A6/A7, variant C).
+  // Missing method is a parameter error; present values other than activate return an empty 200.
   advertise("activation");
   router.post(`${BASE}/activation`, async (req, res) => {
+    if (req.query.method === undefined) {
+      // Exact A4H bytes; exceptionDocument adds whitespace to its documents.
+      res.status(400).type("application/xml").send('<?xml version="1.0" encoding="utf-8"?><exc:exception xmlns:exc="http://www.sap.com/abapxml/types/communicationframework"><namespace id="com.sap.adt"/><type id="ExceptionParameterNotFound"/><message lang="EN">Parameter method could not be found.</message><localizedMessage lang="EN">Parameter method could not be found.</localizedMessage><properties><entry key="T100KEY-ID">SADT_RESOURCE</entry><entry key="T100KEY-NO">017</entry><entry key="T100KEY-V1">method</entry></properties></exc:exception>');
+      return;
+    }
+    if (req.query.method !== "activate") {
+      res.status(200).end();
+      return;
+    }
     const body = await rawBody(req);
     let named = [];
     let checked = [];
@@ -2394,9 +2402,8 @@ export function adtRouter(options = {}) {
       checked = named.map((o) => store.activate(o.type, o.name, {activating: named}));
       const failed = checked.filter((r) => r.active === false);
       if (failed.length > 0) {
-        // the object that did not activate, then whatever it broke: an
-        // object with no issues of its own still belongs in the list,
-        // because it is still inactive and a client shows it as such
+        // Include diagnostics for the named objects and any dependents
+        // whose active source would break.
         const entries = failed.flatMap((r) => [r, ...(r.dependents ?? [])]);
         res.status(200).type("application/xml").send(activationFailureDocument(entries));
         return;
@@ -2424,7 +2431,7 @@ export function adtRouter(options = {}) {
     // answer and then transpile behind the client's back, so a 200 meant
     // "the source is good" while the code a client would next read was still
     // the old code, and nothing said when that stopped being true. Awaiting
-    // publish() makes the empty body mean what a real system means by it:
+    // publish() makes the success properties mean what a real system means by them:
     // the modules are written, and the process that serves them is the one
     // that has them.
     try {

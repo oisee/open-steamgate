@@ -1265,46 +1265,53 @@ export function lockedByOtherDocument(user, object) {
   ]});
 }
 
-// The answer to an activation that happened. Three properties, all true,
-// and no messages: the system's own answer for a clean activation
-// (a4h-adt.jsonl:489), where a message list would carry the findings.
+// A4H activation wire facts: qualified properties, unqualified messages, no
+// inactive/CTS content. preauditRequested does not alter this document.
 export function activationSuccessDocument() {
-  return `<?xml version="1.0" encoding="utf-8"?>
-<chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist">
-  <chkl:properties checkExecuted="true" activationExecuted="true" generationExecuted="true"/>
-</chkl:messages>
-`;
+  return '<?xml version="1.0" encoding="utf-8"?><chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"><chkl:properties checkExecuted="true" activationExecuted="true" generationExecuted="true"/></chkl:messages>';
 }
 
-// The answer to an activation that did not happen: one message per object
-// and line, then the objects that stay inactive. The shape is the one ADT
-// clients read (abap-adt-api's activation parser, docs/adt-abap-port/
-// client-view-abap-fs.md): an unprefixed `msg` under `chkl:messages`, with
-// its type, line and an href to the object and line; `ioc:entry` holding
-// `ioc:object/ioc:ref`. A `msg:msg` was keyed by its prefix and read as no
-// message at all, so a failed activation said nothing about why.
+// Type words derived from ADT types. Program and Class are observed;
+// other SAP wording is unconfirmed, so retain the previous name-only
+// description for those types until measured.
+const ACTIVATION_TYPE_WORD = {
+  "PROG/P": "Program",
+  "PROG/I": "",
+  "CLAS/OC": "Class",
+  "CLAS/I": "Class",
+  "INTF/OI": "",
+  "DDLS/DF": "",
+  "FUGR/F": "",
+  "TABL/DT": "",
+  "TABL/DS": "",
+  "DTEL/DE": "",
+  "DOMA/DD": "",
+  "TTYP/DA": "",
+  "VIEW/DV": "",
+  "SRVD/SRV": "",
+  "SHLP/DH": "",
+  "MSAG/N": "",
+  "DEVC/K": "",
+};
+
 export function activationFailureDocument(objects) {
-  // an issue's own severity (a warning is not an error), E when it has none
   const type = (issue) => (/^w/i.test(String(issue.severity ?? "")) ? "W" : /^i/i.test(String(issue.severity ?? "")) ? "I" : "E");
-  const message = (o, issue) => `  <msg objDescr="${xmlEscape(o.name)}" type="${type(issue)}" line="${issue.line ?? 1}" href="${xmlEscape((uriOf(o.type, o.name) ?? "") + "/source/main#start=" + (issue.line ?? 1) + "," + (issue.column ?? 1))}" forceSupported="false">
-    <shortText><txt>${xmlEscape(issue.message)}</txt></shortText>
-  </msg>`;
-
-  return `<?xml version="1.0" encoding="utf-8"?>
-<chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"
-               xmlns:ioc="http://www.sap.com/abapxml/inactiveCtsObjects"
-               xmlns:adtcore="http://www.sap.com/adt/core"
-               activationExecuted="false">
-${objects.flatMap((o) => (o.issues ?? []).map((i) => message(o, i))).join("\n")}
-  <ioc:inactiveObjects>
-${objects.map((o) => inactiveEntry(o)).join("\n")}
-  </ioc:inactiveObjects>
-</chkl:messages>
-`;
+  const message = (o, issue) => {
+    const word = ACTIVATION_TYPE_WORD[ADT_TYPE[o.type] ?? o.type];
+    const description = word ? word + " " + o.name : o.name;
+    const href = (/\.clas\./i.test(issue.file ?? "") ? frameUri(issue.file, issue.line, issue.column) : undefined) ??
+      ((uriOf(o.type, o.name) ?? "") + "/source/main#start=" + (issue.line ?? 1) + "," + (issue.column ?? 1));
+    // Observed line="1" for a diagnostic at source line 3. Its meaning
+    // beyond that case is unconfirmed; source position belongs in href.
+    return `<msg objDescr="${xmlEscape(description)}" type="${type(issue)}" line="1" href="${xmlEscape(href)}" forceSupported="true"><shortText><txt>${xmlEscape(issue.message)}</txt></shortText></msg>`;
+  };
+  return '<?xml version="1.0" encoding="utf-8"?><chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"><chkl:properties checkExecuted="true" activationExecuted="false" generationExecuted="false"/>' +
+    '<msg objDescr="" type="W" line="0" href=""><shortText><txt>Activation was cancelled.</txt><txt>"Editing canceled" (EU 202)</txt></shortText></msg>' +
+    objects.flatMap((o) => (o.issues ?? []).map((i) => message(o, i))).join("") +
+    '</chkl:messages>';
 }
 
-// one inactive object, as the activation answer and the inactive-objects
-// feed both list it
+// one inactive object for the inactive-objects feed
 function inactiveEntry(o, user = "") {
   const uri = uriOf(o.type, o.name) ?? "";
   const parent = o.package ? ` adtcore:parentUri="/sap/bc/adt/packages/${xmlEscape(encodeURIComponent(String(o.package).toLowerCase()))}"` : "";

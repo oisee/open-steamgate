@@ -2704,10 +2704,7 @@ function activate(context) {
   // Ctrl+F2 / Ctrl+F3 (docs/vscode-extension.md): one diagnostic collection
   // for both, so an activation that passes clears what a check had left, and
   // the other way round.
-  const diagnostics = vscode.languages.createDiagnosticCollection("osd-abap");
-  context.subscriptions.push(diagnostics);
-  context.subscriptions.push(vscode.commands.registerCommand("osd.check", () => check(diagnostics, output)));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(diagnostics, output)));
+  registerCheckActivateCommands(context, output);
   context.subscriptions.push(vscode.commands.registerCommand("osd.run", () => run(output, classrunOutput)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.runWithDebugger", () => run(output, classrunOutput, true)));
 
@@ -3037,6 +3034,17 @@ function currentObject() {
   return object === undefined ? undefined : {editor, object};
 }
 
+function registerCheckActivateCommands(context, output) {
+  // check and activation keep separate collections: activation clears the
+  // documents it no longer reports, which must never erase a check's findings
+  const diagnostics = vscode.languages.createDiagnosticCollection("osd-abap");
+  const activation = vscode.languages.createDiagnosticCollection("osd-activation");
+  const activationDiagnostics = new Map();
+  context.subscriptions.push(diagnostics, activation);
+  context.subscriptions.push(vscode.commands.registerCommand("osd.check", () => check(diagnostics, output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(activation, output, activationDiagnostics)));
+}
+
 // severity -> vscode.DiagnosticSeverity; A and X are ABAP's abort/exception
 // levels and read as errors the same as E
 function severityOf(code) {
@@ -3070,19 +3078,37 @@ async function check(diagnostics, output) {
   }
 }
 
-async function activateCurrent(diagnostics, output) {
+async function activateCurrent(diagnostics, output, activationDiagnostics) {
   const current = currentObject();
   if (current === undefined) return;
   const {editor, object} = current;
   if (editor.document.isDirty) await editor.document.save();
   try {
+    // Includes share an activation scope; other objects, source directories
+    // and systems have distinct scopes. Each URI belongs to the last scope
+    // that wrote it, so another scope's retry cannot clear newer diagnostics.
+    const scope = JSON.stringify([osd().url, path.dirname(editor.document.fileName), object.type, object.name]);
+    const writeDiagnostics = (byFile) => {
+      for (const [file, owner] of activationDiagnostics) {
+        if (owner.scope === scope && !byFile.has(file)) {
+          diagnostics.set(owner.uri, []);
+          activationDiagnostics.delete(file);
+        }
+      }
+      for (const [file, {uri, issues}] of byFile) {
+        diagnostics.set(uri, issues);
+        activationDiagnostics.set(file, {scope, uri});
+      }
+    };
     const result = await osd().activate(object);
     if (result.ok) {
+      writeDiagnostics(new Map());
       await activeController?.refreshDebuggerGeneration();
       try {
         const reports = await osd().check(object, object.include, editor.document.getText());
-        diagnostics.set(editor.document.uri, reports.flatMap((r) => r.issues)
-          .map((i) => diagnosticAt(i.line, i.column, i.message, i.severity)));
+        writeDiagnostics(new Map([[editor.document.fileName, {uri: editor.document.uri,
+          issues: reports.flatMap((r) => r.issues).map((i) => diagnosticAt(i.line, i.column, i.message, i.severity)),
+        }]]));
       } catch (error) {
         output.appendLine(`osd activate ${object.name}: post-activation check: ${String(error.message ?? error)}`);
       }
@@ -3098,16 +3124,23 @@ async function activateCurrent(diagnostics, output) {
       vscode.window.setStatusBarMessage(
         `osd: ${object.name} activated, generation ${generation}${extra ? ` (${extra})` : ""}`, 5000);
     } else {
-      // an issue names the object it belongs to (objDescr); the ones this
-      // editor's object owns go on it, the rest -- what activating it broke
-      // elsewhere -- go to the output channel rather than nowhere
-      const own = result.issues.filter((i) => i.objDescr === object.name || i.objDescr === "");
-      const elsewhere = result.issues.filter((i) => i.objDescr !== object.name && i.objDescr !== "");
-      diagnostics.set(editor.document.uri, own.map((i) => diagnosticAt(i.line, i.column, i.message)));
-      if (elsewhere.length > 0) {
-        output.appendLine(`osd activate ${object.name}: also broke ${elsewhere.map((i) => `${i.objDescr} (${i.message})`).join("; ")}`);
+      // Descriptions are display text ("Class ZCL_A"). Source ownership and
+      // include-relative positions come from href, including other objects
+      // in the same activation. A location-less message is only a summary.
+      const byFile = new Map([[editor.document.fileName, {uri: editor.document.uri, issues: []}]]);
+      let located = 0;
+      for (const issue of result.issues) {
+        const uri = await activationDiagnosticUri(issue.href, editor, object);
+        if (uri === undefined) {
+          output.appendLine(`osd activate ${object.name}: ${issue.objDescr ? `${issue.objDescr}: ` : ""}${issue.message}`);
+          continue;
+        }
+        if (!byFile.has(uri.fsPath)) byFile.set(uri.fsPath, {uri, issues: []});
+        byFile.get(uri.fsPath).issues.push(diagnosticAt(issue.line, issue.column, issue.message, issue.severity));
+        located++;
       }
-      vscode.window.showErrorMessage(`osd: ${object.name} did not activate (${result.issues.length || "no"} issue(s), see Problems)`);
+      writeDiagnostics(byFile);
+      vscode.window.showErrorMessage(`osd: ${object.name} did not activate (${located || "no"} issue(s), see ${located ? "Problems" : "Output"})`);
     }
     // Q4: an activation is the point a class's own line numbers can have
     // moved, so the heat this object's decorations show is worth a refresh
@@ -3118,6 +3151,28 @@ async function activateCurrent(diagnostics, output) {
     output.appendLine(`osd activate ${object.name}: ${String(e.message ?? e)}`);
     vscode.window.showErrorMessage(`osd activate: ${String(e.message ?? e)}`);
   }
+}
+
+async function activationDiagnosticUri(href, editor, current) {
+  if (!href) return undefined;
+  const source = new URL(href, osd().url).pathname;
+  const match = /^\/sap\/bc\/adt\/(oo\/classes|oo\/interfaces|programs\/programs)\/([^/]+)(?:\/includes\/([^/]+))?(?:\/source\/main)?\/?$/i.exec(source);
+  if (match === null) return undefined;
+  const type = {"oo/classes": "clas", "oo/interfaces": "intf", "programs/programs": "prog"}[match[1].toLowerCase()];
+  const object = adtObjectOf(`${decodeURIComponent(match[2]).replaceAll("/", "#")}.${type}.abap`);
+  if (object === undefined) return undefined;
+  let main;
+  if (object.type === current.type && object.name === current.name) {
+    main = editor.document.fileName;
+  } else {
+    main = await resolveKernelObjectFile(object, {
+      running: activeController?.runningSources(),
+      home: activeController?.launcher?.osdHome,
+      layers: activeController?.launcher?.layers,
+    });
+    main ??= (await vscode.workspace.findFiles(readerFilePattern(object), EXCLUDE, 1))[0]?.fsPath;
+  }
+  return main === undefined ? undefined : vscode.Uri.file(fileOf(path.dirname(main), object, match[3] ?? "main"));
 }
 
 // ---- F8: SE80's own key, dispatched by object type (lib.js RUN_TABLE).
@@ -4455,7 +4510,7 @@ async function deactivate() {
 }
 
 module.exports = {WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
-  httpLensProvider, openEntitySetMethod, statusBar,
+  httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
   wirePageTabs, openDetailsMetadata, serviceCardFiles};
