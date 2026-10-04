@@ -1,3 +1,4 @@
+import {servingFront} from "../tools/osd-serving-front.mjs";
 import {randomUUID} from "node:crypto";
 import {requestXMLBodyError, XML_BODY_LIMIT} from "../tools/adt-request-xml.mjs";
 import {parentAdtSnapshot} from "../tools/adt-runtime-state.mjs";
@@ -23,7 +24,7 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
 import {credentials as tlsCredentials, fingerprint as tlsFingerprint, dirOf as tlsDirOf} from "../tools/osd-tls.mjs";
-import {odataProxy, upgradeProxy, startingAnswer} from "../tools/osd-proxy.mjs";
+import {odataProxy, upgradeProxy} from "../tools/osd-proxy.mjs";
 import {inspectPortOf} from "../tools/osd-inspector.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
 import {mountServices, services as icfServices, servicesFromRows, channels as pushChannels} from "../tools/osd-icf.mjs";
@@ -483,25 +484,8 @@ export function startServer(quiet) {
     // still the declared node, forwarded like the others, with one field more
     // The launcher owns this front PID, not the recyclable runtime worker PID.
     // Editors use it to reject a different system that later takes this port.
-    const withWarm = (proxy) => async (req, res, next) => {
-      if (req.method !== "GET") {
-        proxy(req, res, next);
-        return;
-      }
-      // still booting: say so now, with the step, rather than hold the
-      // question for the boot (the VS Code launcher waits on this answer)
-      if (runtime.booting !== undefined && runtime.running !== true) {
-        res.status(200).json({...startingAnswer(runtime), launcherPid: process.pid, launcherIdentity, warm: facade.store.warmStatus(), bind: bindAddresses()});
-        return;
-      }
-      try {
-        const answer = await fetch(`${runtime.url}${req.originalUrl}`, {signal: AbortSignal.timeout(5000)});
-        const body = await answer.json();
-        res.status(answer.status).json({...body, launcherPid: process.pid, launcherIdentity, warm: facade.store.warmStatus(), bind: bindAddresses()});
-      } catch {
-        proxy(req, res, next);
-      }
-    };
+    const withWarm = servingFront(runtime, {launcherIdentity,
+      warmStatus: () => facade.store.warmStatus(), bind: bindAddresses});
     const localBatch = (proxy) => (req, res, next) => {
       const address = req.socket.remoteAddress ?? "";
       if (address !== "::1" && !/^127\./.test(address) && !/^::ffff:127\./.test(address)) {
@@ -513,7 +497,7 @@ export function startServer(quiet) {
     app.get("/osd/job-counts", localBatch(odataProxy(runtime)));
     for (const node of declaredNodeList.filter((n) => !n.internal && n.type === "HOST" && n.implementedIn === "tools/osd-serve.mjs")) {
       const proxy = odataProxy(runtime);
-      app.all(node.path, node.path === "/osd/serving" ? withWarm(proxy)
+      app.all(node.path, node.path === "/osd/serving" ? withWarm
         : node.path === "/osd/batch-runs" ? localBatch(proxy) : proxy);
     }
     // STG_DEV=1: the disk is the other editor. A save becomes a check, a
