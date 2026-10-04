@@ -60,6 +60,7 @@ function startCredentials(env) {
 async function registerAbapFsBridge(vscode, context, controller) {
   const session = randomBytes(16).toString("hex");
   let stopped = false;
+  let restored = false;
   const keys = [...new Set((vscode.workspace.workspaceFolders ?? [])
     .map(folder => folderRecoveryKey(folder.uri)).filter(Boolean))];
   const clearRecovery = async () => {
@@ -97,7 +98,11 @@ async function registerAbapFsBridge(vscode, context, controller) {
     // Consume permanently before awaiting anything; failed starts never loop.
     const file = claimShared(context, `${key}.${recovery.mount}`, claim);
     await context.globalState.update(key, undefined);
-    if (file && !stopped) { await controller.start(); break; }
+    if (file && !stopped) {
+      await controller.start();
+      restored = controller.launcher?.state === "running";
+      break;
+    }
   }
   const extension = vscode.extensions?.getExtension(EXTENSION_ID);
   if (!extension) return;
@@ -188,6 +193,16 @@ async function registerAbapFsBridge(vscode, context, controller) {
   if (provider) context.subscriptions.push(api.registerConnectionProvider({
     getConnections: () => connections, onDidChange: changed.event,
   }));
+  // Reload may have cached a failed root resolution before the system was
+  // ready. Retry once, after publishing its connection; provider changes and
+  // ABAP-FS refresh alone cannot clear Explorer's workspace-folder error.
+  if (restored && current && !disposed && (vscode.workspace.workspaceFolders ?? [])
+    .some(folder => folderRecoveryKey(folder.uri) === folderRecoveryKey({toString: () => `adt://${CONNECTION_ID}`}))) {
+    try { await vscode.commands.executeCommand("workbench.files.action.refreshFilesExplorer"); }
+    catch (error) {
+      controller.output.appendLine(`osd: could not refresh Explorer after ABAP-FS restore: ${String(error.message ?? error)}`);
+    }
+  }
 }
 
 module.exports = {registerAbapFsBridge, startCredentials, EXTENSION_ID, folderRecoveryKey};
