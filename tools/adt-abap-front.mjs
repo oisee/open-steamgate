@@ -77,6 +77,12 @@ export function continuationKinds() {
 
 // the default: the Node façade serves the request
 continuations.set("", ({next}) => next());
+// Creation stays host orchestration. Only after the store succeeds does
+// the Node route re-enter the ABAP handler for the observed program answer.
+continuations.set("PROGRAM_CREATE", ({req, next, resume}) => {
+  req.adt.programCreated = () => resume("");
+  next();
+});
 // the built-in kind for tests: what ABAP decided and who it was decided for,
 // as JSON, replacing the ABAP answer
 continuations.set("echo", ({res, kind, payload, session, answer}) => {

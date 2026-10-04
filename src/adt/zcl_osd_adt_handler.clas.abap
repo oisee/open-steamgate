@@ -31,6 +31,7 @@
 "! whatever its response status. ENQ locks at _SCOPE 1 are independent.
 CLASS zcl_osd_adt_handler DEFINITION PUBLIC CREATE PUBLIC.
   PUBLIC SECTION.
+    CONSTANTS c_program_create TYPE string VALUE `PROGRAM_CREATE`.
     INTERFACES if_http_extension.
     CONSTANTS c_served_by TYPE string VALUE `x-osd-served-by`.
 
@@ -223,6 +224,13 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
     DATA lx_root TYPE REF TO cx_root.
     DATA lv_text TYPE string.
 
+*   The host has created the program successfully. SAP observation,
+*   2026-10-03: no representation, content type or Location on success.
+    IF iv_kind = c_program_create.
+      rs_response-status = 200.
+      RETURN.
+    ENDIF.
+
     lt_routes = gt_routes.
     IF lt_routes IS INITIAL.
       lt_routes = zcl_osd_adt_router=>routes( ).
@@ -284,6 +292,13 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
           lv_text = |{ is_request-method } { is_request-path } is not served by ABAP here|.
           lx_adt = zcx_osd_adt=>not_found( lv_text ).
           es_response = refusal( lx_adt ).
+*         Storage remains host orchestration; never answer success before
+*         the host has completed it. RESUME supplies only the success wire.
+          IF is_request-method = `POST` AND
+              ( to_lower( is_request-path ) = `/sap/bc/adt/programs/programs` OR
+                to_lower( is_request-path ) = `/sap/bc/adt/programs/programs/` ).
+            es_response-continuation-kind = c_program_create.
+          ENDIF.
         ELSE.
           es_response = ls_result-response.
         ENDIF.
