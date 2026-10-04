@@ -128,7 +128,7 @@ describe("ABAP-FS local bridge", () => {
     const first = f.start();
     const connection = provider.getConnections()[0];
     expect(provider.getConnections()).to.have.length(1);
-    expect(connection).to.include({id: "osd_local", name: "OSD (local)", autoConnect: true, client: "002", user: "LOCAL_TEST"});
+    expect(connection).to.include({id: "osd-local", name: "OSD (local)", autoConnect: true, client: "002", user: "LOCAL_TEST"});
     expect(connection.auth.kind).to.equal("provider");
     expect(await connection.auth.getHeaders()).to.deep.equal({Authorization: `Bearer ${first.token}`});
     f.events.fire(); expect(changes).to.equal(1);
@@ -189,7 +189,7 @@ describe("ABAP-FS local bridge", () => {
     let connects = 0, restarts = 0, provider;
     const f = fixture({version: 2, registerConnectionProvider: p => { provider = p; return {dispose() {}}; },
       connect: async id => {
-        expect(id).to.equal("osd_local");
+        expect(id).to.equal("osd-local");
         expect(f.workspaceSaved.get("osd.abapfs.local.wasRunning")).to.equal(true);
         expect(provider.getConnections()[0].autoConnect).to.equal(false);
         connects++;
@@ -200,7 +200,7 @@ describe("ABAP-FS local bridge", () => {
     for (const disposable of f.context.subscriptions) disposable.dispose();
     const again = fixture({version: 2, registerConnectionProvider: p => {
       expect(restarts).to.equal(1);
-      expect(p.getConnections()[0]).to.include({id: "osd_local", autoConnect: true});
+      expect(p.getConnections()[0]).to.include({id: "osd-local", autoConnect: true});
       return {dispose() {}};
     }}, undefined, f.saved, f.workspaceSaved);
     again.vscode.workspace.workspaceFolders = [{}, {}];

@@ -7,7 +7,7 @@ const EXTENSION_ID = "murbani.vscode-abap-remote-fs";
 const OFFER_KEY = "osd.abapfs.local.offered";
 const MOUNT_OFFER_KEY = "osd.abapfs.local.mountOffered";
 const RESTART_KEY = "osd.abapfs.local.wasRunning";
-const CONNECTION_ID = "osd_local";
+const CONNECTION_ID = "osd-local";
 
 function canAutoConnect(workspace) {
   return workspace.workspaceFile !== undefined || (workspace.workspaceFolders?.length ?? 0) !== 1;
