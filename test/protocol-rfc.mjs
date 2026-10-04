@@ -263,6 +263,12 @@ describe("the built-in MIT RFC-to-ADT bridge", () => {
       expect(request.headers.authorization).to.equal(`Basic ${Buffer.from("BACKEND:secret").toString("base64")}`);
       expect(new URL(request.url, "http://backend").searchParams.get("sap-client")).to.equal("777");
       expect(new URL(request.url, "http://backend").searchParams.get("sap-language")).to.equal("DE");
+      if (request.url.startsWith("/sap/public/bc/icf/logoff")) {
+        expect(request.headers.cookie).to.equal("bridge-cookie=present");
+        response.end();
+        return;
+      }
+      expect(request.headers["x-sap-adt-sessiontype"]).to.equal("stateful");
       if (request.url.startsWith("/sap/bc/adt/core/discovery")) {
         probes++;
         expect(request.headers["x-csrf-token"]).to.equal("fetch");

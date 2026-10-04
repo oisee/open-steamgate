@@ -41,6 +41,7 @@
     "test/adt-handle-migration.mjs",
     "test/adt-notebook.mjs",
     "test/adt-session.mjs",
+    "test/adt-rfc-context.mjs",
     "test/adt-session-recycle.mjs",
     "test/adt-versions.mjs",
     "test/http-codelens.mjs",
