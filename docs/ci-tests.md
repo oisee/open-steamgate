@@ -79,32 +79,31 @@ alphabetically in one process, preserving the existing loader order. There is
 no `test/suites.json` or co-process/order constraint in the fragments. The
 complete manifest drift check still runs before selecting a shard or group.
 
-Refreshed on 2026-10-04 from the five latest green runs: 37192035109,
-37190518615, 37190429847, 37189983012 and 37189980651. Each file uses the
-median of its first-run durations across those runs. The old four-shard
-allocation predicts **15.18 / 19.39 / 18.43 / 17.72 min** using the refreshed
-measurements. Rebalancing four gives 17.68 min each; six gives
-**11.78 / 11.78 / 11.79 / 11.78 / 11.78 / 11.79 min**, below the 13-minute
-execution target. The previous seed omitted 25 current ordinary files; all now
-have measurements. These weights exclude npm/install/restore and initial
-import/startup, so they do not guarantee CI elapsed times. The older
+Refreshed on 2026-10-04 from the five latest successful `push` runs of
+`tests.yml` on `main`: 37192035109, 37187008824, 37185244903, 37183279842 and
+37180839525 (20 shard artifacts). Each file uses the median of its first-run
+durations across those runs. Six shards are predicted at
+**11.97 / 11.96 / 11.97 / 11.97 / 11.97 / 11.97 min**, below the 13-minute
+execution target; before this change the slowest of four was 19.39 min. Three
+current files have no measurement yet (`test/pre-push.mjs`,
+`test/vscode-jobs-view.mjs`, `test/vscode-serving-front.mjs`) and take the
+median until the next refresh. These weights exclude npm/install/restore and
+initial import/startup, so they do not guarantee CI elapsed times. The older
 `test/suite-timings.json` is historical.
 
 Each shard uploads `suite-results-<index>-attempt-<attempt>` with first-run `timings.json` and
-`flaky.md`, even on failure. Download and refresh the committed weights:
+`flaky.md`, even on failure. Refresh the committed weights with:
 
 ```sh
-for run in $(gh run list --workflow tests.yml --status success --limit 5 --json databaseId --jq '.[].databaseId'); do
-  gh run download "$run" --pattern 'suite-results-*' --dir ".local/ci-timings/$run"
-done
-node tools/osd-suites-timings.mjs test/suites-timings.json .local/ci-timings/*/suite-results-*/timings.json
+node tools/osd-suites-refresh.mjs
 ```
 
-Use an empty download directory for each refresh. For rerun jobs, retain only the
-latest available attempt per shard within each run before the manual merge;
-otherwise a rerun contributes extra samples. `node tools/osd-suites-refresh.mjs`
-automates downloading and attempt selection and updates weights when drift
-requires it.
+It takes only successful `push` runs of `tests.yml` on `main` of this
+repository, re-checks each run's event, branch, repository and conclusion
+before downloading, keeps the latest attempt per shard, and rewrites the
+weights only when drift requires it. Do not merge artifacts from an arbitrary
+run by hand: a pull-request or dispatch run is not a trusted source of
+weights.
 
 `suites-timings.yml` runs weekly on Monday at 08:00 UTC and via
 `workflow_dispatch`. It downloads the five latest successful `tests.yml` runs,
