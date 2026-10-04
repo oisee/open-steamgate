@@ -13,6 +13,40 @@
 root=$(git rev-parse --show-toplevel)
 status=0
 
+# Resolve operation markers through Git: .git can be a file in a worktree.
+for operation in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+  if [ -e "$(git rev-parse --git-path "$operation")" ]; then
+    echo "Push refused: unfinished Git operation ($operation). Finish or abort it first." >&2
+    exit 1
+  fi
+done
+if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+  echo "Push refused: unmerged paths remain. Resolve them before pushing." >&2
+  exit 1
+fi
+
+# Check every destination before scanning any range. Keep stdin for the scanner
+# loop below. Refresh origin/main once here: the empty-branch check and the
+# size budget below both compare against it (a failed fetch keeps the cached ref).
+push_refs=$(cat)
+git -C "$root" fetch --quiet origin main 2>/dev/null || true
+main_sha=$(git rev-parse --verify refs/remotes/origin/main 2>/dev/null) || main_sha=
+if [ "${OSD_PUSH_ALLOW_EMPTY:-}" != 1 ] && [ -n "$main_sha" ]; then
+  while read -r _local_ref local_sha remote_ref _remote_sha; do
+    case "$local_sha" in
+      ''|0000000000000000000000000000000000000000) continue ;;
+    esac
+    [ "$remote_ref" = refs/heads/main ] && continue
+    if [ "$local_sha" = "$main_sha" ] ||
+       [ "$(git rev-list --count "$main_sha..$local_sha")" = 0 ]; then
+      echo "Push refused: $remote_ref has no commits over origin/main. Set OSD_PUSH_ALLOW_EMPTY=1 for an intentional empty branch." >&2
+      exit 1
+    fi
+  done <<EOF
+$push_refs
+EOF
+fi
+
 # The scanner may not live in the repository being pushed. A sibling Go clone
 # takes the same captures and deserves the same check, and the way to give it
 # one is a shared core.hooksPath — so the tool is looked for next to this hook
@@ -26,7 +60,7 @@ if [ -z "${scanner:-}" ]; then
   exit 0
 fi
 
-while read -r _local_ref local_sha _remote_ref remote_sha; do
+while read -r _local_ref local_sha _remote_ref remote_sha && [ -n "$local_sha" ]; do
   # A deletion has nothing to look at.
   case "$local_sha" in
     0000000000000000000000000000000000000000) continue ;;
@@ -51,7 +85,9 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
     *) status=1 ;;
   esac
   rc=0
-done
+done <<EOF
+$push_refs
+EOF
 
 # The size budget (tools/osd-size-budget.mjs): monoliths may shrink, never
 # grow. It measures the working tree, which is what a push of the current
@@ -61,7 +97,6 @@ done
 # raised against the merge base needs a reason.
 budget=0
 if [ -f "$root/tools/osd-size-budget.mjs" ] && [ -f "$root/tools/osd-size-budget.json" ]; then
-  git -C "$root" fetch --quiet origin main 2>/dev/null || true
   node "$root/tools/osd-size-budget.mjs" --changed origin/main || budget=1
 fi
 

@@ -11,6 +11,7 @@
     "test/gui-reports.mjs",
     "test/journal.mjs",
     "test/leak-scan.mjs",
+    "test/pre-push.mjs",
     "test/lsd-a4h-011.mjs",
     "test/naming-scan.mjs",
     "test/oo-comments.mjs",
