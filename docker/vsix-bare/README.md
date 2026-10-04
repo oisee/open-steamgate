@@ -27,7 +27,12 @@ node tools/osd-vsix-bare-smoke.mjs --vsix /path/package.vsix \
 node --test docker/vsix-bare/*.test.mjs
 ```
 
-The Ubuntu 24.04 runtime contains Xvfb and VS Code's shared-library dependencies.
+Both Ubuntu 24.04 stages use the same pinned OCI index digest, obtained from
+Docker Hub's registry API via `gh api` on 2026-10-04 (Docker is absent on the
+editing host). The advisory workflow's five action refs are pinned to full
+commit SHAs resolved from their major-version tags through GitHub's API via
+`gh api` on the same date.
+The Ubuntu runtime contains Xvfb and VS Code's shared-library dependencies.
 VS Code is the official Linux x64 1.101.2 tarball, pinned to commit
 `2901c5ac6db8a986a5666c3af51ff804d05af0d4`. Its SHA-256 is checked before
 extraction; the checksum comes from Microsoft's
@@ -46,7 +51,8 @@ the same extension API object for the prompt and output-channel wrappers.
 It answers the first-start bundled-copy choice if shown; error prompts never
 trigger retries. It requires Start to return success, then checks ready state,
 launcher identity, generation and HTTP 200 at the demo's `$metadata`, including
-the matching `X-OSD-Generation` header. Stop must remove the HTTP listener.
+the matching `X-OSD-Generation` header. Stop must refuse a fresh connection
+with `ECONNREFUSED`; a timeout or connection reset fails the check.
 No framework or separately installed test extension is needed.
 
 Layers are copied into a writable workspace inside the container and pass
@@ -78,18 +84,19 @@ No extra dbus setup was justified by the supplied log; any subsequent startup
 error is now visible. Module tests cover process lifetime, launch paths and
 flags, exit status, stderr/log reporting, Xvfb failure and missing PASS.
 
-Verify this fix on the Docker host with an image rebuild (omit
-`--skip-image-build`):
+Supplied Docker evidence from the i7 host: release
+`vscode-stable-v0.6.1666` passed the bare-container smoke in 31.8 s, with
+the first answer 12.99 s after Start resolved. The same release with
+`fixtures/bad-layer` exited 1 and reported
+`check_syntax, Component "scheduled" not found in structure`.
+The editing host has no Docker executable or daemon socket, so these are
+the i7 results, not a container run on the editing host.
 
-```sh
-node tools/osd-vsix-bare-smoke.mjs --release vscode-stable-v0.6.1666
-```
-
-Expect exit 0 and `vsix-bare: PASS` after Start, metadata and Stop checks.
-Docker execution remains unverified on the editing host.
-
-Start is bounded to 540 seconds; activation, HTTP and Stop have separate
-limits. Shell installation/test deadlines are 180/660 seconds, with a 10-second
+Start is bounded to 540 seconds; activation and Stop have separate limits.
+Every HTTP request has a five-second absolute deadline that destroys the
+request even if data keeps arriving. The first-answer poll has a 120-second
+budget; each request and retry delay is capped to its remaining time.
+Shell installation/test deadlines are 180/660 seconds, with a 10-second
 kill grace. Host Docker run is bounded to 960 seconds and removes its uniquely
 named container even after a timeout. Image/VSIX builds have 20-minute limits;
 each release fetch has a five-minute limit. Timings are printed for each host
@@ -101,11 +108,12 @@ Docker caches the image's layers normally. `--skip-image-build` uses the
 existing `osd-vsix-bare:code-1.101.2` image, useful for repeated probes. The
 optional [advisory workflow](../../.github/workflows/vsix-bare-smoke.yml) uses
 the Actions Docker build cache and runs only on manual dispatch and
-`vscode-v*` tags. It does not participate in required CI or publish anything.
+`vscode-v*` and `vscode-stable-v*` tags (stable channel, #606).
+It does not participate in required CI or publish anything.
 Tag runs build that tag's checkout, avoiding a race with release publication;
 manual runs may select an already published release instead.
 
-Local validation on 2026-10-04: eight module/harness checks passed in 0.116 s
+Earlier local validation on 2026-10-04: eight module/harness checks passed in 0.116 s
 on Node 24.16.0. Verified upstream main `d1a49bb5` was packaged in a clean
 temporary clone with the locked toolchain and sources in 37.02 s as
 `open-steamgate-0.6.1664.vsix` (20,218,402 bytes, SHA-256
@@ -114,6 +122,10 @@ The packaged seed's actual builder rejected the bad layer with
 `osd-build: FAILED: check_syntax, Component "scheduled" not found in structure`
 at class line 8. This is a native builder check, not a bare-container result.
 The final fixture's native rejection took 11.09 s and exited 1.
-The container pass/fail proofs remain unverified on this host: it has no
-Docker executable or daemon socket, and both invocations exit with
-`spawn docker ENOENT` before installation.
+Local container invocations exited with `spawn docker ENOENT` before
+installation; the supplied i7 container pass/fail evidence is recorded above.
+
+After the critic fixes on 2026-10-04, all 17 module/harness checks and
+actionlint passed. Restoring inactivity timeouts and accepting any Stop
+request error made the trickling-response and both surviving-listener
+regressions fail (three red proofs).

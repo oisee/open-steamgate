@@ -10,18 +10,38 @@ function bounded(promise, ms, label) {
   })]).finally(() => clearTimeout(timer));
 }
 
-function get(url) {
+function get(url, ms = 5000) {
   return new Promise((resolve, reject) => {
-    const req = http.get(url, {timeout: 5000}, res => {
+    const req = http.get(url, {agent: false}, res => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
       res.on('error', reject);
       res.on('end', () => resolve({status: res.statusCode, headers: res.headers,
         body: Buffer.concat(chunks).toString()}));
     });
-    req.on('timeout', () => req.destroy(new Error(`HTTP timeout: ${url}`)));
+    // Socket inactivity timeouts restart on data; this deadline also bounds a
+    // response that keeps trickling bytes without ever ending.
+    const timer = setTimeout(() => req.destroy(Object.assign(
+      new Error(`HTTP deadline after ${ms} ms: ${url}`), {code: 'HTTP_DEADLINE'})), ms);
+    req.on('close', () => clearTimeout(timer));
     req.on('error', reject);
   });
+}
+
+async function waitForServing(url, ms = 120000) {
+  const deadline = Date.now() + ms;
+  let lastError;
+  while (Date.now() < deadline) {
+    const requestBudget = deadline - Date.now();
+    if (requestBudget <= 0) break;
+    try {
+      const serving = await get(url, Math.min(5000, requestBudget));
+      if (serving.status === 200) return serving;
+    } catch (error) { lastError = error; }
+    const remaining = deadline - Date.now();
+    if (remaining > 0) await new Promise(resolve => setTimeout(resolve, Math.min(1000, remaining)));
+  }
+  throw lastError || new Error(`no 200 from ${url} within ${ms} ms`);
 }
 
 exports.run = async () => {
@@ -68,13 +88,7 @@ exports.run = async () => {
     // (e.g. while the warm cache primes). Poll, and print how long it took, so a
     // slow first answer is visible as a number instead of a flaky failure.
     const askedAt = Date.now();
-    let serving, lastError;
-    while (Date.now() - askedAt < 120000) {
-      try { serving = await get(`${url}/osd/serving`); if (serving.status === 200) break; }
-      catch (error) { lastError = error; }
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    if (!serving || serving.status !== 200) throw lastError || new Error(`no 200 from ${url}/osd/serving within 120 s`);
+    const serving = await waitForServing(`${url}/osd/serving`);
     console.log(`vsix-bare: first /osd/serving answer ${((Date.now() - askedAt) / 1000).toFixed(2)} s after Start resolved`);
     const identity = JSON.parse(serving.body);
     assert.equal(identity.ready, true);
@@ -85,7 +99,8 @@ exports.run = async () => {
     assert.equal(metadata.headers['x-osd-generation'], String(identity.generation));
     assert.match(metadata.body, /<.*Edmx/);
     await bounded(vscode.commands.executeCommand('osd.stop'), 90000, 'Stop');
-    await assert.rejects(get(`${url}/osd/serving`), 'system still answers after Stop');
+    await assert.rejects(get(`${url}/osd/serving`), {code: 'ECONNREFUSED'},
+      'Stop must close the listener and refuse a fresh connection');
     fs.writeFileSync('/smoke/PASS', `vsix-bare: PASS in ${((Date.now() - started) / 1000).toFixed(2)} s; ${url}; identity=${identity.launcherIdentity}; generation=${identity.generation}\n`);
   } catch (error) {
     console.error(`vsix-bare: FAIL after ${((Date.now() - started) / 1000).toFixed(2)} s: ${error.stack}`);

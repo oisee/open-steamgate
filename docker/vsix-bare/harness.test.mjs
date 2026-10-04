@@ -8,11 +8,17 @@ import {runInNewContext} from "node:vm";
 const source = await readFile(new URL("./harness.cjs", import.meta.url), "utf8");
 const require = createRequire(import.meta.url);
 
-async function exercise({startResult = true, generation = "generation-a", status = 200, identity = "launch-a"} = {}) {
+async function exercise({startResult = true, generation = "generation-a", status = 200,
+  identity = "launch-a", stopBehavior = "close"} = {}) {
   const logs = [];
   const markers = [];
   const commands = [];
+  let stopped = false;
   const server = createServer((req, res) => {
+    if (stopped) {
+      if (stopBehavior === 'reset') req.socket.destroy();
+      return; // A listener that accepts but never answers must fail Stop too.
+    }
     if (req.url === '/osd/serving') {
       res.end(JSON.stringify({ready: true, launcherPid: process.pid,
         launcherIdentity: identity, generation: 'generation-a'}));
@@ -25,6 +31,7 @@ async function exercise({startResult = true, generation = "generation-a", status
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${server.address().port}`;
   const close = async () => {
+    server.closeAllConnections();
     if (server.listening) await new Promise(resolve => server.close(resolve));
   };
   const vscode = {
@@ -51,7 +58,8 @@ async function exercise({startResult = true, generation = "generation-a", status
         return startResult;
       }
       assert.equal(command, 'osd.stop');
-      await close();
+      stopped = true;
+      if (stopBehavior === 'close') await close();
     }},
   };
   const exports = {};
@@ -59,7 +67,8 @@ async function exercise({startResult = true, generation = "generation-a", status
     require: name => name === 'vscode' ? vscode : name === 'node:fs' ? {
       realpathSync: path => path, writeFileSync: (path, text) => markers.push({path, text}),
     } : require(name),
-    exports, Buffer, setTimeout, clearTimeout,
+    exports, Buffer, clearTimeout,
+    setTimeout: (fn, ms) => setTimeout(fn, ms === 5000 ? 80 : ms),
     process: {env: {SMOKE_EXTENSION: '/installed'}, stdout: {write: text => logs.push(text)}},
     console: {log: text => logs.push(text), error: text => logs.push(text)},
   });
@@ -103,4 +112,64 @@ test('HTTP failure cannot create a PASS marker', async () => {
   const result = await exercise({status: 500});
   assert.ok(result.error);
   assert.equal(result.markers.length, 0);
+});
+
+for (const stopBehavior of ['hang', 'reset']) {
+  test(`Stop cannot create a PASS marker when the listener still accepts (${stopBehavior})`, async () => {
+    const result = await exercise({stopBehavior});
+    assert.ok(result.error, result.logs);
+    assert.equal(result.markers.length, 0);
+    assert.deepEqual(result.commands, ['osd.start', 'osd.stop', 'osd.stop']);
+  });
+}
+
+// Expose the real helpers only inside this test's VM; the extension protocol
+// continues to export just run().
+const helpers = {};
+runInNewContext(source + '\nexports.get = get; exports.waitForServing = waitForServing;', {
+  require, exports: helpers, Buffer, setTimeout, clearTimeout,
+});
+
+async function withServer(handler, check) {
+  const server = createServer(handler);
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try { await check(`http://127.0.0.1:${server.address().port}`); }
+  finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+}
+
+test('absolute HTTP deadline destroys a response that keeps trickling data', async () => {
+  let disconnected;
+  const closed = new Promise(resolve => { disconnected = resolve; });
+  await withServer((req, res) => {
+    res.write('first');
+    const timer = setInterval(() => res.write('more'), 10);
+    const end = setTimeout(() => res.end('late'), 500);
+    res.on('close', () => { clearInterval(timer); clearTimeout(end); disconnected(); });
+  }, async url => {
+    await assert.rejects(helpers.get(url, 80), {code: 'HTTP_DEADLINE'});
+    await closed;
+  });
+});
+
+test('first-answer polling caps a hanging request to the remaining budget', async () => {
+  await withServer(() => {}, async url => {
+    const started = Date.now();
+    await assert.rejects(helpers.waitForServing(url, 80), {code: 'HTTP_DEADLINE'});
+    assert.ok(Date.now() - started < 1000, 'poll exceeded its budget by a full retry delay');
+  });
+});
+
+test('first-answer polling caps the retry delay to the remaining budget', async () => {
+  let responses = 0;
+  await withServer((req, res) => { responses++; res.writeHead(503); res.end(); }, async url => {
+    const started = Date.now();
+    // A timer can wake just before the deadline, allowing one last short
+    // request; either a non-200 or its deadline is a valid final diagnostic.
+    await assert.rejects(helpers.waitForServing(url, 80));
+    assert.ok(Date.now() - started < 1000, 'poll exceeded its budget by a full retry delay');
+    assert.ok(responses > 0, 'server must answer before exercising the retry delay');
+  });
 });
