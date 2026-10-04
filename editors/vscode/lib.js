@@ -914,7 +914,7 @@ class Osd {
       `<adtcore:objectReference adtcore:uri="${xmlEscape(uriOf(o))}" adtcore:name="${xmlEscape(o.name)}"/>`).join("");
     const body = `<?xml version="1.0" encoding="UTF-8"?>
 <adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">${refs}</adtcore:objectReferences>`;
-    const res = await this.request("/sap/bc/adt/activation", {method: "POST", headers: {"content-type": "application/xml"}, body});
+    const res = await this.request("/sap/bc/adt/activation?method=activate", {method: "POST", headers: {"content-type": "application/xml"}, body});
     const generation = res.headers.get("x-osd-generation") ?? undefined;
     const build = res.headers.get("x-osd-build") ?? undefined;
     const swapMs = res.headers.get("x-osd-swap-ms");
@@ -989,11 +989,10 @@ function parseCheckReport(xml) {
 
 /** The activation route's answer (tools/adt-documents.mjs, activationSuccessDocument
  *  / activationFailureDocument) into `{ok, issues: [{line, column, message, objDescr}]}`.
- *  Both shapes are `chkl:messages`; only a clean activation carries
- *  `chkl:properties`, so its presence is the whole test. */
+ *  Both shapes carry properties; activationExecuted determines success. */
 function parseActivationResult(xml) {
   const text = String(xml ?? "").trim();
-  if (text === "" || text.includes("<chkl:properties")) {
+  if (text === "" || /<chkl:properties\b[^>]*activationExecuted="true"/.test(text)) {
     return {ok: true, issues: []};
   }
   const issues = [];
@@ -1002,7 +1001,7 @@ function parseActivationResult(xml) {
     const attrs = m[2];
     const href = attrs.match(/href="([^"]*)"/)?.[1] ?? "";
     issues.push({
-      line: Number(attrs.match(/line="([^"]*)"/)?.[1] ?? "1"),
+      line: Number(href.match(/#start=(\d+),/)?.[1] ?? attrs.match(/line="([^"]*)"/)?.[1] ?? "1"),
       column: Number(href.match(/,(\d+)$/)?.[1] ?? "1"),
       objDescr: xmlUnescape(attrs.match(/objDescr="([^"]*)"/)?.[1] ?? ""),
       message: xmlUnescape(m[3].match(/<txt>([\s\S]*?)<\/txt>/)?.[1] ?? ""),

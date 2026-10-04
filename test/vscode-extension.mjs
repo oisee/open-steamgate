@@ -1495,7 +1495,10 @@ describe("editors/vscode: the extension's logic", function () {
       {type: "CLAS", name: "ZCL_A", issues: [{severity: "E", message: "Syntax error", line: 7, column: 3}]},
     ]));
     expect(failed.ok).to.equal(false);
-    expect(failed.issues).to.deep.equal([{line: 7, column: 3, objDescr: "ZCL_A", message: "Syntax error"}]);
+    expect(failed.issues).to.deep.equal([
+      {line: 0, column: 1, objDescr: "", message: "Activation was cancelled."},
+      {line: 7, column: 3, objDescr: "Class ZCL_A", message: "Syntax error"},
+    ]);
   });
 
   it("SE80's F8, one entry per object type: what this build does, or the route its turn would use", () => {

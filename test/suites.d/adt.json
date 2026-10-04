@@ -32,6 +32,7 @@
     "test/adt-abap-sessions.mjs",
     "test/adt-abapfs-conformance.mjs",
     "test/adt-activation.mjs",
+    "test/adt-activation-wire.mjs",
     "test/adt-devloop.mjs",
     "test/adt-editor.mjs",
     "test/adt-facade.mjs",
