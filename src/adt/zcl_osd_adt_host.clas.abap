@@ -46,6 +46,8 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
 
     TYPES: BEGIN OF ty_read,
              source TYPE string,
+             etag TYPE string,
+             version TYPE string,
              file TYPE string,
              package TYPE string,
              name TYPE string,
@@ -53,6 +55,7 @@ CLASS zcl_osd_adt_host DEFINITION PUBLIC FINAL CREATE PUBLIC.
              empty TYPE abap_bool,
            END OF ty_read.
     CLASS-METHODS read IMPORTING iv_type TYPE string iv_name TYPE string iv_include TYPE string DEFAULT `main`
+      iv_version TYPE string OPTIONAL
       RETURNING VALUE(rs_read) TYPE ty_read RAISING zcx_osd_adt.
 
     TYPES: BEGIN OF ty_answer,
@@ -239,9 +242,9 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
     DATA lx_error TYPE REF TO zcx_osd_adt.
     require( `READ` ).
     CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
-      EXPORTING iv_command = `READ` iv_type = iv_type iv_name = iv_name iv_include = iv_include
+      EXPORTING iv_command = `READ` iv_type = iv_type iv_name = iv_name iv_include = iv_include iv_revision = iv_version
       IMPORTING ev_source = rs_read-source ev_file = rs_read-file ev_package = rs_read-package
-                ev_json = lv_json ev_error = lv_error
+                ev_json = lv_json ev_error = lv_error ev_version = rs_read-version
       EXCEPTIONS OTHERS = 1.
     IF sy-subrc <> 0.
       lx_error = zcx_osd_adt=>internal( `no object store here` ).
@@ -249,6 +252,7 @@ CLASS zcl_osd_adt_host IMPLEMENTATION.
     ENDIF.
     check_error( iv_json = lv_json iv_error = lv_error ).
     lo_json = parse( iv_what = `READ` iv_json = lv_json ).
+    rs_read-etag = lo_json->get_string( `/etag` ).
     rs_read-name = lo_json->get_string( `/name` ).
     rs_read-changed_by = lo_json->get_string( `/changedBy` ).
     rs_read-empty = lo_json->get_boolean( `/empty` ).

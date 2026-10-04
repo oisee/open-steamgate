@@ -216,10 +216,17 @@ describe("ADT B2a source reads and bare documents: live Node byte diff", functio
     expect((await diff(base+collections[0]+"/zcl_plain")).body.toString().match(/<class:include /g)).to.have.length(1);
   });
   it("$TMP author appears on the class document",async () => {expect((await diff(base+collections[0]+"/zcl_author")).body.toString()).to.include('changedBy="BUILDER_A"');});
-  for(const name of ["zreport","zbom","znbsp","zreports","zcomment","zline"]) it(`PROG report scan ${name}, inactive properties stay 1970/active`,async () => {
+  for(const name of ["zreport","zbom","znbsp","zreports","zcomment","zline"]) it(`PROG report scan ${name}, properties keep 1970 and equal source stays active`,async () => {
     const r=await diff(base+collections[2]+"/"+name), body=r.body.toString();
     expect(body.includes('programType="executableProgram"')).to.equal(!["zreports","zcomment"].includes(name));
     expect(body).to.include('changedAt="1970-01-01T00:00:00Z"').and.include('version="active"');
+  });
+  it("a changed saved program reports inactive, and reverting to active bytes reports active",async () => {
+    const path=base+collections[2]+"/zreport";
+    store.write("PROG","ZREPORT","REPORT z.\n* changed");
+    expect((await diff(path)).body.toString()).to.include('version="inactive"');
+    store.write("PROG","ZREPORT","REPORT z.");
+    expect((await diff(path)).body.toString()).to.include('version="active"');
   });
   for(const [label,name] of reportBoundaries) it(`PROG report scan ${label} is executable and byte-equal`,async () => {
     const r=await diff(base+collections[2]+"/"+name); expect(r.status).to.equal(200);

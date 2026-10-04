@@ -9,8 +9,7 @@ export const entityTag = (body) => createHash("sha256")
 export const normalizedTag = (value) => String(value ?? "").trim()
   .replace(/^W\//, "").replace(/^"|"$/g, "");
 
-export const sendEntity = (req, res, body) => {
-  const tag = entityTag(body);
+export const sendEntity = (req, res, body, tag = entityTag(body)) => {
   res.set("ETag", tag);
   const candidates = String(req.headers["if-none-match"] ?? "")
     .split(",").map((value) => value.trim().replace(/^W\//, "").replace(/^"|"$/g, ""));

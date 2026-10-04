@@ -105,7 +105,7 @@ ${pad}</abapsource:objectStructureElement>`;
                                    xml:base="${xmlEscape(options.base)}"`}
                                    adtcore:name="${xmlEscape(object.name)}"
                                    adtcore:type="${xmlEscape(object.type)}"
-                                   abapsource:sourceUri="source/main">
+${object.version === undefined ? "" : `                                   adtcore:version="${xmlEscape(object.version)}"\n`}                                   abapsource:sourceUri="source/main">
 ${(object.children ?? []).map((c) => element(c, 2)).join("\n")}
 </abapsource:objectStructureElement>
 `;
@@ -360,7 +360,8 @@ export function structureOf(store, type, name) {
     children.push({name: entry.name, type: "PROG/PX", uri: "source/main"});
   }
 
-  return {name: entry.name, type: ADT_TYPE[type] ?? type, children};
+  return {name: entry.name, type: ADT_TYPE[type] ?? type, children,
+    ...(["INCL", "SRVD"].includes(type) ? {version: store.stateOf(entry).version} : {})};
 }
 
 // The base resource of a class include. A client resolves a method body by

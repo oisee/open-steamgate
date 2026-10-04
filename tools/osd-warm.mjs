@@ -26,9 +26,10 @@
 // generators read the tree too, and a change they would see has to reach
 // them (see warmRule below).
 // Warm verification children can be launched from the serving runtime.
+import {keepSourceInputs, completeSourceSnapshot} from "./osd-source-snapshot.mjs";
 import {spawn} from "./osd-child-process.mjs";
 import {createHash} from "node:crypto";
-import {copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync} from "node:fs";
+import {cpSync, copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, watch, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {generatorIdentity, hashOf, inputsOf, layout, liveHash, lock, linkRoots, ownConfig, prepare, rootsWanted, switchTo} from "./osd-build.mjs";
@@ -771,6 +772,11 @@ export class WarmCompiler {
             hash, builtAt: new Date().toISOString(), ms: Date.now() - started, objects: manifest.objects,
             transpiler, inputs: manifest.inputs, gen: manifest.gen, overridden: manifest.overridden,
           }, null, 2));
+          keepSourceInputs(root, tmp, digests, actual, overlay,
+            {generation: join(paths.byInput, from), digests: this.digests});
+          const generatedSource = join(paths.byInput, from, "source", "gen");
+          if (existsSync(generatedSource)) cpSync(generatedSource, join(tmp, "source", "gen"), {recursive: true});
+          completeSourceSnapshot(tmp);
           linkRoots(root, tmp, this.config, undefined, {wanted});
           mkdirSync(paths.byInput, {recursive: true});
           // the note first: a generation must never be on disk under its name

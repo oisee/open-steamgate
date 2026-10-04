@@ -6,6 +6,7 @@ CLASS zcl_osd_adt_entity DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS normalized IMPORTING iv_tag TYPE string RETURNING VALUE(rv_tag) TYPE string.
     CLASS-METHODS send IMPORTING is_request TYPE zif_osd_adt_route=>ty_request
       iv_body TYPE string iv_type TYPE string iv_note TYPE string OPTIONAL
+      iv_etag TYPE string OPTIONAL
       iv_charset TYPE abap_bool DEFAULT abap_true
       RETURNING VALUE(rs_response) TYPE zif_osd_adt_route=>ty_response.
 ENDCLASS.
@@ -34,7 +35,10 @@ CLASS zcl_osd_adt_entity IMPLEMENTATION.
     DATA lt_candidates TYPE string_table.
     DATA lv_candidate TYPE string.
     DATA ls_header TYPE ihttpnvp.
-    lv_tag = tag( iv_body ).
+    lv_tag = iv_etag.
+    IF lv_tag IS INITIAL.
+      lv_tag = tag( iv_body ).
+    ENDIF.
     rs_response-status = 200.
     rs_response-content_type = iv_type.
     IF iv_charset = abap_true AND iv_type NS `charset=`.

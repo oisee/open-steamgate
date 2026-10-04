@@ -44,6 +44,22 @@ Named by the hash of its *inputs*: every file in the input folders,
 content. Same inputs, same name, so a rebuild with nothing changed is a
 no-op; a transpiler upgrade is a new generation, as it should be.
 
+**ADT source versions** — cold and warm builds retain their source inputs at
+`build/by-input/<hash>/source/<working-file-path>`. Cold builds validate the
+copies against the input digests, including generated ABAP inputs; warm builds
+hard-link unchanged copies from their previous generation. These are files,
+not database rows. Active reads select the serving runtime's generation (or
+`build/live` when no runtime serves); inactive and unqualified reads select the
+working file. The versions feed's `00000` content uses the same active read.
+
+Saving preserves the generation input in `build/inactive/active/` for the
+existing build overlay. Failed activation leaves the active generation source
+intact. Object documents report `inactive` whenever any saved source part
+differs from its active bytes, including class includes; saving identical bytes
+or reverting to active bytes reports `active`. Active source reads have a
+separate ETag from inactive reads even when their bodies match. The persistent
+inactive set and GET activation/inactiveobjects retain their existing behavior.
+
 **Base image** — a database with the schema of one generation and the
 mandatory rows seeded, and nothing else. Named by the schema hash the
 stamp already computes. Seeded once per schema, then only ever copied.

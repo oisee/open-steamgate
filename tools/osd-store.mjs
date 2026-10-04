@@ -19,7 +19,8 @@ import {ddlsIssues} from "./osd-store-ddls.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
-import {hashOf, inputsOf, loadConfig, normalPath} from "./osd-build.mjs";
+import {hashOf, inputsOf, loadConfig, normalPath, liveHash} from "./osd-build.mjs";
+import {entityTag} from "./adt-entity.mjs";
 import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
 import {TMP_FOLDER, TMP_TEXT, isTmpPackage, tmpAuthors, tmpRoot} from "./osd-tmp.mjs";
@@ -411,7 +412,9 @@ export class ObjectStore {
       if (!existsSync(join(this.root, file))) continue;
       const copy = join(this.root, this.#snapshotOf(file));
       mkdirDurable(dirname(copy));
-      copyDurable(join(this.root, file), copy);
+      const active = this.#activeFile(file, entry);
+      if (active && existsSync(active)) copyDurable(active, copy);
+      else writeDurable(copy, "");
       this.#crash("keep:after-copy");
     }
   }
@@ -562,7 +565,12 @@ export class ObjectStore {
     } catch {
       changedAt = undefined;
     }
-    return {changedAt, version: this.inactive.has(`${entry.type} ${entry.name}`) ? "inactive" : "active"};
+    const object = this.find(entry.type, entry.name) ?? entry;
+    const differs = TYPES[entry.type]?.source === true
+      ? this.#filesOfEntry(object).filter((f) => !/\.xml$/.test(f))
+        .some((f) => (existsSync(join(this.root, f)) ? readFileSync(join(this.root, f), "utf8") : "") !== this.#activeSource(f, entry))
+      : this.inactive.has(`${entry.type} ${entry.name}`);
+    return {changedAt, version: differs ? "inactive" : "active"};
   }
 
   // An activation checks one source revision. A save can arrive while the
@@ -798,7 +806,7 @@ export class ObjectStore {
     return present;
   }
 
-  read(type, name, include = "main") {
+  read(type, name, include = "main", version = "inactive") {
     // a DDLS may be read by the entity it defines, when that is not its
     // object name (FOR TABLE FUNCTION names the entity). Only a read: a
     // write or a delete resolves its target by object name, never by entity,
@@ -816,11 +824,33 @@ export class ObjectStore {
       }
       const file = entry.file.replace(/\.clas\.abap$/, suffix);
       if (!existsSync(join(this.root, file))) {
-        return {...entry, include, source: "", empty: true};
+        return this.#sourceVersion({...entry, include, file, source: "", empty: true}, version);
       }
-      return {...entry, include, file, source: readFileSync(join(this.root, file), "utf8")};
+      return this.#sourceVersion({...entry, include, file, source: readFileSync(join(this.root, file), "utf8")}, version);
     }
-    return {...entry, include, source: readFileSync(join(this.root, entry.file), "utf8")};
+    return this.#sourceVersion({...entry, include, source: readFileSync(join(this.root, entry.file), "utf8")}, version);
+  }
+
+  #activeFile(file, entry) {
+    const hash = (this.served?.running === true ? this.served.generation : undefined) ?? liveHash(this.root);
+    const generation = hash && join(this.root, "build", "by-input", hash, "source");
+    if (generation && existsSync(join(generation, ".complete"))) return join(generation, file);
+    // Trees with no build (and older generations) retain the pre-save copy.
+    const copy = join(this.root, this.#snapshotOf(file));
+    if (existsSync(copy)) return copy;
+    if (this.inactive.has(`${entry.type} ${entry.name}`)) return undefined;
+    return join(this.root, file);
+  }
+
+  #activeSource(file, entry) {
+    const active = this.#activeFile(file, entry);
+    return active && existsSync(active) ? readFileSync(active, "utf8") : "";
+  }
+
+  #sourceVersion(part, version) {
+    const active = version === "active";
+    const source = active ? this.#activeSource(part.file, part) : part.source;
+    return {...part, source, etag: entityTag(active ? "active\0" + source : source)};
   }
 
   // a write lands a file; a new object goes to the first writable root unless

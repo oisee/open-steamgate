@@ -1,6 +1,6 @@
 // The ADT versions feed (tools/adt-versions.mjs) through the facade's own
 // router: a program's .../source/main/versions and a class include's
-// .../includes/<include>/versions list 00000 (the working tree) and one
+// .../includes/<include>/versions list 00000 (the active source; this fixture has no generation) and one
 // version per commit, oldest 00001, and each entry's content URI reads that
 // version back. What a client parses is abap-adt-api's reader contract
 // (atom:content@src, atom:title, atom:updated, atom:author/atom:name). The
@@ -66,7 +66,7 @@ describe("tools/adt-facade: versions of an object out of git", function () {
     rmSync(root, {recursive: true, force: true});
   });
 
-  it("lists a program's versions: 00000 the working tree, then its commits newest first", async () => {
+  it("lists a program's versions: 00000 the active source, then its commits newest first", async () => {
     const feed = await get("/sap/bc/adt/programs/programs/zver/source/main/versions");
     expect(feed.status).to.equal(200);
     expect(feed.type).to.match(/^application\/atom\+xml/);

@@ -1626,9 +1626,10 @@ export function adtRouter(options = {}) {
     // has already decoded it by the time it is a parameter
     router.get(`${BASE}/${adt}/:name/source/main`, (req, res) => {
       answer(res, () => {
-        const source = store.read(type, req.params.name).source;
+        const part = store.read(type, req.params.name, "main", req.query.version);
+        const source = part.source;
         res.type("text/plain; charset=utf-8");
-        sendEntity(req, res, source);
+        sendEntity(req, res, source, part.etag);
       });
     });
     // the base resource of a class include. A client resolving a method body
@@ -1640,12 +1641,12 @@ export function adtRouter(options = {}) {
         if (type !== "CLAS") {
           throw new NotFound(type, `${name} include ${include}`);
         }
-        const part = store.read(type, name, include);
+        const part = store.read(type, name, include, req.query.version);
         // VSP and the source links in class properties use this URL directly
         // with */*. Only an explicit include-property request wants XML.
         if (!String(req.headers.accept ?? "").includes("application/vnd.sap.adt.oo.classes.includes.")) {
           res.type("text/plain; charset=utf-8");
-          sendEntity(req, res, part.source);
+          sendEntity(req, res, part.source, part.etag);
           return;
         }
         const document = classIncludeDocument(store.find(type, name).name, include, `${BASE}/${adt}/${encodeURIComponent(String(name).toLowerCase())}/includes/${include}/source/main`);
@@ -1659,9 +1660,10 @@ export function adtRouter(options = {}) {
         if (type !== "CLAS") {
           throw new NotFound(type, `${req.params.name} include ${req.params.include}`);
         }
-        const source = store.read(type, req.params.name, req.params.include).source;
+        const part = store.read(type, req.params.name, req.params.include, req.query.version);
+        const source = part.source;
         res.type("text/plain; charset=utf-8");
-        sendEntity(req, res, source);
+        sendEntity(req, res, source, part.etag);
       });
     });
     // the versions of the source (tools/adt-versions.mjs): the feed, and one
@@ -1669,7 +1671,7 @@ export function adtRouter(options = {}) {
     // <include>/versions, and so does an interface's main include, which is
     // where vsp asks (resolveRevisionURL); everything else at .../source/main.
     const versionsOf = (req, res, include) => answer(res, () => {
-      const part = store.read(type, req.params.name, include);
+      const part = store.read(type, req.params.name, include, "active");
       const base = `${BASE}/${adt}/${encodeURIComponent(String(req.params.name).toLowerCase())}` +
         (include === undefined ? "/source/main/versions" : `/includes/${include}/versions`);
       const feed = objectVersions(store.root, part.empty ? undefined : part.file, identity.userName);
@@ -1679,7 +1681,7 @@ export function adtRouter(options = {}) {
       sendEntity(req, res, Buffer.from(versionsFeedDocument(part.name, type, base, feed)));
     });
     const versionContent = (req, res, include) => answer(res, () => {
-      const part = store.read(type, req.params.name, include);
+      const part = store.read(type, req.params.name, include, "active");
       let source;
       try {
         source = versionSource(store.root, part.empty ? undefined : part.file, req.params.version, part.source);
@@ -1778,7 +1780,7 @@ export function adtRouter(options = {}) {
       router.get(`${BASE}/${adt}/:name`, (req, res) => {
         answer(res, () => {
           const object = store.read(type, req.params.name);
-          const document = sourcePropertiesDocument(type, object);
+          const document = sourcePropertiesDocument(type, {...object, version: store.stateOf(object).version});
           res.type(SOURCE_PROPERTY_MIME[type]);
           sendEntity(req, res, document);
         });

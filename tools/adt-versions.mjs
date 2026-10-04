@@ -3,11 +3,12 @@
 // and each version's source at .../versions/<timestamp>/<version>/content.
 // This is what Eclipse's Revision History, "Compare With" and vsp read.
 //
-// Nothing here is stored. The versions are the file's commits
+// Historical versions are read from the file's commits
 // (tools/osd-git-history.mjs), the way ZOSD_STORE HISTORY answers ABAP, and
 // the numbering is the one measured on A4H (foreman-dell, 2026-09-30): a
 // local object has one version, 00000, which is the active source, dated at
-// its last activation. Here 00000 is the working tree, and the commits
+// its last activation. Here STORE supplies the active generation source for
+// 00000, and the commits
 // that changed the file are 00001..n, oldest first, so a number stays with
 // its commit as history grows. An object git has no history for has 00000
 // only, which is what a local object on a system has too.
@@ -25,7 +26,7 @@ const escape = (text) => String(text ?? "")
 const stampOf = (date) => date.toISOString().slice(0, 19).replace(/[-T:]/g, "");
 
 /**
- * The versions of a file, newest first: 00000 (the working tree) and one
+ * The versions of a file, newest first: 00000 (the active source) and one
  * per commit that changed it. `user` names the active version's author
  * when the working tree differs from the last commit. `file` undefined is
  * a class include that has no file: 00000 only.
@@ -110,7 +111,7 @@ export function versionsFeedDocument(name, type, base, {versions}) {
 }
 
 /**
- * One version's source. 00000 is `active`, the working tree's source; any
+ * One version's source. 00000 is `active`, supplied by STORE; any
  * other number is read out of its commit at the path the file had then.
  * A number the feed does not list is an error, never the active source.
  */
