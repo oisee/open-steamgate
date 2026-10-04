@@ -1,0 +1,96 @@
+name: consumer-smoke
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: consumer-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+# Advisory for the first week. Deliberately outside the required test rollup;
+# failures remain visible as a red consumer-smoke check (no continue-on-error).
+jobs:
+  consumer-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      OSD_HOME: ${{ github.workspace }}/osd
+      GOPROXY: "off"
+      GOTOOLCHAIN: local
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - name: Check out the runtime under test
+        uses: actions/checkout@v4
+        with:
+          path: osd
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: osd/package-lock.json
+      - name: Install and bootstrap runtime
+        working-directory: osd
+        run: |
+          npm ci
+          npm run bootstrap
+      - name: Read consumer pin
+        id: consumer
+        working-directory: osd
+        run: node tools/consumer-smoke.mjs pin
+      - name: Check out pinned consumer
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.consumer.outputs.repo }}
+          ref: ${{ steps.consumer.outputs.ref }}
+          path: demo
+          persist-credentials: false
+      - name: Install consumer dependencies
+        working-directory: demo
+        run: |
+          if [ -f package.json ]; then
+            npm ci
+          else
+            echo 'Pinned consumer has no package.json: no npm dependencies to install.'
+          fi
+      - uses: actions/setup-go@v5
+        if: success() || failure()
+        with:
+          go-version: '1.26'
+          cache: false
+      - name: Fleet slice (SQLite)
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run sqlite
+      - name: Fleet slice (DuckDB)
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run duckdb
+      - name: Fleet CLI (Go)
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run cli
+      - name: Fleet jobs
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run jobs
+      - name: Fleet DSL L3
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run l3
+      - name: Fleet C in ABAP
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run iti
+      - name: Consumer impact summary
+        if: always()
+        working-directory: osd
+        run: node tools/consumer-smoke.mjs summary
