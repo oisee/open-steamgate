@@ -50,7 +50,7 @@ Local cached dependencies cannot measure `npm ci`, network clones, Actions image
 
 ## Parallel suite workflow
 
-The `tests` workflow has one `build` job that prepares the pinned transpiler, fetched packs and libraries, transpiles, lints, runs ABAP Unit and checks BAL across a restart. It uploads a tar of that run's built tree. Four independent `suites` jobs, one `e2e` browser job, and (for the full profile) one `packaging` job restore the same tar and run concurrently. A final job named `test` succeeds only when `build`, all four matrix jobs and `e2e` succeeded, and the packaging result matches the profile selected by `build`. This keeps the check name stable for branch protection.
+The `tests` workflow has one `build` job that prepares the pinned transpiler, fetched packs and libraries, transpiles, lints, runs ABAP Unit and checks BAL across a restart. It uploads a tar of that run's built tree. Six independent `suites` jobs, one `e2e` browser job, and (for the full profile) one `packaging` job restore the same tar and run concurrently. A final job named `test` succeeds only when `build`, all six matrix jobs and `e2e` succeeded, and the packaging result matches the profile selected by `build`. This keeps the check name stable for branch protection.
 
 The tar preserves `build/live` and `output` symlinks and executable bits, which a plain Actions artifact would lose. Each consumer runs `npm ci` with the setup-node cache, restores the pinned transpiler clone under `.local/ci-artifact/transpiler`, and relinks its compiled packages plus the fork's `@abaplint/core`. Its Git metadata stays in the tar so diagnostics can identify the exact pin. The tar also contains `gen/`, `build/`, `.local/lars/`, and every fetched pack source folder from the pack manifests. A missing `gen/`, `output/`, live manifest, library folder, or transpiler build fails the restore step before tests start. After relinking, `osd-ci-artifact verify` logs both hashes and refuses a live/tree mismatch in every consumer job. The artifact is produced by this workflow run; a generation hash cache cannot accidentally supply another run's build. The existing full-suite weights were about 186 s per suite job before moving packaging out, allowing them to overlap with browser work after the build job.
 
@@ -60,7 +60,7 @@ Run 37181371722 built and restored generation `47228b54cec2add2` unchanged. Its 
 
 ## Named packaging group
 
-Each feature fragment in `test/suites.d/*.json` has a `files` array; `vscode.json` also lists `test/vscode-vsix-packaging.mjs` under `groups.packaging`. `loadSuites()` in `tools/osd-suites.mjs` merges fragments and sorts both ordinary and grouped suite paths alphabetically before returning `{files, groups}` to the runner and Go parity. This intentionally changes execution order once. CI will surface hidden order dependencies, including ones like the earlier `apc-timers`/`adt-facade` trap. `node tools/osd-suites.mjs` and all `--shard i/4` runs select only `files` and print the groups omitted. `node tools/osd-suites.mjs --group packaging` runs exactly the packaging file. The list drift check covers both arrays, while `--list-shard i/4` remains the ordinary file list.
+Each feature fragment in `test/suites.d/*.json` has a `files` array; `vscode.json` also lists `test/vscode-vsix-packaging.mjs` under `groups.packaging`. `loadSuites()` in `tools/osd-suites.mjs` merges fragments and sorts both ordinary and grouped suite paths alphabetically before returning `{files, groups}` to the runner and Go parity. This intentionally changes execution order once. CI will surface hidden order dependencies, including ones like the earlier `apc-timers`/`adt-facade` trap. `node tools/osd-suites.mjs` and all `--shard i/6` runs select only `files` and print the groups omitted. `node tools/osd-suites.mjs --group packaging` runs exactly the packaging file. The list drift check covers both arrays, while `--list-shard i/6` remains the ordinary file list.
 
 To add another group, add its test file under `groups.<name>` in `test/suites.d/*.json`, give it a measured weight in `test/suites-timings.json`, and add a CI job or step that runs `--group <name>` with an explicit gate. Every new `test/*.mjs` suite must appear in `files` or a group. Use the prefix placement table in `test/suites.d/README.md`; `node tools/osd-suites.mjs --check` reports a suggested fragment for each unlisted suite.
 
@@ -72,32 +72,61 @@ The `tests` and `preview` browser jobs share `~/.cache/ms-playwright` through a 
 
 ## Balanced shards and visible retries (2026-10-03)
 
-`--shard i/4` assigns whole files longest first to the least-loaded shard using
+`--shard i/6` assigns whole files longest first to the least-loaded shard using
 `test/suites-timings.json` (file → seconds). Ties use path/shard index; missing
 or invalid weights get the median (one second for an empty seed). Files execute
 alphabetically in one process, preserving the existing loader order. There is
 no `test/suites.json` or co-process/order constraint in the fragments. The
 complete manifest drift check still runs before selecting a shard or group.
 
-Seed: `gh run view 37148565297 --log`, the latest green `tests` run available
-on 2026-10-03, commit `3979272e`. Top-level spec titles, including engine-specific
-titles, map to all 273 ordinary files. Durations sum log timestamp differences
-from each title to the next top-level title or final passing line, including
-hooks/inter-file work but excluding initial import/startup. No local full-suite
-measurement was used. Four shards predict **12.03 min each**; five predict
-9.62 min each, both totaling 48.12 execution minutes. We retain four because
-five adds another runner's npm/install/restore cost. These are timing weights,
-not guaranteed CI elapsed times. The older `test/suite-timings.json` is historical.
+Refreshed on 2026-10-04 from the five latest successful `push` runs of
+`tests.yml` on `main`: 37192035109, 37187008824, 37185244903, 37183279842 and
+37180839525 (20 shard artifacts). Each file uses the median of its first-run
+durations across those runs. Six shards are predicted at
+**11.97 / 11.96 / 11.97 / 11.97 / 11.97 / 11.97 min**, below the 13-minute
+execution target; before this change the slowest of four was 19.39 min. Three
+current files have no measurement yet (`test/pre-push.mjs`,
+`test/vscode-jobs-view.mjs`, `test/vscode-serving-front.mjs`) and take the
+median until the next refresh. These weights exclude npm/install/restore and
+initial import/startup, so they do not guarantee CI elapsed times. The older
+`test/suite-timings.json` is historical.
 
 Each shard uploads `suite-results-<index>-attempt-<attempt>` with first-run `timings.json` and
-`flaky.md`, even on failure. Download and refresh the committed weights:
+`flaky.md`, even on failure. Refresh the committed weights with:
 
 ```sh
-gh run download <run-id> --pattern 'suite-results-*' --dir <download-dir>
-node tools/osd-suites-timings.mjs test/suites-timings.json <download-dir>/suite-results-*/timings.json
+node tools/osd-suites-refresh.mjs
 ```
 
-When a shard approaches 20 minutes, refresh `test/suites-timings.json` from CI artifacts with `tools/osd-suites-timings.mjs`.
+It takes only successful `push` runs of `tests.yml` on `main` of this
+repository, re-checks each run's event, branch, repository and conclusion
+before downloading, keeps the latest attempt per shard, and rewrites the
+weights only when drift requires it. Do not merge artifacts from an arbitrary
+run by hand: a pull-request or dispatch run is not a trusted source of
+weights.
+
+`suites-timings.yml` runs weekly on Monday at 08:00 UTC and via
+`workflow_dispatch`. It downloads the five latest successful `tests.yml` runs,
+merges medians, and evaluates the existing six-shard assignment with the fresh
+weights. A maximum more than two minutes above the ideal total/6, or any
+ordinary file missing a valid committed or fresh timing, triggers a PR from
+`ci/weekly-suite-timings`. The summary reports current and balanced predictions.
+Download/API errors fail the workflow. It uses only `GITHUB_TOKEN` with
+`actions: read`, `contents: write`, and `pull-requests: write`; it never pushes
+to main. Repository settings must allow Actions to create pull requests. PRs
+created with `GITHUB_TOKEN` do not automatically start other workflows; run the
+required checks on the PR before merging.
+
+The `tests` and `gogen` concurrency groups cancel active runs only for
+`pull_request` events and share a group by PR ref. Other events use the run ID
+in their group, so pushes to main and tags cannot replace either active or
+pending runs. `preview` and `docker` already disable `cancel-in-progress`,
+which keeps the running workflow. The unchanged `preview` concurrency group
+still lets a new main-push run replace an existing pending run. Preserving
+every preview would require queuing; disabling cancellation alone does not
+provide that guarantee. See [GitHub's concurrency documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
+The `test` aggregate still requires the entire suites matrix to succeed, plus
+the build, browser and Go checks and the packaging job when selected.
 
 Partial downloads preserve unmeasured weights; multiple samples use their median.
 Retries never replace first-run weights. Local runs can write the same artifacts
@@ -127,7 +156,7 @@ shard green and write this line to `$GITHUB_STEP_SUMMARY` and the PR comment:
 
 The label flags possible order dependence: isolation success cannot distinguish
 an ordering dependency from a transient flake. Investigate recurring lines.
-All pull requests require four readable shard reports, including empty
+All pull requests require six readable shard reports, including empty
 `flaky.md` files for clean shards. Download, validation or publication failures
 fail `pr-report`, which the required `test` gate depends on for PRs. Comment
 writes retain the same-repository restriction; fork PRs still validate reports.

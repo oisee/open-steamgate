@@ -1,0 +1,52 @@
+name: suite timing refresh
+
+on:
+  schedule:
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: suite-timing-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Measure drift using the five latest green runs
+        id: timings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/osd-suites-refresh.mjs
+      - name: Propose refreshed timing weights
+        if: steps.timings.outputs.refresh == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ github.token }}
+          branch: ci/weekly-suite-timings
+          add-paths: test/suites-timings.json
+          author: Alice V. <ooisee@gmail.com>
+          commit-message: |
+            ci: refresh suite timing medians
+
+            Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+            Claude-Session: https://claude.ai/code/session_01FSTEHL6tT6QuRcwTrT1r7X
+          title: 'ci: refresh suite timing medians'
+          body: |
+            The five latest successful tests.yml runs show a shard more than two
+            minutes above the ideal average, or suites with missing timings.
+            Refresh per-file medians and rebalance the six shards. Predictions
+            and missing-timing counts are in the refresh workflow summary.
+            Retry durations do not replace first-run measurements.

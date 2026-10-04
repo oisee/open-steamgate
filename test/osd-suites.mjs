@@ -4,6 +4,7 @@
 // the specimen made for it.
 import {expect} from "chai";
 import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment, runWithRetries, runWithRetries as realRunWithRetries} from "../tools/osd-suites.mjs";
+import {timingDrift, latestShardArtifacts, downloadTrustedTimings} from "../tools/osd-suites-refresh.mjs";
 import {mergeTimings} from "../tools/osd-suites-timings.mjs";
 import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync, symlinkSync, readdirSync} from "node:fs";
 import {createRequire} from "node:module";
@@ -108,10 +109,10 @@ describe("the suite list against the tree", () => {
 
 
 describe("suite sharding", () => {
-  it("partitions the real list into four disjoint shards", () => {
+  it("partitions the real list into six disjoint shards", () => {
     const files = loadSuites().files;
     const seconds = JSON.parse(readFileSync("test/suites-timings.json", "utf8"));
-    const all = assignShards(files, seconds, 4).flatMap((shard) => shard.files);
+    const all = assignShards(files, seconds, 6).flatMap((shard) => shard.files);
     expect(all.slice().sort()).to.deep.equal(files.slice().sort());
     expect(new Set(all).size).to.equal(files.length);
     expect(all).not.to.include("test/vscode-vsix-packaging.mjs");
@@ -218,6 +219,78 @@ describe("timing weights", () => {
       {seconds: {"test/a.mjs": 8}},
     ])).to.deep.equal({"test/a.mjs": 6, "test/old.mjs": 7});
     expect(() => mergeTimings({}, [{seconds: {"test/a.mjs": -1}}])).to.throw("invalid timing");
+  });
+});
+
+
+describe("weekly timing refresh", () => {
+  const repository = "oisee/open-steamgate";
+  const trusted = {event: "push", head_branch: "main", repository: {full_name: repository}, conclusion: "success"};
+  it("filters main pushes in the API and rechecks each run immediately before download", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-trusted-timings-"));
+    const calls = [];
+    const sample = {seconds: {"test/a.mjs": 60}};
+    try {
+      const gh = (args) => {
+        calls.push(args);
+        if (calls.length === 1) return JSON.stringify({workflow_runs: [{id: 1}, {id: 2}]});
+        if (args[0] === "api") return JSON.stringify(trusted);
+        const artifact = join(args.at(-1), "suite-results-1-attempt-1");
+        mkdirSync(artifact, {recursive: true});
+        writeFileSync(join(artifact, "timings.json"), JSON.stringify(sample));
+      };
+      expect(downloadTrustedTimings(gh, repository, dir)).to.deep.equal([sample, sample]);
+      expect(calls).to.deep.equal([
+        ["api", `repos/${repository}/actions/workflows/tests.yml/runs?event=push&branch=main&status=success&per_page=5`],
+        ...[1, 2].flatMap((id) => [
+          ["api", `repos/${repository}/actions/runs/${id}`],
+          ["run", "download", String(id), "--repo", repository, "--pattern", "suite-results-*", "--dir", join(dir, String(id))],
+        ]),
+      ]);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+  for (const [field, value] of [["event", "pull_request"], ["head_branch", "feature"],
+    ["repository", {full_name: "other/open-steamgate"}], ["repository", undefined], ["conclusion", "failure"]]) {
+    it(`refuses untrusted ${field} metadata before downloading`, () => {
+      const calls = [];
+      const gh = (args) => {
+        calls.push(args);
+        return JSON.stringify(calls.length === 1 ? {workflow_runs: [{id: 1}]} : {...trusted, [field]: value});
+      };
+      expect(() => downloadTrustedTimings(gh, repository, "/unused")).to.throw("Untrusted timing run 1");
+      expect(calls.map((args) => args[0])).to.deep.equal(["api", "api"]);
+    });
+  }
+  const files = ["test/a.mjs", "test/b.mjs", "test/c.mjs", "test/d.mjs"];
+  const old = Object.fromEntries(files.map((file) => [file, 60]));
+  it("does not refresh balanced growth and uses a strict two-minute threshold", () => {
+    expect(timingDrift(files, old, Object.fromEntries(files.map((f) => [f, 300])), 2).refresh).to.equal(false);
+    const boundary = {...old, "test/a.mjs": 300};
+    expect(timingDrift(files, old, boundary, 2).drift).to.equal(120);
+    expect(timingDrift(files, old, boundary, 2).refresh).to.equal(false);
+    expect(timingDrift(files, old, {...boundary, "test/a.mjs": 302}, 2).refresh).to.equal(true);
+  });
+  it("detects stale assignment imbalance that a fresh assignment would hide", () => {
+    const result = timingDrift(files, old, {...old, "test/a.mjs": 400, "test/c.mjs": 400}, 2);
+    expect(result.current).to.deep.equal([800, 120]);
+    expect(result.balanced).to.deep.equal([460, 460]);
+    expect(result.refresh).to.equal(true);
+  });
+  it("refreshes missing or invalid timings even with balanced shards", () => {
+    for (const value of [undefined, 0, -1, NaN]) {
+      expect(timingDrift(files, {...old, "test/a.mjs": value}, old, 2).missing).to.deep.equal(["test/a.mjs"]);
+    }
+    const result = timingDrift(files, old, {"test/a.mjs": 60}, 2);
+    expect(result.refresh).to.equal(true);
+    expect(result.missing).to.have.length(3);
+    expect(result.balanced).to.deep.equal([120, 120]);
+  });
+  it("takes the latest retained attempt once per shard and refuses no evidence", () => {
+    expect(latestShardArtifacts(["suite-results-1-attempt-1", "suite-results-1-attempt-2",
+      "suite-results-2-attempt-1", "built-tree"])).to.deep.equal(["suite-results-1-attempt-2", "suite-results-2-attempt-1"]);
+    expect(() => latestShardArtifacts(["built-tree"])).to.throw("No shard timing artifacts");
   });
 });
 
@@ -439,16 +512,17 @@ describe("Mocha file reports", () => {
 describe("required PR retry reports", () => {
   const workflow = readFileSync(".github/workflows/tests.yml", "utf8");
   const script = workflow.split("          script: |\n").at(-1).split("\n").map((line) => line.replace(/^            /, "")).join("\n");
+  const expectedShards = workflow.match(/shard: \[(.*?)\]/)[1].split(',').map((s) => Number(s.trim()));
   const execute = async (mode, attempt = 1, canComment = true) => {
     const nativeRequire = createRequire(import.meta.url);
     const fs = nativeRequire("node:fs");
-    const current = [1, 2, 3, 4].map((i) => `suite-results-${i}-attempt-${attempt}`);
+    const current = expectedShards.map((i) => `suite-results-${i}-attempt-${attempt}`);
     const mockedFs = {...fs,
       readdirSync: () => {
         if (mode === "missing-directory") throw Error("ENOENT suite-results");
         if (mode === "missing-shard") return current.slice(0, 1);
-        if (mode === "missing-rerun-report") return [1, 2, 3, 4].map((i) => `suite-results-${i}-attempt-1`);
-        if (mode === "retained") return ["suite-results-1-attempt-2", ...[1, 2, 3, 4].map((i) => `suite-results-${i}-attempt-1`)];
+        if (mode === "missing-rerun-report") return expectedShards.map((i) => `suite-results-${i}-attempt-1`);
+        if (mode === "retained") return ["suite-results-1-attempt-2", ...expectedShards.map((i) => `suite-results-${i}-attempt-1`)];
         return current;
       },
       readFileSync: (file) => {
@@ -476,7 +550,7 @@ describe("required PR retry reports", () => {
     try {
       await new (Object.getPrototypeOf(async function () {}).constructor)("require", "github", "context", "process", "console", script)(
         (name) => name === "node:fs" ? mockedFs : nativeRequire(name), github, context,
-        {env: {EXPECTED_SHARDS: "1,2,3,4", GITHUB_RUN_ATTEMPT: String(attempt), CAN_COMMENT: String(canComment), JOB_RESULTS: JSON.stringify({build: {result: "success"}, suites: {result: "success"}, packaging: {result: "skipped"}, e2e: {result: "success"}, "osgo-host": {result: "success"}}), VSIX_PROFILE: "fast"}},
+        {env: {EXPECTED_SHARDS: expectedShards.join(","), GITHUB_RUN_ATTEMPT: String(attempt), CAN_COMMENT: String(canComment), JOB_RESULTS: JSON.stringify({build: {result: "success"}, suites: {result: "success"}, packaging: {result: "skipped"}, e2e: {result: "success"}, "osgo-host": {result: "success"}}), VSIX_PROFILE: "fast"}},
         {log() {}, error() {}});
     } catch (error) {
       error.body = body;
@@ -491,7 +565,7 @@ describe("required PR retry reports", () => {
       expect(error, "publication must fail closed").to.be.instanceOf(Error);
     });
   }
-  it("accepts four readable empty reports", async () => { await execute("complete"); });
+  it("accepts every shard’s readable empty report", async () => { await execute("complete"); });
   it("shows failed jobs recovered by a GitHub rerun and retained flaky reports", async () => {
     const {body, calls} = await execute("retained", 2);
     expect(body).to.contain("flaky: rerun suites (1) failed in attempt 1, passed in attempt 2");
