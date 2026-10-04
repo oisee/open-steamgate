@@ -410,11 +410,13 @@ export class ObjectStore {
     if (this.inactive.has(key)) return;
     for (const file of this.#filesOfEntry(entry)) {
       if (!existsSync(join(this.root, file))) continue;
+      const active = this.#activeFile(file, entry);
+      // Unavailable source has no copy. An empty placeholder would become
+      // false proof of activity when the saved source is also empty.
+      if (!active || !existsSync(active)) continue;
       const copy = join(this.root, this.#snapshotOf(file));
       mkdirDurable(dirname(copy));
-      const active = this.#activeFile(file, entry);
-      if (active && existsSync(active)) copyDurable(active, copy);
-      else writeDurable(copy, "");
+      copyDurable(active, copy);
       this.#crash("keep:after-copy");
     }
   }
@@ -844,8 +846,8 @@ export class ObjectStore {
     const complete = generation && existsSync(join(generation, "source", ".complete"));
     const snapshot = generation && join(generation, "source", file);
     if (complete && existsSync(snapshot)) return snapshot;
-    // A pre-save copy also has known provenance, including an empty copy
-    // for a created object which has never been activated.
+    // Pre-save copies retain proven active input, including genuinely empty
+    // bytes. #keepActive leaves unavailable input absent, never a placeholder.
     const copy = join(this.root, this.#snapshotOf(file));
     if (!complete && existsSync(copy)) return copy;
     if (!generation || !existsSync(generation)) return undefined;

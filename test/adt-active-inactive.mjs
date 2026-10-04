@@ -28,6 +28,112 @@ const def = 'CLASS lcl_value DEFINITION. PUBLIC SECTION. CLASS-METHODS get RETUR
 const imp = value => `CLASS lcl_value IMPLEMENTATION. METHOD get. rv = '${value}'. ENDMETHOD. ENDCLASS.\n`;
 const prog = value => `REPORT zt05.\n\nWRITE '${value}'.\n`;
 
+// Critic round 2: STORE used to retain an empty placeholder when active
+// source was unavailable, then mistake an empty save for those active bytes.
+for (const front of ["node", "abap"]) for (const scenario of ["fresh tree", "cleaned build", "built tree"]) {
+  describe(`STORE empty-source provenance: ${front}, ${scenario}`, function () {
+    this.timeout(180000);
+    let root, store, server, base, hash, savedClasses;
+    const classMain = `CLASS zcl_empty_live DEFINITION PUBLIC. PUBLIC SECTION.
+CLASS-METHODS run RETURNING VALUE(rv) TYPE string. ENDCLASS.
+CLASS zcl_empty_live IMPLEMENTATION. METHOD run. rv = lcl_value=>get( ). ENDMETHOD. ENDCLASS.\n`;
+    const program = "REPORT zempty_live. WRITE 'P1'.\n";
+    const options = () => ({root, libs: [], roots: [{path: "src", writable: true}]});
+    const objects = [
+      {type: "PROG", name: "ZEMPTY_LIVE", path: "/programs/programs/zempty_live", parts: {main: program}},
+      {type: "CLAS", name: "ZCL_EMPTY_LIVE", path: "/oo/classes/zcl_empty_live",
+        parts: {main: classMain, definitions: def, implementations: imp("P1"), macros: ""}},
+    ];
+    before(async () => {
+      await import("./start.mjs");
+      savedClasses = Object.fromEntries(["CX_ROOT", "IF_OO_ADT_CLASSRUN", "IF_OO_ADT_CLASSRUN_OUT", "ZCL_EMPTY_LIVE"]
+        .map(name => [name, abap.Classes[name]]));
+      root = mkdtempSync(join(tmpdir(), "adt-empty-provenance-"));
+      mkdirSync(join(root, "src"));
+      const files = {"zempty_live.prog.abap": program, "zcl_empty_live.clas.abap": classMain,
+        "zcl_empty_live.clas.locals_def.abap": def, "zcl_empty_live.clas.locals_imp.abap": imp("P1"),
+        "zcl_empty_live.clas.macros.abap": "",
+        "if_oo_adt_classrun.intf.abap": "INTERFACE if_oo_adt_classrun PUBLIC. METHODS main IMPORTING out TYPE REF TO if_oo_adt_classrun_out. ENDINTERFACE.\n",
+        "if_oo_adt_classrun_out.intf.abap": "INTERFACE if_oo_adt_classrun_out PUBLIC. METHODS write IMPORTING data TYPE any. ENDINTERFACE.\n",
+        "cx_root.clas.abap": "CLASS cx_root DEFINITION PUBLIC. ENDCLASS. CLASS cx_root IMPLEMENTATION. ENDCLASS.\n"};
+      for (const [file, source] of Object.entries(files)) writeFileSync(join(root, "src", file), source);
+      writeFileSync(join(root, "package.json"), "{}");
+      symlinkSync(join(REPO, "node_modules"), join(root, "node_modules"));
+      writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: "src", output_folder: "output", libs: [],
+        options: {ignoreSyntaxCheck: false, addCommonJS: true, unknownTypes: "compileError"}}));
+      if (scenario !== "fresh tree") {
+        hash = (await build({root, generators: false})).hash;
+        await import(pathToFileURL(join(root, "output/zcl_empty_live.clas.mjs")));
+      }
+      if (scenario === "built tree") {
+        // First STORE saves must recover generation-backed input digests,
+        // including the empty macro include, before retaining active copies.
+        rmSync(join(root, "build/by-input", hash, "source"), {recursive: true});
+        rmSync(join(root, "build/source-by-digest"), {recursive: true});
+      }
+      store = new ObjectStore(options());
+      if (hash) store.served = {running: true, generation: hash};
+      if (scenario === "cleaned build") {
+        // The loaded P1 remains executable, but its source proof is gone.
+        writeFileSync(join(root, "src/zcl_empty_live.clas.locals_imp.abap"), imp("P2"));
+        writeFileSync(join(root, "src/zempty_live.prog.abap"), program.replace("P1", "P2"));
+        rmSync(join(root, "build"), {recursive: true});
+      }
+    });
+    after(async () => {
+      if (server) await new Promise(done => server.close(done));
+      Object.assign(abap.Classes, savedClasses);
+      if (root) rmSync(root, {recursive: true, force: true});
+    });
+    const serve = async reader => {
+      if (server) await new Promise(done => server.close(done));
+      const app = express();
+      app.use(adtRouter({store: reader, watch: false, abap: front === "abap" ? await adtAbap() : undefined}).router);
+      server = await new Promise(done => {const s = app.listen(0, () => done(s));});
+      base = `http://localhost:${server.address().port}/sap/bc/adt`;
+    };
+    const verify = async (object, expected, version) => {
+      for (const reader of [store, new ObjectStore(options())]) {
+        if (hash) reader.served = {running: true, generation: hash};
+        await serve(reader);
+        for (const [include, source] of Object.entries(expected)) {
+          const path = object.path + (include === "main" ? "" : `/includes/${include}`) + "/source/main";
+          const active = await fetch(base + path + "?version=active");
+          expect(active.status).to.equal(200);
+          expect(await active.text()).to.equal(source);
+          expect(reader.read(object.type, object.name, include).source).to.equal(scenario === "built tree" ? source : "");
+        }
+        const doc = await fetch(base + object.path);
+        expect(doc.status).to.equal(200);
+        expect(await doc.text()).to.include(`adtcore:version="${version}"`);
+        expect(reader.stateOf(reader.find(object.type, object.name)).version).to.equal(version);
+      }
+    };
+    for (const object of objects) it(`${object.type}: empty STORE saves and reopen preserve source provenance`, async () => {
+      if (scenario === "built tree") {
+        for (const [include, source] of Object.entries(object.parts)) store.write(object.type, object.name, source, include);
+        await verify(object, object.parts, "active");
+        for (const include of Object.keys(object.parts)) store.write(object.type, object.name, "", include);
+        expect(store.stateOf(store.find(object.type, object.name)).version).to.equal("inactive");
+        for (const [include, source] of Object.entries(object.parts)) store.write(object.type, object.name, source, include);
+        await verify(object, object.parts, "active");
+      } else {
+        expect(store.stateOf(store.find(object.type, object.name)).version).to.equal("inactive");
+        for (const include of Object.keys(object.parts)) store.write(object.type, object.name, "", include);
+        await verify(object, Object.fromEntries(Object.keys(object.parts).map(include => [include, ""])), "inactive");
+        if (scenario === "cleaned build") expect((await abap.Classes.ZCL_EMPTY_LIVE.run()).get()).to.equal("P1");
+      }
+    });
+    if (scenario === "built tree") it("a proven empty include stays active from pre-save copies after reopen", async () => {
+      // A pre-save copy of proven empty bytes is still valid without build proof.
+      rmSync(join(root, "build/by-input", hash), {recursive: true});
+      store.write("CLAS", "ZCL_EMPTY_LIVE", "* pending macro\n", "macros");
+      store.write("CLAS", "ZCL_EMPTY_LIVE", "", "macros");
+      await verify(objects[1], objects[1].parts, "active");
+    });
+  });
+}
+
 describe("generation source provenance", function () {
   this.timeout(180000);
   it("normalizes Windows overlay paths in the real snapshot helper", () => {
