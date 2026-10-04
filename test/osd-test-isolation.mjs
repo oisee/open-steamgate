@@ -46,8 +46,16 @@ function run(files, options = [], allowancePatch, preload, hook = true) {
       requires.push('--require', patch);
     }
     const result = spawnSync(process.execPath, [mocha, ...requires, ...(hook ? ['--require', plugin] : []), '--reporter', 'spec', ...options, ...paths], {cwd: root, encoding: 'utf8', timeout: 15000});
-    return {status: result.status, output: result.stdout + result.stderr, filesAfterExit: readdirSync(root, {recursive: true})};
+    return {status: result.status, output: result.stdout + result.stderr, filesAfterExit: listTree(root)};
   } finally { rmSync(root, {recursive: true, force: true}); }
+}
+// Like readdirSync(root, {recursive: true}), but a symlinked directory is
+// listed and never entered: a probe may link a pack outside the checkout.
+function listTree(root, prefix = '') {
+  return readdirSync(join(root, prefix), {withFileTypes: true}).flatMap((entry) => {
+    const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+    return entry.isDirectory() ? [name, ...listTree(root, name)] : [name];
+  });
 }
 describe('per-file process isolation detector', function () {
   this.timeout(30000);
