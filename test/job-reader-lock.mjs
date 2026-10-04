@@ -77,13 +77,27 @@ describe('JOB_OPEN operations reader waits for SQLite locks', function () {
   it('keeps WAL alive across worker shutdown and releases it with the server', () => {
     const env={OSD_OPERATIONS_DB:path, OSD_BATCH_READ_TOKEN:'a'.repeat(32)};
     const writer=new BatchRuns('.',env), server=new EventEmitter();
+    const run=writer.start({program:'DEMO',input:[],generation:'test'});
+    writer.finish(run.id,{status:'COMPLETED',lines:['saved output']});
+    writer.db.prepare("UPDATE batch_runs SET source_owner='DEMO' WHERE id=?").run(run.id);
     const handler=batchMonitorHandler('.',env);
     const req={query:{},get:()=>`Bearer ${env.OSD_BATCH_READ_TOKEN}`,socket:{server}};
-    const res={set(){return this;},status(code){throw new Error(`HTTP ${code}`);},json(){return this;}};
+    let body;
+    const res={set(){return this;},status(code){throw new Error(`HTTP ${code}`);},json(value){body=value;return this;}};
     try {
       handler.attachServer(server);
       writer.close();
       assert.equal(existsSync(path+'-wal'),true,'monitor must pin the WAL between requests');
+      handler(req,res);
+      assert.equal(body.runs[0].user,'DEMO');
+      const revision=body.revision;
+      req.query={since:revision}; handler(req,res);
+      assert.deepEqual(body,{revision,unchanged:true});
+      req.query={id:run.id}; handler(req,res);
+      assert.equal(body.run.user,'DEMO');
+      assert.ok(Array.isArray(body.run.log));
+      req.query={id:run.id,output:'1'}; handler(req,res);
+      assert.deepEqual(body.output.lines,['saved output']);
       // No read transaction survives the request: a worker can checkpoint.
       const replacement=new DatabaseSync(path);
       try { assert.equal(replacement.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get().busy,0); }

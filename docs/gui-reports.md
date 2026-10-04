@@ -352,7 +352,20 @@ not return the technical log.
 `?id=<run-id>` reads one record; `?id=<run-id>&output=1` reads its saved
 output after the SHA-256 check. Stored selection input values are omitted
 from run metadata; the report's detail and output may still contain business
-data or parameter values. Responses are not cached.
+data or parameter values. Metadata also includes the recorded user and start condition; detail reads include
+up to 2000 ordered technical log rows. Source database paths remain private.
+Responses are not cached. Lists include an opaque `revision`; sending it as
+`?limit=200&since=<revision>` returns `{revision, unchanged: true}` when
+nothing changed, without reading run metadata. The revision changes on
+committed run, step or technical-log writes from any window. `since` is
+valid only for list requests and uses the same bearer authorization.
+
+The VS Code jobs panel reads automatically only after healthy counts polls.
+It backs off empty or failed lists from 2 seconds to at most 60 seconds,
+reconciles idle saved lists every 30 seconds, and shares expanded-job detail
+requests within a refresh cycle. Closing a log/output document removes its
+cached text; the cache retains at most 32 MiB using least-recently-used
+eviction.
 
 The route is **disabled by default**. An instance owner may set a random
 `OSD_BATCH_READ_TOKEN` of at least 32 letters, digits, `_` or `-` before

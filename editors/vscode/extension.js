@@ -2714,6 +2714,7 @@ function activate(context) {
   });
   void require("./abapfs-bridge.js").registerAbapFsBridge(vscode, context, controller).catch(() => {});
   context.subscriptions.push(statusBar(context));
+  require("./jobs-view.js").registerJobsView(vscode, context, controller);
   jobsStatusBar(vscode, context, controller);
   breakpointToggleStatusBar(context);
   breakpointGuard(context);

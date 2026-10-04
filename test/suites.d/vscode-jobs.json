@@ -1,6 +1,7 @@
 {
   "files": [
     "test/vscode-job-worker.mjs",
-    "test/vscode-job-worker-integration.mjs"
+    "test/vscode-job-worker-integration.mjs",
+    "test/vscode-jobs-view.mjs"
   ]
 }

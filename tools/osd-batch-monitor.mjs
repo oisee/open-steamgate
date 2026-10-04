@@ -65,12 +65,25 @@ function monitorReader(root, env) {
   };
 }
 
+// Add operator metadata without exposing source paths, runtime identities or selections.
+function jobMetadata(store, run, detail = false) {
+  const row = store.db.prepare("SELECT * FROM batch_runs WHERE id = ?").get(run.id);
+  const metadata = {...run, user: row.source_owner ?? null,
+    afterEvent: row.after_job_name ? {jobname: row.after_job_name, jobcount: row.after_job_count} : null,
+    namedEvent: row.after_named_id ? {id: row.after_named_id, param: row.after_named_param} : null,
+    schedule: row.sdl_at ? {start: row.sdl_at, last: row.last_at} : null};
+  if (detail) metadata.log = store.db.prepare(`SELECT seq AS sequence, step_no AS step,
+    occurred_at AS at, event_code AS event, severity, text FROM batch_job_log
+    WHERE run_id = ? ORDER BY seq LIMIT 2000`).all(run.id);
+  return metadata;
+}
+
 export function batchMonitorHandler(root, env = process.env) {
   const reader = monitorReader(root, env);
   return Object.assign(function (req, res) {
     if (!authorized(req, res, env)) return;
     const query = req.query;
-    if (Object.keys(query).some((key) => !["id", "output", "limit"].includes(key))) {
+    if (Object.keys(query).some((key) => !["id", "output", "limit", "since"].includes(key))) {
       res.status(400).json({error: {code: "BAD_QUERY"}});
       return;
     }
@@ -78,7 +91,7 @@ export function batchMonitorHandler(root, env = process.env) {
       const store = reader.open(req);
       try {
         if (query.id !== undefined) {
-          if (query.limit !== undefined || (query.output !== undefined && query.output !== "1")
+          if (query.since !== undefined || query.limit !== undefined || (query.output !== undefined && query.output !== "1")
               || typeof query.id !== "string" || !/^[0-9a-f-]{36}$/.test(query.id)) {
             res.status(400).json({error: {code: "BAD_QUERY"}});
             return;
@@ -96,11 +109,12 @@ export function batchMonitorHandler(root, env = process.env) {
             }
             res.json({runId: query.id, output});
           } else {
-            res.json({run});
+            res.json({run: store.readSnapshot(() => jobMetadata(store, store.readRun(run.id), true))});
           }
           return;
         }
-        if (query.output !== undefined || (query.limit !== undefined
+        if ((query.since !== undefined && (typeof query.since !== "string" || !/^[0-9a-f-]{36}:[0-9]+$/.test(query.since)))
+            || query.output !== undefined || (query.limit !== undefined
             && (typeof query.limit !== "string" || !/^[1-9][0-9]{0,2}$/.test(query.limit)))) {
           res.status(400).json({error: {code: "BAD_QUERY"}});
           return;
@@ -110,7 +124,14 @@ export function batchMonitorHandler(root, env = process.env) {
           res.status(400).json({error: {code: "BAD_QUERY"}});
           return;
         }
-        res.json({runs: store.list(limit)});
+        res.json(store.readSnapshot(() => {
+          const clock = store.db.prepare('SELECT epoch, seq FROM batch_monitor_revision').get();
+          const revision = `${clock.epoch}:${clock.seq}`;
+          if (query.since === revision) return {revision, unchanged: true};
+          return {revision, runs: store.db.prepare(`SELECT id FROM batch_runs
+            ORDER BY COALESCE(queued_at, started_at) DESC, id DESC LIMIT ?`).all(limit)
+            .map(({id}) => jobMetadata(store, store.readRun(id)))};
+        }));
       } finally {
         reader.release(store);
       }

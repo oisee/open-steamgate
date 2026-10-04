@@ -37,7 +37,8 @@
     "onCommand:osd.webReadProbe",
     "onCommand:osd.webVerifyLastTravel",
     "onCommand:osd.webProbeView",
-    "onView:osdTree"
+    "onView:osdTree",
+    "onView:osdJobs"
   ],
   "contributes": {
     "languages": [{"id": "abap", "aliases": ["ABAP"], "extensions": [".abap"]}],
@@ -183,10 +184,18 @@
     },
     "views": {
       "osd": [
-        {"id": "osdTree", "name": "System", "contextualTitle": "OSD"}
+        {"id": "osdTree", "name": "System", "contextualTitle": "OSD"},
+        {"id": "osdJobs", "name": "OSD Jobs", "when": "!isWeb"}
       ]
     },
     "commands": [
+      {"command": "osd.openJobsPanel", "title": "Open jobs panel", "category": "OSD"},
+      {"command": "osd.refreshJobs", "title": "Refresh jobs", "category": "OSD", "icon": "$(refresh)"},
+      {"command": "osd.filterJobs", "title": "Filter jobs", "category": "OSD", "icon": "$(filter)"},
+      {"command": "osd.openJobLog", "title": "Open job log", "category": "OSD"},
+      {"command": "osd.openJobOutput", "title": "Open output", "category": "OSD"},
+      {"command": "osd.copyJobKey", "title": "Copy job key", "category": "OSD"},
+
       {"command": "osd.prepareAbapgitZip", "title": "osd: Prepare abapGit zip…"},
       {"command": "osd.webProbe", "title": "osd: Web probe"},
       {"command": "osd.webReadProbe", "title": "osd: Web read probe"},
@@ -315,6 +324,9 @@
         {"command": "osd.runWithDebugger", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation@2"}
       ],
       "view/title": [
+        {"command": "osd.refreshJobs", "when": "view == osdJobs", "group": "navigation@1"},
+        {"command": "osd.filterJobs", "when": "view == osdJobs", "group": "navigation@2"},
+
         {"command": "osd.prepareAbapgitZip", "when": "!isWeb && !osd.web && view == osdTree", "group": "9_osd@4"},
         {"command": "osd.start", "when": "!isWeb && !osd.web && view == osdTree", "group": "navigation@1"},
         {"command": "osd.stop", "when": "!isWeb && !osd.web && view == osdTree", "group": "navigation@2"},
@@ -330,6 +342,11 @@
         {"command": "osd.chooseStartSystem", "when": "!isWeb && !osd.web && view == osdTree", "group": "9_osd@3"}
       ],
       "view/item/context": [
+        {"command": "osd.openJobLog", "when": "view == osdJobs && viewItem == osd-job", "group": "jobs@1"},
+        {"command": "osd.openJobOutput", "when": "view == osdJobs && viewItem == osd-job", "group": "jobs@2"},
+        {"command": "osd.copyJobKey", "when": "view == osdJobs && viewItem == osd-job", "group": "jobs@3"},
+        {"command": "osd.start", "when": "view == osdJobs && viewItem == osd-jobs-empty", "group": "jobs@1"},
+
         {"command": "osd.start", "when": "!isWeb && !osd.web && view == osdTree && viewItem == osd-state-stopped", "group": "state@1"},
         {"command": "osd.generateTaxiData", "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /(^|;)taxi-data(;|$)/", "group": "taxi@1"},
         {"command": "osd.resetTaxiData", "when": "!isWeb && !osd.web && view == osdTree && viewItem =~ /(^|;)taxi-data(;|$)/", "group": "taxi@2"},
