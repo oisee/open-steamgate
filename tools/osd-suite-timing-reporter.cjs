@@ -48,12 +48,12 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
       current = file;
       began = process.hrtime.bigint();
     });
-    runner.on("fail", (test) => {
+    runner.on("fail", (test, error) => {
       let owner = test;
       while (owner && !owner.file) owner = owner.parent;
       const path = owner?.file;
       const file = path ? (isAbsolute(path) ? relative(process.cwd(), path) : path).replace(/^\.\//, "") : null;
-      failures.push({file, title: test.fullTitle()});
+      failures.push({file, title: test.fullTitle(), ...(error?.code === 'OSD_TEST_ISOLATION' ? {isolation: true} : {})});
     });
     runner.on("end", () => {
       finish();

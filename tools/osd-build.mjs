@@ -531,6 +531,12 @@ export function liveHash(root) {
   }
 }
 
+/** Read-only proof using the builder's own hash, including generator identity. */
+export function generationStateSnapshot(root = process.cwd(), {hashTree = true} = {}) {
+  const live = liveHash(root);
+  return {root, live: live ?? null, ...(hashTree ? {tree: live === undefined ? null : hashOf(root)} : {})};
+}
+
 export function generations(root) {
   const paths = layout(root);
   if (!existsSync(paths.byInput)) {

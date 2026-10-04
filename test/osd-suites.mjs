@@ -5,7 +5,7 @@
 import {expect} from "chai";
 import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment, runWithRetries, runWithRetries as realRunWithRetries} from "../tools/osd-suites.mjs";
 import {mergeTimings} from "../tools/osd-suites-timings.mjs";
-import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync, symlinkSync} from "node:fs";
+import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync, symlinkSync, readdirSync} from "node:fs";
 import {createRequire} from "node:module";
 import {spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
@@ -312,6 +312,16 @@ describe("fail closed regressions", () => {
     expect(result.status).to.equal(1);
     expect(result.lines).to.deep.equal([]);
   });
+  it("never recovers a process isolation failure in a clean retry", () => {
+    const attempts = [];
+    const result = runWithRetries(["test/leaking.mjs"], (files, phase) => {
+      attempts.push(phase);
+      return {status: 1, failures: [{file: files[0], title: "process invariants", isolation: true}]};
+    });
+    expect(result.status).to.equal(1);
+    expect(attempts).to.deep.equal(["first"]);
+    expect(result.retries).to.deep.equal([]);
+  });
   it("rejects zero exit with inconsistent failure metadata", () => {
     for (const metadata of [{status: 0}, {status: 0, completed: true, failures: [], totalFailures: 1},
       {status: 0, completed: true, failures: [{file: "a", title: "bad"}], totalFailures: 0}]) {
@@ -352,9 +362,12 @@ describe("early-stop CLI regressions", () => {
       try {
         mkdirSync(join(dir, "tools"));
         mkdirSync(join(dir, "test", "suites.d"), {recursive: true});
-        for (const file of ["osd-suites.mjs", "osd-suite-timing-reporter.cjs", "osd-suite-no-retries.cjs"])
+        for (const file of ["osd-suites.mjs", "osd-suite-timing-reporter.cjs", "osd-suite-no-retries.cjs", "osd-test-isolation.cjs", "osd-test-resources.cjs", "osd-test-isolation-allow.json"])
           copyFileSync(join("tools", file), join(dir, "tools", file));
         symlinkSync(resolve("node_modules"), join(dir, "node_modules"), "dir");
+        for (const name of readdirSync("tools")) {
+          if (name.endsWith(".mjs") && name !== "osd-suites.mjs") symlinkSync(resolve("tools", name), join(dir, "tools", name));
+        }
         writeFileSync(join(dir, "test", "suites.d", "fixtures.json"), JSON.stringify({files: ["test/a.mjs", "test/z.mjs"]}));
         writeFileSync(join(dir, "test", "suites-timings.json"), "{}");
         writeFileSync(join(dir, "test", "a.mjs"), `import {existsSync, writeFileSync} from "node:fs";

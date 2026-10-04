@@ -157,6 +157,9 @@ export function assignShards(files, seconds, count) {
  * Unknown crashes, missing reports and more than three failing files stay red. */
 export function runWithRetries(files, run, {group, stopEarly = false} = {}) {
   const first = run(files, "first");
+  // Isolation failures prove contamination. A clean-process retry cannot
+  // erase that evidence or turn the shared run green.
+  if (first.failures?.some((failure) => failure.isolation)) return {status: 1, first, retries: [], lines: []};
   const complete = (report, selected) => !report.crashed && report.completed === true &&
     report.fileTests && Object.keys(report.fileTests).length === selected.length &&
     report.tests && Object.keys(report.tests).length === selected.length &&
@@ -317,7 +320,7 @@ try {
       const path = join(scratch, `${attempt++}.json`);
       console.log(`osd-suites: ${phase}: ${runFiles.length} file(s)`);
       const child = spawnSync("npx", ["mocha", ...runFiles,
-        ...extra, "--require", fileURLToPath(new URL("./osd-suite-no-retries.cjs", import.meta.url)), "--retries", "0", "--reporter", fileURLToPath(new URL("./osd-suite-timing-reporter.cjs", import.meta.url))],
+        ...extra, "--require", fileURLToPath(new URL("./osd-test-isolation.cjs", import.meta.url)), "--require", fileURLToPath(new URL("./osd-suite-no-retries.cjs", import.meta.url)), "--retries", "0", "--reporter", fileURLToPath(new URL("./osd-suite-timing-reporter.cjs", import.meta.url))],
         {stdio: "inherit", env: {...process.env, OSD_SUITE_TIMINGS_FILE: path}});
       const metadata = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
       return {...metadata, status: child.status ?? 1, crashed: Boolean(child.error || child.signal)};

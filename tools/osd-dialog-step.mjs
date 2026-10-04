@@ -59,6 +59,10 @@ try {
 }
 
 let holder;          // the token of the step that has the work process
+const openSteps = new Set(); // includes a step rolled out during WAIT
+export function dialogStateSnapshot() {
+  return {...workProcess(), open: [...openSteps].map((token) => ({what: token.what ?? null, dialog: token.dialog}))};
+}
 const waiting = [];  // [token, resolve] in arrival order
 let since = 0;       // when the holder got it
 function acquire(token) {
@@ -231,6 +235,7 @@ export async function exclusive(work, what, {dialog = false} = {}) {
     throw new Error(`a nested dialog step${what === undefined ? "" : ` (${what})`}: the step that would run it holds the work process`);
   }
   const token = {what, dialog};
+  openSteps.add(token);
   await acquire(token);
   try {
     for (const hooks of stepHooks) hooks.onStart?.(token);
@@ -238,6 +243,7 @@ export async function exclusive(work, what, {dialog = false} = {}) {
   } finally {
     endLuw(token);
     token.done = true;
+    openSteps.delete(token);
     for (const hooks of stepHooks) {
       try { hooks.onEnd?.(token, {dumped: token.dumped === true}); } catch { /* a hook must not hold the work process */ }
     }
