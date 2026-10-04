@@ -1,5 +1,6 @@
 import {expect} from 'chai';
 import {spawnSync} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
 import {mkdtempSync, mkdirSync, readdirSync, writeFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
@@ -46,6 +47,15 @@ describe('per-file process isolation detector', function () {
     const result = run({'test/webgui.mjs': "import fs from 'node:fs'; before(()=>{fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));fs.symlinkSync('by-input/completely-new-stale','build/live')});it('passes',()=>{});"});
     expect(result.status, result.output).to.be.greaterThan(0);
     expect(result.output).to.include('test/webgui.mjs: generation');
+  });
+  it('rejects an already stale live generation at the first file boundary', () => {
+    const result = run(["it('does not mutate the tree',()=>{});"], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));fs.symlinkSync('by-input/pre-existing-stale','build/live');");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('1 passing');
+    const diff = JSON.parse(result.output.match(/test-isolation: 0\.cjs: generation: (.*)/)[1]);
+    expect(diff.before).to.deep.equal(diff.after);
+    expect(diff.before.live).to.equal('pre-existing-stale').and.not.equal(diff.before.tree);
   });
   it('critic environment-import-red-green: rejects restoration of contaminated import values', () => {
     const result = run([
@@ -159,23 +169,37 @@ describe('per-file process isolation detector', function () {
     it(`enforces the originating warm input proof: ${mutation}`, () => {
       const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
       const original = '* The hand-written part a developer owns on a real system. Reads the\n';
-      const edited = '* The hand-written part a developer owns on a real system (T7 warm test isolation-marker). Reads the\n';
+      // The real T7 warm fixture writes a fresh random UUID here; the allowance matches that shape.
+      const edited = `* The hand-written part a developer owns on a real system (T7 warm test ${randomUUID()}). Reads the\n`;
       const extra = mutation === 'other-input' ? "fs.writeFileSync('src/unrelated.clas.abap','unrelated');" : '';
       const inactive = mutation.startsWith('inactive-');
       const inactiveSetup = inactive ? "fs.writeFileSync('src/other.clas.abap','saved');fs.mkdirSync('build/inactive/active/src',{recursive:true});fs.writeFileSync('build/inactive/active/src/other.clas.abap','active');fs.writeFileSync('build/inactive/inactive.json',JSON.stringify({inactive:{OTHER:{files:['src/other.clas.abap']}}}));" : '';
       const beforeProof = mutation === 'inactive-before' ? "fs.writeFileSync('build/inactive/active/src/other.clas.abap','unrelated active edit');" : '';
       const afterProof = mutation === 'fresh-live' ? "fs.unlinkSync('build/live');fs.symlinkSync('by-input/fresh-corruption','build/live');" : mutation === 'inactive-drift' ? "fs.writeFileSync('build/inactive/active/src/other.clas.abap','unrelated active edit');" : '';
+      const proofRejected = ['other-content', 'other-input', 'inactive-before'].includes(mutation);
+      const reached = `console.log('mutation reached: warm ${mutation}');`;
+      const checkMutation = mutation === 'other-input' ? "assert.equal(fs.readFileSync('src/unrelated.clas.abap','utf8'),'unrelated');"
+        : mutation === 'fresh-live' ? "assert.equal(fs.readlinkSync('build/live'),'by-input/fresh-corruption');"
+        : ['inactive-before', 'inactive-drift'].includes(mutation) ? "assert.equal(fs.readFileSync('build/inactive/active/src/other.clas.abap','utf8'),'unrelated active edit');" : '';
       const viewOptions = inactive ? ",undefined,{overlay:{exclude:[process.cwd()+'/src/other.clas.abap'],folder:'build/inactive/active'}}" : '';
-      const result = run({'test/vscode-warm.mjs': `import fs from 'node:fs';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
+      const result = run({'test/vscode-warm.mjs': `import fs from 'node:fs';import assert from 'node:assert/strict';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
         fs.mkdirSync('src/demo',{recursive:true});fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));
         const file='src/demo/zcl_zstg_demo_dpc_ext.clas.abap';const original=${JSON.stringify(original)};fs.writeFileSync(file,original);${inactiveSetup}fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
-        it('activates',async()=>{fs.writeFileSync(file,${JSON.stringify(mutation === 'other-content' ? 'unrelated replacement' : edited)});${extra}${beforeProof}fs.unlinkSync('build/live');fs.symlinkSync('by-input/'+hashOf(process.cwd()${viewOptions}),'build/live');try{await isolation.observeGenerationDrift()}finally{fs.writeFileSync(file,original)}${afterProof}});`});
+        it('activates',async()=>{const edited=${JSON.stringify(mutation === 'other-content' ? 'unrelated replacement' : edited)};fs.writeFileSync(file,edited);${extra}${beforeProof}
+          assert.equal(fs.readFileSync(file,'utf8'),edited);
+          fs.unlinkSync('build/live');const activated='by-input/'+hashOf(process.cwd()${viewOptions});fs.symlinkSync(activated,'build/live');assert.equal(fs.readlinkSync('build/live'),activated);
+          ${proofRejected ? checkMutation + reached : ''}
+          try{await isolation.observeGenerationDrift()}finally{fs.writeFileSync(file,original)}
+          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`});
+      expect(result.output).to.include(`mutation reached: warm ${mutation}`);
       if (mutation === 'known' || mutation === 'inactive-view') {
         expect(result.status, result.output).to.equal(0);
         expect(result.output).to.include('TEMPORARY ALLOW');
       } else {
         expect(result.status, result.output).to.be.greaterThan(0);
         expect(result.output).not.to.include('TEMPORARY ALLOW');
+        if (proofRejected) expect(result.output).to.include('unrecognized originating generation drift');
+        else expect(result.output).to.include('1 passing').and.include('test/vscode-warm.mjs: generation');
       }
     });
   }
@@ -184,10 +208,14 @@ describe('per-file process isolation detector', function () {
       const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
       const sidecar = mutation === 'unknown-sidecar' ? 'src/l2demo/unrelated.trace.meta.json' : 'src/l2demo/zcl_l2_recent_voyage.clas.trace.meta.json';
       const extra = mutation === 'config-drift' ? "fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[],output_folder:'new-output'}));" : '';
-      const result = run({'test/dsl-l2.mjs': `import fs from 'node:fs';import {hashOf} from ${JSON.stringify(builder)};
+      const result = run({'test/dsl-l2.mjs': `import fs from 'node:fs';import assert from 'node:assert/strict';import {hashOf} from ${JSON.stringify(builder)};
         fs.mkdirSync('src/l2demo',{recursive:true});fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));
         fs.writeFileSync('src/base.clas.abap','baseline');fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
-        it('renders',()=>{fs.writeFileSync(${JSON.stringify(sidecar)},'{}');${extra}});`});
+        it('renders',()=>{fs.writeFileSync(${JSON.stringify(sidecar)},'{}');${extra}
+          assert.equal(fs.readFileSync(${JSON.stringify(sidecar)},'utf8'),'{}');
+          ${mutation === 'config-drift' ? "assert.equal(JSON.parse(fs.readFileSync('abap_transpile.json','utf8')).output_folder,'new-output');" : ''}
+          console.log('mutation reached: added-input ${mutation}');});`});
+      expect(result.output).to.include(`mutation reached: added-input ${mutation}`).and.include('1 passing');
       if (mutation === 'known') {
         expect(result.status, result.output).to.equal(0);
         expect(result.output).to.include('TEMPORARY ALLOW');

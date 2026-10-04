@@ -1,5 +1,123 @@
 # Isolation detector run record
 
+## Fix round 2, working tree over 822da6d7 (2026-10-04)
+
+The warm proof fixture now generates its UUID with `randomUUID()`, matching
+the real fixture and the existing restrictive allowance. Each of its seven
+variants verifies the edited source and activated link. Extra-input and
+active-copy mutations verify their bytes; the fresh-live case verifies its
+new target. Parent assertions require a reached-mutation marker. Cases that
+mutate after the proof also require a passing body followed by a failing
+generation invariant. The three added-input variants similarly verify the
+sidecar/config mutation and body completion. An early proof rejection can no
+longer make a later-mutation case pass.
+
+The initial focused run had 98 passing tests and one outer generation hook
+failure. Its first-file entry and exit both recorded live `cabd92f40e45988d`
+and tree `975161d8e16d54e4`: the mismatch existed before the synthetic cases
+ran, and neither hash changed during them. An explicit external
+`npm run transpile` restored live to the tree hash; the same focused command
+then passed all 98 tests. The detector was unchanged. A new regression
+requires an unchanged, already stale generation at the first file boundary
+to stay red, with its body passing and identical entry/exit evidence. Hand-run
+instructions now include the external baseline build.
+
+Worker comparison controls use complete Git archives of `origin/main`
+(`e07b7e8f`) and branch HEAD (`822da6d7`) under `.local/fix-round2/`, with
+identical existing node_modules, pinned libraries, linked transpiler and
+fetched pack sources. Their generated trees and databases are separate. A
+single heavy-wrapper invocation holds instance 91 for all six plain-Mocha
+runs, alternating main and branch three times each. Each run has fresh
+extension storage; an explicit build establishes its tree baseline. The
+results were:
+
+| Alternating round | Main | Branch |
+| --- | --- | --- |
+| 1 | exit 1, 43.746 s | exit 1, 48.277 s |
+| 2 | exit 0, 96.761 s | exit 0, 99.541 s |
+| 3 | exit 0, 99.023 s | exit 1, 44.589 s |
+
+All failures occur at the initial `SUBMITTED` assertion. This reproduces the
+standalone failure on main, without the isolation detector or branch production modules.
+The locking failure is pre-existing and timing dependent; the critic's
+passing relocated original fixture alone could not establish attribution.
+
+Evidence and executable controls are retained under `.local/fix-round2/`:
+`focused-before.log`, `rebaseline.log`, `focused-rebuilt.log`,
+`focused-fixed.log`, `compare.cjs`, `compare.json`, and the individual
+`main-*-plain.log` / `branch-*-plain.log` files. Earlier failures are retained.
+The deterministic `lock-probe.mjs` also demonstrates that main and branch's
+unchanged `legacyCountUsed()` reader throws SQLite error 5 (`database is
+locked`) while another connection holds an exclusive operations-store lock,
+and succeeds after release. That probe establishes the reader's behavior;
+worker diagnostics are separate evidence for the actual failing call.
+
+The intermediate commit (`4456b459`) also fails the initial `SUBMITTED`
+assertion under plain Mocha on instance 91 (exit 1, 42.208 s). There is no
+passing-to-failing boundary between main and the two isolation-hook commits
+for this intermittent error. `bisect.cjs` / `bisect.json` retain that control
+separately from the six unmodified runs.
+
+The corrected main diagnostic captured the actual HTTP response: `ok:false`,
+empty text, `error.message:"database is locked"`, mapped to `JOB_OPEN`'s
+`ZOSD_JOB_PORT` call; the detector was absent from `require.cache`. It failed
+the original `SUBMITTED` assertion (exit 1, 42.472 s). The corrected branch
+diagnostic passed the original test (exit 0, 100.237 s). See
+`diagnostics.json`, `main-diagnostic-corrected.log` and
+`branch-diagnostic-corrected.log`. No branch-specific production fix is
+justified by these results. The separate reader lock probe illustrates a
+shared susceptibility; the mapped HTTP error does not identify its exact
+native SQL statement.
+
+The first, invalid deep diagnostics preloaded `Launcher`, which also cached
+the worker guard before its CLI entry point and made workers exit. Their
+post-submission failures are instrumentation artifacts, excluded from the
+attribution evidence. `diagnostic-invalid.cjs` and the original
+`main-diagnostic.log` / `branch-diagnostic.log` retain them. The corrected
+logger observes core EventEmitter events without importing project modules.
+
+The hooked ADT fragment, sorted directly from `test/suites.d/adt.json`, passed
+in mode 0: 2,275 tests, 47 files checked, exit 0, 450.616 s Mocha wall time.
+Reporter completion is retained in `adt-timings.json`; snapshot accounting is
+44,373.854 ms total and 885.485 ms median per file. The detector's only ADT
+allowance was the existing facade temporary-root exception. The manifest
+check still reports 290 ordinary and six grouped suites, with no drift.
+
+The final focused command is
+`npx mocha --require ./tools/osd-test-isolation.cjs test/osd-test-isolation.mjs test/osd-suites.mjs`,
+through the heavy wrapper after an external build: **99 passing, exit 0,
+11.385 s wrapper wall time**. This includes the new first-file stale-generation
+regression and all mutation-reached assertions. Snapshot accounting is
+1,017.850 ms total and 508.925 ms median per file.
+
+The actual worker fixture also ran in this working tree after explicit
+baseline builds:
+
+| Check | Result | Wrapper wall time |
+| --- | --- | ---: |
+| Plain `npx mocha test/vscode-job-worker-integration.mjs` | exit 1; initial `SUBMITTED` assertion | 46.999 s |
+| Hooked, same fixture | exit 2; body proof and generation invariant fail | 47.397 s |
+| Plain, fetch-only diagnostic | exit 1; same `JOB_OPEN` database lock; detector absent | 47.062 s |
+| Hooked, fetch-only diagnostic repeat | exit 0; 1 passing, full activation and second job completed | 99.960 s |
+
+The hooked failure's proof has `identity:true`, `content:false`: the initial
+submission failure prevents the fixture from reaching its later activation,
+so its pack still contains the original probe rather than the measured final
+content. The narrow generation allowance correctly refuses this unfinished
+fixture. Cleanup still stops the launcher and removes its storage. This
+additional failure is retained in `worker-hooked-final.log`; the fetch-only
+diagnostic records the underlying response without changing it. No assertion
+or allowance was relaxed. `validation.json` and `worker-response.json` retain
+all working-tree runs, including the external baseline builds.
+
+The successful hooked diagnostic repeat performs the cold activation required
+by a SUBMIT source and exercises the complete mutation path. Its final
+restored-pack proof earns the existing `TEMPORARY ALLOW`; snapshot accounting
+is 1,349.076 ms. It does not replace either initial red result. Final external
+build restores the working tree's live generation; no detector cleanup is
+involved. Changed-file leak scan (`--paths` on the three edited files) and
+`git diff --check` pass. HEAD remains `822da6d7`; no commit was made.
+
 ## Fix round 1, f2716315 (2026-10-04)
 
 This working-tree fix replaces 63 invariant allowances across 62 files with

@@ -4,6 +4,7 @@
 For a hand run:
 
 ```sh
+OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh npm run transpile
 OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh \
   npx mocha --require ./tools/osd-test-isolation.cjs test/adt-devloop.mjs
 ```
@@ -80,6 +81,9 @@ paths; environment evidence names the changed keys. An unchanged inherited gener
 boundary. The detector re-baselines its observation state for the next file;
 a new live link, missing generation, hash error or additional tree drift remains red.
 The detector does not re-baseline the filesystem.
+If the first file has identical entry and exit hashes but `live` differs from
+`tree`, the run began with a stale generation. An external build before the run
+restores that baseline; identical snapshots alone do not establish an exemption.
 The runner cannot recover an isolation failure through an isolated retry.
 
 `tools/osd-test-isolation-allow.json` contains only originating exceptions.
