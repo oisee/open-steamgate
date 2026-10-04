@@ -11,7 +11,7 @@ const git = (cwd, ...args) => execFileSync("git", args, {cwd, encoding: "utf8", 
 // squash merge: a subject ending in "(#N)" proves nothing by itself, since a
 // direct commit may carry one too. A log entry is "<sha>\x01<message>"; a
 // plain message (no sha) is checked with an undefined sha.
-export function mergedPullRequests(log, titleFor = () => undefined, isSquashOf = () => true) {
+export function mergedPullRequests(log, titleFor = () => undefined, isSquashOf = () => true, onMerge = () => {}) {
   const seen = new Set();
   const rows = [];
   for (const entry of log.split("\0")) {
@@ -25,6 +25,7 @@ export function mergedPullRequests(log, titleFor = () => undefined, isSquashOf =
     if (squash && !seen.has(squash[2]) && isSquashOf(squash[2], sha)) {
       seen.add(squash[2]);
       rows.push(`- ${squash[1]} (#${squash[2]})`);
+      onMerge(squash[2]);
       continue;
     }
     const match = /^Merge pull request #(\d+)\b/.exec(lines[0]);
@@ -33,15 +34,33 @@ export function mergedPullRequests(log, titleFor = () => undefined, isSquashOf =
     if (!title) throw new Error(`merge commit for PR #${match[1]} has no title`);
     seen.add(match[1]);
     rows.push(`- ${title} (#${match[1]})`);
+    onMerge(match[1]);
   }
   return rows;
 }
 
-const ghMergeSha = (cwd) => (number) => execFileSync("gh", ["api", `repos/{owner}/{repo}/pulls/${number}`, "--jq", ".merged_at + \" \" + .merge_commit_sha"], {
+const ghPullRequest = (cwd) => (number) => JSON.parse(execFileSync("gh", ["api", `repos/{owner}/{repo}/pulls/${number}`], {
   cwd, encoding: "utf8",
-}).trim();
+}));
 
-export function generateNotes({cwd = process.cwd(), tag, from, to, mergeShaFor = ghMergeSha(cwd)}) {
+export function breakingConsumerSection(prs) {
+  const rows = [];
+  for (const {number, body} of prs) {
+    const text = (body ?? "").replace(/<!--[\s\S]*?-->/g, "");
+    const section = /^#{1,6}[ \t]+Consumer impact[ \t]*\r?\n([\s\S]*?)(?=^#{1,6}[ \t]+|(?![\s\S]))/im.exec(text);
+    const line = section?.[1].split(/\r?\n/).map((value) => value.trim()).find(Boolean);
+    if (line && /^Breaking\b/.test(line)) rows.push(`- ${line} (#${number})`);
+  }
+  return rows.length ? `\n## Breaking for consumers\n\n${rows.join("\n")}\n` : "";
+}
+
+export function generateNotes({cwd = process.cwd(), tag, from, to, mergeShaFor, prFor = ghPullRequest(cwd)}) {
+  const prs = new Map();
+  const pullRequest = (number) => {
+    if (!prs.has(number)) prs.set(number, prFor(number));
+    return prs.get(number);
+  };
+  const impacts = [];
   if (tag) {
     if (!/^vscode-v\d+\.\d+\.\d+$/.test(tag)) throw new Error("invalid vscode-v tag");
     const tagged = !to;
@@ -63,16 +82,16 @@ export function generateNotes({cwd = process.cwd(), tag, from, to, mergeShaFor =
   const rows = mergedPullRequests(log, (number) => {
     // Some historical merge commits have only the standard merge subject.
     // Ask GitHub for the PR title rather than treating the branch name as one.
-    return execFileSync("gh", ["api", `repos/{owner}/{repo}/pulls/${number}`, "--jq", ".title"], {
-      cwd, encoding: "utf8",
-    }).trim();
+    return pullRequest(number).title;
   }, (number, sha) => {
-    // A PR that is merged answers "<merged_at> <merge_commit_sha>"; an open
-    // or closed one answers "null ...". Only its own merge commit counts.
-    const [mergedAt, mergeSha] = mergeShaFor(number).split(" ");
+    // Only a merged PR's own merge commit counts. Reuse its API response
+    // when reading the consumer impact below.
+    const [mergedAt, mergeSha] = mergeShaFor
+      ? mergeShaFor(number).split(" ")
+      : [pullRequest(number).merged_at, pullRequest(number).merge_commit_sha];
     return mergedAt !== "null" && Boolean(mergedAt) && mergeSha === sha;
-  });
-  return `# ${tag ?? to}\n\nMerged pull requests${from ? ` since ${from}` : ""}:\n\n${rows.length ? `${rows.join("\n")}\n` : "No pull request merge commits in this range.\n"}`;
+  }, (number) => impacts.push({number, body: pullRequest(number).body}));
+  return `# ${tag ?? to}\n\nMerged pull requests${from ? ` since ${from}` : ""}:\n\n${rows.length ? `${rows.join("\n")}\n` : "No pull request merge commits in this range.\n"}${breakingConsumerSection(impacts)}`;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
