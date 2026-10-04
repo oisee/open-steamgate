@@ -1240,11 +1240,17 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     expect(await source.text()).to.contain(`REPORT ${name.toLowerCase()}`);
   });
 
-  it("a second create of the same object is a conflict", async () => {
+  it("a second program create returns SAP's observed creation failure", async () => {
     await call("/programs/programs", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("PROG", "ZOSD_MADE_REP", "a report", "$STG_DEMO")});
     const again = await call("/programs/programs", {method: "POST", headers: {"content-type": "application/*"}, body: createBody("PROG", "ZOSD_MADE_REP", "a report", "$STG_DEMO")});
-    expect(again.status).to.equal(409);
-    expect(await again.text()).to.contain("ExceptionResourceIsModified");
+    // SAP's program-only XI 001 refusal, observed 2026-10-04.
+    expect(again.status).to.equal(500);
+    const xml = await again.text();
+    expect(xml).to.contain('type id="ExceptionResourceCreationFailure"');
+    expect(xml).to.contain("A program or include already exists with the name ZOSD_MADE_REP");
+    expect(xml).to.contain('<entry key="T100KEY-ID">XI</entry>');
+    expect(xml).to.contain('<entry key="T100KEY-NO">001</entry>');
+    expect(xml).to.contain('<entry key="T100KEY-V1">ZOSD_MADE_REP</entry>');
   });
 
   it("DELETE on the object removes it and its header, and a second delete is a 404", async () => {

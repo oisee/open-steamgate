@@ -455,7 +455,16 @@ with request media `application/vnd.sap.adt.programs.programs.v2+xml` as
 `200`, an empty body, and no `Content-Type`. Program creation now uses that
 answer, without `Location`. A client derives the object URI from the collection
 and the name it sent: collection + `/` + `encodeURIComponent(name.toLowerCase())`.
-Namespaced names are encoded as one segment. Error responses are unchanged.
+Namespaced names are encoded as one segment.
+
+On 2026-10-04, a second program POST with an existing name was observed with
+both v2 and v3 request media: `500 application/xml`, exception type
+`ExceptionResourceCreationFailure` in `com.sap.adt`. Both `message` and
+`localizedMessage` say `A program or include already exists with the name <NAME>`
+with the upper-case name. The exception's properties carry `T100KEY-ID=XI`,
+`T100KEY-NO=001`, and `T100KEY-V1=<NAME>`. Only the programs collection was
+observed; includes and other object types retain their existing duplicate
+answers (`409 ExceptionResourceIsModified` where supported).
 
 | Create surface | SAP evidence | Current successful answer |
 | --- | --- | --- |
@@ -473,8 +482,16 @@ No other type is aligned by analogy. Storage remains Node host orchestration
 in both `OSD_ADT_ONE_RUNTIME=0` and `1`. After successful program creation, the
 ABAP handler's `PROGRAM_CREATE` continuation returns the empty `200` through
 `RESUME`; `OSD_ADT=js` emits the same answer directly. A failed create never
-calls the success continuation. On native ICF without the Node host, create
+calls the success continuation. The host serializes duplicate program errors
+through the same exception document serializer as other T100-bearing refusals
+on both fronts and in both modes. On native ICF without the Node host, create
 still returns the existing unsupported-path refusal rather than false success.
+
+The duplicate-create client check (2026-10-04) found no dependency on `409` or
+`ExceptionResourceIsModified` in `editors/vscode`,
+`tools/abapfs-conformance.mjs`, or pinned `abap-adt-api` 8.4.3's built source.
+The extension's web code only lists `409` in its generic HTTP reason map;
+the API's `createObject` passes errors through its generic request path.
 
 The client gate below records collection-create consumers at base
 `f861b944caa4b7265f70a16d4982dcea7c074271` (line numbers before this change).

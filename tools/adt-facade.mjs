@@ -1979,12 +1979,25 @@ export function adtRouter(options = {}) {
         const home = type === "DEVC"
           ? attribute(body, "pack:superPackage", "adtcore:name")
           : attribute(body, "adtcore:packageRef", "adtcore:name") ?? attribute(body, "adtcore:packageRef", "adtcore:packageName");
-        const made = store.create(type, name, {
-          description: attribute(body, undefined, "adtcore:description") ?? "",
-          package: home ?? "",
-          // an object of $TMP carries who made it (tools/osd-tmp.mjs)
-          author: req.adt.session.user,
-        });
+        let made;
+        try {
+          made = store.create(type, name, {
+            description: attribute(body, undefined, "adtcore:description") ?? "",
+            package: home ?? "",
+            // an object of $TMP carries who made it (tools/osd-tmp.mjs)
+            author: req.adt.session.user,
+          });
+        } catch (error) {
+          // SAP observation 2026-10-04, program v2/v3 only. Keep the
+          // store's conflict and every other collection's answer unchanged.
+          if (adt !== "programs/programs" || !(error instanceof Conflict)) throw error;
+          const upper = name.toUpperCase();
+          refuse(res, 500, "ExceptionResourceCreationFailure",
+            `A program or include already exists with the name ${upper}`, {properties: [
+              ["T100KEY-ID", "XI"], ["T100KEY-NO", "001"], ["T100KEY-V1", upper],
+            ]});
+          return;
+        }
         if (adt === "programs/programs") {
           if (req.adt.programCreated !== undefined) await req.adt.programCreated();
           else res.status(200).end();

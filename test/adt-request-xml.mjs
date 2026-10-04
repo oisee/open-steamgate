@@ -8,6 +8,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import "./start.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
+import {exceptionDocument} from "../tools/adt-documents.mjs";
 import {liveHash} from "../tools/osd-build.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
@@ -23,7 +24,8 @@ const refs = `<adtcore:objectReferences xmlns:adtcore="${core}"><adtcore:objectR
 const envelopes = [
   ["activation?method=activate", refs, 200],
   ["checkruns", `<chkrun:checkObjectList xmlns:chkrun="http://www.sap.com/adt/checkrun" xmlns:adtcore="${core}"><chkrun:checkObject adtcore:uri="${uri}"><chkrun:content>REPORT zxml.</chkrun:content></chkrun:checkObject></chkrun:checkObjectList>`, 200],
-  ["programs/programs", `<program:abapProgram xmlns:program="http://www.sap.com/adt/programs/programs" xmlns:adtcore="${core}" adtcore:name="ZXML" adtcore:description="XML"><adtcore:packageRef adtcore:name="$TMP"/></program:abapProgram>`, 409],
+  // SAP observed duplicate programs as XI 001 / 500 (2026-10-04); other types retain 409.
+  ["programs/programs", `<program:abapProgram xmlns:program="http://www.sap.com/adt/programs/programs" xmlns:adtcore="${core}" adtcore:name="ZXML" adtcore:description="XML"><adtcore:packageRef adtcore:name="$TMP"/></program:abapProgram>`, 500],
   ["oo/classes", `<class:abapClass xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="${core}" adtcore:name="ZCL_XML"/>`, 409],
   ["oo/interfaces", `<intf:abapInterface xmlns:intf="http://www.sap.com/adt/oo/interfaces" xmlns:adtcore="${core}" adtcore:name="ZIF_XML"/>`, 409],
   ["programs/includes", `<include:abapInclude xmlns:include="http://www.sap.com/adt/programs/includes" xmlns:adtcore="${core}" adtcore:name="ZINCL_XML"/>`, 409],
@@ -144,9 +146,27 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
   };
   for(const [path,xml,status] of envelopes) for(const [kind,transform] of Object.entries(variants)) it(`T12 ${path} ${kind}`,async () => {
     const baseline = await post(path,xml); expect(baseline.status,baseline.body).to.equal(status);
+    // Unobserved collection duplicates retain 409; class includes require a lock.
+    if (status === 409) expect(baseline.body).to.contain(`type id="${path.endsWith("/includes") && path.startsWith("oo/classes/")
+      ? "ExceptionResourceNotLocked" : "ExceptionResourceIsModified"}"`);
     const key = `baseline ${path}`;
     if(front === "node") wireAnswers.set(key,baseline);else expect(baseline).to.deep.equal(wireAnswers.get(key));
     expect(await post(path,transform(xml))).to.deep.equal(baseline);
+  });
+  for (const media of ["v2", "v3"]) it(`duplicate program create ${media}: observed XI 001 refusal`, async () => {
+    const xml = envelopes.find(([path]) => path === "programs/programs")[1].replace('adtcore:name="ZXML"', 'adtcore:name="zxml"');
+    const sources = () => [store.read("PROG", "ZXML").source,
+      store.read("PROG", "ZXML", "main", "active").source, store.inactiveSources()];
+    const before = sources();
+    const response = await fetch(origin+base+"programs/programs", {method:"POST",
+      headers:{...auth,"content-type":`application/vnd.sap.adt.programs.programs.${media}+xml`},body:xml});
+    expect(response.status).to.equal(500);
+    expect(response.headers.get("content-type")).to.match(/^application\/xml\b/);
+    expect(await response.text()).to.equal(exceptionDocument("ExceptionResourceCreationFailure",
+      "A program or include already exists with the name ZXML", {properties:[
+        ["T100KEY-ID","XI"],["T100KEY-NO","001"],["T100KEY-V1","ZXML"],
+      ]}));
+    expect(sources(), "a refused create preserves the active and inactive sources").to.deep.equal(before);
   });
   for(const [path,xml] of envelopes.filter(([path]) => ["programs/programs","oo/classes","oo/interfaces","programs/includes","ddic/ddl/sources","packages"].includes(path))) it(`T12 ${path} successful create variants`,async () => {
     const types = {"programs/programs":"PROG","oo/classes":"CLAS","oo/interfaces":"INTF","programs/includes":"INCL","ddic/ddl/sources":"DDLS","ddic/srvd/sources":"SRVD",packages:"DEVC"};

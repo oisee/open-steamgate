@@ -119,8 +119,13 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       expect(read.status, read.body).to.equal(200);
       expect(read.body).to.equal(`REPORT ${name.toLowerCase()}.\n`);
       const duplicate = await request(url, "POST", collection, headers, body);
-      expect(duplicate.status).to.equal(409);
-      expect(duplicate.body).to.contain("ExceptionResourceIsModified");
+      // SAP observed XI 001 / 500 for programs in v2 and v3, 2026-10-04.
+      expect(duplicate.status).to.equal(500);
+      expect(duplicate.type).to.match(/^application\/xml\b/);
+      expect(duplicate.body).to.equal(exceptionDocument("ExceptionResourceCreationFailure",
+        `A program or include already exists with the name ${name}`, {properties:[
+          ["T100KEY-ID", "XI"], ["T100KEY-NO", "001"], ["T100KEY-V1", name],
+        ]}));
       // A valid ADT envelope missing its name reaches the create handler.
       // Admission rejects malformed XML and a root outside the route's namespace.
       for (const [badBody, exception] of [
