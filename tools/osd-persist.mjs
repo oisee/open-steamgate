@@ -18,6 +18,7 @@
 import {createHash} from "node:crypto";
 import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from "node:fs";
 import {dirname} from "node:path";
+import {migrateAdtHandle} from "./osd-adt-handle-migrate.mjs";
 
 // The one table OSD owns in its own database: which schema the rows in this
 // file were made for. Source and data version on different axes, git for the
@@ -132,7 +133,14 @@ export async function loadInto(db, schema) {
     return true;
   }
   const wanted = fingerprintOf(schema);
-  const found = await stampOf(db);
+  let found = await stampOf(db);
+  if (await migrateAdtHandle({
+    begin: () => db.execute("BEGIN IMMEDIATE"),
+    query: async (sql) => (await db.select({select: sql})).rows,
+    execute: (sql) => db.execute(sql),
+    commit: () => db.execute("COMMIT"),
+    rollback: () => db.execute("ROLLBACK"),
+  }, found, wanted, schema, fingerprintOf)) found = wanted;
   if (found === wanted) {
     seeded = true;
     return true;

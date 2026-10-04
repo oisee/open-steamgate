@@ -1,10 +1,11 @@
 // PostgreSQL connection and first-run seed for the OSD runtime.
 // A dedicated database is the isolation boundary; this client uses its public
-// schema and never drops or rewrites a pre-existing schema.
+// schema; recognized DDIC upgrades migrate in place, unknown drift is refused.
 import {PostgresDatabaseClient} from "@abaplint/database-pg";
 import {fingerprintOf} from "./osd-persist.mjs";
 import {abapTypeLetter, bindValue} from "./abap-types.mjs";
 import {randomBytes} from "node:crypto";
+import {migrateAdtHandle} from "./osd-adt-handle-migrate.mjs";
 
 export function bindNativeValue(parameter) {
   if (parameter.isNull === true) return null;
@@ -110,7 +111,15 @@ export class OsdPostgresClient extends PostgresDatabaseClient {
       return false;
     }
     const stored = await this.select({select: "SELECT fingerprint FROM osd_schema LIMIT 1"});
-    if (stored.rows?.[0]?.fingerprint?.trim() !== wanted) {
+    const found = stored.rows?.[0]?.fingerprint?.trim();
+    const migrated = await migrateAdtHandle({
+      begin: () => this.beginTransaction(),
+      query: async (sql) => (await this.query(sql)).rows,
+      execute: (sql) => this.execute(sql),
+      commit: () => this.commit(),
+      rollback: () => this.rollback(),
+    }, found, wanted, schema, fingerprintOf, true);
+    if (found !== wanted && !migrated) {
       throw new Error(`PostgreSQL schema drift: stored ${stored.rows?.[0]?.fingerprint ?? "missing"}, expected ${wanted}; existing data left intact`);
     }
     return true;

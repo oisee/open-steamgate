@@ -8,6 +8,8 @@ import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
 import {batchInserts} from "../tools/osd-batch-inserts.mjs";
 import {TraceRing, TraceDestination} from "../tools/osd-sql-trace-buffer.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
+import {beforeAdtHandleDDL, adtHandleMigration} from "../tools/osd-adt-handle-migrate.mjs";
+export {beforeAdtHandleDDL} from "../tools/osd-adt-handle-migrate.mjs";
 
 /** The trace a running system holds, for the ST05-shaped screen to read
  *  (backlog G.10). It is off until the screen turns it on, and the wrapper
@@ -17,6 +19,25 @@ export const traceRing = new TraceRing();
 export function schemaTables(ddl) {
   return [ddl].flat().flatMap((statement) =>
     [...String(statement).matchAll(/\bCREATE\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map((match) => match[1].toUpperCase()));
+}
+
+export function migrateAdtHandleFile(native, found, wanted, ddl, fingerprintOf) {
+  const table = adtHandleMigration(found, wanted, ddl, fingerprintOf);
+  if (!table) return false;
+  native.exec("BEGIN IMMEDIATE");
+  try {
+    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
+    if (current === wanted) { native.exec("COMMIT"); return true; }
+    if (current !== found) { native.exec("COMMIT"); return false; }
+    // These rows are transient session handles, so discarding them on an
+    // upgrade is acceptable. No business table or session row is dropped.
+    native.exec("DROP TABLE zosd_adt_shdl");
+    native.exec(table);
+    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
+      .run(wanted, new Date().toISOString());
+    native.exec("COMMIT");
+  } catch (error) { native.exec("ROLLBACK"); throw error; }
+  return true;
 }
 
 // Add the permanent job key to the previous business schema without moving
@@ -639,7 +660,9 @@ async function setupDatabase(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     let found = await db.stampedSchema();
-    const beforeRelease = beforeJobReleaseDDL(schemas.sqlite);
+    const beforeHandle = beforeAdtHandleDDL(schemas.sqlite);
+    const handlePriorWanted = fingerprintOf(beforeHandle);
+    const beforeRelease = beforeJobReleaseDDL(beforeHandle);
     const releasePriorWanted = fingerprintOf(beforeRelease);
     const beforeSchedule = beforeJobScheduleDDL(beforeRelease);
     const schedulePriorWanted = fingerprintOf(beforeSchedule);
@@ -654,7 +677,8 @@ async function setupDatabase(abap, schemas, insert) {
     if (migrateJobEventFile(db.db, found, inputPriorWanted, beforeInput, fingerprintOf)) found = inputPriorWanted;
     if (migrateJobStepInputFile(db.db, found, schedulePriorWanted, beforeSchedule, fingerprintOf)) found = schedulePriorWanted;
     if (migrateJobScheduleFile(db.db, found, releasePriorWanted, beforeRelease, fingerprintOf)) found = releasePriorWanted;
-    if (migrateJobReleaseFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
+    if (migrateJobReleaseFile(db.db, found, handlePriorWanted, beforeHandle, fingerprintOf)) found = handlePriorWanted;
+    if (migrateAdtHandleFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
     if (found === wanted) {
       // the rows are already there, made for this DDIC. The tables the
       // generation writes at start (wwwparams: which SMW0 objects exist and
