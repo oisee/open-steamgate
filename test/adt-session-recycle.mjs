@@ -83,7 +83,8 @@ for (const profile of ["file", "sqlite"]) describe(`ADT editing session across c
     for (const [collection, name, element] of [["programs/programs", "ZOSD_RECYCLE", "program:program"], ["oo/classes", "ZOSD_RECYCLE_PEER", "class:class"]]) {
       const created = await request("POST", BASE + "/" + collection, {...headers, "content-type": "application/xml"},
         `<${element} xmlns:program="http://www.sap.com/adt/programs/programs" xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="${name}"><adtcore:packageRef adtcore:name="$TMP"/></${element}>`);
-      expect(created.status, created.body).to.equal(201);
+      // a program create answers 200 with an empty body (as observed on a system, #580); other types 201
+      expect(created.status, created.body).to.equal(collection === "programs/programs" ? 200 : 201);
     }
     const handle = await lock(headers);
     const source = SOURCE.replace("before", next.toLowerCase());
@@ -142,7 +143,7 @@ for (const profile of ["file", "sqlite"]) describe(`ADT editing session across c
     const headers = await login();
     const created = await request("POST", BASE + "/programs/programs", {...headers, "content-type": "application/xml"},
       '<program:program xmlns:program="http://www.sap.com/adt/programs/programs" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="ZOSD_RECYCLE"><adtcore:packageRef adtcore:name="$TMP"/></program:program>');
-    expect(created.status, created.body).to.equal(201);
+    expect(created.status, created.body).to.equal(200);
     const handle = await lock(headers);
     const source = store.read("PROG", "ZOSD_RECYCLE").source;
     const id = /sap-contextid=([0-9a-f]{24})/.exec(headers.cookie)[1];
