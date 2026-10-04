@@ -121,7 +121,11 @@ required checks on the PR before merging.
 The `tests` and `gogen` concurrency groups cancel active runs only for
 `pull_request` events and share a group by PR ref. Other events use the run ID
 in their group, so pushes to main and tags cannot replace either active or
-pending runs. `preview` and `docker` already disable cancellation.
+pending runs. `preview` and `docker` already disable `cancel-in-progress`,
+which keeps the running workflow. The unchanged `preview` concurrency group
+still lets a new main-push run replace an existing pending run. Preserving
+every preview would require queuing; disabling cancellation alone does not
+provide that guarantee. See [GitHub's concurrency documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
 The `test` aggregate still requires the entire suites matrix to succeed, plus
 the build, browser and Go checks and the packaging job when selected.
 
