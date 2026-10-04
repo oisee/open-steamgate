@@ -988,7 +988,7 @@ function parseCheckReport(xml) {
 }
 
 /** The activation route's answer (tools/adt-documents.mjs, activationSuccessDocument
- *  / activationFailureDocument) into `{ok, issues: [{line, column, message, objDescr}]}`.
+ *  / activationFailureDocument) into `{ok, issues}` with source hrefs and severity.
  *  Both shapes carry properties; activationExecuted determines success. */
 function parseActivationResult(xml) {
   const text = String(xml ?? "").trim();
@@ -999,8 +999,10 @@ function parseActivationResult(xml) {
   // `msg` as a system writes it; `msg:msg` as an older OSD did
   for (const m of text.matchAll(/<(msg(?::msg)?)\b([^>]*)>([\s\S]*?)<\/\1>/g)) {
     const attrs = m[2];
-    const href = attrs.match(/href="([^"]*)"/)?.[1] ?? "";
+    const href = xmlUnescape(attrs.match(/href="([^"]*)"/)?.[1] ?? "");
     issues.push({
+      href,
+      severity: attrs.match(/type="([^"]*)"/)?.[1] ?? "E",
       line: Number(href.match(/#start=(\d+),/)?.[1] ?? attrs.match(/line="([^"]*)"/)?.[1] ?? "1"),
       column: Number(href.match(/,(\d+)$/)?.[1] ?? "1"),
       objDescr: xmlUnescape(attrs.match(/objDescr="([^"]*)"/)?.[1] ?? ""),

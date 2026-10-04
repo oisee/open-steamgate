@@ -1496,9 +1496,56 @@ describe("editors/vscode: the extension's logic", function () {
     ]));
     expect(failed.ok).to.equal(false);
     expect(failed.issues).to.deep.equal([
-      {line: 0, column: 1, objDescr: "", message: "Activation was cancelled."},
-      {line: 7, column: 3, objDescr: "Class ZCL_A", message: "Syntax error"},
+      {href: "", severity: "W", line: 0, column: 1, objDescr: "", message: "Activation was cancelled."},
+      {href: "/sap/bc/adt/oo/classes/zcl_a/source/main#start=7,3", severity: "E", line: 7, column: 3, objDescr: "Class ZCL_A", message: "Syntax error"},
     ]);
+  });
+
+  it("Ctrl+F3 command: failed activation puts href diagnostics on each document, without the cancellation warning", async () => {
+    const xml = activationFailureDocument([
+      {type: "CLAS", name: "ZCL_A", issues: [
+        {severity: "E", message: "Main syntax error", line: 7, column: 3},
+        {severity: "E", message: "Test syntax error", file: "zcl_a.clas.testclasses.abap", line: 11, column: 5},
+        {severity: "W", message: "Local warning", file: "zcl_a.clas.locals_imp.abap", line: 4, column: 2},
+      ]},
+      {type: "PROG", name: "X", issues: [{severity: "E", message: "Program syntax error", line: 8, column: 6}]},
+    ]);
+    const app = express();
+    app.head("/sap/bc/adt/core/discovery", (_req, res) => res.set("x-csrf-token", "test-token").end());
+    app.post("/sap/bc/adt/activation", (_req, res) => res.type("application/xml").send(xml));
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    try {
+      const api = vscodeStub({url: `http://127.0.0.1:${server.address().port}`});
+      const handlers = new Map(), problems = new Map(), output = [];
+      api.commands.registerCommand = (name, handler) => { handlers.set(name, handler); return {dispose() {}}; };
+      api.languages = {createDiagnosticCollection: () => ({
+        set: (uri, issues) => problems.set(uri.fsPath, issues), dispose() {},
+      })};
+      api.DiagnosticSeverity = {Error: 0, Warning: 1, Information: 2};
+      api.Diagnostic = class { constructor(range, message, severity) { Object.assign(this, {range, message, severity}); } };
+      api.Position = class {
+        constructor(line, character) { Object.assign(this, {line, character}); }
+        translate(line, character) { return new api.Position(this.line + line, this.character + character); }
+      };
+      const activeFile = "/project/zcl_a.clas.testclasses.abap";
+      api.window.activeTextEditor = {document: {fileName: activeFile, uri: api.Uri.file(activeFile), isDirty: false}};
+      api.workspace.findFiles = async (pattern) => pattern === "**/x.prog.abap" ? [api.Uri.file("/other/x.prog.abap")] : [];
+      loadExtension(api).registerCheckActivateCommands({subscriptions: []}, {appendLine: (line) => output.push(line)});
+      await handlers.get("osd.activate")();
+      const actual = [...problems].filter(([, issues]) => issues.length).map(([file, issues]) => [file,
+        issues.map((issue) => [issue.message, issue.range.start.line, issue.range.start.character, issue.severity])]);
+      expect(actual).to.have.deep.members([
+        ["/project/zcl_a.clas.abap", [["Main syntax error", 6, 2, 0]]],
+        [activeFile, [["Test syntax error", 10, 4, 0]]],
+        ["/project/zcl_a.clas.locals_imp.abap", [["Local warning", 3, 1, 1]]],
+        ["/other/x.prog.abap", [["Program syntax error", 7, 5, 0]]],
+      ]);
+      expect(output.join("\n")).to.contain("Activation was cancelled.");
+      expect(output.join("\n")).not.to.contain("also broke");
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   it("SE80's F8, one entry per object type: what this build does, or the route its turn would use", () => {
