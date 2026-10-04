@@ -178,6 +178,19 @@ export class BatchRuns {
       this.db.exec("DROP INDEX IF EXISTS batch_job_events_key");
       this.db.exec(`CREATE INDEX IF NOT EXISTS batch_job_events_key ON batch_job_events
         (source_db, source_client, source_sysid, source_owner, job_name, job_count, run_id)`);
+      // A durable revision sees writes from every window and rolls back with
+      // the changed rows. The epoch distinguishes a replaced operations file.
+      this.db.exec('CREATE TABLE IF NOT EXISTS batch_monitor_revision (epoch TEXT NOT NULL, seq INTEGER NOT NULL)');
+      if (!this.db.prepare('SELECT 1 FROM batch_monitor_revision').get()) {
+        this.db.prepare('INSERT INTO batch_monitor_revision VALUES (?, 0)').run(randomUUID());
+      }
+      for (const table of ['batch_runs', 'batch_run_steps', 'batch_job_log']) {
+        for (const operation of ['INSERT', 'UPDATE', 'DELETE']) {
+          this.db.exec(`CREATE TRIGGER IF NOT EXISTS ${table}_revision_${operation}
+            AFTER ${operation} ON ${table} BEGIN
+            UPDATE batch_monitor_revision SET seq = seq + 1; END`);
+        }
+      }
       this.db.exec("COMMIT");
     } catch (error) {
       this.db.exec("ROLLBACK");

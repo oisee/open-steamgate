@@ -45,7 +45,7 @@ describe('VS Code read-only jobs panel', function() {
         res.end(JSON.stringify({output:{lines:['saved WRITE output']}}));return;
       }
       if (url.pathname === '/osd/job-counts') {res.end(JSON.stringify({counts:{running:1,queued:0}}));return;}
-      res.end(JSON.stringify(url.searchParams.has('id') ? {run:runs.find(r=>r.id===url.searchParams.get('id'))} : {runs}));
+      res.end(JSON.stringify(url.searchParams.has('id') ? {run:runs.find(r=>r.id===url.searchParams.get('id'))} : (url.searchParams.get('since')===JSON.stringify(runs) ? {revision:JSON.stringify(runs),unchanged:true} : {runs,revision:JSON.stringify(runs)})));
     });
     await new Promise(r=>server.listen(0,'127.0.0.1',r));
     controller={launcher:{state:'running',port:server.address().port,env:{OSD_BATCH_READ_TOKEN:token}},onDidChange:fn=>{controller.change=fn;return {dispose(){}};}};
@@ -120,6 +120,21 @@ describe('VS Code read-only jobs panel', function() {
     const count=requests.length;await controller.jobsPanelTick({running:0,queued:0},'healthy');expect(requests).to.have.length(count);
     await controller.jobsPanelTick({running:1},'healthy');expect(requests).to.have.length(count+1);
   });
+  it('reconciles completed runs between zero-count polls every 30 seconds',async()=>{
+    const savedNow=Date.now;let now=0;Date.now=()=>now;
+    try {
+      runs[0].state='COMPLETED';await provider.refresh();
+      const count=requests.length;
+      runs.push({...run,id:'between-polls',state:'COMPLETED'});
+      now=2000;await controller.jobsPanelTick({running:0,queued:0},'healthy');expect(requests.length).to.equal(count);
+      now=30000;await controller.jobsPanelTick({running:0,queued:0},'healthy');
+      expect((await provider.getChildren({group:'finished'})).map(n=>n.id)).to.include('between-polls');
+      expect(requests.at(-1).url).to.include('since=');
+      const cached=provider.runs;
+      now=60000;await controller.jobsPanelTick({running:0,queued:0},'healthy');
+      expect(provider.runs).to.equal(cached);expect(requests.length).to.equal(count+2);
+    } finally {Date.now=savedNow;}
+  });
   it('uses the status poll for active refresh and opens the panel from the jobs item',async()=>{
     const {jobsStatusBar}=require('../editors/vscode/job-worker.js');
     Object.assign(controller.launcher,{jobsWorkerMode:'auto',jobWorker:{running:true}});
@@ -141,9 +156,11 @@ describe('VS Code read-only jobs panel', function() {
     const node=await job();await provider.getChildren(node);
     const savedFetch=globalThis.fetch;
     try {
-      for(const mode of ['timeout','disabled']) {
+      for(const mode of ['timeout','paused','disabled']) {
+        controller.launcher.inspectPort=9229;
+        ui.vscode.debug={activeDebugSession:mode==='paused'?{name:'OSD: ABAP (9229)'}:undefined};
         let panelReads=0;
-        globalThis.fetch=async url=>{if(String(url).includes('batch-runs')) {panelReads++;return savedFetch(url,{headers:{Authorization:`Bearer ${token}`}});}if(mode==='timeout')throw new DOMException('timeout','TimeoutError');return {ok:false,status:404};};
+        globalThis.fetch=async url=>{if(String(url).includes('batch-runs')) {panelReads++;return savedFetch(url,{headers:{Authorization:`Bearer ${token}`}});}if(mode!=='disabled')throw new DOMException('timeout','TimeoutError');return {ok:false,status:404};};
         const before=requests.length;
         for(let i=0;i<10;i++) {await tick();await provider.getChildren(node);await provider.getChildren({run:{id:'uncached'}});}
         expect(requests.length).to.equal(before);expect(panelReads).to.equal(0);
@@ -161,6 +178,7 @@ describe('VS Code read-only jobs panel', function() {
       for(const disabled of [true,false]) {
         status=disabled?404:200;runs=[];await provider.refresh();
         const count=requests.length;
+        if(disabled) {await provider.getChildren({run:{id:'disabled-detail'}});expect(requests.length).to.equal(count);}
         for(let i=0;i<60;i++) {now+=2000;await controller.jobsPanelTick({running:0},'healthy');}
         expect(requests.length-count).to.be.at.most(6);
       }
@@ -184,6 +202,17 @@ describe('Jobs panel real saved-run API contract',function(){
       const app=express();app.get('/osd/batch-runs',batchMonitorHandler(dir,env));server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
       const get=async query=>fetch(`http://127.0.0.1:${server.address().port}/osd/batch-runs?${query}`,{headers:{Authorization:`Bearer ${token}`}});
       const list=await (await get('limit=200')).json();expect(list.runs[0].user).to.equal('DEMO');expect(list.runs[0].namedEvent.id).to.equal('DEMO_EVENT');expect(JSON.stringify(list)).not.to.include('/private/path');
+      const unchanged=await (await get('limit=200&since='+encodeURIComponent(list.revision))).json();
+      expect(unchanged).to.deep.equal({revision:list.revision,unchanged:true});
+      const other=new BatchRuns(dir,env);
+      try {const next=other.start({program:'OTHER_REPORT',input:[],generation:'test'});other.finish(next.id,{status:'COMPLETED',lines:[]});} finally {other.close();}
+      const changed=await (await get('limit=200&since='+encodeURIComponent(list.revision))).json();
+      expect(changed.revision).not.to.equal(list.revision);expect(changed.runs).to.have.length(2);
+      store.db.exec('BEGIN IMMEDIATE');store.db.prepare("UPDATE batch_runs SET state='FAILED' WHERE id=?").run(saved.id);store.db.exec('ROLLBACK');
+      expect((await (await get('limit=200&since='+encodeURIComponent(changed.revision))).json()).unchanged).to.equal(true);
+      expect((await get('since=bad')).status).to.equal(400);
+      expect((await get(`id=${saved.id}&since=${list.revision}`)).status).to.equal(400);
+      expect((await fetch(`http://127.0.0.1:${server.address().port}/osd/batch-runs?since=${list.revision}`)).status).to.equal(401);
       const detail=await (await get(`id=${saved.id}`)).json();expect(detail.run.log[0].text).to.equal('Job completed');
       expect((await (await get(`id=${saved.id}&output=1`)).json()).output.lines).to.deep.equal(['verified WRITE']);
       writeFileSync(join(store.artifacts,`${saved.id}.json`),'tampered');expect((await get(`id=${saved.id}&output=1`)).status).to.equal(500);

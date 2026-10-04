@@ -81,7 +81,7 @@ export function batchMonitorHandler(root, env = process.env) {
   return Object.assign(function (req, res) {
     if (!authorized(req, res, env)) return;
     const query = req.query;
-    if (Object.keys(query).some((key) => !["id", "output", "limit"].includes(key))) {
+    if (Object.keys(query).some((key) => !["id", "output", "limit", "since"].includes(key))) {
       res.status(400).json({error: {code: "BAD_QUERY"}});
       return;
     }
@@ -89,7 +89,7 @@ export function batchMonitorHandler(root, env = process.env) {
       const store = reader.open(req);
       try {
         if (query.id !== undefined) {
-          if (query.limit !== undefined || (query.output !== undefined && query.output !== "1")
+          if (query.since !== undefined || query.limit !== undefined || (query.output !== undefined && query.output !== "1")
               || typeof query.id !== "string" || !/^[0-9a-f-]{36}$/.test(query.id)) {
             res.status(400).json({error: {code: "BAD_QUERY"}});
             return;
@@ -111,7 +111,8 @@ export function batchMonitorHandler(root, env = process.env) {
           }
           return;
         }
-        if (query.output !== undefined || (query.limit !== undefined
+        if ((query.since !== undefined && (typeof query.since !== "string" || !/^[0-9a-f-]{36}:[0-9]+$/.test(query.since)))
+            || query.output !== undefined || (query.limit !== undefined
             && (typeof query.limit !== "string" || !/^[1-9][0-9]{0,2}$/.test(query.limit)))) {
           res.status(400).json({error: {code: "BAD_QUERY"}});
           return;
@@ -121,9 +122,14 @@ export function batchMonitorHandler(root, env = process.env) {
           res.status(400).json({error: {code: "BAD_QUERY"}});
           return;
         }
-        res.json({runs: store.readSnapshot(() => store.db.prepare(`SELECT id FROM batch_runs
-          ORDER BY COALESCE(queued_at, started_at) DESC, id DESC LIMIT ?`).all(limit)
-          .map(({id}) => jobMetadata(store, store.readRun(id))))});
+        res.json(store.readSnapshot(() => {
+          const clock = store.db.prepare('SELECT epoch, seq FROM batch_monitor_revision').get();
+          const revision = `${clock.epoch}:${clock.seq}`;
+          if (query.since === revision) return {revision, unchanged: true};
+          return {revision, runs: store.db.prepare(`SELECT id FROM batch_runs
+            ORDER BY COALESCE(queued_at, started_at) DESC, id DESC LIMIT ?`).all(limit)
+            .map(({id}) => jobMetadata(store, store.readRun(id)))};
+        }));
       } finally {
         reader.release(store);
       }
