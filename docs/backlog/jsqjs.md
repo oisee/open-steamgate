@@ -120,3 +120,52 @@ runner's per-test and phase timing fields.
 Run heavy checks with `OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh timeout ...`.
 Local diagnostic logs/profiles stay under `.local/jsqjs/`; a watchdog stops
 only the run's own descendants above 14 GiB or a phase deadline.
+
+## Round 2: backing-field correctness and isolated comparisons
+
+Promoted instances retain an enumerable `value` property with a getter that
+materializes current buffered bytes. Its setter invalidates the buffer, so
+native assignments and direct field writes cannot leave an old buffer active.
+JSON serialization, structured clone, native clone, and direct `.value` reads
+all observe buffered writes immediately. The hot-path regression forbids both
+`get()` and backing-field reads during small stores, slices and length queries.
+
+The native and buffered differential variants now run in separate processes.
+Each child verifies that its runtime prototype starts unpatched. They transpile
+and execute identical ABAP covering value/reference parameters, assignment,
+APPEND/MODIFY/READ INTO/SORT, CONCATENATE/FIND/REPLACE IN BYTE MODE, string and
+fixed-hex conversions, range failures, the real `cl_abap_conv_in_ce` and
+`cl_abap_conv_out_ce` classes, and a RAWSTRING table INSERT/SELECT through the
+runtime's binding path and the real SQLite client. Known expected outputs are
+asserted as well as compared.
+
+SECTION write acceleration now requires runtime `Integer` operands. `Integer8`
+and mixed SECTION operands retain native exceptions. No evidence establishing
+SAP legality for int8 SECTION operands was found in ANORMALIES.md or the
+supplied ABAPiti checkout; that checkout contains no inbox in this snapshot.
+This fix makes no new SAP semantic claim.
+
+The synthetic benchmark still takes 7 / 1 / 2 ms for 1,000 writes at
+1,024 / 65,536 / 1,179,648 bytes, versus 7 / 222 / 4,099 ms natively.
+
+The corrected QuickJS run passed **9/9 SUCCESS, zero failures/errors/skips**
+in 474.1 s overall, with 41.595 s in methods and sampled peak process-tree RSS
+of 9,327 MiB (2 s samples). The same Node/runtime/database/heap settings as the
+first run were used, without CPU profiling. Method results:
+
+| Method | Status | Seconds |
+|---|---|---:|
+| E0_ONE_PLUS_TWO | SUCCESS | 3.352 |
+| E1_SUM_LOOP | SUCCESS | 7.743 |
+| E2_SORT | SUCCESS | 2.167 |
+| E3_JSON | SUCCESS | 1.926 |
+| E4_FIB | SUCCESS | 19.376 |
+| E5_STRING | SUCCESS | 1.867 |
+| E6_MATH | SUCCESS | 2.920 |
+| E7_MAP_REGEXP | SUCCESS | 2.210 |
+| P_PRINTF | SUCCESS | 0.034 |
+
+The targeted xstring and folder-runner suites pass **13/13** (74 s overall).
+The suites registry check passes. The branch-aware size guard (`--changed
+origin/main`) passes and reports five inherited breaches; the whole-tree guard
+still reports those breaches in unrelated paths. No budgets were raised.

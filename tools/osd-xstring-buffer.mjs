@@ -11,8 +11,6 @@ export function installXStringBuffer(abap) {
     const buffers = new WeakMap();
     const original = Object.fromEntries(['get', 'set', 'clear', 'clone', 'getOffset'].map(k => [k, proto[k]]));
     const materialize = (value) => {
-      const entry = buffers.get(value);
-      if (entry) value.value = entry.hex ??= entry.bytes.toString('hex').toUpperCase();
       return original.get.call(value);
     };
     proto.get = function() { return materialize(this); };
@@ -26,6 +24,26 @@ export function installXStringBuffer(abap) {
     proto.clone = function() { materialize(this); return original.clone.call(this); };
     const numeric = value => typeof value === 'number' ? value
       : value instanceof Integer || value instanceof Integer8 ? Number(value.get()) : undefined;
+    const promote = (value, bytes) => {
+      // XString has an own, enumerable value field. Keep that shape so JSON,
+      // structuredClone and every direct reader see the same current hex.
+      // The setter also fences native mutations (including direct assignment).
+      const descriptor = Object.getOwnPropertyDescriptor(value, 'value');
+      if ('value' in descriptor) {
+        let raw = descriptor.value;
+        Object.defineProperty(value, 'value', {
+          enumerable: descriptor.enumerable, configurable: descriptor.configurable,
+          get() {
+            const entry = buffers.get(this);
+            return entry ? entry.hex ??= entry.bytes.toString('hex').toUpperCase() : raw;
+          },
+          set(hex) { buffers.delete(this); raw = hex; },
+        });
+      }
+      const entry = {bytes};
+      buffers.set(value, entry);
+      return entry;
+    };
     proto.getOffset = function(input) {
       const entry = buffers.get(this);
       if (entry && input && (input.offset !== undefined || input.length !== undefined)) {
@@ -37,15 +55,16 @@ export function installXStringBuffer(abap) {
       materialize(this);
       return original.getOffset.call(this, input);
     };
-    state = {buffers, numeric, materialize};
+    state = {buffers, numeric, materialize, promote};
     Object.defineProperty(proto, installed, {value: state});
   }
   if (abap.statements[installed]) return;
-  const {buffers, numeric} = state;
+  const {buffers, numeric, promote} = state;
   const replace = abap.statements.replace;
   abap.statements.replace = function(input) {
     const target = input.target;
     if (target instanceof XString && input.sectionOffset && input.sectionLength
+        && input.sectionOffset instanceof Integer && input.sectionLength instanceof Integer
         && !input.of && !input.regex && !input.pcre && !input.replacementCount && !input.replacementLength) {
       const offset = numeric(input.sectionOffset), length = numeric(input.sectionLength);
       const replacement = typeof input.with === 'string' ? input.with : input.with?.get();
@@ -55,8 +74,7 @@ export function installXStringBuffer(abap) {
           && offset >= 0 && length >= 0 && offset + length <= bytes
           && typeof replacement === 'string' && replacement.length === length * 2 && /^[0-9A-F]*$/.test(replacement)) {
         if (!entry) {
-          entry = {bytes: Buffer.from(target.get(), 'hex')};
-          buffers.set(target, entry);
+          entry = promote(target, Buffer.from(target.get(), 'hex'));
         }
         entry.bytes.set(Buffer.from(replacement, 'hex'), offset);
         entry.hex = undefined;

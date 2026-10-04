@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import runtime from '@abaplint/runtime';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
 import {installXStringBuffer} from '../tools/osd-xstring-buffer.mjs';
 
 const make = (buffered) => {
@@ -35,18 +37,34 @@ describe('large xstring SECTION writes', () => {
     mem.clear();
     assert.equal(abap.builtin.xstrlen({val:mem}).get(), 0);
   });
-  it('matches the native implementation across boundaries and size-changing writes', () => {
-    const execute = buffered => {
-      const abap = make(buffered), mem = new abap.types.XString().set('00'.repeat(65536));
-      const results = [];
-      for (const [offset,length,bytes] of [[65535,1,'AB'], [0,1,'CD'], [4,0,''], [4,2,'123456'], [3,4,'AA'], [2,1,'']]) {
-        store(abap,mem,offset,length,bytes);
-        results.push([abap.builtin.xstrlen({val:mem}).get(), mem.getOffset({offset:0,length:10}).get(), abap.builtin.sy.get().subrc.get()]);
-      }
-      results.push(mem.get());
-      return results;
+  it('matches native operands, ABAP byte operations, conversions and RAWSTRING SQL in separate processes', function() {
+    this.timeout(60000);
+    const execute = mode => {
+      const run = spawnSync(process.execPath, [fileURLToPath(new URL('./fixtures/xstring-buffer/child.mjs',import.meta.url)),mode],
+        {encoding:'utf8', timeout:30000, maxBuffer:2e6});
+      assert.equal(run.error,undefined,String(run.error));
+      assert.equal(run.status,0,run.stderr);
+      return JSON.parse(run.stdout);
     };
-    assert.deepEqual(execute(true), execute(false));
+    assert.deepEqual(execute('buffered'),execute('native'));
+  });
+  it('flushes every backing-field reader and invalidates direct writes', () => {
+    const abap = make(true), mem = new abap.types.XString().set('00'.repeat(65536));
+    for (const read of [m => JSON.parse(JSON.stringify(m)).value,
+      m => structuredClone(m).value, m => m.value, m => m.valueOf().value,
+      m => m.get(), m => m.clone().value]) {
+      store(abap,mem,0,1,'AB');
+      assert.equal(read(mem).slice(0,4),'AB00');
+      store(abap,mem,0,1,'CD');
+      assert.equal(read(mem).slice(0,4),'CD00');
+    }
+    assert.equal(Object.getOwnPropertyDescriptor(mem,'value').enumerable,true);
+    mem.value = '1234';
+    assert.equal(mem.get(),'1234');
+    assert.equal(abap.builtin.xstrlen({val:mem}).get(),2);
+    mem.set('00'.repeat(65536));
+    store(abap,mem,0,1,'EF'); // promote the same instance again
+    assert.equal(mem.value.slice(0,4),'EF00');
   });
   it('preserves range exceptions and ordinary search replacement after promotion', () => {
     const abap = make(true), mem = new abap.types.XString().set('00'.repeat(65536));
@@ -66,6 +84,7 @@ describe('large xstring SECTION writes', () => {
     store(abap,mem,0,4,'12345678');
     // A full read on the hot path would restore the O(buffer-size) work.
     mem.get = () => { throw new Error('full-buffer read'); };
+    Object.defineProperty(mem,'value',{get() { throw new Error('backing-field read'); }});
     for(let i=0;i<1000;i++) {
       store(abap,mem,i,4,'12345678');
       assert.equal(mem.getOffset({offset:i,length:4}).get(),'12345678');
