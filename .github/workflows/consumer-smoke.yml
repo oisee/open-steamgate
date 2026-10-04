@@ -24,7 +24,6 @@ jobs:
     timeout-minutes: 75
     env:
       OSD_HOME: ${{ github.workspace }}/osd
-      GOPROXY: "off"
       GOTOOLCHAIN: local
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
@@ -62,7 +61,19 @@ jobs:
         if: success() || failure()
         with:
           go-version: '1.26'
-          cache: false
+          cache: true
+          cache-dependency-path: osd/tools/gogen/go/go.sum
+      # The only network step for Go: a clean runner has an empty module cache
+      # (tools/gogen/go has external modules and no vendor/). After this, the
+      # checks run with GOPROXY=off so they never reach the network themselves.
+      - name: Download Go modules for the CLI check
+        timeout-minutes: 5
+        if: success() || failure()
+        working-directory: osd/tools/gogen/go
+        run: go mod download
+      - name: Close the Go module network for the checks
+        if: success() || failure()
+        run: echo "GOPROXY=off" >> "$GITHUB_ENV"
       - name: Fleet slice (SQLite)
         if: success() || failure()
         working-directory: demo
