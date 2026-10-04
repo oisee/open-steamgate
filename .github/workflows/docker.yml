@@ -30,7 +30,7 @@ on:
       - 'packs/**'
       - '.github/workflows/docker.yml'
   push:
-    tags: ['vscode-v*']
+    tags: ['vscode-v*', 'vscode-stable-v*']
   workflow_dispatch:
     inputs:
       publish:
@@ -289,8 +289,8 @@ jobs:
           amd64_digest="sha256:${amd64_file[0]##*/}"
           arm64_digest="sha256:${arm64_file[0]##*/}"
           [[ "$amd64_digest" =~ ^sha256:[0-9a-f]{64}$ && "$arm64_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          if [[ "$GITHUB_REF" == refs/tags/vscode-v* ]]; then
-            version="${GITHUB_REF_NAME#vscode-v}"
+          if [[ "$GITHUB_REF" == refs/tags/vscode-v* || "$GITHUB_REF" == refs/tags/vscode-stable-v* ]]; then
+            version="${GITHUB_REF_NAME##*v}"
             [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           else
             version="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"

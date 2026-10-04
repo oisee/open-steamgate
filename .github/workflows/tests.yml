@@ -26,7 +26,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: [vscode-v*]
+    tags: [vscode-v*, vscode-stable-v*]
   schedule:
     - cron: '0 3 * * 0'
   workflow_dispatch:

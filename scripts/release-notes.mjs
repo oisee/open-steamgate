@@ -62,14 +62,14 @@ export function generateNotes({cwd = process.cwd(), tag, from, to, mergeShaFor, 
   };
   const impacts = [];
   if (tag) {
-    if (!/^vscode-v\d+\.\d+\.\d+$/.test(tag)) throw new Error("invalid vscode-v tag");
+    if (!/^vscode-(?:stable-)?v\d+\.\d+\.\d+$/.test(tag)) throw new Error("invalid VS Code release tag");
     const tagged = !to;
     to ??= `refs/tags/${tag}`;
     git(cwd, "rev-parse", "--verify", `${to}^{commit}`);
     // The nearest older release reachable from this tag. A first release
     // covers the full first-parent history.
     try {
-      from = git(cwd, "describe", "--first-parent", "--tags", "--match", "vscode-v*", "--abbrev=0", tagged ? `${to}^` : to);
+      from = git(cwd, "describe", "--first-parent", "--tags", "--match", "vscode-v*", "--match", "vscode-stable-v*", "--abbrev=0", tagged ? `${to}^` : to);
     } catch {
       from = undefined;
     }

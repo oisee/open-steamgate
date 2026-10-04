@@ -1,17 +1,23 @@
-name: VS Code prerelease
+name: VS Code release
 
 on:
   push:
-    tags: ['vscode-v*']
+    tags: ['vscode-v*', 'vscode-stable-v*']
   workflow_dispatch:
     inputs:
+      channel:
+        description: Release channel
+        required: false
+        default: prerelease
+        type: choice
+        options: [prerelease, stable]
       tag:
-        description: Leave blank to use vscode-v<stamped version> from the selected ref
+        description: Leave blank to use the selected channel and stamped version from the selected ref
         required: false
         default: ''
         type: string
       draft:
-        description: Keep the prerelease as a draft (false publishes an existing draft)
+        description: Keep the release as a draft (false publishes an existing draft)
         required: false
         default: true
         type: boolean
@@ -19,7 +25,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: vscode-release-${{ github.event_name == 'workflow_dispatch' && (inputs.tag || github.sha) || github.ref_name }}
+  group: vscode-release-${{ inputs.channel || (startsWith(github.ref_name, 'vscode-stable-v') && 'stable' || 'prerelease') }}-${{ github.event_name == 'workflow_dispatch' && (inputs.tag || github.sha) || github.ref_name }}
   cancel-in-progress: false
 defaults:
   run:
@@ -34,6 +40,8 @@ jobs:
       contents: write
     outputs:
       tag: ${{ steps.release.outputs.tag }}
+      channel: ${{ steps.release.outputs.channel }}
+      version: ${{ steps.release.outputs.version }}
       scan_status: ${{ steps.leak.outputs.status }}
       full_scan: ${{ steps.leak.outputs.full_scan }}
     env:
@@ -47,6 +55,43 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: Select and validate release tag
+        id: release
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          channel=prerelease
+          prefix=vscode-v
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            channel="${INPUT_CHANNEL:-prerelease}"
+            if [[ "$channel" == stable ]]; then prefix=vscode-stable-v; fi
+            tag="${INPUT_TAG:-$(node scripts/release-version.mjs --suggest | sed "s/^vscode-v/$prefix/")}"
+            if [[ "$tag" != "$prefix"* ]]; then
+              echo '::error::Release tag must match the selected channel'
+              exit 1
+            fi
+            version=$(node scripts/release-version.mjs "$tag" --allow-untagged)
+          else
+            tag="$GITHUB_REF_NAME"
+            if [[ "$tag" == vscode-stable-v* ]]; then channel=stable; fi
+            version=$(node scripts/release-version.mjs "$tag")
+          fi
+          printf 'tag=%s\nchannel=%s\nversion=%s\n' "$tag" "$channel" "$version" >> "$GITHUB_OUTPUT"
+      - name: Require a new Marketplace version
+        if: github.event_name == 'push' || inputs.channel == 'stable'
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          npm exec --yes --package=@vscode/vsce@4.0.0 -- \
+            vsce show oisee.open-steamgate --json > "$RUNNER_TEMP/marketplace.json"
+          jq -e '.versions | type == "array"' "$RUNNER_TEMP/marketplace.json" >/dev/null
+          if jq -e --arg version "$RELEASE_VERSION" 'any(.versions[]; .version == $version)' "$RUNNER_TEMP/marketplace.json" >/dev/null; then
+            echo "::error::Marketplace version $RELEASE_VERSION already exists. A prerelease cannot be republished as stable; release a new commit with a new stamped version."
+            exit 1
+          fi
       - run: npm ci
       - name: Build and link the pinned transpiler and runtime
         run: |
@@ -58,20 +103,6 @@ jobs:
           node tools/osd-link.mjs transpiler-cli packages/cli
           node tools/osd-link.mjs runtime packages/runtime
           node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
-      - name: Select and validate release tag
-        id: release
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
-            tag="${INPUT_TAG:-$(node scripts/release-version.mjs --suggest)}"
-            node scripts/release-version.mjs "$tag" --allow-untagged
-          else
-            tag="$GITHUB_REF_NAME"
-            node scripts/release-version.mjs "$tag"
-          fi
-          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
       - run: npm run bootstrap
       - run: npm run vsix
       - name: Check the bundled transpiler and runtime
@@ -81,7 +112,7 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#vscode-v}"
+          version="${RELEASE_TAG##*v}"
           vsix="build/vsix/open-steamgate-$version.vsix"
           test -f "$vsix"
           node scripts/release-version.mjs "$RELEASE_TAG" "$vsix" --allow-untagged
@@ -94,7 +125,7 @@ jobs:
           DRAFT: ${{ inputs.draft }}
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#vscode-v}"
+          version="${RELEASE_TAG##*v}"
           if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
             node scripts/release-notes.mjs "$RELEASE_TAG" > build/vsix/CHANGELOG.md
           else
@@ -142,14 +173,17 @@ jobs:
             fi
             exit "$status"
           fi
-      - name: Create or update prerelease and upload VSIX
+      - name: Create or update release and upload VSIX
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           DRAFT: ${{ inputs.draft }}
           FULL_SCAN: ${{ steps.leak.outputs.full_scan }}
+          RELEASE_CHANNEL: ${{ steps.release.outputs.channel }}
         run: |
           set -euo pipefail
-          version="${RELEASE_TAG#vscode-v}"
+          release_flags=(--prerelease)
+          if [[ "$RELEASE_CHANNEL" == stable ]]; then release_flags=(--prerelease=false --latest); fi
+          version="${RELEASE_TAG##*v}"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             git fetch --tags --force
             node scripts/release-version.mjs --check-target "$RELEASE_TAG"
@@ -163,17 +197,17 @@ jobs:
               tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
               node tools/osd-ci-wait-tests.mjs "$RELEASE_TAG" "$tag_sha"
             fi
-            gh release edit "$RELEASE_TAG" --prerelease --title "$RELEASE_TAG" --notes-file build/vsix/release-body.md
+            gh release edit "$RELEASE_TAG" "${release_flags[@]}" --title "$RELEASE_TAG" --notes-file build/vsix/release-body.md
           elif [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
             if [[ "$DRAFT" == false ]]; then
               echo 'Run once with draft=true before publishing an untagged dispatch release' >&2
               exit 1
             fi
-            gh release create "$RELEASE_TAG" --draft --prerelease --target "$(git rev-parse HEAD)" \
+            gh release create "$RELEASE_TAG" --draft "${release_flags[@]}" --target "$(git rev-parse HEAD)" \
               --title "$RELEASE_TAG" --notes-file build/vsix/release-body.md
           else
             gh release create "$RELEASE_TAG" --verify-tag --target "$(git rev-parse HEAD)" \
-              --draft --prerelease --title "$RELEASE_TAG" --notes-file build/vsix/release-body.md
+              --draft "${release_flags[@]}" --title "$RELEASE_TAG" --notes-file build/vsix/release-body.md
           fi
           release_is_draft=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)
           if [[ "$release_is_draft" != true && "$FULL_SCAN" != true ]]; then
@@ -458,6 +492,7 @@ jobs:
       contents: write
     env:
       RELEASE_TAG: ${{ needs.vsix.outputs.tag }}
+      RELEASE_CHANNEL: ${{ needs.vsix.outputs.channel }}
       DRAFT: ${{ inputs.draft }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       LEAK_IDENTIFIERS_JSON: ${{ secrets.OSD_LEAK_IDENTIFIERS }}
@@ -466,7 +501,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Publish completed prerelease
+      - name: Publish completed release
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == push || "$DRAFT" == false ]]; then
@@ -489,13 +524,15 @@ jobs:
             grep -Fxq "$asset.sha256" "$RUNNER_TEMP/release-assets.txt"
           done
           if [[ "$GITHUB_EVENT_NAME" == push || "$DRAFT" == false ]]; then
-            gh release edit "$RELEASE_TAG" --draft=false --prerelease
+            release_flags=(--prerelease)
+            if [[ "$RELEASE_CHANNEL" == stable ]]; then release_flags=(--prerelease=false --latest); fi
+            gh release edit "$RELEASE_TAG" --draft=false "${release_flags[@]}"
           fi
 
   marketplace:
     # A draft dispatch is useful for review, but must never publish to the
     # Marketplace. Only the immutable tag-push path is a deployment trigger.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/vscode-v')
+    if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/vscode-v') || startsWith(github.ref, 'refs/tags/vscode-stable-v'))
     needs: [vsix, publish]
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -504,6 +541,7 @@ jobs:
       contents: read
     env:
       RELEASE_TAG: ${{ needs.vsix.outputs.tag }}
+      RELEASE_CHANNEL: ${{ needs.vsix.outputs.channel }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
@@ -525,10 +563,13 @@ jobs:
           node tools/osd-link.mjs runtime packages/runtime
           node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
       - run: npm run bootstrap
-      - name: Build the Marketplace prerelease VSIX
+      - name: Build the Marketplace VSIX
         run: |
           set -euo pipefail
-          npm run vsix:marketplace 2>&1 | tee "$RUNNER_TEMP/marketplace-build.log"
+          export OSD_VSIX_PROFILE=marketplace
+          export OSD_VSIX_PRERELEASE=0
+          if [[ "$RELEASE_CHANNEL" == prerelease ]]; then export OSD_VSIX_PRERELEASE=1; fi
+          npm run vsix 2>&1 | tee "$RUNNER_TEMP/marketplace-build.log"
           node scripts/verify-vsix-transpiler.mjs build/vsix/*.vsix
           # These two placeholder licences have explicit maintainer overrides
           # in third-party-notices.mjs. Any new issue needs a fresh review.
@@ -542,10 +583,16 @@ jobs:
             echo '::error::Review new third-party licence issues before Marketplace publication'
             exit 1
           fi
-          vsix="build/vsix/open-steamgate-${RELEASE_TAG#vscode-v}.vsix"
+          vsix="build/vsix/open-steamgate-${RELEASE_TAG##*v}.vsix"
           node scripts/release-version.mjs "$RELEASE_TAG" "$vsix"
           unzip -tq "$vsix"
-          unzip -p "$vsix" extension.vsixmanifest | grep -q 'Id="Microsoft.VisualStudio.Code.PreRelease" Value="true"'
+          unzip -p "$vsix" extension.vsixmanifest > "$RUNNER_TEMP/marketplace-manifest.xml"
+          if [[ "$RELEASE_CHANNEL" == prerelease ]]; then
+            grep -q 'Id="Microsoft.VisualStudio.Code.PreRelease" Value="true"' "$RUNNER_TEMP/marketplace-manifest.xml"
+          elif grep -q 'Id="Microsoft.VisualStudio.Code.PreRelease"' "$RUNNER_TEMP/marketplace-manifest.xml"; then
+            echo '::error::Stable Marketplace VSIX contains the prerelease property'
+            exit 1
+          fi
           if unzip -p "$vsix" extension/package.json | jq -e 'has("browser")' >/dev/null; then
             echo '::error::Marketplace profile unexpectedly contains a browser entry'
             exit 1
@@ -559,6 +606,8 @@ jobs:
             echo '::error::Configure the VSCE_PAT Actions secret before publishing'
             exit 1
           fi
-          vsix="build/vsix/open-steamgate-${RELEASE_TAG#vscode-v}.vsix"
+          vsix="build/vsix/open-steamgate-${RELEASE_TAG##*v}.vsix"
+          publish_flags=()
+          if [[ "$RELEASE_CHANNEL" == prerelease ]]; then publish_flags=(--pre-release); fi
           npm exec --yes --package=@vscode/vsce@4.0.0 -- \
-            vsce publish --pre-release --packagePath "$vsix"
+            vsce publish "${publish_flags[@]}" --packagePath "$vsix"
