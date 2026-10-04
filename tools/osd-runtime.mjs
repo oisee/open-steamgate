@@ -44,6 +44,7 @@ const CHILDREN = new Set();
 /** every serving child this process started and has not seen exit: for a
  *  test that must not leave one behind when the code under test is wrong */
 export const liveChildren = () => [...CHILDREN];
+export const servingStateSnapshot = () => liveChildren().map((child) => ({pid: child.pid, exitCode: child.exitCode, signalCode: child.signalCode}));
 let reaperInstalled = false;
 
 function reapOnExit() {

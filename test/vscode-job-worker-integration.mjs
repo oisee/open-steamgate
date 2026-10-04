@@ -88,9 +88,13 @@ ENDCLASS.`);
       console.log(`job worker activation: ${activation.build}`);
 
     } finally {
-      await launcher.stop();
-      expect(launcher.jobWorker?.running ?? false).to.equal(false);
-      rmSync(storageDir,{recursive:true,force:true});
+      const isolation = require.cache[require.resolve('../tools/osd-test-isolation.cjs')]?.exports;
+      try { await isolation?.observeGenerationDrift({pack: join(storageDir, 'packs/notebook-scratch')}); }
+      finally {
+        await launcher.stop();
+        expect(launcher.jobWorker?.running ?? false).to.equal(false);
+        rmSync(storageDir,{recursive:true,force:true});
+      }
     }
   });
 });

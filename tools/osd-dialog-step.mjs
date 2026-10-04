@@ -59,6 +59,11 @@ try {
 }
 
 let holder;          // the token of the step that has the work process
+let dialogObserver = null; // installed only by the test detector
+export function registerDialogObserver(observer) { dialogObserver = observer; }
+export function dialogStateSnapshot() {
+  return {...workProcess(), open: dialogObserver?.snapshot() ?? []};
+}
 const waiting = [];  // [token, resolve] in arrival order
 let since = 0;       // when the holder got it
 function acquire(token) {
@@ -231,6 +236,7 @@ export async function exclusive(work, what, {dialog = false} = {}) {
     throw new Error(`a nested dialog step${what === undefined ? "" : ` (${what})`}: the step that would run it holds the work process`);
   }
   const token = {what, dialog};
+  dialogObserver?.open(token);
   await acquire(token);
   try {
     for (const hooks of stepHooks) hooks.onStart?.(token);
