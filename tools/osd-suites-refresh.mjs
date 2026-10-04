@@ -1,4 +1,4 @@
-// Refresh from green CI runs only; each run contributes one sample per shard.
+// Refresh from successful main-push CI runs only; one sample per shard per run.
 import {execFileSync} from 'node:child_process';
 import {readFileSync, writeFileSync, readdirSync, mkdtempSync, rmSync, appendFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -34,21 +34,32 @@ export function latestShardArtifacts(names) {
   return [...shards.values()].map(({name}) => name).sort();
 }
 
+export function downloadTrustedTimings(gh, repository, scratch) {
+  const {workflow_runs: runs} = JSON.parse(gh(['api',
+    `repos/${repository}/actions/workflows/tests.yml/runs?event=push&branch=main&status=success&per_page=5`]));
+  if (!runs.length) throw new Error('No successful main-push tests.yml runs found');
+  const artifacts = [];
+  for (const {id} of runs) {
+    const run = JSON.parse(gh(['api', `repos/${repository}/actions/runs/${id}`]));
+    if (run.event !== 'push' || run.head_branch !== 'main' ||
+        run.repository?.full_name !== repository || run.conclusion !== 'success') {
+      throw new Error(`Untrusted timing run ${id}: expected successful push on ${repository} main`);
+    }
+    const dir = join(scratch, String(id));
+    gh(['run', 'download', String(id), '--repo', repository, '--pattern', 'suite-results-*', '--dir', dir]);
+    for (const name of latestShardArtifacts(readdirSync(dir))) {
+      artifacts.push(JSON.parse(readFileSync(join(dir, name, 'timings.json'), 'utf8')));
+    }
+  }
+  return artifacts;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const scratch = mkdtempSync(join(tmpdir(), 'osd-timings-'));
   try {
     const gh = (args) => execFileSync('gh', args, {encoding: 'utf8'});
-    const runs = JSON.parse(gh(['run', 'list', '--workflow', 'tests.yml', '--status', 'success',
-      '--limit', '5', '--json', 'databaseId']));
-    if (!runs.length) throw new Error('No successful tests.yml runs found');
-    const artifacts = [];
-    for (const {databaseId} of runs) {
-      const dir = join(scratch, String(databaseId));
-      gh(['run', 'download', String(databaseId), '--pattern', 'suite-results-*', '--dir', dir]);
-      for (const name of latestShardArtifacts(readdirSync(dir))) {
-        artifacts.push(JSON.parse(readFileSync(join(dir, name, 'timings.json'), 'utf8')));
-      }
-    }
+    const repository = gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']).trim();
+    const artifacts = downloadTrustedTimings(gh, repository, scratch);
     const output = 'test/suites-timings.json';
     const previous = JSON.parse(readFileSync(output, 'utf8'));
     const measured = mergeTimings({}, artifacts);

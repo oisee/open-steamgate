@@ -4,7 +4,7 @@
 // the specimen made for it.
 import {expect} from "chai";
 import {OPTIONAL, reportSkips, listDrift, suitesOnDisk, hasSuites, assignShards, loadSuites, suggestSuiteFragment, runWithRetries, runWithRetries as realRunWithRetries} from "../tools/osd-suites.mjs";
-import {timingDrift, latestShardArtifacts} from "../tools/osd-suites-refresh.mjs";
+import {timingDrift, latestShardArtifacts, downloadTrustedTimings} from "../tools/osd-suites-refresh.mjs";
 import {mergeTimings} from "../tools/osd-suites-timings.mjs";
 import {readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync, symlinkSync, readdirSync} from "node:fs";
 import {createRequire} from "node:module";
@@ -224,6 +224,45 @@ describe("timing weights", () => {
 
 
 describe("weekly timing refresh", () => {
+  const repository = "oisee/open-steamgate";
+  const trusted = {event: "push", head_branch: "main", repository: {full_name: repository}, conclusion: "success"};
+  it("filters main pushes in the API and rechecks each run immediately before download", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osd-trusted-timings-"));
+    const calls = [];
+    const sample = {seconds: {"test/a.mjs": 60}};
+    try {
+      const gh = (args) => {
+        calls.push(args);
+        if (calls.length === 1) return JSON.stringify({workflow_runs: [{id: 1}, {id: 2}]});
+        if (args[0] === "api") return JSON.stringify(trusted);
+        const artifact = join(args.at(-1), "suite-results-1-attempt-1");
+        mkdirSync(artifact, {recursive: true});
+        writeFileSync(join(artifact, "timings.json"), JSON.stringify(sample));
+      };
+      expect(downloadTrustedTimings(gh, repository, dir)).to.deep.equal([sample, sample]);
+      expect(calls).to.deep.equal([
+        ["api", `repos/${repository}/actions/workflows/tests.yml/runs?event=push&branch=main&status=success&per_page=5`],
+        ...[1, 2].flatMap((id) => [
+          ["api", `repos/${repository}/actions/runs/${id}`],
+          ["run", "download", String(id), "--repo", repository, "--pattern", "suite-results-*", "--dir", join(dir, String(id))],
+        ]),
+      ]);
+    } finally {
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+  for (const [field, value] of [["event", "pull_request"], ["head_branch", "feature"],
+    ["repository", {full_name: "other/open-steamgate"}], ["repository", undefined], ["conclusion", "failure"]]) {
+    it(`refuses untrusted ${field} metadata before downloading`, () => {
+      const calls = [];
+      const gh = (args) => {
+        calls.push(args);
+        return JSON.stringify(calls.length === 1 ? {workflow_runs: [{id: 1}]} : {...trusted, [field]: value});
+      };
+      expect(() => downloadTrustedTimings(gh, repository, "/unused")).to.throw("Untrusted timing run 1");
+      expect(calls.map((args) => args[0])).to.deep.equal(["api", "api"]);
+    });
+  }
   const files = ["test/a.mjs", "test/b.mjs", "test/c.mjs", "test/d.mjs"];
   const old = Object.fromEntries(files.map((file) => [file, 60]));
   it("does not refresh balanced growth and uses a strict two-minute threshold", () => {
