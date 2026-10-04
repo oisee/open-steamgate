@@ -7,8 +7,20 @@ export const KERNEL_FORMS = Object.freeze([
   ...["BIT-AND", "BIT-OR", "BIT-XOR", "BIT-NOT"].map((operator) => Object.freeze({
     operator, form: `${operator} on non-byte operands`,
     anchor: `kernel-${operator.toLowerCase()}-operand-not-x`, title: `${operator} on non-byte operands`,
+    rejects: "SAP requires byte operands (x or xstring), rather than integers, for bit operations.",
+    rewrite: "Use byte fields for the operands and result.",
+    rejectedExample: `DATA value TYPE i.
+value = ${operator === "BIT-NOT" ? "BIT-NOT value" : `value ${operator} value`}.`,
+    acceptedExample: `DATA bytes TYPE x LENGTH 2.
+bytes = '1234'.
+bytes = ${operator === "BIT-NOT" ? "BIT-NOT bytes" : `bytes ${operator} bytes`}.`,
   })),
-  Object.freeze({form: "offset/length write on xstring", anchor: "kernel-xstring-offset-write", title: "Offset/length write on xstring"}),
+  Object.freeze({form: "offset/length write on xstring", anchor: "kernel-xstring-offset-write", title: "Offset/length write on xstring",
+    rejects: "SAP rejects writes into an xstring offset/length slice, including MOVE, CLEAR and CHANGING targets.",
+    rewrite: "Read into a fixed-length x field, change its slice, then assign it back to the xstring. Match the x length to the bytes being edited; this example edits a two-byte value.",
+    rejectedExample: "DATA local TYPE xstring.\nlocal = '1234'.\nlocal+0(1) = '05'.",
+    acceptedExample: "DATA bytes TYPE x LENGTH 2.\nDATA local TYPE xstring.\nlocal = '1234'.\nbytes = local+0(2).\nbytes+0(1) = '05'.\nlocal = bytes.",
+  }),
 ]);
 
 export const kernelWarningForms = KERNEL_FORMS;

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {createRequire} from "node:module";
 import {execFileSync, spawnSync} from "node:child_process";
 import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
@@ -39,7 +40,82 @@ describe("generated corpus support evidence", function () {
     const anchors = [...page.matchAll(/<a id="([^"]+)"><\/a>/g)].map((m) => m[1]);
     assert.equal(new Set(anchors).size, anchors.length);
     assert.equal(new Set(KERNEL_FORMS.map((f) => f.anchor)).size, KERNEL_FORMS.length);
-    for (const {anchor} of KERNEL_FORMS) assert.equal(anchors.filter((a) => a === anchor).length, 1, anchor);
+    for (const {anchor, rejectedExample, acceptedExample} of KERNEL_FORMS) {
+      assert.equal(anchors.filter((a) => a === anchor).length, 1, anchor);
+      const entry = page.split(`<a id="${anchor}"></a>`)[1].split(/<a id=|## Provenance/)[0];
+      assert.ok(entry.includes("Rejected by SAP:"), anchor);
+      assert.ok(entry.includes("Correct rewrite:"), anchor);
+      assert.ok(entry.includes("```abap\n" + rejectedExample + "\n```"), anchor);
+      assert.ok(entry.includes("```abap\n" + acceptedExample + "\n```"), anchor);
+    }
+    const firstSection = page.indexOf("\n## ");
+    for (const guide of ["Runs means", "The osgo column", "The VS Code column"]) assert.ok(page.indexOf(guide) < firstSection);
+    assert.equal([...page.matchAll(/^## (.+)$/gm)].at(-1)[1], "Provenance");
+    for (const detail of ["ABAPiti commit:", "git blob", "Heap setting", "Installed versions"]) {
+      assert.ok(page.indexOf(detail) > page.indexOf("## Provenance"), detail);
+    }
+  });
+  it("keeps kernel examples ASCII, diagnoses rejected forms and accepts rewrites as ABAP 7.02", () => {
+    const require = createRequire(import.meta.url);
+    const core = require("@abaplint/core");
+    for (const form of KERNEL_FORMS) for (const kind of ["rejectedExample", "acceptedExample"]) {
+      const example = form[kind];
+      assert.match(example, /^[\x00-\x7f]+$/);
+      const file = "zcl_example.clas.abap";
+      const source = `CLASS zcl_example DEFINITION PUBLIC.
+PUBLIC SECTION. CLASS-METHODS example. ENDCLASS.
+CLASS zcl_example IMPLEMENTATION. METHOD example.
+${example}
+ENDMETHOD. ENDCLASS.`;
+      const warnings = kernelWarnings({file, source});
+      assert.equal(warnings.length, kind === "rejectedExample" ? 1 : 0, form.anchor);
+      if (warnings.length) assert.ok(warnings[0].supportAnchor.endsWith(form.anchor));
+      else {
+        const reg = new core.Registry(new core.Config(JSON.stringify({syntax: {version: core.Version.v702}, rules: {}})));
+        reg.addFile(new core.MemoryFile(file, source)); reg.parse();
+        const issues = Array.from(reg.getObjects()).flatMap((obj) => new core.SyntaxLogic(reg, obj).run().issues);
+        assert.deepEqual(issues.map((issue) => issue.getMessage()), [], form.anchor);
+      }
+    }
+  });
+  it("counts distinct failing classes per runtime, sorts shares and separates majority passes", () => {
+    const dir = join(temp, "shares"); mkdirSync(dir);
+    // RETURN: 1/1 fails; DO and CONTINUE: 1/2; ASSERT and CLEAR: 1/3; MOVE: 4/4.
+    const bodies = ["RETURN. DO 1 TIMES. CONTINUE. ENDDO. ASSERT 1 = 1. CLEAR value. value = 1.",
+      "DO 1 TIMES. CONTINUE. ENDDO. ASSERT 1 = 1. CLEAR value.",
+      "ASSERT 1 = 1. CLEAR value.", "value = 1.", "value = 1.", "value = 1."];
+    const classes = bodies.map((body, i) => {
+      const cls = `ZCL_SHARE${i}`;
+      writeFileSync(join(dir, cls.toLowerCase() + ".clas.abap"), `CLASS ${cls} DEFINITION PUBLIC.
+PUBLIC SECTION. CLASS-METHODS example. ENDCLASS.
+CLASS ${cls} IMPLEMENTATION. METHOD example. DATA value TYPE i.
+${body}
+ENDMETHOD. ENDCLASS.`);
+      return cls;
+    });
+    const js = join(temp, "shares-js.json"), go = join(temp, "shares-go.json");
+    const rows = classes.map((cls, i) => ({class: cls, method: "CHECK", status: [0, 3, 4, 5].includes(i) ? "FAILURE" : "SUCCESS"}));
+    rows.push({...rows[0], method: "OTHER", status: "ERROR"});
+    writeFileSync(js, JSON.stringify({rows}));
+    writeFileSync(go, JSON.stringify({rows: classes.map((cls, i) => ({class: cls, method: "CHECK", status: i === 1 ? "FAILURE" : "SUCCESS"}))}));
+    const {markdown, report} = generate([dir], {osgjs: [js], osgo: [go]});
+    const fail = markdown.split("## Fails on JS")[1].split("## Fails in some classes")[0];
+    const some = markdown.split("## Fails in some classes on JS")[1].split("## Not measured")[0];
+    assert.ok(fail.indexOf("statement: Return") < fail.indexOf("statement: Continue"));
+    assert.ok(fail.indexOf("statement: Continue") < fail.indexOf("statement: Do"));
+    assert.ok(some.includes("statement: Assert") && some.includes("statement: Clear"));
+    assert.ok(some.indexOf("statement: Assert") < some.indexOf("statement: Clear"));
+    const assertion = markdown.split("\n").find((line) => line.startsWith("| statement: Assert |"));
+    assert.match(assertion, /fails in 1 of 3 classes \(ZCL_SHARE0\); passes in 2/);
+    assert.match(assertion, /fails in 1 of 3 classes \(ZCL_SHARE1\); passes in 2/);
+    const move = markdown.split("\n").find((line) => line.startsWith("| statement: Move |"));
+    assert.match(move, /fails in 4 of 4 classes \(ZCL_SHARE0, ZCL_SHARE3, ZCL_SHARE4, …\); passes in 0/);
+    assert.ok(!move.includes("ZCL_SHARE5"));
+    assert.equal(report.constructs.find((c) => c.name === "Assert").osgjs.failures.length, 2);
+    const mixed = evidence(classes, {rows: new Map([[classes[0], [rows[0]]], [classes[1], [rows[1]]],
+      [classes[2], [{status: "NOT_COMPILED"}]]])});
+    assert.deepEqual(mixed.passingClasses, [classes[1]]);
+    assert.equal(mixed.missing.length, 3);
   });
   it("credits helpers only from declared successful full-folder runs and preserves partial results", () => {
     const dir = join(temp, "helpers"); mkdirSync(dir);
@@ -327,7 +403,7 @@ DO 1 TIMES. CONTINUE. ENDDO. RETURN. ENDMETHOD. ENDCLASS.
     ]}));
     writeFileSync(js, JSON.stringify({rows: [{class: "ZCL_KERNEL_VALID", status: "SUCCESS", method: "CHECK"}]}));
     const {markdown, report} = generate(dirs, {osgo: [go], osgjs: [js]});
-    const titles = ["Runs on JS (osgo agrees)", "JS only", "osgo only", "Fails on JS", "Not measured on JS"];
+    const titles = ["Runs on JS (osgo agrees)", "JS only", "osgo only", "Fails on JS", "Fails in some classes on JS", "Not measured on JS"];
     let previous = -1;
     for (const title of titles) {
       const index = markdown.indexOf("## " + title);
@@ -363,6 +439,25 @@ DO 1 TIMES. CONTINUE. ENDDO. RETURN. ENDMETHOD. ENDCLASS.
     assert.equal(changed.status, 1); assert.match(changed.stderr, /first changed line/);
     const none = generate(dirs, {osgo: [], osgjs: []});
     assert.ok(none.report.constructs.every((r) => r.osgo.status === "not measured" && r.osgjs.status === "not measured"));
+  });
+  it("rerenders a recorded inventory through CLI without source folders or runtime runs", () => {
+    const original = generate([join(root, "tools/testdata-kernel-valid")], {osgo: [], osgjs: []}).report;
+    const saved = structuredClone(original);
+    for (const c of saved.constructs) for (const runtime of ["osgjs", "osgo"]) {
+      delete c[runtime].failingClasses; delete c[runtime].passingClasses;
+    }
+    saved.generatorFiles = []; saved.openSteamgate = "old"; saved.knownWarnings = [];
+    const recorded = join(temp, "recorded.json"), page = join(temp, "recorded.md"), json = join(temp, "rerendered.json");
+    writeFileSync(recorded, JSON.stringify(saved));
+    const cli = (...args) => spawnSync(process.execPath, ["tools/osg-support.mjs", "--recorded", recorded, ...args], {cwd: root, encoding: "utf8"});
+    const result = cli("--out", page, "--json", json);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(json)), original);
+    assert.equal(cli("--check", page).status, 0);
+    writeFileSync(page, "stale"); assert.equal(cli("--check", page).status, 1);
+    assert.equal(cli("tools/testdata-kernel-valid").status, 2);
+    assert.equal(cli("--osgo", "absent.json").status, 2);
+    assert.equal(readFileSync(recorded, "utf8"), JSON.stringify(saved));
   });
   it("rejects malformed evidence and duplicate owners", () => {
     const bad = join(temp, "bad.json"); writeFileSync(bad, '{"rows":[{"status":"SUCCESS"}]}');
