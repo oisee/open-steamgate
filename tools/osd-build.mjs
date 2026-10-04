@@ -27,9 +27,9 @@ import {run} from "./osd-build-command.mjs";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, resolve as resolvePath, sep} from "node:path";
 import {fileURLToPath} from "node:url";
-import {buildIdentity, describeBuild} from "./osd-transpiler.mjs";
+import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
-import {transpile} from "./osd-transpile.mjs";
+import {transpile, selectedModules} from "./osd-transpile.mjs";
 import {inputFoldersOf, packsOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
@@ -697,8 +697,10 @@ export async function build(options = {}) {
   // what each input held when the generation was named: the bytes it is
   // built from (checked as the transpiler reads them, below), and what an
   // activation's completion compares with (ObjectStore#completeActivations)
+  const loaded = selectedModules(root);
+  const identity = assertToolchain(root, loaded);
   const named = new Map();
-  const hash = hashOf(root, inputs, {overlay: options.overlay, digests: named});
+  const hash = hashOf(root, inputs, {overlay: options.overlay, digests: named, transpiler: identity});
   // one spelling of a path for every comparison: a native one from the walk,
   // a forward-slash one from the transpiler's reads on Windows
   const digests = new Map([...named].map(([file, digest]) => [normalPath(file), digest]));
@@ -805,7 +807,7 @@ export async function build(options = {}) {
     // and the next build names what is there then
     const changed = [];
     const generatedDigests = new Map();
-    const made = await transpile({root, config: own, log: (m) => { output += m + "\n"; },
+    const made = await transpile({root, modules: loaded, config: own, log: (m) => { output += m + "\n"; },
       onRead: (file, bytes) => {
         if (normalPath(file).startsWith(normalPath(join(root, "gen")) + "/")) {
           generatedDigests.set(normalPath(file), createHash("sha256").update(bytes).digest("hex"));
@@ -815,6 +817,7 @@ export async function build(options = {}) {
       }});
     // and nothing the generators or the transpiler read was written since
     // it was named
+    assertToolchain(root, loaded);
     changed.push(...watched.filter((file) => stampOf(file) !== stamps.get(file)));
     if (changed.length > 0) throw changedError(root, changed);
     keepSourceInputs(root, tmp, digests, undefined, options.overlay);
@@ -828,6 +831,7 @@ export async function build(options = {}) {
       ms: Date.now() - started,
       objects,
       transpiler: describeBuild(root),
+      toolchain: identity,
       inputs: {folders: inputs.folders.map((f) => relative(root, f)), libs: inputs.libs.map((f) => relative(root, f)),
         // the active copies an overlay added: a publisher reads them too (osd-tmp.mjs)
         overlay: overlayFilesOf(root, options.overlay)},

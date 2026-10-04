@@ -28,9 +28,14 @@ import * as setup from "../test/setup.mjs";
 import {pathToFileURL} from "node:url";
 import {dirname, resolve} from "node:path";
 import {createRequire} from "node:module";
+import {buildIdentity} from "../tools/osd-transpiler.mjs";
 import {systemId} from "../tools/osd-identity.mjs";
 import {compiled, setHostModules, dataDirOf, ensureBinaryHome, homesIn, isCheckout, layerList} from "../tools/osd-host.mjs";
 
+// Bundles retain the identity of the packages actually embedded at build
+// time. Reading a later checkout here would falsely describe old code.
+const toolchainIdentity = typeof __OSD_TOOLCHAIN_IDENTITY__ !== "undefined"
+  ? __OSD_TOOLCHAIN_IDENTITY__ : buildIdentity(process.cwd());
 const embeddedSeed = typeof __OSD_BINARY_SEEDED__ !== "undefined" && __OSD_BINARY_SEEDED__;
 const [, , mode = "up", ...rawArgs] = process.argv;
 // a report's arguments are its own: --layer there is not osd's
@@ -85,7 +90,7 @@ if (typeof Bun !== "undefined") {
     },
   });
 }
-setHostModules({Transpiler, Chunk, core, CallFunctionTranspiler, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
+setHostModules({identity: toolchainIdentity, Transpiler, Chunk, core, CallFunctionTranspiler, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
 
 const GENERATORS = {
   "gogen-unit.mjs": () => import(pathToFileURL(resolve(process.cwd(), "tools/gogen/unit.mjs")).href),

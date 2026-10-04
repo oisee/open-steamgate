@@ -33,7 +33,7 @@ import {copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {generatorIdentity, hashOf, inputsOf, layout, liveHash, lock, linkRoots, ownConfig, prepare, rootsWanted, switchTo} from "./osd-build.mjs";
-import {buildIdentity} from "./osd-transpiler.mjs";
+import {assertToolchain} from "./osd-transpiler.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {toolCommand} from "./osd-host.mjs";
@@ -314,12 +314,10 @@ export class WarmCompiler {
     this.reg = undefined;
     const root = this.root;
     const loaded = selectedModules(root, this.modules);
+    const transpiler = assertToolchain(root, loaded);
+    this.loaded = loaded;
     const {Transpiler, Chunk, core, plugin} = loaded;
     mapStatementStarts(Chunk);
-    // a checkout's transpiler can be relinked under a running process; a
-    // binary's is inside it
-    this.transpilerFile = loaded.where === undefined ? undefined : join(loaded.where, "package.json");
-    this.transpilerStat = this.transpilerFile === undefined ? undefined : statKey(this.transpilerFile);
     if (plugin !== undefined) {
       throw new NotWarm("a transpiler plugin is installed, and `only` is ignored with one");
     }
@@ -337,7 +335,6 @@ export class WarmCompiler {
     // the libraries are pinned clones and most of the inputs; a watcher per
     // library lets a build reuse their walk until something moves in one
     this.#watchLibraries(inputsOf(root, config).libs);
-    const transpiler = buildIdentity(root);
     const overlay = this.overlayOf(new Set());
     const raw = new Map();
     const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
@@ -588,10 +585,7 @@ export class WarmCompiler {
     const {config, stack} = prepare(root);
     // the transpiler that builds this is the one loaded when it was primed;
     // one relinked on disk since would name a generation it did not build
-    if (this.transpilerFile !== undefined && statKey(this.transpilerFile) !== this.transpilerStat) {
-      throw new NotWarm("the transpiler on disk changed since the registry was primed");
-    }
-    const transpiler = buildIdentity(root);
+    const transpiler = assertToolchain(root, this.loaded);
     // the view this build makes live: S promoted, every other inactive
     // object as its copy -- the overlay a cold build of S would read
     const input = this.#generatorInput(activating);
@@ -767,10 +761,11 @@ export class WarmCompiler {
           linkOrCopy(join(paths.byInput, from, "abap_transpile.json"), join(tmp, "abap_transpile.json"), this.link);
           // the manifest a cold build of these inputs writes: the same fields in
           // the same order, so the comparison in verify() is of the output
+          assertToolchain(root, this.loaded);
           const manifest = JSON.parse(readFileSync(join(paths.byInput, from, "manifest.json"), "utf8"));
           writeFileSync(join(tmp, "manifest.json"), JSON.stringify({
             hash, builtAt: new Date().toISOString(), ms: Date.now() - started, objects: manifest.objects,
-            transpiler, inputs: manifest.inputs, gen: manifest.gen, overridden: manifest.overridden,
+            transpiler, toolchain: this.loaded.identity, inputs: manifest.inputs, gen: manifest.gen, overridden: manifest.overridden,
           }, null, 2));
           const sharedSources = keepSourceInputs(root, tmp, digests, actual, overlay,
             {generation: join(paths.byInput, from), digests: this.digests});

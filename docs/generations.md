@@ -54,6 +54,20 @@ still report local checkout locations and Git state, but never name a generation
 An existing generation named by the old hash is stale once and rebuilds normally;
 there is no compatibility special case.
 
+A process retains the toolchain identity captured when it loads the transpiler;
+a bundled host embeds that identity when the binary is built. Both cold and
+warm builds record it in the generation manifest. If a linked transpiler or
+runtime changes, builds refuse with `TOOLCHAIN_CHANGED`: restart the server or
+run `osd build` in a fresh process. Falling back to a cold build in the same
+process would still execute Node's cached old transpiler. The same refusal
+works in the Node server, VS Code worker and binary; a binary whose embedded
+toolchain differs from the checkout must itself be rebuilt or replaced.
+Published package identities are cached for the process lifetime; linked
+packages continue checking built-file content and version on every call.
+A local published-package measurement reduced repeated checks from 558 stats,
+20 directory reads and 25.8 ms to zero stats/reads and 0.10–0.13 ms. The first
+check still hashes the files (38.9 ms before, 31.5 ms after in single samples).
+
 The relocation audit (`hashOf`'s optional `trace` callback records every hashed
 chunk) found these location-dependent fields: the linked transpiler's `where`,
 the linked runtime's `where`, and generator filenames relative to a target tree
@@ -69,7 +83,10 @@ the linked-checkout diagnostic paths. On a materialised copy, the build check
 measured 0.48 s before and 0.45 s after, both reusing the prebuilt generation
 without a cold transpile. These single local samples show reuse, not a measured
 speed improvement. Linked tree relocation is covered separately by the hash
-regressions (including copies at different directory depths).
+regressions (including copies at different directory depths). After adding the
+load-time toolchain guard, another first-start check reused the generation in
+0.82 s; it now loads the transpiler before accepting a generation. All 16 full
+VSIX packaging scenarios passed, including rebuilds in the installed copy.
 
 **ADT source versions** — cold and warm builds retain their source inputs at
 `build/by-input/<hash>/source/<working-file-path>`. Cold builds validate the

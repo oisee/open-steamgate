@@ -11,7 +11,7 @@
 // then one line apart from being explained.
 import {createHash} from "node:crypto";
 import {execFileSync} from "node:child_process";
-import {modulesOf} from "./osd-transpile.mjs";
+import {transpilerLocation} from "./osd-transpile.mjs";
 import {existsSync, lstatSync, readFileSync, realpathSync, readdirSync, statSync} from "node:fs";
 import {dirname, join, relative, sep} from "node:path";
 import {createRequire} from "node:module";
@@ -68,7 +68,7 @@ export function transpilerInUse(root = process.cwd()) {
     return packageInUse(root, "transpiler");
   }
   try {
-    return packageInUse(root, "transpiler", modulesOf(root).where);
+    return packageInUse(root, "transpiler", transpilerLocation(root));
   } catch {
     return {kind: "missing", where: installed};
   }
@@ -107,6 +107,7 @@ export function describeBuild(root = process.cwd()) {
 // commit alone misses rebuilt/untracked distribution files in a checkout.
 // Use the same content identity for linked and materialised packages.
 const CONTENT_DIGESTS = new Map();
+const PUBLISHED_IDENTITIES = new Map();
 function contentDigest(file) {
   const st = statSync(file);
   const key = `${st.size}:${st.mtimeMs}:${st.ctimeMs}:${st.ino}`;
@@ -120,6 +121,13 @@ function contentDigest(file) {
 
 export function packageIdentity(at, name) {
   if (!existsSync(at)) return {name, missing: true};
+  const real = realpathSync(at);
+  // An installed release is immutable for this process. A package symlink
+  // or a realpath outside node_modules is a local build:
+  // continue checking its files on every call.
+  const published = !lstatSync(at).isSymbolicLink()
+    && real.split(sep).includes("node_modules");
+  if (published && PUBLISHED_IDENTITIES.has(real)) return PUBLISHED_IDENTITIES.get(real);
   const meta = JSON.parse(readFileSync(join(at, "package.json"), "utf8"));
   const h = createHash("sha256");
   const walk = dir => {
@@ -134,15 +142,17 @@ export function packageIdentity(at, name) {
     }
   };
   if (existsSync(join(at, "build"))) walk(join(at, "build"));
-  return {name: meta.name ?? name, version: meta.version, main: meta.main, exports: meta.exports, type: meta.type,
+  const identity = {name: meta.name ?? name, version: meta.version, main: meta.main, exports: meta.exports, type: meta.type,
     content: h.digest("hex")};
+  if (published) PUBLISHED_IDENTITIES.set(real, identity);
+  return identity;
 }
 
 export function buildIdentity(root = process.cwd()) {
   const installed = join(root, "node_modules", "@abaplint", "transpiler");
   let transpiler = installed;
   if (!existsSync(transpiler)) {
-    try { transpiler = modulesOf(root).where; } catch { /* missing, reported without a location */ }
+    try { transpiler = transpilerLocation(root); } catch { /* missing, reported without a location */ }
   }
   return JSON.stringify([
     packageIdentity(transpiler, "@abaplint/transpiler"),
@@ -153,4 +163,15 @@ export function buildIdentity(root = process.cwd()) {
 if (runsAs("osd-transpiler.mjs")) {
   console.log(describeBuild());
   process.exit(0);
+}
+
+// This is a hard build refusal, not NotWarm: a cold fallback in this same
+// process would still execute the cached old modules under a new name.
+export function assertToolchain(root, loaded) {
+  if (loaded.identity !== buildIdentity(root)) {
+    const error = new Error("the transpiler/runtime changed since this process started; restart the server (or run `osd build`)");
+    error.code = "TOOLCHAIN_CHANGED";
+    throw error;
+  }
+  return loaded.identity;
 }

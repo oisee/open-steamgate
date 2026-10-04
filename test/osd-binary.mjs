@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {execFileSync, spawn, spawnSync} from "node:child_process";
-import {copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync} from "node:fs";
+import {copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {dirname, join, relative, resolve} from "node:path";
 import {builtinModules} from "node:module";
 import {tmpdir} from "node:os";
@@ -72,6 +72,28 @@ describe("binary build modes from a clean checkout", function () {
     expect(lines, build.stderr).to.have.length(1);
     expect(lines[0]).to.match(/^build-binary --seed: missing .*\.local\/lars\/.*; run npm run bootstrap$/);
   });
+
+  it("refuses a checkout toolchain changed after the binary was built", () => {
+    const output = join(checkout, "osd-identity-test");
+    const compiled = spawnSync("bun", ["scripts/build-binary.mjs", output], {cwd: checkout, encoding: "utf8"});
+    expect(compiled.status, compiled.stderr).to.equal(0);
+    const view = join(checkout, "changed-toolchain");
+    mkdirSync(join(view, "src"), {recursive: true});
+    mkdirSync(join(view, "tools"));
+    const modules = join(view, "node_modules", "@abaplint");
+    mkdirSync(modules, {recursive: true});
+    symlinkSync(join(root, "node_modules", "@abaplint", "transpiler"), join(modules, "transpiler"));
+    const runtime = join(modules, "runtime");
+    cpSync(join(root, "node_modules", "@abaplint", "runtime"), runtime, {recursive: true, dereference: true});
+    const meta = join(runtime, "package.json");
+    writeFileSync(meta, JSON.stringify({...JSON.parse(readFileSync(meta)), version: "0.0.0-changed"}));
+    writeFileSync(join(view, "abap_transpile.json"), JSON.stringify({input_folder: "src", output_folder: "output", libs: []}));
+    const refused = spawnSync(output, ["build"], {cwd: view, encoding: "utf8"});
+    expect(refused.status).not.to.equal(0);
+    expect(refused.stderr + refused.stdout).to.contain("the transpiler/runtime changed since this process started");
+    expect(existsSync(join(view, "build", "live"))).to.equal(false);
+  });
+
 });
 
 describe("the binary: the same system, one file", function () {
