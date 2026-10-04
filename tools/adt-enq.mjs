@@ -54,8 +54,8 @@ export class EnqOwners {
   // this table): the same lock ZCL_OSD_ADT_LOCK takes
   take(session, type, name) {
     const res = enqTake(this.key(session.id), session.user, LOCK_TABLE, LOCK_OBJECT, argument(type, name));
-    // 602: the session's own lock, which LOCK answers with its handle
-    if (res.subrc === 0 || res.msgno === "602") {
+    // Mode X refuses a second LOCK in the same session too (MC 602).
+    if (res.subrc === 0) {
       return {};
     }
     if (res.subrc === 1) {

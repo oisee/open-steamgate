@@ -181,6 +181,27 @@ Generated (`gen/`) and library objects are read-only.
 5. Check and activate, reading the response document for findings.
 6. Release the lock and verify the resulting repository content.
 
+**Locks (T03/T04, measured 2026-10-04).** A missing Accept or any offer of
+`application/vnd.sap.as+xml` returns `200` with
+`application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.lock.Result`
+and the observed `asx:abap` / `DATA` body (`LOCK_HANDLE`, `CORRNR`, `CORRUSER`,
+`CORRTEXT`, `IS_LOCAL=X`, `IS_LINK_UP`, empty `MODIFICATION_SUPPORT`,
+`SCOPE_MESSAGES`); media-type case, dataname and q
+(including zero) do not affect it. Wildcard offers include this media type.
+Other media types return `406` / `ExceptionResourceNotAcceptable` with
+"The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml".
+Unlike SAP, our 406 takes no enqueue; SAP's leaked enqueue is a SAP-side defect we choose not to copy.
+`accessMode` is ignored (including absent, junk, `INSERT` and `modify`);
+a second LOCK, even in the same session, returns `403` / `ExceptionResourceNoAccess`
+without changing the holder or its handle.
+Unlike SAP's same-user cross-session PUT, our handles work only in the session that acquired them.
+The client audit found no dependency on SAP's looser handle rule: the VS Code
+extension edits local files; `lib.js` retains its mutation cookie; the ABAP-FS
+bridge registers a connection and does not transfer handles. The conformance
+driver uses one stateful `abap-adt-api` client for LOCK, PUT and UNLOCK and its
+stateless clone for reads. The clean-room kit likewise uses one client and
+cookie jar throughout its lock/write/restore/unlock cycle.
+
 **Activation, as the code does it.** `POST /sap/bc/adt/activation` names
 objects; the store checks each one with abaplint over the whole registry, then
 checks every object that mentions its name, because a local system has no

@@ -119,7 +119,7 @@ export class AbapSessions {
   lock(session, type, name) {
     return this.#run(async (obj) => {
       const holder = await this.#holder(obj, type, name);
-      if (holder !== undefined && holder.session.id !== session.id) return {heldBy: holder.session};
+      if (holder !== undefined) return {heldBy: holder.session};
       if ((await this.#call(obj, "alive", {iv_id: session.id})).get() !== "X") throw new Error("ADT session ended");
       const taken = this.owners.take(session, type, name);
       if (taken.heldBy !== undefined) return taken;

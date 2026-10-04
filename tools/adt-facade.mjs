@@ -2054,28 +2054,35 @@ export function adtRouter(options = {}) {
       }
 
       if (action === "LOCK") {
+        // Measured 2026-10-04: ignore q and dataname, always return Result.
+        // Negotiate before enqueue: SAP's 406 leaks a lock with no handle.
+        const offers = String(req.headers.accept ?? "").split(",").map((offer) => offer.split(";")[0].trim().toLowerCase());
+        if (offers.some(Boolean) && !offers.some((type) => ["application/vnd.sap.as+xml", "application/*", "*/*"].includes(type))) {
+          return void refuse(res, 406, "ExceptionResourceNotAcceptable",
+            "The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml");
+        }
+        const contentType = "application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.lock.Result";
         if (entry.writable === false) {
           // A library object is not ours to change, and the way to say so is
           // the lock envelope with no handle in it: that is what a real
           // system returns for an object ADT may not modify, and a client
           // reads it as "not modifiable" before it ever attempts a write.
           //
-          // Deliberately not MODIFICATION_SUPPORT: a real system returns
-          // NoModification for perfectly writable local objects, so a client
-          // that trusted that field would find nothing writable at all.
-          res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2"))
+          // The observed Result leaves MODIFICATION_SUPPORT empty; the handle
+          // is what tells the client whether it may write.
+          res.status(200).type(contentType)
             .send(lockResultDocument(""));
           return;
         }
         // a lock lives with a stateful session: without one it is refused, not given (statelessLock)
         if (session.stateful !== true) return void refuse(res, 400, "ExceptionInvalidRequest", statelessLock(entry));
-        // one holder per object; the same session gets its handle again
+        // one holder per object; even its own session's second LOCK is refused
         const taken = await req.adt.sessions.lock(session, entry.type, entry.name, () => randomUUID());
         if (taken.heldBy !== undefined) {
           res.status(403).type("application/xml").send(lockedByOtherDocument(taken.heldBy.user, entry.name));
           return;
         }
-        res.status(200).type(asXmlTypeFor(req, "com.sap.adt.lock.Result2")).send(lockResultDocument(taken.handle));
+        res.status(200).type(contentType).send(lockResultDocument(taken.handle));
         return;
       }
 

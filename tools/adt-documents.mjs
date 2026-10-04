@@ -1184,14 +1184,8 @@ function decodeContent(raw) {
   return /[\r\n]/.test(decoded) && /\uFFFD/.test(decoded) === false ? decoded : plain;
 }
 
-// A lock result. The handle is the whole payload; the rest of the envelope is
-// what a client expects around it, and the same envelope carries the node
-// structure, so the shape is already confirmed by one round trip.
-//
-// MODIFICATION_SUPPORT is always NoModification, for a writable object too:
-// that is what A4H answers for writable local objects, so a client that read
-// the field would find nothing writable. The handle (empty for an object that
-// may not be changed) is what says whether a write may follow.
+// The Result envelope measured 2026-10-04: empty modification support and
+// nine DATA fields. A handle (empty for a read-only object) permits a write.
 export function lockResultDocument(handle, options = {}) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
@@ -1203,10 +1197,7 @@ export function lockResultDocument(handle, options = {}) {
       <CORRTEXT/>
       <IS_LOCAL>${options.local === false ? "" : "X"}</IS_LOCAL>
       <IS_LINK_UP/>
-      <MODIFICATION_SUPPORT>NoModification</MODIFICATION_SUPPORT>
-      <LINK_UP_MODE/>
-      <CORR_LOCKS/>
-      <CORR_CONTENTS/>
+      <MODIFICATION_SUPPORT/>
       <SCOPE_MESSAGES/>
     </DATA>
   </asx:values>
