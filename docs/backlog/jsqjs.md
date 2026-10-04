@@ -169,3 +169,56 @@ The targeted xstring and folder-runner suites pass **13/13** (74 s overall).
 The suites registry check passes. The branch-aware size guard (`--changed
 origin/main`) passes and reports five inherited breaches; the whole-tree guard
 still reports those breaches in unrelated paths. No budgets were raised.
+
+## Round 3: CI setup and result-comparison regressions
+
+The xstring installer now returns before changing any prototype when the host
+lacks `types.XString`, `statements` or `builtin`. Database-only setup doubles
+need none of those runtime operations. The five DuckDB migration and pack-seed
+failures reproduced locally before the guard; real-runtime differential and
+buffer hot-path checks remain enabled.
+
+The kernel scanner CI failure compared independent method timings as part of
+row equality: the same successful test took 2 ms in one run and 1 ms in another.
+Two local runs of the original comparison passed when the rounded timings
+coincided; the CI log supplies the failing 2-versus-1-ms comparison.
+The subprocess comparison now validates each JS timing as a nonnegative integer
+and compares every other row field, totals, warnings and exit codes. An added
+direct regression verifies complete row preservation, including the recorded
+milliseconds, for a scanner error in ordinary and strict modes.
+
+The warm-xref missing-superclass error also reproduces on unchanged
+`origin/main` at `e07b7e8f`: running `adt-xref-warm.mjs` together with
+`shadowed-objects.mjs` gives 15 passing tests and one failed setup hook.
+The latter suite's module-load `compileAll("src", "gen/stg")` sweeps generated
+pack projects from the checkout. Warm-xref now carries its webapp assets and
+runs the generators in its own copied tree before the cold baseline, so it
+does not depend on the checkout's remaining generated pack classes.
+
+With CI's exact transpiler/runtime pin `e34d6a1f`, the installer rerun passes
+**9/9 QuickJS tests, zero failures/errors/skips** in **476.1 s overall**,
+**41.506 s in methods**, at **8,899 MiB sampled peak process-tree RSS**.
+Kernel scanning took 118.590 s, input parsing 116.124 s, transpiling 184.589 s,
+module writing 2.507 s, importing 2.792 s and database setup 0.932 s.
+Node's heap limit remains 12,288 MiB and the database is `--db file`.
+
+| Method | Status | Seconds |
+|---|---|---:|
+| E0_ONE_PLUS_TWO | SUCCESS | 3.097 |
+| E1_SUM_LOOP | SUCCESS | 7.622 |
+| E2_SORT | SUCCESS | 2.084 |
+| E3_JSON | SUCCESS | 1.937 |
+| E4_FIB | SUCCESS | 20.114 |
+| E5_STRING | SUCCESS | 1.745 |
+| E6_MATH | SUCCESS | 2.819 |
+| E7_MAP_REGEXP | SUCCESS | 2.053 |
+| P_PRINTF | SUCCESS | 0.035 |
+
+Validation covers **78 distinct focused tests**: 15 database migration,
+10 seeding, 7 xstring, 4 warm-xref, 15 shadowed-object, 20 kernel compatibility
+and 7 folder-runner cases. All 71 cases in the first six suites passed in the
+combined run. Its additional folder-runner cleanup hook observed the concurrent
+QuickJS staging directory; after QuickJS exited, the complete folder-runner
+suite passed 7/7 in isolation (77.31 s), with the cleanup assertion unchanged.
+The suites registry check passes (289 ordinary and 7 grouped suites), as does
+the branch-aware size guard; its five inherited breaches remain unchanged.

@@ -74,12 +74,31 @@ ENDMETHOD. ENDCLASS.
     assert.equal(result.result.rows[1].class, "ZCL_KERNEL_COMPAT");
     assert.equal(result.result.rows[1].status, "ERROR");
   });
+  it("scanner errors preserve complete recorded rows, including elapsed time, in both modes", () => {
+    const baseline = summarize({rows: [{class:"ZCL_KERNEL_VALID", testclass:"LTCL_TEST",
+      method:"CHECK", status:"SUCCESS", message:"", ms:17}]}).result;
+    const warnings = [{kind:"scanner-error", message:"Kernel compatibility scanner failed: forced scanner failure"}];
+    for (const strict of [false, true]) {
+      const after = summarize(applyKernelWarnings(baseline, warnings, strict));
+      assert.equal(after.code, 0);
+      assert.deepEqual(after.result.rows, baseline.rows);
+      assert.deepEqual(after.result.totals, baseline.totals);
+      assert.deepEqual(after.result.warnings, warnings);
+    }
+  });
   for (const runner of ["osgo", "osgjs"]) {
     it(`${runner}: scanner failures preserve rows and exit codes, including strict mode`, () => {
       const baseline = spawnSync(process.execPath, [`tools/${runner}-unit.mjs`, validFixture, "--json"],
         {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 8e6});
       assert.equal(baseline.status, 0, baseline.stdout + baseline.stderr);
       const expectedResult = JSON.parse(baseline.stdout);
+      // Separate executions have separate timings. Validate the measurement
+      // and compare every other row field; the check above covers preservation.
+      const outcomes = rows => rows.map(({ms, ...row}) => {
+        if (runner === "osgjs") assert.ok(Number.isSafeInteger(ms) && ms >= 0);
+        else assert.equal(ms, undefined);
+        return row;
+      });
       for (const strict of [false, true]) {
         const run = spawnSync(process.execPath, [`tools/${runner}-unit.mjs`, validFixture,
           "--json", ...(strict ? ["--kernel-strict"] : [])],
@@ -88,7 +107,7 @@ ENDMETHOD. ENDCLASS.
         assert.equal(run.error, undefined);
         assert.equal(run.status, baseline.status, run.stdout + run.stderr);
         const result = JSON.parse(run.stdout);
-        assert.deepEqual(result.rows, expectedResult.rows);
+        assert.deepEqual(outcomes(result.rows), outcomes(expectedResult.rows));
         assert.deepEqual(result.totals, expectedResult.totals);
         assert.deepEqual(result.warnings, [{kind: "scanner-error", message: "Kernel compatibility scanner failed: forced scanner failure"}]);
         assert.equal(run.stderr.split("\n").filter((line) => line === result.warnings[0].message).length, 1);

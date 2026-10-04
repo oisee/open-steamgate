@@ -15,6 +15,15 @@ const store = (abap, target, offset, length, bytes) => abap.statements.replace({
   with: new abap.types.XString().set(bytes)});
 
 describe('large xstring SECTION writes', () => {
+  it('leaves minimal runtimes unchanged when types, statements or builtins are absent', () => {
+    for (const abap of [{}, {types:{}}, {types:{XString:class {}}},
+      {types:{XString:class {}}, statements:{}}, {types:{XString:class {}}, builtin:{}}]) {
+      const before = Object.getOwnPropertyDescriptors(abap);
+      installXStringBuffer(abap);
+      assert.deepEqual(Object.getOwnPropertyDescriptors(abap), before);
+      assert.equal(abap.types?.XString?.prototype[Symbol.for('osd.xstringBuffer')], undefined);
+    }
+  });
   it('keeps slices, clones, assignments and materialized snapshots independent', () => {
     const abap = make(true);
     const mem = new abap.types.XString({qualifiedName:'MEM'}).set('00'.repeat(65536));

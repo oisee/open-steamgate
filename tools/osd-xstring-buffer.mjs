@@ -4,6 +4,8 @@ import {Buffer} from 'buffer';
 const installed = Symbol.for('osd.xstringBuffer');
 const minimumBytes = 65536;
 export function installXStringBuffer(abap) {
+  // Database-only hosts can provide a minimal runtime without byte operations.
+  if (!abap?.types?.XString || !abap.statements || !abap.builtin) return;
   const {XString, Integer, Integer8} = abap.types;
   const proto = XString.prototype;
   let state = proto[installed];
