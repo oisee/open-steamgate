@@ -6,6 +6,14 @@ import {runsAs} from "./osd-main.mjs";
 const identity = (row) => [row.class, row.testclass, row.method].join("/");
 export const identityDigest = (rows) => createHash("sha256").update(rows.map(identity).sort().join("\n") + "\n").digest("hex");
 
+export function failureSignature(row) {
+  const message = String(row.message ?? "");
+  // Assertion values are stable; the runtime's location suffix is not evidence.
+  const assertion = /(?:^|; )Expected \[([\s\S]*?)\]; Actual \[([\s\S]*?)\](?:; Raised in [^\n]*|\s*)$/.exec(message);
+  if (assertion) return `Expected [${assertion[1]}]; Actual [${assertion[2]}]`;
+  return message.replace(/; Raised in [^\n]*$/, "").replace(/\s+/g, " ").trim();
+}
+
 export function compareFailures(result, known, {tests, exitCode, knownFile = ".github/ci/kernel-known-failures.json"} = {}) {
   const errors = [], seen = new Set(), failed = new Map();
   if (!Array.isArray(result.rows) || !result.rows.length) return ["missing test rows"];
@@ -14,19 +22,20 @@ export function compareFailures(result, known, {tests, exitCode, knownFile = ".g
     if (!row.class || !row.testclass || !row.method) errors.push(`missing test identity: ${key} (${row.status})`);
     if (seen.has(key)) errors.push(`duplicate test: ${key}`);
     seen.add(key);
-    if (row.status !== "SUCCESS") failed.set(key, row.status);
+    if (row.status !== "SUCCESS") failed.set(key, row);
   }
   if (tests !== undefined && result.rows.length !== tests) errors.push(`test count: ${result.rows.length}, expected ${tests}`);
   const expected = new Map();
   for (const entry of known) {
     const key = identity(entry);
-    if (entry.status !== "FAILURE" || !entry.reason || !/^https:\/\/github\.com\//.test(entry.upstream) || expected.has(key)) errors.push(`invalid known failure: ${key}`);
+    if (entry.status !== "FAILURE" || typeof entry.signature !== "string" || !entry.signature.trim() || !entry.reason || !/^https:\/\/github\.com\//.test(entry.upstream) || expected.has(key)) errors.push(`invalid known failure: ${key}`);
     expected.set(key, entry.status);
     if (!seen.has(key)) errors.push(`known failure missing: ${key}; restore the pinned test input`);
     else if (!failed.has(key)) errors.push(`known failure fixed: ${key}; remove this entry from ${knownFile}`);
-    else if (failed.get(key) !== entry.status) errors.push(`known failure changed status: ${key}: ${failed.get(key)}`);
+    else if (failed.get(key).status !== entry.status) errors.push(`known failure changed status: ${key}: ${failed.get(key).status}`);
+    else if (failureSignature(failed.get(key)) !== entry.signature) errors.push(`known failure changed signature: ${key}: expected ${JSON.stringify(entry.signature)}; actual ${JSON.stringify(failureSignature(failed.get(key)))}`);
   }
-  for (const [key, status] of failed) if (!expected.has(key)) errors.push(`new failure: ${key}: ${status}`);
+  for (const [key, row] of failed) if (!expected.has(key)) errors.push(`new failure: ${key}: ${row.status}`);
   const totals = result.totals;
   for (const [key, status] of Object.entries({success: "SUCCESS", failure: "FAILURE", error: "ERROR", not_compiled: "NOT_COMPILED"})) {
     if (totals?.[key] !== result.rows.filter((row) => row.status === status).length) errors.push(`invalid totals.${key}`);

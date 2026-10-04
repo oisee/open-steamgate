@@ -32,12 +32,47 @@ export function goEnv(work) {
   for (const key of ["GOPATH", "GOMODCACHE", "GOCACHE"]) mkdirSync(env[key], {recursive: true});
   return env;
 }
+export function cacheValid(work = join(root, ".local/kernelci"), manifest = readJSON(join(root, ".github/ci/kernel-corpus.json"))) {
+  if (manifest.abapiti !== pin()) throw new Error("corpus manifest and ABAPiti pin differ");
+  try { verifyCorpus(join(work, "corpus"), manifest, ["TestOSD_EmitUnitClasses", "int8"]); return true; }
+  catch { return false; }
+}
+
+export function repairFolder(corpus, manifest, name, generate) {
+  try { verifyCorpus(corpus, manifest, [name]); return false; }
+  catch (error) { console.error(`corpus cache: ${error.message}; regenerating ${name}`); }
+  // Evict only the invalid folder. A regenerated mismatch remains a hard failure.
+  const output = join(corpus, name);
+  rmSync(output, {recursive: true, force: true});
+  generate(output);
+  verifyCorpus(corpus, manifest, [name]);
+  return true;
+}
+
+export function generateWithRetry(source, work, generated, {run = spawnSync, delay = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000)} = {}) {
+  const diagnostics = [], failures = [];
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    rmSync(generated, {recursive: true, force: true});
+    const result = run("go", ["test", "./wasm", "-count=1", "-run", "^TestOSD_EmitUnitClasses$"], {
+      cwd: source, env: {...goEnv(work), ABAPITI_TEST_OUT: generated}, encoding: "utf8", timeout: 300000, maxBuffer: 8e6,
+    });
+    const reason = result.error?.message ?? result.signal ?? `exit ${result.status}`;
+    diagnostics.push(`Attempt ${attempt}: ${reason}\n${result.stdout ?? ""}${result.stderr ?? ""}`);
+    writeFileSync(join(work, "generate.log"), diagnostics.join("\n"));
+    if (!result.error && result.status === 0) return;
+    failures.push(`attempt ${attempt}: ${reason}`);
+    if (attempt === 1) { console.error(`corpus generation ${failures[0]}; retrying in 2 s`); delay(); }
+  }
+  throw new Error(`corpus generation failed after both attempts (${failures.join("; ")}); see ${join(work, "generate.log")}`);
+}
+
 export function prepare({source = join(root, ".local/abapiti-src"), work = join(root, ".local/kernelci")} = {}) {
   source = resolve(source); work = resolve(work);
   const ref = pin(), manifest = readJSON(join(root, ".github/ci/kernel-corpus.json"));
   const corpus = join(work, "corpus"), fast = ["TestOSD_EmitUnitClasses", "int8"];
-  // Cache hits are rehashed, not trusted solely because the directory exists.
-  if (!existsSync(join(corpus, "TestOSD_EmitUnitClasses"))) {
+  if (manifest.abapiti !== ref) throw new Error("corpus manifest and ABAPiti pin differ");
+  // Validation also decides whether the read-only source checkout is needed.
+  repairFolder(corpus, manifest, fast[0], (output) => {
     const actual = execFileSync("git", ["rev-parse", "HEAD"], {cwd: source, encoding: "utf8"}).trim();
     if (actual !== ref || execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], {cwd: source, encoding: "utf8"}).trim()) throw new Error("ABAPiti checkout must be clean and at abapiti.ref");
     const license = readFileSync(join(source, "LICENSE"), "utf8");
@@ -46,12 +81,8 @@ export function prepare({source = join(root, ".local/abapiti-src"), work = join(
     const temp = mkdtempSync(join(work, "generate-"));
     try {
       const generated = join(temp, "generated");
-      const run = spawnSync("go", ["test", "./wasm", "-count=1", "-run", "^TestOSD_EmitUnitClasses$"], {
-        cwd: source, env: {...goEnv(work), ABAPITI_TEST_OUT: generated}, encoding: "utf8", timeout: 300000, maxBuffer: 8e6,
-      });
-      writeFileSync(join(work, "generate.log"), (run.stdout ?? "") + (run.stderr ?? ""));
-      if (run.error || run.status !== 0) throw new Error(`corpus generation failed: ${run.error?.message ?? run.status}; see generate.log`);
-      const output = join(corpus, fast[0]); mkdirSync(output, {recursive: true});
+      generateWithRetry(source, work, generated);
+      mkdirSync(output, {recursive: true});
       const input = join(generated, fast[0]);
       for (const dir of [input, join(input, "split")]) for (const file of readdirSync(dir).filter((f) => f.endsWith(".abap"))) {
         if (existsSync(join(output, file))) throw new Error(`duplicate generated file: ${file}`);
@@ -59,25 +90,29 @@ export function prepare({source = join(root, ".local/abapiti-src"), work = join(
       }
       cpSync(join(source, "LICENSE"), join(corpus, "ABAPiti-LICENSE"));
     } finally { rmSync(temp, {recursive: true, force: true}); }
-  }
-  if (!existsSync(join(corpus, "int8"))) {
-    mkdirSync(join(corpus, "int8"), {recursive: true});
+  });
+  repairFolder(corpus, manifest, "int8", (output) => {
+    mkdirSync(output, {recursive: true});
     for (const name of ["int8x", "int8y"]) for (const [suffix, target] of [[".abap", ".clas.abap"], ["-testclasses.abap", ".clas.testclasses.abap"]]) {
-      cpSync(join(root, "test/fixtures/osgjs-unit-int8", name + suffix), join(corpus, "int8", "zcl_abapiti_" + name + target));
+      cpSync(join(root, "test/fixtures/osgjs-unit-int8", name + suffix), join(output, "zcl_abapiti_" + name + target));
     }
-  }
+  });
   verifyCorpus(corpus, manifest, fast);
   return corpus;
 }
 
 if (runsAs("osd-kernel-corpus.mjs")) {
   try {
-    const options = {};
-    for (let i = 2; i < process.argv.length; i += 2) {
-      const key = {"--source": "source", "--work": "work"}[process.argv[i]];
-      if (!key || !process.argv[i + 1]) throw new Error("usage: osd-kernel-corpus.mjs [--source dir] [--work dir]");
-      options[key] = process.argv[i + 1];
+    if (process.argv.length === 3 && process.argv[2] === "--check-cache") {
+      console.log(`regenerate=${!cacheValid()}`);
+    } else {
+      const options = {};
+      for (let i = 2; i < process.argv.length; i += 2) {
+        const key = {"--source": "source", "--work": "work"}[process.argv[i]];
+        if (!key || !process.argv[i + 1]) throw new Error("usage: osd-kernel-corpus.mjs [--check-cache | --source dir --work dir]");
+        options[key] = process.argv[i + 1];
+      }
+      console.log(prepare(options));
     }
-    console.log(prepare(options));
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

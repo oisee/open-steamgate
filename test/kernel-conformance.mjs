@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import {spawnSync} from "node:child_process";
-import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
-import {compareFailures, compareDrift, identityDigest} from "../tools/osd-kernel-check.mjs";
-import {fingerprint, verifyCorpus, pin} from "../tools/osd-kernel-corpus.mjs";
+import {compareFailures, compareDrift, identityDigest, failureSignature} from "../tools/osd-kernel-check.mjs";
+import {fingerprint, verifyCorpus, pin, repairFolder, generateWithRetry, cacheValid} from "../tools/osd-kernel-corpus.mjs";
 import {render} from "../tools/osg-support.mjs";
 import {regenerateEvidence, publicFolders, unmeasuredInputs} from "../tools/osd-kernel-conformance.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const row = {class: "ZCL_TEST", testclass: "LTCL_TEST", method: "EDGE", status: "FAILURE"};
-const known = {...row, reason: "upstream byte conversion", upstream: "https://github.com/abaplint/transpiler/pull/1964"};
+const row = {class: "ZCL_TEST", testclass: "LTCL_TEST", method: "EDGE", status: "FAILURE", message: "Expected '1', got '2'; Expected [1]; Actual [2]; Raised in edge"};
+const known = {...row, signature: "Expected [1]; Actual [2]", reason: "upstream byte conversion", upstream: "https://github.com/abaplint/transpiler/pull/1964"};
 const result = (rows) => ({rows, totals: {tests: rows.length, success: rows.filter((r) => r.status === "SUCCESS").length,
   failure: rows.filter((r) => r.status === "FAILURE").length, error: rows.filter((r) => r.status === "ERROR").length, not_compiled: 0}});
 
@@ -20,6 +20,20 @@ describe("kernel conformance gate", function () {
   after(() => rmSync(temp, {recursive: true, force: true}));
   it("unchanged known failures pass, with matching count and runner exit", () => {
     assert.deepEqual(compareFailures(result([row]), [known], {tests: 1, exitCode: 1}), []);
+  });
+  it("a changed assertion in an allowed method makes the checker red with both signatures", () => {
+    const changed = {...row, message: "Expected '1', got '3'; Expected [1]; Actual [3]; Raised in edge"};
+    const errors = compareFailures(result([changed]), [known]);
+    assert.match(errors.join("\n"), /changed signature.*Expected \[1\]; Actual \[2\].*Expected \[1\]; Actual \[3\]/);
+    const file = join(temp, "signature-result.json"), list = join(temp, "signature-known.json");
+    writeFileSync(file, JSON.stringify(result([changed])));
+    writeFileSync(list, JSON.stringify({entries: [{...known, runtime: "osgjs", folder: "int8"}]}));
+    const child = spawnSync(process.execPath, ["tools/osd-kernel-check.mjs", "--result", file, "--known", list, "--runtime", "osgjs", "--folder", "int8", "--tests", "1"], {cwd: root, encoding: "utf8"});
+    assert.equal(child.status, 1); assert.equal(child.stderr.trim(), errors.join("\n"));
+    assert.deepEqual(compareFailures(result([{...row, message: row.message.replace("edge", "other_location")}]), [known]), []);
+    assert.equal(failureSignature({message: "runtime  error; Raised in edge"}), "runtime error");
+    assert.match(compareFailures(result([row]), [{...known, signature: ""}]).join("\n"), /invalid known failure/);
+    assert.match(compareFailures(result([{...row, message: "different failure"}]), [known]).join("\n"), /changed signature/);
   });
   it("a synthetic new failure makes the actual checker process red", () => {
     const file = join(temp, "result.json"), list = join(temp, "known.json");
@@ -62,6 +76,52 @@ describe("kernel conformance gate", function () {
     assert.throws(() => verifyCorpus(temp, manifest, ["int8"]), /content differs/);
     assert.throws(() => verifyCorpus(temp, manifest, ["mono"]), /missing pinned fixture/);
     assert.throws(() => verifyCorpus(temp, {...manifest, abapiti: "0".repeat(40)}, []), /pin differ/);
+  });
+  it("evicts a corrupt cache and regenerates once; a wrong replacement stays red", () => {
+    const work = join(temp, "cache"), corpus = join(work, "corpus"), folder = join(corpus, "int8");
+    mkdirSync(folder, {recursive: true});
+    const file = join(folder, "a.abap"); writeFileSync(file, "pinned content");
+    const generatedFolder = join(corpus, "TestOSD_EmitUnitClasses");
+    mkdirSync(generatedFolder); writeFileSync(join(generatedFolder, "a.abap"), "generated public content");
+    const manifest = {abapiti: pin(), folders: {int8: fingerprint(folder), TestOSD_EmitUnitClasses: fingerprint(generatedFolder)}};
+    assert.equal(cacheValid(work, manifest), true);
+    let generated = 0;
+    const generate = (output) => {
+      generated++; assert.equal(existsSync(output), false);
+      mkdirSync(output, {recursive: true}); writeFileSync(join(output, "a.abap"), "pinned content");
+    };
+    assert.equal(repairFolder(corpus, manifest, "int8", generate), false);
+    assert.equal(generated, 0);
+    writeFileSync(file, "corruption");
+    assert.equal(cacheValid(work, manifest), false); // Workflows fetch source even on an exact cache-key hit.
+    assert.equal(repairFolder(corpus, manifest, "int8", generate), true);
+    assert.equal(generated, 1); verifyCorpus(corpus, manifest, ["int8"]);
+    assert.equal(cacheValid(work, manifest), true);
+    writeFileSync(file, "corruption again");
+    assert.throws(() => repairFolder(corpus, manifest, "int8", (output) => {
+      generate(output); writeFileSync(file, "wrong regenerated content");
+    }), /content differs/);
+    assert.equal(generated, 2);
+  });
+  it("retries failed generation once, discards partial output and keeps both diagnostics", () => {
+    const work = join(temp, "retry"), generated = join(work, "generated");
+    mkdirSync(generated, {recursive: true});
+    let calls = 0, delays = 0;
+    const run = (_command, _args, options) => {
+      calls++; assert.equal(existsSync(generated), false);
+      assert.equal(options.env.GOTOOLCHAIN, "go1.26.0");
+      mkdirSync(generated); writeFileSync(join(generated, "partial.abap"), "partial");
+      return {status: calls === 1 ? 1 : 0, stdout: `output ${calls}\n`, stderr: `diagnostic ${calls}\n`};
+    };
+    generateWithRetry(temp, work, generated, {run, delay: () => { delays++; }});
+    assert.equal(calls, 2); assert.equal(delays, 1);
+    assert.match(readFileSync(join(work, "generate.log"), "utf8"), /Attempt 1[\s\S]*diagnostic 1[\s\S]*Attempt 2[\s\S]*diagnostic 2/);
+    calls = 0; delays = 0;
+    assert.throws(() => generateWithRetry(temp, work, generated, {
+      run: () => { calls++; return {status: 1, stderr: `failure ${calls}\n`}; }, delay: () => { delays++; },
+    }), /failed after both attempts \(attempt 1: exit 1; attempt 2: exit 1\)/);
+    assert.equal(calls, 2); assert.equal(delays, 1);
+    assert.match(readFileSync(join(work, "generate.log"), "utf8"), /failure 1[\s\S]*failure 2/);
   });
 
   const key = "conversion: int8 → x LENGTH 4";

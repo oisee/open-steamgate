@@ -220,15 +220,23 @@ runs all 4,077 generated ABAPiti tests plus 10 int8 tests on
 OSG-JS. It is part of the existing `test` aggregate gate. The integration
 shards gain only the small comparator suite, not any corpus execution.
 
-`kernel-conformance.yml` runs a separate job nightly at 02:00 UTC, on every
-tag, and manually. It has no PR trigger and is outside the required `test`
+`kernel-conformance.yml` runs a separate job on pushes to `main`, nightly at
+02:00 UTC, on every tag, and manually. It has no PR trigger and is outside the required `test`
 aggregate. It runs the public generated corpus and int8 on
 OSG-JS and osgo, and lists mono and QuickJS as not measured. Jobs publish
 per-folder results, aggregate `osgjs.json` and
 `osgo.json`, a run manifest, regenerated support evidence, stderr, and
 `summary.md`, including on failure. The heavy profile uses a 90-minute job
 limit, an 80-minute outer timeout, and a 20-minute timeout per folder/runtime;
-the required command has a 20-minute outer timeout in a 25-minute job.
+the required command has a 10-minute outer timeout and an 11-minute step
+timeout in a 25-minute job, allowing headroom above the estimated 3–7 minutes
+on CI. Every step in both kernel jobs has an explicit timeout: one minute for
+metadata, validation and summaries; five for setup, checkout, cache, artifact
+and library operations; ten for the heavy job's runtime build; eleven for
+generation (two attempts of at most five minutes) and the required run; and
+81 for the heavy run. Actions are pinned to commit SHAs with version comments.
+Only PR runs can cancel an earlier heavy run; main, schedule and tag runs
+finish independently. The concurrency policy in `tests.yml` is unchanged.
 
 Both use `osgjs:unit --db file` and `NODE_OPTIONS=--max-old-space-size=12288`,
 including the parent evidence generator. Go uses `GOTOOLCHAIN=go1.26.0` and
@@ -250,18 +258,26 @@ The emitter's `split/` ABAP files are flattened into the corpus directory,
 just as ABAPiti's own osgo CI does. `.github/ci/kernel-corpus.json` records
 file counts, content hashes and sorted test-identity hashes. Cache keys
 include the corpus pin, platform and generation recipe/fixture manifest.
-Every hit is content-checked. The verified public inputs are saved before
+Every hit is content-checked before deciding whether the source checkout is
+needed. A corrupt folder is evicted locally and regenerated once from pinned
+inputs; incorrect regenerated content fails the job. Checkout and Go setup
+each have one explicit retry, with the final failure remaining red. The Go
+emitter retries once after two seconds, removes partial output between
+attempts and retains both diagnostics in `generate.log` if both fail.
+The verified public inputs are saved before
 runtime tests, so even a red regression run populates the generated-input
-cache. A normal cache-hit PR does not check out or regenerate ABAPiti. No
+cache. A valid cache-hit PR does not check out or regenerate ABAPiti. No
 generated corpus ABAP is added to this repository.
 
 The int8 inputs already live in `test/fixtures/osgjs-unit-int8`; staging gives
 them abapGit names. The fixture expectations are A4H 758 measurements; the
 int8x oracle passed 6/6. The fixtures retain their measured expectations.
 `.github/ci/kernel-known-failures.json` allows exactly four
-OSG-JS int8 test identities, each with a reason and a link to
+OSG-JS int8 test identities, each with a stable failure signature, reason and a link to
 [transpiler #1964](https://github.com/abaplint/transpiler/pull/1964).
-An unchanged list is green; a new failure, changed status, missing test,
+Assertion signatures retain the expected and actual values; other messages
+normalize whitespace and omit the runtime's `Raised in` location suffix.
+An unchanged list is green; a new failure, changed signature or status, missing test,
 changed test identity or fixed known failure is red. Harness/setup errors,
 refusals and timeouts cannot be added as known failures.
 
@@ -315,12 +331,15 @@ A mismatch never silently refreshes the manifest.
 
 When an allowed failure starts passing, the gate says "remove this entry
 from .github/ci/kernel-known-failures.json" and names its class/testclass/method.
-The JSON has one entry per test method, with a reason and upstream link.
+The JSON has one entry per test method, with its signature, reason and upstream link.
 Remove the exact entry and regenerate the measured support claims from
 complete folder results, preserving claims for unmeasured folders; the
 allowance is not inverted
 or broadened. A proposed new allowance needs a minimal reproducer, reason and
-upstream link, followed by another required run. Recheck a recorded result
+upstream link, followed by another required run. Use `failureSignature()` from
+`tools/osd-kernel-check.mjs` to record a measured signature. Never replace an
+old signature merely to accept a changed failure: investigate the assertion
+and its cause first. Recheck a recorded result
 without rebuilding using `osd-kernel-check.mjs --result <json> --known
 .github/ci/kernel-known-failures.json --runtime osgjs --folder int8 --tests 10`.
 Use `--support <support.json> --page docs/osg-support.md --inventory
@@ -348,9 +367,10 @@ four-folder measurements or claimed as covered by these jobs.
 ### Local timing, 2026-10-04
 
 The required public-input profile passed on the unchanged tracked runtime
-pin `e34d6a1f` (2.13.93) in **117.15 seconds** (1 min 57 s): 4,083 SUCCESS
+pin `e34d6a1f` (2.13.93) in **130.02 seconds** (2 min 10 s), including repair
+of an intentionally corrupted generated-corpus cache: 4,083 SUCCESS
 and exactly four allowed FAILURE rows among 4,087 tests. Folder times were
-79.29 s for the 4,077-test corpus and 21.82 s for int8; fresh evidence
+81.01 s for the 4,077-test corpus and 23.37 s for int8; cache repair, fresh evidence
 regeneration and drift comparison account for the remainder. The projection
 covers 50 classes, 91,175 source lines and 130 constructs. The source build
 was made in this workspace with the CI build script, without source patches
@@ -358,17 +378,24 @@ or changes to `libs.lock.json` or the transpiler pin.
 
 Cold preparation regenerated the public inputs from the read-only ABAPiti
 checkout and verified the licence, content hashes and identities. Go reported
-1.308 s for the emitter test itself, excluding downloads. The initial cold
+1.301 s for the emitter test itself, excluding downloads. The initial cold
 profile, run concurrently with focused tests using the inherited runtime,
 also passed in 297.93 s (200.55 s corpus, 67.86 s int8).
 
-All 32 focused comparator/support tests passed in 7 s when run alone. Three
-initial timeouts under concurrent corpus execution were resolved by that
-serial rerun. The suites check and actionlint passed for both workflows;
+All 35 focused comparator/support tests passed serially in 13 s (the original
+32 plus changed-signature, cache-repair and generation-retry regressions).
+One repeat exceeded the 120 s outer timeout; the isolated serial rerun passed
+without skipping tests or changing their limits. The suites
+check and actionlint passed for both workflows;
 the changed-file size guard passed, reporting six inherited breaches.
 A synthetic additional int8 failure exited 1 and named its method. A
-synthetic result with all four known failures fixed also exited 1 and named
-the exact entries to remove. Structural leak checks found no matches;
+changed-signature probe also exited 1 and named both expected and actual
+signatures. Fixed allowances are still checked by the focused suite.
+All 165 support-page construct rows and outcomes are unchanged; int8's 124
+lines became 119 because the measured fixtures replaced the old local copies,
+reducing the total from 348,319 to 348,314. The required profile's semantic
+page drift check and `osg:support --check` on its regenerated artifact passed.
+Structural leak checks found no matches;
 the local private identifier list was absent, so private names were not
 checked. GitHub Actions, the full integration suite and the heavy profile
 were not run locally.
