@@ -538,6 +538,9 @@ class SystemController {
     }));
     this.emitter = new vscode.EventEmitter();
     this.onDidChange = this.emitter.event;
+    this.stopEmitter = new vscode.EventEmitter();
+    this.onWillStop = this.stopEmitter.event;
+    context.subscriptions.push(this.stopEmitter);
     context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
       if (this.launcher !== undefined) {
         this.launcher.workspaceFolders = workspaceFoldersFor(this.launcher.osdHome);
@@ -1095,7 +1098,10 @@ class SystemController {
     this.launcher = launcher;
   }
 
-  async stop() {
+  async stop({shutdown = false} = {}) {
+    const pending = [];
+    this.stopEmitter.fire({shutdown, waitUntil: promise => pending.push(promise)});
+    await Promise.all(pending);
     if (this.launcher === undefined) {
       return;
     }
@@ -4445,7 +4451,7 @@ async function runNotebookCell(controller, cell, executionOrder, output) {
 // leaving a build's server as an orphan the way closing a terminal would
 // not (VS Code awaits a returned promise here).
 async function deactivate() {
-  await activeController?.stop();
+  await activeController?.stop({shutdown: true});
 }
 
 module.exports = {WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,

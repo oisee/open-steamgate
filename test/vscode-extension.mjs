@@ -2883,6 +2883,22 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     expect(third.disposed).to.equal(false);
   });
 
+  it("Stop awaits recovery cleanup and distinguishes reload shutdown", async () => {
+    const api = vscodeStub({home: ROOT});
+    const {SystemController} = loadExtension(api);
+    const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    const order = [];
+    const off = controller.onWillStop(event => {
+      order.push(event.shutdown ? "shutdown" : "explicit");
+      event.waitUntil(new Promise(resolve => setImmediate(() => { order.push("cleared"); resolve(); })));
+    });
+    controller.launcher = {stop: async () => order.push("launcher stopped")};
+    await controller.stop();
+    await controller.stop({shutdown: true});
+    expect(order).to.deep.equal(["explicit", "cleared", "launcher stopped", "shutdown", "cleared", "launcher stopped"]);
+    off.dispose();
+  });
+
   it("page tabs: a rebuild reloads them (on a new port too), Stop and an unasked exit close them", async () => {
     const api = vscodeStub({home: ROOT});
     const {openPage, wirePageTabs, SystemController} = loadExtension(api);
