@@ -31,7 +31,8 @@ function fixture(api, answer, saved = new Map(), workspaceSaved = new Map()) {
   const stops = new Emitter();
   const controller = {onDidChange: events.event, onWillStop: stops.event};
   let remote = {other: {url: "http://localhost", username: "EXAMPLE"}};
-  const messages = [], writes = [];
+  const messages = [], writes = [], commands = [], logs = [];
+  controller.output = {appendLine: line => logs.push(line)};
   const context = {globalStorageUri: {fsPath: storageDirs.get(saved)}, subscriptions: [], globalState: {
     get: (key, fallback) => saved.get(key) ?? fallback,
     update: async (key, value) => saved.set(key, value),
@@ -41,6 +42,7 @@ function fixture(api, answer, saved = new Map(), workspaceSaved = new Map()) {
     update: async (key, value) => workspaceSaved.set(key, value),
   };
   const vscode = {EventEmitter: Emitter, ConfigurationTarget: {Global: 1},
+    commands: {executeCommand: async command => commands.push(command)},
     extensions: {getExtension: (id) => { expect(id).to.equal(EXTENSION_ID); return {activate: async () => api}; }},
     window: {showInformationMessage: async (...args) => { messages.push(args); return answer; },
       showWarningMessage: (s) => messages.push(s)},
@@ -50,7 +52,7 @@ function fixture(api, answer, saved = new Map(), workspaceSaved = new Map()) {
       },
     }; }},
   };
-  return {controller, events, context, vscode, messages, writes, saved, workspaceSaved,
+  return {controller, events, context, vscode, messages, writes, commands, logs, saved, workspaceSaved,
     start() { controller.launcher = {state: "running", port: 8080, adtCredentials: startCredentials({OSD_USER: "LOCAL_TEST", OSD_ADT_CLIENT: "002"})}; events.fire(); return controller.launcher.adtCredentials; },
     async stop({shutdown = false} = {}) {
       const pending = [];
@@ -231,6 +233,65 @@ describe("ABAP-FS local bridge", () => {
     later.controller.start = async () => restarts++;
     await registerAbapFsBridge(later.vscode, later.context, later.controller);
     expect(restarts).to.equal(1);
+  });
+  for (const rejected of [false, true]) {
+    it(`refreshes Explorer once after restored readiness and provider registration (rejected: ${rejected})`, async () => {
+      let provider, finishStart;
+      const f = fixture({version: 2, registerConnectionProvider: p => {
+        provider = p;
+        return {dispose() {}};
+      }});
+      f.saved.set(recoveryKey, {...transitionEvidence, mount: "refresh-test", timestamp: Date.now()});
+      f.controller.start = async () => {
+        f.controller.launcher = {state: "starting"};
+        await new Promise(resolve => { finishStart = resolve; });
+        f.start();
+        return true;
+      };
+      f.vscode.commands.executeCommand = async command => {
+        expect(f.controller.launcher.state).to.equal("running");
+        expect(provider.getConnections().map(c => c.id)).to.deep.equal(["osd-local"]);
+        f.commands.push(command);
+        if (rejected) throw Error("Explorer unavailable");
+      };
+      const registration = registerAbapFsBridge(f.vscode, f.context, f.controller);
+      await settled();
+      expect(f.commands).to.deep.equal([]);
+      finishStart();
+      await registration;
+      f.events.fire(); f.events.fire();
+      await f.stop(); f.start(); await settled();
+      expect(f.commands).to.deep.equal(["workbench.files.action.refreshFilesExplorer"]);
+      expect(f.controller.launcher.state).to.equal("running");
+      expect(f.logs).to.have.length(rejected ? 1 : 0);
+      if (rejected) expect(f.logs[0]).to.contain("Explorer unavailable");
+    });
+  }
+  it("does not refresh Explorer after restore when ABAP-FS registers no connection provider (API v1)", async () => {
+    const f = fixture({version: 1});
+    f.saved.set(recoveryKey, {...transitionEvidence, mount: "refresh-v1", timestamp: Date.now()});
+    f.controller.start = async () => { f.start(); return true; };
+    await registerAbapFsBridge(f.vscode, f.context, f.controller);
+    await settled();
+    expect(f.controller.launcher.state).to.equal("running");
+    expect(f.commands).to.deep.equal([]);
+  });
+  it("does not refresh Explorer on manual starts", async () => {
+    const f = fixture({version: 2, registerConnectionProvider: () => ({dispose() {}})});
+    await registerAbapFsBridge(f.vscode, f.context, f.controller);
+    f.start(); f.events.fire(); await settled();
+    await f.stop(); f.start(); await settled();
+    expect(f.commands).to.deep.equal([]);
+  });
+  it("does not refresh Explorer after restore without the local ABAP-FS root", async () => {
+    const f = fixture({version: 2, registerConnectionProvider: () => ({dispose() {}})});
+    f.vscode.workspace.workspaceFolders = [folder];
+    f.vscode.workspace.workspaceFile = {scheme: "untitled"};
+    f.saved.set(recoveryKey, {...transitionEvidence, mount: "no-root", timestamp: Date.now()});
+    f.controller.start = async () => { f.start(); return true; };
+    await registerAbapFsBridge(f.vscode, f.context, f.controller);
+    expect(f.controller.launcher.state).to.equal("running");
+    expect(f.commands).to.deep.equal([]);
   });
   it("leaves a hanging mount intent for the transitioned workspace, never a single-folder window", async () => {
     const f = fixture({version: 2, registerConnectionProvider: () => ({dispose() {}}),
