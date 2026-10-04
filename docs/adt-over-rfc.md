@@ -230,8 +230,13 @@ What that means in practice:
 - probe an ADT resource with `X-CSRF-Token: fetch`, HEAD first and GET after —
   some systems mint nothing on a HEAD;
 - keep the token beside the cookie jar whose session it belongs to, one per
-  conversation, because a jar shared between two clients shares an ADT context
-  between them;
+  conversation;
+- Eclipse may SAVE or UNLOCK through another pooled RFC connection. For a
+  known `lockHandle`, continue its owner's backend context only when the
+  authenticated RFC user and client match. Unknown, stale or foreign handles
+  use the caller's own context and remain subject to the backend's ownership
+  and object checks. Requests sharing a context serialize cookie and token
+  updates; closing its owner removes this association;
 - establish a stateful backend context for each conversation: the bridge
   sends `X-SAP-ADT-SessionType: stateful` on its CSRF probes and defaults
   tunneled requests to it when the client omitted the header. An explicit
@@ -263,8 +268,11 @@ opening the source. Before this fix the new conversation's CSRF probe
 created a stateless context and LOCK returned 400. The regression in
 `test/adt-rfc-context.mjs` sends header-free synthetic RFC requests through
 the real bridge and ABAP front, checks both a read-first and write-first
-conversation, owner-only writes, UNLOCK, stale handles, explicit logoff and
-disconnect cleanup, including a disconnect while LOCK is still in flight.
+conversation, same-user pooled SAVE and UNLOCK, foreign and stale handles,
+explicit logoff and disconnect cleanup, including a disconnect while LOCK
+or a pooled SAVE is still in flight. The same Eclipse run reproduced a 409
+on SAVE in a different RFC conversation; continuing the known handle's
+context addresses that failure without relaxing direct HTTP ownership.
 
 ## Identity
 

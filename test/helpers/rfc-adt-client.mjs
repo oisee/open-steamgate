@@ -14,13 +14,13 @@ function data(payload) {
   const frame = appc(0xcb); frame.writeUInt16BE(7, 4);
   return Buffer.concat([frame, payload]);
 }
-function logon() {
+function logon(user) {
   const prefix = Buffer.from("d9c6c3f0f0f0f0f0f0f0f0f0010100080301", "hex");
   const chain = encodeRfcFieldChain(0x0101, [
     {tag: 0x0101}, {tag: 0x0103, value: Buffer.from("00000e09", "hex")},
     {tag: 0x0106, value: Buffer.from("04010003000a0200000023", "hex")}, {tag: 0x0337},
     {tag: 0x0514, value: Buffer.alloc(16,7)}, {tag: 0x0114, value: Buffer.from("001")},
-    {tag: 0x0111, value: Buffer.from("DEVELOPER")},
+    {tag: 0x0111, value: Buffer.from(user)},
     {tag: 0x0117, value: Buffer.from("150000008981dc9b914e", "hex")},
     {tag: 0x0115, value: Buffer.from("E")}, {tag: 0x0501, value: Buffer.from([1])},
     {tag: 0x0007, value: Buffer.from("127.0.0.1")}, {tag: 0x0018, value: Buffer.from("::1")},
@@ -49,7 +49,7 @@ function request(method, path, body = "", headers = {}) {
   return Buffer.concat([Buffer.from([5,2,0,0]), chain, trailer]);
 }
 
-export async function connectAdt(port) {
+export async function connectAdt(port, user = "DEVELOPER") {
   const socket = connect(port, "127.0.0.1"), decoder = new NIFrameDecoder();
   const queued = [], waiting = [];
   const fail = (error) => {for (const w of waiting.splice(0)) w.reject(error);};
@@ -65,7 +65,7 @@ export async function connectAdt(port) {
   });
   await new Promise((resolve,reject) => socket.once("connect",resolve).once("error",reject));
   const init = appc(0x01,453); init.writeUInt16BE(3,76);
-  for (const frame of [Buffer.alloc(64),init,appc(0x0f,224),appc(0x05),data(logon())]) socket.write(encodeNIFrame(frame));
+  for (const frame of [Buffer.alloc(64),init,appc(0x0f,224),appc(0x05),data(logon(user))]) socket.write(encodeNIFrame(frame));
   for (let i=0;i<4;i++) await receive();
   return {close: () => socket.destroy(), async call(method,path,body,headers) {
     socket.write(encodeNIFrame(data(request(method,path,body,headers))));

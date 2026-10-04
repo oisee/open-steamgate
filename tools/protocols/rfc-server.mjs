@@ -297,9 +297,14 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
   if (backendPassword && !backendUser) throw new Error("backend password requires STG_ADT_USER");
   const backendAuth = {user: backendUser, password: backendPassword, client: backendClient, language: backendLanguage};
   const rfcAuth = {mode: rfcAuthMode, user: rfcUser, password: rfcPassword, client: rfcClient};
+  const editingHandles = new Map();
+  const forgetSession = (session) => {
+    for (const [handle, owner] of editingHandles) if (owner.session === session) editingHandles.delete(handle);
+  };
   const server = net.createServer((socket) => {
     const decoder = new NIFrameDecoder({maxPayloadLength: MAX_FRAME});
-    const session = {jar: new Map(), csrfToken: ""};
+    const session = {jar: new Map(), csrfToken: "", requests: Promise.resolve(), closed: false};
+    let principal;
     let phase = "gateway";
     let conversationID;
     let sequence;
@@ -329,6 +334,7 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
       if (frame[1] !== 0xcb || frame.length <= 80) throw new Error("unsupported APPC conversation step");
       if (phase === "logon") {
         const caller = authenticateLogon(frame, rfcAuth);
+        principal = JSON.stringify([caller.client, caller.user]);
         const identity = {
           systemID,
           host: systemHost,
@@ -353,7 +359,29 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
       }
       if (call.functionName !== "SADT_REST_RFC_ENDPOINT") throw new Error(`unsupported RFC function ${call.functionName}`);
       const request = admitAdtRequest(call.compact ? parseAdtBxmlRequest(call.compact) : parseAdtHttpRequest(call.xml));
-      const response = await forwardAdt(backendURL, backendAuth, request, session, timeoutMs);
+      const target = backendRequestTarget(request.url, backendURL, backendAuth);
+      const lockHandle = target.searchParams.get("lockHandle");
+      const owner = editingHandles.get(lockHandle);
+      // Eclipse pools RFC connections: SAVE can use a different connection
+      // from LOCK. Continue only a known handle of the same RFC identity.
+      // The backend still checks that the handle owns the requested object.
+      const context = owner?.principal === principal && !owner.session.closed ? owner.session : session;
+      const pending = context.requests.catch(() => {}).then(async () => {
+        const result = await forwardAdt(backendURL, backendAuth, request, context, timeoutMs);
+        if (result.status >= 200 && result.status < 300) {
+          const action = target.searchParams.get("_action");
+          if (request.method === "POST" && action === "LOCK" && !context.closed) {
+            const handle = /<LOCK_HANDLE>([a-fA-F0-9]{40})<\/LOCK_HANDLE>/.exec(result.body.toString("utf8"))?.[1];
+            if (handle) editingHandles.set(handle, {session: context, principal});
+          }
+          if (request.method === "POST" && action === "UNLOCK" && owner?.session === context) editingHandles.delete(lockHandle);
+          if (target.pathname === "/sap/public/bc/icf/logoff") forgetSession(context);
+        }
+        return result;
+      });
+      // Shared contexts serialize cookies and CSRF rotation across sockets.
+      context.requests = pending;
+      const response = await pending;
       const cut = call.compact
         ? encodeAdtCompactResponse(encodeAdtBxmlResponse(response), findSessionGuid(frame))
         : encodeAdtCutResponse(encodeAdtHttpResponse(response));
@@ -373,9 +401,12 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
     });
     socket.on("error", (error) => log({error: error.message}));
     socket.once("close", () => {
+      session.closed = true;
+      forgetSession(session);
       // A request already in flight may still acquire a lock or issue
       // cookies. Finish that chain before ending this conversation's context.
-      void chain.catch(() => {}).then(() => endBackendSession(backendURL, backendAuth, session, timeoutMs, log));
+      void chain.catch(() => {}).then(() => session.requests.catch(() => {}))
+        .then(() => endBackendSession(backendURL, backendAuth, session, timeoutMs, log));
     });
   });
   server.maxConnections = maxConnections;
