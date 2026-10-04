@@ -56,32 +56,6 @@
       }
     }
   },
-  "test/dsl-l2.mjs": {
-    "generation": {
-      "reason": "Temporary: setup at test/dsl-l2.mjs:112 writes 13 previously absent ignored trace.meta.json sidecars under src/l2demo and leaves live at 759177bda0d12f33 while the tree becomes a1e53ac46cfb6ea1. A read-only hash excluding exactly those 13 files returns 759177bda0d12f33. Recorded in shard 2 on base 11122e9f; no cleanup/rebuild is performed by the detector.",
-      "owner": "stoker",
-      "backlog": "docs/backlog/misc.md#isolation-dsl-l2-generation",
-      "drift": {
-        "kind": "added-inputs",
-        "maxCount": 13,
-        "paths": [
-          "src/l2demo/zcl_l2_grounded_ship_crew.clas.testclasses.trace.meta.json",
-          "src/l2demo/zcl_l2_maintenance_ship.clas.testclasses.trace.meta.json",
-          "src/l2demo/zcl_l2_recent_voyage.clas.testclasses.trace.meta.json",
-          "src/l2demo/zcl_l2_recent_voyage.clas.trace.meta.json",
-          "src/l2demo/zcl_l2_ship_busy.clas.testclasses.trace.meta.json",
-          "src/l2demo/zcl_l2_ship_captain.clas.testclasses.trace.meta.json",
-          "src/l2demo/zcl_l2_ship_cargo_limit.clas.testclasses.trace.meta.json",
-          "src/l2demo/zcl_l2_ship_max_cargo.clas.testclasses.trace.meta.json",
-          "src/l2demo/zcl_l2_ship_min_captains.clas.testclasses.trace.meta.json",
-          "src/l2demo/zcl_l2_ship_min_captains.clas.trace.meta.json",
-          "src/l2demo/zcl_l2_ship_min_crew.clas.testclasses.trace.meta.json",
-          "src/l2demo/zcl_l2_ship_restricted.clas.testclasses.trace.meta.json",
-          "src/l2demo/zcl_l2_ship_voyage_limit.clas.testclasses.trace.meta.json"
-        ]
-      }
-    }
-  },
   "test/osd-bsp.mjs": {
     "temporary-roots": {
       "reason": "Temporary: the osd-bsp fixture creates an osd-bsp-* root and leaves it on disk. Shared shard 2 on base 11122e9f observed one survivor; the fixture owner must remove it.",

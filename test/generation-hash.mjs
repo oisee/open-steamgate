@@ -1,8 +1,9 @@
 import {expect} from "chai";
 import {writeFileSync, readFileSync, readdirSync, rmSync, mkdirSync, mkdtempSync, cpSync, symlinkSync, utimesSync, realpathSync} from "node:fs";
 import {tmpdir} from "node:os";
+import {execFileSync} from "node:child_process";
 import {join} from "node:path";
-import {build, liveHash, hashOf, generatorClosure, genHash} from "../tools/osd-build.mjs";
+import {build, liveHash, hashOf, inputsOf, generatorClosure, genHash} from "../tools/osd-build.mjs";
 
 import {WarmCompiler} from "../tools/osd-warm.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
@@ -230,6 +231,35 @@ describe("a generation identifies content regardless of location", () => {
     const before = hashOf(first);
     writeFileSync(join(first, "src", "zcl_identity.clas.abap"), "* changed source\n");
     expect(hashOf(first)).not.to.equal(before);
+  });
+  for (const folder of ["src", "webapp", "pack-data"]) it(`${folder}: navigation trace metadata does not rename a generation`, () => {
+    mkdirSync(join(first, folder), {recursive: true});
+    const inputs = inputsOf(first);
+    inputs.packFolders = [join(first, "pack-data")];
+    const before = hashOf(first, inputs);
+    const file = join(first, folder, "zcl_identity.clas.trace.meta.json");
+    writeFileSync(file, JSON.stringify({generatedAt: "first", navigation: {line: 1}}));
+    expect(hashOf(first, inputs), "optional navigation metadata is not compiler input").to.equal(before);
+    writeFileSync(file, JSON.stringify({generatedAt: "second", navigation: {line: 2}}));
+    expect(hashOf(first, inputs), "editing metadata leaves generated code unchanged").to.equal(before);
+  });
+  it("a tar/untar and package relink preserve every framed hash input", () => {
+    const trace = root => {
+      const inputs = [];
+      const hash = hashOf(root, undefined, {trace: value => inputs.push(String(value))});
+      return {hash, inputs};
+    };
+    const before = trace(first);
+    const archive = join(scratch, "built-tree.tar");
+    execFileSync("tar", ["--exclude=node_modules", "-cf", archive, "-C", first, "."]);
+    rmSync(second, {recursive: true});
+    mkdirSync(second);
+    execFileSync("tar", ["-xf", archive, "-C", second]);
+    mkdirSync(join(second, "node_modules", "@abaplint"), {recursive: true});
+    for (const name of ["transpiler", "runtime"]) {
+      symlinkSync(join(second, "local", name), join(second, "node_modules", "@abaplint", name));
+    }
+    expect(trace(second)).to.deep.equal(before);
   });
   for (const name of ["transpiler", "runtime"]) {
     it(`a ${name} build edit changes the hash even with the same version`, () => {

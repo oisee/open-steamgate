@@ -54,6 +54,14 @@ still report local checkout locations and Git state, but never name a generation
 An existing generation named by the old hash is stale once and rebuilds normally;
 there is no compatibility special case.
 
+Optional `*.trace.meta.json` navigation companions are derived metadata, not
+compiler inputs. They are excluded from source/library folders, BSP pages and
+pack data/DDIC folders, so rendering or editing them cannot rename live code.
+A pre-snapshot generation can still prove matching working source using its
+recorded aggregate hash: the proof uses `manifest.toolchain` for content identity,
+with `manifest.transpiler` retained for older manifest shapes. Cold manifests
+keep the diagnostic description in `transpiler`; it is not the identity.
+
 A process retains the toolchain identity captured when it loads the transpiler;
 a bundled host embeds that identity when the binary is built. Both cold and
 warm builds record it in the generation manifest. If a linked transpiler or

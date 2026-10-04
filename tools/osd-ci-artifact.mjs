@@ -2,9 +2,16 @@
 import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {spawnSync} from "node:child_process";
 
+if (process.argv[2] === "verify") {
+  const {generationStateSnapshot} = await import("./osd-build.mjs");
+  const state = generationStateSnapshot();
+  console.log(`osd-ci-artifact: generation: ${JSON.stringify(state)}`);
+  process.exit(state.live !== null && state.live === state.tree ? 0 : 1);
+}
+
 const archive = process.argv[2] === "pack" ? process.argv[3] : undefined;
 if (!archive) {
-  console.error("usage: node tools/osd-ci-artifact.mjs pack <tar-file>");
+  console.error("usage: node tools/osd-ci-artifact.mjs pack <tar-file> | verify");
   process.exit(2);
 }
 const paths = ["gen", "output", "build", ".local/lars", ".local/ci-artifact/transpiler"];

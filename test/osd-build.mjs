@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
-import {execFileSync} from "node:child_process";
+import {execFileSync, spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {build, hashOf, liveHash, missingLibraries} from "../tools/osd-build.mjs";
@@ -25,6 +25,19 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
   });
 
   afterEach(() => rmSync(root, {recursive: true, force: true}));
+
+  it("CI restore verification accepts matching inputs and refuses a stale generation", async () => {
+    write("src/zcl_archive.clas.abap", "CLASS zcl_archive DEFINITION PUBLIC. ENDCLASS. CLASS zcl_archive IMPLEMENTATION. ENDCLASS.\n");
+    const built = await build({root, generators: false});
+    const verify = () => spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "verify"], {cwd: root, encoding: "utf8"});
+    const fresh = verify();
+    expect(fresh.status, fresh.stdout + fresh.stderr).to.equal(0);
+    expect(JSON.parse(fresh.stdout.split("generation: ")[1])).to.include({live: built.hash, tree: built.hash});
+    write("src/zcl_archive.clas.abap", "* changed source\n");
+    const stale = verify();
+    expect(stale.status, stale.stdout + stale.stderr).to.equal(1);
+    expect(liveHash(root)).to.equal(built.hash);
+  });
 
   // The builder starts a generator through tools/osd-host.mjs, which inside a
   // compiled binary becomes "osd gen <name>" and is answered from a map in

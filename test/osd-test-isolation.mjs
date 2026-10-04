@@ -213,6 +213,8 @@ describe('per-file process isolation detector', function () {
         : mutation === 'fresh-live' ? "assert.equal(fs.readlinkSync('build/live'),'by-input/fresh-corruption');"
         : ['inactive-before', 'inactive-drift'].includes(mutation) ? "assert.equal(fs.readFileSync('build/inactive/active/src/other.clas.abap','utf8'),'unrelated active edit');" : '';
       const viewOptions = inactive ? ",undefined,{overlay:{exclude:[process.cwd()+'/src/other.clas.abap'],folder:'build/inactive/active'}}" : '';
+      // The proof loads real warm/store modules asynchronously. Give this
+      // child its own timeout; the outer mocha timeout does not reach it.
       const result = run({'test/vscode-warm.mjs': `import fs from 'node:fs';import assert from 'node:assert/strict';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
         fs.mkdirSync('src/demo',{recursive:true});fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));
         const file='src/demo/zcl_zstg_demo_dpc_ext.clas.abap';const original=${JSON.stringify(original)};fs.writeFileSync(file,original);${inactiveSetup}fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
@@ -221,7 +223,7 @@ describe('per-file process isolation detector', function () {
           fs.unlinkSync('build/live');const activated='by-input/'+hashOf(process.cwd()${viewOptions});fs.symlinkSync(activated,'build/live');assert.equal(fs.readlinkSync('build/live'),activated);
           ${proofRejected ? checkMutation + reached : ''}
           try{await isolation.observeGenerationDrift()}finally{fs.writeFileSync(file,original)}
-          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`});
+          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`}, ['--timeout', '10000']);
       expect(result.output).to.include(`mutation reached: warm ${mutation}`);
       if (mutation === 'known' || mutation === 'inactive-view') {
         expect(result.status, result.output).to.equal(0);
@@ -234,11 +236,12 @@ describe('per-file process isolation detector', function () {
       }
     });
   }
-  for (const mutation of ['known', 'unknown-sidecar', 'config-drift']) {
-    it(`limits added-input generation drift to the observed sidecars: ${mutation}`, () => {
+  for (const mutation of ['known', 'unknown-sidecar', 'source-drift', 'config-drift']) {
+    it(`ignores navigation metadata but detects real generation drift: ${mutation}`, () => {
       const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
       const sidecar = mutation === 'unknown-sidecar' ? 'src/l2demo/unrelated.trace.meta.json' : 'src/l2demo/zcl_l2_recent_voyage.clas.trace.meta.json';
-      const extra = mutation === 'config-drift' ? "fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[],output_folder:'new-output'}));" : '';
+      const extra = mutation === 'config-drift' ? "fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[],output_folder:'new-output'}));"
+        : mutation === 'source-drift' ? "fs.writeFileSync('src/base.clas.abap','changed source');" : '';
       const result = run({'test/dsl-l2.mjs': `import fs from 'node:fs';import assert from 'node:assert/strict';import {hashOf} from ${JSON.stringify(builder)};
         fs.mkdirSync('src/l2demo',{recursive:true});fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));
         fs.writeFileSync('src/base.clas.abap','baseline');fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
@@ -247,12 +250,11 @@ describe('per-file process isolation detector', function () {
           ${mutation === 'config-drift' ? "assert.equal(JSON.parse(fs.readFileSync('abap_transpile.json','utf8')).output_folder,'new-output');" : ''}
           console.log('mutation reached: added-input ${mutation}');});`});
       expect(result.output).to.include(`mutation reached: added-input ${mutation}`).and.include('1 passing');
-      if (mutation === 'known') {
+      expect(result.output).not.to.include('TEMPORARY ALLOW');
+      if (mutation === 'known' || mutation === 'unknown-sidecar') {
         expect(result.status, result.output).to.equal(0);
-        expect(result.output).to.include('TEMPORARY ALLOW');
       } else {
         expect(result.status, result.output).to.be.greaterThan(0);
-        expect(result.output).not.to.include('TEMPORARY ALLOW');
       }
     });
   }

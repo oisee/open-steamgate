@@ -198,7 +198,11 @@ export function describeMissingLibraries(missing) {
 // test or a note beside the ABAP is not an input, and a hash that counted
 // it would spend ten seconds building the same output again after an edit
 // to a .mjs. Everything in an input folder counts except these.
-const NOT_AN_INPUT = /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap)$/i;
+// Optional DSL navigation metadata is generated beside the source, carries
+// volatile provenance, and is excluded by the transpiler and BSP generator.
+// Creating it (for example in dsl-l2's setup) must not invalidate live code.
+const TRACE_METADATA = /\.trace\.meta\.json$/i;
+const NOT_AN_INPUT = /\.(mjs|cjs|js|ts|py|md|txt|log|lock|snap|trace\.meta\.json)$/i;
 
 /**
  * The modules that decide what `gen/` will contain: the generators and
@@ -380,10 +384,10 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
     folder("active", dir, () => (existsSync(dir) ? walk(dir).filter((f) => !NOT_AN_INPUT.test(f) && kept(f)).sort() : []));
   }
   for (const dir of inputs.bspFolders ?? []) {
-    folder("bsp", dir, () => walk(dir).sort());
+    folder("bsp", dir, () => walk(dir).filter((f) => !TRACE_METADATA.test(f)).sort());
   }
   for (const dir of inputs.packFolders ?? []) {
-    folder("pack", dir, () => walk(dir).sort());
+    folder("pack", dir, () => walk(dir).filter((f) => !TRACE_METADATA.test(f)).sort());
   }
   for (const file of inputs.packFiles ?? []) {
     h.update(`manifest ${relative(root, file)}\0`).update(digestOf(file)).update("\0");
