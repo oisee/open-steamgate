@@ -468,6 +468,16 @@ the façade serves may be checked, including a dictionary object, for which
 the status says that it is here and readable rather than implying a syntax
 check it did not get.
 
+Semantic registry caches include the serving (or live) generation, retained
+snapshot identity, working source files (including saved inactive edits),
+roots, exclusions and syntax configuration. A successful publication therefore
+retires a parse containing the previous generated consumers before the next
+unsaved check. Generated consumers come only from proven generation inputs;
+`gen/` is build scratch and can hold output from a failed build. Without a live
+generation, checks omit generated objects, even if `gen/` exists. DDLS syntax
+and source checks still run; generated-shape warnings become available after
+a successful build publishes retained inputs.
+
 **A test run is a tree, not a verdict.** `(await store.unit()).runDetached(type, name)`
 returns program, test classes, test methods and the alerts under each
 method, which is exactly the nesting of an `aunit:runResult`: a method with
