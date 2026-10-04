@@ -143,7 +143,11 @@ CLASS zcl_osd_adt_session IMPLEMENTATION.
             REPLACE ALL OCCURRENCES OF `+` IN rv_value WITH `-`.
             REPLACE ALL OCCURRENCES OF `/` IN rv_value WITH `_`.
           WHEN `HANDLE`.
-            rv_value = to_lower( cl_system_uuid=>create_uuid_c36_static( ) ).
+*           20 bytes as opaque hex; more entropy than one UUID, no padding.
+            lv_second = cl_system_uuid=>create_uuid_x16_static( ).
+            CONCATENATE lv_first lv_second(4) INTO lv_bytes IN BYTE MODE.
+            lv_hex = lv_bytes.
+            rv_value = to_lower( lv_hex ).
         ENDCASE.
       CATCH cx_uuid_error.
         lx_error = zcx_osd_adt=>internal( `could not generate session randomness` ).

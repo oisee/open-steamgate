@@ -181,6 +181,43 @@ Generated (`gen/`) and library objects are read-only.
 5. Check and activate, reading the response document for findings.
 6. Release the lock and verify the resulting repository content.
 
+**Locks (T03/T04, measured on disposable programs 2026-10-04).** The tested
+offers were Result/Result2 with reversed q preferences, q=0 on either or both,
+no Accept, an unknown dataname, Result-only, Result2-only, and a capitalized
+`com.sap.adt.lock.Result2` dataname. All returned `200` with
+`application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.lock.Result`
+and the observed `asx:abap` / `DATA` body (`LOCK_HANDLE`, `CORRNR`, `CORRUSER`,
+`CORRTEXT`, `IS_LOCAL=X`, `IS_LINK_UP`, empty `MODIFICATION_SUPPORT`,
+`SCOPE_MESSAGES`): eight children of DATA. `application/xml` returned
+`406` / `ExceptionResourceNotAcceptable`, with T100 key `SADT_RESOURCE/044`,
+V1 `application/vnd.sap.as+xml`, and message
+"The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml".
+The tested `accessMode` values (absent, junk, `INSERT`, lower-case `modify`)
+all allowed LOCK and PUT. A same-session second LOCK returned `403` /
+`ExceptionResourceNoAccess`; a same-user cross-session PUT using the original
+handle returned `200`.
+
+**Our implementation choices and inferences.** We apply those program results
+to classes and other lockable object types; that generalization is unmeasured.
+We accept upper-case media types, `*/*` and `application/*` (including q=0),
+other charsets, and arbitrary parameter spellings/orderings, always answering
+UTF-8 Result. Wildcard acceptance is an interoperability inference; extending
+the observed q-ignoring behavior to zero-quality wildcards is our policy.
+Both fronts trim HTTP optional whitespace (space and HTAB) around media tokens
+and ignore parameters. An Accept containing only empty list elements, such as
+`Accept: ,`, is treated as missing Accept and returns Result: this is our choice,
+not a measured SAP fact. Nonmatching media offers receive the observed 406
+message and T100 properties. Our 406 takes no enqueue; SAP's leaked enqueue is
+a SAP-side defect we choose not to copy. Refused re-locks preserve the holder
+and handle. Our handles work only in the session that acquired them, a deliberate
+difference from the measured same-user cross-session PUT.
+The client audit found no dependency on SAP's looser handle rule: the VS Code
+extension edits local files; `lib.js` retains its mutation cookie; the ABAP-FS
+bridge registers a connection and does not transfer handles. The conformance
+driver uses one stateful `abap-adt-api` client for LOCK, PUT and UNLOCK and its
+stateless clone for reads. The clean-room kit likewise uses one client and
+cookie jar throughout its lock/write/restore/unlock cycle.
+
 **Activation, as the code does it.** `POST /sap/bc/adt/activation` names
 objects; the store checks each one with abaplint over the whole registry, then
 checks every object that mentions its name, because a local system has no

@@ -38,6 +38,7 @@
     "test/adt-editor.mjs",
     "test/adt-facade.mjs",
     "test/adt-host-seam.mjs",
+    "test/adt-handle-migration.mjs",
     "test/adt-notebook.mjs",
     "test/adt-session.mjs",
     "test/adt-session-recycle.mjs",

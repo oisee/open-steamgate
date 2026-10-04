@@ -1,5 +1,6 @@
 import {expect} from "chai";
 import {diff, normalise, readLog} from "../tools/osd-replay.mjs";
+import {lockResultDocument} from "../tools/adt-documents.mjs";
 
 // The first of W.1's three sieves: two branches of a system, the same calls
 // into both, and whether they answered the same.
@@ -13,6 +14,37 @@ import {diff, normalise, readLog} from "../tools/osd-replay.mjs";
 const answer = (path, body, status = 200) => ({call: {path}, status, contentType: "application/json", body});
 
 describe("the first sieve: two answers, and whether they are the same one", () => {
+  const lockAnswer = (handle, options) => ({
+    ...answer("/sap/bc/adt/programs/programs/zosd_replay_lock?_action=LOCK",
+      lockResultDocument(handle, options)),
+    contentType: "application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.lock.Result",
+  });
+  const handles = ["00112233445566778899aabbccddeeff01020304", "ffeeddccbbaa99887766554433221100a1b2c3d4"];
+
+  it("compares fresh LOCK handles as opaque tokens, including the old UUID format", () => {
+    for (const [left, right] of [handles,
+      ["3c2b1a09-1111-4222-8333-444455556666", "aaaaaaaa-2222-4333-8444-555566667777"],
+      ["opaque-first&amp;token", "opaque-second/token"]]) {
+      expect(diff([lockAnswer(left)], [lockAnswer(right)])).to.have.length(0);
+    }
+  });
+
+  it("still detects other LOCK changes and an empty handle", () => {
+    expect(diff([lockAnswer(handles[0])], [lockAnswer(handles[1], {local: false})])).to.have.length(1);
+    expect(diff([lockAnswer(handles[0])], [lockAnswer("")])).to.have.length(1);
+  });
+
+  it("masks lockHandle query values in answers without hiding adjacent parameters or hashes", () => {
+    for (const prefix of ["?", "?x=1&", "?x=1&amp;"]) {
+      const uri = handle => `<uri>/source/main${prefix}lockHandle=${handle}&amp;hash=${handles[0]}</uri>`;
+      expect(diff([answer("/x", uri("opaque%2Ffirst"))], [answer("/x", uri("second-token"))])).to.have.length(0);
+      expect(diff([answer("/x", uri(handles[0]))],
+        [answer("/x", uri(handles[1]).replace(`hash=${handles[0]}`, `hash=${handles[1]}`))])).to.have.length(1);
+    }
+    expect(diff([answer("/x", `<HASH>${handles[0]}</HASH>`)],
+      [answer("/x", `<HASH>${handles[1]}</HASH>`)])).to.have.length(1);
+  });
+
   it("is silent about a clock, which is what two runs differ in and not behaviour", () => {
     const left = [answer("/x", '{"started":"2026-09-19T05:00:00.000Z","rows":3}')];
     const right = [answer("/x", '{"started":"2026-09-19T06:11:22.500Z","rows":3}')];

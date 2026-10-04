@@ -256,9 +256,11 @@ decision splits the state by what it is:
   server and a suite's own router) would end each other's locks.
 - **The handle is the session's,** as port-map step 8 says: an ADT value, not an ENQ one. It stays in
   `session.locks`, and ABAP writes it through two SYSTEM kinds bound per request like IDENTITY. `LOCK_HANDLE "TYPE
-  NAME"` returns the session's handle for the object (`Sessions#adopt`: the one it has, or a new UUID).
+  NAME"` returns the session's handle for the object (`Sessions#adopt`: the one it has, or a new opaque handle).
   `LOCK_RELEASE <handle>` forgets the handle and returns the object (`Sessions#forget`). The route then dequeues.
-  The handle is minted in JavaScript with `randomUUID`, so its format is the Node façade's by construction.
+  The earlier UUID format and same-session re-lock behavior are superseded: handles are now 40 hex characters,
+  and a second LOCK returns 403 while preserving the original handle. See the current
+  [lock contract](../adt-facade.md#repository-and-mutation-semantics).
 
 A write is allowed when `Sessions#holds(session, handle, type, name)` is true: the handle is the session's for that
 object, **and** the lock server says this session holds it. `stillHeld`, which every write route runs right before it

@@ -183,13 +183,14 @@ describe("tools/adt-session: the token dance", function () {
   });
 
   describe("the lock table: one holder per object across sessions", () => {
-    it("a second session is refused and told who holds the object; the holder relocks idempotently", () => {
+    it("both another session and the holder's second LOCK are refused", () => {
       const sessions = new Sessions();
       const alice = sessions.open("ALICE");
       const bob = sessions.open("BOB");
       const first = sessions.lock(alice, "CLAS", "ZCL_X", () => "H1");
       expect(first).to.deep.equal({handle: "H1"});
-      expect(sessions.lock(alice, "CLAS", "zcl_x", () => "H2")).to.deep.equal({handle: "H1"});
+      expect(sessions.lock(alice, "CLAS", "zcl_x", () => "H2")).to.deep.equal({heldBy: alice});
+      expect(sessions.holds(alice, "H1", "CLAS", "ZCL_X")).to.equal(true);
       const refused = sessions.lock(bob, "CLAS", "ZCL_X", () => "H3");
       expect(refused.handle).to.equal(undefined);
       expect(refused.heldBy.user).to.equal("ALICE");

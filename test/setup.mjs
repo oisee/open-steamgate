@@ -8,6 +8,8 @@ import {installSqlTrace, fileSink} from "../tools/osd-sql-trace.mjs";
 import {batchInserts} from "../tools/osd-batch-inserts.mjs";
 import {TraceRing, TraceDestination} from "../tools/osd-sql-trace-buffer.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
+import {beforeAdtHandleDDL, adtHandleMigration} from "../tools/osd-adt-handle-migrate.mjs";
+export {beforeAdtHandleDDL} from "../tools/osd-adt-handle-migrate.mjs";
 
 /** The trace a running system holds, for the ST05-shaped screen to read
  *  (backlog G.10). It is off until the screen turns it on, and the wrapper
@@ -17,6 +19,44 @@ export const traceRing = new TraceRing();
 export function schemaTables(ddl) {
   return [ddl].flat().flatMap((statement) =>
     [...String(statement).matchAll(/\bCREATE\s+TABLE\s+"?([A-Za-z_][A-Za-z_0-9]*)"?/gi)].map((match) => match[1].toUpperCase()));
+}
+
+// Standalone migrations take the write lock; startup holds it across the
+// whole chain and the drift decision. Savepoints keep each migration's
+// rollback local without releasing the startup transaction.
+function withSchemaMigrationLock(native, migrate) {
+  const nested = native.isTransaction;
+  native.exec(nested ? "SAVEPOINT osd_schema_migration" : "BEGIN IMMEDIATE");
+  try {
+    const result = migrate();
+    native.exec(nested ? "RELEASE osd_schema_migration" : "COMMIT");
+    return result;
+  } catch (error) {
+    if (nested) {
+      native.exec("ROLLBACK TO osd_schema_migration");
+      native.exec("RELEASE osd_schema_migration");
+    } else {
+      native.exec("ROLLBACK");
+    }
+    throw error;
+  }
+}
+
+export function migrateAdtHandleFile(native, found, wanted, ddl, fingerprintOf) {
+  const table = adtHandleMigration(found, wanted, ddl, fingerprintOf);
+  if (!table) return false;
+  return withSchemaMigrationLock(native, () => {
+    const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
+    if (current === wanted) return true;
+    if (current !== found) return false;
+    // These rows are transient session handles, so discarding them on an
+    // upgrade is acceptable. No business table or session row is dropped.
+    native.exec("DROP TABLE zosd_adt_shdl");
+    native.exec(table);
+    native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
+      .run(wanted, new Date().toISOString());
+    return true;
+  });
 }
 
 // Add the permanent job key to the previous business schema without moving
@@ -35,13 +75,12 @@ export function migrateJobIdentityFile(native, found, wanted, ddl, fingerprintOf
   const prior = fingerprintOf(previous) === found ? "multistep" :
     fingerprintOf(oneStep) === found && oldParent !== parent ? "one-step" : undefined;
   if (!prior) return false;
-  native.exec("BEGIN IMMEDIATE");
-  try {
+  return withSchemaMigrationLock(native, () => {
     const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) { native.exec("COMMIT"); return true; }
-    if (current !== found) { native.exec("COMMIT"); return false; }
+    if (current === wanted) return true;
+    if (current !== found) return false;
     if (native.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zosd_job_identity'").get()) {
-      native.exec("COMMIT"); return false;
+      return false;
     }
     if (prior === "one-step") {
       native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN step_count NCHAR(2)");
@@ -57,9 +96,8 @@ export function migrateJobIdentityFile(native, found, wanted, ddl, fingerprintOf
     }
     native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
       .run(wanted, new Date().toISOString());
-    native.exec("COMMIT");
-  } catch (error) { native.exec("ROLLBACK"); throw error; }
-  return true;
+    return true;
+  });
 }
 
 // The predecessor columns are additive. Existing committed outbox rows have
@@ -79,20 +117,18 @@ export function migrateJobPredecessorFile(native, found, wanted, ddl, fingerprin
   const previous = beforeJobPredecessorDDL(ddl);
   if (fingerprintOf(previous) === wanted) return false;
   if (fingerprintOf(previous) !== found) return false;
-  native.exec("BEGIN IMMEDIATE");
-  try {
+  return withSchemaMigrationLock(native, () => {
     const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) { native.exec("COMMIT"); return true; }
-    if (current !== found) { native.exec("COMMIT"); return false; }
+    if (current === wanted) return true;
+    if (current !== found) return false;
     native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN pred_jobname NCHAR(32) COLLATE RTRIM`);
     native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN pred_jobcount NCHAR(8) COLLATE RTRIM`);
     native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN pred_intent_id NCHAR(32) COLLATE RTRIM`);
     native.exec("UPDATE zosd_job_outbox SET pred_jobname = '', pred_jobcount = '', pred_intent_id = ''");
     native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
       .run(wanted, new Date().toISOString());
-    native.exec("COMMIT");
-  } catch (error) { native.exec("ROLLBACK"); throw error; }
-  return true;
+    return true;
+  });
 }
 
 export function beforeJobEventDDL(ddl) {
@@ -110,11 +146,10 @@ export function migrateJobEventFile(native, found, wanted, ddl, fingerprintOf) {
   if (fingerprintOf(ddl) !== wanted) return false;
   const previous = beforeJobEventDDL(ddl);
   if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
-  native.exec("BEGIN IMMEDIATE");
-  try {
+  return withSchemaMigrationLock(native, () => {
     const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) { native.exec("COMMIT"); return true; }
-    if (current !== found) { native.exec("COMMIT"); return false; }
+    if (current === wanted) return true;
+    if (current !== found) return false;
     native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN source_instance NCHAR(32) COLLATE RTRIM");
     native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN wait_seq NCHAR(16)");
     native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN event_id NCHAR(32) COLLATE RTRIM");
@@ -122,9 +157,8 @@ export function migrateJobEventFile(native, found, wanted, ddl, fingerprintOf) {
     native.exec("UPDATE zosd_job_outbox SET source_instance = '', wait_seq = '', event_id = '', event_param = ''");
     native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
       .run(wanted, new Date().toISOString());
-    native.exec("COMMIT");
-  } catch (error) { native.exec("ROLLBACK"); throw error; }
-  return true;
+    return true;
+  });
 }
 
 export function beforeJobStepInputDDL(ddl) {
@@ -136,18 +170,16 @@ export function migrateJobStepInputFile(native, found, wanted, ddl, fingerprintO
   if (fingerprintOf(ddl) !== wanted) return false;
   const previous = beforeJobStepInputDDL(ddl);
   if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
-  native.exec("BEGIN IMMEDIATE");
-  try {
+  return withSchemaMigrationLock(native, () => {
     const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) { native.exec("COMMIT"); return true; }
-    if (current !== found) { native.exec("COMMIT"); return false; }
+    if (current === wanted) return true;
+    if (current !== found) return false;
     native.exec("ALTER TABLE zosd_job_step ADD COLUMN input_json TEXT COLLATE RTRIM");
     native.exec("UPDATE zosd_job_step SET input_json = '[]'");
     native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
       .run(wanted, new Date().toISOString());
-    native.exec("COMMIT");
-  } catch (error) { native.exec("ROLLBACK"); throw error; }
-  return true;
+    return true;
+  });
 }
 
 // Start by date and time and periodic starts (2026-10-01): eight additive
@@ -170,20 +202,18 @@ export function migrateJobScheduleFile(native, found, wanted, ddl, fingerprintOf
   if (fingerprintOf(ddl) !== wanted) return false;
   const previous = beforeJobScheduleDDL(ddl);
   if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
-  native.exec("BEGIN IMMEDIATE");
-  try {
+  return withSchemaMigrationLock(native, () => {
     const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) { native.exec("COMMIT"); return true; }
-    if (current !== found) { native.exec("COMMIT"); return false; }
+    if (current === wanted) return true;
+    if (current !== found) return false;
     for (const [column, width] of JOB_SCHEDULE_COLUMNS) {
       native.exec(`ALTER TABLE zosd_job_outbox ADD COLUMN ${column} NCHAR(${width}) COLLATE RTRIM`);
     }
     native.exec(`UPDATE zosd_job_outbox SET ${JOB_SCHEDULE_COLUMNS.map(([column]) => `${column} = ''`).join(", ")}`);
     native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
       .run(wanted, new Date().toISOString());
-    native.exec("COMMIT");
-  } catch (error) { native.exec("ROLLBACK"); throw error; }
-  return true;
+    return true;
+  });
 }
 
 // The release order of the outbox (DSL L3 slice 5d, 2026-10-02): RELEASE_SEQ,
@@ -202,11 +232,10 @@ export function migrateJobReleaseFile(native, found, wanted, ddl, fingerprintOf)
   if (fingerprintOf(ddl) !== wanted) return false;
   const previous = beforeJobReleaseDDL(ddl);
   if (fingerprintOf(previous) === wanted || fingerprintOf(previous) !== found) return false;
-  native.exec("BEGIN IMMEDIATE");
-  try {
+  return withSchemaMigrationLock(native, () => {
     const current = native.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint;
-    if (current === wanted) { native.exec("COMMIT"); return true; }
-    if (current !== found) { native.exec("COMMIT"); return false; }
+    if (current === wanted) return true;
+    if (current !== found) return false;
     native.exec("ALTER TABLE zosd_job_outbox ADD COLUMN release_seq NCHAR(16)");
     native.exec("UPDATE zosd_job_outbox SET release_seq = ''");
     if (native.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'zosd_l3_stage'").get()) {
@@ -215,9 +244,8 @@ export function migrateJobReleaseFile(native, found, wanted, ddl, fingerprintOf)
     }
     native.prepare("UPDATE osd_schema SET fingerprint = ?, at = ?")
       .run(wanted, new Date().toISOString());
-    native.exec("COMMIT");
-  } catch (error) { native.exec("ROLLBACK"); throw error; }
-  return true;
+    return true;
+  });
 }
 
 export function ensureJobEventMetadata(native) {
@@ -639,22 +667,34 @@ async function setupDatabase(abap, schemas, insert) {
     abap.context.databaseConnections["DEFAULT"] = traced(db);
     await db.connect();
     let found = await db.stampedSchema();
-    const beforeRelease = beforeJobReleaseDDL(schemas.sqlite);
-    const releasePriorWanted = fingerprintOf(beforeRelease);
-    const beforeSchedule = beforeJobScheduleDDL(beforeRelease);
-    const schedulePriorWanted = fingerprintOf(beforeSchedule);
-    const beforeInput = beforeJobStepInputDDL(beforeSchedule);
-    const inputPriorWanted = fingerprintOf(beforeInput);
-    const beforeEvent = beforeJobEventDDL(beforeInput);
-    const eventPriorWanted = fingerprintOf(beforeEvent);
-    const beforePredecessor = beforeJobPredecessorDDL(beforeEvent);
-    const priorWanted = fingerprintOf(beforePredecessor);
-    if (migrateJobIdentityFile(db.db, found, priorWanted, beforePredecessor, fingerprintOf)) found = priorWanted;
-    if (migrateJobPredecessorFile(db.db, found, eventPriorWanted, beforeEvent, fingerprintOf)) found = eventPriorWanted;
-    if (migrateJobEventFile(db.db, found, inputPriorWanted, beforeInput, fingerprintOf)) found = inputPriorWanted;
-    if (migrateJobStepInputFile(db.db, found, schedulePriorWanted, beforeSchedule, fingerprintOf)) found = schedulePriorWanted;
-    if (migrateJobScheduleFile(db.db, found, releasePriorWanted, beforeRelease, fingerprintOf)) found = releasePriorWanted;
-    if (migrateJobReleaseFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
+    const drift = withSchemaMigrationLock(db.db, () => {
+      found = db.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'osd_schema'").get()
+        ? db.db.prepare("SELECT fingerprint FROM osd_schema LIMIT 1").get()?.fingerprint : undefined;
+      if (found === wanted) return false;
+      const beforeHandle = beforeAdtHandleDDL(schemas.sqlite);
+      const handlePriorWanted = fingerprintOf(beforeHandle);
+      const beforeRelease = beforeJobReleaseDDL(beforeHandle);
+      const releasePriorWanted = fingerprintOf(beforeRelease);
+      const beforeSchedule = beforeJobScheduleDDL(beforeRelease);
+      const schedulePriorWanted = fingerprintOf(beforeSchedule);
+      const beforeInput = beforeJobStepInputDDL(beforeSchedule);
+      const inputPriorWanted = fingerprintOf(beforeInput);
+      const beforeEvent = beforeJobEventDDL(beforeInput);
+      const eventPriorWanted = fingerprintOf(beforeEvent);
+      const beforePredecessor = beforeJobPredecessorDDL(beforeEvent);
+      const priorWanted = fingerprintOf(beforePredecessor);
+      if (migrateJobIdentityFile(db.db, found, priorWanted, beforePredecessor, fingerprintOf)) found = priorWanted;
+      if (migrateJobPredecessorFile(db.db, found, eventPriorWanted, beforeEvent, fingerprintOf)) found = eventPriorWanted;
+      if (migrateJobEventFile(db.db, found, inputPriorWanted, beforeInput, fingerprintOf)) found = inputPriorWanted;
+      if (migrateJobStepInputFile(db.db, found, schedulePriorWanted, beforeSchedule, fingerprintOf)) found = schedulePriorWanted;
+      if (migrateJobScheduleFile(db.db, found, releasePriorWanted, beforeRelease, fingerprintOf)) found = releasePriorWanted;
+      if (migrateJobReleaseFile(db.db, found, handlePriorWanted, beforeHandle, fingerprintOf)) found = handlePriorWanted;
+      if (migrateAdtHandleFile(db.db, found, wanted, schemas.sqlite, fingerprintOf)) found = wanted;
+      // Decide while holding the same lock as the migrations, even when an
+      // unstamped database has tables. A pre-lock stamp is only a snapshot.
+      return found !== wanted && (found !== undefined ||
+        db.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master").get().n > 0);
+    });
     if (found === wanted) {
       // the rows are already there, made for this DDIC. The tables the
       // generation writes at start (wwwparams: which SMW0 objects exist and
@@ -666,7 +706,7 @@ async function setupDatabase(abap, schemas, insert) {
       ensureJobEventMetadata(db.db);
       return;
     }
-    if (found !== undefined || existsSync(path) && (await db.query("SELECT COUNT(*) AS n FROM sqlite_master"))[0]?.n > 0) {
+    if (drift) {
       // a file made for another DDIC, or one nobody stamped: not this
       // instance's data. Moved aside with the schema it was made for in
       // its name, never dropped — the rows may be somebody's

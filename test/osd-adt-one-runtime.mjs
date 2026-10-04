@@ -241,7 +241,9 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       const taken = await nodeSessions.lock(session, "PROG", "ZOSD_REMOTE");
       const again = await request(remote, "POST", object + "?_action=LOCK&accessMode=MODIFY", headers);
       expect(again.served).to.equal("ABAP");
-      expect(/<LOCK_HANDLE>([^<]+)/.exec(again.body)[1]).to.equal(taken.handle);
+      expect(again.status).to.equal(403);
+      expect(again.body).to.contain('<type id="ExceptionResourceNoAccess"/>');
+      expect((await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).handle).to.equal(taken.handle);
       await nodeSessions.release("PROG", "ZOSD_REMOTE");
       expect(await nodeSessions.holderOf("PROG", "ZOSD_REMOTE")).to.equal(undefined);
     } finally { await logoffSession(session.id); }

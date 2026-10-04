@@ -325,6 +325,7 @@ export async function writeRoundTrip(c, ADTClient, url) {
   const handle = requireHandle(lock, url);
   let failure, written = false;
   try {
+    check(handle.length === 40, `LOCK_HANDLE has ${handle.length} characters, expected 40`);
     written = true;
     await c.setObjectSource(main, `${original.replace(/\n?$/, "\n")}${marker}\n`, handle);
     const back = await c.getObjectSource(main, {version: "inactive"});
@@ -347,7 +348,7 @@ export async function writeRoundTrip(c, ADTClient, url) {
     await c.unLock(url, handle).catch(e => { failure ??= e; });
   }
   if (failure) throw failure;
-  return `lock IS_LOCAL=${lock.IS_LOCAL || "-"}, restored`;
+  return `lock ${handle.length} chars, IS_LOCAL=${lock.IS_LOCAL || "-"}, restored`;
 }
 
 async function deleteObject(c, url) {

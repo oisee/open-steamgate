@@ -3684,6 +3684,17 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Upstream: needs an issue in open-abap-core; no upstream filing requested.
 - Upstream version containing a fix: unknown.
 
+### ANOMALY-2026-10-04-adt-lock-handle-length - ADT handles were 36 characters
+
+- Status: `fixed locally`
+- Discovery: black-box wire comparison, W1-lock; only the observed length is used here.
+- Affected path: Node ADT LOCK and the ABAP session implementation used by the ABAP lock route.
+- Expected SAP behaviour: LOCK_HANDLE is an opaque 40-character value that is passed unchanged to PUT and UNLOCK.
+- Actual local behaviour: UUID text produced 36 characters, and ZOSD_ADT_SHDL stored CHAR36.
+- Resolution: Node generates 20 random bytes as hex; ABAP combines one UUID's 16 bytes with four bytes of another, then hex-encodes them. Both produce 40 characters with at least the former entropy. The persisted field is CHAR40; consumers retain opaque string equality.
+- Regression: T03/T04 for both fronts, persisted session handle checks, and the ABAP-FS write/restore/unlock driver, in both runtime modes.
+- Upstream: none; the facade and session storage are local implementations.
+
 ### ANOMALY-2026-10-04-sxml-supplementary-ref - numeric references truncate to a BMP code unit
 
 - Status: `workaround`

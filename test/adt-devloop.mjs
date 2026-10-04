@@ -153,10 +153,18 @@ describe("tools/adt-facade: the development loop", () => {
     },
   });
 
+  const testLocks = [];
+  afterEach(async () => {
+    for (const {name, handle} of testLocks.splice(0)) {
+      await call(`/oo/classes/${name}?_action=UNLOCK&lockHandle=${handle}`, {method: "POST"});
+    }
+  });
   const lock = async (name = SCRATCH) => {
     const res = await call(`/oo/classes/${name}?_action=LOCK&accessMode=MODIFY`, {method: "POST"});
     const xml = await res.text();
-    return {status: res.status, xml, handle: xml.match(/<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/)?.[1]};
+    const handle = xml.match(/<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/)?.[1];
+    if (handle) testLocks.push({name, handle});
+    return {status: res.status, xml, handle};
   };
 
   describe("locking", () => {
@@ -170,10 +178,13 @@ describe("tools/adt-facade: the development loop", () => {
       expect(handle).to.be.a("string").with.length.greaterThan(8);
     });
 
-    it("locking the same object twice in one session gives the same handle", async () => {
+    it("locking the same object twice in one session refuses the second LOCK", async () => {
       const first = await lock();
       const again = await lock();
-      expect(again.handle).to.equal(first.handle);
+      expect(first.status).to.equal(200);
+      expect(again.status).to.equal(403);
+      expect(again.handle).to.equal(undefined);
+      expect(again.xml).to.contain('<type id="ExceptionResourceNoAccess"/>');
     });
 
     it("a library object locks with no handle, which is how a system says not modifiable", async () => {
@@ -184,8 +195,7 @@ describe("tools/adt-facade: the development loop", () => {
     });
 
     it("a writable object of ours still locks, whatever its modification support says", async () => {
-      // a real system reports NoModification for plenty of writable local
-      // objects, so that field is never what decides; only the handle is
+      // Result's modification support is empty; the handle permits a write
       const {status, handle} = await lock();
       expect(status).to.equal(200);
       expect(handle).to.have.length.greaterThan(8);
@@ -1330,8 +1340,8 @@ describe("tools/adt-facade: create and delete over the wire", () => {
       const {other} = await otherSession("OTHERDEV");
       const refused = await lockIt(other);
       expectLockedBy(refused, "OSD");
-      // the holder locking again is still idempotent
-      expect((await lockIt()).handle).to.equal(handle);
+      // the holder's second LOCK is refused too, preserving its first handle
+      expectLockedBy(await lockIt(), "OSD");
       // released by the holder, the other session gets it -- and gives it back
       await unlockIt(handle);
       const taken = await lockIt(other);

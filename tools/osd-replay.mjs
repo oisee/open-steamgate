@@ -80,11 +80,15 @@ export async function replay(base, calls = readLog()) {
  *  real differences, so none of these are speculative. */
 export function normalise(text, contentType = "") {
   let out = String(text ?? "");
+  // ADT lock handles are opaque, volatile tokens (currently 40 hex chars).
+  // Keep empty handles distinct and leave hashes outside these fields alone.
+  out = out.replace(/(<LOCK_HANDLE>)[^<]+(<\/LOCK_HANDLE>)/g, "$1<lock-handle>$2");
+  out = out.replace(/([?&](?:amp;)?lockHandle=)[^&#\s"'<>]+/g, "$1<lock-handle>");
   // an ISO timestamp anywhere: `started`, `builtAt`, `last-modified` in a body
   out = out.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g, "<when>");
   // OData V2 writes its dates as /Date(1758…)/
   out = out.replace(/\/Date\((-?\d+)\)\//g, "/Date(<when>)/");
-  // uuids: session ids, correlation ids, ADT handles
+  // uuids: session ids, correlation ids
   out = out.replace(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, "<uuid>");
   // a $batch boundary is random by definition, and it appears both in the
   // header and several times in the body

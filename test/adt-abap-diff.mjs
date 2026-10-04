@@ -794,7 +794,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     const LOCKED = "ZCL_OSD_LK";
     const DOOMED = "ZCL_OSD_LK_DOOMED";
     const PACKAGE = "$STG_DEMO";
-    const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+    const HANDLE = /\b[0-9a-f]{40}\b/g;
     const roots = [];
 
     const tree = () => {
@@ -836,6 +836,183 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     const logoff = (client) => fetch(`http://127.0.0.1:${client.server.address().port}/sap/public/bc/icf/logoff`,
       {headers: {cookie: `${SESSION_COOKIE}=${client.id}`}}).then((r) => r.status);
 
+    // Measured facts and explicit local policies; synthetic fixtures only. Use Node's
+    // HTTP client here because fetch adds Accept: */* when it is absent.
+    const lockOffer = (client, accept, accessMode = "MODIFY", object = at(LOCKED)) => new Promise((resolve, reject) => {
+      const query = accessMode == null ? "" : `&accessMode=${encodeURIComponent(accessMode)}`;
+      const req = httpRequest({host: "127.0.0.1", port: client.server.address().port,
+        path: `${object}?_action=LOCK${query}`, method: "POST", headers: {
+          cookie: `sap-contextid=${client.id}`, "x-csrf-token": client.token,
+          "x-sap-adt-sessiontype": "stateful", ...(accept === undefined ? {} : {accept}),
+        }}, (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
+          resolve({status: res.statusCode, type: res.headers["content-type"], body,
+            handle: /<LOCK_HANDLE>([^<]*)<\/LOCK_HANDLE>/.exec(body)?.[1]});
+        });
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    const AS_XML = "application/vnd.sap.as+xml";
+    const RESULT_TYPE = `${AS_XML}; charset=utf-8; dataname=com.sap.adt.lock.Result`;
+    const result = `${AS_XML}; dataname=com.sap.adt.lock.result`;
+    const result2 = `${AS_XML}; dataname=com.sap.adt.lock.result2`;
+    const OFFERS = [
+      ["result preferred", `${result}; q=0.9, ${result2}; q=0.1`],
+      ["result2 preferred", `${result}; q=0.1, ${result2}; q=0.9`],
+      ["result2 excluded", `${result}; q=0.5, ${result2}; q=0`],
+      ["result excluded", `${result}; q=0, ${result2}; q=0.5`],
+      ["both excluded", `${result}; q=0, ${result2}; q=0`],
+      ["missing Accept", undefined],
+      ["unknown dataname", `${AS_XML}; dataname=SYN_UNSUPPORTED`],
+      ["result only", result],
+      ["result2 only", result2],
+      ["capitalized Result2", `${AS_XML}; dataname=com.sap.adt.lock.Result2`],
+    ];
+    const POLICY_OFFERS = [
+      ["uppercase media type", "APPLICATION/VND.SAP.AS+XML; DATANAME=UNKNOWN; Q=0"],
+      ["tabs around media and parameters", `${AS_XML}\t;\tcharset=utf-8`],
+      ["mixed SP/HTAB around media and parameters", ` \t${AS_XML}\t ; \tcharset \t=\t utf-8 ;\tdataname = UNKNOWN\t; q = 0`],
+      ["empty list", ","],
+      ["SP/HTAB empty list elements", " , \t,\t "],
+      ["empty elements around an offer", `,\t${AS_XML}\t; charset=utf-8, `],
+      ["any media wildcard", "*/*"],
+      ["application wildcard", "application/*"],
+      ["zero-quality wildcard", "*/*;q=0"],
+      ["other charset", `${AS_XML};charset=ISO-8859-1`],
+    ];
+    const expectResult = (answer) => {
+      expect(answer.status).to.equal(200);
+      expect(answer.type).to.equal(RESULT_TYPE);
+      expect(answer.handle).to.match(/^[0-9a-f]{40}$/);
+      // Independent measured shape: Result has eight children of DATA, with empty
+      // modification support. Do not derive this oracle from our serializer.
+      expect([...answer.body.matchAll(/<([A-Z_]+)(?:>|\/>)/g)].map((m) => m[1])).to.deep.equal([
+        "DATA", "LOCK_HANDLE", "CORRNR", "CORRUSER", "CORRTEXT", "IS_LOCAL", "IS_LINK_UP",
+        "MODIFICATION_SUPPORT", "SCOPE_MESSAGES",
+      ]);
+      for (const field of ["CORRNR", "CORRUSER", "CORRTEXT", "IS_LINK_UP", "MODIFICATION_SUPPORT", "SCOPE_MESSAGES"]) {
+        expect(answer.body).to.contain(`<${field}/>`);
+      }
+      expect(answer.body).to.contain('<asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">');
+      expect(answer.body).to.contain("<IS_LOCAL>X</IS_LOCAL>");
+    };
+    for (const front of ["Node", "ABAP"]) {
+      describe(`T03/T04 observed locks: ${front}`, () => {
+        let server, one, two, store;
+        beforeEach(async () => {
+          store = tree();
+          server = await mount(front === "Node" ? {store} : withAbap({store}));
+          one = await logon(server);
+          two = await logon(server); // same user, separate cookies and CSRF
+          served.length = 0;
+        });
+        afterEach(async () => {
+          await logoff(one);
+          await logoff(two);
+        });
+        for (const [title, accept] of OFFERS) {
+          it(`T03 ${title} answers Result and the observed body`, async () => {
+            expectResult(await lockOffer(one, accept));
+            if (front === "ABAP") expect(served).to.include(`ABAP POST ${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`);
+          });
+        }
+        for (const [title, accept] of POLICY_OFFERS) {
+          it(`T03 policy: ${title} answers Result`, async () => {
+            expectResult(await lockOffer(one, accept));
+            if (front === "ABAP") expect(served).to.include(`ABAP POST ${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`);
+          });
+        }
+        it("T03 application/xml is 406 and leaves no enqueue or handle", async () => {
+          const refused = await lockOffer(one, "application/xml");
+          expect(refused.status).to.equal(406);
+          expect(refused.type).to.equal("application/xml; charset=utf-8");
+          expect(refused.body).to.equal(exceptionDocument("ExceptionResourceNotAcceptable",
+            "The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml", {properties: [
+              ["T100KEY-ID", "SADT_RESOURCE"], ["T100KEY-NO", "044"], ["T100KEY-V1", AS_XML],
+            ]}));
+          // Check the measured identity independently of the shared serializer.
+          expect(refused.body).to.contain('<type id="ExceptionResourceNotAcceptable"/>');
+          expect(refused.body).to.contain('<message lang="EN">The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml</message>');
+          expect([...refused.body.matchAll(/<entry key="([^"]+)">([^<]*)<\/entry>/g)].map((m) => [m[1], m[2]])).to.deep.equal([
+            ["T100KEY-ID", "SADT_RESOURCE"], ["T100KEY-NO", "044"], ["T100KEY-V1", AS_XML],
+          ]);
+          if (front === "ABAP") expect(served).to.include(`ABAP POST ${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`);
+          const fresh = await lockOffer(two, result);
+          expectResult(fresh);
+          expect((await unlock(two, fresh.handle)).status).to.equal(200);
+          expectResult(await lockOffer(one, result));
+        });
+        for (const mode of [null, "SYN_INVALID", "INSERT", "modify"]) {
+          it(`T04 accessMode ${mode ?? "absent"} locks and permits a write`, async () => {
+            // null is the omitted query; undefined would use the helper's default.
+            const locked = await lockOffer(one, result, mode);
+            expectResult(locked);
+            const source = "* synthetic accessMode write\n";
+            const saved = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${locked.handle}`,
+              {headers: {"content-type": "text/plain"}, body: source});
+            expect(saved.status).to.equal(200);
+            expect((await send(one, "GET", `${at(LOCKED)}/source/main`)).body).to.equal(source);
+            expect((await unlock(one, locked.handle)).status).to.equal(200);
+            expect((await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${locked.handle}`,
+              {body: source})).status).to.equal(409);
+            const fresh = await lockOffer(two, result);
+            expectResult(fresh);
+            expect(fresh.handle).not.to.equal(locked.handle);
+            expect((await unlock(two, fresh.handle)).status).to.equal(200);
+          });
+        }
+        it("T04 same-session second LOCK is the same 403 as a foreign session and preserves ownership", async () => {
+          const first = await lockOffer(one, result);
+          expect(first.status).to.equal(200);
+          const again = await lockOffer(one, result);
+          const foreign = await lockOffer(two, result);
+          expect(again.status).to.equal(403);
+          expect(again.body).to.contain('<type id="ExceptionResourceNoAccess"/>');
+          expect(again).to.deep.equal(foreign);
+          expect((await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${first.handle}`,
+            {body: "* owner survives\n"})).status).to.equal(200);
+          await unlock(one, first.handle);
+          expectResult(await lockOffer(two, result));
+        });
+        it("T04 a handle authorizes only its originating session, even for the same user", async () => {
+          const first = await lockOffer(one, result);
+          expect(first.status).to.equal(200);
+          const path = `${at(LOCKED)}/source/main?lockHandle=${first.handle}`;
+          expect((await send(two, "PUT", path, {body: "* foreign write\n"})).status).to.equal(409);
+          const source = "* owner write\n";
+          expect((await send(one, "PUT", path, {body: source})).status).to.equal(200);
+          expect((await send(two, "GET", `${at(LOCKED)}/source/main`)).body).to.equal(source);
+        });
+        it("T03/T04 the observed program path follows the same lock/write contract", async () => {
+          const name = "ZOSD_LOCK_PROG";
+          store.create("PROG", name, {description: "synthetic lock fixture", package: PACKAGE});
+          const object = `/sap/bc/adt/programs/programs/${name.toLowerCase()}`;
+          for (const [, accept] of OFFERS) {
+            const locked = await lockOffer(one, accept, "MODIFY", object);
+            expectResult(locked);
+            await send(one, "POST", `${object}?_action=UNLOCK&lockHandle=${locked.handle}`);
+          }
+          for (const mode of [null, "SYN_INVALID", "INSERT", "modify"]) {
+            const locked = await lockOffer(one, result2, mode, object);
+            expectResult(locked);
+            expect((await lockOffer(one, result, mode, object)).status).to.equal(403);
+            const path = `${object}/source/main?lockHandle=${locked.handle}`;
+            expect((await send(two, "PUT", path, {body: "* foreign\n"})).status).to.equal(409);
+            const source = `REPORT ${name.toLowerCase()}.\n* ${mode ?? "absent"}\n`;
+            expect((await send(one, "PUT", path, {body: source})).status).to.equal(200);
+            expect((await send(one, "GET", `${object}/source/main`)).body).to.equal(source);
+            await send(one, "POST", `${object}?_action=UNLOCK&lockHandle=${locked.handle}`);
+          }
+          expect((await lockOffer(one, "application/xml", "MODIFY", object)).status).to.equal(406);
+          expectResult(await lockOffer(two, result, "MODIFY", object));
+        });
+      });
+    }
+
     // the sequences: each takes a server and answers what it saw, in order
     const SEQUENCES = {
       "lock, a stateless read, the PUT, UNLOCK, and a PUT after it": async (server) => {
@@ -850,13 +1027,14 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
         await logoff(one);
         return [locked, read, written, unlocked, late];
       },
-      "a second session is refused with EU 510, the holder relocks, UNLOCK hands it over": async (server) => {
+      "both foreign and same-session locks are refused with EU 510, UNLOCK hands it over": async (server) => {
         const one = await logon(server, "DEVONE");
         const two = await logon(server, "DEVTWO");
         const first = await lock(one);
         const refused = await lock(two);
         const again = await lock(one);
-        expect(again.handle, "the holder locking again gets its handle").to.equal(first.handle);
+        expect(again.status, "the holder's second LOCK is not re-entrant").to.equal(403);
+        expect(again.body).to.equal(refused.body);
         const unlocked = await unlock(one, first.handle);
         const taken = await lock(two);
         const back = await lock(one);
@@ -967,7 +1145,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
 
     const STATUSES = {
       "lock, a stateless read, the PUT, UNLOCK, and a PUT after it": [200, 200, 200, 200, 409],
-      "a second session is refused with EU 510, the holder relocks, UNLOCK hands it over": [200, 403, 200, 200, 200, 403],
+      "both foreign and same-session locks are refused with EU 510, UNLOCK hands it over": [200, 403, 403, 200, 200, 403],
       "a logoff releases the session's locks": [200, 403, 200, 200],
       "the session DELETE releases them too, a stateless request does not": [200, 403, 200, 200],
       "lowercase security DELETE releases the lock": [200, 403, 200, 200],
@@ -980,11 +1158,11 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     };
 
     const answered = (answers) => answers.map(({handle, ...rest}) => {
-      if (rest.body !== undefined && new RegExp(UUID.source).test(rest.body)) {
+      if (rest.body !== undefined && new RegExp(HANDLE.source).test(rest.body)) {
         expect(rest.etag).to.equal(null);
       }
-      if (rest.body !== undefined) rest.body = rest.body.replace(UUID, "<handle>");
-      return {...rest, handle: handle === undefined ? undefined : handle.replace(UUID, "<handle>")};
+      if (rest.body !== undefined) rest.body = rest.body.replace(HANDLE, "<handle>");
+      return {...rest, handle: handle === undefined ? undefined : handle.replace(HANDLE, "<handle>")};
     });
 
     for (const [title, sequence] of Object.entries(SEQUENCES)) {
@@ -1013,7 +1191,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
           || /^ABAP DELETE \/sap\/bc\/adt\/core\/http\/sessions\/[0-9A-Fa-f]+$/.test(s)
           || s === "ABAP GET /sap/public/bc/icf/logoff"
           || /^ABAP GET \/sap\/bc\/adt\/oo\/classes\/[^/?]+\/source\/main$/.test(s)), byAbap.join("\n")).to.equal(true);
-        // a handle is a UUID on both sides
+        // a handle is opaque 40-character hex on both sides
         for (const answer of [...expected, ...actual]) {
           if (answer.handle !== undefined && answer.handle !== "") expect(answer.handle).to.equal("<handle>");
         }
@@ -1075,7 +1253,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       expect(held[0].user).to.equal("DEVONE");
       expect(held[0].mode).to.equal("X");
       expect(held[0].dialogs).to.equal(1);
-      expect((await lock(one)).status, "locked again: still one count, so one UNLOCK releases it").to.equal(200);
+      expect((await lock(one)).status, "a second LOCK refuses and leaves the original enqueue").to.equal(403);
       expect(rows().filter((r) => r.arg.includes(LOCKED))[0].dialogs).to.equal(1);
       await logoff(one);
       expect(rows().filter((r) => r.arg.includes(LOCKED))).to.deep.equal([]);
@@ -1243,10 +1421,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       expect(await rows()).to.deep.equal([]);
     });
 
-    it("a relock whose handle the host cannot give keeps the lock the session had", async () => {
-      // zcl_osd_adt_lock: only a lock this LOCK granted goes again when
-      // LOCK_HANDLE fails; a relock (MC 602, the session's own) is not this
-      // call's to give back
+    it("a second LOCK never asks for a handle and preserves the owner's lock; a failed first handle releases it", async () => {
+      // MC 602 refuses before LOCK_HANDLE, preserving the original handle.
       let failing = false;
       const {server} = await withSessions((own, ...args) => {
         if (failing) throw new Error("the host has no handle for you");
@@ -1257,8 +1433,8 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       expect(first.status).to.equal(200);
       failing = true;
       const again = await lock(one);
-      expect(again.status).to.equal(500);
-      expect(again.body).to.contain("the host has no handle for you");
+      expect(again.status).to.equal(403);
+      expect(again.body).to.contain('<type id="ExceptionResourceNoAccess"/>');
       failing = false;
       expect((await rows()).filter((r) => r.arg.includes(LOCKED)), "still held").to.have.length(1);
       const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${first.handle}`,

@@ -2,7 +2,7 @@
 // remains the reference; this test does not wire the production front.
 import {expect} from "chai";
 import "./start.mjs";
-import {randomUUID} from "node:crypto";
+import {newLockHandle} from "../tools/adt-enq.mjs";
 import {Sessions, SESSION_COOKIE, CONTEXT_COOKIE} from "../tools/adt-session.mjs";
 import {dialogStep, currentStepToken, outsideStepContext} from "../tools/osd-dialog-step.mjs";
 import {adtEnqOwner} from "../tools/adt-enq-key.mjs";
@@ -131,10 +131,11 @@ describe("ADT session slice 3: ABAP / Node parity and ENQ", function () {
     const p = await pair();
     try {
       let both = await p.request({}, {"x-sap-adt-sessiontype": "stateful"});
-      const nodeHandle = p.atTime(() => p.node.lock(both.node.session, "clas", "zsession", randomUUID)).handle;
+      const nodeHandle = p.atTime(() => p.node.lock(both.node.session, "clas", "zsession", newLockHandle)).handle;
       const sapHandle = (await dialogStep(() => p.sap.call("adopt_handle", {
         iv_id: both.sap.id, iv_type: "clas", iv_name: "zsession"}), "ABAP adopt")).get();
-      expect(sapHandle).to.match(/^[a-f0-9-]{36}$/);
+      expect(nodeHandle).to.match(/^[a-f0-9]{40}$/);
+      expect(sapHandle).to.match(/^[a-f0-9]{40}$/);
       for (const method of ["GET", "PUT"]) {
         both = await p.request({[SESSION_COOKIE]: "latest"}, {"x-sap-adt-sessiontype": "stateless"}, method);
         const holds = await dialogStep(() => p.sap.call("holds", {iv_id: both.sap.id, iv_handle: sapHandle,

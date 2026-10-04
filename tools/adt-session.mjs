@@ -201,12 +201,11 @@ export class Sessions {
     return holder?.session === session && holder.handle === handle;
   }
 
-  // Take the lock on an object for a session. The same session asking again
-  // gets the handle it already has; another session gets {heldBy}, naming
-  // the session (and so the user) that holds it, and no handle.
+  // Take the lock on an object for a session. Any existing holder, including
+  // this session, is refused with {heldBy} and no handle (not re-entrant).
   lock(session, type, name, makeHandle) {
     const owner = this.holderOf(type, name);
-    if (owner !== undefined && owner.session !== session) {
+    if (owner !== undefined) {
       return {heldBy: owner.session};
     }
     const taken = this.owners.take(session, type, name);

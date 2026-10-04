@@ -119,6 +119,7 @@ CLASS zcl_osd_adt_session_mem IMPLEMENTATION.
     DATA ls_handle TYPE ty_handle.
     DATA lv_type TYPE string.
     DATA lv_name TYPE string.
+    DATA lv_extra TYPE string.
     READ TABLE gt_sessions TRANSPORTING NO FIELDS WITH KEY id = iv_id.
     IF sy-subrc <> 0.
       RETURN.
@@ -129,7 +130,8 @@ CLASS zcl_osd_adt_session_mem IMPLEMENTATION.
       objtype = lv_type objname = lv_name.
     IF sy-subrc <> 0.
       ls_handle-id = iv_id.
-      ls_handle-handle = random( ).
+      lv_extra = random( ).
+      ls_handle-handle = random( ) && lv_extra(8).
       ls_handle-objtype = lv_type.
       ls_handle-objname = lv_name.
       APPEND ls_handle TO gt_handles.

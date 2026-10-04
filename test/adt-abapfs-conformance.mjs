@@ -76,7 +76,7 @@ const notFound = () => Object.assign(new Error("not found"), {err: 404});
 
 function fakeEditor(opts = {}) {
   const {putFails = () => false, readBack = (src) => src} = opts;
-  const lockHandle = "lockHandle" in opts ? opts.lockHandle : "H1";
+  const lockHandle = "lockHandle" in opts ? opts.lockHandle : "H".repeat(40);
   const log = [];
   let source = "ORIGINAL\n";
   return {log, get source() { return source; }, c: {
@@ -94,6 +94,30 @@ function fakeEditor(opts = {}) {
 }
 
 describe("tools/abapfs-conformance: safety paths, offline", () => {
+  it("round-trips an opaque 40-character handle and rejects the wrong length before writing", async () => {
+    const handle = "opaque:" + "X".repeat(33);
+    const f = fakeEditor({lockHandle: handle});
+    const put = f.c.setObjectSource;
+    const unlock = f.c.unLock;
+    f.c.setObjectSource = async (url, source, given) => {
+      expect(given).to.equal(handle);
+      return put(url, source, given);
+    };
+    f.c.unLock = async (url, given) => {
+      expect(given).to.equal(handle);
+      return unlock(url, given);
+    };
+    expect(await writeRoundTrip(f.c, ADT, URL0)).to.contain("40 chars");
+    expect(f.log).to.deep.equal(["lock", "put0", "put1", "unlock"]);
+    for (const length of [36, 39, 41]) {
+      const bad = fakeEditor({lockHandle: "X".repeat(length)});
+      let err;
+      await writeRoundTrip(bad.c, ADT, URL0).catch(e => { err = e; });
+      expect(err.message).to.equal(`LOCK_HANDLE has ${length} characters, expected 40`);
+      expect(bad.log).to.deep.equal(["lock", "unlock"]);
+    }
+  });
+
   it("restores and verifies when the marker write is refused", async () => {
     const f = fakeEditor({putFails: n => n === 0});
     let err;

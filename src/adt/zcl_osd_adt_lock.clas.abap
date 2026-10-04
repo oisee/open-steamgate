@@ -7,9 +7,8 @@
 "! the step, which the host binds to the ADT session when that session is
 "! stateful (tools/adt-abap-front.mjs), so it outlives the request and goes
 "! with logoff, the session DELETE or expiry. Mode X makes a second LOCK of
-"! the same session a refusal with MC 602 (the caller's own lock), which is
-"! "you have it already", so one UNLOCK releases it, as in the Node facade.
-"! Another owner is MC 601 and sy-msgv1 is its user: the 403 with EU 510.
+"! the same session a refusal with MC 602 (the caller's own lock). Both it
+"! and MC 601 (another owner) answer 403 with EU 510; LOCK is not re-entrant.
 "!
 "! A lock needs a stateful session: without one the ENQ session is the
 "! request's, and the lock would be gone before the client used its handle.
@@ -23,7 +22,7 @@
 CLASS zcl_osd_adt_lock DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     INTERFACES zif_osd_adt_route.
-    CONSTANTS c_result_type TYPE string VALUE `com.sap.adt.lock.Result2`.
+    CONSTANTS c_result_type TYPE string VALUE `com.sap.adt.lock.Result`.
 
     CLASS-METHODS lock_result
       IMPORTING iv_handle     TYPE string
@@ -36,6 +35,10 @@ CLASS zcl_osd_adt_lock DEFINITION PUBLIC FINAL CREATE PUBLIC.
                 iv_fallback    TYPE string
       RETURNING VALUE(rv_type) TYPE string.
   PRIVATE SECTION.
+    CLASS-METHODS lock_type
+      IMPORTING it_headers     TYPE tihttpnvp
+      RETURNING VALUE(rv_type) TYPE string
+      RAISING zcx_osd_adt.
     CLASS-METHODS lock
       IMPORTING is_request         TYPE zif_osd_adt_route=>ty_request
                 is_object          TYPE zcl_osd_adt_host=>ty_object
@@ -45,11 +48,9 @@ CLASS zcl_osd_adt_lock DEFINITION PUBLIC FINAL CREATE PUBLIC.
       IMPORTING is_request         TYPE zif_osd_adt_route=>ty_request
       RETURNING VALUE(rs_response) TYPE zif_osd_adt_route=>ty_response
       RAISING   zcx_osd_adt.
-    "! ENQUEUE_EZOSD_ADT_OBJ: rv_granted is true when this call took the
-    "! lock, false when the session had it already (MC 602)
+    "! ENQUEUE_EZOSD_ADT_OBJ: existing locks, including MC 602, are refused
     CLASS-METHODS enqueue
       IMPORTING is_object         TYPE zcl_osd_adt_host=>ty_object
-      RETURNING VALUE(rv_granted) TYPE abap_bool
       RAISING   zcx_osd_adt.
     CLASS-METHODS try_enqueue
       IMPORTING is_object TYPE zcl_osd_adt_host=>ty_object
@@ -109,11 +110,11 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
   METHOD lock.
     DATA lv_handle TYPE string.
     DATA lv_text TYPE string.
-    DATA lv_granted TYPE abap_bool.
     DATA lx_error TYPE REF TO zcx_osd_adt.
 
     rs_response-status = 200.
-    rs_response-content_type = zcl_osd_adt_xml=>as_xml_type( it_headers = is_request-headers iv_fallback = c_result_type ).
+*   negotiate before enqueue: SAP's 406 takes a lock without giving a handle
+    rs_response-content_type = lock_type( is_request-headers ).
 *   a library object is not ours to change: the envelope with no handle,
 *   which a client reads as "not modifiable" before it tries a write
     IF is_object-writable = abap_false.
@@ -128,16 +129,13 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
       RAISE EXCEPTION lx_error.
     ENDIF.
 
-    lv_granted = enqueue( is_object ).
+    enqueue( is_object ).
     TRY.
         lv_handle = zcl_osd_adt_host=>lock_handle( iv_type = is_object-type iv_name = is_object-name ).
       CATCH zcx_osd_adt INTO lx_error.
 *       a lock without a handle is one nobody can write with or give back,
-*       so a lock this call took goes again; one the session had before
-*       (a relock) stays, with the handle it already has
-        IF lv_granted = abap_true.
-          dequeue( is_object ).
-        ENDIF.
+*       so a lock this call took goes again
+        dequeue( is_object ).
         RAISE EXCEPTION lx_error.
     ENDTRY.
     rs_response-body = lock_result( lv_handle ).
@@ -174,13 +172,9 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
     ENDIF.
     CASE lv_subrc.
       WHEN 0.
-        rv_granted = abap_true.
         RETURN.
       WHEN 1.
-*       602: the caller's own lock, taken by an earlier LOCK of this session
-        IF lv_msgno = `602`.
-          RETURN.
-        ENDIF.
+*       both another owner's lock and the caller's own lock (MC 602)
         lx_error = zcx_osd_adt=>locked_by_other( iv_user = lv_user iv_object = is_object-name ).
       WHEN OTHERS.
         lv_text = |{ is_object-type } { is_object-name } could not be locked (sy-subrc { lv_subrc })|.
@@ -244,10 +238,7 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
       && `      <CORRTEXT/>` && lv_nl
       && `      <IS_LOCAL>X</IS_LOCAL>` && lv_nl
       && `      <IS_LINK_UP/>` && lv_nl
-      && `      <MODIFICATION_SUPPORT>NoModification</MODIFICATION_SUPPORT>` && lv_nl
-      && `      <LINK_UP_MODE/>` && lv_nl
-      && `      <CORR_LOCKS/>` && lv_nl
-      && `      <CORR_CONTENTS/>` && lv_nl
+      && `      <MODIFICATION_SUPPORT/>` && lv_nl
       && `      <SCOPE_MESSAGES/>` && lv_nl
       && `    </DATA>` && lv_nl
       && `  </asx:values>` && lv_nl
@@ -256,6 +247,61 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
 
   METHOD as_xml_type.
     rv_type = zcl_osd_adt_xml=>as_xml_type( it_headers = it_headers iv_fallback = iv_fallback ).
+  ENDMETHOD.
+
+  METHOD lock_type.
+    DATA lv_accept TYPE string.
+    DATA lt_offers TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lv_offer TYPE string.
+    DATA lv_media TYPE string.
+    DATA lv_params TYPE string.
+    DATA lv_ows_pattern TYPE string.
+    DATA lv_has_media TYPE abap_bool.
+    DATA lt_properties TYPE tihttpnvp.
+    DATA ls_property TYPE ihttpnvp.
+    DATA lx_error TYPE REF TO zcx_osd_adt.
+
+    rv_type = |application/vnd.sap.as+xml; charset=utf-8; dataname={ c_result_type }|.
+    lv_accept = field( it_fields = it_headers iv_name = `accept` iv_any_case = abap_true ).
+    IF lv_accept IS INITIAL.
+      RETURN.
+    ENDIF.
+*   HTTP OWS is space or HTAB; trim only the media token's edges.
+    lv_ows_pattern = `^[ ` && cl_abap_char_utilities=>horizontal_tab
+      && `]+|[ ` && cl_abap_char_utilities=>horizontal_tab && `]+$`.
+    SPLIT lv_accept AT `,` INTO TABLE lt_offers.
+    LOOP AT lt_offers INTO lv_offer.
+      SPLIT lv_offer AT `;` INTO lv_media lv_params.
+      REPLACE ALL OCCURRENCES OF REGEX lv_ows_pattern IN lv_media WITH ``.
+      IF lv_media IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      lv_has_media = abap_true.
+      lv_media = to_lower( lv_media ).
+*     Program offers measured 2026-10-04 ignore q and dataname.
+*     Media-type case and wildcard acceptance are our policies.
+      IF lv_media = `application/vnd.sap.as+xml` OR lv_media = `application/*` OR lv_media = `*/*`.
+        RETURN.
+      ENDIF.
+    ENDLOOP.
+*   Our choice: empty list elements alone behave like missing Accept.
+    IF lv_has_media = abap_false.
+      RETURN.
+    ENDIF.
+    ls_property-name = `T100KEY-ID`.
+    ls_property-value = `SADT_RESOURCE`.
+    APPEND ls_property TO lt_properties.
+    ls_property-name = `T100KEY-NO`.
+    ls_property-value = `044`.
+    APPEND ls_property TO lt_properties.
+    ls_property-name = `T100KEY-V1`.
+    ls_property-value = `application/vnd.sap.as+xml`.
+    APPEND ls_property TO lt_properties.
+    CREATE OBJECT lx_error
+      EXPORTING iv_status = 406 iv_type = `ExceptionResourceNotAcceptable`
+        iv_message = `The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml`
+        it_properties = lt_properties.
+    RAISE EXCEPTION lx_error.
   ENDMETHOD.
 
   METHOD field.
