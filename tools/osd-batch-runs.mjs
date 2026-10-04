@@ -64,7 +64,6 @@ function publicStep(row, {revealInput = false} = {}) {
 
 export class BatchRuns {
   static { installTimedJobs(BatchRuns, (store, ...args) => store.#appendJobLog(...args)); }
-
   constructor(root = process.cwd(), env = process.env, {readOnly = false} = {}) {
     this.path = operationsPath(root, env);
     this.artifacts = join(dirname(this.path), "batch-output");
@@ -82,18 +81,17 @@ export class BatchRuns {
     }
     if (!readOnly) chmodSync(this.path, 0o600);
     this.db.exec("PRAGMA journal_mode=WAL");
-    this.db.exec(`CREATE TABLE IF NOT EXISTS batch_runs (
-      id TEXT PRIMARY KEY, program TEXT NOT NULL, generation TEXT NOT NULL,
-      started_at TEXT NOT NULL, ended_at TEXT, state TEXT NOT NULL,
-      result_status TEXT, detail TEXT, input_json TEXT NOT NULL,
-      output_sha256 TEXT, output_bytes INTEGER, queued_at TEXT,
-      source_db TEXT, source_client TEXT, source_sysid TEXT, source_owner TEXT,
-      job_name TEXT, job_count TEXT
-    )`);
-    // Existing operations files from the saved-run slice stay readable.
-    // Serialize the check and ALTER: two first-start workers can arrive together.
+    // Publish batch_runs and its sibling schema together for read-only monitors.
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS batch_runs (
+        id TEXT PRIMARY KEY, program TEXT NOT NULL, generation TEXT NOT NULL,
+        started_at TEXT NOT NULL, ended_at TEXT, state TEXT NOT NULL,
+        result_status TEXT, detail TEXT, input_json TEXT NOT NULL,
+        output_sha256 TEXT, output_bytes INTEGER, queued_at TEXT,
+        source_db TEXT, source_client TEXT, source_sysid TEXT, source_owner TEXT,
+        job_name TEXT, job_count TEXT
+      )`);
       if (!this.db.prepare("PRAGMA table_info(batch_runs)").all().some((column) => column.name === "queued_at")) {
         this.db.exec("ALTER TABLE batch_runs ADD COLUMN queued_at TEXT");
       }

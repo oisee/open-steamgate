@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {fork} from 'node:child_process';
 import {EventEmitter} from 'node:events';
 import {DatabaseSync} from 'node:sqlite';
-import {existsSync, mkdtempSync, rmSync} from 'node:fs';
+import {existsSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {BatchRuns} from '../tools/osd-batch-runs.mjs';
 import {batchMonitorHandler, batchCountsHandler} from '../tools/osd-batch-monitor.mjs';
@@ -49,6 +49,62 @@ describe('JOB_OPEN operations reader waits for SQLite locks', function () {
       await holder.exit;
     } finally { holder.child.kill(); await holder.exit.catch(()=>{}); }
   });
+
+  for (const monitorFirst of [true, false]) {
+    it(`fresh schema is published atomically (${monitorFirst ? 'monitor' : 'writer'} starts first)`, async () => {
+      const env={OSD_OPERATIONS_DB:path, OSD_BATCH_READ_TOKEN:'a'.repeat(32)};
+      const handlers=[batchMonitorHandler('.',env), batchCountsHandler('.',env)];
+      const req={query:{},get:()=>`Bearer ${env.OSD_BATCH_READ_TOKEN}`,socket:{remoteAddress:'127.0.0.1'}};
+      let body, status=200;
+      const res={set(){return this;},status(code){status=code;return this;},json(value){body=value;return this;}};
+      const checkEmpty = () => {
+        status=200; handlers[0](req,res);
+        assert.equal(status,200,JSON.stringify(body)); assert.deepEqual(body.runs,[]);
+        assert.match(body.revision,/^[0-9a-f-]{36}:0$/);
+        handlers[1](req,res); assert.deepEqual({...body.counts},{running:0,queued:0});
+        assert.equal(read(),false);
+      };
+      let holder;
+      try {
+        if (monitorFirst) { checkEmpty(); assert.equal(existsSync(path),false); }
+        // Stop the real writer exactly where the old constructor exposed its
+        // first table, before the revision/steps/log tables existed.
+        holder=startChild(`import {DatabaseSync} from 'node:sqlite';
+          import {existsSync} from 'node:fs';
+          import {BatchRuns} from './tools/osd-batch-runs.mjs';
+          const exec=DatabaseSync.prototype.exec;
+          DatabaseSync.prototype.exec=function(sql) {
+            const result=exec.call(this,sql);
+            if (/CREATE TABLE IF NOT EXISTS batch_runs\\s*\\(/.test(sql)) {
+              process.send('first table');
+              const deadline=Date.now()+15000;
+              while (!existsSync(process.env.OSD_LOCK_TEST_PATH+'.release')) {
+                if (Date.now()>deadline) throw new Error('schema probe release timed out');
+                Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10);
+              }
+            }
+            return result;
+          };
+          const writer=new BatchRuns('.',{OSD_OPERATIONS_DB:process.env.OSD_LOCK_TEST_PATH});
+          writer.enqueue({program:'FIRST'}); writer.close(); process.disconnect();`,path);
+        await holder.ready;
+        const probe=new DatabaseSync(path,{readOnly:true});
+        try {
+          const before=probe.prepare('SELECT * FROM sqlite_master').all();
+          checkEmpty();
+          assert.deepEqual(probe.prepare('SELECT * FROM sqlite_master').all(),before,'readers must not create schema');
+        } finally { probe.close(); }
+        writeFileSync(path+'.release','');
+        await holder.exit;
+        handlers[0](req,res); assert.equal(body.runs[0].program,'FIRST');
+        handlers[1](req,res); assert.deepEqual({...body.counts},{running:0,queued:1});
+      } finally {
+        writeFileSync(path+'.release','');
+        if (holder) { holder.child.kill(); await holder.exit.catch(()=>{}); }
+        for (const handler of handlers) handler.close();
+      }
+    });
+  }
 
   it('monitor reads the committed WAL snapshot while a worker owns the write lock', async () => {
     const env={OSD_OPERATIONS_DB:path, OSD_BATCH_READ_TOKEN:'a'.repeat(32)};
