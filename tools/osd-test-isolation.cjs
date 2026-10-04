@@ -142,7 +142,8 @@ let genDiffMs = 0;
 const genSnapshot = () => {
   const started = process.hrtime.bigint();
   const manifest = resources.genManifest();
-  genCosts.push({ms: Number(process.hrtime.bigint() - started) / 1e6, files: manifest.length});
+  genCosts.push({ms: Number(process.hrtime.bigint() - started) / 1e6, files: manifest.length,
+    ...(genCosts.length === 0 ? {bytes: manifest.reduce((sum, {size}) => sum + size, 0)} : {})});
   return manifest;
 };
 const genDifference = (before, after, phase) => {
@@ -389,6 +390,8 @@ exports.mochaHooks = {
     const genSorted = genCosts.map(({ms}) => ms).sort((a, b) => a - b);
     const genMedian = genSorted.length ? (genSorted[Math.floor((genSorted.length - 1) / 2)] + genSorted[Math.floor(genSorted.length / 2)]) / 2 : 0;
     console.log(`test-isolation: gen manifests: ${genCosts.length} boundaries; ${genCosts.at(0)?.files ?? 0} files at start; ${genCosts.reduce((sum, {ms}) => sum + ms, 0).toFixed(3)} ms total; median ${genMedian.toFixed(3)} ms/boundary`);
+    const genStart = genCosts.at(0);
+    console.log(`test-isolation: gen baseline hashing/manifest: ${genStart?.files ?? 0} files; ${((genStart?.bytes ?? 0) / 1e6).toFixed(3)} MB; ${(genStart?.ms ?? 0).toFixed(3)} ms`);
     console.log(`test-isolation: gen comparison/hash: ${genDiffMs.toFixed(3)} ms; gen observation total: ${(genDiffMs + genCosts.reduce((sum, {ms}) => sum + ms, 0)).toFixed(3)} ms`);
     if (missed.length) {
       const error = new Error(missed.map((error) => error.message).join('\n'));

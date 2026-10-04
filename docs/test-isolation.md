@@ -33,14 +33,18 @@ release a lock, rebuild code or switch generations:
   by the builder's own hash function, including libraries and generators.
   Trees with no live generation have nothing to compare. Owner:
   `osd-build.mjs`, `generationStateSnapshot()`.
-- **gen:** generated outputs under checkout `gen/` keep the same sorted
-  manifest of relative paths, sizes and `mtimeMs`. Owner:
+- **gen:** generated outputs under checkout `gen/` keep the same paths and
+  contents. Owner:
   `osd-test-resources.cjs`, `genManifest()` / `genDifference()`. Snapshots
-  read directory entries and metadata only. When entries differ, evidence
-  names each added, removed or changed path and hashes only differing files
-  still present (SHA-256). Removed files retain their baseline metadata;
-  their deleted bytes cannot be hashed without reading contents up front.
-  A metadata change counts as a change even if rewritten bytes are identical.
+  read directory entries and metadata, caching a SHA-256 digest per absolute
+  path, size and `mtimeMs`. Each file is hashed once when first seen; unchanged
+  metadata reuses its cached digest. A new size or timestamp triggers a content
+  read and comparison with the digest retained in the baseline snapshot.
+  Equal bytes pass and update the cache: legitimate builds regenerate outputs
+  with identical bytes and a newer mtime, which is not a leak. Different bytes
+  are `changed`; added and removed paths still fail. Evidence names each path
+  and retains baseline metadata and digests, including for deleted files.
+  Hash errors stay red even under an allowance.
   This detects sweeps that the generation hash cannot see: `gen/` is an
   output and excluded from that hash. It does not validate pre-existing
   output against a build manifest or assign a stale run start to a file.
@@ -147,7 +151,16 @@ is complete. See the [run report](test-isolation-runs.md).
 
 Each checked file prints total baseline and final snapshot time in milliseconds;
 this includes detector proof captures and excludes test work and user cleanup.
-The run also prints `gen` manifest boundary count, initial file count, median
+The run also prints the one-time `gen` baseline hashing/manifest cost (files,
+decimal MB and milliseconds), manifest boundary count, initial file count, median
 milliseconds per boundary, comparison/hash time and total added observation
 time. This total includes import observations as well as execution snapshots;
 normally there are four manifests per selected file.
+
+Local measurement (2026-10-04, Node 22.23.3, cached filesystem): the real `gen/`
+contained 582 files totaling 5.107 MB. Its initial manifest took 28.0 ms,
+including 16.8 ms reading and hashing content, with exactly one read and SHA-256
+per file. Across 100 subsequent unchanged snapshot/comparison boundaries, the
+median was 4.92 ms, with zero content reads or hashes. These are local costs,
+not CI timing guarantees. The instrumented measurement separates filesystem
+reads and hash creation/update/digest from the complete manifest capture.

@@ -55,6 +55,28 @@ describe('per-file process isolation detector', function () {
     expect(result.output).to.include('checked 0.cjs');
     expect(result.output).not.to.include('0.cjs: gen:');
   });
+  for (const phase of ['import', 'execution']) {
+    for (const content of ['original', 'changed!']) {
+      it(`${phase}: ${content === 'original' ? 'accepts identical bytes' : 'rejects same-size different bytes'} with a newer gen mtime`, () => {
+        const rewrite = `const fs=require('node:fs');const path='gen/probe.abap';const stamp=fs.statSync(path).mtimeMs+10000;fs.writeFileSync(path,'${content}');fs.utimesSync(path,stamp/1000,stamp/1000);`;
+        const source = phase === 'import' ? `${rewrite}it('rewrites',()=>{});` : `it('rewrites',()=>{${rewrite}});`;
+        const result = run([source, "it('inherits output',()=>{});"], [], undefined,
+          "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/probe.abap','original');");
+        if (content === 'original') {
+          expect(result.status, result.output).to.equal(0);
+          expect(result.output).not.to.include('0.cjs: gen:');
+        } else {
+          expect(result.status, result.output).to.be.greaterThan(0);
+          const changes = JSON.parse(result.output.match(/test-isolation: 0.cjs: gen: (.*)/)[1]);
+          expect(changes).to.have.length(1);
+          expect(changes[0]).to.include({path: 'gen/probe.abap', kind: 'changed', phase});
+          expect(changes[0].before.size).to.equal(changes[0].after.size);
+          expect(changes[0].after.mtimeMs).to.be.greaterThan(changes[0].before.mtimeMs);
+        }
+        expect(result.output).not.to.include('1.cjs: gen:');
+      });
+    }
+  }
   it('attributes an import-time sweep even when the file has no selected tests', () => {
     const result = run([
       "require('node:fs').rmSync('gen/probe.abap');it('unselected',()=>{});",
@@ -106,14 +128,27 @@ describe('per-file process isolation detector', function () {
     ]);
     for (const change of changes) expect(change.after.sha256).to.match(/^[0-9a-f]{64}$/);
   });
-  it('does no gen content reads when manifests agree and hashes only differing files', () => {
-    const setup = "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/untouched.abap','same');const read=fs.readFileSync;fs.readFileSync=function(path,...args){if(String(path).includes('untouched.abap'))throw Error('read unchanged gen content');return read.call(this,path,...args)};";
-    const unchanged = run(["it('unchanged',()=>{});"], [], undefined, setup);
+  it('hashes gen once at baseline and does no further content reads when metadata agrees', () => {
+    const setup = "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/untouched.abap','same');const read=fs.readFileSync;let reads=0;fs.readFileSync=function(path,...args){if(String(path).includes('untouched.abap')&&++reads>1)throw Error('read unchanged gen content');return read.call(this,path,...args)};";
+    const unchanged = run(["it('unchanged',()=>{});", "it('still unchanged',()=>{});"], [], undefined, setup);
     expect(unchanged.status, unchanged.output).to.equal(0);
     const changed = run(["it('adds output',()=>require('node:fs').writeFileSync('gen/added.abap','new'));"], [], undefined, setup);
     expect(changed.status, changed.output).to.be.greaterThan(0);
     expect(changed.output).to.include('gen/added.abap').and.include('"sha256"');
     expect(changed.output).not.to.include('read unchanged gen content');
+  });
+  it('caches an identical rewrite and retains its digest for a later corruption', () => {
+    const result = run([
+      "it('rewrites identical bytes',()=>{const fs=require('node:fs');const stamp=fs.statSync('gen/probe.abap').mtimeMs+10000;fs.writeFileSync('gen/probe.abap','original');fs.utimesSync('gen/probe.abap',stamp/1000,stamp/1000);});",
+      "it('uses the new cache entry',()=>{if(global.genReads!==2)throw Error('rehashed unchanged output');});",
+      "it('corrupts the rewritten file',()=>{const fs=require('node:fs');const stamp=fs.statSync('gen/probe.abap').mtimeMs+10000;fs.writeFileSync('gen/probe.abap','changed!');fs.utimesSync('gen/probe.abap',stamp/1000,stamp/1000);});",
+      "it('inherits corruption',()=>{if(global.genReads!==3)throw Error('rehashed corruption');});",
+    ], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/probe.abap','original');const read=fs.readFileSync;global.genReads=0;fs.readFileSync=function(path,...args){if(String(path).endsWith('gen/probe.abap'))global.genReads++;return read.call(this,path,...args)};");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('4 passing').and.include('2.cjs: gen:').and.include('gen/probe.abap').and.include('"changed"');
+    for (const file of ['0.cjs', '1.cjs', '3.cjs']) expect(result.output).not.to.include(`${file}: gen:`);
+    expect(result.output).not.to.include('rehashed');
   });
   it('keeps a gen hash error red even with a matching allowance', () => {
     const result = run(["it('adds output',()=>require('node:fs').writeFileSync('gen/probe.abap','new'));"], [],

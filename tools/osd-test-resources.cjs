@@ -11,8 +11,20 @@ const children = new Set();
 const roots = new Map();
 exports.setOwner = (file) => { owner = file; };
 exports.environmentSnapshot = () => ({...process.env});
-// Metadata only on the common path. Do not follow directory symlinks out
-// of the checkout, and let errors other than an absent gen root stay red.
+// Cache the most recent (absolute path, size, mtimeMs) version. Snapshots
+// retain its digest even when the cache advances, so a rewrite can be
+// compared with bytes that no longer exist. Unchanged versions need no reads.
+const genDigests = new Map();
+const genDigest = (file, stat) => {
+  const cached = genDigests.get(file);
+  if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached.sha256;
+  const content = stat.isSymbolicLink() ? fs.readlinkSync(file) : fs.readFileSync(file);
+  const sha256 = createHash('sha256').update(content).digest('hex');
+  genDigests.set(file, {size: stat.size, mtimeMs: stat.mtimeMs, sha256});
+  return sha256;
+};
+// Do not follow directory symlinks out of the checkout. Hash each file on
+// first observation and after metadata changes, before its bytes can vanish.
 exports.genManifest = (root = process.cwd()) => {
   const files = [];
   const walk = (folder, prefix) => {
@@ -22,7 +34,10 @@ exports.genManifest = (root = process.cwd()) => {
       if (entry.isDirectory()) walk(path, name);
       else {
         const stat = fs.lstatSync(path);
-        files.push({path: name, size: stat.size, mtimeMs: stat.mtimeMs});
+        const entry = {path: name, size: stat.size, mtimeMs: stat.mtimeMs};
+        try { entry.sha256 = genDigest(resolve(path), stat); }
+        catch (error) { entry.error = error.message; }
+        files.push(entry);
       }
     }
   };
@@ -32,26 +47,18 @@ exports.genManifest = (root = process.cwd()) => {
   walk(folder, 'gen');
   return files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 };
-exports.genDifference = (before, after, root = process.cwd()) => {
+exports.genDifference = (before, after) => {
   const old = new Map(before.map((entry) => [entry.path, entry]));
   const next = new Map(after.map((entry) => [entry.path, entry]));
   const changes = [];
   for (const path of [...new Set([...old.keys(), ...next.keys()])].sort()) {
     const a = old.get(path);
     const b = next.get(path);
-    if (a && b && a.size === b.size && a.mtimeMs === b.mtimeMs) continue;
-    // Removed bytes cannot be read after deletion. Their baseline metadata
-    // identifies them; hash only the differing files that still exist.
-    let sha256;
-    let error;
-    if (b) {
-      const file = join(root, path);
-      try {
-        const content = fs.lstatSync(file).isSymbolicLink() ? fs.readlinkSync(file) : fs.readFileSync(file);
-        sha256 = createHash('sha256').update(content).digest('hex');
-      } catch (cause) { error = cause.message; }
-    }
-    changes.push({path, kind: !a ? 'added' : !b ? 'removed' : 'changed', before: a ?? null, after: b ? {...b, sha256} : null, ...(error ? {error} : {})});
+    const error = a?.error ?? b?.error;
+    // Legitimate builds rewrite identical outputs. Metadata invalidates the
+    // digest cache, but only different bytes constitute a changed output.
+    if (a && b && !error && a.sha256 === b.sha256) continue;
+    changes.push({path, kind: !a ? 'added' : !b ? 'removed' : 'changed', before: a ?? null, after: b ?? null, ...(error ? {error} : {})});
   }
   return changes;
 };
