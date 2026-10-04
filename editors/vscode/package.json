@@ -206,6 +206,8 @@
       {"command": "osd.classrunWithDebugger", "title": "osd: Run as ABAP Application with debugger"},
       {"command": "osd.callEntitySetWithDebugger", "title": "osd: Attach debugger and call EntitySet"},
       {"command": "osd.toggleBreakpoints", "title": "osd: Toggle ABAP breakpoints"},
+      {"command": "osd.showRawJobLog", "title": "OSD: Show raw job log"},
+      {"command": "osd.openSample", "title": "OSD: Open sample"},
       {"command": "osd.newSqlNotebook", "title": "osd: New SQL notebook"},
       {"command": "osd.gettingStarted", "title": "osd: Getting started"},
       {"command": "osd.quickStart", "title": "osd: Quick start (defaults)", "icon": "$(rocket)"},
@@ -268,6 +270,8 @@
         {"command": "osd.callEntitySetWithDebugger", "when": "!isWeb && !osd.web"},
         {"command": "osd.toggleBreakpoints", "when": "!isWeb && !osd.web"},
         {"command": "osd.newSqlNotebook", "when": "!isWeb && !osd.web"},
+        {"command": "osd.openSample", "when": "!isWeb && !osd.web"},
+        {"command": "osd.showRawJobLog", "when": "!isWeb && !osd.web"},
         {"command": "osd.gettingStarted", "when": "!isWeb && !osd.web"},
         {"command": "osd.quickStart", "when": "!isWeb && !osd.web"},
         {"command": "osd.openSystemOverview", "when": "!isWeb && !osd.web"},
@@ -382,7 +386,7 @@
           {"id": "startSystem", "title": "Start the system", "description": "The OSD view owns the build, listener, and stop controls.\n\n[Start the system](command:osd.start)", "media": {"markdown": "./walkthrough/start-system.md"}},
           {"id": "whereThingsLive", "title": "Where things live", "description": "The base system and your workspace layers are separate places.", "media": {"markdown": "./walkthrough/where-things-live.md"}},
           {"id": "keys", "title": "Keys", "description": "The default ABAP keymap follows familiar ADT actions.", "media": {"markdown": "./walkthrough/keys.md"}},
-          {"id": "tryIt", "title": "Try the tools", "description": "Run tests, use a lens, preview data, and open the launchpad.\n\n[New SQL notebook](command:osd.newSqlNotebook)", "media": {"markdown": "./walkthrough/try-it.md"}},
+          {"id": "tryIt", "title": "Try the tools", "description": "Open a sample, run tests, use a lens, preview data, and open the launchpad.\n\n[Open sample](command:osd.openSample) · [New SQL notebook](command:osd.newSqlNotebook)", "media": {"markdown": "./walkthrough/try-it.md"}},
           {"id": "reinstall", "title": "Reinstall the extension", "description": "Build and install a fresh VSIX when the extension changes.", "media": {"markdown": "./walkthrough/reinstall.md"}}
         ]
       }

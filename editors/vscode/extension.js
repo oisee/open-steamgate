@@ -6,7 +6,7 @@
 // the language server; this adds only what needs a running system.
 "use strict";
 
-const {jobsStatusBar} = require("./job-worker");
+const {jobsStatusBar, workerEnabled} = require("./job-worker");
 const vscode = require("vscode");
 const {registerKernelDiagnostics, resolveKernelObjectFile} = require("./kernel-diagnostics.js");
 let kernelDiagnostics;
@@ -2511,34 +2511,56 @@ async function openEntitySetMethod(dpcName, set, line, output, sourceFile) {
   }
 }
 
-/** The ▶/■ status bar item: a second one from Q2's own generation display
- *  above, because the two answer different questions -- "what is this osd
- *  serving" versus "is a system running at all, and shall I start or stop
- *  one" -- and B0 must work even when nothing is serving yet, which Q2's
- *  item already assumes something is. */
+/** Keep launch state separate from the serving generation and job counts:
+ *  each is labelled, and the system/jobs clicks share the same actions. */
+function runningParts(controller) {
+  const launcher = controller.launcher;
+  const state = launcher?.state ?? "stopped";
+  const items = [{label: "OSD system", description: state,
+    detail: state === "stopped" ? "Start system" : "Show overview",
+    command: state === "stopped" ? "osd.start" : "osd.openSystemOverview"}];
+  if (workerEnabled(launcher?.jobsWorkerMode, launcher?.env)) {
+    const worker = launcher.jobWorker;
+    const other = worker?.otherWindow;
+    items.push({label: "Job worker", description: other ? "running in another window" : worker?.running ? "running" : "stopped",
+      detail: other || worker?.running ? "Show jobs" : state === "running" ? "Start worker" : state === "stopped" ? "Start system" : "Show overview",
+      command: other || worker?.running ? "osd.showJobs" : state === "running" ? "osd.startJobWorker" : state === "stopped" ? "osd.start" : "osd.openSystemOverview"});
+  }
+  if (workerEnabled(launcher?.jobsWorkerMode, launcher?.env)) {
+    items.push({label: "Show raw job log", detail: "Worker JSON events and diagnostics", command: "osd.showRawJobLog"});
+  }
+  items.push({label: "Open sample", detail: "Choose a notebook or hello class", command: "osd.openSample"});
+  items.push({label: "System overview", detail: "Show overview", command: "osd.openSystemOverview"});
+  return items;
+}
+
+async function showRunning(controller) {
+  const picked = await vscode.window.showQuickPick(runningParts(controller), {title: "OSD: What is running?"});
+  if (picked) await vscode.commands.executeCommand(picked.command);
+}
+
 function startStopStatusBar(context, controller) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 11);
+  item.command = "osd.showRunning";
   const refresh = () => {
     const state = controller.launcher?.state ?? "stopped";
     const source = homeSourceText(controller.homeSource);
-    const sourceSuffix = source === undefined ? "" : ` · ${source}`;
-    if (state === "running") {
-      item.text = `$(primitive-square) osd${sourceSuffix}`;
-      item.tooltip = `osd is running on :${controller.launcher.port} · ${controller.launcher.databaseLabel}${source === undefined ? "" : `, ${source}`} -- click to stop`;
-      item.command = "osd.stop";
-    } else if (state === "stopped") {
-      item.text = `$(play) osd${sourceSuffix}`;
-      item.tooltip = `click to build and start osd (B0)${source === undefined ? "" : `, ${source}`}`;
-      item.command = "osd.start";
-    } else {
-      item.text = `$(sync~spin) osd ${state}${sourceSuffix}`;
-      item.tooltip = `osd is ${state}${source === undefined ? "" : `, ${source}`}`;
-      item.command = undefined;
-    }
+    item.text = state === "running" ? "$(server) OSD running"
+      : state === "stopped" ? "$(play) OSD stopped" : `$(sync~spin) OSD ${state}`;
+    item.tooltip = `OSD system: ${state}${source === undefined ? "" : ` · ${source}`}\n` +
+      (state === "running" ? `Port ${controller.launcher.port} · ${controller.launcher.databaseLabel}\n` : "") +
+      "Click for system and worker actions";
   };
   refresh();
   const off = controller.onDidChange(refresh);
   item.show();
+  context.subscriptions.push(vscode.commands.registerCommand("osd.showRunning", () => showRunning(controller)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.startJobWorker", () => {
+    const launcher = controller.launcher;
+    if (launcher?.state === "running" && workerEnabled(launcher.jobsWorkerMode, launcher.env)) {
+      launcher.jobWorker?.start();
+    }
+  }));
   context.subscriptions.push({dispose: () => {
     off.dispose();
     item.dispose();
@@ -2743,6 +2765,7 @@ function activate(context) {
   context.subscriptions.push(vscode.workspace.registerNotebookSerializer(NOTEBOOK_TYPE, sqlNotebookSerializer()));
   context.subscriptions.push(sqlNotebookController(output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.newSqlNotebook", newSqlNotebook));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.openSample", () => openSample(context, controller)));
 
   // The controller is available to the Test Explorer and lenses from their
   // registration onward, including before the first Start.
@@ -2834,19 +2857,62 @@ function setServingAvailability(available) {
 // itself started (docs/vscode-extension.md, "Databases").
 const DB_ENGINE_LABEL = {sqlite: "SQLite", duckdb: "DuckDB", HDB: "HANA", postgres: "PostgreSQL"};
 
-function statusBar(context) {
+function statusBar(context, findingCount = () => kernelFindingCount, controller = activeController) {
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 10);
   item.command = "osd.showDumps";
   item.show();
   let dumpsSeen;
+  let disposed = false, pollEpoch = 0, observedLauncher, observedState;
+  let awaitingServing = false, misses = 0, firstMiss;
+  const resetMisses = () => { misses = 0; firstMiss = undefined; };
+  const kernelTooltip = text => {
+    let count;
+    try { count = findingCount(); } catch { count = "unknown"; }
+    return `${text}\nOSD kernel: ${count} finding(s)`;
+  };
+  const transitioning = () => ["building", "starting", "stopping"].includes(controller?.launcher?.state);
+  const visibility = () => {
+    if (disposed) return;
+    const launcher = controller?.launcher;
+    if (launcher !== observedLauncher || launcher?.state !== observedState) {
+      observedLauncher = launcher; observedState = launcher?.state; pollEpoch++;
+      resetMisses();
+      if (["building", "starting", "running"].includes(observedState)) awaitingServing = true;
+      else if (["stopped", "failed"].includes(observedState)) {
+        awaitingServing = false;
+        item.text = "$(debug-disconnect) osd down";
+        item.tooltip = kernelTooltip(`System ${observedState}`);
+        item.backgroundColor = undefined;
+      }
+    }
+    if (transitioning()) item.hide();
+    else {
+      if (awaitingServing) {
+        item.text = "$(sync~spin) OSD generation: awaiting serving";
+        item.tooltip = kernelTooltip("Waiting for the first serving response after Start");
+        item.backgroundColor = undefined;
+      }
+      item.show();
+    }
+  };
+  const onState = controller?.onDidChange(visibility);
   const tick = async () => {
+    if (disposed) return;
+    visibility();
+    if (transitioning()) return;
+    const epoch = pollEpoch;
+    const client = osd(), url = client.url;
+    const current = () => !disposed && epoch === pollEpoch && osd() === client && client.url === url;
     try {
-      const serving = await osd().serving();
+      const serving = await client.serving();
+      if (!current()) return;
       setServingAvailability(true);
       await activeController?.launcher?.refreshJobsGeneration(serving);
       await activeController?.refreshDebuggerGeneration().catch((error) =>
         activeController.output.appendLine(`osd debugger: ${String(error?.message ?? error)}`));
-      const dumps = await osd().dumps().catch(() => []);
+      const dumps = await client.dumps().catch(() => []);
+      if (!current()) return;
+      awaitingServing = false; resetMisses();
       const generation = String(serving.generation ?? "?").slice(0, 8);
       const warm = serving.warm;
       // T7 (docs/vscode-extension.md "Warm"): the swap count from the warm
@@ -2856,10 +2922,10 @@ function statusBar(context) {
       const warmText = warmStatusText(warm);
       const engine = serving.databaseIdentity?.engine;
       const dbLabel = DB_ENGINE_LABEL[engine] ?? engine;
-      item.text = `$(server) osd ${generation}${dbLabel ? ` · ${dbLabel}` : ""}${warmText ? ` · ${warmText}` : ""}${swaps ? ` +${swaps}` : ""}${dumps.length ? `  $(bug) ${dumps.length}` : ""}`;
+      item.text = `$(server) OSD generation ${generation}${dbLabel ? ` · ${dbLabel}` : ""}${warmText ? ` · ${warmText}` : ""}${swaps ? ` +${swaps}` : ""}${dumps.length ? `  $(bug) ${dumps.length}` : ""}`;
       const lastVerify = warm?.lastVerify === undefined ? "never"
         : `${warm.lastVerify.verdict ?? "?"} at ${warm.lastVerify.at ?? "?"}`;
-      item.tooltip = `${osd().url}\ngeneration ${serving.generation}\ndatabase ${dbLabel ?? "unknown"}\npid ${serving.pid}` +
+      item.tooltip = `${url}\ngeneration ${serving.generation}\ndatabase ${dbLabel ?? "unknown"}\npid ${serving.pid}` +
         (warm === undefined ? "" : `\nwarm: ${warm.state}${warm.reason ? ` (${warm.reason})` : ""}` +
           `\nwarm generation: ${warm.generation ?? "n/a"}\nunverified: ${(warm.unverified ?? []).join(", ") || "none"}` +
           `\nswaps: ${warm.swaps ?? 0}\ncopies: ${warm.copies ?? 0}\nlast verify: ${lastVerify}`) +
@@ -2868,25 +2934,25 @@ function statusBar(context) {
         ? new vscode.ThemeColor("statusBarItem.errorBackground") : undefined;
       dumpsSeen ??= dumps.length;
     } catch {
+      if (!current()) return;
+      if (awaitingServing) {
+        firstMiss ??= Date.now(); misses++;
+        // Match the jobs grace: require both repeated misses and elapsed time.
+        if (misses < 3 || Date.now() - firstMiss < 15000) { visibility(); return; }
+        awaitingServing = false;
+      }
       setServingAvailability(false);
-      // T7: right after a launch the façade answers nothing at all while the
-      // warm registry primes synchronously (docs/warm-compile.md), for up to
-      // about the ~9 s that was measured -- "warming up..." rather than
-      // "osd down" for the first 20 s of a launch this window itself made,
-      // so a person does not read a normal start as a failure.
-      const since = activeController?.launcher?.startedAt;
-      const launching = activeController?.launcher?.state !== "stopped" && since !== undefined && Date.now() - since < 20000;
-      item.text = launching ? "$(sync~spin) osd warming up…" : "$(debug-disconnect) osd down";
-      item.tooltip = launching
-        ? `${osd().url} has not answered yet -- normal for the first few seconds of a launch (osd.warm primes synchronously)`
-        : `nothing answers /osd/serving at ${osd().url} (setting osd.url)`;
+      item.text = "$(debug-disconnect) osd down";
+      item.tooltip = `nothing answers /osd/serving at ${url} (setting osd.url)`;
       item.backgroundColor = undefined;
     }
-    item.tooltip += `\nOSD kernel: ${kernelFindingCount} finding(s)`;
+    item.tooltip = kernelTooltip(item.tooltip);
+    // A poll begun before Start may finish after the launcher changes state.
+    visibility();
   };
   tick();
   const timer = setInterval(tick, 5000);
-  context.subscriptions.push({dispose: () => clearInterval(timer)});
+  context.subscriptions.push({dispose: () => { disposed = true; clearInterval(timer); onState?.dispose(); }});
   return item;
 }
 
@@ -4442,6 +4508,46 @@ function sqlNotebookSerializer() {
   };
 }
 
+/** Bundled notebooks work against the demo seed. The book's hello class
+ *  is offered only when its source is in this workspace and is a classrun. */
+async function sampleItems(context) {
+  const dir = path.join(context.extensionUri.fsPath, "examples");
+  const items = fs.readdirSync(dir).filter((name) => name.endsWith(".osdnb")).sort().map((name) => ({
+    label: name, description: "Bundled notebook", detail: "Open and run a cell",
+    uri: vscode.Uri.file(path.join(dir, name)), notebook: true,
+  }));
+  const classes = await vscode.workspace.findFiles("**/zosd_demo_hello.clas.abap", EXCLUDE);
+  for (const uri of classes) {
+    const document = await vscode.workspace.openTextDocument(uri);
+    if (implementsClassrun(document.getText())) {
+      items.push({label: "ZOSD_DEMO_HELLO", description: "Workspace classrun", detail: "Open and press F9 to run", uri});
+    }
+  }
+  return items;
+}
+
+async function openSample(context, controller) {
+  try {
+    const picked = await vscode.window.showQuickPick(await sampleItems(context), {title: "OSD: Open sample"});
+    if (!picked) return;
+    if (picked.notebook) {
+      const document = await vscode.workspace.openNotebookDocument(picked.uri);
+      await vscode.window.showNotebookDocument(document);
+    } else {
+      await vscode.window.showTextDocument(picked.uri);
+    }
+    // Also accept a system started outside this window, at osd.url.
+    if (controller.launcher?.state === "running") return;
+    try { await osd().json("/osd/serving", {signal: AbortSignal.timeout(3000)}); return; }
+    catch { /* Offer the existing Start action below. */ }
+    if (controller.launcher && controller.launcher.state !== "stopped") return;
+    const action = await vscode.window.showInformationMessage("Start OSD to run this sample.", "Start system");
+    if (action === "Start system") await vscode.commands.executeCommand("osd.start");
+  } catch (error) {
+    vscode.window.showErrorMessage(`osd: could not open sample: ${String(error.message ?? error)}`);
+  }
+}
+
 /** `osd.newSqlNotebook`'s own untitled notebook, and Q7's "Open in SQL
  *  notebook" button -- `statement` is the cell it opens with, ready to
  *  run; the command palette and SQL tree node use the base status example. */
@@ -4510,7 +4616,7 @@ async function deactivate() {
 }
 
 module.exports = {WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
-  httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands,
+  httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands, startStopStatusBar, runningParts, showRunning, sampleItems, openSample,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
   wirePageTabs, openDetailsMetadata, serviceCardFiles};

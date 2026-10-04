@@ -3020,6 +3020,9 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
       expect(commands.get(external).title).to.match(/in External Browser$/);
     }
     const palette = manifest.contributes.menus.commandPalette;
+    for (const command of ["osd.newSqlNotebook", "osd.openSample", "osd.showRawJobLog"]) {
+      expect(palette.find((m) => m.command === command)?.when, command).to.equal("!isWeb && !osd.web");
+    }
     for (const command of ["osd.openHostDoorExternal", "osd.openServiceRowExternal", "osd.openServiceMetadataExternal"]) {
       expect(palette.find((m) => m.command === command)?.when, command).to.equal("false");
     }
@@ -3966,5 +3969,498 @@ describe("editors/vscode: T7 warm status and build text", function () {
     expect(closureTestsText({closureTests: []})).to.equal(undefined);
     expect(closureTestsText({})).to.equal(undefined);
     expect(closureTestsText(undefined)).to.equal(undefined);
+  });
+});
+
+// Exercise the real status item and command callbacks with a small VS Code API.
+function runningStatusApi() {
+  const commands = new Map(), items = [], executed = [];
+  let pick;
+  const api = {
+    StatusBarAlignment: {Left: 1},
+    TreeItem: class {},
+    commands: {
+      registerCommand(id, fn) { commands.set(id, fn); return {dispose() {}}; },
+      async executeCommand(id) { executed.push(id); return commands.get(id)?.(); },
+    },
+    window: {
+      createStatusBarItem() {
+        const item = {show() { this.visible = true; }, hide() { this.visible = false; }, dispose() {}};
+        items.push(item); return item;
+      },
+      createOutputChannel() { return {show() {}, appendLine() {}, dispose() {}}; },
+      async showQuickPick(entries) { api.entries = entries; return pick?.(entries); },
+    },
+  };
+  return {api, items, commands, executed, choose(fn) { pick = fn; }};
+}
+
+describe("editors/vscode: running parts status and actions", () => {
+  it("shows each system state without a click and keeps one action menu", () => {
+    const h = runningStatusApi();
+    const {startStopStatusBar} = loadExtension(h.api);
+    let refresh;
+    const controller = {onDidChange(fn) { refresh = fn; return {dispose() {}}; }};
+    const context = {subscriptions: []};
+    const item = startStopStatusBar(context, controller);
+    expect(item.text).to.equal("$(play) OSD stopped");
+    expect(item.command).to.equal("osd.showRunning");
+    for (const state of ["running", "building", "starting", "stopping", "stopped"]) {
+      controller.launcher = {state, port: 8060, databaseLabel: "SQLite"};
+      refresh();
+      expect(item.text).to.include(`OSD ${state}`);
+      expect(item.tooltip).to.include(`OSD system: ${state}`);
+      expect(item.command).to.equal("osd.showRunning");
+    }
+    context.subscriptions.forEach(s => s.dispose());
+  });
+
+  it("maps system/worker state combinations to the right click actions", async () => {
+    const h = runningStatusApi();
+    const {startStopStatusBar, runningParts} = loadExtension(h.api);
+    const controller = {onDidChange() { return {dispose() {}}; }};
+    const context = {subscriptions: []};
+    startStopStatusBar(context, controller);
+    let starts = 0;
+    for (const state of ["stopped", "starting", "running", "stopping"]) {
+      for (const running of [false, true]) {
+        controller.launcher = {state, jobsWorkerMode: "auto", env: {STG_DB: "file", STG_DB_PATH: "jobs.sqlite"},
+          jobWorker: {running, start() { starts++; }}};
+        const parts = runningParts(controller);
+        expect(parts[0].command).to.equal(state === "stopped" ? "osd.start" : "osd.openSystemOverview");
+        expect(parts[1].description).to.equal(running ? "running" : "stopped");
+        expect(parts[1].command).to.equal(running ? "osd.showJobs" : state === "running" ? "osd.startJobWorker" : state === "stopped" ? "osd.start" : "osd.openSystemOverview");
+        for (const label of ["OSD system", "Job worker", "System overview"]) {
+          h.choose(entries => entries.find(e => e.label === label));
+          await h.commands.get("osd.showRunning")();
+          expect(h.executed.at(-1)).to.equal(parts.find(e => e.label === label).command);
+        }
+      }
+    }
+    expect(starts).to.equal(1);
+    expect(runningParts(controller).find(i => i.label === "Show raw job log")?.command).to.equal("osd.showRawJobLog");
+    expect(JSON.parse(readFileSync(new URL("../editors/vscode/package.json", import.meta.url), "utf8")).contributes.commands
+      .find(i => i.command === "osd.showRawJobLog")?.title).to.equal("OSD: Show raw job log");
+    controller.launcher.jobWorker.otherWindow = true;
+    expect(runningParts(controller)[1]).to.include({description: "running in another window", command: "osd.showJobs"});
+    controller.launcher.jobsWorkerMode = "off";
+    expect(runningParts(controller).map(e => e.label)).not.to.include("Job worker");
+    controller.launcher.jobsWorkerMode = "auto";
+    controller.launcher.env.STG_DB = "duckdb";
+    expect(runningParts(controller).map(e => e.label)).not.to.include("Job worker");
+    const before = h.executed.length;
+    h.choose(() => undefined);
+    await h.commands.get("osd.showRunning")();
+    expect(h.executed).to.have.length(before);
+    context.subscriptions.forEach(s => s.dispose());
+  });
+
+  it("hides unused jobs and keeps idle, stopped, active and other-window states visible", async () => {
+    const h = runningStatusApi();
+    const {jobsStatusBar} = require("../editors/vscode/job-worker.js");
+    const controller = {onDidChange() { return {dispose() {}}; }};
+    const context = {subscriptions: []};
+    const tick = jobsStatusBar(h.api, context, controller);
+    const item = h.items[0];
+    const originalFetch = globalThis.fetch;
+    try {
+      expect(item.visible).to.equal(false);
+      controller.launcher = {port: 8060, jobsWorkerMode: "auto", env: {STG_DB: "file", STG_DB_PATH: "jobs.sqlite"}, jobWorker: {running: false}};
+      await tick();
+      expect(item.visible).to.equal(true);
+      expect(item.text).to.equal("OSD jobs: worker stopped");
+      expect(item.command).to.equal("osd.showRunning");
+      controller.launcher.jobWorker.running = true;
+      for (const counts of [{running: 0, queued: 0}, {running: 2, queued: 1}]) {
+        globalThis.fetch = async () => ({ok: true, json: async () => ({counts})});
+        await tick();
+        expect(item.text).to.equal(counts.running ? "OSD jobs: running 2, queued 1" : "OSD jobs: idle");
+      }
+      globalThis.fetch = async () => { throw Error("offline"); };
+      await tick();
+      expect(item.text).to.equal("OSD jobs: running 2, queued 1");
+      expect(item.backgroundColor).to.equal(undefined);
+      controller.launcher.jobWorker.otherWindow = true;
+      controller.launcher.jobWorker.running = false;
+      let queried = false;
+      globalThis.fetch = async url => { queried = url.endsWith("/osd/job-counts"); return {ok: true, json: async () => ({counts: {running: 2, queued: 1}})}; };
+      await tick();
+      expect(queried).to.equal(true);
+      expect(item.text).to.equal("OSD jobs: other window · 2 running, 1 queued");
+      for (const [mode, db] of [["off", "file"], ["auto", "sqlite"], ["auto", "duckdb"]]) {
+        controller.launcher.jobsWorkerMode = mode;
+        controller.launcher.env.STG_DB = db;
+        await tick();
+        expect(item.visible).to.equal(false);
+      }
+    } finally {
+      globalThis.fetch = originalFetch;
+      context.subscriptions.forEach(s => s.dispose());
+    }
+  });
+});
+
+describe("editors/vscode: serving generation status", () => {
+  // Critic round 2: drive the exported status function with a deterministic
+  // clock and deferred responses, restoring globals even on assertion failure.
+  async function handoffProbe(run, {realController = false, findingCount = () => 2} = {}) {
+    const h = runningStatusApi();
+    const base = vscodeStub();
+    Object.assign(h.api, {EventEmitter: base.EventEmitter, debug: base.debug,
+      ConfigurationTarget: base.ConfigurationTarget});
+    let url = "http://external:3030", now = 0, tick, refresh;
+    let respond = async () => { throw Error("unreachable"); };
+    const errors = [];
+    h.api.workspace = {...base.workspace, getConfiguration: () => ({
+      get: (key, fallback) => key === "url" ? url : fallback,
+      update: async () => { throw Error("settings are read-only"); },
+    })};
+    h.api.window.showErrorMessage = message => errors.push(message);
+    h.api.window.setStatusBarMessage = () => {};
+    const {statusBar, SystemController} = loadExtension(h.api);
+    const context = controllerContext();
+    const saved = {fetch: globalThis.fetch, interval: globalThis.setInterval,
+      clear: globalThis.clearInterval, now: Date.now};
+    const controller = realController
+      ? new SystemController(context, {append() {}, appendLine() {}, show() {}})
+      : {launcher: {state: "stopped"}, onDidChange(fn) { refresh = fn; return {dispose() {}}; }};
+    if (realController) {
+      const launcher = new NodeEventEmitter();
+      Object.assign(launcher, {state: "stopped", port: 8060, async start() {
+        for (const state of ["starting", "running"]) { this.state = state; this.emit("state", state); }
+        return {port: this.port, generation: "local123"};
+      }});
+      controller.attachLauncher(launcher);
+      controller.ensureLauncher = async () => launcher;
+    }
+    try {
+      globalThis.fetch = (...args) => respond(...args);
+      globalThis.setInterval = fn => { tick = fn; return 1; };
+      globalThis.clearInterval = () => {};
+      Date.now = () => now;
+      const item = statusBar(context, findingCount, controller);
+      await new Promise(resolve => setImmediate(resolve));
+      await run({item, controller, errors, tick: () => tick(),
+        time: value => { now = value; }, url: value => { url = value; },
+        respond: fn => { respond = fn; },
+        state: value => { controller.launcher.state = value; refresh(); },
+        refresh: () => refresh(),
+        start: () => { controller.launcher.state = "starting"; refresh(); controller.launcher.state = "running"; refresh(); }});
+    } finally {
+      context.subscriptions.forEach(s => s.dispose());
+      globalThis.fetch = saved.fetch; globalThis.setInterval = saved.interval;
+      globalThis.clearInterval = saved.clear; Date.now = saved.now;
+    }
+  }
+
+  for (const times of [[0, 5000, 14999, 15000], [0, 60000, 60001]]) {
+    it(`bounds a never-serving handoff with both three misses and fifteen seconds (${times.join(",")})`, async () => {
+      await handoffProbe(async p => {
+        p.start();
+        for (const time of times.slice(0, -1)) {
+          p.time(time); await p.tick();
+          expect(p.item.text).to.include("awaiting serving");
+        }
+        p.time(times.at(-1)); await p.tick();
+        expect(p.item.text).to.include("osd down");
+        expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
+        p.start(); await p.tick();
+        expect(p.item.text, "restart resets the grace").to.include("awaiting serving");
+      });
+    });
+  }
+
+  it("keeps two kernel findings in immediate and polled awaiting tooltips", async () => {
+    await handoffProbe(async p => {
+      p.start();
+      expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
+      await p.tick();
+      expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
+      p.state("stopped"); p.start();
+      expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
+    });
+  });
+
+  it("treats a throwing findings provider as unknown through state notifications and polls", async () => {
+    await handoffProbe(async p => {
+      expect(() => p.start()).not.to.throw();
+      expect(p.item.text).to.include("awaiting serving");
+      expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
+      await p.tick();
+      expect(p.item.text).to.include("awaiting serving");
+      expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
+      p.respond(async url => ({ok: true, json: async () => url.endsWith("/osd/dumps")
+        ? [] : {generation: "fresh123"}}));
+      await p.tick();
+      expect(p.item.text).to.include("fresh123");
+      expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
+      for (const state of ["stopped", "failed"]) {
+        p.start();
+        expect(() => p.state(state)).not.to.throw();
+        expect(p.item.text).to.include("osd down");
+        expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
+      }
+    }, {findingCount: () => { throw Error("count failed"); }});
+  });
+
+  it("leaves awaiting immediately when the launcher stops or fails", async () => {
+    await handoffProbe(async p => {
+      for (const state of ["stopped", "failed"]) {
+        p.start(); p.state(state);
+        expect(p.item.text, state).to.include("osd down");
+        expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
+      }
+    });
+  });
+
+  for (const notify of [true, false]) {
+    it(`ignores an old URL serving response after a URL switch (state notification: ${notify})`, async () => {
+      await handoffProbe(async p => {
+        p.start();
+        let resolveOld;
+        const requests = [];
+        p.respond(url => {
+          requests.push(url);
+          return url.endsWith("/osd/serving")
+            ? new Promise(resolve => { resolveOld = resolve; })
+            : Promise.resolve({ok: true, json: async () => []});
+        });
+        const pending = p.tick();
+        p.url("http://localhost:8060");
+        if (notify) p.refresh();
+        resolveOld({ok: true, json: async () => ({generation: "old-system"})});
+        await pending;
+        expect(p.item.text).to.include("awaiting serving");
+        expect(requests).to.deep.equal(["http://external:3030/osd/serving"]);
+        p.respond(async url => {
+          requests.push(url);
+          return {ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {generation: "fresh123"}};
+        });
+        await p.tick();
+        expect(p.item.text).to.include("fresh123");
+        expect(p.item.tooltip).to.include("http://localhost:8060");
+        expect(requests.slice(1)).to.deep.equal(["http://localhost:8060/osd/serving", "http://localhost:8060/osd/dumps"]);
+      });
+    });
+  }
+
+  it("bounds awaiting when a successful launch cannot update osd.url", async () => {
+    await handoffProbe(async p => {
+      expect(await p.controller.start()).to.equal(true);
+      expect(p.errors.some(message => message.includes("could not update osd.url"))).to.equal(true);
+      expect(p.item.text).to.include("awaiting serving");
+      for (const time of [0, 5000, 15000]) { p.time(time); await p.tick(); }
+      expect(p.item.text).to.include("osd down");
+      expect(p.item.tooltip).to.include("http://external:3030");
+    }, {realController: true});
+  });
+
+  it("hides immediately throughout long startup, guards a late poll, and restores stopped/crashed status", async () => {
+    const h = runningStatusApi();
+    h.api.workspace = {getConfiguration() { return {get: (_, fallback) => fallback}; }};
+    const {statusBar} = loadExtension(h.api);
+    let refresh, rejectPoll;
+    const controller = {launcher: {state: "stopped", startedAt: Date.now() - 60000},
+      onDidChange(fn) { refresh = fn; return {dispose() { refresh = undefined; }}; }};
+    const originalFetch = globalThis.fetch;
+    const context = {subscriptions: []};
+    try {
+      globalThis.fetch = () => new Promise((_, reject) => { rejectPoll = reject; });
+      const item = statusBar(context, () => 0, controller);
+      for (const state of ["building", "starting"]) {
+        controller.launcher.state = state;
+        refresh();
+        expect(item.visible, state).to.equal(false);
+      }
+      rejectPoll(new Error("not serving yet"));
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(item.visible, "late failed poll during startup").to.equal(false);
+      controller.launcher.state = "running";
+      refresh();
+      expect(item.visible).to.equal(true);
+      expect(item.text).to.include("awaiting serving");
+      expect(item.backgroundColor).to.equal(undefined);
+      for (const state of ["stopped"]) {
+        controller.launcher.state = state;
+        refresh();
+        expect(item.visible, state).to.equal(true);
+        expect(item.text).to.include("osd down");
+      }
+      controller.launcher.state = "stopping";
+      refresh();
+      expect(item.visible).to.equal(false);
+    } finally {
+      context.subscriptions.forEach(s => s.dispose());
+      globalThis.fetch = originalFetch;
+    }
+    expect(refresh).to.equal(undefined);
+  });
+
+  it("stays neutral through failed handoff polls, accepts the first fresh serving poll, and shows a later crash", async () => {
+    const h = runningStatusApi();
+    h.api.workspace = {getConfiguration() { return {get: (_, fallback) => fallback}; }};
+    const {statusBar} = loadExtension(h.api);
+    const originalFetch = globalThis.fetch, originalInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    const context = {subscriptions: []};
+    let tick, refresh, resolveOld, respond;
+    const controller = {launcher: {state: "stopped"},
+      onDidChange(fn) { refresh = fn; return {dispose() {}}; }};
+    try {
+      globalThis.setInterval = fn => { tick = fn; return 1; };
+      globalThis.clearInterval = () => {};
+      respond = () => new Promise(resolve => { resolveOld = resolve; });
+      globalThis.fetch = (...args) => respond(...args);
+      const item = statusBar(context, () => 0, controller);
+      controller.launcher.state = "starting"; refresh();
+      controller.launcher.state = "running"; refresh();
+      expect(item.text).to.include("awaiting serving");
+      resolveOld({ok: true, json: async () => ({generation: "stale"})});
+      await new Promise(resolve => setImmediate(resolve));
+      expect(item.text).to.include("awaiting serving");
+      respond = async () => { throw Error("not ready"); };
+      await tick(); await tick();
+      expect(item.visible).to.equal(true);
+      expect(item.text).to.include("awaiting serving");
+      expect(item.backgroundColor).to.equal(undefined);
+      respond = async url => ({ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {generation: "fresh123"}});
+      await tick();
+      expect(item.text).to.include("OSD generation fresh123");
+      respond = async () => { throw Error("crashed"); };
+      await tick();
+      expect(item.text).to.include("osd down");
+      controller.launcher.state = "starting"; refresh();
+      controller.launcher.state = "running"; refresh();
+      expect(item.text).to.include("awaiting serving");
+      controller.launcher.state = "stopped"; refresh();
+      expect(item.text).to.include("osd down");
+    } finally {
+      context.subscriptions.forEach(s => s.dispose());
+      globalThis.fetch = originalFetch;
+      globalThis.setInterval = originalInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
+  });
+
+  it("preserves generation, database, dump action and kernel findings tooltip", async () => {
+    const h = runningStatusApi();
+    h.api.workspace = {getConfiguration() { return {get: (_, fallback) => fallback}; }};
+    const {statusBar} = loadExtension(h.api);
+    const originalFetch = globalThis.fetch;
+    const context = {subscriptions: []};
+    try {
+      globalThis.fetch = async url => ({ok: true, json: async () => url.endsWith("/osd/dumps") ? [{id: 1}]
+        : {generation: "abcdefgh123", databaseIdentity: {engine: "sqlite"}, pid: 123}});
+      const item = statusBar(context, () => 2);
+      // statusBar starts its first asynchronous poll immediately.
+      for (let i = 0; i < 20 && !item.tooltip?.includes("OSD kernel:"); i++) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+      expect(item.text).to.include("OSD generation abcdefgh · SQLite");
+      expect(item.text).to.include("$(bug) 1");
+      expect(item.tooltip).to.include("OSD kernel: 2 finding(s)");
+      expect(item.command).to.equal("osd.showDumps");
+      item.dispose();
+    } finally {
+      context.subscriptions.forEach(s => s.dispose());
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe("editors/vscode: Open sample", () => {
+  const context = {extensionUri: {fsPath: path.join(ROOT, "editors/vscode")}};
+  function sampleApi(classes = []) {
+    const h = runningStatusApi();
+    h.api.Uri = {file: fsPath => ({fsPath})};
+    h.api.workspace = {
+      getConfiguration() { return {get: (_, fallback) => fallback}; },
+      async findFiles(pattern, exclude) {
+        expect(pattern).to.equal("**/zosd_demo_hello.clas.abap");
+        expect(exclude).to.include("node_modules");
+        return classes.map(c => c.uri);
+      },
+      async openTextDocument(uri) { return {getText: () => classes.find(c => c.uri === uri).source}; },
+      async openNotebookDocument(uri) { h.openedNotebook = uri; return {uri}; },
+    };
+    h.api.window.showNotebookDocument = async doc => { h.shownNotebook = doc.uri; };
+    h.api.window.showTextDocument = async uri => { h.shownClass = uri; };
+    h.api.window.showInformationMessage = async (_, action) => { h.offer = action; return h.startChoice; };
+    h.api.window.showErrorMessage = message => { h.error = message; };
+    return h;
+  }
+  it("lists every bundled notebook and only a present classrun hello sample", async () => {
+    const h = sampleApi();
+    const {sampleItems, runningParts} = loadExtension(h.api);
+    const notebooks = await sampleItems(context);
+    expect(notebooks.map(e => e.label)).to.deep.equal(["abap-amdp.osdnb", "demo.osdnb"]);
+    for (const item of notebooks) {
+      expect(item.notebook).to.equal(true);
+      expect(item.uri.fsPath).to.equal(path.join(context.extensionUri.fsPath, "examples", item.label));
+      expect(JSON.parse(readFileSync(item.uri.fsPath, "utf8")).cells.length).to.be.greaterThan(0);
+    }
+    expect(runningParts({}).find(e => e.label === "Open sample").command).to.equal("osd.openSample");
+    const uri = {fsPath: "/workspace/src/zosd_demo_hello.clas.abap"};
+    const classes = [{uri, source: "CLASS zosd_demo_hello DEFINITION.\n  PUBLIC SECTION.\n    INTERFACES if_oo_adt_classrun.\nENDCLASS."}];
+    const demo = sampleApi(classes);
+    const items = await loadExtension(demo.api).sampleItems(context);
+    expect(items).to.have.length(3);
+    expect(items[2]).to.include({label: "ZOSD_DEMO_HELLO", uri, detail: "Open and press F9 to run"});
+    classes[0].source = "CLASS zosd_demo_hello DEFINITION. ENDCLASS.";
+    expect(await loadExtension(demo.api).sampleItems(context)).to.have.length(2);
+    const manifest = JSON.parse(readFileSync(path.join(context.extensionUri.fsPath, "package.json"), "utf8"));
+    expect(manifest.contributes.commands.find(c => c.command === "osd.openSample").title).to.equal("OSD: Open sample");
+    expect(readFileSync(path.join(context.extensionUri.fsPath, "walkthrough/try-it.md"), "utf8")).to.include("command:osd.openSample");
+  });
+
+  it("opens the chosen notebook or class without running it", async () => {
+    const uri = {fsPath: "/workspace/src/zosd_demo_hello.clas.abap"};
+    const h = sampleApi([{uri, source: "INTERFACES if_oo_adt_classrun."}]);
+    const {openSample} = loadExtension(h.api);
+    h.choose(entries => entries.find(e => e.label === "demo.osdnb"));
+    await openSample(context, {launcher: {state: "running"}});
+    expect(h.openedNotebook).to.equal(h.shownNotebook);
+    expect(h.shownNotebook.fsPath).to.match(/examples\/demo.osdnb$/);
+    h.choose(entries => entries.find(e => e.label === "ZOSD_DEMO_HELLO"));
+    await openSample(context, {launcher: {state: "running"}});
+    expect(h.shownClass).to.equal(uri);
+    expect(h.executed).to.deep.equal([]);
+    expect(h.offer).to.equal(undefined);
+    expect(h.error).to.equal(undefined);
+  });
+
+  it("offers Start only for an unavailable system, allows dismissal and cancellation", async () => {
+    const h = sampleApi();
+    const {openSample} = loadExtension(h.api);
+    const originalFetch = globalThis.fetch;
+    try {
+      h.choose(entries => entries[0]);
+      let available = false;
+      globalThis.fetch = async (url, options) => {
+        expect(url).to.match(/\/osd\/serving$/);
+        expect(options.signal).to.be.instanceOf(AbortSignal);
+        if (!available) throw Error("offline");
+        return {ok: true, json: async () => ({generation: "external"})};
+      };
+      await openSample(context, {});
+      expect(h.offer).to.equal("Start system");
+      expect(h.executed).to.deep.equal([]);
+      h.startChoice = "Start system";
+      await openSample(context, {});
+      expect(h.executed).to.deep.equal(["osd.start"]);
+      h.offer = undefined;
+      available = true;
+      await openSample(context, {});
+      expect(h.offer).to.equal(undefined);
+      available = false;
+      await openSample(context, {launcher: {state: "starting"}});
+      expect(h.offer).to.equal(undefined);
+      h.choose(() => undefined);
+      h.openedNotebook = undefined;
+      await openSample(context, {});
+      expect(h.openedNotebook).to.equal(undefined);
+      expect(h.executed).to.deep.equal(["osd.start"]);
+      expect(h.error).to.equal(undefined);
+    } finally { globalThis.fetch = originalFetch; }
   });
 });

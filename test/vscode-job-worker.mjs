@@ -182,7 +182,7 @@ describe('VS Code jobs status poll grace and debugging', () => {
     savedClearInterval = globalThis.clearInterval;
     globalThis.setInterval = fn => { tick = fn; return 1; };
     globalThis.clearInterval = () => {};
-    item = {show() {}, dispose() {}};
+    item = {show() {}, hide() {}, dispose() {}};
     messages = [];
     subscriptions = [];
     api = {
@@ -198,7 +198,7 @@ describe('VS Code jobs status poll grace and debugging', () => {
         onDidTerminateDebugSession: fn => { end = fn; return {dispose() {}}; },
       },
     };
-    controller = {launcher: {port: 8080, inspectPort: 9480, env: {}, jobWorker: {running: true}}};
+    controller = {onDidChange() { return {dispose() {}}; }, launcher: {port: 8080, inspectPort: 9480, jobsWorkerMode: 'auto', env: {STG_DB: 'file', STG_DB_PATH: 'jobs.db'}, jobWorker: {running: true}}};
     globalThis.fetch = async () => { throw Error('worker unavailable'); };
   });
   afterEach(() => {
@@ -343,4 +343,152 @@ describe('VS Code jobs status poll grace and debugging', () => {
     expect(messages).to.have.length(1);
   });
 
+});
+
+describe('VS Code readable job summaries', () => {
+  const {jobsSummary, jobsStatusBar} = require('../editors/vscode/job-worker.js');
+  it('formats terminal, active and pending states, names, times and available counts newest first', () => {
+    const start = '2026-01-01T12:00:00.000Z';
+    const lines = jobsSummary([
+      {program:'ZOLD', state:'COMPLETED', startedAt:start, endedAt:'2026-01-01T12:01:05Z', outputBytes:0,
+        steps:[{state:'COMPLETED'}, {state:'DONE'}]},
+      {jobName:'Book job', program:'ZREPORT', state:'RUNNING', startedAt:'2026-01-01T12:02:00Z'},
+      {program:'ZQUEUE', state:'QUEUED', queuedAt:'2026-01-01T12:03:00Z'},
+    ], Date.parse('2026-01-01T12:02:10Z')).split('\n');
+    expect(lines[0]).to.equal('ZQUEUE | QUEUED | Start: not started | Duration: — | Queued: 2026-01-01 12:03:00 UTC');
+    expect(lines[1]).to.equal('Book job | RUNNING | Start: 2026-01-01 12:02:00 UTC | Duration: 10s');
+    expect(lines[2]).to.equal('ZOLD | DONE | Start: 2026-01-01 12:00:00 UTC | Duration: 1m 5s | 2/2 steps done, 0 output bytes');
+  });
+  it('marks failures with a single-line reason and preserves DONE, GLASS, HELD and WAITING', () => {
+    for (const state of ['DONE','GLASS','HELD','WAITING']) {
+      expect(jobsSummary([{program:'ZBOOK',state}])).to.equal(`ZBOOK | ${state} | Start: not started | Duration: —`);
+    }
+    expect(jobsSummary([{jobName:'Book\njob',state:'FAILED',detail:'Bad\ninput',id:'private-id',outputSha256:'private-hash'}]))
+      .to.equal('! Book job | FAILED | Start: not started | Duration: — | Reason: Bad input');
+    expect(jobsSummary([{program:'ZBOOK',state:'INTERRUPTED',resultStatus:'WORKER_STOPPED'}])).to.include('! ZBOOK | INTERRUPTED').and.include('Reason: WORKER_STOPPED');
+    expect(jobsSummary([{state:'FAILED'}])).to.include('Reason: No reason recorded');
+    expect(jobsSummary([])).to.equal('No jobs recorded.');
+  });
+  it('opens a current snapshot by default and keeps the exact raw stream reachable explicitly', async () => {
+    const channels = [], commands = new Map(), subscriptions = [];
+    const vscode = {StatusBarAlignment:{Left:1}, ThemeColor: class {constructor(id) {this.id = id;}}, commands:{registerCommand(id, fn) { commands.set(id, fn); return {dispose(){}}; }},
+      window:{createOutputChannel(name) {
+        const channel = {name, content:'', shown:0, append(s){this.content += s;}, appendLine(s){this.content += s + '\n';},
+          clear(){this.content = '';}, show(){this.shown++;}, dispose(){}};
+        channels.push(channel); return channel;
+      }, createStatusBarItem(){return {show(){},hide(){},dispose(){}};}}};
+    const controller = {launcher:{port:8060,jobsWorkerMode:'auto',env:{STG_DB:'file',STG_DB_PATH:'jobs.db',OSD_BATCH_READ_TOKEN:'fixture'}},
+      onDidChange(){return {dispose(){}};}};
+    const previous = globalThis.fetch;
+    let request;
+    try {
+      globalThis.fetch = async (url, options) => {request = {url,options}; return {ok:true,json:async()=>({runs:[{program:'ZBOOK',state:'RUNNING',startedAt:'2026-01-01T12:00:00Z'}]})};};
+      jobsStatusBar(vscode,{subscriptions},controller);
+      const raw = '{"kind":"completed","run":{"id":"raw-id"}}\n';
+      controller.jobsOutput.append(raw);
+      await commands.get('osd.showJobs')();
+      expect(channels[0].shown).to.equal(1);
+      expect(channels[0].content).to.include('ZBOOK | RUNNING').and.not.include('raw-id');
+      expect(request.url).to.equal('http://127.0.0.1:8060/osd/batch-runs?limit=200');
+      expect(request.options.headers.Authorization).to.equal('Bearer fixture');
+      expect(channels[1].shown).to.equal(0);
+      commands.get('osd.showRawJobLog')();
+      expect(channels[1].shown).to.equal(1);
+      expect(channels[1].content).to.equal(raw);
+      globalThis.fetch = async () => {throw Error('offline');};
+      await commands.get('osd.showJobs')();
+      expect(channels[0].content).to.include('Job summary unavailable: offline');
+      expect(channels[1].content).to.equal(raw);
+      controller.launcher = undefined;
+      await commands.get('osd.showJobs')();
+      expect(channels[0].content).to.include('Jobs unavailable');
+    } finally {globalThis.fetch = previous; subscriptions.forEach(s => s.dispose());}
+  });
+});
+
+// Deferred fetches deliberately ignore cancellation to exercise late completions.
+describe('VS Code job status request lifecycle', () => {
+  const {jobsStatusBar} = require('../editors/vscode/job-worker.js');
+  let previous, h;
+  beforeEach(() => {
+    previous = globalThis.fetch;
+    const commands = new Map(), subscriptions = [], writes = [], requests = [];
+    let disposed = false;
+    const record = value => { writes.push({value, disposed}); };
+    const channels = [];
+    const api = {StatusBarAlignment:{Left:1}, ThemeColor: class {constructor(id) {this.id = id;}}, commands:{registerCommand(id, fn) {commands.set(id, fn); return {dispose(){}};}},
+      window:{createOutputChannel(name) {
+        const channel = {content:'', clear(){record(`${name}: clear`); this.content = '';},
+          appendLine(value){record(`${name}: ${value}`); this.content += value;}, show(){record(`${name}: show`);}, dispose(){}};
+        channels.push(channel); return channel;
+      }, createStatusBarItem(){return {show(){record('show');}, hide(){record('hide');}, dispose(){},
+        set text(value){record(value);}, set tooltip(value){record(value);}};}}};
+    const controller = {launcher:{port:8060,jobsWorkerMode:'auto',env:{STG_DB:'file',STG_DB_PATH:'jobs.db',OSD_BATCH_READ_TOKEN:'fixture'},jobWorker:{running:false}},
+      onDidChange(){return {dispose(){}};}};
+    globalThis.fetch = async url => {requests.push(url); return {ok:true,json:async()=>({counts:{running:0,queued:0},runs:[]})};};
+    const tick = jobsStatusBar(api, {subscriptions}, controller);
+    h = {commands, subscriptions, writes, requests, channels, controller, tick,
+      dispose(){subscriptions.forEach(s => s.dispose()); disposed = true;}};
+  });
+  afterEach(() => {h.dispose(); globalThis.fetch = previous;});
+  for (const endpoint of ['counts', 'summary']) {
+    it(`ignores a pending ${endpoint} response after disposal and starts no further requests`, async () => {
+      await h.commands.get('osd.showJobs')();
+      let resolve;
+      globalThis.fetch = url => {h.requests.push(url); return new Promise(done => {resolve = done;});};
+      h.controller.launcher.jobWorker.running = true;
+      const pending = endpoint === 'counts' ? h.tick() : h.commands.get('osd.showJobs')();
+      expect(resolve).to.be.a('function');
+      h.dispose();
+      const writes = h.writes.length, requests = h.requests.length;
+      resolve({ok:true,json:async()=>({counts:{running:2,queued:1},runs:[]})});
+      await pending;
+      await h.tick();
+      await h.commands.get('osd.showJobs')();
+      h.commands.get('osd.showRawJobLog')();
+      expect(h.writes).to.have.length(writes);
+      expect(h.requests).to.have.length(requests);
+    });
+  }
+  for (const outcome of ['success', 'failure']) {
+    it(`ignores counts ${outcome} from a replaced launcher`, async () => {
+      let resolve, reject;
+      globalThis.fetch = () => new Promise((done, fail) => {resolve = done; reject = fail;});
+      h.controller.launcher.jobWorker.running = true;
+      const pending = h.tick();
+      h.controller.launcher = {...h.controller.launcher, jobWorker:{running:false}};
+      const writes = h.writes.length;
+      if (outcome === 'success') resolve({ok:true,json:async()=>({counts:{running:2,queued:1}})});
+      else reject(Error('old launcher offline'));
+      await pending;
+      expect(h.writes).to.have.length(writes);
+    });
+  }
+  for (const endpoint of ['counts', 'summary']) {
+    for (const failure of [401, 503, 'non-JSON']) {
+      it(`shows readable unavailable messages for ${endpoint} ${failure}`, async () => {
+        globalThis.fetch = async () => failure === 'non-JSON'
+          ? {ok:true,json:async()=>{throw new SyntaxError('Unexpected token < in JSON');}}
+          : {ok:false,status:failure};
+        if (endpoint === 'counts') {
+          h.controller.launcher.jobWorker.running = true;
+          const savedNow = Date.now;
+          let now = 0;
+          try {
+            Date.now = () => now;
+            await h.tick();
+            expect(h.writes.map(w => w.value)).to.include('OSD jobs: busy');
+            now = 7500; await h.tick();
+            now = 15000; await h.tick();
+          } finally { Date.now = savedNow; }
+          expect(h.writes.map(w => w.value)).to.include('OSD jobs: status unavailable');
+          expect(h.channels[1].content).to.include(failure === 'non-JSON' ? 'JSON' : `HTTP ${failure}`);
+        } else {
+          await h.commands.get('osd.showJobs')();
+          expect(h.channels[0].content).to.include('Job summary unavailable:').and.include('Use Show raw job log');
+          expect(h.channels[0].content).to.include(failure === 'non-JSON' ? 'JSON' : `HTTP ${failure}`);
+        }
+      });
+    }
+  }
 });
