@@ -2432,11 +2432,23 @@ export function adtRouter(options = {}) {
     let named = [];
     let checked = [];
     let published = false;
-    answer(res, () => {
+    await answer(res, async () => {
       named = objectReferencesIn(body, collections);
       if (named.length === 0) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
         return;
+      }
+      // Activation is a HOST route behind either front. Ask its session
+      // adapter for the enqueue owner (the serving child's in mode 1),
+      // comparing session ids: another session of the same user is foreign.
+      // Preflight the whole list before any check, build or promotion so a
+      // locked reference cannot leave earlier free references activated.
+      for (const object of named) {
+        const holder = await req.adt.sessions.holderOf(object.type, object.name);
+        if (holder !== undefined && holder.session.id !== req.adt.session.id) {
+          res.status(403).type("application/xml").send(lockedByOtherDocument(holder.session.user, object.name));
+          return;
+        }
       }
       // Workbench sends the entity tag of the exact source that passed its
       // check. Refuse activation if Git or another editor replaced it in the

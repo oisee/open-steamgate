@@ -33,6 +33,7 @@
     "test/adt-abapfs-conformance.mjs",
     "test/adt-active-inactive.mjs",
     "test/adt-activation.mjs",
+    "test/adt-activation-locks.mjs",
     "test/adt-activation-wire.mjs",
     "test/adt-devloop.mjs",
     "test/adt-editor.mjs",

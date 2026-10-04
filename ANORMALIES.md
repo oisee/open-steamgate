@@ -3661,6 +3661,17 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Verification: int8 folder 10/10 SUCCESS; OSG opt-in harness 1 pass (default 1 pending); upstream 154 new tests, 192 runtime passes, 99 affected ABAP passes with 4 existing pending. All 26 supplied xstring conversion methods pass. Folder 007 is 12/17 overall: five of seven byte/integer equality methods fail in the separate comparison path; folder 008 is 16/16. This fix does not change comparison operators.
 - Dependency isolation: proof used core 2.120.64 (declared upstream minimum); 2.120.65 changes CREATE DATA TYPE HANDLE operand nodes and breaks the unchanged compiler on the library tree. The original shared dependencies were already a local 2.13.93 build, not published; their symlink and contents were preserved, and the disposable copy was removed.
 
+### ANOMALY-2026-10-04-adt-activation-foreign-lock - activation bypasses another session's editing lock
+
+- Status: `fixed locally`
+- Discovery: supplied private black-box comparison, row Xb and activation section S6; no new SAP request made.
+- Reproducer: session A locks a class; session B of the same user, with its own cookies and CSRF token, POSTs an activation referencing that class.
+- Expected SAP behaviour: 403 application/xml, ExceptionResourceNoAccess, T100 EU/510 with the editing user and object, and LONGTEXT, as for a foreign LOCK. A mass request with any foreign-locked reference activates nothing.
+- Actual before fix: 200 with checkExecuted/activationExecuted/generationExecuted all true; the edit becomes active while A still holds its lock.
+- Fix: preflight every activation reference against the authoritative session/enqueue owner before checking or publishing, using the existing LOCK refusal. The holder's own session and unlocked references remain eligible. Activation is a HOST route behind the ABAP front; its local and remote session adapters supply the same ownership check.
+- Regression: `test/adt-activation-locks.mjs`, Node and ABAP fronts, both runtime modes, own/foreign locks, mixed mass requests and activation after unlock.
+- Upstream: none; the ADT activation route belongs to this repository.
+
 ### ANOMALY-2026-10-04-sxml-byte-find - XML quote search can match between bytes
 
 - Status: `workaround`
