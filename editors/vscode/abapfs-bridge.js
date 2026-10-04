@@ -11,6 +11,12 @@ const RECOVERY_TTL = 5 * 60_000;
 function folderRecoveryKey(uri) {
   if (!uri) return undefined;
   const normalized = new URL(uri.toString());
+  // Drive URIs identify Windows paths even in a remote extension host.
+  // Authorities (including WSL) and POSIX paths retain their case.
+  if (normalized.protocol === "file:" && !normalized.hostname
+      && /^\/[a-z](?::|%3a)(?:\/|$)/i.test(normalized.pathname)) {
+    normalized.pathname = normalized.pathname.toLowerCase().replace(/^\/([a-z])%3a/, "/$1:");
+  }
   normalized.pathname = normalized.pathname.replace(/\/+$/, "") || "/";
   return `${RESTART_KEY}.${createHash("sha256").update(normalized.href).digest("hex")}`;
 }

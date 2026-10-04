@@ -62,6 +62,15 @@ function fixture(api, answer, saved = new Map(), workspaceSaved = new Map()) {
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 describe("ABAP-FS local bridge", () => {
   after(() => { for (const dir of createdDirs) rmSync(dir, {recursive: true, force: true}); });
+  it("matches Windows drive and folder case while preserving remote and WSL case", () => {
+    const key = value => folderRecoveryKey({toString: () => value});
+    expect(key("file:///C:/Work/Demo")).to.equal(key("file:///c:/work/demo/"));
+    expect(key("file:///C%3A/Work/Demo")).to.equal(key("file:///c:/work/demo/"));
+    for (const prefix of ["file:///work/", "file://wsl.localhost/Ubuntu/", "vscode-remote://wsl+Ubuntu/work/", "vscode-remote://ssh-remote+host/work/"]) {
+      expect(key(prefix + "Demo")).not.to.equal(key(prefix + "demo/"));
+    }
+    expect(key("vscode-remote://wsl+Ubuntu/work/demo")).not.to.equal(key("vscode-remote://wsl+ubuntu/work/demo"));
+  });
   it("limits the scrubbed child-process helper to deliberate serving-runtime uses", () => {
     const allowed = [
       "adt-facade.mjs", // HTTP boundary and its Git children.
