@@ -1056,11 +1056,11 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
   });
   it("an activation during priming waits and publishes the saved source", async () => {
     await store.warmState.compiler.drop();
+    await store.write("CLAS", A, src(A, 25));
     const prime = store.warmUp();
     expect(store.warmState.priming).to.equal(prime);
     let settled = false;
     prime.then(() => { settled = true; });
-    store.write("CLAS", A, src(A, 25));
     const result = await activate(A);
     expect(settled, "activation waited for the in-flight prime").to.equal(true);
     expect(result.ok, JSON.stringify(result.transpile)).to.equal(true);

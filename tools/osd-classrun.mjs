@@ -60,28 +60,9 @@ function specifier(file) {
   return "file://" + file.replaceAll("#", "%23");
 }
 
-// A short, bounded retry for a genuinely transient ENOENT right after a
-// build (a filesystem that has not caught up with a rename yet, measured
-// occasionally on this worktree under WSL2). This does NOT paper over the
-// bigger fact underneath it, the one tools/osd-serve.mjs's own header names
-// for the whole project: **Node pins a module graph for the life of a
-// process.** `output/` is two symlink hops from the tree root
-// (osd-build.mjs `switchTo`: `output -> build/live/output`, `build/live ->
-// by-input/<hash>`), and once *anything* under `output/` has been imported
-// once, this process's own module graph is the one it answers from --
-// activating a class and classrunning it in the SAME process a moment
-// later is exactly the scenario the serving runtime solves by recycling
-// into a NEW process. A retry fixes the disk catching up; it cannot fix a
-// process that already loaded the old graph -- which is exactly why a
-// served (child) runtime, recycled after every activation, does not have
-// this problem the way the façade's own inline connection can: `runClassrun`
-// below runs in whichever process holds the live connection, and in child
-// mode that is a process the last activation just replaced. In practice the
-// residual risk is only "write, activate and classrun the same class within
-// one still-running inline process" (this file's own tests build the
-// fixture that dumps this way at transpile time instead, for exactly this
-// reason); a classrun of anything that was already part of the tree when
-// the process started is unaffected.
+// Retry a transient missing file just after a build. The module import
+// validates that the requested class was built; after a warm swap its cached
+// export may be old, so execution below resolves the live runtime class table.
 async function importFresh(path, deadline = Date.now() + 500) {
   for (;;) {
     try {
@@ -128,7 +109,7 @@ export async function runClassrun(root, name, options = {}) {
     missing.code = "NOT_BUILT";
     throw missing;
   }
-  const [Local] = Object.values(module);
+  const Local = globalThis.abap?.Classes?.[name.toUpperCase()] ?? Object.values(module)[0];
   if (Local === undefined) {
     throw new Error(`${name} is not exported by its own module`);
   }
@@ -141,7 +122,7 @@ export async function runClassrun(root, name, options = {}) {
     throw new NotClassrun(name);
   }
   const outModule = await importFresh(join(outputDir, "zcl_osd_classrun_out.clas.mjs"));
-  const [OutClass] = Object.values(outModule);
+  const OutClass = globalThis.abap?.Classes?.ZCL_OSD_CLASSRUN_OUT ?? Object.values(outModule)[0];
   if (OutClass === undefined) {
     const e = new Error("ZCL_OSD_CLASSRUN_OUT is not built: transpile first");
     e.code = "NOT_TRANSPILED";

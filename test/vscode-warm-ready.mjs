@@ -3,7 +3,7 @@
 import {expect} from "chai";
 import {spawn} from "node:child_process";
 import {once} from "node:events";
-import {cpSync, mkdtempSync, rmSync, symlinkSync} from "node:fs";
+import {cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
@@ -64,6 +64,17 @@ describe("warm startup: ready means the front answers during priming", function 
         final = await fetch(`${base}/osd/serving`, {signal: AbortSignal.timeout(2000)}).then(r => r.json());
       }
       expect(final.warm.state, final.warm.reason ?? log.slice(-2000)).to.equal("primed");
+      // The first classrun imported its module before the swap. A later run
+      // must execute the live class table, rather than that cached export.
+      const file = join(dir, "src/classrun/zcl_osd_classrun_demo.clas.abap");
+      const before = readFileSync(file, "utf8");
+      const marker = `hello from classrun ${randomUUID()}`;
+      writeFileSync(file, before.replace("hello from classrun", marker));
+      const editing = new Osd(base);
+      const activated = await editing.activate({type: "CLAS", name: "ZCL_OSD_CLASSRUN_DEMO", base: "zcl_osd_classrun_demo"});
+      expect(activated.ok, JSON.stringify(activated)).to.equal(true);
+      expect(activated.build).to.equal("warm");
+      expect((await editing.classrun("ZCL_OSD_CLASSRUN_DEMO")).text).to.include(marker);
     } finally {
       if (child && child.exitCode === null && child.signalCode === null) {
         const stopped = once(child, "exit");

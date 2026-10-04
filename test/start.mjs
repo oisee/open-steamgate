@@ -627,7 +627,9 @@ export function startServer(quiet) {
   }
 
   // Open the sockets first. Discovery waits for this same warm-up on both
-  // fronts, with a silence bound. The synchronous registry parse still blocks
+  // fronts, with a silence bound. This parent registry serves ADT Unit plans
+  // and risk/xref reads independently of the compiler registry. Keep both
+  // (measured RSS in docs/warm-compile.md). The synchronous parse still blocks
   // readiness and unrelated routes until it finishes. Bind-only tests opt out.
   if (quiet !== true && process.env.OSD_UNIT_WARM !== "0") {
     facade.store.unitReady = new Promise((resolve) => setImmediate(resolve))

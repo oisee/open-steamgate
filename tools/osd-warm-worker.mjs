@@ -4,7 +4,7 @@ import {warmOverlay} from "./osd-warm-overlay.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {join} from "node:path";
 
-export function main() {
+export function main({beforeCompile = () => {}, heapLimit = 512 * 1048576} = {}) {
   let inactive = [];
   let folder;
   const root = process.env.OSD_ROOT ?? process.cwd();
@@ -15,7 +15,10 @@ export function main() {
     overlay: activating => warmOverlay(root, folder,
       inactive.map(entry => ({key: entry.key, files: entry.files.map(f => f.file)})), activating),
   });
-  const state = () => ({primed: compiler.primed, hash: compiler.hash, files: compiler.files?.size ?? 0,
+  let heapBase;
+  const state = () => ({memory: process.memoryUsage(),
+    recycleDue: heapBase !== undefined && process.memoryUsage().heapUsed - heapBase > heapLimit,
+    primed: compiler.primed, hash: compiler.hash, files: compiler.files?.size ?? 0,
     digests: [...(compiler.digests ?? [])], unverified: [...compiler.unverified],
     readers: compiler.primed ? [...compiler.reg.getObjects()].map(o => {
       const type = o.getType(), name = o.getName();
@@ -24,12 +27,14 @@ export function main() {
   });
   let queue = Promise.resolve();
   process.on("message", message => {
+    if (!["prime", "build"].includes(message.method)) return;
     queue = queue.then(async () => {
       inactive = message.inactive;
       folder = message.folder;
       try {
-        if (!["prime", "build"].includes(message.method)) throw new Error("unknown compiler operation");
+        await beforeCompile(message);
         const result = await compiler[message.method](new Set(message.activating));
+        if (message.method === "prime") heapBase = process.memoryUsage().heapUsed;
         process.send({id: message.id, result, state: state()});
       } catch (e) {
         const error = {message: e.message, code: e.code, check: e.check, issues: e.issues, output: e.output};

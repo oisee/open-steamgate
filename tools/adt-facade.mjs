@@ -1891,7 +1891,7 @@ export function adtRouter(options = {}) {
       const previousEntry = store.find("CLAS", name);
       const previous = previousEntry === undefined ? undefined : store.read("CLAS", name).source;
       const previousActive = previousEntry !== undefined && store.stateOf(previousEntry).version === "active";
-      store.write("CLAS", name, asked.source, "main", {root: scratch.path});
+      await store.write("CLAS", name, asked.source, "main", {root: scratch.path});
       const checked = store.warmActivation("CLAS", name);
       let notebookBuilt;
       try {
@@ -1907,16 +1907,16 @@ export function adtRouter(options = {}) {
       } catch (error) {
         // The pack survives restarts, so a failed candidate must not become
         // the next launcher's build input. Keep the last source that built.
-        if (previous === undefined) store.delete("CLAS", name);
+        if (previous === undefined) await store.delete("CLAS", name);
         else {
-          store.write("CLAS", name, previous, "main", {root: scratch.path});
+          await store.write("CLAS", name, previous, "main", {root: scratch.path});
           // The old source is still the serving generation. write() marks it
           // inactive, so restore its earlier ADT state for that revision.
-          if (previousActive) store.completeActivation(store.warmActivation("CLAS", name));
+          if (previousActive) await store.completeActivation(store.warmActivation("CLAS", name));
         }
         throw error;
       }
-      if (!store.completeActivation(checked, notebookBuilt)) {
+      if (!(await store.completeActivation(checked, notebookBuilt))) {
         const error = new Error("source changed during activation; run the notebook cell again");
         error.code = "NOTEBOOK_ACTIVATION_FAILED";
         throw error;
@@ -1981,7 +1981,7 @@ export function adtRouter(options = {}) {
           : attribute(body, "adtcore:packageRef", "adtcore:name") ?? attribute(body, "adtcore:packageRef", "adtcore:packageName");
         let made;
         try {
-          made = store.create(type, name, {
+          made = await store.create(type, name, {
             description: attribute(body, undefined, "adtcore:description") ?? "",
             package: home ?? "",
             // an object of $TMP carries who made it (tools/osd-tmp.mjs)
@@ -2032,7 +2032,7 @@ export function adtRouter(options = {}) {
           res.status(403).type("application/xml").send(lockedByOtherDocument(holder.session.user, String(name).toUpperCase()));
           return;
         }
-        const gone = store.delete(type, name);
+        const gone = await store.delete(type, name);
         // and a lock on an object that is gone holds nothing
         await req.adt.sessions.release(gone.type, gone.name);
         res.status(200).end();
@@ -2486,7 +2486,7 @@ export function adtRouter(options = {}) {
     });
     if (published === false || options.transpileOnActivate === false) {
       if (published === true) {
-        if (!store.completeActivations(checked)) {
+        if (!(await store.completeActivations(checked))) {
           res.status(200).type("application/xml").send(failureDocument(
             named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
           ));
@@ -2536,7 +2536,7 @@ export function adtRouter(options = {}) {
         return;
       }
       // promoted only if what was built is what was checked (and still saved)
-      if (!store.completeActivations(checked, result?.transpile?.built)) {
+      if (!(await store.completeActivations(checked, result?.transpile?.built))) {
         res.status(200).type("application/xml").send(failureDocument(
           named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
         ));

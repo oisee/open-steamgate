@@ -31,9 +31,10 @@ watcher and a 30 ms debounce.
    and VSIX host. Both the full prime and subsequent warm builds run there;
    the launcher can answer HTTP and proxy requests throughout. The warm
    path becomes available only when the prime completes. An activation
-   during priming waits for it, as before, while other requests keep using
-   the serving generation. The source view and inactive copies are sent
-   with each compiler operation, using the store's shared overlay rule. The
+   during priming waits up to 30 seconds while other requests keep using
+   the serving generation. A silent compiler, exit, or IPC loss kills and
+   awaits the compiler before building cold; later publications stay cold
+   until restart. The inactive-source metadata is sent with each operation. The
    prime checks its premise rather than assuming it: a full run of the kept
    registry must give the live generation's files byte for byte.
 2. **A save builds what it reaches.** The changed file replaces its copy in
@@ -65,6 +66,22 @@ watcher and a 30 ms debounce.
    again.
 
 ## The build view, with objects inactive
+
+The compiler's disk reads and store mutations share `osd-store-source-lock.mjs`.
+This is the serialization option: the lock spans the overlay snapshot, IPC,
+hashing, source reads and generation switch, for both warm and cold builds.
+A save, create, delete or promotion arriving in that interval queues behind
+it. The ADT and ABAP destination adapters await that write before acknowledging
+it. The synchronous store API remains available when idle; callers that mutate
+a running store must await the result. Priming takes the same lock, with its
+30-second deadline, and compilation acquires it only after priming settles.
+An external editor still uses the existing digest and revision checks.
+
+`test/warm-process.mjs` pauses the child after dispatch and before hashing,
+then saves an unrelated B while activating A. With the unguarded save restored,
+the test fails because B's saved-only value enters A's live generation. With
+the lock, B waits and stays inactive. Other regressions inject a CPU-bound hung
+prime, child exit and IPC loss; cold fallback returns only after child exit.
 
 An ADT save makes its object inactive, and an inactive object is kept out
 of every build (`ObjectStore#overlay`, #460): its last active copy from
@@ -204,6 +221,57 @@ kept polling through the full run. `test/warm.mjs` also covers activation
 during priming, inactive source views, comparison and process cleanup. A
 seeded Bun binary with no tool scripts in its test checkout answered serving
 in **0.143 s** and classrun in **138 ms** during an **18.077 s** prime.
+
+Round 2 verification (2026-10-04), with `npm run binary -- --seed` and
+`build/osd up` in a newly materialized standalone home:
+
+| Measurement | Result |
+| --- | --- |
+| First `/osd/serving` after Start resolved | **0.108 s** |
+| First classrun, still priming | **0.119 s** |
+| Full prime, front polled throughout | **16.093 s**, 1537 files |
+| Warm activation, including front work | **7.533 s**, acknowledged swap **3 ms** |
+| Parent RSS after prime | **1372.0 MiB** |
+| Compiler RSS after prime | **2385.9 MiB** |
+| Combined parent/compiler RSS | **3757.9 MiB** |
+
+The parent registry and `UnitRisk` graph prewarmed in `test/start.mjs` serve
+ADT Unit discovery, test plans and risk/xref reads. They are retained for those
+reads, independently of the compiler. The RSS total above includes both
+processes, measured after the prime with that prewarm enabled. The serving
+runtime is a third process and is outside this two-registry total. The compiler
+has its own **512 MiB heap-growth limit from the completed prime**: after a
+build exceeding it, the process is reaped, its published generation is kept,
+and the next activation primes a replacement. This supplements the serving
+runtime's existing 512 MiB growth and 25-swap recycle limits. A regression
+injects a smaller compiler threshold and verifies the generation survives.
+
+The binary run initially exposed classrun's cached-module export after an
+acknowledged warm swap: it still printed the old value. Classrun now resolves
+the live class from `abap.Classes`, and the successful run verified the changed
+output after activation. `vscode-warm-ready` repeats that cached-import case;
+`vscode-warm` now starts the supervised child host and waits for priming instead
+of accepting an inline host's permanent "not primed yet" state.
+
+The final focused run passed **78 tests**: the original 71 plus five compiler
+process regressions and two platform kill-strategy tests. All eight files ran
+with the isolation hook: no leaked compiler workers or processes, and no new
+allowances. `vscode-warm` used its existing bounded restored-source generation
+allowance, with a real **7 ms** warm swap. The checkout startup check measured
+**0.145 s** for serving and **0.126 s** for classrun. The injected hung prime
+completed cold activation and a subsequent publication in **612 ms** with a
+500 ms compiler deadline. Suite registration lists 308 ordinary and seven
+grouped suites; the changed-file size guard passes without raised budgets.
+The store, ABAP destination and launcher checks added **166 passing tests**
+under isolation (244 passing across the two final focused runs).
+The full guard still reports five inherited breaches in untouched files.
+Local evidence is under `.local/warm-round2/`, including the failing race
+control and the first binary run that exposed the stale classrun export.
+
+Launcher shutdown uses `taskkill /T /F` on Windows and a dedicated process
+group on POSIX, with kill escalation. The platform strategies are unit tested
+(Windows mocked); they do not depend on the CPU-bound compiler processing
+an IPC disconnect.
 
 ## What a swap means, compared with a system
 

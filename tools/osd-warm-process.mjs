@@ -36,13 +36,19 @@ export class WarmCompilerProcess extends WarmCompiler {
   #epoch = 0;
   #closing = false;
 
+  constructor(options = {}) {
+    super(options);
+    this.worker = options.worker ?? CHILD;
+    this.onMessage = options.onMessage;
+  }
+
   get primed() { return this.#primed; }
   get closing() { return this.#closing; }
 
   #start() {
     if (this.#child) return this.#child;
     reapOnExit();
-    const [cmd, ...args] = toolCommand(CHILD);
+    const [cmd, ...args] = toolCommand(this.worker);
     const child = spawn(cmd, args, {cwd: this.root, stdio: ["ignore", "pipe", "pipe", "ipc"],
       env: {...process.env, OSD_ROOT: this.root}});
     this.#child = child;
@@ -51,26 +57,31 @@ export class WarmCompilerProcess extends WarmCompiler {
     child.stdout.on("data", d => this.log(String(d).trimEnd()));
     child.stderr.on("data", d => this.log(String(d).trimEnd()));
     const fail = error => {
+      error.code = "WARM_UNAVAILABLE";
       if (this.#child === child) {
         this.#primed = false;
-        this.#child = undefined;
       }
       for (const pending of this.#pending.values()) pending.reject(error);
       this.#pending.clear();
     };
     child.on("error", fail);
+    child.on("disconnect", () => fail(new Error("warm compiler IPC disconnected")));
     this.#closed = new Promise(resolve => child.once("close", (code, signal) => {
       children.delete(child);
       fail(new Error(`warm compiler exited (${signal ?? code})`));
+      if (this.#child === child) this.#child = undefined;
       resolve();
     }));
     child.on("message", message => {
+      this.onMessage?.(message, child);
       if (message.type === "log") { this.log(message.text); return; }
       const pending = this.#pending.get(message.id);
       if (!pending || this.#child !== child) return;
       this.#pending.delete(message.id);
       const s = message.state;
       this.#primed = s.primed;
+      this.memory = s.memory;
+      this.recycleDue = s.recycleDue;
       this.hash = s.hash;
       this.files = new Map(Array.from({length: s.files}, (_, i) => [i, undefined]));
       this.digests = new Map(s.digests);
@@ -97,7 +108,7 @@ export class WarmCompilerProcess extends WarmCompiler {
     return new Promise((resolve, reject) => {
       this.#pending.set(id, {resolve, reject});
       child.send({id, method, activating: [...activating], inactive, folder}, error => {
-        if (error) { this.#pending.delete(id); reject(error); }
+        if (error) { this.#pending.delete(id); reject(Object.assign(error, {code: "WARM_UNAVAILABLE"})); }
       });
     });
   }
@@ -107,6 +118,7 @@ export class WarmCompilerProcess extends WarmCompiler {
     const view = this.overlayOf(activating);
     const result = await this.#call("build", activating);
     this.views.set(result.hash, view);
+    if (this.recycleDue) await this.drop();
     return result;
   }
   async verify(hash) {
