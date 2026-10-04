@@ -209,14 +209,15 @@ function jobsStatusBar(vscode, context, controller) {
     return false;
   };
   const debugging = () => [vscode.debug?.activeDebugSession, ...sessions].some(isSystemSession);
-  let busy = false, misses = 0, firstMiss, lastKnown, observedLauncher, panelCounts;
+  let busy = false, misses = 0, firstMiss, lastKnown, observedLauncher;
   const resetMisses = () => { misses = 0; firstMiss = undefined; };
   const tick = async () => {
     if (disposed || busy) return;
     busy = true;
     const launcher = controller.launcher;
+    let panelCounts, pollHealth = 'unavailable';
     if (launcher !== observedLauncher) {
-      observedLauncher = launcher; lastKnown = undefined; panelCounts = undefined; resetMisses();
+      observedLauncher = launcher; lastKnown = undefined; resetMisses();
     }
     try {
       if (!workerEnabled(launcher?.jobsWorkerMode, launcher?.env)) { item.hide(); return; }
@@ -228,7 +229,7 @@ function jobsStatusBar(vscode, context, controller) {
       if (disposed) return;
       if (!answer.ok) throw Error(`job counts: HTTP ${answer.status}`);
       const counts = (await answer.json()).counts;
-      panelCounts = counts;
+      panelCounts = counts; pollHealth = 'healthy';
       if (!disposed && controller.launcher === launcher && workerEnabled(launcher.jobsWorkerMode, launcher.env)) {
         item.text = launcher.jobWorker.otherWindow
           ? `OSD jobs: other window · ${counts.running ?? 0} running, ${counts.queued ?? 0} queued`
@@ -239,6 +240,7 @@ function jobsStatusBar(vscode, context, controller) {
     } catch (error) {
       if (disposed || controller.launcher !== launcher || !workerEnabled(launcher.jobsWorkerMode, launcher.env)) return;
       const paused = error.name === 'TimeoutError' && debugging();
+      pollHealth = paused ? 'paused' : 'busy';
       // The engine serializes requests: even a normal first classrun can
       // outlast this poll. Require sustained failures before claiming an outage.
       if (paused) resetMisses();
@@ -249,7 +251,7 @@ function jobsStatusBar(vscode, context, controller) {
       item.backgroundColor = unavailable ? new vscode.ThemeColor('statusBarItem.errorBackground') : undefined;
       if (unavailable) raw.appendLine(error.message);
     }
-    finally { busy = false; if (!disposed) await controller.jobsPanelTick?.(panelCounts); if (!disposed && summaryShown) await refreshSummary(); }
+    finally { busy = false; if (!disposed) await controller.jobsPanelTick?.(panelCounts, pollHealth); if (!disposed && pollHealth === 'healthy' && summaryShown) await refreshSummary(); }
   };
   if (vscode.debug?.onDidStartDebugSession) context.subscriptions.push(
     vscode.debug.onDidStartDebugSession(session => sessions.add(session)));

@@ -49,7 +49,7 @@ describe('VS Code read-only jobs panel', function() {
     });
     await new Promise(r=>server.listen(0,'127.0.0.1',r));
     controller={launcher:{state:'running',port:server.address().port,env:{OSD_BATCH_READ_TOKEN:token}},onDidChange:fn=>{controller.change=fn;return {dispose(){}};}};
-    context={subscriptions:[]};provider=registerJobsView(ui.vscode,context,controller);await until(()=>!provider.busy);
+    context={subscriptions:[]};provider=registerJobsView(ui.vscode,context,controller);await provider.refresh();await until(()=>!provider.busy);
   });
   afterEach(async()=>{context.subscriptions.forEach(d=>d.dispose());await new Promise(r=>server.close(r));});
   async function job() {return (await provider.getChildren({group:'active'}))[0];}
@@ -116,9 +116,9 @@ describe('VS Code read-only jobs panel', function() {
     expect((await provider.getChildren())[0].label).to.equal('System is not running');
   });
   it('refreshes active jobs from the shared poll and stops fetching for finished jobs',async()=>{
-    runs[0].state='COMPLETED';await controller.jobsPanelTick();expect((await provider.getChildren())[0].group).to.equal('finished');
-    const count=requests.length;await controller.jobsPanelTick({running:0,queued:0});expect(requests).to.have.length(count);
-    await controller.jobsPanelTick({running:1});expect(requests).to.have.length(count+1);
+    runs[0].state='COMPLETED';await controller.jobsPanelTick(undefined,'healthy');expect((await provider.getChildren())[0].group).to.equal('finished');
+    const count=requests.length;await controller.jobsPanelTick({running:0,queued:0},'healthy');expect(requests).to.have.length(count);
+    await controller.jobsPanelTick({running:1},'healthy');expect(requests).to.have.length(count+1);
   });
   it('uses the status poll for active refresh and opens the panel from the jobs item',async()=>{
     const {jobsStatusBar}=require('../editors/vscode/job-worker.js');
@@ -131,6 +131,40 @@ describe('VS Code read-only jobs panel', function() {
     expect(ui.providers.get('statusBar').command).to.equal('osd.openJobsPanel');
     status=500;await tick();expect(ui.providers.get('statusBar').backgroundColor).to.equal(undefined);
     expect(JSON.stringify(ui.output)).not.to.include(token);
+  });
+  it('suppresses panel and expanded-detail reads after repeated counts timeouts and 404s',async()=>{
+    const {jobsStatusBar}=require('../editors/vscode/job-worker.js');
+    Object.assign(controller.launcher,{jobsWorkerMode:'auto',jobWorker:{running:true}});
+    Object.assign(controller.launcher.env,{STG_DB:'file',STG_DB_PATH:'/tmp/synthetic-jobs.db'});
+    const tick=jobsStatusBar(ui.vscode,context,controller);
+    await until(()=>requests.filter(r=>r.url.startsWith('/osd/batch-runs?limit')).length>=2 && !provider.busy);
+    const node=await job();await provider.getChildren(node);
+    const savedFetch=globalThis.fetch;
+    try {
+      for(const mode of ['timeout','disabled']) {
+        let panelReads=0;
+        globalThis.fetch=async url=>{if(String(url).includes('batch-runs')) {panelReads++;return savedFetch(url,{headers:{Authorization:`Bearer ${token}`}});}if(mode==='timeout')throw new DOMException('timeout','TimeoutError');return {ok:false,status:404};};
+        const before=requests.length;
+        for(let i=0;i<10;i++) {await tick();await provider.getChildren(node);await provider.getChildren({run:{id:'uncached'}});}
+        expect(requests.length).to.equal(before);expect(panelReads).to.equal(0);
+      }
+    } finally {globalThis.fetch=savedFetch;}
+  });
+  it('backs off disabled and empty lists and reuses details in a refresh cycle',async()=>{
+    const savedNow=Date.now;let now=0;Date.now=()=>now;
+    try {
+      const node=await job();const before=requests.length;
+      await Promise.all([provider.getChildren(node),provider.getChildren(node)]);
+      await provider.getChildren(node);provider.events.fire();await provider.getChildren(node);
+      expect(requests.length).to.equal(before+1);
+      await provider.refresh();await provider.getChildren(node);expect(requests.length).to.equal(before+3);
+      for(const disabled of [true,false]) {
+        status=disabled?404:200;runs=[];await provider.refresh();
+        const count=requests.length;
+        for(let i=0;i<60;i++) {now+=2000;await controller.jobsPanelTick({running:0},'healthy');}
+        expect(requests.length-count).to.be.at.most(6);
+      }
+    } finally {Date.now=savedNow;}
   });
   it('retains jobs on missed/busy polls and never surfaces bearer or server errors',async()=>{
     status=500;await provider.refresh();expect((await provider.getChildren())[0].group).to.equal('active');await provider.open(await job(),'log');

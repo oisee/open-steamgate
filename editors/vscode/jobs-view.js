@@ -22,7 +22,7 @@ class JobsView {
   constructor(vscode, controller) {
     this.vscode = vscode; this.controller = controller; this.runs = []; this.filter = {};
     this.events = new vscode.EventEmitter(); this.onDidChangeTreeData = this.events.event;
-    this.empty = 'System is not running';
+    this.empty = 'System is not running'; this.details = new Map(); this.pollHealth = 'unavailable'; this.retryMs = 2000; this.nextRead = 0;
   }
   getTreeItem(node) { return node; }
   node(label, children = false) { return {label, collapsibleState: children ? 1 : 0}; }
@@ -37,30 +37,45 @@ class JobsView {
   async refresh() {
     if (this.disposed) return;
     const launcher = this.controller.launcher, token = launcher?.env?.OSD_BATCH_READ_TOKEN;
-    if (launcher !== this.observed || token !== this.token) { this.runs = []; this.observed = launcher; this.token = token; }
+    if (launcher !== this.observed || token !== this.token) { this.runs = []; this.details.clear(); this.retryMs = 2000; this.nextRead = 0; this.observed = launcher; this.token = token; }
     if (launcher?.state !== 'running') {
       this.runs = []; this.empty = 'System is not running'; this.events.fire(); return;
     }
     if (this.busy) return;
-    this.busy = true;
+    this.busy = true; this.pollHealth = 'healthy';
     try {
       const answer = await this.request({limit:200}, launcher);
       if (this.disposed || this.controller.launcher !== launcher || launcher.state !== 'running' || launcher.env?.OSD_BATCH_READ_TOKEN !== token) return;
       this.runs = answer.runs.filter(run => run.state !== 'DELETED').sort((a,b) => time(b)-time(a) || b.id.localeCompare(a.id));
-      this.empty = 'No saved jobs';
+      this.empty = 'No saved jobs'; this.details.clear();
+      if (this.runs.length) { this.retryMs = 2000; this.nextRead = 0; } else this.backoff();
     } catch (error) {
       if (this.disposed || this.controller.launcher !== launcher || launcher.state !== 'running' || launcher.env?.OSD_BATCH_READ_TOKEN !== token) return;
       if ([401,404].includes(error.status)) { this.runs = []; this.empty = error.status === 401 ? 'Jobs API authorization unavailable' : 'Jobs API is disabled'; }
       else if (!this.runs.length) this.empty = 'Jobs API is busy or paused; retrying';
+      this.backoff();
     } finally { this.busy = false; if (!this.disposed) this.events.fire(); }
   }
-  poll(counts) {
+  backoff() {
+    this.nextRead = Date.now() + this.retryMs;
+    this.retryMs = Math.min(60000, this.retryMs * 2);
+  }
+  poll(counts, health) {
+    this.pollHealth = health;
+    if (health !== 'healthy' || Date.now() < this.nextRead) return;
     if (counts?.running || counts?.queued || this.runs.some(run => ['active','ready','released'].includes(phase(run))) || !this.runs.length) return this.refresh();
   }
   async getChildren(node) {
     if (node?.run) {
       let run;
-      try { ({run} = await this.request({id:node.run.id})); }
+      try {
+        if (!this.details.has(node.run.id)) {
+          if (this.pollHealth !== 'healthy') return [this.node('Job details unavailable; refresh to retry')];
+          this.details.set(node.run.id, this.request({id:node.run.id}).then(answer => answer.run));
+        }
+        run = await this.details.get(node.run.id);
+        if (!run) throw Error('Missing run');
+      }
       catch { return [this.node("Job details unavailable; refresh to retry")]; }
       return [...(run.steps?.length ? run.steps : [{number:1, program:run.program}]).map(step =>
         this.node(`Step ${step.number}: ${step.program}${step.variant ? ` · Variant ${step.variant}` : ''} · User ${step.user || run.user || 'not recorded'}`)),
@@ -142,9 +157,8 @@ function registerJobsView(vscode, context, controller) {
     if (!node.run.jobName || !node.run.jobCount) return vscode.window.showInformationMessage('No retained JOBNAME/JOBCOUNT key is recorded for this run.');
     return vscode.env.clipboard.writeText(`${node.run.jobName}/${node.run.jobCount}`);
   });
-  controller.jobsPanelTick = counts => provider.poll(counts);
-  context.subscriptions.push(controller.onDidChange(() => { void provider.refresh(); }), {dispose:() => { delete controller.jobsPanelTick; }});
-  void provider.refresh();
+  controller.jobsPanelTick = (counts, health) => provider.poll(counts, health);
+  context.subscriptions.push(controller.onDidChange(() => { provider.pollHealth = 'unavailable'; if (controller.launcher?.state !== 'running') void provider.refresh(); }), {dispose:() => { delete controller.jobsPanelTick; }});
   return provider;
 }
 module.exports = {JobsView, registerJobsView, phase, startCondition};
