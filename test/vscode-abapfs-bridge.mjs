@@ -19,6 +19,7 @@ class Emitter {
 }
 const folder = {uri: {toString: () => "file:///work/demo/"}};
 const recoveryKey = folderRecoveryKey(folder.uri);
+const transitionEvidence = {expectedFolders: [recoveryKey, folderRecoveryKey({toString: () => "adt://osd-local"})], workspaceScheme: "untitled"};
 const storageDirs = new WeakMap();
 const createdDirs = [];
 function fixture(api, answer, saved = new Map(), workspaceSaved = new Map()) {
@@ -43,7 +44,7 @@ function fixture(api, answer, saved = new Map(), workspaceSaved = new Map()) {
     extensions: {getExtension: (id) => { expect(id).to.equal(EXTENSION_ID); return {activate: async () => api}; }},
     window: {showInformationMessage: async (...args) => { messages.push(args); return answer; },
       showWarningMessage: (s) => messages.push(s)},
-    workspace: {workspaceFolders: [folder, {uri: {toString: () => "abapfs:/osd-local"}}], getConfiguration: (name) => { expect(name).to.equal("abapfs"); return {
+    workspace: {workspaceFolders: [folder, {uri: {toString: () => "adt://osd-local"}}], getConfiguration: (name) => { expect(name).to.equal("abapfs"); return {
       get: () => remote, inspect: () => ({globalValue: remote}), update: async (key, value, scope) => {
         expect(key).to.equal("remote"); expect(scope).to.equal(1); remote = value; writes.push(value);
       },
@@ -220,7 +221,7 @@ describe("ABAP-FS local bridge", () => {
       expect(p.getConnections()[0]).to.include({id: "osd-local", autoConnect: true});
       return {dispose() {}};
     }}, undefined, f.saved, new Map());
-    again.vscode.workspace.workspaceFolders = [folder, {}];
+    again.vscode.workspace.workspaceFolders = f.vscode.workspace.workspaceFolders.concat({uri: {toString: () => "adt://osd-local"}});
     again.vscode.workspace.workspaceFile = {scheme: "untitled"};
     again.controller.start = async () => { restarts++; again.start(); };
     await registerAbapFsBridge(again.vscode, again.context, again.controller);
@@ -230,6 +231,33 @@ describe("ABAP-FS local bridge", () => {
     later.controller.start = async () => restarts++;
     await registerAbapFsBridge(later.vscode, later.context, later.controller);
     expect(restarts).to.equal(1);
+  });
+  it("leaves a hanging mount intent for the transitioned workspace, never a single-folder window", async () => {
+    const f = fixture({version: 2, registerConnectionProvider: () => ({dispose() {}}),
+      connect: () => new Promise(() => {})}, "Open OSD (local) in ABAP-FS");
+    f.vscode.workspace.workspaceFolders = [folder];
+    await registerAbapFsBridge(f.vscode, f.context, f.controller); f.start(); await settled();
+    const intent = f.saved.get(recoveryKey);
+    expect(intent.session).to.be.a("string");
+    let starts = 0;
+    const plain = fixture({}, undefined, f.saved);
+    plain.vscode.workspace.workspaceFolders = [folder];
+    plain.controller.start = async () => starts++;
+    await registerAbapFsBridge(plain.vscode, plain.context, plain.controller);
+    expect(starts).to.equal(0);
+    expect(f.saved.get(recoveryKey)).to.equal(intent);
+    const unrelated = fixture({}, undefined, f.saved);
+    unrelated.vscode.workspace.workspaceFolders = [folder, {uri: {toString: () => "file:///work/other"}}];
+    unrelated.controller.start = async () => starts++;
+    await registerAbapFsBridge(unrelated.vscode, unrelated.context, unrelated.controller);
+    expect(starts).to.equal(0);
+    expect(f.saved.get(recoveryKey)).to.equal(intent);
+    const transitioned = fixture({}, undefined, f.saved);
+    transitioned.vscode.workspace.workspaceFile = {scheme: "untitled"};
+    transitioned.controller.start = async () => starts++;
+    await registerAbapFsBridge(transitioned.vscode, transitioned.context, transitioned.controller);
+    expect(starts).to.equal(1);
+    expect(f.saved.get(recoveryKey)).to.equal(undefined);
   });
   it("clears restart intent when explicit mounting fails", async () => {
     const f = fixture({version: 2, registerConnectionProvider: () => ({dispose() {}}),
@@ -276,7 +304,7 @@ describe("ABAP-FS local bridge", () => {
     expect(f.saved.get(recoveryKey)).to.equal(undefined);
   });
   it("claims recovery once across hosts with independently cached running intent", async () => {
-    const recovery = {mount: "test-mount", session: "initiator", timestamp: Date.now()};
+    const recovery = {...transitionEvidence, mount: "test-mount", session: "initiator", timestamp: Date.now()};
     const first = fixture({}), second = fixture({});
     second.context.globalStorageUri = first.context.globalStorageUri;
     for (const f of [first, second]) f.saved.set(recoveryKey, recovery);
@@ -342,7 +370,7 @@ describe("ABAP-FS local bridge", () => {
   });
   it("recovers after reload even if ABAP-FS was removed, and consumes failed recovery", async () => {
     const f = fixture({});
-    f.saved.set(recoveryKey, {mount: "failed-start", timestamp: Date.now()});
+    f.saved.set(recoveryKey, {...transitionEvidence, mount: "failed-start", timestamp: Date.now()});
     f.vscode.extensions.getExtension = () => undefined;
     let starts = 0;
     f.controller.start = async () => { starts++; throw Error("start failed"); };

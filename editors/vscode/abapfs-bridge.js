@@ -83,6 +83,15 @@ async function registerAbapFsBridge(vscode, context, controller) {
       await context.globalState.update(key, undefined);
       continue;
     }
+    const expected = recovery.expectedFolders;
+    const untitled = vscode.workspace.workspaceFile?.scheme === recovery.workspaceScheme
+      && recovery.workspaceScheme === "untitled";
+    // A pending provider call is not evidence of a reload. Only the expected
+    // folder set or its untitled workspace (even after ABAP-FS removal) is.
+    if (recovery.session === session || !Array.isArray(expected)
+        || !canAutoConnect(vscode.workspace)
+        || !keys.every(key => expected.includes(key))
+        || (!untitled && (keys.length !== expected.length || keys.length < 2))) continue;
     const claim = {session, timestamp: Date.now(), consumed: true};
     // The mount id fences independently cached globalState in other hosts.
     // Consume permanently before awaiting anything; failed starts never loop.
@@ -115,7 +124,11 @@ async function registerAbapFsBridge(vscode, context, controller) {
       if (choice !== "Open OSD (local) in ABAP-FS" || disposed || !current) return;
       const reload = !canAutoConnect(vscode.workspace);
       stopped = false;
-      if (reload && keys[0]) await context.globalState.update(keys[0], {mount: randomBytes(16).toString("hex"), session, timestamp: Date.now()});
+      if (reload && keys[0]) await context.globalState.update(keys[0], {
+        mount: randomBytes(16).toString("hex"), session, timestamp: Date.now(),
+        expectedFolders: [...keys, folderRecoveryKey({toString: () => `adt://${CONNECTION_ID}`})],
+        workspaceScheme: "untitled",
+      });
       if (stopped || disposed || !current) { if (stopped) await clearRecovery(); return; }
       try { await api.connect(CONNECTION_ID); }
       catch {
