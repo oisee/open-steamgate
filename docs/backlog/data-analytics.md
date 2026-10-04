@@ -16,6 +16,48 @@
      └─ free now, docs/virtual-elements.md
 ```
 
+
+## 3b. More database backends (after 0.8, Alice 2026-10-04)
+
+The seam is one object: `abap.context.databaseConnections["DEFAULT"]` and its
+eleven-method `DatabaseClient` (`docs/db-backends.md`). SQLite, DuckDB, PostgreSQL
+and HANA already sit behind it. Each new engine is a client module, a DDL and
+literal dialect, the LUW (savepoints or replay), and a Compose stack with its own
+instance number. Nothing changes in the transpiled ABAP.
+
+```
+3b.1 HANA: in-place migration of an existing schema                    [Should, 0.8/0.9]
+     └─ 0.7 refuses an old schema with a clear message; per-table migration
+        (#610, draft) covers SQLite, DuckDB and PostgreSQL first
+3b.2 Oracle Database Free (formerly XE)                                [S]
+     ├─ free without a time limit: 2 CPU threads, 2 GB RAM, 12 GB user data;
+     │  the official container image runs on x86-64 and ARM (Apple Silicon)
+     ├─ the second "real" enterprise engine next to HANA: SAP systems ran on
+     │  Oracle for decades, so its Open SQL edge cases are worth measuring
+     ├─ dialect: no LIMIT before 12c-style FETCH FIRST, empty string = NULL
+     │  (a CHAR/STRING trap for ABAP's initial values), identifier case,
+     │  NUMBER for P, savepoints exist
+     └─ also reachable without install: Oracle Cloud Always Free (Autonomous
+        DB) and FreeSQL; a stack stays local-first
+3b.3 MariaDB / MySQL                                                   [S]
+     ├─ the most common open-source server engine; a Compose stack like PG
+     ├─ dialect: backtick identifiers, sql_mode for strict types, utf8mb4,
+     │  DECIMAL for P, savepoints (InnoDB)
+     └─ one client can serve both, measured on both
+3b.4 ClickHouse, for the analytics side only                           [R]
+     ├─ columnar OLAP: no row-level transactions, mutations are asynchronous,
+     │  so not a full Open SQL backend for writes
+     ├─ candidate as a read replica for the CDS cube and SADL analytics
+     │  (docs/backlog/data-analytics.md §3), next to DuckDB, which already
+     │  covers in-process analytics
+     └─ decide only after a measurement against DuckDB on the 1M-fact cube
+        (`npm run bench:cube`)
+```
+
+Each one is done when `npm run unit` and the `.http` regression cases pass on it,
+the support page has a column for it, and it has a stack in the i7/i3 Portainer
+set.
+
 ### The rest of the one-row inserts, and what the seed fix did not reach (2026-09-19)
 
 `tools/osd-batch-inserts.mjs`, called once in `test/setup.mjs`. Suite
