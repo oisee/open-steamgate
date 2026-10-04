@@ -3,6 +3,7 @@
 import {WarmCompiler} from "./osd-warm.mjs";
 import {spawn} from "./osd-child-process.mjs";
 import {toolCommand} from "./osd-host.mjs";
+import {compilerEnv} from "./osd-warm-env.mjs";
 import {fileURLToPath} from "node:url";
 import {join} from "node:path";
 
@@ -50,7 +51,7 @@ export class WarmCompilerProcess extends WarmCompiler {
     reapOnExit();
     const [cmd, ...args] = toolCommand(this.worker);
     const child = spawn(cmd, args, {cwd: this.root, stdio: ["ignore", "pipe", "pipe", "ipc"],
-      env: {...process.env, OSD_ROOT: this.root}});
+      env: {...compilerEnv(), OSD_ROOT: this.root}});
     this.#child = child;
     child.osdWarmStop = () => { this.#closing = true; };
     children.add(child);

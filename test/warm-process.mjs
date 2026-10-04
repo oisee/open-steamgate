@@ -22,7 +22,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 describe("warm compiler process: source isolation and bounded cold fallback", function () {
   this.timeout(30000);
-  let root, store, compiler, child, paused;
+  let root, store, compiler, child, paused, environment;
   const mode = text => writeFileSync(join(root, "control"), text);
   const out = name => readFileSync(join(root, "output", `${name}.clas.mjs`), "utf8");
   const save = (name, n) => store.write("CLAS", name.toUpperCase(), source(name, n));
@@ -49,6 +49,8 @@ describe("warm compiler process: source isolation and bounded cold fallback", fu
     writeFileSync(worker, `import {main} from ${JSON.stringify(pathToFileURL(join(repo, "tools/osd-warm-worker.mjs")).href)};
 import {readFileSync} from "node:fs";
 main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
+ process.send({type: "environment", credentials: ["OSD_ADT_TOKEN", "OSD_BATCH_READ_TOKEN", "PGPASSWORD", "HANA_PASSWORD", "FIXTURE_SECRET"]
+  .filter(key => process.env[key] !== undefined), root: process.env.OSD_ROOT, path: process.env.PATH});
  const mode = readFileSync("control", "utf8");
  if (mode === "hang-" + method) { process.send({type: "paused"}); while (true) {} }
  if (mode === "exit-" + method) process.exit(23);
@@ -71,12 +73,28 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     paused = false; child = undefined;
     compiler = new WarmCompilerProcess({root, worker,
       overlay: s => store.overlay(s), keyOf: f => store.objectKeyOf(f), inactiveSources: s => store.inactiveSources(s),
-      onMessage: (message, process) => { child = process; if (message.type === "paused") paused = true; },
+      onMessage: (message, process) => { child = process; if (message.type === "paused") paused = true;
+        if (message.type === "environment") environment = message; },
     });
     store.warmState = {on: true, compiler};
     expect(await store.warmUp()).to.not.equal(undefined, store.warmState.reason);
   });
   afterEach(async () => { await closeWarm(store); rmSync(root, {recursive: true, force: true}); });
+
+  it("primes through osd-host without inheriting bridge, database or arbitrary secrets", async () => {
+    await compiler.drop();
+    const keys = ["OSD_ADT_TOKEN", "OSD_BATCH_READ_TOKEN", "PGPASSWORD", "HANA_PASSWORD", "FIXTURE_SECRET"];
+    const previous = keys.map(key => process.env[key]);
+    try {
+      for (const key of keys) process.env[key] = "fixture-secret";
+      environment = undefined;
+      expect(await store.warmUp()).to.not.equal(undefined, store.warmState.reason);
+      expect(environment).to.include({root, path: process.env.PATH});
+      expect(environment.credentials).to.deep.equal([]);
+    } finally {
+      keys.forEach((key, i) => { if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i]; });
+    }
+  });
 
   it("saves an unrelated object within 200 ms after dispatch, before hashing; B stays inactive", async () => {
     await save("zcl_a", 2);
@@ -243,6 +261,7 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     writeFileSync(worker, readFileSync(worker, "utf8").replace("heapLimit: 536870912", "heapLimit: -1e12"));
     await store.warmUp();
     await save("zcl_a", 6);
+    const checked = store.warmActivation("CLAS", "ZCL_A");
     const result = await activate();
     expect(result.ok).to.equal(true);
     expect(result.transpile.warm).to.equal(true);
@@ -252,6 +271,16 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     expect(store.warmState.primeDue).to.equal(true);
     gone();
     expect(out("zcl_a")).to.include("IntegerFactory.get(6)");
+    expect(store.completeActivation(checked, result.transpile.built)).to.equal(true);
+    // Direct compiler users need readiness again after recycling. The ADT
+    // publication path instead primes on demand, under its bounded deadline.
+    const error = await compiler.build().then(() => undefined, error => error);
+    expect(error).to.include({code: "NOT_WARM", message: "not primed"});
+    await save("zcl_a", 7);
+    const next = await activate();
+    expect(next.ok, JSON.stringify(next)).to.equal(true);
+    expect(next.transpile.warm).to.equal(true);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(7)");
   });
 
   for (const fault of ["exit", "disconnect"]) {

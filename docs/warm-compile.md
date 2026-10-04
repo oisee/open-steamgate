@@ -310,6 +310,36 @@ Evidence, including the failing save-latency controls, is under
 both exercised the compiler child through `osd-host.mjs`, after rebasing onto
 `origin/main` at `45d2e383` (extension metadata and documentation only).
 
+Round 4 verification (2026-10-04), rebased onto `origin/main` at `b78d2a91`:
+the xref failure was a direct compiler caller assuming the registry survived
+every build. The compiler may reap itself after heap growth. The fixture now
+completes its direct activations and awaits the public `prime()` result after
+recycling, before editing again. It also forces a recycle before the SQL
+refresh failure case. The only `not primed` throw is `WarmCompiler.build()`;
+ADT publications already await the store's in-flight prime, with the existing
+30-second compiler deadline and cold fallback. The heap regression now proves
+both the direct-call refusal and a successful warm publication after it.
+
+The helper allow-list names the compiler child and its reason: it dispatches
+through `osd-host` and must not receive the HTTP/ABAP-FS token. Its environment
+now retains only OS paths, host execution options and build source selection.
+An actual child-process regression checks the bridge and batch tokens,
+PostgreSQL/HANA passwords and an arbitrary secret. Restoring the old broad
+environment makes that regression fail on the four secrets the shared helper
+did not scrub.
+
+Both failing files passed **43 tests** under the CI isolation and no-retry
+hooks. The full focused group passed **84 tests** (83 existing plus the
+credential regression), and store/destination/launcher passed **166**. No
+compiler processes leaked and no isolation allowances were added. The checkout
+startup test answered serving in **0.108 s** and classrun in **0.112 s** while
+priming; `vscode-warm` completed a **7 ms** swap. Suite registration still lists
+308 ordinary and seven grouped suites. The changed-file size guard passes,
+without raised budgets; four inherited Go breaches remain outside this change.
+Structural leak checks found zero matches; the private identifier list remains
+absent. Evidence is in `.local/warm-round4/`. Binary and bare VSIX smoke were
+not repeated in this round; their prior measurements above remain separate.
+
 Launcher shutdown uses `taskkill /T /F` on Windows and a dedicated process
 group on POSIX, with kill escalation. The platform strategies are unit tested
 (Windows mocked); they do not depend on the CPU-bound compiler processing

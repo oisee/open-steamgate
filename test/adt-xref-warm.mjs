@@ -91,6 +91,18 @@ describe("ADT xref after a warm swap", function () {
   };
   const swap = built => runtime.hot({generation:built.hash, from:built.from, modules:built.modules,
     only:built.closure, xrefRows:built.xrefRows});
+  const compile = async (activating = new Set()) => {
+    const checked = [...activating].map(key => store.warmActivation(...key.split(" ")));
+    const built = await compiler.build(activating);
+    // Complete the test's direct activation just as the ADT client does,
+    // so a replacement compiler sees the published active source view.
+    expect(store.completeActivations(checked)).to.equal(true);
+    // Heap recycling may discard the registry after a successful build.
+    // Await the public readiness result while disk still matches that build,
+    // before this test edits sources for the next direct compiler call.
+    if (!compiler.primed) await compiler.prime();
+    return built;
+  };
 
   it("adds and drops short and long references using compiler rows without reparsing", async () => {
     const pid = runtime.child.pid;
@@ -99,7 +111,7 @@ describe("ADT xref after a warm swap", function () {
     writeFileSync(file(edited), source(edited, calls));
     // The child's tree is deliberately changed AFTER compilation: the
     // swap must use the compiled generation, not today's checkout files.
-    const built = await compiler.build();
+    const built = await compile();
     expect(compiler.readersOf("CLAS", target)).to.deep.include({type:"CLAS", name:edited});
     expect(compiler.closureOf("CLAS", target)).to.deep.include({type:"CLAS", name:edited});
     expect(built.xrefRows.WBCROSSGT).to.deep.include({OTYPE:"TY",NAME:target,INCLUDE:edited});
@@ -113,7 +125,7 @@ describe("ADT xref after a warm swap", function () {
     expect(runtime.child.pid).to.equal(pid);
     expect(await readers(target)).to.include(edited);
     expect(await readers(long)).to.include(edited);
-    const dropped = await compiler.build();
+    const dropped = await compile();
     await swap(dropped);
     expect(runtime.child.pid).to.equal(pid);
     expect(await readers(target)).not.to.include(edited);
@@ -122,36 +134,39 @@ describe("ADT xref after a warm swap", function () {
 
   it("reports the SQL refresh time in the acknowledged swap duration", async () => {
     writeFileSync(file(edited), source(edited, "", 2));
-    const built = await compiler.build();
+    const built = await compile();
     writeFileSync(timingMarker, "delay");
     let done;
     try {done = await swap(built);} finally {rmSync(timingMarker, {force:true});}
     expect(done.xrefMs).to.be.at.least(80);
     expect(done.ms, "swap metric excluded SQL refresh").to.be.at.least(80);
     writeFileSync(file(edited), source(edited));
-    await swap(await compiler.build());
+    await swap(await compile());
   });
 
   it("uses an inactive reader's active copy when rebuilding its dependency", async () => {
     writeFileSync(file(edited), source(edited, `DATA ref TYPE REF TO ${target.toLowerCase()}.`));
-    await swap(await compiler.build());
+    await swap(await compile());
     store.write("CLAS", edited, source(edited, `DATA ref TYPE REF TO ${long.toLowerCase()}.`, 99));
     writeFileSync(file(target), source(target, "", 2));
-    const built = await compiler.build(new Set([`CLAS ${target}`]));
+    const built = await compile(new Set([`CLAS ${target}`]));
     expect(built.closure).to.deep.include({type:"CLAS",name:edited});
     await swap(built);
     expect(await readers(target)).to.include(edited);
     expect(await readers(long)).not.to.include(edited);
     // Promote a source without references before the failure test.
     store.write("CLAS", edited, source(edited));
-    await swap(await compiler.build(new Set([`CLAS ${edited}`])));
+    await swap(await compile(new Set([`CLAS ${edited}`])));
 
   });
 
   it("keeps old modules and blocks queued work after a SQL refresh failure until recycle", async () => {
     const pid = runtime.child.pid;
+    // Exercise the same lost registry as a heap recycle, on every platform.
+    await compiler.drop();
+    await compiler.prime();
     writeFileSync(file(edited), source(edited));
-    await swap(await compiler.build(new Set([`CLAS ${edited}`])));
+    await swap(await compile(new Set([`CLAS ${edited}`])));
     writeFileSync(file(edited), source(edited, calls, 7));
     writeFileSync(marker, "fail");
     const injected = new Promise(done => {
