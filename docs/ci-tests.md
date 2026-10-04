@@ -164,6 +164,59 @@ writes retain the same-repository restriction; fork PRs still validate reports.
 Alice's merge policy (2026-10-03): **required checks are `test` + `scan` only**.
 Docker, gogen, preview, size and queue are advisory on PRs. The `test` rollup also requires retry-report validation/publication on PRs.
 
+## Downstream consumer smoke
+
+`consumer-smoke.yml` runs on every pull request and push to `main`, against
+the runtime tree checked out for that event. It bootstraps the runtime, then
+checks out `oisee/osg-demo` in a sibling directory at the full commit recorded
+in [`consumers.lock.json`](../consumers.lock.json), the only source of the pin.
+The osg-demo maintainers move that pin by PR when the book adopts a new tag.
+The consumer is separate from `libs.lock.json`, whose entries describe the
+transpiler's library closure.
+
+Six separate steps run the fleet slice on SQLite and DuckDB, the Go CLI,
+jobs, DSL L3 and C in ABAP. All six are attempted after earlier failures.
+Node 24, Go 1.26 (CLI only) and Ubuntu's `cc` are used; browser checks are
+disabled with `SLICE_SKIP_UI=1`. Setup needs network for checkouts, `npm ci`
+and bootstrap's pinned library/pack fetches; the tests use local services,
+with Go dependency downloads disabled. The initial consumer pin has no
+`package.json` or npm lockfile, so its install step reports no dependencies;
+a later pin with a package manifest must support `npm ci`.
+
+**Advisory for the first week by agreement:** `consumer-smoke` can go red,
+but is outside the required `test` aggregate and does not change the
+`test` + `scan` merge gate. Promotion to required status needs a separate
+agreement. Its job timeout is 75 minutes; expected runtime is about 5–6 minutes.
+Slice checks are bounded at eight minutes each, other checks and consumer
+installation at six minutes each. A timeout kills the command’s process group,
+records “timeout”, and allows the remaining checks and summary to run. Runtime
+setup and Go setup are bounded at ten and five minutes respectively. Consumer
+commands and install scripts receive no runner command-file variables or
+`ACTIONS_*` tokens, and their output is fenced with `stop-commands`.
+The job summary gives each command's result and elapsed time, lists lines
+containing `drift` as “generator output changed for consumers”, and supplies
+the exact command for each failure. Missing runs are shown explicitly.
+
+To reproduce, run `npm ci && npm run bootstrap` in your runtime checkout,
+clone osg-demo and check out the `osg-demo.ref` from `consumers.lock.json`.
+Run `npm ci` there if that pin has a package manifest. From osg-demo:
+
+```sh
+export OSD_HOME="<absolute path of your open-steamgate checkout>"
+export GOPROXY=off GOTOOLCHAIN=local
+SLICE_SKIP_UI=1 SLICE_L2_DRIFT=warn node test/slice.mjs
+SLICE_SKIP_UI=1 SLICE_L2_DRIFT=warn STG_DB=duckdb node test/slice.mjs
+node test/cli.mjs
+node test/jobs.mjs
+node test/l3.mjs
+node test/iti.mjs
+```
+
+For local heavy runs, prefix each command with
+`OSD_HEAVY_RANGE=80-89 "$OSD_HOME/tools/osd-heavy.sh" env` (put the slice
+environment assignments after `env`). There is no PR template in this tree;
+include a `Consumer impact:` line in PR descriptions.
+
 ### Per-file integration timing, 2026-09-29
 
 Measurement: local, relative weights only. The full integration run used a free `STG_PORT` and the pinned transpiler. Total and the 20 longest files:

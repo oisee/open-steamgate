@@ -1,0 +1,104 @@
+name: consumer-smoke
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: consumer-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+# Advisory for the first week. Deliberately outside the required test rollup;
+# failures remain visible as a red consumer-smoke check (no continue-on-error).
+jobs:
+  consumer-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      OSD_HOME: ${{ github.workspace }}/osd
+      GOTOOLCHAIN: local
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - name: Check out the runtime under test
+        uses: actions/checkout@v4
+        with:
+          path: osd
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: osd/package-lock.json
+      - name: Install and bootstrap runtime
+        timeout-minutes: 10
+        working-directory: osd
+        run: |
+          npm ci
+          npm run bootstrap
+      - name: Read consumer pin
+        id: consumer
+        working-directory: osd
+        run: node tools/consumer-smoke.mjs pin
+      - name: Check out pinned consumer
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.consumer.outputs.repo }}
+          ref: ${{ steps.consumer.outputs.ref }}
+          path: demo
+          persist-credentials: false
+      - name: Install consumer dependencies
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs install
+      - uses: actions/setup-go@v5
+        timeout-minutes: 5
+        if: success() || failure()
+        with:
+          go-version: '1.26'
+          cache: true
+          cache-dependency-path: osd/tools/gogen/go/go.sum
+      # The only network step for Go: a clean runner has an empty module cache
+      # (tools/gogen/go has external modules and no vendor/). After this, the
+      # checks run with GOPROXY=off so they never reach the network themselves.
+      - name: Download Go modules for the CLI check
+        timeout-minutes: 5
+        if: success() || failure()
+        working-directory: osd/tools/gogen/go
+        run: go mod download
+      - name: Close the Go module network for the checks
+        if: success() || failure()
+        run: echo "GOPROXY=off" >> "$GITHUB_ENV"
+      - name: Fleet slice (SQLite)
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run sqlite
+      - name: Fleet slice (DuckDB)
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run duckdb
+      - name: Fleet CLI (Go)
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run cli
+      - name: Fleet jobs
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run jobs
+      - name: Fleet DSL L3
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run l3
+      - name: Fleet C in ABAP
+        if: success() || failure()
+        working-directory: demo
+        run: node ../osd/tools/consumer-smoke.mjs run iti
+      - name: Consumer impact summary
+        if: always()
+        working-directory: osd
+        run: node tools/consumer-smoke.mjs summary
