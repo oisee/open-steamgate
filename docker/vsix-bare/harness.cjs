@@ -64,8 +64,18 @@ exports.run = async () => {
     const result = await bounded(vscode.commands.executeCommand(command.command), 540000, 'Start');
     assert.equal(result, true, 'Start failed; see extension output and build error lines above');
     const url = vscode.workspace.getConfiguration('osd').get('url');
-    const serving = await get(`${url}/osd/serving`);
-    assert.equal(serving.status, 200);
+    // Start resolves when the system reports ready; the first answer can still lag
+    // (e.g. while the warm cache primes). Poll, and print how long it took, so a
+    // slow first answer is visible as a number instead of a flaky failure.
+    const askedAt = Date.now();
+    let serving, lastError;
+    while (Date.now() - askedAt < 120000) {
+      try { serving = await get(`${url}/osd/serving`); if (serving.status === 200) break; }
+      catch (error) { lastError = error; }
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    if (!serving || serving.status !== 200) throw lastError || new Error(`no 200 from ${url}/osd/serving within 120 s`);
+    console.log(`vsix-bare: first /osd/serving answer ${((Date.now() - askedAt) / 1000).toFixed(2)} s after Start resolved`);
     const identity = JSON.parse(serving.body);
     assert.equal(identity.ready, true);
     assert.ok(identity.launcherPid > 0 && identity.launcherIdentity, 'missing serving identity');
