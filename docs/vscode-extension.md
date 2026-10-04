@@ -149,22 +149,15 @@ by what their test classes declare:
 - A debug run stays one at a time: one debugger, one child.
 
 **The declaration is checked, not trusted** (`tools/osd-unit-risk.mjs`).
-From the cross-reference (`WBCROSSGT`, `CROSS`), every object a test's
-object reaches is searched for statements that write:
-`INSERT`/`UPDATE`/`MODIFY`/`DELETE` on a table, `COMMIT WORK`,
-`CALL FUNCTION ... IN UPDATE TASK`, and a call this cannot follow (a dynamic
-method call, `CREATE OBJECT ... TYPE (name)`, a `CALL FUNCTION` whose name
-is not a literal). A class that declares HARMLESS and reaches one is
-scheduled as DANGEROUS, and its class definition (the line that says
-`RISK LEVEL`, when the declaration fits on one) gets a warning naming the
-first write and how many more there are. The reach is per object, not per
-method, so it errs towards flagging: measured on this tree, 14 of the 23
-objects with tests reach a write or a dynamic call. The classes that write
-application rows in the SEGW, gateway and AMDP tests declare DANGEROUS;
-ICF tests that alter the service registry declare CRITICAL. Read-only
-classes in the same object can still be scheduled as DANGEROUS by this
-object-level check; their HARMLESS declarations describe what they do.
-The other 9 objects run in parallel.
+The method call graph starts at the object's test and lifecycle methods.
+Only reachable method bodies contribute database writes; type declarations
+and unused methods do not. Interface and virtual calls use implementations
+instantiated by reachable code, including reachable factories. The warning
+shows a concrete source path and the count of reachable write statements.
+Dynamic or unresolved receivers produce a separate "may reach a database
+write" warning instead of a confirmed write. Both confirmed writes and
+uncertainty schedule HARMLESS objects serially. See [unit-risk.md](unit-risk.md)
+for the fallback policy, limitations and the fleet fixture's red proof.
 
 **And guarded at runtime** (`tools/osd-unit.mjs`, the first consumer of the
 database hooks in `tools/osd-dialog-step.mjs`, docs/ideas.md B17). A class

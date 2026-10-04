@@ -218,8 +218,10 @@ export class UnitRun {
       ...plan,
       writes: reached.writes,
       writesTotal: reached.total,
+      dynamicCalls: reached.dynamicCalls,
+      dynamicCallsTotal: reached.dynamicCallsTotal,
       classes: plan.classes.map((testClass) => {
-        const schedule = scheduledRisk(testClass, reached.writes);
+        const schedule = scheduledRisk(testClass, [...reached.writes, ...(reached.dynamicCalls ?? [])]);
         return {...testClass, schedule, guard: schedule === "harmless"};
       }),
     };

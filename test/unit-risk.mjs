@@ -4,6 +4,7 @@
 // the runtime guard (tools/osd-unit.mjs) that fails a HARMLESS class that
 // writes anyway.
 import {expect} from "chai";
+import {Registry, MemoryFile} from "@abaplint/core";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun} from "../tools/osd-unit.mjs";
 import {writeKindOf, scheduledRisk} from "../tools/osd-unit-risk.mjs";
@@ -38,7 +39,7 @@ describe("tools/osd-unit-risk: a declared RISK LEVEL against what the test reach
     expect(scheduledRisk({riskLevel: "critical", riskLevelDeclared: true}, [])).to.equal("critical");
   });
 
-  it("keeps writing SEGW tests DANGEROUS and a read-only test HARMLESS", async () => {
+  it("keeps writing SEGW tests DANGEROUS and table assertion helpers HARMLESS", async () => {
     const segw = await runner.withRisk(runner.classes("CLAS", "ZCL_STG_SEGW_TEST"));
     expect(segw.writesTotal).to.be.greaterThan(0);
     // the test's own statements are named first
@@ -50,11 +51,36 @@ describe("tools/osd-unit-risk: a declared RISK LEVEL against what the test reach
 
     const tokens = await runner.withRisk(runner.classes("CLAS", "ZCL_OSD_ABAP_TOKENS"));
     expect(tokens.writesTotal, JSON.stringify(tokens.writes)).to.equal(0);
+    // Noise guard: ASSERT_EQUALS inspects internal tables through RTTI;
+    // describing or creating a data type never initializes that class.
+    expect(tokens.dynamicCallsTotal, JSON.stringify(tokens.dynamicCalls)).to.equal(0);
     for (const testClass of tokens.classes) {
-      expect(testClass, testClass.name).to.include({schedule: testClass.riskLevelDeclared ? testClass.riskLevel : "dangerous"});
-      expect(testClass.guard).to.equal(testClass.schedule === "harmless");
+      expect(testClass, testClass.name).to.include({schedule: "harmless", guard: true});
     }
-    expect(tokens.classes.some((c) => c.guard), "at least one guarded class to run below").to.equal(true);
+  });
+
+  it("noise guard: ASSERT_EQUALS on internal tables stays HARMLESS with the real assertion library", async () => {
+    const source = store.registry();
+    const registry = new Registry(source.getConfig());
+    for (const file of source.getFiles()) registry.addFile(new MemoryFile(file.getFilename(), file.getRaw()));
+    registry.addFile(new MemoryFile("zcl_risk_table_assert.clas.abap",
+      "CLASS zcl_risk_table_assert DEFINITION PUBLIC. ENDCLASS. CLASS zcl_risk_table_assert IMPLEMENTATION. ENDCLASS."));
+    registry.addFile(new MemoryFile("zcl_risk_table_assert.clas.testclasses.abap", `
+      CLASS ltcl_tables DEFINITION FOR TESTING RISK LEVEL HARMLESS.
+        PRIVATE SECTION. METHODS compare FOR TESTING. ENDCLASS.
+      CLASS ltcl_tables IMPLEMENTATION. METHOD compare.
+        DATA actual TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+        DATA expected TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+        APPEND 'row' TO actual. APPEND 'row' TO expected.
+        cl_abap_unit_assert=>assert_equals( act = actual exp = expected ).
+      ENDMETHOD. ENDCLASS.`));
+    registry.parse();
+    const tableRunner = new UnitRun({registry: () => registry,
+      find: () => ({type: "CLAS", name: "ZCL_RISK_TABLE_ASSERT"})});
+    const plan = await tableRunner.withRisk(tableRunner.classes("CLAS", "ZCL_RISK_TABLE_ASSERT"));
+    expect(plan.writesTotal, JSON.stringify(plan.writes)).to.equal(0);
+    expect(plan.dynamicCallsTotal, JSON.stringify(plan.dynamicCalls)).to.equal(0);
+    expect(plan.classes[0]).to.include({schedule: "harmless", guard: true});
   });
 
   // the runtime half, against real runs: a guarded class that writes fails
@@ -84,8 +110,9 @@ describe("tools/osd-unit-risk: a declared RISK LEVEL against what the test reach
     expect(plan.classes.every((c) => c.schedule === "dangerous" && c.guard === false)).to.equal(true);
   });
 
-  it("a guarded class that reaches no write passes", async () => {
+  it("the runtime guard permits the read-only table assertion run", async () => {
     const plan = await runner.withRisk(runner.classes("CLAS", "ZCL_OSD_ABAP_TOKENS"));
+    expect(plan.classes.every((c) => c.schedule === "harmless" && c.guard)).to.equal(true);
     const result = await runner.runDetached("CLAS", "ZCL_OSD_ABAP_TOKENS", {plan});
     expect(result.ok, JSON.stringify(result.testClasses.flatMap((c) => c.testMethods.flatMap((m) => m.alerts))).slice(0, 800)).to.equal(true);
     expect(result.counts.methods).to.be.greaterThan(0);

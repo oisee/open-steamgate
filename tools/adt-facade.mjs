@@ -1241,6 +1241,8 @@ export function adtRouter(options = {}) {
         object: {type: plan.object.type, name: plan.object.name},
         writes: plan.writes,
         writesTotal: plan.writesTotal,
+        dynamicCalls: plan.dynamicCalls,
+        dynamicCallsTotal: plan.dynamicCallsTotal,
         ...(plan.riskError === undefined ? {} : {riskError: plan.riskError}),
         classes: plan.classes.map((testClass) => ({
           name: testClass.name,
