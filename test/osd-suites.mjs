@@ -513,6 +513,7 @@ describe("required PR retry reports", () => {
   const workflow = readFileSync(".github/workflows/tests.yml", "utf8");
   const script = workflow.split("          script: |\n").at(-1).split("\n").map((line) => line.replace(/^            /, "")).join("\n");
   const expectedShards = workflow.match(/shard: \[(.*?)\]/)[1].split(',').map((s) => Number(s.trim()));
+  const requiredResults = {build: {result: "success"}, suites: {result: "success"}, packaging: {result: "skipped"}, e2e: {result: "success"}, "osgo-host": {result: "success"}, "kernel-conformance": {result: "success"}};
   const execute = async (mode, attempt = 1, canComment = true) => {
     const nativeRequire = createRequire(import.meta.url);
     const fs = nativeRequire("node:fs");
@@ -540,17 +541,21 @@ describe("required PR retry reports", () => {
           if (mode === "api-error") throw Error("fixture API error");
           return [{name: "suites (1)", conclusion: "failure"}];
         }
-        return [{name: "suites (1)", conclusion: "success"}];
+        return [{name: "suites (1)", conclusion: "success"},
+          {name: "kernel-conformance", conclusion: mode === "kernel-failed" ? "failure" : "success"}];
       },
       rest: {actions: {listJobsForWorkflowRunAttempt() {}}, issues: {
         listComments() {}, createComment(args) { body = args.body; }, updateComment(args) { body = args.body; },
       }},
     };
     const context = {repo: {owner: "fixture", repo: "fixture"}, payload: {pull_request: {head: {sha: "12345678"}}}, issue: {number: 1}, runId: 1};
+    const results = structuredClone(requiredResults);
+    if (mode === "kernel-failed") results["kernel-conformance"].result = "failure";
+    if (mode.startsWith("missing-job:")) delete results[mode.slice("missing-job:".length)];
     try {
       await new (Object.getPrototypeOf(async function () {}).constructor)("require", "github", "context", "process", "console", script)(
         (name) => name === "node:fs" ? mockedFs : nativeRequire(name), github, context,
-        {env: {EXPECTED_SHARDS: expectedShards.join(","), GITHUB_RUN_ATTEMPT: String(attempt), CAN_COMMENT: String(canComment), JOB_RESULTS: JSON.stringify({build: {result: "success"}, suites: {result: "success"}, packaging: {result: "skipped"}, e2e: {result: "success"}, "osgo-host": {result: "success"}}), VSIX_PROFILE: "fast"}},
+        {env: {EXPECTED_SHARDS: expectedShards.join(","), GITHUB_RUN_ATTEMPT: String(attempt), CAN_COMMENT: String(canComment), JOB_RESULTS: JSON.stringify(results), VSIX_PROFILE: "fast"}},
         {log() {}, error() {}});
     } catch (error) {
       error.body = body;
@@ -566,6 +571,24 @@ describe("required PR retry reports", () => {
     });
   }
   it("accepts every shard’s readable empty report", async () => { await execute("complete"); });
+  it("reports a failed required kernel job as red", async () => {
+    const {body} = await execute("kernel-failed");
+    expect(body).to.contain("### PR tests: 🔴 fail");
+    expect(body).to.contain("| kernel-conformance | 🔴 fail |");
+    const gate = workflow.split("  test:\n")[1].split("  # One comment")[0];
+    const shell = gate.split("        run: |\n")[1].split("\n").map((line) => line.replace(/^          /, "")).join("\n");
+    const env = {...process.env, BUILD_RESULT: "success", SUITES_RESULT: "success", E2E_RESULT: "success", OSGO_RESULT: "success", PACKAGING_RESULT: "skipped", VSIX_PROFILE: "fast", EVENT_NAME: "pull_request", REPORT_RESULT: "success"};
+    expect(spawnSync("bash", ["-e", "-c", shell], {env: {...env, KERNEL_RESULT: "success"}}).status).to.equal(0);
+    expect(spawnSync("bash", ["-e", "-c", shell], {env: {...env, KERNEL_RESULT: "failure"}}).status).to.equal(1);
+  });
+  for (const job of Object.keys(requiredResults)) {
+    it(`rejects a missing required job result: ${job}`, async () => {
+      let error;
+      try { await execute(`missing-job:${job}`, 1, false); } catch (caught) { error = caught; }
+      expect(error).to.be.instanceOf(Error);
+      expect(error.message).to.equal(`Missing required job result: ${job}`);
+    });
+  }
   it("shows failed jobs recovered by a GitHub rerun and retained flaky reports", async () => {
     const {body, calls} = await execute("retained", 2);
     expect(body).to.contain("flaky: rerun suites (1) failed in attempt 1, passed in attempt 2");
@@ -606,6 +629,10 @@ describe("required PR retry reports", () => {
     expect(gate).to.contain("pr-report]");
     expect(gate).to.contain('"$REPORT_RESULT" == success');
     const report = workflow.split("  pr-report:\n")[1];
+    const needed = report.match(/needs: \[(.*?)\]/)[1].split(',').map((job) => job.trim());
+    expect(needed.sort()).to.deep.equal(Object.keys(requiredResults).sort());
+    expect(gate).to.contain("kernel-conformance");
+    expect(gate).to.contain('"$KERNEL_RESULT" == success');
     expect(report).not.to.contain("continue-on-error: true");
     expect(report).not.to.contain("needs: [test]");
   });

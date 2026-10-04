@@ -203,3 +203,272 @@ The new ordinary `test/vscode-vsix.mjs` file measured 0.040 s for its four tests
 1. Record the times for transpiler preparation, transpile, lint, ABAP Unit, non-VSIX integration and browser smoke on the same runner before changing them.
 2. The Test Explorer pool does not speed up CI's ABAP Unit command: CI calls `tools/osd-unit-run.mjs`, which launches one `output/index.mjs`. Only consider parallel CI ABAP Unit after isolated databases and the baseline time are measured.
 3. Measure cold and warm cache timings on the same GitHub runner before treating the expected transpiler and Chromium savings as observed CI reductions.
+
+## Kernel conformance: required and heavy evidence
+
+CI runs only inputs reproducible from the public ABAPiti pin: the generated
+corpus and the checked-in int8 fixtures. Mono and no-SIMD QuickJS are
+**not measured in CI: no public pinned source (local copies only; see
+this section)**. They are absent from ABAPiti commit
+`8cdf57212c23772baf6293cb3d8784181521c8e4`, including its emitter and test data.
+Both profiles report that reason; unavailable optional inputs never fail the
+job. No SSH credentials, secrets or local fixture copies are required.
+
+`tests.yml` adds `kernel-conformance`, parallel to the six suite shards after
+`build`. It restores the same pinned transpiler/runtime and libraries, then
+runs all 4,077 generated ABAPiti tests plus 10 int8 tests on
+OSG-JS. It is part of the existing `test` aggregate gate. The integration
+shards gain only the small comparator suite, not any corpus execution.
+
+`kernel-conformance.yml` runs a separate job on pushes to `main`, nightly at
+02:00 UTC, on every tag, and manually. It has no PR trigger and is outside the required `test`
+aggregate. It runs the public generated corpus and int8 on
+OSG-JS and osgo, and lists mono and QuickJS as not measured. Jobs publish
+per-folder results, aggregate `osgjs.json` and
+`osgo.json`, a run manifest, regenerated support evidence, stderr, and
+`summary.md`, including on failure. The heavy profile uses a 90-minute job
+limit, an 80-minute outer timeout, and a 20-minute timeout per folder/runtime;
+the required command has a 10-minute outer timeout and an 11-minute step
+timeout in a 25-minute job, allowing headroom above the estimated 3–7 minutes
+on CI. Every step in both kernel jobs has an explicit timeout: one minute for
+metadata, validation and summaries; five for setup, checkout, cache, artifact
+and library operations; ten for the heavy job's runtime build; eleven for
+generation (two attempts of at most five minutes) and the required run; and
+81 for the heavy run. Actions are pinned to commit SHAs with version comments.
+Only PR runs can cancel an earlier heavy run; main, schedule and tag runs
+finish independently. The concurrency policy in `tests.yml` is unchanged.
+
+Both use `osgjs:unit --db file` and `NODE_OPTIONS=--max-old-space-size=12288`,
+including the parent evidence generator. Go uses `GOTOOLCHAIN=go1.26.0` and
+`GOFLAGS=-buildvcs=false`; GOPATH, module cache and build cache stay in the
+workspace. The generator requires clang/wasm-ld 18. GitHub installs those on
+a corpus cache miss. The corpus content hash catches a partial generator
+run, a skipped C fixture or different compiler output.
+
+The tracked `.github/ci/abapiti.ref` is a full commit, following ABAPiti's
+`.github/ci/osgo.ref` convention. On a cache miss, a second checkout reads
+that exact commit, checks its MIT licence, and executes:
+
+```sh
+ABAPITI_TEST_OUT=<output> GOTOOLCHAIN=go1.26.0 GOFLAGS=-buildvcs=false \
+  go test ./wasm -count=1 -run '^TestOSD_EmitUnitClasses$'
+```
+
+The emitter's `split/` ABAP files are flattened into the corpus directory,
+just as ABAPiti's own osgo CI does. `.github/ci/kernel-corpus.json` records
+file counts, content hashes and sorted test-identity hashes. Cache keys
+include the corpus pin, platform and generation recipe/fixture manifest.
+Every hit is content-checked before deciding whether the source checkout is
+needed. A corrupt folder is evicted locally and regenerated once from pinned
+inputs; incorrect regenerated content fails the job. Checkout and Go setup
+each have one explicit retry, with the final failure remaining red. The Go
+emitter retries once after two seconds, removes partial output between
+attempts and retains both diagnostics in `generate.log` if both fail.
+The verified public inputs are saved before
+runtime tests, so even a red regression run populates the generated-input
+cache. A valid cache-hit PR does not check out or regenerate ABAPiti. No
+generated corpus ABAP is added to this repository.
+
+The int8 inputs already live in `test/fixtures/osgjs-unit-int8`; staging gives
+them abapGit names. The fixture expectations are A4H 758 measurements; the
+int8x oracle passed 6/6. The fixtures retain their measured expectations.
+`.github/ci/kernel-known-failures.json` allows exactly four
+OSG-JS int8 test identities, each with a stable failure signature, reason and a link to
+[transpiler #1964](https://github.com/abaplint/transpiler/pull/1964).
+Assertion signatures retain the expected and actual values; other messages
+normalize whitespace and omit the runtime's `Raised in` location suffix.
+An unchanged list is green; a new failure, changed signature or status, missing test,
+changed test identity or fixed known failure is red. Harness/setup errors,
+refusals and timeouts cannot be added as known failures.
+
+The drift check regenerates AST inventory and runtime evidence through
+`osg:support`'s generator. It compares every construct's measured class
+outcomes with `docs/osg-support.md` at the same pin and names differences.
+The required profile projects the page onto the generated corpus and int8
+on OSG-JS; the heavy profile also measures those folders on osgo. Neither
+compares mono/QuickJS outcomes or constructs found only in unmeasured
+folders. A compact tracked inventory of all four folders supplies the full
+page counts for shared constructs, while outcomes are compared only for
+measured classes and runtimes. Partial runs, missing helpers and compiler
+refusals cannot support a `runs` claim. Timings, installed versions and
+generator blob identifiers are recorded in artifacts; those variable
+provenance fields are excluded from semantic drift, unlike the standalone
+`osg:support --check` command's byte comparison.
+
+### Reproduce and maintain the inputs
+
+For the supplied read-only public checkout:
+
+```sh
+OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh timeout 1200s \
+  env NODE_OPTIONS=--max-old-space-size=12288 \
+  node tools/osd-kernel-conformance.mjs --profile required \
+    --source .local/abapiti-src
+```
+
+Use `--profile heavy` with `timeout 4800s` for both public runtime columns.
+`--work <dir>` selects another workspace-local cache/report directory.
+Only the two public folders are staged and content-checked, including all
+ABAP/XML files consumed by the runners. Extra folders in an old cache are
+ignored. Inputs are never read from a live branch.
+`node tools/osd-suites.mjs --check`, the focused
+`test/kernel-conformance.mjs` and `test/osg-support.mjs` suites, and the size
+guard validate the changed path. Workflows are linted with actionlint; actual
+GitHub Actions jobs cannot be run locally.
+
+To update the pin, choose a full public ABAPiti commit in a separate checkout,
+verify its licence, and update `abapiti.ref`. Emit fresh inputs using the
+command above with workspace-local Go caches, flatten `split/`, and stage the
+int8 fixture names. Regenerate the hashes with `fingerprint()` and
+`identityDigest()` from `tools/osd-kernel-{corpus,check}.mjs`, and regenerate
+`kernel-inventory.json` with `inventory()` from `tools/osg-support.mjs` for
+the two public folders, preserving the unmeasured folder inventory. Do this
+in a new `--work` directory; do not overwrite the
+read-only supplied source checkout or manually bless an old cache. The new
+pin, hashes, inventory, `kernel-known-failures.json.abapiti` and support page
+must be updated together, then both public profiles must be measured.
+A mismatch never silently refreshes the manifest.
+
+When an allowed failure starts passing, the gate says "remove this entry
+from .github/ci/kernel-known-failures.json" and names its class/testclass/method.
+The JSON has one entry per test method, with its signature, reason and upstream link.
+The list is currently empty: pin `f3611417` fixes all four int8 allowances;
+keep `entries: []` valid rather than removing the file.
+Remove the exact entry and regenerate the measured support claims from
+complete folder results, preserving claims for unmeasured folders; the
+allowance is not inverted
+or broadened. A proposed new allowance needs a minimal reproducer, reason and
+upstream link, followed by another required run. Use `failureSignature()` from
+`tools/osd-kernel-check.mjs` to record a measured signature. Never replace an
+old signature merely to accept a changed failure: investigate the assertion
+and its cause first. Recheck a recorded result
+without rebuilding using `osd-kernel-check.mjs --result <json> --known
+.github/ci/kernel-known-failures.json --runtime osgjs --folder int8 --tests 10`.
+Use `--support <support.json> --page docs/osg-support.md --inventory
+.github/ci/kernel-inventory.json` to recheck semantic drift.
+
+The public-source follow-up should put the mono WASM/driver, the no-SIMD
+QuickJS WASM/driver, their test emitters, compiler versions/flags and licences
+in ABAPiti at a full commit, or publish an immutable archive with a tracked
+SHA-256 and those provenance files. Then add those inputs to corpus
+preparation and the heavy profile, verify their hashes, and measure them
+before adding them to the drift projection. The committed
+`quickjs_eval.wasm` is a different SIMD
+fixture: the pinned compiler explicitly rejects opcode 0xFD, so it cannot
+replace the measured qjs folder. The approximately 906 KB mono class and
+large QuickJS classes stay local. ABAPiti itself is public and MIT; that does
+not establish provenance or all embedded third-party licences for an
+unpublished generated artifact.
+
+[zmjs](https://github.com/oisee/zmjs) and
+[zqjs](https://github.com/larshp/zqjs) are separate hand-written ABAP projects,
+not artifacts of this ABAPiti emitter. Their independent public pins and
+corpus adapters are a follow-up; neither is included in the support page's
+four-folder measurements or claimed as covered by these jobs.
+
+### Local timing, 2026-10-04
+
+The required public-input profile passed on the unchanged tracked runtime
+pin `e34d6a1f` (2.13.93) in **130.02 seconds** (2 min 10 s), including repair
+of an intentionally corrupted generated-corpus cache: 4,083 SUCCESS
+and exactly four allowed FAILURE rows among 4,087 tests. Folder times were
+81.01 s for the 4,077-test corpus and 23.37 s for int8; cache repair, fresh evidence
+regeneration and drift comparison account for the remainder. The projection
+covers 50 classes, 91,175 source lines and 130 constructs. The source build
+was made in this workspace with the CI build script, without source patches
+or changes to `libs.lock.json` or the transpiler pin.
+
+Cold preparation regenerated the public inputs from the read-only ABAPiti
+checkout and verified the licence, content hashes and identities. Go reported
+1.301 s for the emitter test itself, excluding downloads. The initial cold
+profile, run concurrently with focused tests using the inherited runtime,
+also passed in 297.93 s (200.55 s corpus, 67.86 s int8).
+
+All 35 focused comparator/support tests passed serially in 13 s (the original
+32 plus changed-signature, cache-repair and generation-retry regressions).
+One repeat exceeded the 120 s outer timeout; the isolated serial rerun passed
+without skipping tests or changing their limits. The suites
+check and actionlint passed for both workflows;
+the changed-file size guard passed, reporting six inherited breaches.
+A synthetic additional int8 failure exited 1 and named its method. A
+changed-signature probe also exited 1 and named both expected and actual
+signatures. Fixed allowances are still checked by the focused suite.
+All 165 support-page construct rows and outcomes are unchanged; int8's 124
+lines became 119 because the measured fixtures replaced the old local copies,
+reducing the total from 348,319 to 348,314. The required profile's semantic
+page drift check and `osg:support --check` on its regenerated artifact passed.
+Structural leak checks found no matches;
+the local private identifier list was absent, so private names were not
+checked. GitHub Actions, the full integration suite and the heavy profile
+were not run locally.
+
+The required job runs beside the existing approximately 12-minute shards;
+budget approximately 3–7 minutes on a public Ubuntu runner, plus the shared
+build and any cold toolchain/module downloads. This is an estimate, not a
+measured GitHub Actions result.
+
+The previous digest-byte allowance is removed together with the unused
+QuickJS content hash. It allowed only a packed private-address prefix found
+inside the independently recomputed SHA-256 of 29 local QuickJS ABAP files,
+not a hostname or a measured system address. CI no longer stages or verifies
+that folder, so there is no reason to retain its digest or the exception.
+
+### Runtime pin f3611417 remeasurement, 2026-10-04
+
+The branch was rebased onto `origin/main` at `d843715f` (#599), and the CI
+build script compiled the exact locked transpiler/runtime commit
+`f36114179f6f39e5abb42d021f2cf5dcc50b45b9`. `transpiler:which` confirmed
+both package paths and their Git HEAD; the package version alone still says
+2.13.93 and cannot distinguish this build from the previous pin. Libraries
+were synced with `osd-libs --sync`, and `osd-fetch` verified the pack pins.
+No runtime source patches were applied; the CI script sets the CLI executable
+bit in its disposable clone.
+
+With the old allowance list, the required profile correctly exited red and
+named all four fixed known failures. Corpus was 4,077/4,077 SUCCESS in
+87.16 s and int8 was 10/10 SUCCESS in 22.69 s; the full profile took
+129.15 s. The four allowances were removed, leaving `entries: []`.
+An intermediate run with the empty list passed all 4,087 tests in 129.93 s
+but correctly remained red on the 27 stale support claims while full-page
+regeneration was still running.
+
+All four JS folders were remeasured with `--db file` and the 12,288 MiB heap:
+corpus 4,077/4,077, int8 10/10, mono 10/10 (260.16 s; 1,716,472 KiB peak
+RSS), and QuickJS 9/9 (469.93 s; 8,959,844 KiB peak RSS). The full page
+covers 4,106 passing tests, 66 classes and 348,314 source lines. Its 27
+previously failing constructs now run: 165 runs, zero fails and zero fails
+in some classes. The Go generator/input content did not change, so its
+previously published evidence, helper reasons, counts and provenance were
+preserved; every osgo construct cell was checked for exact equality.
+Mono/QuickJS remain local measurements, not public CI input coverage.
+
+The final required profile is green with zero known failures: 4,077/4,077
+corpus tests in 78.63 s and 10/10 int8 tests in 23.27 s, 120.48 s total.
+The regenerated recorded evidence passes `osg:support --check`, and the
+required profile's fresh evidence agrees with the page. The synthetic
+additional int8 failure exits 1 and names its method. The 104 focused tests
+pass in 16 s with three existing pending tests; actionlint, the suites check
+and the changed-file size guard pass (seven inherited main breaches).
+Structural leak checks found no matches; the private identifier list is
+absent here, so private identifiers were not checked. GitHub Actions, the
+full integration suite and the heavy CI profile were not run locally.
+
+## Six-shard rebase validation, 2026-10-04
+
+Rebased kernel conformance onto `9e7687c0` (#602). The required gate and
+PR reporter retain the kernel prerequisite alongside main's six suite shards.
+The fixture reports derive all six shard identities from the workflow matrix.
+Main's pull-request-only cancellation, trusted weekly timing refresh and
+committed timing weights are preserved. Removing the kernel job and its
+gate/report integration makes `tests.yml` byte-identical to `origin/main`;
+the timing refresh workflow, script and timing weights already match it.
+
+The focused suite, kernel comparator and support checks passed 108/108 in
+16 seconds (including the synthetic new failure exiting nonzero). The
+required profile passed corpus 4077/4077 in 87.87 seconds and int8 10/10 in
+22.01 seconds, with zero known failures and semantic support drift PASS;
+total wall time was 130.74 seconds. Actionlint passed both kernel workflows
+and the retained timing refresh workflow. The suite list check passed with
+302 ordinary and seven grouped suites; the changed-file size guard passed
+with seven inherited main breaches. GitHub Actions and the heavy profile
+were not run locally.

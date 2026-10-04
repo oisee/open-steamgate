@@ -436,9 +436,137 @@ jobs:
           grep -q '^200 OK$' <<<"$out"
           grep -q '"EntitySets":\["TravelSet"' <<<"$out"
 
+  # An independent parallel gate; no additional work in the suite shards.
+  kernel-conformance:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GOTOOLCHAIN: go1.26.0
+      GOFLAGS: -buildvcs=false
+      NODE_OPTIONS: --max-old-space-size=12288
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        timeout-minutes: 5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        timeout-minutes: 5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        timeout-minutes: 5
+      - name: Read the corpus pin
+        timeout-minutes: 1
+        id: corpus_pin
+        run: echo "ref=$(cat .github/ci/abapiti.ref)" >> "$GITHUB_OUTPUT"
+      - name: Restore the generated corpus by pin and recipe
+        timeout-minutes: 5
+        id: corpus_cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .local/kernelci/corpus
+          key: kernel-corpus-v1-${{ runner.os }}-${{ steps.corpus_pin.outputs.ref }}-${{ hashFiles('tools/osd-kernel-corpus.mjs', '.github/ci/kernel-corpus.json', 'test/fixtures/osgjs-unit-int8/*') }}
+      - name: Validate restored corpus content before deciding whether to fetch source
+        timeout-minutes: 1
+        id: corpus_validation
+        run: node tools/osd-kernel-corpus.mjs --check-cache >> "$GITHUB_OUTPUT"
+      - name: Check out public ABAPiti for missing or corrupt corpus inputs
+        timeout-minutes: 5
+        id: abapiti_checkout
+        if: steps.corpus_validation.outputs.regenerate == 'true'
+        continue-on-error: true
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: oisee/abapiti
+          ref: ${{ steps.corpus_pin.outputs.ref }}
+          path: .local/kernelci/abapiti-source
+          persist-credentials: false
+      - name: Retry failed ABAPiti checkout once
+        timeout-minutes: 5
+        if: steps.corpus_validation.outputs.regenerate == 'true' && steps.abapiti_checkout.outcome == 'failure'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: oisee/abapiti
+          ref: ${{ steps.corpus_pin.outputs.ref }}
+          path: .local/kernelci/abapiti-source
+          persist-credentials: false
+      - name: Set up Go for corpus generation and runtime checks
+        timeout-minutes: 5
+        id: setup_go
+        continue-on-error: true
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.0'
+          cache: false
+      - name: Retry failed Go setup once
+        timeout-minutes: 5
+        if: steps.setup_go.outcome == 'failure'
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: '1.26.0'
+          cache: false
+      - name: Install the corpus C compiler
+        timeout-minutes: 5
+        if: steps.corpus_validation.outputs.regenerate == 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18
+          mkdir -p .local/kernelci/clang-bin
+          ln -s /usr/bin/clang-18 .local/kernelci/clang-bin/clang
+          ln -s /usr/bin/wasm-ld-18 .local/kernelci/clang-bin/wasm-ld
+          echo "$PWD/.local/kernelci/clang-bin" >> "$GITHUB_PATH"
+      - name: Generate or verify the pinned public inputs
+        timeout-minutes: 11
+        id: prepare_corpus
+        run: node tools/osd-kernel-corpus.mjs --source .local/kernelci/abapiti-source
+      - name: Cache verified generated inputs even if runtime conformance later fails
+        timeout-minutes: 5
+        if: steps.corpus_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: .local/kernelci/corpus
+          key: ${{ steps.corpus_cache.outputs.cache-primary-key }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        timeout-minutes: 5
+        with:
+          name: built-tree
+          path: ${{ runner.temp }}
+      - name: Restore this run's pinned runtime and libraries
+        timeout-minutes: 5
+        run: |
+          tar -xf "$RUNNER_TEMP/built-tree.tar"
+          test -d .local/lars/open-abap-core
+          test -f .local/ci-artifact/transpiler/packages/transpiler/build/src/index.js
+          echo "TRANSPILER=$PWD/.local/ci-artifact/transpiler" >> "$GITHUB_ENV"
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler packages/transpiler
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
+          node tools/osd-ci-artifact.mjs verify
+      - name: Run required kernel conformance and support drift
+        timeout-minutes: 11
+        run: OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh timeout 600s node tools/osd-kernel-conformance.mjs --profile required --source .local/kernelci/abapiti-source
+      - name: Publish the conformance summary
+        timeout-minutes: 1
+        if: always()
+        run: |
+          if [[ -f .local/kernelci/report/summary.md ]]; then
+            cat .local/kernelci/report/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Kernel conformance failed before producing a report.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        timeout-minutes: 5
+        if: always()
+        with:
+          name: kernel-conformance-required
+          path: |
+            .local/kernelci/report/
+            .local/kernelci/generate.log
+          if-no-files-found: error
+
   test:
     if: always()
-    needs: [build, suites, packaging, e2e, osgo-host, pr-report]
+    needs: [build, suites, packaging, e2e, osgo-host, kernel-conformance, pr-report]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job to pass
@@ -447,6 +575,7 @@ jobs:
           SUITES_RESULT: ${{ needs.suites.result }}
           E2E_RESULT: ${{ needs.e2e.result }}
           OSGO_RESULT: ${{ needs.osgo-host.result }}
+          KERNEL_RESULT: ${{ needs.kernel-conformance.result }}
           PACKAGING_RESULT: ${{ needs.packaging.result }}
           VSIX_PROFILE: ${{ needs.build.outputs.vsix_profile }}
           EVENT_NAME: ${{ github.event_name }}
@@ -455,7 +584,7 @@ jobs:
           if [[ "$EVENT_NAME" == pull_request ]]; then
             [[ "$REPORT_RESULT" == success ]] || exit 1
           fi
-          [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success && "$OSGO_RESULT" == success ]]
+          [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success && "$OSGO_RESULT" == success && "$KERNEL_RESULT" == success ]]
           case "$VSIX_PROFILE:$PACKAGING_RESULT" in
             full:success|fast:skipped) ;;
             *) echo "unexpected VSIX profile/job result: $VSIX_PROFILE:$PACKAGING_RESULT" >&2; exit 1 ;;
@@ -469,7 +598,7 @@ jobs:
   # this step. All PRs validate artifacts; only same-repository PRs write comments.
   pr-report:
     if: always() && github.event_name == 'pull_request'
-    needs: [build, suites, packaging, e2e, osgo-host]
+    needs: [build, suites, packaging, e2e, osgo-host, kernel-conformance]
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -517,7 +646,11 @@ jobs:
               }
             }
             const results = JSON.parse(process.env.JOB_RESULTS);
-            const gatePassed = ['build', 'suites', 'e2e', 'osgo-host'].every((job) => results[job].result === 'success') &&
+            const required = ['build', 'suites', 'e2e', 'osgo-host', 'kernel-conformance'];
+            for (const job of [...required, 'packaging']) {
+              if (!results[job]?.result) throw new Error(`Missing required job result: ${job}`);
+            }
+            const gatePassed = required.every((job) => results[job].result === 'success') &&
               (process.env.VSIX_PROFILE === 'full' ? results.packaging.result === 'success' :
                 process.env.VSIX_PROFILE === 'fast' && results.packaging.result === 'skipped');
             const marker = '<!-- osd-pr-test-report -->';

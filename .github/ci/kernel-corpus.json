@@ -1,0 +1,19 @@
+{
+  "abapiti": "8cdf57212c23772baf6293cb3d8784181521c8e4",
+  "folders": {
+    "TestOSD_EmitUnitClasses": {
+      "files": 87,
+      "sha256": "fbbf61c0cdd1e8d427667ae9dd8f717eca346611c5ee497e3521d817ca9f03d1",
+      "tests": 4077,
+      "identitiesSha256": "2ecf8a8f2cf91330074df29033963bba7899b4e7cfd023e1bcc5e2c55dc6e973",
+      "source": "ABAPiti TestOSD_EmitUnitClasses (flatten split/)"
+    },
+    "int8": {
+      "files": 4,
+      "sha256": "d9b0010df36010d79c4916f1c596a9f5f499df6eb11469cd5be308bf98ee7650",
+      "tests": 10,
+      "identitiesSha256": "92f7b5008d5cd3144626b7369a9e390453365e85969ce51d7e463f51a9ebb1e1",
+      "source": "test/fixtures/osgjs-unit-int8 (renamed abapGit files)"
+    }
+  }
+}
