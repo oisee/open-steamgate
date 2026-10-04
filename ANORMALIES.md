@@ -3652,7 +3652,7 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Affected path: open-abap-core `cl_sxml_string_reader` binary parser's `seek`, through runtime `FIND ... IN BYTE MODE`.
 - Reproducer: `<chkrun:checkObjectList xmlns:chkrun='http://www.sap.com/adt/checkrun' xmlns:adtcore='http://www.sap.com/adt/core'/>` fails as not well formed, while double quotes succeed. Searching hex `27` can match between byte boundaries in ASCII data; the first attribute is cut short.
 - Expected: public XML syntax allows both quote delimiters with identical semantics.
-- Workaround: the ADT request reader validates UTF-8, then supplies a BOM-marked UTF-16LE buffer to the same implemented sXML reader. This selects its character parser, whose search uses string offsets. No dependency source is changed.
+- Original workaround: the ADT reader supplied BOM-marked UTF-16LE to select the character parser. Critic round 1 confirmed more syntax and numeric-reference defects; the reader now uses its own strict tokenizer and does not call sXML. The byte-mode defect remains confirmed; no dependency source is changed.
 - Regression: `test/adt-request-xml.mjs`, single quotes on checkruns and virtual folders.
 - Upstream: needs an issue in abaplint/transpiler for byte-aligned FIND; no upstream filing requested.
 - Upstream version containing a fix: unknown.
@@ -3663,7 +3663,19 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Discovery: repository source inspection during the clean-room XML request review; no SAP system consulted.
 - Affected path: open-abap-core local XML parser `next`: text with an empty element stack is skipped before entity decoding.
 - Reproducer: `<a/>tail` is not a well-formed XML document under the public XML contract, but its trailing text is not returned by sXML.
-- Workaround: the ADT reader puts the validated UTF-8 text inside a private parser wrapper, skips only that wrapper's open/close events and rejects all value events at request depth zero. Root counting and the 64-level limit still count only the original request.
+- Original workaround: a private sXML wrapper exposed outside-root text. Critic round 1 replaced this with a strict tokenizer that checks outside-root XML S and counts roots directly. The sXML defect remains confirmed; sXML is no longer on this request path.
 - Regression: `zcl_osd_adt_request_xml` Unit tests and `test/adt-request-xml.mjs` trailing-text rejection with an unchanged state digest.
+- Upstream: needs an issue in open-abap-core; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-04-sxml-supplementary-ref - numeric references truncate to a BMP code unit
+
+- Status: `workaround`
+- Discovery: critic round 1 of T12/T13; independent reader and ABAP Unit probes, no SAP system consulted.
+- Affected path: open-abap-core `cl_sxml_string_reader.clas.locals_imp.abap`, local XML parser `decode`, numeric reference conversion through BMP-only `cl_abap_conv_in_ce=>uccpi`.
+- Reproducer: `<r>&#x1F680;</r>` and `<r>&#128640;</r>` produce U+F680 instead of U+1F680. Literal supplementary UTF-8 survives; transcoding is not the cause.
+- Expected: decimal and hexadecimal references denote the same Unicode scalar value as literal UTF-8, in text and attribute values.
+- Workaround: ADT request XML no longer uses sXML. Its strict tokenizer validates the scalar value, constructs the complete UTF-16 surrogate pair, and converts that pair together. No dependency file is changed.
+- Regression: the common `test/fixtures/adt-request-xml-corpus.json` exercises both references, literal pairs, text and attributes through Node and the transpiled ABAP class.
 - Upstream: needs an issue in open-abap-core; no upstream filing requested.
 - Upstream version containing a fix: unknown.

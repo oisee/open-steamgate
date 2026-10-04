@@ -34,179 +34,190 @@ options, and JSON execution/debug endpoints parse JSON. Nodepath, debugger
 listeners and other no-payload POSTs discard their bodies. Response XML and
 DDIC/abapGit source readers are outside this request-envelope policy.
 
-## Design
+## Design after critic round 1
 
-`tools/adt-request-xml.mjs` is the shared Node reader and route policy.
-`zcl_osd_adt_request_xml` is the shared ABAP reader and route policy. All XML
-request routes pass through them before dispatch or store work. Route
-selection does not depend on Content-Type: ADT's `application/*` requests
-still use the policy. Empty transport-check, node-key, virtual-folder and
-lock/unlock bodies retain their existing meaning. Activation's missing-method and present non-activate
-method behavior from #572 remains unchanged: those paths do not read XML.
+Node (`tools/adt-request-xml.mjs`) and ABAP (`zcl_osd_adt_request_xml`) implement
+one restricted XML 1.0 grammar in two tokenizers. They share the acceptance
+corpus `test/fixtures/adt-request-xml-corpus.json`: each case has original
+bytes as hexadecimal, an accept/refuse verdict, and, for accepted documents,
+an expected expanded-name element table. The mocha suite
+`test/adt-request-xml-corpus.mjs` reads that same file, calls Node directly and
+the transpiled ABAP class directly, and checks both verdicts and structures.
+A disagreement fails the test. The corpus is an executable acceptance set,
+not a claim of exhaustive coverage of all possible XML documents.
 
-The readers consume the **entire** document before returning any tokens.
-Namespace scope resolves element and attribute expanded names (URI plus
-local name); default namespaces apply to elements, never unprefixed
-attributes. Required protocol elements reject a foreign URI. The readers
-produce a private canonical token stream for the existing field extractors.
-Its prefixes come only from resolved namespace URIs; client prefixes and
-namespace declarations never reach those extractors. Empty elements become
-explicit open/close pairs. Literal-prefix scans below the boundary therefore
-operate on trusted internal tokens, not request XML. This avoids changing
-response writers and preserves established byte comparisons.
+The grammar follows [XML 1.0 fifth edition](https://www.w3.org/TR/REC-xml/)
+and [Namespaces 1.0 third edition](https://www.w3.org/TR/REC-xml-names/), with
+UTF-8 input only and no DTD. XML S is exactly space, tab, CR and LF. Names
+use the fifth-edition Unicode ranges; QNames have one or two nonempty
+NCNames. Namespace declaration prefixes and PI targets are NCNames.
+Declarations accept version 1.0, optional UTF-8 encoding, then optional
+standalone yes/no, with XML S and either quote delimiter. The reserved xml
+and xmlns bindings, raw and expanded-name duplicate attributes, namespace
+scope, character validity, numeric references, closing names, a single root,
+and all bytes after that root are checked. One initial UTF-8 BOM is allowed.
+Line endings and literal attribute whitespace receive XML normalization;
+whitespace from character references is preserved.
 
-Limits are **64 element levels, including the root**, and **16 MiB of original
-request bytes**. Node constants `XML_DEPTH_LIMIT` and `XML_BODY_LIMIT` live
-in the reader module. The raw parsers in `test/start.mjs` and
-`tools/osd-serve.mjs` import the body limit and its shared error handler.
-ABAP constants `c_depth_limit` and `c_body_limit` live in the reader class;
-the ABAP/ICF entry also checks the original bytes. POST lock/unlock bodies
-remain semantically unused, but any supplied body is validated before
-OBJECT retrieval or enqueue work.
+Limits remain **64 element levels including the root** and **16 MiB of original
+bytes**. Route selection does not depend on Content-Type. Empty transport,
+node-key, virtual-folder and lock/unlock bodies retain their old meanings.
+Activation with a missing or non-activate method retains #572's behavior.
+Source PUTs, including DDIC XML stored as source, remain outside this envelope
+policy, as do SQL and JSON endpoints.
 
-DOCTYPE is rejected before parsing. There is no external entity resolver,
-network/file callback or DTD-defined entity expansion. Only XML's predefined
-and numeric character references are read. Input is UTF-8; invalid UTF-8 is
-refused. Namespace URIs remain case-sensitive.
+DOCTYPE is refused when encountered as declaration markup. Its spelling in
+comments, CDATA and escaped source text is ordinary data. There is no DTD
+parser, external resolver, network/file callback or entity expansion. Only
+predefined and numeric character references are decoded, after checking the
+Unicode scalar. ABAP constructs complete UTF-16 pairs for supplementary
+references and converts both units together. Its tokenizer uses ABAP 7.02
+syntax and ASCII source; it does not call sXML for any part of parsing.
 
-The Node ABAP bridge now sends XML bodies even for HOST routes, in both
-inline and serving-child execution. ABAP validates their original bytes
-before handing over; the Node route then uses the Node reader. ABAP-owned
-checkruns, transport, node-key and virtual-folder routes receive ABAP's
-canonical tokens. Neither front can start checking/activation, compilation,
-source writes, enqueue changes, Unit execution or entity retrieval on a
-rejected request.
+## Structured consumers and admission order
 
-Both readers answer 400 with `application/xml; charset=utf-8`, using the
-existing Node `exceptionDocument`/`refuse` and ABAP `zcx_osd_adt`/handler
-refusal builders. `exc:exception` retains the communicationframework URI
-used by #572. **ExceptionInvalidXML and its message are our clean-room
-identifiers, not observed SAP XML-error type IDs.** The existing missing-method
-400's observed bytes are unchanged.
+The reader returns a flat element table: namespace URI, local name, one-based
+parent index (zero for the root), immediate element text, and attributes with
+URI/local/value. Namespace declarations are bindings rather than attributes
+in this table. Node's `requestElements`, `elementsNamed` and `attributeValue`
+provide access to it; ABAP uses `zif_osd_adt_xml` types and the reader's
+`attribute` method. The original byte body is retained. Canonical text remains
+available for diagnostics and existing direct reader tests; downstream
+request extractors do not scan it.
 
-## Substrate verification
+Checkrun source and artifact URIs, transport URI/package/operation, VFS
+preselection/value/facet/pattern, tree TV_NODEKEY, activation references,
+create attributes and package references, and Unit references all consume
+expanded names and element text. Decorating text elements with xml:space or
+xml:lang cannot hide their values. Unit object identity and selector come
+from the same `{http://www.sap.com/adt/core}uri` attribute of the objectReference;
+foreign URI attributes and their order have no effect. Activation, create
+and Unit are HOST routes on the ABAP front; after ABAP admission their Node
+consumers parse the original bytes into the same structured representation.
 
-The local open-abap-core implementations were read, not inferred from their
-interfaces. `cl_ixml`'s local element/attribute namespace accessors assert
-TODO (`cl_ixml.clas.locals_imp.abap:333`, `:804`); its parser does not validate
-closing names (`:1342`). It is unsuitable for this request boundary.
+The Node route profile normalizes the base path before matching, including
+uppercase spellings accepted by Express. The Node-only front verifies local
+Bearer credentials, admits XML, then
+resolves the session and runs CSRF checks. The ABAP handler admits XML before
+session resolution, statefulness upgrades, cookies, token issuance, enqueue
+binding or dispatch. This also applies when ANSWER has no session adapter,
+as in the real preview adapter. XML refusal is 400 with no Set-Cookie or
+CSRF header, leaves existing sessions and enqueue contexts untouched, and
+opens no fresh session even when the malformed POST has no token. Valid XML
+continues through the existing session and CSRF gates.
 
-`cl_sxml_string_reader=>create`, local reader `next_node` and `next_attribute`,
-local XML parser `next`, namespace lookup/restore, attribute/value classes
-and `get_value` are implemented on the path used here. Namespace declarations
-are scoped, undeclared element/attribute prefixes fail, closing names are
-checked, and unsupported declarations fail. Unrelated methods such as
-`get_nsbindings`, current-node and writer operations still contain stubs;
-this implementation does not call them. UTF-8 input conversion and UTF-16LE
-(codepage 4103) output/input conversion were also inspected and exercised.
+Both readers use `ExceptionInvalidXML` / `invalid XML request`, our clean-room
+identifiers, with `application/xml; charset=utf-8`. The exception namespace
+remains the communicationframework URI from #572. No SAP XML error type was
+observed or inferred.
 
-The inspected sXML classes are in
-`.local/lars/open-abap-core/src/sxml/cl_sxml_string_reader.clas.abap` and its
-`clas.locals_imp.abap`: the factory, `lcl_reader` (`constructor`, `next_node`,
-`next_attribute`), `lcl_xml_parser` (`next`, `lookup`, `restore`, `decode`),
-`lcl_attribute` (`constructor`, `get_value`), and `lcl_value_node`
-(`constructor`, `get_value`). Each called method has executable code rather
-than a TODO assertion. The JSON parser and stub reader/node operations are
-outside the execution path.
+## Confirmed substrate defects
 
-T12 found the binary sXML quote-search defect recorded in
-`ANORMALIES.md` as `ANOMALY-2026-10-04-sxml-byte-find`. After checking the
-original UTF-8 bytes, the reader supplies BOM-marked UTF-16LE to select the
-same parser's implemented character path. No dependency files were changed.
-The depth/size/DOCTYPE policy remains in our reader, not in a host wrapper.
-The second defect, `ANOMALY-2026-10-04-sxml-outside-root`, discards text outside
-the document root. A private parser wrapper exposes that text to the reader,
-which rejects it and multiple roots; the wrapper does not count toward the
-64-level request limit.
+The original sXML choice was insufficient. The critic independently
+reproduced malformed-input acceptance on ABAP-owned routes and preview, and
+numeric supplementary-reference corruption. The strict tokenizer replaces
+that substrate path. `ANORMALIES.md` retains the confirmed byte-quote-search
+and outside-root-text defects, explaining that their former transcoding and
+wrapper workarounds are superseded. A third entry records numeric-reference
+truncation. No dependency source was edited and no upstream filing was made.
 
-## Acceptance evidence
+## Round 1 acceptance evidence
 
-The new HTTP suite is `test/adt-request-xml.mjs`, registered in
-`test/suites.d/adt.json`. It covers every surveyed XML envelope and supplied
-lock/unlock bodies. Five variants change every bound prefix, use a default
-element namespace, change quotes, reverse attributes, or vary whitespace.
-Supported creates also exercise 201 responses. SRVD creation's existing 501
-is compared across variants. ABAP Unit protocol tests use a counted fixture
-runner; existing Unit suites continue to cover real compilation/execution.
-
-Every T13 case asserts both an unchanged digest and zero store-work calls.
-The digest includes fixture files (source and active copies), inactive state,
-held session handles, the complete enqueue table, the serving generation and
-runtime epoch. A populated unrelated lock and an inactive save with an
-active predecessor ensure the digest is not merely empty-state equality.
-Mode 1 snapshots the actual serving child's enqueue table over a read-only
-test transport. The external-entity case uses a live loopback listener and
-asserts zero accepted connections. Node and ABAP responses are compared byte
-for byte where deterministic.
-
-Before production edits, the original 222 HTTP cases ran against unchanged
-main a79959a9: **58 passed, 164 failed**, recorded in
-`.local/t1213/red-main.log`. Examples include a renamed activation prefix or
-single quotes returning 400, a DOCTYPE reaching activation and returning 200,
-and the oversized body returning HTML 413. The suite was then expanded to
-all create collections, successful creates, populated locks, work counters
-and cross-front comparisons. The expanded focused mode-0 run passed
-**422 tests** (`.local/t1213/focused-0.log`), including trailing-text rejection
-on every envelope. ABAP Unit tests additionally cover
-the accepted depth-64 / rejected depth-65 boundary and direct reader rejection.
-
-Excerpt from the recorded red output:
-
-```text
-  58 passing (3s)
-  164 failing
-
-  1) T12/T13 XML requests node mode=0
-       T12 activation?method=activate prefix:
-
-      AssertionError: expected { status: 400, …(2) } to deeply equal { status: 200, …(2) }
-```
-
-The complete response diff and every failure remain in `red-main.log`.
-
-Preparation used
-`bash /home/alice/dev/osg-adt-abap/.local/codex/prep.sh "$PWD"` and
-`npm run transpile`. Every transpile, Unit, mocha and lint invocation used
+The working branch remains `feat/adt-xml-namespaces` at
+`11e0cb77f380cc20e3fb62aeb8d3d07bccbdbec8`; `.git` was not written and no commit
+was made. All heavy commands use
 `OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh`.
-The fragment runner reads every file from `test/suites.d/adt.json` and runs
-mocha with `--retries 0`; modes 0 and 1 run sequentially.
+Local logs and the final report are under `.local/fix-round1/`.
 
-| Check | Result | Local log |
+Before the production fixes, direct critic probes reproduced the reader
+acceptance differences and supplementary-reference truncation. The initial
+119-case corpus on 11e0cb77 had 32 passing / 87 failing: failures include both
+incorrect verdicts and the absent structured-output API. The strengthened
+HTTP F1-F7 regressions were then run with the exact baseline production files
+and its built generation: **0 passing / 384 failing**, recorded in
+`http-red-11e0cb77.log`. That run includes unchanged-session digest assertions;
+its failures are not relabeled as isolated syntax failures. All temporary
+baseline file and generation substitutions were restored before fixing and
+verification. The original critic's failing inline and foreign-URI assertions
+also reproduced in `adversarial-before.log`.
+
+The HTTP suite deliberately saves valid source and submits different invalid
+inline source. It covers text-element attributes on all surveyed envelopes,
+foreign Unit attributes in both orders, and legal DOCTYPE text. Every refused
+kind checks zero store work and a digest of fixture/source/active files,
+inactive state, held handles, **all session metadata including tokens and
+statefulness**, enqueue locks and contexts, xref tables CROSS/WBCROSSGT/
+WBCROSSGTX/D010INC, generation and runtime epoch. Mode 1 reads the actual
+serving child's tables and contexts over read-only test IPC. Existing
+stateless-session upgrade attempts and fresh no-token malformed requests
+add explicit no-cookie/no-token assertions. Preview has direct malformed
+admission tests without a Sessions adapter.
+
+The final reader corpus has 310 byte cases plus 14 real preview-adapter
+probes. The initial complete-fragment attempts exposed two regressions in the
+conversion: direct-child-only content selection missed nested artifacts, and
+stream admission did not retain bytes for hosts without express.raw. Both
+were corrected and targeted checks passed. Those initial runs remain failed:
+3,316 pass / 16 fail in mode 0, 3,319 pass / 17 fail in mode 1.
+
+After those fixes, complete fragments passed 3,339 cases in each mode.
+An extra uppercase-base-path probe then found a Node policy bypass; its
+recorded red responses were 500 for an existing session and 403 for a fresh
+one. Normalizing the base before matching closes it. Both focused modes
+passed all 1,208 XML/corpus/preview cases after that fix. Final full-fragment
+runs including the four extra cases each passed all 3,343 tests, sequentially,
+with zero failures and zero retries.
+
+| Check | Result | Local log under `.local/fix-round1/` |
 | --- | --- | --- |
-| Original acceptance suite on unchanged main | 58 passed, 164 failed | `.local/t1213/red-main.log` |
-| Expanded focused acceptance, mode 0 | 422 passed | `.local/t1213/focused-0.log` |
-| ABAP reader Unit | 3 passed, 0 failed | `.local/t1213/reader-unit.log` |
-| Complete ADT fragment, mode 0 | 2,557 passed, 47 files, 7 minutes | `.local/t1213/fragment-0.log` |
-| Complete ADT fragment, mode 1 | 2,557 passed, 47 files, 7 minutes; includes all 422 new XML cases against the serving child | `.local/t1213/fragment-1.log` |
-| Corrected B5 node-key fixture, mode 0 | 157 passed | `.local/t1213/b5-final.log` |
-| Changed-path suites outside the fragment, including vscode-extension | 689 cases passed after focused recheck; 2 pre-existing optional stand cases pending, 29 files | `.local/t1213/extra.log`, `.local/t1213/extra-recheck.log` |
-| `npm run lint` | Exit 0; 79 warnings, no errors | `.local/t1213/lint.log` |
-| Suite registration / changed ABAP ASCII / `git diff --check` | Passed | No manifest drift; all changed ABAP is 7-bit ASCII |
+| Final transpile | exit 0, 2,333 objects | `transpile-final.log` |
+| Final lint | exit 0, 79 advisory warnings | `lint-final.log` |
+| XML, corpus, preview and C1, mode 0 | 1,230 pass | `focused-final-0.log` |
+| Same, mode 1 | 1,230 pass | `focused-final-1.log` |
+| Last XML/corpus/preview recheck, each mode | 1,208 pass | `uppercase-focused-{0,1}.log` |
+| Affected consumers and host seams, mode 0 | 249 pass | `affected-final-0.log` |
+| Critic full adversarial matrix, mode 0 | 540 pass | `adversarial-final-0.log` |
+| Same, mode 1 | 540 pass | `adversarial-final-1.log` |
+| Complete ADT fragments, each mode, before the casing cases | 3,339 pass | `fragment-final-{0,1}.log` |
+| Final complete ADT fragments, each mode, including casing cases | 3,343 pass | `fragment-complete-{0,1}.log` |
 
-The changed-path `rg -l -F` scan and selected outside-fragment files are
-recorded in `.local/t1213/affected-grep-final.json`. `test/run.mjs` is a server
-harness with no mocha cases, rather than an omitted suite. Existing fixtures
-that used undeclared prefixes, invented create namespaces or multiple bare
-roots now send well-formed envelopes. Invalid UTF-8 cases explicitly assert
-400. Node-key comparisons explicitly assert 200 so equal refusals cannot
-masquerade as a successful behavior comparison.
+No required assertion or check was removed or relaxed. An intermediate
+transpile detected the scratch class changing during an overlapping test,
+refused publication and left live untouched. Subsequent build and checks
+ran sequentially. Suite registration, changed ABAP ASCII and whitespace
+checks passed.
+The latency harness is the critic's `cost-stable.mjs`: sequential HTTP,
+nine discarded warmups and median of nine measurements, with the same
+ObjectStore fixture, payloads, auth, activation/checkrun work and
+`transpileOnActivate:false`. The before/after comparison uses reader-enabled
+measurements on 11e0cb77 and the fixed tree. Reader-off measurements are not
+used to compare the two implementations. These numbers exclude cold child
+startup and full-system activation transpilation/publication.
 
-The first outside-fragment run had 687 passes and two failures: route drift
-did not yet explain the new error middleware, and a source-check case
-exceeded its existing two-second timeout. The inventory now explicitly maps
-that middleware in both HTTP hosts to ADT request refusal. Both affected
-suites then passed all 49 cases with `--retries 0`, preserving the original
-timeout and assertions. The two optional pending cases are the existing
-ZO4D Node/Go stand probes: their generated artifacts are absent in this tree.
-No required check was removed or skipped.
+## Sequential median-of-nine latency
 
-Logs live under `.local/t1213/`; no capture data is tracked.
+| Front | Mode | Request | Before (ms) | After (ms) | Delta (ms) |
+| --- | --- | --- | ---: | ---: | ---: |
+| node | 0 | activation | 7.227 | 7.333 | +0.107 |
+| node | 0 | checkruns | 1.519 | 1.677 | +0.158 |
+| abap | 0 | activation | 9.227 | 12.715 | +3.488 |
+| abap | 0 | checkruns | 6.966 | 10.130 | +3.165 |
+| node | 1 | activation | 7.342 | 7.311 | -0.031 |
+| node | 1 | checkruns | 1.601 | 1.695 | +0.094 |
+| abap | 1 | activation | 13.329 | 23.615 | +10.286 |
+| abap | 1 | checkruns | 9.323 | 12.417 | +3.094 |
+
+These are before/after reader-enabled measurements on 11e0cb77 and the fixed
+tree. Node deltas are small; the negative delta is noise. The strict ABAP
+checkrun path adds about 3 ms in this fixture. ABAP activation adds about
+3.5 ms inline and 10.3 ms through the serving child. Raw samples and logs
+remain in `.local/fix-round1/`; each median contains exactly nine samples.
+The benchmark scope excludes cold startup and full-system publication.
 
 ## Remaining scope
 
-The XML-error type ID is deliberately our own; no SAP observation was made.
-SRVD create still returns its established 501 capability refusal, with syntax
-equivalence and rejection covered. The two sXML substrate defects have local
-workarounds and documented upstream follow-ups; no upstream filing was
-requested. Lint retains 79 advisory warnings, including two for the new
-reader's method length and complexity. Input encoding is UTF-8.
+The input encoding remains UTF-8. SRVD create retains its existing 501
+capability refusal. The three sXML defects need upstream follow-up; no
+upstream action is authorized here. The corpus checks the acceptance grammar
+and structure on both implementations; direct preview probes check its real
+adapter, without claiming a new built browser or binary was executed.

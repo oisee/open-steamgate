@@ -59,6 +59,9 @@ const variants = {
     return `<${name}${attrs.length ? " " + attrs.join(" ") : ""}${inner.endsWith("/") && !name.endsWith("/") ? "/" : ""}>`;
   }),
   whitespace: xml => xml.replaceAll("><", ">\n\t<").replaceAll("=", " = "),
+  xmlSpaceText: xml => xml.replace(/<([\w:]+)>([^<]+)<\//g,'<$1 xml:space="preserve" xml:lang="en">$2</'),
+  cdata: xml => xml.replace(/>([^<]+)</g,(_,t) => `><![CDATA[${t}]]><`),
+
 };
 
 const wireAnswers = new Map();
@@ -113,7 +116,13 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
     return {status:r.status,type:r.headers.get("content-type"),body:await r.text()};
   };
   let sequence = 0;
-  const enqueueSnapshot = () => runtime === undefined ? locks().read() : new Promise((resolve,reject) => {
+  const localState = () => dialogStep(async () => {
+    const xref = {}, db = abap.context.databaseConnections.DEFAULT;
+    for (const table of ["cross","wbcrossgt","wbcrossgtx","d010inc","zosd_adt_sess","zosd_adt_shdl"])
+      xref[table] = (await db.select({select:`SELECT * FROM ${table}`})).rows;
+    return {enq:locks().read(),contexts:[...locks().sessions],sequence:locks().seq,xref};
+  },"XML acceptance snapshot");
+  const enqueueSnapshot = () => runtime === undefined ? localState() : new Promise((resolve,reject) => {
     const id = ++sequence;
     const timer = setTimeout(() => finish(new Error("XML state snapshot timeout")),15000);
     const receive = message => {if(message?.type === "adt-xml-state-answer" && message.id === id) finish(message.error ? new Error(message.error) : undefined,message.state);};
@@ -131,8 +140,7 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
       const h = await facade.sessions.holderOf(type,name);
       holders.push(h ? [type,name,h.session.id,h.handle,[...h.session.locks]] : [type,name]);
     }
-    const r = await fetch(origin+base+"core/discovery"); await r.arrayBuffer();
-    return createHash("sha256").update(JSON.stringify({files,active:store.inactiveSources(),holders,sessionLocks:[...(facade.sessions.byId ?? new Map())].filter(([,s]) => s.locks.size > 0).map(([id,s]) => [id,[...s.locks]]),enq:await enqueueSnapshot(),generation:r.headers.get("x-osd-generation"),epoch:runtime?.epoch,liveGeneration:liveHash(process.cwd())})).digest("hex");
+    return createHash("sha256").update(JSON.stringify({files,active:store.inactiveSources(),holders,sessions:[...(facade.sessions.byId ?? new Map())].map(([id,s]) => [id,{...s,locks:[...s.locks]}]),enq:await enqueueSnapshot(),generation:liveHash(store.root),epoch:runtime?.epoch,liveGeneration:liveHash(process.cwd())})).digest("hex");
   };
   for(const [path,xml,status] of envelopes) for(const [kind,transform] of Object.entries(variants)) it(`T12 ${path} ${kind}`,async () => {
     const baseline = await post(path,xml); expect(baseline.status,baseline.body).to.equal(status);
@@ -152,7 +160,83 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
       store.delete(types[path],name);
     }
   });
+  it("F1 admission retains source and fields on a host without a raw body parser",async () => {
+    const app=express(); app.set("etag",false); app.use(facade.router);
+    const bare=await new Promise(resolve => {const s=app.listen(0,"127.0.0.1",() => resolve(s));});
+    try {
+      const bareOrigin=`http://127.0.0.1:${bare.address().port}`;
+      for (const [path,xml] of envelopes) {
+        const baseline=await post(path,xml);
+        const r=await fetch(bareOrigin+base+path,{method:"POST",headers:auth,body:xml});
+        expect({status:r.status,type:r.headers.get("content-type"),body:await r.text()},path).to.deep.equal(baseline);
+      }
+      const xml=envelopes.find(([p]) => p === "checkruns")[1].replace("REPORT zxml.","REPORT zxml.\nTHIS IS INVALID ABAP.");
+      const r=await fetch(bareOrigin+base+"checkruns",{method:"POST",headers:auth,body:xml});
+      expect(await r.text()).to.include("THIS");
+    } finally {await new Promise(r => bare.close(r));}
+  });
+  it("F1 xml:space checks invalid inline source instead of valid saved source",async () => {
+    store.write("PROG","ZXML","REPORT zxml.\nWRITE 'saved and valid'.\n");
+    const xml = envelopes.find(([p]) => p === "checkruns")[1].replace("REPORT zxml.","REPORT zxml.\nTHIS IS INVALID ABAP.");
+    const baseline = await post("checkruns",xml);
+    expect(baseline.status,baseline.body).to.equal(200);
+    expect(baseline.body).to.include("THIS");
+    const decorated = xml.replace("<chkrun:content>",'<chkrun:content xml:space="preserve" xml:lang="en">');
+    expect(await post("checkruns",decorated)).to.deep.equal(baseline);
+  });
+  it("F1 nested artifact content retains xml:space and submitted source",async () => {
+    const xml=envelopes.find(([p]) => p === "checkruns")[1].replace("REPORT zxml.","REPORT zxml.\nTHIS IS INVALID ABAP.");
+    const baseline=await post("checkruns",xml);
+    expect(baseline.body).to.include("THIS");
+    const nested=xml.replace("<chkrun:content>",'<chkrun:artifacts><chkrun:artifact><chkrun:content xml:space="preserve">')
+      .replace("</chkrun:content>","</chkrun:content></chkrun:artifact></chkrun:artifacts>");
+    expect(await post("checkruns",nested)).to.deep.equal(baseline);
+  });
+  it("F4 Unit object URI and selector ignore foreign attributes in either order",async () => {
+    const xml=envelopes.find(([p]) => p === "abapunit/testruns")[1];
+    const baseline=await post("abapunit/testruns",xml);
+    expect(baseline.status,baseline.body).to.equal(200);
+    const prefix='xmlns:evil="urn:foreign" evil:uri="/ignored#testclass=LTCL_OTHER" ';
+    const before=xml.replace('adtcore:uri="',prefix+'adtcore:uri="');
+    const after=xml.replace('adtcore:uri="','xmlns:evil="urn:foreign" adtcore:uri="').replace(' adtcore:name="',' evil:uri="/ignored#testclass=LTCL_OTHER" adtcore:name="');
+    for (const variant of [before,after]) expect(await post("abapunit/testruns",variant)).to.deep.equal(baseline);
+  });
+  it("F4 Unit ignores core URI attributes on elements other than objectReference",async () => {
+    const xml=envelopes.find(([p]) => p === "abapunit/testruns")[1];
+    const baseline=await post("abapunit/testruns",xml);
+    const variant=xml.replace('<aunit:runConfiguration ','<aunit:runConfiguration xmlns:c="http://www.sap.com/adt/core" c:uri="/sap/bc/adt/oo/classes/zcl_other" ');
+    expect(await post("abapunit/testruns",variant)).to.deep.equal(baseline);
+  });
+  it("F6 DOCTYPE in comments and CDATA is ordinary source text",async () => {
+    const xml=envelopes.find(([p]) => p === "checkruns")[1].replace("REPORT zxml.","REPORT zxml. WRITE '&lt;!DOCTYPE html&gt;'.");
+    const baseline=await post("checkruns",xml);
+    expect(baseline.status,baseline.body).to.equal(200);
+    const cdata=xml.replace("REPORT zxml. WRITE '&lt;!DOCTYPE html&gt;'.","<![CDATA[REPORT zxml. WRITE '<!DOCTYPE html>'.]]>");
+    for (const variant of [cdata,'<!-- <!DOCTYPE ignored> -->'+xml]) expect(await post("checkruns",variant)).to.deep.equal(baseline);
+  });
+  for (const fresh of [false,true]) for (const uppercase of [false,true]) it(`F3 refused XML preserves ${fresh ? "fresh" : "existing stateless"} session metadata ${uppercase ? "uppercase" : "lowercase"} path`,async () => {
+    const before=await digest(); workCalls.length=0;
+    const headers={...(fresh ? {"content-type":"application/xml"} : auth),"x-sap-adt-sessiontype":"stateful"};
+    const response=await fetch(origin+(uppercase ? base.toUpperCase() : base)+"activation?method=activate",{method:"POST",headers,body:refs+"tail"});
+    const text=await response.text();
+    expect(response.status,text).to.equal(400);
+    expect(response.headers.getSetCookie()).to.deep.equal([]);
+    expect(response.headers.get("x-csrf-token")).to.equal(null);
+    expect(workCalls).to.deep.equal([]);
+    expect(await digest()).to.equal(before);
+  });
   const invalid = {
+    F2duplicateNamespace: xml => xml.replace(/xmlns:([^=]+)="([^"]*)"/, '$& xmlns:$1="$2"'),
+    F2reservedXML: xml => xml.replace(/^<([^ >]+)/,'<$1 xmlns:xml="urn:wrong"'),
+    F2emptyPrefix: xml => xml.replace(/^<([^ >]+)/,'<$1 xmlns:q=""'),
+    F2xmlnsURI: xml => xml.replace(/^<([^ >]+)/,'<$1 xmlns:q="http://www.w3.org/2000/xmlns/"'),
+    F2control: xml => xml.replace(/^<([^ >]+)/,'<$1 extra="\u0001"'),
+    F2nullReference: xml => xml.replace(/^<([^ >]+)/,'<$1 extra="&#0;"'),
+    F2declaration: xml => '<?xml junk?>'+xml,
+    F2attributeName: xml => xml.replace(/^<([^ >]+)/,'<$1 xmlns:q="u" q:a:b="x"'),
+    F7namespaceName: xml => xml.replace(/^<([^ >]+)/,'<$1 xmlns:a:b="u"'),
+    F7NBSP: xml => '\u00a0'+xml,
+    F7PI: xml => '<? ?>'+xml,
     undeclared: xml => xml.replace(/ xmlns:adtcore="[^"]*"/, "").replace(/ xmlns:\w+="[^"]*"/, ""),
     foreign: xml => xml.replace(/http:\/\/www.sap.com\/[^" ]+/, "urn:foreign"),
     trailing: xml => xml+"tail",

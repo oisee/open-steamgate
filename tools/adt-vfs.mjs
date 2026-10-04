@@ -1,3 +1,4 @@
+import {requestElements, elementsNamed, attributeValue, namespaces} from "./adt-request-xml.mjs";
 // Live Node VFS renderer: the independent oracle for the ABAP port.
 import {TYPES} from "./osd-store-types.mjs";
 import {ADT_TYPE, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL} from "./adt-documents.mjs";
@@ -21,15 +22,15 @@ export function virtualFoldersDocument(store, xml) {
   const vfsGroupLabel = (value) => GROUP_LABELS[value] ?? TREE_CATEGORY_LABEL[value.toLowerCase()] ?? value;
 
   const virtualFoldersRequest = (xml) => {
-    const preselection = new Map();
-    for (const [, facet, inner] of xml.matchAll(
-      /<vfs:preselection[^>]*facet="([^"]+)"[^>]*>([\s\S]*?)<\/vfs:preselection>/g)) {
-      preselection.set(facet.toLowerCase(),
-        [...inner.matchAll(/<vfs:value>([^<]*)<\/vfs:value>/g)].map((m) => m[1].toUpperCase()));
+    const elements=requestElements(xml),preselection=new Map();
+    for (const element of elementsNamed(elements,namespaces.vfs,"preselection")) {
+      const facet=attributeValue(element,"","facet"); if (!facet) continue;
+      preselection.set(facet.toLowerCase(),elementsNamed(elements,namespaces.vfs,"value",elements.indexOf(element)+1).map(e => e.text.toUpperCase()));
     }
-    const order = [...xml.matchAll(/<vfs:facet>([^<]+)<\/vfs:facet>/g)].map((m) => m[1].toLowerCase());
-    const pattern = /objectSearchPattern="([^"]*)"/.exec(xml)?.[1] ?? "*";
-    return {preselection, order, pattern};
+    const order=elementsNamed(elements,namespaces.vfs,"facet").map(e => e.text.toLowerCase()).filter(Boolean);
+    const root=elementsNamed(elements,namespaces.vfs,"virtualFoldersRequest")[0];
+    const pattern=attributeValue(root,"","objectSearchPattern") ?? "*";
+    return {preselection,order,pattern};
   };
 
   // Every object this façade holds, with the package it sits in.

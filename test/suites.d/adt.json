@@ -48,6 +48,7 @@
     "test/tmp-package.mjs",
     "test/adt-xref-warm.mjs",
     "test/unit-risk-calls.mjs",
-    "test/adt-request-xml.mjs"
+    "test/adt-request-xml.mjs",
+    "test/adt-request-xml-corpus.mjs"
   ]
 }

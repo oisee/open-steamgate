@@ -28,6 +28,7 @@ INTERFACE zif_osd_adt_route PUBLIC.
            query    TYPE tihttpnvp,
            headers  TYPE tihttpnvp,
            body     TYPE xstring,
+           xml      TYPE zif_osd_adt_xml=>tt_element,
          END OF ty_request.
 
   "! What a host does after the step, when a route asks for it

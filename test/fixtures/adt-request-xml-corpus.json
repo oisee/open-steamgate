@@ -1,0 +1,2775 @@
+[
+  {
+    "name": "empty",
+    "bytes": "3c722f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "XML S outside",
+    "bytes": "20090d0a3c722f3e20090d0a",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "BOM",
+    "bytes": "efbbbf3c722f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "declaration <?xml version=\"1.0\"?>",
+    "bytes": "3c3f786d6c2076657273696f6e3d22312e30223f3e3c722f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "declaration <?xml version = '1.0' encoding=\"utf-8\" standalone='yes' ?>",
+    "bytes": "3c3f786d6c2076657273696f6e203d2027312e302720656e636f64696e673d227574662d3822207374616e64616c6f6e653d2779657327203f3e3c722f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "declaration <?xml version=\"1.0\" standalone=\"no\"?>",
+    "bytes": "3c3f786d6c2076657273696f6e3d22312e3022207374616e64616c6f6e653d226e6f223f3e3c722f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "bad PI/declaration <?xml?>",
+    "bytes": "3c3f786d6c3f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad PI/declaration <?xml junk?>",
+    "bytes": "3c3f786d6c206a756e6b3f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad PI/declaration <?XML version=\"1.0\"?>",
+    "bytes": "3c3f584d4c2076657273696f6e3d22312e30223f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad PI/declaration <?xml version=\"1.1\"?>",
+    "bytes": "3c3f786d6c2076657273696f6e3d22312e31223f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad PI/declaration  <?xml version=\"1.0\"?>",
+    "bytes": "203c3f786d6c2076657273696f6e3d22312e30223f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad PI/declaration <?xml encoding=\"UTF-8\" version=\"1.0\"?>",
+    "bytes": "3c3f786d6c20656e636f64696e673d225554462d38222076657273696f6e3d22312e30223f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad PI/declaration <?xml version=\"1.0\" encoding=\"UTF-16\"?>",
+    "bytes": "3c3f786d6c2076657273696f6e3d22312e302220656e636f64696e673d225554462d3136223f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad PI/declaration <?xml version=\"1.0\" standalone=\"maybe\"?>",
+    "bytes": "3c3f786d6c2076657273696f6e3d22312e3022207374616e64616c6f6e653d226d61796265223f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad PI/declaration <? ?>",
+    "bytes": "3c3f203f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad PI/declaration <?1target?>",
+    "bytes": "3c3f317461726765743f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad PI/declaration <?xml:foo?>",
+    "bytes": "3c3f786d6c3a666f6f3f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "PI",
+    "bytes": "3c3f7461726765743f3e3c723e3c3f74617267657420646174613f3e3c2f723e3c3f6166746572203f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "PI XML-like target",
+    "bytes": "3c3f786d6c2d7374796c65736865657420613f3e3c722f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "duplicate NS",
+    "bytes": "3c7220786d6c6e733a633d22752220786d6c6e733a633d2275222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "wrong xml",
+    "bytes": "3c7220786d6c6e733a786d6c3d2275726e3a77726f6e67222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "undeclare prefix",
+    "bytes": "3c7220786d6c6e733a713d22222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "xmlns URI",
+    "bytes": "3c7220786d6c6e733a713d22687474703a2f2f7777772e77332e6f72672f323030302f786d6c6e732f222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "colon attribute",
+    "bytes": "3c7220786d6c6e733a713d22752220713a613a623d2278222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "colon declaration",
+    "bytes": "3c7220786d6c6e733a613a623d2275222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "xmlns prefix",
+    "bytes": "3c7220786d6c6e733a786d6c6e733d2275222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "xml URI default",
+    "bytes": "3c7220786d6c6e733d22687474703a2f2f7777772e77332e6f72672f584d4c2f313939382f6e616d657370616365222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "xml URI alias",
+    "bytes": "3c7220786d6c6e733a713d22687474703a2f2f7777772e77332e6f72672f584d4c2f313939382f6e616d657370616365222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "duplicate expanded",
+    "bytes": "3c7220786d6c6e733a613d22752220786d6c6e733a623d22752220613a783d22312220623a783d2232222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "duplicate raw",
+    "bytes": "3c7220783d22312220783d2232222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "undeclared attr",
+    "bytes": "3c7220713a783d2231222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "xml attributes",
+    "bytes": "3c7220786d6c3a73706163653d2270726573657276652220786d6c3a6c616e673d22656e222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "http://www.w3.org/XML/1998/namespace",
+            "local": "space",
+            "value": "preserve"
+          },
+          {
+            "uri": "http://www.w3.org/XML/1998/namespace",
+            "local": "lang",
+            "value": "en"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "xml explicit binding",
+    "bytes": "3c7220786d6c6e733a786d6c3d22687474703a2f2f7777772e77332e6f72672f584d4c2f313939382f6e616d657370616365222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "namespace scopes",
+    "bytes": "3c7220786d6c6e733d22752220786d6c6e733a613d22612220783d2276223e3c613a6e20613a783d2276222f3e3c6e20786d6c6e733d22222f3e3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "u",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "",
+            "local": "x",
+            "value": "v"
+          }
+        ]
+      },
+      {
+        "uri": "a",
+        "local": "n",
+        "parent": 1,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "a",
+            "local": "x",
+            "value": "v"
+          }
+        ]
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 1,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "foreign same local attrs",
+    "bytes": "3c7220786d6c6e733a613d22612220786d6c6e733a623d22622220613a783d22312220623a783d2232222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "a",
+            "local": "x",
+            "value": "1"
+          },
+          {
+            "uri": "b",
+            "local": "x",
+            "value": "2"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "supplementary text &#x1F680;",
+    "bytes": "3c723e26237831463638303b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\ud83d\ude80",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "supplementary attr &#x1F680;",
+    "bytes": "3c7220783d2226237831463638303b222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "",
+            "local": "x",
+            "value": "\ud83d\ude80"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "supplementary text &#128640;",
+    "bytes": "3c723e26233132383634303b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\ud83d\ude80",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "supplementary attr &#128640;",
+    "bytes": "3c7220783d2226233132383634303b222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "",
+            "local": "x",
+            "value": "\ud83d\ude80"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "supplementary text \ud83d\ude80",
+    "bytes": "3c723ef09f9a803c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\ud83d\ude80",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "supplementary attr \ud83d\ude80",
+    "bytes": "3c7220783d22f09f9a80222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "",
+            "local": "x",
+            "value": "\ud83d\ude80"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bad char/ref '&#0;'",
+    "bytes": "3c723e2623303b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '&#0;'",
+    "bytes": "3c7220783d222623303b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '&#x0;'",
+    "bytes": "3c723e262378303b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '&#x0;'",
+    "bytes": "3c7220783d22262378303b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '&#1;'",
+    "bytes": "3c723e2623313b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '&#1;'",
+    "bytes": "3c7220783d222623313b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '&#xD800;'",
+    "bytes": "3c723e262378443830303b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '&#xD800;'",
+    "bytes": "3c7220783d22262378443830303b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '&#x110000;'",
+    "bytes": "3c723e2623783131303030303b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '&#x110000;'",
+    "bytes": "3c7220783d222623783131303030303b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '&#xFFFF;'",
+    "bytes": "3c723e262378464646463b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '&#xFFFF;'",
+    "bytes": "3c7220783d22262378464646463b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '&#X20;'",
+    "bytes": "3c723e26235832303b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '&#X20;'",
+    "bytes": "3c7220783d2226235832303b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '&undefined;'",
+    "bytes": "3c723e26756e646566696e65643b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '&undefined;'",
+    "bytes": "3c7220783d2226756e646566696e65643b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '&amp'",
+    "bytes": "3c723e26616d703c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '&amp'",
+    "bytes": "3c7220783d2226616d70222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '&#;'",
+    "bytes": "3c723e26233b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '&#;'",
+    "bytes": "3c7220783d2226233b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '\\x01'",
+    "bytes": "3c723e013c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '\\x01'",
+    "bytes": "3c7220783d2201222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '\\x00'",
+    "bytes": "3c723e003c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '\\x00'",
+    "bytes": "3c7220783d2200222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad char/ref '\\x0b'",
+    "bytes": "3c723e0b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad attr char/ref '\\x0b'",
+    "bytes": "3c7220783d220b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "space outside '\\xa0'",
+    "bytes": "c2a03c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "space in markup '\\xa0'",
+    "bytes": "3c72c2a0783d2276222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "space outside '\\u2000'",
+    "bytes": "e280803c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "space in markup '\\u2000'",
+    "bytes": "3c72e28080783d2276222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "space outside '\\u2028'",
+    "bytes": "e280a83c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "space in markup '\\u2028'",
+    "bytes": "3c72e280a8783d2276222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "space in markup '\\ufeff'",
+    "bytes": "3c72efbbbf783d2276222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "CDATA doctype",
+    "bytes": "3c723e3c215b43444154415b3c21444f43545950452068746d6c3e5d5d3e3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "<!DOCTYPE html>",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "comment doctype",
+    "bytes": "3c212d2d203c21444f43545950452069676e6f7265643e202d2d3e3c722f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "escaped doctype",
+    "bytes": "3c723e266c743b21444f43545950452068746d6c2667743b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "<!DOCTYPE html>",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "real DOCTYPE",
+    "bytes": "3c21444f435459504520723e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "DTD entities",
+    "bytes": "3c21444f43545950452072205b3c21454e544954592078202276223e5d3e3c723e26783b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "references",
+    "bytes": "3c7220783d2226616d703b266c743b2671756f743b2661706f733b2623393b262331303b262331333b223e26616d703b266c743b2667743b2671756f743b2661706f733b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "&<>\"'",
+        "attributes": [
+          {
+            "uri": "",
+            "local": "x",
+            "value": "&<\"'\t\n\r"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "attribute normalization",
+    "bytes": "3c7220783d2261090d0a620d63222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "",
+            "local": "x",
+            "value": "a  b c"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "text normalization",
+    "bytes": "3c723e610d0a620d633c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "a\nb\nc",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "valid NCName \u00e9",
+    "bytes": "3cc3a92f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u00e9",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "valid NCName \u200c",
+    "bytes": "3ce2808c2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u200c",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "valid NCName \u037f",
+    "bytes": "3ccdbf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u037f",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "valid NCName \u3001",
+    "bytes": "3ce380812f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u3001",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "valid NCName \ud800\udc00",
+    "bytes": "3cf09080802f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\ud800\udc00",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "valid NCName \udb7f\udfff",
+    "bytes": "3cf3afbfbf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\udb7f\udfff",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "valid NCName a\u00b7",
+    "bytes": "3c61c2b72f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a\u00b7",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "valid NCName a\u0300",
+    "bytes": "3c61cc802f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a\u0300",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "valid NCName a\u203f",
+    "bytes": "3c61e280bf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a\u203f",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "invalid NCName 1a",
+    "bytes": "3c31612f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "invalid NCName \u00b7",
+    "bytes": "3cc2b72f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "invalid NCName \u0300",
+    "bytes": "3ccc802f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "invalid NCName \u037e",
+    "bytes": "3ccdbe2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "invalid NCName \u2000",
+    "bytes": "3ce280802f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "invalid NCName \udb80\udc00",
+    "bytes": "3cf3b080802f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "invalid NCName a:b:c",
+    "bytes": "3c613a623a632f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "invalid NCName :r",
+    "bytes": "3c3a722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "invalid NCName r:",
+    "bytes": "3c723a2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax <r/>tail",
+    "bytes": "3c722f3e7461696c",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax <r/><s/>",
+    "bytes": "3c722f3e3c732f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax <r><s></r>",
+    "bytes": "3c723e3c733e3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax <r x=\"<\"/>",
+    "bytes": "3c7220783d223c222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax <r>]]></r>",
+    "bytes": "3c723e5d5d3e3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax <!-- bad--x --><r/>",
+    "bytes": "3c212d2d206261642d2d78202d2d3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax <![CDATA[x]]><r/>",
+    "bytes": "3c215b43444154415b785d5d3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax <r x=\"v\"y=\"w\"/>",
+    "bytes": "3c7220783d227622793d2277222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax <r/ >",
+    "bytes": "3c722f203e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax </r>",
+    "bytes": "3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax <r>",
+    "bytes": "3c723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "syntax ",
+    "bytes": "",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad UTF8 c0af",
+    "bytes": "3c722f3ec0af",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad UTF8 eda080",
+    "bytes": "3c722f3eeda080",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad UTF8 f09f9a",
+    "bytes": "3c722f3ef09f9a",
+    "verdict": "refuse"
+  },
+  {
+    "name": "bad UTF8 f0288cbc",
+    "bytes": "3c722f3ef0288cbc",
+    "verdict": "refuse"
+  },
+  {
+    "name": "depth 64",
+    "bytes": "3c723e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 1,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 2,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 3,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 4,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 5,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 6,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 7,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 8,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 9,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 10,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 11,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 12,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 13,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 14,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 15,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 16,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 17,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 18,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 19,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 20,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 21,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 22,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 23,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 24,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 25,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 26,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 27,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 28,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 29,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 30,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 31,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 32,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 33,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 34,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 35,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 36,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 37,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 38,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 39,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 40,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 41,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 42,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 43,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 44,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 45,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 46,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 47,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 48,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 49,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 50,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 51,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 52,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 53,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 54,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 55,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 56,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 57,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 58,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 59,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 60,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 61,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 62,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 63,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "depth 65",
+    "bytes": "3c723e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f6e3e3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "BOM after root",
+    "bytes": "3c722f3eefbbbf",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 0 literal text",
+    "bytes": "3c723e003c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 0 literal attribute",
+    "bytes": "3c7220783d2200222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 0 reference text",
+    "bytes": "3c723e2623303b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 0 reference attribute",
+    "bytes": "3c7220783d222623303b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 1 literal text",
+    "bytes": "3c723e013c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 1 literal attribute",
+    "bytes": "3c7220783d2201222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 1 reference text",
+    "bytes": "3c723e2623313b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 1 reference attribute",
+    "bytes": "3c7220783d222623313b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 2 literal text",
+    "bytes": "3c723e023c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 2 literal attribute",
+    "bytes": "3c7220783d2202222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 2 reference text",
+    "bytes": "3c723e2623323b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 2 reference attribute",
+    "bytes": "3c7220783d222623323b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 3 literal text",
+    "bytes": "3c723e033c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 3 literal attribute",
+    "bytes": "3c7220783d2203222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 3 reference text",
+    "bytes": "3c723e2623333b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 3 reference attribute",
+    "bytes": "3c7220783d222623333b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 4 literal text",
+    "bytes": "3c723e043c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 4 literal attribute",
+    "bytes": "3c7220783d2204222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 4 reference text",
+    "bytes": "3c723e2623343b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 4 reference attribute",
+    "bytes": "3c7220783d222623343b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 5 literal text",
+    "bytes": "3c723e053c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 5 literal attribute",
+    "bytes": "3c7220783d2205222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 5 reference text",
+    "bytes": "3c723e2623353b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 5 reference attribute",
+    "bytes": "3c7220783d222623353b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 6 literal text",
+    "bytes": "3c723e063c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 6 literal attribute",
+    "bytes": "3c7220783d2206222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 6 reference text",
+    "bytes": "3c723e2623363b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 6 reference attribute",
+    "bytes": "3c7220783d222623363b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 7 literal text",
+    "bytes": "3c723e073c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 7 literal attribute",
+    "bytes": "3c7220783d2207222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 7 reference text",
+    "bytes": "3c723e2623373b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 7 reference attribute",
+    "bytes": "3c7220783d222623373b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 8 literal text",
+    "bytes": "3c723e083c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 8 literal attribute",
+    "bytes": "3c7220783d2208222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 8 reference text",
+    "bytes": "3c723e2623383b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 8 reference attribute",
+    "bytes": "3c7220783d222623383b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 11 literal text",
+    "bytes": "3c723e0b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 11 literal attribute",
+    "bytes": "3c7220783d220b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 11 reference text",
+    "bytes": "3c723e262331313b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 11 reference attribute",
+    "bytes": "3c7220783d22262331313b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 12 literal text",
+    "bytes": "3c723e0c3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 12 literal attribute",
+    "bytes": "3c7220783d220c222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 12 reference text",
+    "bytes": "3c723e262331323b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 12 reference attribute",
+    "bytes": "3c7220783d22262331323b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 14 literal text",
+    "bytes": "3c723e0e3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 14 literal attribute",
+    "bytes": "3c7220783d220e222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 14 reference text",
+    "bytes": "3c723e262331343b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 14 reference attribute",
+    "bytes": "3c7220783d22262331343b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 15 literal text",
+    "bytes": "3c723e0f3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 15 literal attribute",
+    "bytes": "3c7220783d220f222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 15 reference text",
+    "bytes": "3c723e262331353b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 15 reference attribute",
+    "bytes": "3c7220783d22262331353b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 16 literal text",
+    "bytes": "3c723e103c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 16 literal attribute",
+    "bytes": "3c7220783d2210222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 16 reference text",
+    "bytes": "3c723e262331363b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 16 reference attribute",
+    "bytes": "3c7220783d22262331363b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 17 literal text",
+    "bytes": "3c723e113c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 17 literal attribute",
+    "bytes": "3c7220783d2211222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 17 reference text",
+    "bytes": "3c723e262331373b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 17 reference attribute",
+    "bytes": "3c7220783d22262331373b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 18 literal text",
+    "bytes": "3c723e123c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 18 literal attribute",
+    "bytes": "3c7220783d2212222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 18 reference text",
+    "bytes": "3c723e262331383b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 18 reference attribute",
+    "bytes": "3c7220783d22262331383b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 19 literal text",
+    "bytes": "3c723e133c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 19 literal attribute",
+    "bytes": "3c7220783d2213222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 19 reference text",
+    "bytes": "3c723e262331393b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 19 reference attribute",
+    "bytes": "3c7220783d22262331393b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 20 literal text",
+    "bytes": "3c723e143c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 20 literal attribute",
+    "bytes": "3c7220783d2214222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 20 reference text",
+    "bytes": "3c723e262332303b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 20 reference attribute",
+    "bytes": "3c7220783d22262332303b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 21 literal text",
+    "bytes": "3c723e153c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 21 literal attribute",
+    "bytes": "3c7220783d2215222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 21 reference text",
+    "bytes": "3c723e262332313b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 21 reference attribute",
+    "bytes": "3c7220783d22262332313b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 22 literal text",
+    "bytes": "3c723e163c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 22 literal attribute",
+    "bytes": "3c7220783d2216222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 22 reference text",
+    "bytes": "3c723e262332323b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 22 reference attribute",
+    "bytes": "3c7220783d22262332323b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 23 literal text",
+    "bytes": "3c723e173c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 23 literal attribute",
+    "bytes": "3c7220783d2217222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 23 reference text",
+    "bytes": "3c723e262332333b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 23 reference attribute",
+    "bytes": "3c7220783d22262332333b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 24 literal text",
+    "bytes": "3c723e183c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 24 literal attribute",
+    "bytes": "3c7220783d2218222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 24 reference text",
+    "bytes": "3c723e262332343b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 24 reference attribute",
+    "bytes": "3c7220783d22262332343b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 25 literal text",
+    "bytes": "3c723e193c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 25 literal attribute",
+    "bytes": "3c7220783d2219222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 25 reference text",
+    "bytes": "3c723e262332353b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 25 reference attribute",
+    "bytes": "3c7220783d22262332353b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 26 literal text",
+    "bytes": "3c723e1a3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 26 literal attribute",
+    "bytes": "3c7220783d221a222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 26 reference text",
+    "bytes": "3c723e262332363b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 26 reference attribute",
+    "bytes": "3c7220783d22262332363b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 27 literal text",
+    "bytes": "3c723e1b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 27 literal attribute",
+    "bytes": "3c7220783d221b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 27 reference text",
+    "bytes": "3c723e262332373b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 27 reference attribute",
+    "bytes": "3c7220783d22262332373b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 28 literal text",
+    "bytes": "3c723e1c3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 28 literal attribute",
+    "bytes": "3c7220783d221c222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 28 reference text",
+    "bytes": "3c723e262332383b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 28 reference attribute",
+    "bytes": "3c7220783d22262332383b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 29 literal text",
+    "bytes": "3c723e1d3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 29 literal attribute",
+    "bytes": "3c7220783d221d222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 29 reference text",
+    "bytes": "3c723e262332393b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 29 reference attribute",
+    "bytes": "3c7220783d22262332393b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 30 literal text",
+    "bytes": "3c723e1e3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 30 literal attribute",
+    "bytes": "3c7220783d221e222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 30 reference text",
+    "bytes": "3c723e262333303b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 30 reference attribute",
+    "bytes": "3c7220783d22262333303b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 31 literal text",
+    "bytes": "3c723e1f3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 31 literal attribute",
+    "bytes": "3c7220783d221f222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 31 reference text",
+    "bytes": "3c723e262333313b3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "C0 31 reference attribute",
+    "bytes": "3c7220783d22262333313b222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "XML Char scalar 9",
+    "bytes": "3c723e262378393b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\t",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "XML Char scalar 10",
+    "bytes": "3c723e262378413b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\n",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "XML Char scalar 13",
+    "bytes": "3c723e262378443b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\r",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "XML Char scalar 32",
+    "bytes": "3c723e26237832303b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": " ",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "XML Char scalar 55295",
+    "bytes": "3c723e262378443746463b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\ud7ff",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "XML Char scalar 57344",
+    "bytes": "3c723e262378453030303b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\ue000",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "XML Char scalar 65533",
+    "bytes": "3c723e262378464646443b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\ufffd",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "XML Char scalar 65536",
+    "bytes": "3c723e26237831303030303b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\ud800\udc00",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "XML Char scalar 1114111",
+    "bytes": "3c723e2623783130464646463b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "\udbff\udfff",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 192",
+    "bytes": "3cc3802f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u00c0",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 214",
+    "bytes": "3cc3962f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u00d6",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 216",
+    "bytes": "3cc3982f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u00d8",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 246",
+    "bytes": "3cc3b62f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u00f6",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 248",
+    "bytes": "3cc3b82f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u00f8",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 767",
+    "bytes": "3ccbbf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u02ff",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 880",
+    "bytes": "3ccdb02f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u0370",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 893",
+    "bytes": "3ccdbd2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u037d",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 895",
+    "bytes": "3ccdbf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u037f",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 8191",
+    "bytes": "3ce1bfbf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u1fff",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 8204",
+    "bytes": "3ce2808c2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u200c",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 8205",
+    "bytes": "3ce2808d2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u200d",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 8304",
+    "bytes": "3ce281b02f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u2070",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 8591",
+    "bytes": "3ce2868f2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u218f",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 11264",
+    "bytes": "3ce2b0802f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u2c00",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 12271",
+    "bytes": "3ce2bfaf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u2fef",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 12289",
+    "bytes": "3ce380812f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\u3001",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 55295",
+    "bytes": "3ced9fbf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\ud7ff",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 63744",
+    "bytes": "3cefa4802f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\uf900",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 64975",
+    "bytes": "3cefb78f2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\ufdcf",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 65008",
+    "bytes": "3cefb7b02f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\ufdf0",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 65533",
+    "bytes": "3cefbfbd2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\ufffd",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 65536",
+    "bytes": "3cf09080802f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\ud800\udc00",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart endpoint 983039",
+    "bytes": "3cf3afbfbf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "\udb7f\udfff",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameStart gap 191",
+    "bytes": "3cc2bf2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 215",
+    "bytes": "3cc3972f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 247",
+    "bytes": "3cc3b72f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 768",
+    "bytes": "3ccc802f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 879",
+    "bytes": "3ccdaf2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 894",
+    "bytes": "3ccdbe2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 8203",
+    "bytes": "3ce2808b2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 8206",
+    "bytes": "3ce2808e2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 8303",
+    "bytes": "3ce281af2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 8592",
+    "bytes": "3ce286902f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 11263",
+    "bytes": "3ce2afbf2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 12272",
+    "bytes": "3ce2bfb02f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 12288",
+    "bytes": "3ce380802f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 63743",
+    "bytes": "3cefa3bf2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 64976",
+    "bytes": "3cefb7902f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 65007",
+    "bytes": "3cefb7af2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameStart gap 983040",
+    "bytes": "3cf3b080802f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameChar 'a-b'",
+    "bytes": "3c612d622f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a-b",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameChar 'a.b'",
+    "bytes": "3c612e622f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a.b",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameChar 'a0'",
+    "bytes": "3c61302f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a0",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameChar 'a\u00b7'",
+    "bytes": "3c61c2b72f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a\u00b7",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameChar 'a\u0300'",
+    "bytes": "3c61cc802f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a\u0300",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameChar 'a\u036f'",
+    "bytes": "3c61cdaf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a\u036f",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameChar 'a\u203f'",
+    "bytes": "3c61e280bf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a\u203f",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameChar 'a\u2040'",
+    "bytes": "3c61e281802f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "a\u2040",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "NameChar gap 'a\u00d7'",
+    "bytes": "3c61c3972f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameChar gap 'a\u00f7'",
+    "bytes": "3c61c3b72f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "NameChar gap 'a\u2041'",
+    "bytes": "3c61e281812f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "reference outside &#32;",
+    "bytes": "262333323b3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "reference outside &#9;",
+    "bytes": "2623393b3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "reference outside &#10;",
+    "bytes": "262331303b3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "reference outside &#13;",
+    "bytes": "262331333b3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "additional syntax <r xmlns=\"u\" xmlns=\"u\"/>",
+    "bytes": "3c7220786d6c6e733d22752220786d6c6e733d2275222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "additional syntax <xmlns:r xmlns:xmlns=\"u\"/>",
+    "bytes": "3c786d6c6e733a7220786d6c6e733a786d6c6e733d2275222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "additional syntax <r a='1' a='2'/>",
+    "bytes": "3c7220613d27312720613d2732272f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "additional syntax <r> &unknown; </r>",
+    "bytes": "3c723e2026756e6b6e6f776e3b203c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "additional syntax <r><!-- a---></r>",
+    "bytes": "3c723e3c212d2d20612d2d2d3e3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "additional syntax <?target/data?><r/>",
+    "bytes": "3c3f7461726765742f646174613f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "additional syntax <?target:part?><r/>",
+    "bytes": "3c3f7461726765743a706172743f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "additional syntax <r><?xml version=\"1.0\"?></r>",
+    "bytes": "3c723e3c3f786d6c2076657273696f6e3d22312e30223f3e3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "additional syntax <!--comment--><?xml version=\"1.0\"?><r/>",
+    "bytes": "3c212d2d636f6d6d656e742d2d3e3c3f786d6c2076657273696f6e3d22312e30223f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "prefix alias and reset",
+    "bytes": "3c7220786d6c6e733d22752220786d6c6e733a613d2261223e3c613a6e20786d6c6e733a613d2262222f3e3c6e20786d6c6e733d222220786d6c3a6c616e673d22656e222f3e3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "u",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "b",
+        "local": "n",
+        "parent": 1,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "",
+        "local": "n",
+        "parent": 1,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "http://www.w3.org/XML/1998/namespace",
+            "local": "lang",
+            "value": "en"
+          }
+        ]
+      }
+    ]
+  }
+]

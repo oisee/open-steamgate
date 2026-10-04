@@ -77,7 +77,7 @@ describe("ADT ABAP shared helpers: Node parity", function () {
       if (expected) expect({type:actual.type,name:actual.name}).to.deep.equal(expected);
     }
     const xml = uris.slice(0,-1).map((uri) => `adtcore:uri="${uri}"`).join(" ");
-    expect((await api("SCAN").references({iv_xml:text(xml)})).array().map((s) => {const {type,name}=plain(s);return {type,name};})).to.deep.equal(objectReferencesIn(xml,collections));
+    expect((await api("SCAN").references({iv_xml:text(xml)})).array().map((s) => {const {type,name}=plain(s);return {type,name};})).to.deep.equal(objectReferencesIn(`<r xmlns:adtcore="http://www.sap.com/adt/core">${uris.slice(0,-1).map(uri => `<adtcore:objectReference adtcore:uri="${uri.replaceAll("&","&amp;")}"/>`).join("")}</r>`,collections));
   });
   it("entity tags hash UTF-8 and If-Match normalization never splits commas", async () => {
     for (const body of ["", "abc", "éЖ😀", "a\r\nb\0"]) expect((await api("ENTITY").tag({iv_body:text(body)})).get()).to.equal(entityTag(body));

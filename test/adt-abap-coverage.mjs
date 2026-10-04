@@ -267,7 +267,7 @@ describe("ADT on ABAP: the variant C done gate", function () {
   after(() => { if (root !== undefined) rmSync(root, {recursive: true, force: true}); });
 
   it("every middleware layer is known and only ported session fallbacks disappear in ABAP mounts", () => {
-    const expected = {node: ["local-logon", "sessions", "generation", "request-xml"], dump: ["local-logon", "sessions", "generation", "dump", "request-xml"],
+    const expected = {node: ["local-logon", "request-xml", "sessions", "generation"], dump: ["local-logon", "request-xml", "sessions", "generation", "dump"],
       abap: ["local-logon", "generation", "abap-front", "request-xml"], "dump+abap": ["local-logon", "generation", "dump", "abap-front", "request-xml"]};
     const retired = new Set([
       "GET /sap/bc/adt/core/http/sessions",
