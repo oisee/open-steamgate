@@ -33,6 +33,7 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
   let databaseDir;
   let testIdentity;
   let originalSource;
+  let intendedDrift = false;
   const log = [];
 
   before(async () => {
@@ -74,7 +75,9 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
     // Only the preloaded detector receives this proof, while edited inputs
     // still identify the live generation. Plain Mocha installs no observer.
     const isolation = require.cache[require.resolve('../tools/osd-test-isolation.cjs')]?.exports;
-    try { await isolation?.observeGenerationDrift(); }
+    // Before successful activation there is no recognized drift to prove.
+    // Leave any unexpected generation leak to the detector's after-all audit.
+    try { if (intendedDrift) await isolation?.observeGenerationDrift(); }
     finally {
       writeFileSync(CLASS_FILE, originalSource);
       if (child && child.exitCode === null && child.signalCode === null) {
@@ -108,6 +111,7 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
     const client = new Osd(BASE);
     const result = await client.activate({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT", base: "zcl_zstg_demo_dpc_ext"});
     expect(result.ok, `activation issues: ${JSON.stringify(result.issues)}`).to.equal(true);
+    intendedDrift = true;
     expect(result.build, "X-OSD-Build is on every activation answer once publish() ran").to.be.a("string");
 
     if (serving.warm.state === "primed") {

@@ -1,7 +1,7 @@
 import {expect} from 'chai';
 import {spawnSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
-import {mkdtempSync, mkdirSync, readdirSync, writeFileSync, rmSync} from 'node:fs';
+import {mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync, rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {dirname, join, resolve} from 'node:path';
 import {createRequire} from 'node:module';
@@ -161,6 +161,30 @@ describe('per-file process isolation detector', function () {
     expect(result.output).not.to.include('test/vscode-warm.mjs: generation').and.not.to.include('2.cjs: generation');
     expect(result.output).to.include('checked test/vscode-warm.mjs').and.include('checked 2.cjs');
   });
+  for (const hook of ['finally', 'after']) {
+    it(`preserves a body failure before the intended edit in ${hook}`, () => {
+      const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
+      // Exercise each caller's actual proof gate, so removing it makes this
+      // regression red without running a server or inducing a database flake.
+      const caller = hook === 'finally' ? 'vscode-job-worker-integration.mjs' : 'vscode-warm.mjs';
+      const source = readFileSync(new URL(caller, import.meta.url), 'utf8');
+      const proof = source.match(/(?:if \(intendedDrift\) )?await isolation\?\.observeGenerationDrift/)[0].replace('?.', '.') + '();';
+      const body = `fs.unlinkSync('build/live');fs.symlinkSync('by-input/unexpected','build/live');
+        throw Error('BODY failed before edit');`;
+      const result = run({'test/vscode-warm.mjs': `import fs from 'node:fs';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
+        fs.mkdirSync('src/demo',{recursive:true});fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));
+        const file='src/demo/zcl_zstg_demo_dpc_ext.clas.abap';const original='* The hand-written part a developer owns on a real system. Reads the\\n';
+        fs.writeFileSync(file,original);fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
+        let intendedDrift = false;
+        ${hook === 'finally'
+          ? `it('fails before edit',async()=>{try{${body}intendedDrift=true;}finally{try{${proof}}finally{fs.writeFileSync(file,original)}}});`
+          : `it('fails before edit',async()=>{${body}intendedDrift=true;});after(async()=>{try{${proof}}finally{fs.writeFileSync(file,original)}});`}`});
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('BODY failed before edit').and.include('test/vscode-warm.mjs: generation');
+      expect(result.output).to.include('2 failing'); // Body and after-all invariant fail separately.
+      expect(result.output).not.to.include('unrecognized originating generation drift').and.not.to.include('TEMPORARY ALLOW');
+    });
+  }
   for (const mutation of ['fresh', 'delete', 'hash-error']) {
     it(`rejects ${mutation} generation drift after an originating leak`, () => {
       const edit = mutation === 'fresh' ? "fs.unlinkSync('build/live');fs.symlinkSync('by-input/new-stale','build/live')" : mutation === 'delete' ? "fs.unlinkSync('build/live')" : "fs.unlinkSync('abap_transpile.json')";
