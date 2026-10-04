@@ -205,8 +205,8 @@
       {"command": "osd.setHanaPassword", "title": "osd: Set database password (HANA)"},
       {"command": "osd.setPostgresPassword", "title": "osd: Set database password (PostgreSQL)"},
       {"command": "osd.refreshHotspots", "title": "osd: Refresh hotspots"},
-      {"command": "osd.check", "title": "osd: Check"},
-      {"command": "osd.activate", "title": "osd: Activate"},
+      {"command": "osd.check", "title": "osd: Check (Ctrl+F2)", "icon": "$(check)"},
+      {"command": "osd.activate", "title": "osd: Activate (Ctrl+F3)", "icon": "$(zap)"},
       {"command": "osd.run", "title": "osd: Run", "icon": "$(play)"},
       {"command": "osd.runWithDebugger", "title": "osd: Run with debugger", "icon": "$(debug)"},
       {"command": "osd.classrun", "title": "osd: Run as ABAP Application (Console)"},
@@ -320,6 +320,8 @@
         {"command": "osd.openServiceMetadataExternal", "when": "false"}
       ],
       "editor/title": [
+        {"command": "osd.check", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(clas|prog|intf)(\\.(locals_def|locals_imp|macros|testclasses))?\\.abap$/i", "group": "navigation@0"},
+        {"command": "osd.activate", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(clas|prog|intf)(\\.(locals_def|locals_imp|macros|testclasses))?\\.abap$/i", "group": "navigation@0.5"},
         {"command": "osd.run", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation@1"},
         {"command": "osd.runWithDebugger", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation@2"}
       ],

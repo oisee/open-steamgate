@@ -2734,7 +2734,7 @@ function activate(context) {
   // Ctrl+F2 / Ctrl+F3 (docs/vscode-extension.md): one diagnostic collection
   // for both, so an activation that passes clears what a check had left, and
   // the other way round.
-  registerCheckActivateCommands(context, output);
+  registerCheckActivateCommands(context, output, classrunOutput);
   context.subscriptions.push(vscode.commands.registerCommand("osd.run", () => run(output, classrunOutput)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.runWithDebugger", () => run(output, classrunOutput, true)));
 
@@ -3116,15 +3116,15 @@ function currentObject() {
   return object === undefined ? undefined : {editor, object};
 }
 
-function registerCheckActivateCommands(context, output) {
+function registerCheckActivateCommands(context, output, consoleOutput = output) {
   // check and activation keep separate collections: activation clears the
   // documents it no longer reports, which must never erase a check's findings
   const diagnostics = vscode.languages.createDiagnosticCollection("osd-abap");
   const activation = vscode.languages.createDiagnosticCollection("osd-activation");
   const activationDiagnostics = new Map();
   context.subscriptions.push(diagnostics, activation);
-  context.subscriptions.push(vscode.commands.registerCommand("osd.check", () => check(diagnostics, output)));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(activation, output, activationDiagnostics)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.check", () => check(diagnostics, output, consoleOutput)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(activation, output, activationDiagnostics, consoleOutput)));
 }
 
 // severity -> vscode.DiagnosticSeverity; A and X are ABAP's abort/exception
@@ -3140,7 +3140,7 @@ function diagnosticAt(line, column, message, severity) {
   return new vscode.Diagnostic(new vscode.Range(at, at.translate(0, 1)), message, severityOf(severity));
 }
 
-async function check(diagnostics, output) {
+async function check(diagnostics, output, consoleOutput) {
   const current = currentObject();
   if (current === undefined) return;
   const {editor, object} = current;
@@ -3152,6 +3152,8 @@ async function check(diagnostics, output) {
     if (failed.length > 0) {
       vscode.window.showErrorMessage(`osd check: ${failed.map((r) => r.statusText).join("; ")}`);
     } else {
+      consoleOutput.appendLine(`osd check ${object.name}: ${issues.length === 0 ? "no findings" : `${issues.length} findings`}`);
+      consoleOutput.show?.(true);
       vscode.window.setStatusBarMessage(`osd check: ${issues.length === 0 ? "no errors" : `${issues.length} issue(s)`}`, 5000);
     }
   } catch (e) {
@@ -3160,7 +3162,7 @@ async function check(diagnostics, output) {
   }
 }
 
-async function activateCurrent(diagnostics, output, activationDiagnostics) {
+async function activateCurrent(diagnostics, output, activationDiagnostics, consoleOutput) {
   const current = currentObject();
   if (current === undefined) return;
   const {editor, object} = current;
@@ -3203,6 +3205,8 @@ async function activateCurrent(diagnostics, output, activationDiagnostics) {
       const build = activationBuildText(result);
       const tests = closureTestsText(result);
       const extra = [build, tests].filter(Boolean).join(", ");
+      consoleOutput.appendLine(`osd activate ${object.name}: activated, generation ${generation}${extra ? ` (${extra})` : ""}`);
+      consoleOutput.show?.(true);
       vscode.window.setStatusBarMessage(
         `osd: ${object.name} activated, generation ${generation}${extra ? ` (${extra})` : ""}`, 5000);
     } else {
@@ -3502,6 +3506,12 @@ async function classrunObject(name, classrunOutput, withDebugger = false, file,
   }
   if (withDebugger) controller.debugNote?.(`classrun ${name}: sending the run`);
   classrunOutput.show(true);
+  const document = vscode.window.activeTextEditor?.document;
+  // Source maps identify paths, but do not prove the active source content.
+  // Use the cheap buffer signal until a digest-proven comparison is available.
+  if (document?.isDirty && file && path.resolve(document.fileName) === path.resolve(file)) {
+    classrunOutput.appendLine("osd: running the active version; your saved changes are not activated yet (Ctrl+F3)");
+  }
   classrunOutput.appendLine(`--- classrun ${name} ---`);
   try {
     const {text, ms, generation} = await client().classrun(name);

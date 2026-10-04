@@ -181,6 +181,97 @@ describe("editors/vscode: the extension's logic", function () {
     expect(contributes.debuggers ?? [], "Node attach uses VS Code's built-in debugger").to.deep.equal([]);
   });
 
+  it("shows Check and Activate before Run and Debug for supported source objects", () => {
+    const {contributes} = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
+    const menu = contributes.menus["editor/title"];
+    expect(menu.map(({command}) => command)).to.deep.equal(["osd.check", "osd.activate", "osd.run", "osd.runWithDebugger"]);
+    for (const [command, title, icon] of [["osd.check", "osd: Check (Ctrl+F2)", "$(check)"],
+      ["osd.activate", "osd: Activate (Ctrl+F3)", "$(zap)"]]) {
+      expect(contributes.commands.find((row) => row.command === command)).to.include({title, icon});
+      const entry = menu.find((row) => row.command === command);
+      expect(entry.when).to.include("!isWeb && !osd.web && resourceFilename =~ ");
+      expect(entry.group).to.match(/^navigation@/);
+      expect(Number(entry.group.split("@")[1])).to.be.lessThan(Number(menu[2].group.split("@")[1]));
+      const literal = entry.when.slice(entry.when.indexOf("/"));
+      const pattern = new RegExp(literal.slice(1, literal.lastIndexOf("/")), literal.slice(literal.lastIndexOf("/") + 1));
+      for (const file of ["zcl_a.clas.abap", "zcl_a.clas.locals_def.abap", "zcl_a.clas.locals_imp.abap",
+        "zcl_a.clas.macros.abap", "zcl_a.clas.testclasses.abap", "zif_a.intf.abap", "zprog.prog.abap", "ZCL_A.CLAS.ABAP"]) {
+        expect(pattern.test(file), file).to.equal(adtObjectOf(file) !== undefined);
+      }
+      for (const file of ["readme.md", "plain.abap", "ztab.tabl.xml", "zview.ddls.asddls", "zview.ddls.xml", "zfg.fugr.abap"]) {
+        expect(pattern.test(file), file).to.equal(false);
+      }
+    }
+  });
+
+  it("writes check and activation results to osd console and keeps status feedback", async () => {
+    let issues = [];
+    const app = express();
+    app.head("/sap/bc/adt/core/discovery", (_req, res) => res.set("x-csrf-token", "test-token").end());
+    app.post("/sap/bc/adt/checkruns", (_req, res) => res.type("application/xml").send(
+      checkReportDocument([{uri: "/sap/bc/adt/oo/classes/zcl_a", issues}])));
+    app.post("/sap/bc/adt/activation", (_req, res) => res.set({"x-osd-generation": "123456789abcdef", "x-osd-build": "warm", "x-osd-swap-ms": "12"})
+      .type("application/xml").send(activationSuccessDocument()));
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    try {
+      const api = vscodeStub({url: `http://127.0.0.1:${server.address().port}`});
+      const handlers = new Map(), lines = [], statuses = [], errors = [], general = [], shows = [];
+      api.commands.registerCommand = (name, handler) => { handlers.set(name, handler); return {dispose() {}}; };
+      api.languages = {createDiagnosticCollection: () => ({set() {}, dispose() {}})};
+      api.DiagnosticSeverity = {Error: 0, Warning: 1, Information: 2};
+      api.Diagnostic = class { constructor(range, message, severity) { Object.assign(this, {range, message, severity}); } };
+      api.Position = class {
+        constructor(line, character) { Object.assign(this, {line, character}); }
+        translate(line, character) { return new api.Position(this.line + line, this.character + character); }
+      };
+      const file = "/project/zcl_a.clas.abap";
+      api.window.activeTextEditor = {document: {fileName: file, uri: api.Uri.file(file), isDirty: false, getText: () => ""}};
+      api.window.setStatusBarMessage = (...args) => statuses.push(args);
+      api.window.showErrorMessage = (message) => errors.push(message);
+      loadExtension(api).registerCheckActivateCommands({subscriptions: []}, {appendLine: (line) => general.push(line)},
+        {appendLine: (line) => lines.push(line), show: (preserveFocus) => shows.push(preserveFocus)});
+      await handlers.get("osd.check")();
+      issues = [{severity: "W", message: "unused variable", line: 1, column: 1}];
+      await handlers.get("osd.check")();
+      issues = [];
+      await handlers.get("osd.activate")();
+      expect(lines).to.deep.equal(["osd check ZCL_A: no findings", "osd check ZCL_A: 1 findings",
+        "osd activate ZCL_A: activated, generation 12345678 (hot-swapped in 12 ms (warm))"]);
+      expect(statuses).to.have.lengthOf(3);
+      expect(statuses.every(([, duration]) => duration === 5000)).to.equal(true);
+      expect(shows).to.deep.equal([true, true, true]);
+      expect(errors).to.deep.equal([]);
+      expect(general).to.deep.equal([]);
+    } finally { await new Promise((resolve) => server.close(resolve)); }
+  });
+
+  it("warns before classrun sends a dirty editor's run, and stays quiet for clean or unrelated editors", async () => {
+    const api = vscodeStub();
+    const file = "/project/zcl_a.clas.abap";
+    const document = {fileName: file, isDirty: true};
+    api.window.activeTextEditor = {document};
+    const {classrunObject} = loadExtension(api);
+    const lines = [];
+    const output = {show() {}, appendLine: (line) => lines.push(line)};
+    const warning = "osd: running the active version; your saved changes are not activated yet (Ctrl+F3)";
+    const options = {client: () => ({classrun: async () => {
+      expect(lines[0]).to.equal(document.isDirty && document.fileName === file ? warning : "--- classrun ZCL_A ---");
+      return {text: "hello", ms: 1};
+    }})};
+    await classrunObject("ZCL_A", output, false, file, options);
+    expect(lines.filter((line) => line === warning)).to.have.lengthOf(1);
+    document.isDirty = false;
+    lines.length = 0;
+    await classrunObject("ZCL_A", output, false, file, options);
+    expect(lines).not.to.include(warning);
+    document.isDirty = true;
+    document.fileName = "/project/zcl_b.clas.abap";
+    lines.length = 0;
+    await classrunObject("ZCL_A", output, false, file, options);
+    expect(lines).not.to.include(warning);
+  });
+
   it("uses paused debug state for ABAP run and stepping keys", () => {
     const bindings = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8")).contributes.keybindings;
     for (const [key, command] of [["f8", "osd.run"], ["f9", "osd.classrun"]]) {
