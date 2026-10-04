@@ -95,14 +95,15 @@ describe("ADT kernel: loaded once, stale said, never booted over", function () {
       const {Data} = await import(${JSON.stringify(resolve("tools/osd-data.mjs"))});
       const kernel = await loadAdtKernel({output: ${JSON.stringify(OUTPUT)}, setup});
       const runtime = globalThis.abap;
+      const {rows: like} = await runtime.context.databaseConnections.DEFAULT.select({select:"SELECT 'A' LIKE 'a' AS matches"});
       let refused;
       try { await new Data({root: process.cwd()}).boot(); } catch (e) { refused = e.message; }
-      console.log(JSON.stringify({refused, same: globalThis.abap === runtime, handler: typeof kernel.handler}));
+      console.log(JSON.stringify({refused, same: globalThis.abap === runtime, handler: typeof kernel.handler, like: like[0].matches}));
       process.exit(0);`;
     const run = spawnSync(process.execPath, ["--input-type=module", "-e", script], {encoding: "utf8", timeout: 60000});
     const line = run.stdout.trim().split("\n").pop();
     expect(JSON.parse(line ?? "{}"), run.stderr).to.deep.equal({
       refused: "this process holds the ADT kernel; the system's ABAP runs in the serving child, not here",
-      same: true, handler: "function"});
+      same: true, handler: "function", like: 0});
   });
 });

@@ -507,7 +507,7 @@ export const VERDICTS = {
     measured: "test/sqlscript-treatments.mjs: div_zero -- DuckDB raises, and SQLite's NULL is pinned rather than remembered",
     why: "DuckDB can be made to raise and is. SQLite cannot raise at all, so faithfulness would mean refusing division outright -- a common operator declined for a rare case. That trade is written down in the dialect and the row goes on being measured."},
   like_case: {class: "compat", done: true,
-    where: "the CONNECTION, not the dialect: PRAGMA case_sensitive_like = ON in tools/sqljs-native.mjs and tools/sqlite-file-client.mjs",
+    where: "the CONNECTION, not the dialect: tools/sqlite-connection.mjs shared LIKE function setup",
     measured: "test/sqlscript-treatments.mjs: like_case -- asserted through the client, since that is where the treatment is",
     why: "SQLite's LIKE is case-insensitive for ASCII unless the connection says otherwise. The fix is connection-scoped and survives transactions, so the dialect passes LIKE through -- which means this table, which opens its own connections, keeps showing the difference while the runtime does not have it."},
   cast_char_narrow: {class: "compat", done: true,

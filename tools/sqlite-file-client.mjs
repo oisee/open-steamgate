@@ -21,6 +21,8 @@ import {dirname} from "node:path";
 import {fingerprintOf} from "./osd-persist.mjs";
 import {osqlSemanticsError} from "./osql-error.mjs";
 
+import {setupSqliteConnection} from "./sqlite-connection.mjs";
+
 const STAMP = "osd_schema";
 
 // Where the rows live when nobody says: beside the tree, out of git. One
@@ -152,10 +154,7 @@ export class FileSqliteClient {
       this.db.exec("PRAGMA synchronous = NORMAL");
     }
     this.db.exec("PRAGMA busy_timeout = 5000");
-    // HANA's LIKE is case-sensitive and SQLite's is not, for ASCII, unless
-    // this is on (measured 2026-09-19). The native channel's lowering passes
-    // a LIKE through on the strength of this line.
-    this.db.exec("PRAGMA case_sensitive_like = ON");
+    setupSqliteConnection(this.db);
     if (globalThis.abap?.context?.databaseConnections?.DEFAULT === this) {
       globalThis.abap.builtin.sy.get().dbsys?.set(this.name);
     }

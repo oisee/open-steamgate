@@ -236,8 +236,8 @@ export const DIALECTS = {
     // deliberately left alone -- see the call site.
     decArith: (e, scale) => `ROUND(${e}, ${scale})`,
     // SQLite's LIKE is case-INSENSITIVE for ASCII unless the connection says
-    // otherwise, and HANA's is not. `PRAGMA case_sensitive_like = ON` fixes
-    // it, is connection-scoped and survives transactions (measured), so the
+    // otherwise, and HANA's is not. The shared connection setup registers
+    // case-sensitive LIKE, which survives transactions (measured), so the
     // two SQLite native channels set it when they open rather than every
     // statement carrying a workaround. A dialect cannot check a pragma from
     // here, which is why this reads as a pass-through and the guarantee lives

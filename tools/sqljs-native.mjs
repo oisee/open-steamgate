@@ -18,6 +18,7 @@
 // sent to the engine untouched, which is the point and also the reason.
 
 import {bindValue} from "./abap-types.mjs";
+import {setupSqliteConnection} from "./sqlite-connection.mjs";
 
 /** ABAP's type letters into values sql.js will bind */
 function bind(params = []) {
@@ -37,12 +38,7 @@ export function installNative(client) {
   }
   let relations = 0;
 
-  // SQLite's LIKE is case-INSENSITIVE for ASCII by default and HANA's is not
-  // ('ABC' LIKE 'abc' matches here and does not there, measured 2026-09-19).
-  // The pragma is connection-scoped and survives transactions, so setting it
-  // once at the connection is what makes tools/sqlscript-lower.mjs able to
-  // pass a LIKE straight through instead of refusing it.
-  db.exec("PRAGMA case_sensitive_like = ON");
+  setupSqliteConnection(db);
 
   Object.defineProperty(client, "supportsNative", {value: true, configurable: true});
 
