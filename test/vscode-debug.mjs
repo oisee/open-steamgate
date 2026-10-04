@@ -878,8 +878,8 @@ describe("VS Code controller: Attach and call across a generation switch", funct
         if (request === "vscode") return api;
         return originalLoad.call(this, request, parent, isMain);
       };
-      let SystemController;
-      try { ({SystemController} = require(extensionPath)); }
+      let SystemController, classrunObject;
+      try { ({SystemController, classrunObject} = require(extensionPath)); }
       finally { Module._load = originalLoad; }
       const controller = new SystemController({subscriptions: []}, {appendLine: (line) => lines.push(line)});
       controller.launcher = {state: "running", inspectPort: 9402, osdHome: dir};
@@ -892,6 +892,17 @@ describe("VS Code controller: Attach and call across a generation switch", funct
       expect(await controller.waitForDebuggerReady(file, 1000)).to.equal(true);
       expect(lines.some((line) => line.includes("matches") && line.includes("(realpath)"))).to.equal(true);
       expect(lines.some((line) => line.includes("ready after") && line.includes("Remote Process [0]"))).to.equal(true);
+      const runSteps = [];
+      await classrunObject("ZCL_OSD_FLEET_REPORT", {show() {}, appendLine() {}}, false, file, {
+        attach: async () => { runSteps.push("attach"); return true; },
+        controller: {waitForDebuggerReady: async target => {
+          expect(target).to.equal(file);
+          runSteps.push("verified");
+          return controller.waitForDebuggerReady(target, 1000);
+        }},
+        client: () => ({classrun: async () => { runSteps.push("run"); return {text: "ok", ms: 1}; }}),
+      });
+      expect(runSteps, "F9 with an existing breakpoint attaches before sending").to.deep.equal(["attach", "verified", "run"]);
       // and a wait that gives up says why
       child.getDebugProtocolBreakpoint = async () => ({verified: false});
       expect(await controller.waitForDebuggerReady(file, 120)).to.equal(false);

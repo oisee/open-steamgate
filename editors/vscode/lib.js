@@ -602,6 +602,13 @@ class Osd {
     return this.json("/osd/dumps");
   }
 
+  /** Cheap read of the activated include, bounded so F9 stays responsive. */
+  async activeSource(object, include = object.include ?? "main") {
+    const suffix = include === "main" ? "/source/main" : `/includes/${encodeURIComponent(include)}/source/main`;
+    return (await this.request(`${uriOf(object)}${suffix}?version=active`,
+      {headers: {accept: "text/plain"}, signal: AbortSignal.timeout(750)})).text();
+  }
+
   /** Test classes and methods of an object, without running anything. */
   discover(object) {
     return this.json(`/sap/bc/adt/core/http/unit/object?type=${encodeURIComponent(object.type)}&name=${encodeURIComponent(object.name)}`);
@@ -1295,25 +1302,14 @@ const RUN_TABLE = {
   // hands the answer in `ctx.entitySet`; everything else on such a class
   // still has no Gateway client to open.
   CLAS: (ctx) => {
+    if (ctx.hasClassrun) return {kind: "classrun"};
     if (/_DPC_EXT$|_MPC_EXT$/i.test(ctx.name ?? "")) {
       if (ctx.entitySet !== undefined) {
         return {kind: "call-entityset", ...ctx.entitySet};
       }
       return {kind: "not-yet", text: "not yet: put the cursor inside a <set>_get_entityset or <set>_get_entity method (or click its CodeLens) -- the rest of a service's DPC_EXT / MPC_EXT still has no Gateway client"};
     }
-    if (ctx.hasUnitTests) {
-      return {kind: "unit"};
-    }
-    // Q6b (docs/vscode-extension.md): a class with no tests that declares
-    // IF_OO_ADT_CLASSRUN runs as a console (oo/classrun, tools/adt-facade.mjs)
-    // -- ADT's own F9. `ctx.hasClassrun` is `implementsClassrun` below, run
-    // by the caller against the editor's buffer, the same way `ctx.hasUnitTests`
-    // is a file-system fact the caller supplies because lib.js touches
-    // neither.
-    if (ctx.hasClassrun) {
-      return {kind: "classrun"};
-    }
-    return {kind: "not-yet", text: "not yet: run as ABAP Application (Console) -- put IF_OO_ADT_CLASSRUN on this class (or give it ABAP Unit tests) for F8/F9 to do something"};
+    return {kind: "nothing-to-run", text: `Nothing to run for ${ctx.name}. Tests: Ctrl+Shift+F10.`};
   },
   INTF: () => ({kind: "not-yet", text: "not yet: an interface has nothing of its own to run"}),
   // gui-reports spike (docs/gui-reports.md): a report converted by
@@ -1365,10 +1361,7 @@ function osdRunCommandLine({home, file, node = "node"}) {
   return `${call}${q(node)} ${q(osd)} run ${q(file)}`;
 }
 
-/** SE80's F8 for `object` (`{type, name}`), `ctx.hasUnitTests` told by the
- *  caller (it needs the file system osd/lib.js does not touch): `{kind:
- *  "unit"}` when this build can already run it, else `{kind: "not-yet",
- *  text}` naming the server work that would make it real. */
+/** F8 dispatches runnable objects only; ABAP Unit has its own commands. */
 function runActionFor(object, ctx = {}) {
   const entry = RUN_TABLE[object?.type];
   if (entry === undefined) {

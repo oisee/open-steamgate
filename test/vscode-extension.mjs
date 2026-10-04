@@ -181,6 +181,232 @@ describe("editors/vscode: the extension's logic", function () {
     expect(contributes.debuggers ?? [], "Node attach uses VS Code's built-in debugger").to.deep.equal([]);
   });
 
+  it("shows Check and Activate before Run and Debug for supported source objects", () => {
+    const {contributes} = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
+    const menu = contributes.menus["editor/title"];
+    expect(menu.map(({command}) => command)).to.deep.equal(["osd.check", "osd.activate", "osd.classrun", "osd.runTitle", "osd.runUnit", "osd.runWithDebugger"]);
+    for (const [command, name] of [["osd.check", "check"], ["osd.activate", "activate"],
+      ["osd.classrun", "run-console"], ["osd.runTitle", "run-console"],
+      ["osd.run", "run-console"], ["osd.runUnit", "beaker"]]) {
+      const {icon} = contributes.commands.find(row => row.command === command);
+      expect(icon).to.deep.equal({light: `resources/icons/${name}-light.svg`, dark: `resources/icons/${name}-dark.svg`});
+      for (const [theme, color] of [["light", "#424242"], ["dark", "#C5C5C5"]]) {
+        const svg = readFileSync(path.join(ROOT, "editors/vscode", icon[theme]), "utf8");
+        expect(svg).to.include('viewBox="0 0 16 16"').and.include('stroke-width="1"').and.include(`stroke="${color}"`);
+        expect(svg).not.to.include("currentColor");
+      }
+    }
+    for (const [command, title] of [["osd.check", "osd: Check (Ctrl+F2)"],
+      ["osd.activate", "osd: Activate (Ctrl+F3)"]]) {
+      expect(contributes.commands.find((row) => row.command === command)).to.include({title});
+      const entry = menu.find((row) => row.command === command);
+      expect(entry.when).to.include("!isWeb && !osd.web && resourceFilename =~ ");
+      expect(entry.group).to.match(/^navigation@/);
+      expect(Number(entry.group.split("@")[1])).to.be.lessThan(Number(menu[2].group.split("@")[1]));
+      const literal = entry.when.slice(entry.when.indexOf("/"));
+      const pattern = new RegExp(literal.slice(1, literal.lastIndexOf("/")), literal.slice(literal.lastIndexOf("/") + 1));
+      for (const file of ["zcl_a.clas.abap", "zcl_a.clas.locals_def.abap", "zcl_a.clas.locals_imp.abap",
+        "zcl_a.clas.macros.abap", "zcl_a.clas.testclasses.abap", "zif_a.intf.abap", "zprog.prog.abap", "ZCL_A.CLAS.ABAP"]) {
+        expect(pattern.test(file), file).to.equal(adtObjectOf(file) !== undefined);
+      }
+      for (const file of ["readme.md", "plain.abap", "ztab.tabl.xml", "zview.ddls.asddls", "zview.ddls.xml", "zfg.fugr.abap"]) {
+        expect(pattern.test(file), file).to.equal(false);
+      }
+    }
+  });
+
+  it("offers classrun and ABAP Unit independently on a class with tests", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "osd-title-"));
+    try {
+      const api = vscodeStub();
+      const file = path.join(dir, "zcl_demo.clas.abap");
+      writeFileSync(path.join(dir, "zcl_demo.clas.testclasses.abap"), "CLASS ltcl DEFINITION FOR TESTING. METHODS known_line FOR TESTING. ENDCLASS.");
+      api.window.activeTextEditor = {document: {fileName: file, getText: () => "INTERFACES if_oo_adt_classrun."}};
+      loadExtension(api).editorRunContext({subscriptions: []});
+      expect(api.executedCommands).to.deep.include(["setContext", "osd.editorClassrun", true]);
+      expect(api.executedCommands).to.deep.include(["setContext", "osd.editorTests", true]);
+      const {contributes} = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
+      expect(contributes.commands.find(c => c.command === "osd.classrun").title).to.equal("osd: Run classrun (F9)");
+      expect(contributes.commands.find(c => c.command === "osd.runUnit")).to.include({title: "osd: Run ABAP Unit (Ctrl+Shift+F10)"});
+    } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
+
+  it("names desktop output channels consistently and explains their contents first", () => {
+    const api = vscodeStub(), channels = [];
+    api.window.createOutputChannel = name => {
+      const channel = {name, lines: [], appendLine(line) { this.lines.push(line); }, dispose() {}};
+      channels.push(channel);
+      return channel;
+    };
+    const context = {subscriptions: []};
+    loadExtension(api).desktopOutputs(context);
+    expect(channels.map(c => c.name)).to.deep.equal(["OSD", "OSD: Console", "OSD: System log"]);
+    expect(channels.map(c => c.lines[0])).to.deep.equal([
+      "OSD: extension diagnostics and command/debugger activity.",
+      "OSD: Console: classrun (F9/▷) output and Check/Activate results.",
+      "OSD: System log: server builds, runtime and debugger attachment diagnostics.",
+    ]);
+    expect(context.subscriptions).to.deep.equal(channels);
+  });
+
+  it("writes check and activation results to OSD: Console and keeps status feedback", async () => {
+    let issues = [];
+    const app = express();
+    app.head("/sap/bc/adt/core/discovery", (_req, res) => res.set("x-csrf-token", "test-token").end());
+    app.post("/sap/bc/adt/checkruns", (_req, res) => res.type("application/xml").send(
+      checkReportDocument([{uri: "/sap/bc/adt/oo/classes/zcl_a", issues}])));
+    app.post("/sap/bc/adt/activation", (_req, res) => res.set({"x-osd-generation": "123456789abcdef", "x-osd-build": "warm", "x-osd-swap-ms": "12"})
+      .type("application/xml").send(activationSuccessDocument()));
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    try {
+      const api = vscodeStub({url: `http://127.0.0.1:${server.address().port}`});
+      const handlers = new Map(), lines = [], statuses = [], errors = [], general = [], shows = [];
+      api.commands.registerCommand = (name, handler) => { handlers.set(name, handler); return {dispose() {}}; };
+      api.languages = {createDiagnosticCollection: () => ({set() {}, dispose() {}})};
+      api.DiagnosticSeverity = {Error: 0, Warning: 1, Information: 2};
+      api.Diagnostic = class { constructor(range, message, severity) { Object.assign(this, {range, message, severity}); } };
+      api.Position = class {
+        constructor(line, character) { Object.assign(this, {line, character}); }
+        translate(line, character) { return new api.Position(this.line + line, this.character + character); }
+      };
+      const file = "/project/zcl_a.clas.abap";
+      api.window.activeTextEditor = {document: {fileName: file, uri: api.Uri.file(file), isDirty: false, getText: () => ""}};
+      api.window.setStatusBarMessage = (...args) => statuses.push(args);
+      api.window.showErrorMessage = (message) => errors.push(message);
+      loadExtension(api).registerCheckActivateCommands({subscriptions: []}, {appendLine: (line) => general.push(line)},
+        {appendLine: (line) => lines.push(line), show: (preserveFocus) => shows.push(preserveFocus)});
+      await handlers.get("osd.check")();
+      issues = [{severity: "W", message: "unused variable", line: 1, column: 1}];
+      await handlers.get("osd.check")();
+      issues = [];
+      await handlers.get("osd.activate")();
+      expect(lines).to.deep.equal(["osd check ZCL_A: no findings", "osd check ZCL_A: 1 findings",
+        "osd activate ZCL_A: activated, generation 12345678 (hot-swapped in 12 ms (warm))"]);
+      expect(statuses).to.have.lengthOf(3);
+      expect(statuses.every(([, duration]) => duration === 5000)).to.equal(true);
+      expect(shows).to.deep.equal([true, true, true]);
+      expect(errors).to.deep.equal([]);
+      expect(general).to.deep.equal([]);
+    } finally { await new Promise((resolve) => server.close(resolve)); }
+  });
+
+  it("warns before classrun sends a dirty editor's run, and stays quiet for clean or unrelated editors", async () => {
+    const api = vscodeStub();
+    const file = "/project/zcl_a.clas.abap";
+    const document = {fileName: file, isDirty: true};
+    api.window.activeTextEditor = {document};
+    const {classrunObject} = loadExtension(api);
+    const lines = [];
+    const output = {show() {}, appendLine: (line) => lines.push(line)};
+    const warning = "osd: running the active version; your editor changes are not activated yet (Ctrl+F3)";
+    const options = {client: () => ({classrun: async () => {
+      expect(lines[0]).to.equal(document.isDirty && document.fileName === file ? warning : "--- classrun ZCL_A ---");
+      return {text: "hello", ms: 1};
+    }})};
+    await classrunObject("ZCL_A", output, false, file, options);
+    expect(lines.filter((line) => line === warning)).to.have.lengthOf(1);
+    document.isDirty = false;
+    lines.length = 0;
+    await classrunObject("ZCL_A", output, false, file, options);
+    expect(lines).not.to.include(warning);
+    document.isDirty = true;
+    document.fileName = "/project/zcl_b.clas.abap";
+    lines.length = 0;
+    await classrunObject("ZCL_A", output, false, file, options);
+    expect(lines).not.to.include(warning);
+  });
+
+  it("compares saved source with the active ADT include before F9, falling back when unavailable", async () => {
+    const api = vscodeStub();
+    const file = "/project/zcl_a.clas.abap", lines = [], requests = [];
+    let active = "old", unavailable = false;
+    api.window.activeTextEditor = {document: {fileName: file, isDirty: false, getText: () => "new\r\n"}};
+    const client = new Osd("http://local", async (url, options) => {
+      requests.push([url, options]);
+      if (unavailable) throw Error("timeout");
+      return {ok: true, text: async () => active};
+    });
+    client.classrun = async () => ({text: "ok", ms: 1});
+    const run = () => loadExtension(api).classrunObject("ZCL_A", {show() {}, appendLine: line => lines.push(line)},
+      false, file, {client: () => client, controller: {launcher: {state: "running"}}});
+    await run();
+    expect(lines[0]).to.include("editor changes are not activated");
+    expect(requests[0][0]).to.equal("http://local/sap/bc/adt/oo/classes/zcl_a/source/main?version=active");
+    expect(requests[0][1].signal).to.be.instanceOf(AbortSignal);
+    active = "new\n"; lines.length = 0;
+    await run();
+    expect(lines[0]).to.equal("--- classrun ZCL_A ---");
+    unavailable = true; lines.length = 0;
+    await run();
+    expect(lines[0]).to.equal("--- classrun ZCL_A ---");
+  });
+
+  it("normalizes active-source CRLF and terminal newlines for main source and includes", async () => {
+    const api = vscodeStub();
+    const {classrunObject} = loadExtension(api);
+    for (const [suffix, include] of [["abap", "main"], ["locals_imp.abap", "implementations"]]) {
+      const file = `/project/zcl_a.clas.${suffix}`;
+      for (const [active, saved] of [["same", "same\r\n"], ["same\r\n\r\n", "same"],
+        ["one\r\ntwo\r\n", "one\ntwo\n\n"], ["same", "changed\n"]]) {
+        const lines = [], requests = [];
+        api.window.activeTextEditor = {document: {fileName: file, isDirty: false, getText: () => saved}};
+        const client = new Osd("http://local", async url => {
+          requests.push(url);
+          return {ok: true, text: async () => active};
+        });
+        client.classrun = async () => ({text: "ok", ms: 1});
+        await classrunObject("ZCL_A", {show() {}, appendLine: line => lines.push(line)}, false, file,
+          {client: () => client, controller: {launcher: {state: "running"}}});
+        expect(requests).to.deep.equal([`http://local/sap/bc/adt/oo/classes/zcl_a/${include === "main" ? "source/main" : "includes/implementations/source/main"}?version=active`]);
+        expect(lines.some(line => line.includes("not activated")), `${suffix}: ${JSON.stringify([active, saved])}`)
+          .to.equal(saved.startsWith("changed"));
+      }
+    }
+  });
+
+  it("skips the active-source comparison when serving availability is unknown or stopped", async () => {
+    const api = vscodeStub(), file = "/project/zcl_a.clas.abap";
+    api.window.activeTextEditor = {document: {fileName: file, isDirty: false, getText: () => "same"}};
+    const {classrunObject} = loadExtension(api);
+    for (const state of [undefined, "stopped", "starting", "failed", "running"]) {
+      let comparisons = 0, runs = 0;
+      const client = {activeSource: async () => { comparisons++; return "same"; },
+        classrun: async () => { runs++; return {text: "ok", ms: 1}; }};
+      await classrunObject("ZCL_A", {show() {}, appendLine() {}}, false, file,
+        {client: () => client, controller: state === undefined ? undefined : {launcher: {state}}});
+      expect(comparisons, String(state)).to.equal(state === "running" ? 1 : 0);
+      expect(runs).to.equal(1);
+    }
+  });
+
+  it("compares active source for an independently running system after a successful serving poll", async () => {
+    const api = vscodeStub(), file = "/project/zcl_a.clas.abap";
+    api.window.activeTextEditor = {document: {fileName: file, isDirty: false, getText: () => "same"}};
+    api.StatusBarAlignment = {Left: 1};
+    api.window.createStatusBarItem = () => ({show() {}, hide() {}, dispose() {}});
+    const {statusBar, classrunObject} = loadExtension(api);
+    const context = {subscriptions: []};
+    const originalFetch = globalThis.fetch, originalInterval = globalThis.setInterval;
+    let tick, comparisons = 0;
+    try {
+      globalThis.fetch = async url => ({ok: true, json: async () =>
+        String(url).endsWith("/osd/serving") ? {generation: "external", ready: true} : []});
+      globalThis.setInterval = fn => { tick = fn; return undefined; };
+      statusBar(context, () => 0);
+      await tick();
+      await classrunObject("ZCL_A", {show() {}, appendLine() {}}, false, file, {client: () => ({
+        activeSource: async () => { comparisons++; return "same"; },
+        classrun: async () => ({text: "ok", ms: 1}),
+      })});
+      expect(comparisons).to.equal(1);
+    } finally {
+      context.subscriptions.forEach(subscription => subscription.dispose());
+      globalThis.fetch = originalFetch;
+      globalThis.setInterval = originalInterval;
+    }
+  });
+
   it("uses paused debug state for ABAP run and stepping keys", () => {
     const bindings = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8")).contributes.keybindings;
     for (const [key, command] of [["f8", "osd.run"], ["f9", "osd.classrun"]]) {
@@ -513,6 +739,185 @@ describe("editors/vscode: the extension's logic", function () {
       expect(events.filter(([name]) => name === "errored").map(([, id]) => id)).to.deep.equal([methods[0].id]);
       expect(listeners.size, "the cancellation listener is removed").to.equal(0);
     } finally {
+      explorer?.dispose();
+      Osd.prototype.discover = originalDiscover;
+      Osd.prototype.run = originalRun;
+    }
+  });
+
+  it("keeps running TestItems stable when an activation save triggers rediscovery", async () => {
+    const api = vscodeStub({home: ROOT, "tests.showSystem": false});
+    const source = path.join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+    api.Uri.file = (fsPath) => ({fsPath});
+    api.Range = class { constructor() {} };
+    api.TestMessage = class { constructor(message) { this.message = message; } };
+    api.TestRunProfileKind = {Run: 1, Debug: 2};
+    api.workspace.findFiles = async () => [api.Uri.file(source)];
+    api.workspace.getWorkspaceFolder = () => ({uri: api.Uri.file(ROOT)});
+    let changed;
+    api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange(fn) { changed = fn; }, dispose() {}});
+    api.commands = {registerCommand: () => ({dispose() {}})};
+    const collection = (parent) => {
+      const items = new Map();
+      return {
+        get size() { return items.size; },
+        get: (id) => items.get(id),
+        add(item) { item.parent = parent; items.set(item.id, item); },
+        replace(next) { items.clear(); next.forEach((item) => this.add(item)); },
+        [Symbol.iterator]: () => items[Symbol.iterator](),
+      };
+    };
+    const profiles = new Map();
+    const events = [];
+    const controller = {
+      items: collection(undefined),
+      createTestItem(id, label, uri) {
+        const item = {id, label, uri};
+        item.children = collection(item);
+        return item;
+      },
+      createRunProfile(name, kind, handler) { profiles.set(name, handler); },
+      createTestRun() {
+        return Object.fromEntries(["started", "passed", "failed", "skipped", "errored", "appendOutput", "end"]
+          .map((name) => [name, (item) => events.push([name, item?.id])]));
+      },
+      dispose() {},
+    };
+    api.tests = {createTestController: () => controller};
+    const {testExplorer} = loadExtension(api);
+    const originalDiscover = Osd.prototype.discover;
+    const originalRun = Osd.prototype.run;
+    const listeners = new Set();
+    const token = {
+      isCancellationRequested: false,
+      onCancellationRequested(listener) { listeners.add(listener); return {dispose: () => listeners.delete(listener)}; },
+      cancel() { this.isCancellationRequested = true; for (const listener of listeners) listener(); },
+    };
+    const signals = [];
+    Osd.prototype.discover = async () => ({classes: [{name: "LTCL_SCAN", include: "testclasses", line: 1, schedule: "harmless",
+      methods: [{name: "FIRST", line: 2}]}]});
+    let finish;
+    Osd.prototype.run = () => new Promise(resolve => { finish = resolve; });
+    let explorer;
+    try {
+      explorer = testExplorer(controllerContext(), {appendLine() {}}, {});
+      await controller.resolveHandler();
+      const object = controller.items.get("group:project").children.get("CLAS:ZCL_OSD_ABAP_TOKENS");
+      await controller.resolveHandler(object);
+      const methods = [...object.children.get("CLAS:ZCL_OSD_ABAP_TOKENS/LTCL_SCAN").children].map(([, item]) => item);
+      const running = profiles.get("Run")({include: methods}, token);
+      while (!finish) await new Promise(resolve => setImmediate(resolve));
+      changed(api.Uri.file(source));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(object.children.get("CLAS:ZCL_OSD_ABAP_TOKENS/LTCL_SCAN").children.get(methods[0].id),
+        "a watcher must not replace a spinning item").to.equal(methods[0]);
+      finish({classes: [{name: "LTCL_SCAN", methods: [{name: "FIRST", status: "passed"}]}]});
+      await running;
+      expect(events.filter(([name]) => name === "started")).to.have.length(1);
+      expect(events.filter(([name]) => ["passed", "failed", "skipped", "errored"].includes(name))).to.have.length(1);
+      expect(events.at(-1)[0]).to.equal("end");
+      expect(listeners.size).to.equal(0);
+    } finally {
+      explorer?.dispose();
+      Osd.prototype.discover = originalDiscover;
+      Osd.prototype.run = originalRun;
+    }
+  });
+
+  for (const scenario of ["removed", "replaced", "rejected"]) it(`deferred rediscovery handles an object ${scenario} during a run`, async () => {
+    const api = vscodeStub({home: ROOT, "tests.showSystem": false});
+    const source = path.join(ROOT, "src/webgui/zcl_osd_abap_tokens.clas.testclasses.abap");
+    api.Uri.file = (fsPath) => ({fsPath});
+    api.Range = class { constructor() {} };
+    api.TestMessage = class { constructor(message) { this.message = message; } };
+    api.TestRunProfileKind = {Run: 1, Debug: 2};
+    let files = [api.Uri.file(source)];
+    api.workspace.findFiles = async () => files;
+    api.workspace.getWorkspaceFolder = () => ({uri: api.Uri.file(ROOT)});
+    let changed;
+    api.workspace.createFileSystemWatcher = () => ({onDidCreate() {}, onDidDelete() {}, onDidChange(fn) { changed = fn; }, dispose() {}});
+    api.commands = {registerCommand: () => ({dispose() {}})};
+    const collection = (parent) => {
+      const items = new Map();
+      return {
+        get size() { return items.size; },
+        get: (id) => items.get(id),
+        add(item) { item.parent = parent; items.set(item.id, item); },
+        replace(next) { items.clear(); next.forEach((item) => this.add(item)); },
+        [Symbol.iterator]: () => items[Symbol.iterator](),
+      };
+    };
+    const profiles = new Map();
+    const events = [];
+    const controller = {
+      items: collection(undefined),
+      createTestItem(id, label, uri) {
+        const item = {id, label, uri};
+        item.children = collection(item);
+        return item;
+      },
+      createRunProfile(name, kind, handler) { profiles.set(name, handler); },
+      createTestRun() {
+        return Object.fromEntries(["started", "passed", "failed", "skipped", "errored", "appendOutput", "end"]
+          .map((name) => [name, (item) => events.push([name, item?.id])]));
+      },
+      dispose() {},
+    };
+    api.tests = {createTestController: () => controller};
+    const {testExplorer} = loadExtension(api);
+    const originalDiscover = Osd.prototype.discover;
+    const originalRun = Osd.prototype.run;
+    const listeners = new Set();
+    const token = {
+      isCancellationRequested: false,
+      onCancellationRequested(listener) { listeners.add(listener); return {dispose: () => listeners.delete(listener)}; },
+      cancel() { this.isCancellationRequested = true; for (const listener of listeners) listener(); },
+    };
+    const signals = [];
+    Osd.prototype.discover = async () => ({classes: [{name: "LTCL_SCAN", include: "testclasses", line: 1, schedule: "harmless",
+      methods: [{name: "FIRST", line: 2}]}]});
+    let finish;
+    Osd.prototype.run = () => new Promise(resolve => { finish = resolve; });
+    const unhandled = [];
+    const onUnhandled = error => unhandled.push(error);
+    process.on("unhandledRejection", onUnhandled);
+    let explorer;
+    try {
+      const outputLines = [];
+      explorer = testExplorer(controllerContext(), {appendLine: line => outputLines.push(line)}, {});
+      await controller.resolveHandler();
+      const object = controller.items.get("group:project").children.get("CLAS:ZCL_OSD_ABAP_TOKENS");
+      await controller.resolveHandler(object);
+      const methods = [...object.children.get("CLAS:ZCL_OSD_ABAP_TOKENS/LTCL_SCAN").children].map(([, item]) => item);
+      const running = profiles.get("Run")({include: methods}, token);
+      while (!finish) await new Promise(resolve => setImmediate(resolve));
+      changed(api.Uri.file(source));
+      await new Promise(resolve => setImmediate(resolve));
+      expect(object.children.get("CLAS:ZCL_OSD_ABAP_TOKENS/LTCL_SCAN").children.get(methods[0].id),
+        "a watcher must not replace a spinning item").to.equal(methods[0]);
+      files = scenario === "removed" ? [] : files;
+      await controller.refreshHandler();
+      const current = controller.items.get("group:project").children.get(object.id);
+      let discoveries = 0;
+      Osd.prototype.discover = async () => { discoveries++; return {classes: []}; };
+      if (scenario === "rejected") Object.defineProperty(current, "busy", {set() { throw Error("deferred failure"); }});
+      finish({classes: [{name: "LTCL_SCAN", methods: [{name: "FIRST", status: "passed"}]}]});
+      await running;
+      expect(events.filter(([name]) => name === "started")).to.have.length(1);
+      expect(events.filter(([name]) => ["passed", "failed", "skipped", "errored"].includes(name))).to.have.length(1);
+      expect(events.at(-1)[0]).to.equal("end");
+      await new Promise(resolve => setImmediate(resolve));
+      expect(unhandled.map(String)).to.deep.equal([]);
+      if (scenario === "replaced") expect(current.busy).to.equal(false);
+      expect(discoveries).to.equal(scenario === "replaced" ? 1 : 0);
+      if (scenario !== "removed") {
+        expect(current).not.to.equal(object);
+        expect(current.children.size).to.equal(0);
+      }
+      if (scenario === "rejected") expect(outputLines).to.include("deferred failure");
+      expect(listeners.size).to.equal(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
       explorer?.dispose();
       Osd.prototype.discover = originalDiscover;
       Osd.prototype.run = originalRun;
@@ -1198,6 +1603,42 @@ describe("editors/vscode: the extension's logic", function () {
     expect(calls, "nothing to attach to while stopped").to.have.length(3);
   });
 
+  it("explains debugging on the first workspace ABAP breakpoint and remembers dismissal", () => {
+    const api = debugApi(), saved = new Map(), messages = [];
+    let changed;
+    api.workspace.workspaceFolders = [{uri: {toString: () => "file:///workspace"}}];
+    api.workspace.getWorkspaceFolder = uri => uri.fsPath.startsWith("/w/") ? {} : undefined;
+    api.debug.onDidChangeBreakpoints = fn => { changed = fn; return {dispose() {}}; };
+    api.window.showInformationMessage = (...args) => messages.push(args);
+    const context = {subscriptions: [], globalState: {get: key => saved.get(key), update: async (key, value) => saved.set(key, value)}};
+    const {debugOnboarding} = loadExtension(api);
+    debugOnboarding(context);
+    changed({added: [new api.SourceBreakpoint("/outside/z.clas.abap")]});
+    changed({added: [new api.SourceBreakpoint("/w/x.mjs")]});
+    expect(messages).to.have.length(0);
+    changed({added: [new api.SourceBreakpoint("/w/z.clas.abap")]});
+    changed({added: [new api.SourceBreakpoint("/w/z2.clas.abap")]});
+    expect(messages).to.deep.equal([["osd debugs without a launch configuration: set a breakpoint and press F9 or ▷. 'Attach to server' / 'ABAP on server' belong to the ABAP-FS extension and SAP systems.", "Got it"]]);
+    debugOnboarding(context);
+    changed({added: [new api.SourceBreakpoint("/w/z.clas.abap")]});
+    expect(messages).to.have.length(1);
+    expect(api.debug.started).to.have.length(0);
+  });
+
+  it("never attaches on system Start, even with saved ABAP breakpoints and legacy debug enabled", async () => {
+    const api = debugApi();
+    api.debug.breakpoints = [new api.SourceBreakpoint("/w/z.clas.abap")];
+    api.window.setStatusBarMessage = () => {};
+    const controller = new (loadSystemController(api))(controllerContext(), {show() {}, appendLine() {}});
+    const launcher = fakeLauncher({state: "stopped", debug: true, databaseLabel: "SQLite", async start() { this.state = "running"; return {port: 3100}; }});
+    controller.ensureLauncher = async () => launcher;
+    let attaches = 0;
+    controller.attachSystemDebugger = async () => { attaches++; return true; };
+    expect(await controller.start()).to.equal(true);
+    expect(attaches).to.equal(0);
+    expect(api.debug.started).to.have.length(0);
+  });
+
   it("osd.debug is gone from the settings UI, and read silently for one release", () => {
     const manifest = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
     expect(manifest.contributes.configuration.properties).to.not.have.property("osd.debug");
@@ -1710,10 +2151,10 @@ describe("editors/vscode: the extension's logic", function () {
   }
 
   it("SE80's F8, one entry per object type: what this build does, or the route its turn would use", () => {
-    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: true})).to.deep.equal({kind: "unit"});
-    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false}).kind).to.equal("not-yet");
+    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: true})).to.deep.equal({kind: "nothing-to-run", text: "Nothing to run for ZCL_DEMO. Tests: Ctrl+Shift+F10."});
+    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false}).kind).to.equal("nothing-to-run");
     // a service's own class, cursor outside any entity-set method: F8 there
-    // means a Gateway client, before ABAP Unit -- still not yet
+    // means a Gateway client -- still not yet
     const dpc = runActionFor({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT"}, {hasUnitTests: true});
     expect(dpc.kind).to.equal("not-yet");
     expect(dpc.text).to.contain("get_entityset");
@@ -1804,19 +2245,18 @@ describe("editors/vscode: the extension's logic", function () {
     expect(facadeImplementsClassrun(demo)).to.equal(implementsClassrun(demo));
   });
 
-  it("Q6b: F8 dispatches a no-tests classrun class to a run, tests still win, neither loses to the other", () => {
+  it("Q6b: F8 runs classrun regardless of tests and never dispatches to ABAP Unit", () => {
     expect(runActionFor({type: "CLAS", name: "ZCL_OSD_CLASSRUN_DEMO"}, {hasUnitTests: false, hasClassrun: true}))
       .to.deep.equal({kind: "classrun"});
-    // ABAP Unit still wins when a class happens to carry both
+    // Classrun runs even when the class carries tests
     expect(runActionFor({type: "CLAS", name: "ZCL_OSD_CLASSRUN_DEMO"}, {hasUnitTests: true, hasClassrun: true}))
-      .to.deep.equal({kind: "unit"});
-    // neither: the same "not yet" as before Q6b existed
-    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false, hasClassrun: false}).kind)
-      .to.equal("not-yet");
-    // a DPC_EXT's own dispatch (Q2b) still comes first, classrun or not
+      .to.deep.equal({kind: "classrun"});
+    // Neither: explain how to run tests independently
+    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false, hasClassrun: false}))
+      .to.deep.equal({kind: "nothing-to-run", text: "Nothing to run for ZCL_DEMO. Tests: Ctrl+Shift+F10."});
+    // An explicit classrun interface also runs on a DPC_EXT
     const dpc = runActionFor({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT"}, {hasUnitTests: false, hasClassrun: true});
-    expect(dpc.kind).to.equal("not-yet");
-    expect(dpc.text).to.contain("get_entityset");
+    expect(dpc).to.deep.equal({kind: "classrun"});
   });
 
   // ---- Q2b "Runner": the CodeLens over a SEGW _DPC_EXT class's own

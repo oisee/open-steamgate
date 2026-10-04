@@ -110,8 +110,9 @@ starts the attach session before requesting the detached run. The child uses
 `--inspect-brk`, so it waits at entry until the debugger has installed
 breakpoints; js-debug's `continueOnAttach` then resumes it. `test/vscode-debug.mjs`
 exercises this ordering against a real detached run. The Test Explorer's
-**Debug** profile always uses this path; its **Run** profile and F8's unit
-run attach only when the inspector is asked for at start (`OSD_INSPECT=1`).
+**Debug** profile always uses this path; its **Run** profile (also used by
+Ctrl+Shift+F10 and the beaker) attaches when an enabled breakpoint is set in an
+`.abap` file, or when the inspector was asked for at start (`OSD_INSPECT=1`).
 
 The status-bar item **Toggle ABAP breakpoints** runs VS Code's global
 breakpoint activation command; it leaves the breakpoint markers in place
@@ -336,7 +337,7 @@ run or the request. Two facts govern that wait.
 
 A wait that gives up is reported, and the run or call goes ahead anyway.
 There is no prompt to answer, since an unattended run has nobody to answer
-one. Every step of an attach is written to the **osd system** output channel
+one. Every step of an attach is written to the **OSD: System log** output channel
 as `osd debugger: ...`: the attach configuration, each wait's start and end
 or timeout, which breakpoints matched and why, the sessions asked and their
 verified state, and the live generation. The 0.5.1467 regression showed
