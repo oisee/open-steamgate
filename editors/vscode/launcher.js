@@ -595,11 +595,13 @@ async function waitForServing(port, options = {}) {
     }
     const serving = await servingOnce(port);
     if (serving?.ready === true && serving.generation !== undefined
-      && (options.launcherPid === undefined || serving.launcherPid === options.launcherPid)) {
+      && (options.launcherPid === undefined || serving.launcherPid === options.launcherPid)
+      && (options.launcherIdentity === undefined || serving.launcherIdentity === options.launcherIdentity)) {
       return serving;
     }
     if (serving?.starting === true
-      && (options.launcherPid === undefined || serving.launcherPid === options.launcherPid)) {
+      && (options.launcherPid === undefined || serving.launcherPid === options.launcherPid)
+      && (options.launcherIdentity === undefined || serving.launcherIdentity === options.launcherIdentity)) {
       deadline = Math.min(Math.max(deadline, Date.now() + timeoutMs), started + Math.max(bootMs, timeoutMs));
       lastPhase = serving.phase ?? lastPhase;
       options.onStarting?.(serving);
@@ -1190,7 +1192,8 @@ class Launcher extends EventEmitter {
 
   ownsServing(serving) {
     return this.state === "running" && Number.isInteger(this.pid)
-      && serving?.launcherPid === this.pid;
+      && typeof this.launcherIdentity === "string"
+      && serving?.launcherPid === this.pid && serving.launcherIdentity === this.launcherIdentity;
   }
 
   async refreshJobsGeneration(serving) {
@@ -1221,6 +1224,8 @@ class Launcher extends EventEmitter {
       this.pid = undefined;
       this.generation = undefined;
       this.adtCredentials = undefined;
+      this.launcherIdentity = undefined;
+      if (this.env) delete this.env.OSD_LAUNCHER_IDENTITY;
       if (this.env) delete this.env.OSD_ADT_TOKEN;
     }
     this.state = state;
@@ -1378,6 +1383,8 @@ class Launcher extends EventEmitter {
       // If the host dies between spawn and recording the child's PID, this
       // malformed pending value makes another window keep the home.
       if (this.servingLock !== undefined) fs.writeFileSync(this.servingLock, `${process.pid}\npending\n`);
+      this.launcherIdentity = randomUUID();
+      env.OSD_LAUNCHER_IDENTITY = this.launcherIdentity;
       this.adtCredentials = startCredentials(env);
       env.OSD_ADT_TOKEN = this.adtCredentials.token;
       child = spawn(process.execPath, ["test/run.mjs"], {cwd: this.osdHome, env});
@@ -1444,7 +1451,7 @@ class Launcher extends EventEmitter {
     this.#poll = poll;
     try {
       serving = await Promise.race([
-        waitForServing(port, {launcherPid: child.pid, timeoutMs: this.timeoutMs, signal: poll.signal, onStarting: (answer) => {
+        waitForServing(port, {launcherPid: child.pid, launcherIdentity: this.launcherIdentity, timeoutMs: this.timeoutMs, signal: poll.signal, onStarting: (answer) => {
           // the boot's step, once each, in the system's own log
           if (answer.phase !== undefined && answer.phase !== this.#bootPhase) {
             this.#bootPhase = answer.phase;
@@ -1537,7 +1544,7 @@ class Launcher extends EventEmitter {
         const remaining = deadline - Date.now();
         if (remaining <= 0) throw new Error("the requested inspector was not ready within 15000 ms");
         const serving = await servingOnce(this.port, Math.min(2000, remaining));
-        if (serving?.ready === true && Date.now() < deadline) {
+        if (serving?.ready === true && this.ownsServing(serving) && Date.now() < deadline) {
           const state = await inspectorOnce(this.port, undefined, Math.max(1, deadline - Date.now()));
           if (state.open === true && state.port === this.inspectPort && state.pending !== true && state.recovering !== true) break;
         }

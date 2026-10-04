@@ -43,7 +43,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const Module = require("node:module");
 const {Launcher} = require("../editors/vscode/launcher.js");
-const ownedLauncher = {pid: 12345, ownsServing: Launcher.prototype.ownsServing};
+const ownedLauncher = {pid: 12345, launcherIdentity: "test-owned", ownsServing: Launcher.prototype.ownsServing};
 
 function loadExtension(vscodeApi) {
   const extensionPath = require.resolve("../editors/vscode/extension.js");
@@ -1254,7 +1254,7 @@ describe("editors/vscode: the extension's logic", function () {
     globalThis.fetch = async (url) => {
       requested.push(String(url));
       const body = String(url).endsWith("/osd/serving")
-        ? {ready: true, launcherPid: 12345, database: "/work/db/osd.sqlite", databaseIdentity: {engine: "sqlite", storage: "file"}, warm: {state: "primed"}}
+        ? {ready: true, launcherPid: 12345, launcherIdentity: "test-owned", database: "/work/db/osd.sqlite", databaseIdentity: {engine: "sqlite", storage: "file"}, warm: {state: "primed"}}
         : {d: {results: []}};
       return {ok: true, status: 200, json: async () => body};
     };
@@ -3183,7 +3183,7 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     writeFileSync(path.join(osdHome, "tools", "osd-build.mjs"), "process.exit(0);\n");
     writeFileSync(path.join(osdHome, "test", "run.mjs"),
       "import {createServer} from 'node:http';\n" +
-      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake', launcherPid: process.pid})); })" +
+      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake', launcherPid: process.pid, launcherIdentity: process.env.OSD_LAUNCHER_IDENTITY})); })" +
       ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n");
     const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
     const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
@@ -4218,7 +4218,7 @@ describe("editors/vscode: serving generation status", () => {
       expect(p.item.text).to.include("awaiting serving");
       expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
       p.respond(async url => ({ok: true, json: async () => url.endsWith("/osd/dumps")
-        ? [] : {launcherPid: 12345, generation: "fresh123"}}));
+        ? [] : {launcherPid: 12345, launcherIdentity: "test-owned", generation: "fresh123"}}));
       await p.tick();
       expect(p.item.text).to.include("fresh123");
       expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
@@ -4231,13 +4231,13 @@ describe("editors/vscode: serving generation status", () => {
     }, {findingCount: () => { throw Error("count failed"); }});
   });
 
-  it("shows down for a foreign serving PID and never polls after Stop", async () => {
+  it("shows down for a foreign launch identity with a copied PID and never polls after Stop", async () => {
     await handoffProbe(async p => {
       p.start();
       let requests = 0;
       const foreign = express();
       foreign.get("/osd/serving", (_req, res) => { requests++; res.json({
-        launcherPid: 54321, ready: true, generation: "foreign-system",
+        launcherPid: 12345, launcherIdentity: "foreign", ready: true, generation: "foreign-system",
       }); });
       const server = await new Promise(resolve => {
         const listening = foreign.listen(0, "127.0.0.1", () => resolve(listening));
@@ -4286,7 +4286,7 @@ describe("editors/vscode: serving generation status", () => {
         expect(requests).to.deep.equal(["http://external:3030/osd/serving"]);
         p.respond(async url => {
           requests.push(url);
-          return {ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {launcherPid: 12345, generation: "fresh123"}};
+          return {ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {launcherPid: 12345, launcherIdentity: "test-owned", generation: "fresh123"}};
         });
         await p.tick();
         expect(p.item.text).to.include("fresh123");
@@ -4376,7 +4376,7 @@ describe("editors/vscode: serving generation status", () => {
       expect(item.visible).to.equal(true);
       expect(item.text).to.include("awaiting serving");
       expect(item.backgroundColor).to.equal(undefined);
-      respond = async url => ({ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {launcherPid: 12345, generation: "fresh123"}});
+      respond = async url => ({ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {launcherPid: 12345, launcherIdentity: "test-owned", generation: "fresh123"}});
       await tick();
       expect(item.text).to.include("OSD generation fresh123");
       respond = async () => { throw Error("crashed"); };

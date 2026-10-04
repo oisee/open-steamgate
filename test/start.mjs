@@ -1,3 +1,4 @@
+import {randomUUID} from "node:crypto";
 import {requestXMLBodyError, XML_BODY_LIMIT} from "../tools/adt-request-xml.mjs";
 import {parentAdtSnapshot} from "../tools/adt-runtime-state.mjs";
 import {databasePath} from "../tools/osd-persist.mjs";
@@ -52,6 +53,9 @@ import {mountPortableCells} from "../tools/sqlscript-to-procedure-ir.mjs";
 // through. One generation, one database, and every consumer on them.
 // STG_SERVE=child asks for it; test/run.mjs, the way a server is started,
 // defaults to it; a suite that calls startServer() itself stays inline.
+// Owned by the front, independent of runtime generations and worker PIDs.
+const launcherIdentity = process.env.OSD_LAUNCHER_IDENTITY ?? randomUUID();
+delete process.env.OSD_LAUNCHER_IDENTITY;
 const MODE = process.env.STG_SERVE === "child" ? "child" : "inline";
 
 /** the close of the last server this module started, so the next bind can
@@ -487,13 +491,13 @@ export function startServer(quiet) {
       // still booting: say so now, with the step, rather than hold the
       // question for the boot (the VS Code launcher waits on this answer)
       if (runtime.booting !== undefined && runtime.running !== true) {
-        res.status(200).json({...startingAnswer(runtime), launcherPid: process.pid, warm: facade.store.warmStatus(), bind: bindAddresses()});
+        res.status(200).json({...startingAnswer(runtime), launcherPid: process.pid, launcherIdentity, warm: facade.store.warmStatus(), bind: bindAddresses()});
         return;
       }
       try {
         const answer = await fetch(`${runtime.url}${req.originalUrl}`, {signal: AbortSignal.timeout(5000)});
         const body = await answer.json();
-        res.status(answer.status).json({...body, launcherPid: process.pid, warm: facade.store.warmStatus(), bind: bindAddresses()});
+        res.status(answer.status).json({...body, launcherPid: process.pid, launcherIdentity, warm: facade.store.warmStatus(), bind: bindAddresses()});
       } catch {
         proxy(req, res, next);
       }
