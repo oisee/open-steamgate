@@ -1565,6 +1565,61 @@ describe("editors/vscode: the extension's logic", function () {
     });
   }
 
+  it("Ctrl+F3 command: retrying one scope preserves newer diagnostics owned by another", async () => {
+    let xml = activationFailureDocument([
+      {type: "CLAS", name: "ZCL_Y", issues: [{severity: "E", message: "Error from X", line: 7, column: 3}]},
+    ]);
+    const app = express();
+    app.head("/sap/bc/adt/core/discovery", (_req, res) => res.set("x-csrf-token", "test-token").end());
+    app.post("/sap/bc/adt/activation", (_req, res) => res.type("application/xml").send(xml));
+    app.post("/sap/bc/adt/checkruns", (_req, res) => res.type("application/xml").send(
+      checkReportDocument([{uri: "/sap/bc/adt/oo/classes/zcl_x", issues: []}])));
+    const server = app.listen(0, "127.0.0.1");
+    await new Promise((resolve) => server.once("listening", resolve));
+    try {
+      const api = vscodeStub({url: `http://127.0.0.1:${server.address().port}`});
+      const handlers = new Map(), problems = new Map();
+      api.commands.registerCommand = (name, handler) => { handlers.set(name, handler); return {dispose() {}}; };
+      api.languages = {createDiagnosticCollection: () => ({
+        set: (uri, issues) => problems.set(uri.fsPath, issues), dispose() {},
+      })};
+      api.DiagnosticSeverity = {Error: 0, Warning: 1, Information: 2};
+      api.Diagnostic = class { constructor(range, message, severity) { Object.assign(this, {range, message, severity}); } };
+      api.Position = class {
+        constructor(line, character) { Object.assign(this, {line, character}); }
+        translate(line, character) { return new api.Position(this.line + line, this.character + character); }
+      };
+      const select = (fileName) => {
+        api.window.activeTextEditor = {document: {fileName, uri: api.Uri.file(fileName), isDirty: false, getText: () => ""}};
+      };
+      const x = "/project/zcl_x.clas.abap", y = "/project/zcl_y.clas.abap";
+      api.workspace.findFiles = async (pattern) => pattern === "**/zcl_y.clas.abap" ? [api.Uri.file(y)] : [];
+      loadExtension(api).registerCheckActivateCommands({subscriptions: []}, {appendLine() {}});
+      select(x);
+      await handlers.get("osd.activate")();
+      expect(problems.get(y).map((issue) => issue.message)).to.deep.equal(["Error from X"]);
+
+      select(y);
+      xml = activationFailureDocument([
+        {type: "CLAS", name: "ZCL_Y", issues: [{severity: "E", message: "Newer error from Y", line: 9, column: 2}]},
+      ]);
+      await handlers.get("osd.activate")();
+      expect(problems.get(y).map((issue) => issue.message)).to.deep.equal(["Newer error from Y"]);
+
+      select(x);
+      xml = activationSuccessDocument();
+      await handlers.get("osd.activate")();
+      expect(problems.get(x)).to.deep.equal([]);
+      expect(problems.get(y).map((issue) => issue.message)).to.deep.equal(["Newer error from Y"]);
+
+      select(y);
+      await handlers.get("osd.activate")();
+      expect(problems.get(y)).to.deep.equal([]);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
   it("SE80's F8, one entry per object type: what this build does, or the route its turn would use", () => {
     expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: true})).to.deep.equal({kind: "unit"});
     expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false}).kind).to.equal("not-yet");

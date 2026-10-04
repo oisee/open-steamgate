@@ -3076,15 +3076,20 @@ async function activateCurrent(diagnostics, output, activationDiagnostics) {
   if (editor.document.isDirty) await editor.document.save();
   try {
     // Includes share an activation scope; other objects, source directories
-    // and systems keep their own last set of affected document URIs.
+    // and systems have distinct scopes. Each URI belongs to the last scope
+    // that wrote it, so another scope's retry cannot clear newer diagnostics.
     const scope = JSON.stringify([osd().url, path.dirname(editor.document.fileName), object.type, object.name]);
     const writeDiagnostics = (byFile) => {
-      for (const [file, uri] of activationDiagnostics.get(scope) ?? []) {
-        if (!byFile.has(file)) diagnostics.set(uri, []);
+      for (const [file, owner] of activationDiagnostics) {
+        if (owner.scope === scope && !byFile.has(file)) {
+          diagnostics.set(owner.uri, []);
+          activationDiagnostics.delete(file);
+        }
       }
-      for (const {uri, issues} of byFile.values()) diagnostics.set(uri, issues);
-      if (byFile.size === 0) activationDiagnostics.delete(scope);
-      else activationDiagnostics.set(scope, new Map([...byFile].map(([file, {uri}]) => [file, uri])));
+      for (const [file, {uri, issues}] of byFile) {
+        diagnostics.set(uri, issues);
+        activationDiagnostics.set(file, {scope, uri});
+      }
     };
     const result = await osd().activate(object);
     if (result.ok) {
