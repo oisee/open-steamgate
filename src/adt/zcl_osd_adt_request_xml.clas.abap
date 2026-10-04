@@ -16,15 +16,25 @@ CLASS zcl_osd_adt_request_xml DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS prepare IMPORTING is_request TYPE zif_osd_adt_route=>ty_request
       RETURNING VALUE(rs_request) TYPE zif_osd_adt_route=>ty_request RAISING zcx_osd_adt.
   PRIVATE SECTION.
+    CONSTANTS c_ascii TYPE string VALUE ` !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_``abcdefghijklmnopqrstuvwxyz{|}~`.
     TYPES: BEGIN OF ty_binding, prefix TYPE string, uri TYPE string, END OF ty_binding.
-    TYPES tt_binding TYPE STANDARD TABLE OF ty_binding WITH DEFAULT KEY.
-    TYPES: BEGIN OF ty_frame, id TYPE i, raw TYPE string, canonical TYPE string, bindings TYPE tt_binding, END OF ty_frame.
+    TYPES tt_binding TYPE HASHED TABLE OF ty_binding WITH UNIQUE KEY prefix.
+    TYPES: BEGIN OF ty_undo, prefix TYPE string, uri TYPE string, existed TYPE abap_bool, END OF ty_undo.
+    TYPES tt_undo TYPE STANDARD TABLE OF ty_undo WITH DEFAULT KEY.
+    TYPES: BEGIN OF ty_expanded, uri TYPE string, local TYPE string, END OF ty_expanded.
+    TYPES tt_expanded TYPE HASHED TABLE OF ty_expanded WITH UNIQUE KEY uri local.
+    TYPES tt_seen TYPE HASHED TABLE OF string WITH UNIQUE KEY table_line.
+    TYPES: BEGIN OF ty_frame, id TYPE i, raw TYPE string, canonical TYPE string, undo TYPE tt_undo, END OF ty_frame.
     TYPES: BEGIN OF ty_raw, name TYPE string, value TYPE string, END OF ty_raw.
     TYPES tt_raw TYPE STANDARD TABLE OF ty_raw WITH DEFAULT KEY.
+    TYPES: BEGIN OF ty_lexical, raw TYPE string, prefix TYPE string, local TYPE string, END OF ty_lexical.
+    TYPES tt_lexical TYPE HASHED TABLE OF ty_lexical WITH UNIQUE KEY raw.
+    DATA mt_lexical TYPE tt_lexical.
     DATA mv_text TYPE string.
     DATA mv_pos TYPE i.
     DATA mv_tokens TYPE string.
     DATA mt_stack TYPE STANDARD TABLE OF ty_frame WITH DEFAULT KEY.
+    DATA mt_bindings TYPE tt_binding.
     DATA mt_elements TYPE zif_osd_adt_xml=>tt_element.
     METHODS run IMPORTING iv_body TYPE xstring iv_profile TYPE string
       RETURNING VALUE(rt_elements) TYPE zif_osd_adt_xml=>tt_element RAISING zcx_osd_adt.
@@ -37,11 +47,12 @@ CLASS zcl_osd_adt_request_xml DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS name_start IMPORTING iv_cp TYPE i RETURNING VALUE(rv_ok) TYPE abap_bool.
     CLASS-METHODS name_char IMPORTING iv_cp TYPE i RETURNING VALUE(rv_ok) TYPE abap_bool.
     CLASS-METHODS ncname IMPORTING iv_name TYPE string RAISING zcx_osd_adt.
-    CLASS-METHODS split_name IMPORTING iv_name TYPE string EXPORTING ev_prefix TYPE string ev_local TYPE string RAISING zcx_osd_adt.
+    METHODS split_name IMPORTING iv_name TYPE string EXPORTING ev_prefix TYPE string ev_local TYPE string RAISING zcx_osd_adt.
     CLASS-METHODS valid_char IMPORTING iv_cp TYPE i RETURNING VALUE(rv_ok) TYPE abap_bool.
     CLASS-METHODS decode IMPORTING iv_raw TYPE string RETURNING VALUE(rv_text) TYPE string RAISING zcx_osd_adt.
-    CLASS-METHODS expand IMPORTING iv_raw TYPE string it_bindings TYPE tt_binding iv_attribute TYPE abap_bool DEFAULT abap_false
+    METHODS expand IMPORTING iv_raw TYPE string it_bindings TYPE tt_binding iv_attribute TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_name) TYPE zif_osd_adt_xml=>ty_attribute RAISING zcx_osd_adt.
+    METHODS restore IMPORTING it_undo TYPE tt_undo.
     METHODS text IMPORTING iv_value TYPE string RAISING zcx_osd_adt.
     CLASS-METHODS prefix IMPORTING iv_uri TYPE string RETURNING VALUE(rv_prefix) TYPE string.
     CLASS-METHODS required IMPORTING iv_name TYPE string RETURNING VALUE(rv_prefix) TYPE string.
@@ -253,6 +264,13 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
     DATA lv_low TYPE i.
     DATA lv_unit TYPE c LENGTH 1.
     lv_unit = substring( val = iv_text off = cv_pos len = 1 ).
+*   Printable ASCII needs no conversion object; Unicode uses the same path.
+    FIND FIRST OCCURRENCE OF lv_unit IN c_ascii MATCH OFFSET rv_cp.
+    IF sy-subrc = 0.
+      rv_cp = rv_cp + 32.
+      cv_pos = cv_pos + 1.
+      RETURN.
+    ENDIF.
     lv_hex = cl_abap_conv_out_ce=>uccp( lv_unit ).
     rv_cp = lv_hex.
     cv_pos = cv_pos + 1.
@@ -303,6 +321,15 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
   ENDMETHOD.
   METHOD split_name.
     DATA lt_parts TYPE string_table.
+    DATA ls_lexical TYPE ty_lexical.
+*   Cache lexical parts only. Expanded URIs depend on the current scope.
+*   The parser instance and this cache live for one document.
+    READ TABLE mt_lexical INTO ls_lexical WITH TABLE KEY raw = iv_name.
+    IF sy-subrc = 0.
+      ev_prefix = ls_lexical-prefix.
+      ev_local = ls_lexical-local.
+      RETURN.
+    ENDIF.
     IF iv_name IS INITIAL OR substring( val = iv_name off = strlen( iv_name ) - 1 ) = `:`.
       fail( ).
     ENDIF.
@@ -318,24 +345,52 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
       READ TABLE lt_parts INDEX 2 INTO ev_local.
     ENDIF.
     ncname( ev_local ).
+    ls_lexical-raw = iv_name.
+    ls_lexical-prefix = ev_prefix.
+    ls_lexical-local = ev_local.
+    INSERT ls_lexical INTO TABLE mt_lexical.
   ENDMETHOD.
   METHOD scan_name.
     DATA lv_begin TYPE i.
     DATA lv_next TYPE i.
     DATA lv_cp TYPE i.
-    DATA lv_prefix TYPE string.
-    DATA lv_local TYPE string.
+    DATA lv_colon TYPE i VALUE -1.
+    DATA lv_start TYPE abap_bool VALUE abap_true.
+    DATA ls_lexical TYPE ty_lexical.
     lv_begin = mv_pos.
+*   Validate QName components in the tokenizer's existing character walk.
     WHILE mv_pos < strlen( mv_text ).
       lv_next = mv_pos.
       lv_cp = codepoint( EXPORTING iv_text = mv_text CHANGING cv_pos = lv_next ).
-      IF lv_cp <> 58 AND name_char( lv_cp ) = abap_false.
-        EXIT.
+      IF lv_cp = 58.
+        IF lv_start = abap_true OR lv_colon >= 0.
+          fail( ).
+        ENDIF.
+        lv_colon = mv_pos - lv_begin.
+        lv_start = abap_true.
+      ELSE.
+        IF name_char( lv_cp ) = abap_false.
+          EXIT.
+        ENDIF.
+        IF lv_start = abap_true AND name_start( lv_cp ) = abap_false.
+          fail( ).
+        ENDIF.
+        lv_start = abap_false.
       ENDIF.
       mv_pos = lv_next.
     ENDWHILE.
+    IF lv_start = abap_true.
+      fail( ).
+    ENDIF.
     rv_name = substring( val = mv_text off = lv_begin len = mv_pos - lv_begin ).
-    split_name( EXPORTING iv_name = rv_name IMPORTING ev_prefix = lv_prefix ev_local = lv_local ).
+    ls_lexical-raw = rv_name.
+    IF lv_colon >= 0.
+      ls_lexical-prefix = rv_name(lv_colon).
+      ls_lexical-local = substring( val = rv_name off = lv_colon + 1 ).
+    ELSE.
+      ls_lexical-local = rv_name.
+    ENDIF.
+    INSERT ls_lexical INTO TABLE mt_lexical.
   ENDMETHOD.
   METHOD valid_char.
     rv_ok = boolc( iv_cp = 9 OR iv_cp = 10 OR iv_cp = 13 OR ( iv_cp >= 32 AND iv_cp <= 55295 )
@@ -429,15 +484,30 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
       fail( ).
     ENDIF.
     IF lv_prefix IS NOT INITIAL OR iv_attribute = abap_false.
-      READ TABLE it_bindings INTO ls_binding WITH KEY prefix = lv_prefix.
+      READ TABLE it_bindings INTO ls_binding WITH TABLE KEY prefix = lv_prefix.
       rs_name-uri = ls_binding-uri.
     ENDIF.
     IF lv_prefix IS NOT INITIAL AND rs_name-uri IS INITIAL.
       fail( ).
     ENDIF.
   ENDMETHOD.
+  METHOD restore.
+    DATA ls_undo TYPE ty_undo.
+    DATA ls_binding TYPE ty_binding.
+    FIELD-SYMBOLS <binding> TYPE ty_binding.
+*   Each prefix occurs once per element (raw duplicates have been refused).
+    LOOP AT it_undo INTO ls_undo.
+      IF ls_undo-existed = abap_true.
+        READ TABLE mt_bindings ASSIGNING <binding> WITH TABLE KEY prefix = ls_undo-prefix.
+        <binding>-uri = ls_undo-uri.
+      ELSE.
+        ls_binding-prefix = ls_undo-prefix.
+        DELETE TABLE mt_bindings FROM ls_binding.
+      ENDIF.
+    ENDLOOP.
+  ENDMETHOD.
   METHOD text.
-    DATA ls_frame TYPE ty_frame.
+    FIELD-SYMBOLS <frame> TYPE ty_frame.
     DATA lv_test TYPE string.
     FIELD-SYMBOLS <element> TYPE zif_osd_adt_xml=>ty_element.
     IF mt_stack IS INITIAL.
@@ -448,8 +518,8 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
       ENDIF.
       RETURN.
     ENDIF.
-    READ TABLE mt_stack INDEX lines( mt_stack ) INTO ls_frame.
-    READ TABLE mt_elements INDEX ls_frame-id ASSIGNING <element>.
+    READ TABLE mt_stack INDEX lines( mt_stack ) ASSIGNING <frame>.
+    READ TABLE mt_elements INDEX <frame>-id ASSIGNING <element>.
     <element>-text = <element>-text && iv_value.
     mv_tokens = mv_tokens && zcl_osd_adt_xml=>esc( iv_value ).
   ENDMETHOD.
@@ -475,7 +545,11 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
     DATA lv_attrname TYPE string.
     DATA lt_raw TYPE tt_raw.
     DATA ls_raw TYPE ty_raw.
-    DATA lt_bindings TYPE tt_binding.
+    DATA lt_seen TYPE tt_seen.
+    DATA lt_expanded TYPE tt_expanded.
+    DATA ls_expanded TYPE ty_expanded.
+    DATA lt_undo TYPE tt_undo.
+    DATA ls_undo TYPE ty_undo.
     DATA ls_binding TYPE ty_binding.
     DATA ls_frame TYPE ty_frame.
     DATA ls_element TYPE zif_osd_adt_xml=>ty_element.
@@ -485,6 +559,7 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
     DATA lv_admitted TYPE abap_bool.
     DATA lx_error TYPE REF TO cx_root.
     FIELD-SYMBOLS <binding> TYPE ty_binding.
+    FIELD-SYMBOLS <frame> TYPE ty_frame.
     IF xstrlen( iv_body ) > c_body_limit.
       fail( ).
     ENDIF.
@@ -511,6 +586,9 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
         ENDIF.
         REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN mv_text WITH cl_abap_char_utilities=>newline.
         REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf(1) IN mv_text WITH cl_abap_char_utilities=>newline.
+        ls_binding-prefix = `xml`.
+        ls_binding-uri = `http://www.w3.org/XML/1998/namespace`.
+        INSERT ls_binding INTO TABLE mt_bindings.
         SPLIT iv_profile AT `,` INTO TABLE lt_profiles.
         WHILE mv_pos < strlen( mv_text ).
           IF starts( `<!--` ) = abap_true.
@@ -523,7 +601,9 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
             lv_begin = mv_pos.
             mv_pos = mv_pos + 2.
             lv_target = scan_name( ).
-            ncname( lv_target ).
+            IF lv_target CS `:`.
+              fail( ).
+            ENDIF.
             IF to_lower( lv_target ) = `xml`.
               lv_value = until( `?>` ).
               lv_raw = lv_target && lv_value.
@@ -577,15 +657,16 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
           IF lv_closing = abap_true.
             space( ).
             expect( `>` ).
-            READ TABLE mt_stack INDEX lines( mt_stack ) INTO ls_frame.
-            IF sy-subrc <> 0 OR ls_frame-raw <> lv_name.
+            READ TABLE mt_stack INDEX lines( mt_stack ) ASSIGNING <frame>.
+            IF sy-subrc <> 0 OR <frame>-raw <> lv_name.
               fail( ).
             ENDIF.
-            mv_tokens = mv_tokens && `</` && ls_frame-canonical && `>`.
+            mv_tokens = mv_tokens && `</` && <frame>-canonical && `>`.
+            restore( <frame>-undo ).
             DELETE mt_stack INDEX lines( mt_stack ).
             CONTINUE.
           ENDIF.
-          CLEAR: lt_raw, lv_empty.
+          CLEAR: lt_raw, lt_seen, lt_expanded, lt_undo, lv_empty.
           DO.
             lv_separated = space( ).
             IF starts( `>` ) = abap_true.
@@ -618,8 +699,8 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
             REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>horizontal_tab IN lv_value WITH ` `.
             REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>newline IN lv_value WITH ` `.
             ls_raw-value = decode( lv_value ).
-            READ TABLE lt_raw TRANSPORTING NO FIELDS WITH KEY name = ls_raw-name.
-            IF sy-subrc = 0.
+            INSERT ls_raw-name INTO TABLE lt_seen.
+            IF sy-subrc <> 0.
               fail( ).
             ENDIF.
             APPEND ls_raw TO lt_raw.
@@ -627,15 +708,10 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
           IF lines( mt_stack ) >= c_depth_limit.
             fail( ).
           ENDIF.
-          CLEAR: lt_bindings, lv_parent.
-          READ TABLE mt_stack INDEX lines( mt_stack ) INTO ls_frame.
+          CLEAR lv_parent.
+          READ TABLE mt_stack INDEX lines( mt_stack ) ASSIGNING <frame>.
           IF sy-subrc = 0.
-            lt_bindings = ls_frame-bindings.
-            lv_parent = ls_frame-id.
-          ELSE.
-            ls_binding-prefix = `xml`.
-            ls_binding-uri = `http://www.w3.org/XML/1998/namespace`.
-            APPEND ls_binding TO lt_bindings.
+            lv_parent = <frame>-id.
           ENDIF.
           LOOP AT lt_raw INTO ls_raw.
             split_name( EXPORTING iv_name = ls_raw-name IMPORTING ev_prefix = lv_prefix ev_local = lv_local ).
@@ -653,15 +729,20 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
                 OR ( ls_binding-prefix IS NOT INITIAL AND ls_binding-uri IS INITIAL ).
               fail( ).
             ENDIF.
-            READ TABLE lt_bindings ASSIGNING <binding> WITH KEY prefix = ls_binding-prefix.
+            CLEAR ls_undo.
+            ls_undo-prefix = ls_binding-prefix.
+            READ TABLE mt_bindings ASSIGNING <binding> WITH TABLE KEY prefix = ls_binding-prefix.
             IF sy-subrc = 0.
+              ls_undo-existed = abap_true.
+              ls_undo-uri = <binding>-uri.
               <binding>-uri = ls_binding-uri.
             ELSE.
-              APPEND ls_binding TO lt_bindings.
+              INSERT ls_binding INTO TABLE mt_bindings.
             ENDIF.
+            APPEND ls_undo TO lt_undo.
           ENDLOOP.
           CLEAR ls_element.
-          ls_attribute = expand( iv_raw = lv_name it_bindings = lt_bindings ).
+          ls_attribute = expand( iv_raw = lv_name it_bindings = mt_bindings ).
           ls_element-uri = ls_attribute-uri.
           ls_element-local = ls_attribute-local.
           ls_element-parent = lv_parent.
@@ -695,9 +776,11 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
             IF ls_raw-name = `xmlns` OR lv_prefix = `xmlns`.
               CONTINUE.
             ENDIF.
-            ls_attribute = expand( iv_raw = ls_raw-name it_bindings = lt_bindings iv_attribute = abap_true ).
-            READ TABLE ls_element-attributes TRANSPORTING NO FIELDS WITH KEY uri = ls_attribute-uri local = ls_attribute-local.
-            IF sy-subrc = 0.
+            ls_attribute = expand( iv_raw = ls_raw-name it_bindings = mt_bindings iv_attribute = abap_true ).
+            ls_expanded-uri = ls_attribute-uri.
+            ls_expanded-local = ls_attribute-local.
+            INSERT ls_expanded INTO TABLE lt_expanded.
+            IF sy-subrc <> 0.
               fail( ).
             ENDIF.
             ls_attribute-value = ls_raw-value.
@@ -709,11 +792,12 @@ CLASS zcl_osd_adt_request_xml IMPLEMENTATION.
           mv_tokens = mv_tokens && lv_output && `>`.
           IF lv_empty = abap_true.
             mv_tokens = mv_tokens && `</` && lv_cname && `>`.
+            restore( lt_undo ).
           ELSE.
             ls_frame-id = lines( mt_elements ).
             ls_frame-raw = lv_name.
             ls_frame-canonical = lv_cname.
-            ls_frame-bindings = lt_bindings.
+            ls_frame-undo = lt_undo.
             APPEND ls_frame TO mt_stack.
           ENDIF.
         ENDWHILE.

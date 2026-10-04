@@ -28,7 +28,9 @@ export function virtualFoldersDocument(store, xml) {
       preselection.set(facet.toLowerCase(),elementsNamed(elements,namespaces.vfs,"value",elements.indexOf(element)+1).map(e => e.text.toUpperCase()));
     }
     const order=elementsNamed(elements,namespaces.vfs,"facet").map(e => e.text.toLowerCase()).filter(Boolean);
-    const root=elementsNamed(elements,namespaces.vfs,"virtualFoldersRequest")[0];
+    // The former consumers also accepted the older request root.
+    const root=elements.find(e => e.parent === 0 && e.uri === namespaces.vfs &&
+      (e.local === "virtualFoldersRequest" || e.local === "request"));
     const pattern=attributeValue(root,"","objectSearchPattern") ?? "*";
     return {preselection,order,pattern};
   };

@@ -2771,5 +2771,265 @@
         ]
       }
     ]
+  },
+  {
+    "name": "critic2-name-max-supplementary",
+    "bytes": "3cf3afbfbf782f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "󯿿x",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "critic2-name-above-supplementary",
+    "bytes": "3cf3b08080782f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "critic2-name-gap-037e",
+    "bytes": "3c61cdbe2f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "critic2-name-start-037d",
+    "bytes": "3ccdbd2d612f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "ͽ-a",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "critic2-name-combining-after-start",
+    "bytes": "3c61cc80e280bf2f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "à‿",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "critic2-name-combining-at-start",
+    "bytes": "3ccc80612f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "critic2-attribute-normalization-vs-references",
+    "bytes": "3c7220613d22780d0a0979262331333b262331303b2623393b7a222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "",
+            "local": "a",
+            "value": "x  y\r\n\tz"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critic2-numeric-leading-zero",
+    "bytes": "3c723e2623303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303036353b3c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "A",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "critic2-hex-leading-zero",
+    "bytes": "3c7220613d2226237830303030303030303030303030303030303030303030303030303030303030303030303030303031463638303b222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "",
+            "local": "a",
+            "value": "🚀"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critic2-comment-triple-hyphen",
+    "bytes": "3c723e3c212d2d612d2d2d3e3c2f723e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "critic2-comment-surrounding-misc",
+    "bytes": "3c212d2d3c782f3e2d2d3e3c3f70203c783f3e203c722f3e203c3f656e643f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "critic2-pi-target-with-colon",
+    "bytes": "3c3f703a7120646174613f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "critic2-pi-xml-stylesheet",
+    "bytes": "3c3f786d6c2d7374796c65736865657420687265663d2278223f3e3c722f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "critic2-declaration-tabs-crlf",
+    "bytes": "3c3f786d6c0976657273696f6e203d2027312e30270d0a20656e636f64696e67203d20277574662d3827207374616e64616c6f6e65203d20276e6f273f3e3c722f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "critic2-declaration-encoded-version",
+    "bytes": "3c3f786d6c2076657273696f6e3d22262334393b2e30223f3e3c722f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "critic2-namespace-reference-duplicate-expanded",
+    "bytes": "3c7220786d6c6e733a703d2226237837353b726e3a412220786d6c6e733a713d2275726e3a412220703a613d22312220713a613d2232222f3e",
+    "verdict": "refuse"
+  },
+  {
+    "name": "critic2-default-namespace-not-attribute",
+    "bytes": "3c7220786d6c6e733d2275726e3a412220786d6c6e733a703d2275726e3a412220613d22312220703a613d2232222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "urn:A",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "",
+            "local": "a",
+            "value": "1"
+          },
+          {
+            "uri": "urn:A",
+            "local": "a",
+            "value": "2"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "critic2-namespace-sibling-restoration",
+    "bytes": "3c703a7220786d6c6e733a703d2275726e3a41223e3c703a7320786d6c6e733a703d2275726e3a42222f3e3c703a742f3e3c2f703a723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "urn:A",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "urn:B",
+        "local": "s",
+        "parent": 1,
+        "text": "",
+        "attributes": []
+      },
+      {
+        "uri": "urn:A",
+        "local": "t",
+        "parent": 1,
+        "text": "",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "critic2-character-data-cdata-boundaries",
+    "bytes": "3c723e613c215b43444154415b26625d5d3e26616d703b633c212d2d69676e6f72652d2d3e3c3f70693f3e643c2f723e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "a&b&cd",
+        "attributes": []
+      }
+    ]
+  },
+  {
+    "name": "critic2-namespace-escaped-xml-binding",
+    "bytes": "3c7220786d6c6e733a786d6c3d22687474703a2f2f7777772e77332e6f72672f584d4c2f313939382f6e616d657370616326233130313b2220786d6c3a6c616e673d22656e222f3e",
+    "verdict": "accept",
+    "expected": [
+      {
+        "uri": "",
+        "local": "r",
+        "parent": 0,
+        "text": "",
+        "attributes": [
+          {
+            "uri": "http://www.w3.org/XML/1998/namespace",
+            "local": "lang",
+            "value": "en"
+          }
+        ]
+      }
+    ]
   }
 ]

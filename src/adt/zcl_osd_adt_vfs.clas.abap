@@ -156,7 +156,11 @@ CLASS zcl_osd_adt_vfs IMPLEMENTATION.
       mv_facet = to_lower( ls_element-text ).
       EXIT.
     ENDLOOP.
-    READ TABLE it_xml INTO ls_element WITH KEY uri = `http://www.sap.com/adt/ris/virtualFolders` local = `virtualFoldersRequest`.
+    READ TABLE it_xml INTO ls_element WITH KEY uri = `http://www.sap.com/adt/ris/virtualFolders` local = `virtualFoldersRequest` parent = 0.
+    IF sy-subrc <> 0.
+*     Preserve the request root accepted by the former request extractors.
+      READ TABLE it_xml INTO ls_element WITH KEY uri = `http://www.sap.com/adt/ris/virtualFolders` local = `request` parent = 0.
+    ENDIF.
     IF sy-subrc = 0.
       lv_pattern = zcl_osd_adt_request_xml=>attribute( is_element = ls_element iv_local = `objectSearchPattern` ).
     ENDIF.

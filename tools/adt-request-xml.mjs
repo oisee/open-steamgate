@@ -98,6 +98,16 @@ export function readRequestXML(body, profile) {
   for (const c of xml) if (!validChar(c.codePointAt(0))) fail();
   xml = xml.replaceAll("\r\n","\n").replaceAll("\r","\n");
   let pos = 0, rootCount = 0;
+  // Immutable scope links: no inherited table copy or large-Map set/delete
+  // churn for a sibling with one declaration. Lookup follows at most 64 parent links.
+  const initialBindings = {local:new Map([["xml",namespaces.xml]])};
+  const bindingURI = (scope,prefix) => {
+    for (; scope; scope=scope.parent) {
+      const uri=scope.local.get(prefix);
+      if (uri !== undefined) return uri;
+    }
+    return "";
+  };
   const stack = [], tokens = [], elements = [], unknown = new Map();
   const space = () => {const before=pos; while (/[ \t\r\n]/.test(xml[pos] ?? "") && pos < xml.length) pos++; return pos > before;};
   const scanName = () => {
@@ -118,7 +128,7 @@ export function readRequestXML(body, profile) {
   const expand = (raw,bindings,attribute=false) => {
     const [prefix,local] = splitName(raw);
     if (prefix === "xmlns") fail();
-    const uri = bindings.get(prefix) ?? "";
+    const uri = bindingURI(bindings,prefix);
     if (prefix && !uri) fail();
     return {uri:!prefix && attribute ? "" : uri,local};
   };
@@ -170,15 +180,17 @@ export function readRequestXML(body, profile) {
       attrs.push([key,decode(value.replace(/[\t\n]/g," "))]); pos=end+1;
     }
     if (stack.length >= XML_DEPTH_LIMIT) fail();
-    const bindings=new Map(stack.at(-1)?.bindings ?? [["xml",namespaces.xml]]), rawNames=new Set();
+    let bindings=stack.at(-1)?.bindings ?? initialBindings, declarations;
+    const rawNames=new Set();
     for (const [key,value] of attrs) {
       if(rawNames.has(key)) fail(); rawNames.add(key);
       if (key === "xmlns" || key.startsWith("xmlns:")) {
         const prefix=key === "xmlns" ? "" : key.slice(6); if(prefix && !ncName(prefix)) fail();
         if(prefix === "xmlns" || value === "http://www.w3.org/2000/xmlns/" || (prefix === "xml") !== (value === namespaces.xml) || prefix && !value) fail();
-        bindings.set(prefix,value);
+        (declarations ??= new Map()).set(prefix,value);
       }
     }
+    if (declarations) bindings={parent:bindings,local:declarations};
     const expanded=expand(raw,bindings);
     if (Object.hasOwn(knownElements,expanded.local) && expanded.uri !== (namespaces[knownElements[expanded.local]] ?? "")) fail();
     if(!stack.length && (++rootCount > 1 || profile?.length && !profile.some(p => namespaces[p] === expanded.uri))) fail();
