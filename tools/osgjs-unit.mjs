@@ -1,6 +1,7 @@
 // A checkout CI runner: build and run in a disposable system, never build/live.
 import {cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
+import {phase, timingMs} from "./osgjs-trace.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
 import {inputFoldersOf} from "./osd-packs.mjs";
@@ -17,6 +18,7 @@ Reads the immediate directory only (no recursion). Requires a checkout and synce
 Builds the whole system in a temporary directory; runs only the selected owners.
 --db file uses a private file-backed SQLite, removed after the run (default: sqlite / sql.js).
 NODE_OPTIONS=--max-old-space-size=12288 (or node --max-old-space-size=12288) raises the heap limit for scanning, building and running large folders.
+OSGJS_TRACE=1 streams phase/test timings and memory measurements to stderr (JSON stays on stdout).
 Kernel compatibility warnings preserve compiler diagnostics and exit codes; --kernel-strict reports ERROR (exit 2).
 Exit codes: 0 all SUCCESS, 1 FAILURE, 2 NOT_COMPILED/ERROR/SKIPPED, 3 no tests.`;
 
@@ -77,9 +79,9 @@ export async function main(args = process.argv.slice(2)) {
     }
     if (!directory) throw new Error("<dir> is required; use --help for usage");
     provenance = unitProvenance("osgjs", {database});
-    const staged = stageInput(directory, selected, "osgjs-unit");
+    const staged = await phase("staging", () => stageInput(directory, selected, "osgjs-unit"));
     staging = staged.staging;
-    try { warnings = kernelWarnings(staged.input ?? directory); }
+    try { warnings = await phase("kernel-scan", () => kernelWarnings(staged.input ?? directory)); }
     catch (error) {
       warnings = [{kind: "scanner-error", message: `Kernel compatibility scanner failed: ${String(error.message ?? error).replace(/\s+/g, " ")}`}];
     }
@@ -88,12 +90,12 @@ export async function main(args = process.argv.slice(2)) {
       const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
       const {overrides} = unitInputs({home: root, config, extraInputs: [staged.input], env: {...process.env, ...unitEnv}});
       for (const o of overrides) console.error(`Override ${o.object}: ${o.hidden} hidden by ${o.input}`);
-      const home = isolatedSystem(staging, staged.input);
+      const home = await phase("checkout", () => isolatedSystem(staging, staged.input));
       const child = await run([process.execPath, ...process.execArgv, join(home, "tools/osgjs-unit-run.mjs"), staged.input, ...staged.chosen], home, {
         ...unitEnv, OSD_LAYERS: "", STG_DB: database,
         STG_DB_PATH: database === "file" ? join(staging, "unit.sqlite") : "",
-      });
-      if (child.stderr) process.stderr.write(child.stderr);
+      }, {onStderr: process.env.OSGJS_TRACE === "1" ? (data) => process.stderr.write(data) : undefined});
+      if (child.stderr && process.env.OSGJS_TRACE !== "1") process.stderr.write(child.stderr);
       if (child.signal) throw new Error(`unit runner terminated by ${child.signal}`);
       if (child.status !== 0) throw new Error(child.stderr.trim() || `unit runner exited ${child.status}`);
       try { result = JSON.parse(child.stdout); }
@@ -104,6 +106,7 @@ export async function main(args = process.argv.slice(2)) {
   } catch (error) {
     result = {classes: 0, compiled: 0, rows: [{source: "harness", status: "ERROR", message: error.message}], overrides: []};
   } finally { if (staging) rmSync(staging, {recursive: true, force: true}); }
+  result.timingMs = {...timingMs, ...result.timingMs};
   result.overrides ??= [];
   if (provenance) result.provenance = provenance;
   const summary = summarize(applyKernelWarnings(result, warnings, args.includes("--kernel-strict"), selected));

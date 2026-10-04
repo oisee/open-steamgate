@@ -2,6 +2,7 @@
 import {readFileSync, readdirSync} from "node:fs";
 import {basename, join} from "node:path";
 import {pathToFileURL} from "node:url";
+import {phase, trace, timingMs} from "./osgjs-trace.mjs";
 import {build} from "./osd-build.mjs";
 import {modulesOf} from "./osd-transpile.mjs";
 import {alertOf} from "./osd-unit.mjs";
@@ -24,13 +25,15 @@ async function hook(test, name) {
   if (access?.SUPER?.[name]) await access.SUPER[name]();
 }
 try {
+  trace("scan");
   const {core} = modulesOf(root);
   const reg = new core.Registry(new core.Config(JSON.stringify({
     global: {files: "/**/*.*"}, syntax: {version: core.Version.OpenABAP}, rules: {parser_error: true},
   })));
   for (const file of readdirSync(input).filter((f) => /\.(abap|xml)$/.test(f)))
     reg.addFile(new core.MemoryFile(file, readFileSync(join(input, file), "utf8")));
-  const issues = reg.findIssues();
+  const issues = await phase("parse-input", () => reg.findIssues());
+  trace("scan", "end");
   if (issues.length) {
     for (const owner of owners) rows.push({class: owner, status: "NOT_COMPILED", message:
       issues.map((i) => `${i.getFilename()}:${i.getStart().getRow()}: ${i.getMessage()}`).join("\n")});
@@ -46,23 +49,23 @@ try {
   if (!rows.length && groups.some((g) => g.methods.length)) {
     let output;
     try {
-      const made = await build({root, switch: false});
+      const made = await phase("build", () => build({root, switch: false, log: (m) => trace(`build:${m}`)}));
       output = join(root, "build/by-input", made.hash, "output");
     }
     catch (error) {
       for (const owner of owners) rows.push({class: owner, status: "NOT_COMPILED", ...(error.signal || error.spawnError ? {source: "harness"} : {}), message: error.message + (error.output ? "\n" + error.output : "")});
     }
     if (!rows.length) {
-      const {initializeABAP} = await import(pathToFileURL(join(output, "init.mjs")).href);
-      await initializeABAP();
+      const {initializeABAP} = await phase("import", () => import(pathToFileURL(join(output, "init.mjs")).href));
+      await phase("initialize/database", () => initializeABAP());
       compiled = owners.length;
       for (const group of groups.filter((g) => g.methods.length)) {
         const base = {class: group.owner, testclass: group.local.toUpperCase()};
         let Class;
         try {
-          Class = (await import(pathToFileURL(join(output, group.module)).href))[group.local];
+          Class = (await phase(`class:${group.owner}`, () => import(pathToFileURL(join(output, group.module)).href)))[group.local];
           if (!Class) throw new Error(`test class ${group.local} missing from ${group.module}`);
-          await Class.class_setup?.();
+          await phase("class_setup", () => Class.class_setup?.());
         } catch (error) {
           for (const method of group.methods) rows.push({...base, method: method.toUpperCase(), ...failure(error, "class_setup")});
           continue;
@@ -74,6 +77,8 @@ try {
               rows.push({...row, status: "SKIPPED", message: "skipped due to configuration"});
               continue;
             }
+            const started = performance.now();
+            trace(`test:${row.method}`);
             let test;
             try {
               test = await new Class().constructor_();
@@ -90,6 +95,8 @@ try {
                 else row.message += "; " + failed.message;
               }
             }
+            row.ms = Math.round(performance.now() - started);
+            trace(`test:${row.method}`, row.status, row.ms);
             rows.push(row);
           }
         } finally {
@@ -100,6 +107,6 @@ try {
     }
   }
 } catch (error) { rows.push({source: "harness", status: "ERROR", message: error.message}); }
-await new Promise((done) => process.stdout.write(JSON.stringify({classes: owners.length, compiled, rows}), done));
+await new Promise((done) => process.stdout.write(JSON.stringify({classes: owners.length, compiled, rows, timingMs}), done));
 // Setup may install timers: this process owns them and its private database.
 process.exit(0);

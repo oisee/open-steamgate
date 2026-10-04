@@ -92,7 +92,7 @@ export function printResult(result, json) {
   }
 }
 
-export const run = (command, cwd, env = {}) => new Promise((resolveRun, reject) => {
+export const run = (command, cwd, env = {}, options = {}) => new Promise((resolveRun, reject) => {
   const child = spawn(command[0], command.slice(1), {cwd, env: {...process.env, OSG_HOME: cwd, OSD_ROOT: cwd, ...env}, detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe"]});
   let stdout = "", stderr = "", interrupted;
   // Only this invocation's process group is ours. Let its children finish before cleanup.
@@ -105,7 +105,7 @@ export const run = (command, cwd, env = {}) => new Promise((resolveRun, reject) 
   const onInt = () => stop("SIGINT"), onTerm = () => stop("SIGTERM");
   process.on("SIGINT", onInt); process.on("SIGTERM", onTerm);
   child.stdout.on("data", (data) => { stdout += data; });
-  child.stderr.on("data", (data) => { stderr += data; });
+  child.stderr.on("data", (data) => { stderr += data; options.onStderr?.(data); });
   child.on("error", reject);
   child.on("close", (status, signal) => {
     process.off("SIGINT", onInt); process.off("SIGTERM", onTerm);

@@ -1,3 +1,5 @@
+import {phase} from "../tools/osgjs-trace.mjs";
+import {installXStringBuffer} from "../tools/osd-xstring-buffer.mjs";
 import {SQLiteDatabaseClient} from "../tools/sqlite-heap-client.mjs";
 import {randomBytes} from "node:crypto";
 import {bootIdentity} from "../tools/osd-identity.mjs";
@@ -315,7 +317,8 @@ export function installStoreDestination(abap, options = {}) {
 // schema from the DDIC in src/ + libs, seed rows from data/*.tabu.json.
 // STG_DB=duckdb swaps SQLite for DuckDB (tools/duckdb-client.mjs).
 export async function setup(abap, schemas, insert) {
-  await setupDatabase(abap, schemas, insert);
+  installXStringBuffer(abap);
+  await phase("database-setup", () => setupDatabase(abap, schemas, insert));
   // opt-in, Node only (the preview never installs it): a table of the allow
   // list that has no rows here is filled from this destination on its first
   // read (docs/rfc-proxy.md, "P2: tables"). After the database, whichever
