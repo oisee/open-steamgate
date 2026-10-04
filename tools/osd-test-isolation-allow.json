@@ -162,5 +162,70 @@
         }
       ]
     }
+  },
+  "test/shadowed-objects.mjs": {
+    "gen": {
+      "reason": "Temporary: import-time compileAll(\"src\", \"gen/stg\") omits gen/cds and packs, removes their generated service outputs and rewrites retained services. The hooked scan on 9bd399d8 observed 50 removals and 74 rewrites. Repair the fixture to compile in a disposable root.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-shadowed-objects-gen",
+      "files": [
+        {
+          "prefix": "gen/stg/zc_osd_taxicube_cds/",
+          "maxCount": 10
+        },
+        {
+          "prefix": "gen/stg/zc_stg_flightcube_cds/",
+          "maxCount": 10
+        },
+        {
+          "prefix": "gen/stg/zc_stg_travel_cds/",
+          "maxCount": 10
+        },
+        {
+          "prefix": "gen/stg/zc_stg_travelcube_cds/",
+          "maxCount": 10
+        },
+        {
+          "prefix": "gen/stg/zl3c_fleet2/",
+          "maxCount": 10
+        },
+        {
+          "prefix": "gen/stg/zosd_icf/",
+          "maxCount": 12
+        },
+        {
+          "prefix": "gen/stg/zosd_ref/",
+          "maxCount": 8
+        },
+        {
+          "prefix": "gen/stg/zosd_status/",
+          "maxCount": 12
+        },
+        {
+          "prefix": "gen/stg/zosd_taxi/",
+          "maxCount": 6
+        },
+        {
+          "prefix": "gen/stg/zosd_test/",
+          "maxCount": 6
+        },
+        {
+          "prefix": "gen/stg/zstg_demo/",
+          "maxCount": 2
+        },
+        {
+          "prefix": "gen/stg/zstg_odc/",
+          "maxCount": 10
+        },
+        {
+          "prefix": "gen/stg/zstg_segw/",
+          "maxCount": 8
+        },
+        {
+          "prefix": "gen/stg/zvdb_100/",
+          "maxCount": 10
+        }
+      ]
+    }
   }
 }

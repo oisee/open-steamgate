@@ -36,6 +36,83 @@ function run(files, options = [], allowancePatch, preload, hook = true) {
 describe('per-file process isolation detector', function () {
   this.timeout(30000);
 
+  it('names a deleted gen file, leaves it deleted and does not blame downstream files', () => {
+    const result = run([
+      "it('leaves gen alone',()=>{});",
+      "it('sweeps generated output',()=>require('node:fs').rmSync('gen/pack/probe.clas.abap'));",
+      "it('inherits missing generated output',()=>{});",
+    ], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('gen/pack',{recursive:true});fs.writeFileSync('gen/pack/probe.clas.abap','generated');");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('1.cjs: gen:').and.include('gen/pack/probe.clas.abap').and.include('"removed"');
+    expect(result.output).not.to.include('0.cjs: gen:').and.not.to.include('2.cjs: gen:');
+    expect(result.filesAfterExit).not.to.include('gen/pack/probe.clas.abap');
+  });
+  it('passes when gen is untouched, including a stale run start', () => {
+    const result = run(["it('unchanged',()=>{});"], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/pre-existing.abap','stale output');");
+    expect(result.status, result.output).to.equal(0);
+    expect(result.output).to.include('checked 0.cjs');
+    expect(result.output).not.to.include('0.cjs: gen:');
+  });
+  it('attributes an import-time sweep even when the file has no selected tests', () => {
+    const result = run([
+      "require('node:fs').rmSync('gen/probe.abap');it('unselected',()=>{});",
+      "it('selected',()=>{});",
+    ], ['--grep', ' selected$'], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/probe.abap','generated');");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('0.cjs: gen:').and.include('gen/probe.abap');
+    expect(result.output).not.to.include('1.cjs: gen:');
+  });
+  it('reports added and same-size changed files with content hashes, after cleanup', () => {
+    const result = run(["const fs=require('node:fs');it('edits output',()=>{});after(()=>{fs.writeFileSync('gen/added.abap','new');fs.writeFileSync('gen/probe.abap','changed!');fs.utimesSync('gen/probe.abap',new Date(),new Date(2000))});"], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/probe.abap','original');");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    const changes = JSON.parse(result.output.match(/test-isolation: 0.cjs: gen: (.*)/)[1]);
+    expect(changes.map(({path, kind}) => ({path, kind}))).to.deep.equal([
+      {path: 'gen/added.abap', kind: 'added'}, {path: 'gen/probe.abap', kind: 'changed'},
+    ]);
+    for (const change of changes) expect(change.after.sha256).to.match(/^[0-9a-f]{64}$/);
+  });
+  it('does no gen content reads when manifests agree and hashes only differing files', () => {
+    const setup = "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/untouched.abap','same');const read=fs.readFileSync;fs.readFileSync=function(path,...args){if(String(path).includes('untouched.abap'))throw Error('read unchanged gen content');return read.call(this,path,...args)};";
+    const unchanged = run(["it('unchanged',()=>{});"], [], undefined, setup);
+    expect(unchanged.status, unchanged.output).to.equal(0);
+    const changed = run(["it('adds output',()=>require('node:fs').writeFileSync('gen/added.abap','new'));"], [], undefined, setup);
+    expect(changed.status, changed.output).to.be.greaterThan(0);
+    expect(changed.output).to.include('gen/added.abap').and.include('"sha256"');
+    expect(changed.output).not.to.include('read unchanged gen content');
+  });
+  it('keeps a gen hash error red even with a matching allowance', () => {
+    const result = run(["it('adds output',()=>require('node:fs').writeFileSync('gen/probe.abap','new'));"], [],
+      "allowances['0.cjs']={gen:{reason:'fixture',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:[{path:'gen/probe.abap',maxCount:1}]}};",
+      "const fs=require('node:fs');fs.mkdirSync('gen');const read=fs.readFileSync;fs.readFileSync=function(path,...args){if(String(path).endsWith('gen/probe.abap'))throw Error('cannot hash generated output');return read.call(this,path,...args)};");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('0.cjs: gen:').and.include('gen/probe.abap').and.include('cannot hash generated output');
+    expect(result.output).not.to.include('TEMPORARY ALLOW');
+  });
+  for (const mutation of ['known', 'extra', 'other']) {
+    it(`bounds gen allowances by prefix and count: ${mutation}`, () => {
+      const edit = mutation === 'extra' ? "fs.writeFileSync('gen/pack/extra.abap','new');" : mutation === 'other' ? "fs.writeFileSync('gen/other.abap','new');" : '';
+      const result = run([`const fs=require('node:fs');it('sweeps',()=>{fs.rmSync('gen/pack/probe.abap');${edit}});`], [],
+        "allowances['0.cjs']={gen:{reason:'measured fixture',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:[{prefix:'gen/pack/',maxCount:1}]}};",
+        "const fs=require('node:fs');fs.mkdirSync('gen/pack',{recursive:true});fs.writeFileSync('gen/pack/probe.abap','generated');");
+      if (mutation === 'known') expect(result.status, result.output).to.equal(0);
+      else expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('0.cjs: gen:');
+      if (mutation === 'known') expect(result.output).to.include('TEMPORARY ALLOW');
+      else expect(result.output).not.to.include('TEMPORARY ALLOW');
+    });
+  }
+  for (const files of [[], [{prefix: 'gen/', maxCount: 1}], [{prefix: 'gen/pack/'}], [{path: 'gen/../probe', maxCount: 1}], [{path: 'gen/probe', maxCount: 2}]]) {
+    it(`rejects unbounded or invalid gen allowances: ${JSON.stringify(files)}`, () => {
+      const result = run(["it('works',()=>{});"], [], `allowances['0.cjs']={gen:{reason:'fixture',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:${JSON.stringify(files)}}};`);
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('invalid gen path/prefix/count');
+    });
+  }
+
   for (const file of ['test/adt-facade.mjs', 'test/unknown.cjs']) {
     it(`critic unknown-root: rejects a new root identity in ${file}`, () => {
       const result = run({[file]: "it('leaves root',()=>require('node:fs').mkdtempSync('completely-new-leak-'));".replace("require('node:fs')", file.endsWith('.mjs') ? "fs" : "require('node:fs')") + (file.endsWith('.mjs') ? " import fs from 'node:fs';" : '')});
