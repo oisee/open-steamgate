@@ -183,10 +183,11 @@ HEAD fallback correctly passes GET to the handler: current GET-only handlers are
    - LOCK and UNLOCK go through `?_action=` (upper-cased; unknown → 400).
    - Missing object → 404.
    - A library object (`writable === false`) → 200 with an **empty** handle.
-   - Re-lock in the same session → the existing handle.
+   - Re-lock in the same session → 403, preserving the existing handle (supersedes the original re-lock behavior;
+     see the [current lock contract](../adt-facade.md#repository-and-mutation-semantics)).
    - Another session, including the same user in another session → 403 `lockedByOtherDocument` (EU 510, holder user).
    - UNLOCK of an unknown handle is ignored.
-   - The handle is a random UUID. The map handle → {type, name, since} stays in the session, because it is an ADT value, not an ENQ artefact.
+   - The handle is an opaque 40-character hex token (supersedes the original UUID format). The map handle → {type, name, since} stays in the session, because it is an ADT value, not an ENQ artefact.
    - Exported to group A: `holds( handle, type, name )`, `holder_of( type, name )`, `release( type, name )`.
    - Session end, logoff and expiry release all of that owner's locks.
 9. **Session routes.**
