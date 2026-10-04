@@ -33,7 +33,7 @@ import {copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {generatorIdentity, hashOf, inputsOf, layout, liveHash, lock, linkRoots, ownConfig, prepare, rootsWanted, switchTo} from "./osd-build.mjs";
-import {describeBuild} from "./osd-transpiler.mjs";
+import {buildIdentity} from "./osd-transpiler.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {toolCommand} from "./osd-host.mjs";
@@ -337,7 +337,7 @@ export class WarmCompiler {
     // the libraries are pinned clones and most of the inputs; a watcher per
     // library lets a build reuse their walk until something moves in one
     this.#watchLibraries(inputsOf(root, config).libs);
-    const transpiler = String(describeBuild(root));
+    const transpiler = buildIdentity(root);
     const overlay = this.overlayOf(new Set());
     const raw = new Map();
     const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
@@ -591,7 +591,7 @@ export class WarmCompiler {
     if (this.transpilerFile !== undefined && statKey(this.transpilerFile) !== this.transpilerStat) {
       throw new NotWarm("the transpiler on disk changed since the registry was primed");
     }
-    const transpiler = this.identity.transpiler;
+    const transpiler = buildIdentity(root);
     // the view this build makes live: S promoted, every other inactive
     // object as its copy -- the overlay a cold build of S would read
     const input = this.#generatorInput(activating);

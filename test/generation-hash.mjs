@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {writeFileSync, readFileSync, readdirSync, rmSync, mkdirSync, mkdtempSync} from "node:fs";
+import {writeFileSync, readFileSync, readdirSync, rmSync, mkdirSync, mkdtempSync, cpSync, symlinkSync, utimesSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {hashOf, generatorClosure, genHash} from "../tools/osd-build.mjs";
@@ -141,4 +141,71 @@ describe("a cache hit does not leave gen/ holding somebody else's edit", () => {
     const manifest = JSON.parse(readFileSync("build/live/manifest.json", "utf8"));
     expect(manifest.gen, "without it a cache hit cannot tell that gen/ drifted").to.be.a("string");
   });
+});
+
+describe("a generation identifies content regardless of location", () => {
+  let scratch, first, second;
+  beforeEach(() => {
+    scratch = mkdtempSync(join(tmpdir(), "osd-tree-identity-"));
+    first = join(scratch, "first");
+    second = join(scratch, "elsewhere", "deeper", "second");
+    mkdirSync(join(first, "src"), {recursive: true});
+    writeFileSync(join(first, "abap_transpile.json"), JSON.stringify({input_folder: "src", libs: []}));
+    writeFileSync(join(first, "src", "zcl_identity.clas.abap"), "* original source\n");
+    for (const name of ["transpiler", "runtime"]) {
+      const pkg = join(first, "local", name);
+      mkdirSync(join(pkg, "build"), {recursive: true});
+      writeFileSync(join(pkg, "package.json"), JSON.stringify({name: `@abaplint/${name}`, version: "1.0.0", main: "build/index.js"}));
+      writeFileSync(join(pkg, "build", "index.js"), "module.exports = {};\n");
+      mkdirSync(join(first, "node_modules", "@abaplint"), {recursive: true});
+      symlinkSync(join("..", "..", "local", name), join(first, "node_modules", "@abaplint", name));
+    }
+    mkdirSync(join(scratch, "elsewhere", "deeper"), {recursive: true});
+    cpSync(first, second, {recursive: true, verbatimSymlinks: true});
+  });
+  afterEach(() => rmSync(scratch, {recursive: true, force: true}));
+
+  it("copies with linked packages have the same hash", () => {
+    const a = [], b = [];
+    const firstHash = hashOf(first, undefined, {trace: value => a.push(String(value))});
+    expect(hashOf(second, undefined, {trace: value => b.push(String(value))})).to.equal(firstHash);
+    expect(b, "the exact hashed inputs also match").to.deep.equal(a);
+    expect(a.join(""), "locations never enter the hash").not.to.contain(scratch);
+  });
+  it("a source edit changes the hash", () => {
+    const before = hashOf(first);
+    writeFileSync(join(first, "src", "zcl_identity.clas.abap"), "* changed source\n");
+    expect(hashOf(first)).not.to.equal(before);
+  });
+  for (const name of ["transpiler", "runtime"]) {
+    it(`a ${name} build edit changes the hash even with the same version`, () => {
+      const before = hashOf(first);
+      writeFileSync(join(first, "local", name, "build", "index.js"), "module.exports = {changed: true};\n");
+      expect(hashOf(first)).not.to.equal(before);
+    });
+    it(`a ${name} edit with restored mtime still changes identity`, () => {
+      const before = hashOf(first);
+      const file = join(first, "local", name, "build", "index.js");
+      writeFileSync(file, "module.exports = [];\n");
+      utimesSync(file, new Date(0), new Date(0));
+      expect(hashOf(first)).not.to.equal(before);
+    });
+    it(`a ${name} version edit changes the hash`, () => {
+      const before = hashOf(first);
+      const file = join(first, "local", name, "package.json");
+      const meta = JSON.parse(readFileSync(file, "utf8"));
+      writeFileSync(file, JSON.stringify({...meta, version: "1.0.1"}));
+      expect(hashOf(first)).not.to.equal(before);
+    });
+    it(`materialising ${name} and changing timestamps preserves identity`, () => {
+      const before = hashOf(first);
+      const installed = join(first, "node_modules", "@abaplint", name);
+      rmSync(installed);
+      cpSync(join(first, "local", name), installed, {recursive: true});
+      utimesSync(join(installed, "build", "index.js"), new Date(0), new Date(0));
+      writeFileSync(join(installed, "build", "index.js.map"), "packaging may remove this map");
+      writeFileSync(join(installed, "build", "index.d.ts"), "export {};");
+      expect(hashOf(first)).to.equal(before);
+    });
+  }
 });

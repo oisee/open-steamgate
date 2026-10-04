@@ -27,7 +27,7 @@ import {run} from "./osd-build-command.mjs";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, resolve as resolvePath, sep} from "node:path";
 import {fileURLToPath} from "node:url";
-import {describeBuild} from "./osd-transpiler.mjs";
+import {buildIdentity, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile} from "./osd-transpile.mjs";
 import {inputFoldersOf, packsOf, webappsOf} from "./osd-packs.mjs";
@@ -279,7 +279,7 @@ export function generatorIdentity(root = process.cwd()) {
   const closure = generatorClosure();
   h.update(`generators ${closure.length}\0`);
   for (const f of closure) {
-    h.update(relative(root, f)).update("\0").update(readFileSync(f)).update("\0");
+    h.update(relative(TOOLS, f).split(sep).join("/")).update("\0").update(readFileSync(f)).update("\0");
   }
   return "tools:" + h.digest("hex").slice(0, 16);
 }
@@ -325,7 +325,7 @@ function digestOf(file) {
 //   folders    per input folder, the (file, digest) list of an earlier walk,
 //              for a folder a watcher says has not changed since -- the
 //              libraries are 4400 of this tree's 5100 inputs;
-//   transpiler describeBuild(root), when the caller has it already.
+//   transpiler buildIdentity(root), when the caller has it already.
 // None of them changes the name: it is the same hash over the same list.
 //   overlay    the inactive objects an ObjectStore keeps out of the build
 //              (overlayOf below); an empty or absent one changes nothing.
@@ -339,8 +339,14 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
   // prime asking whether its view is the live generation with saves since
   // put back to the bytes they replaced, tools/osd-warm.mjs)
   const substitute = options instanceof Map ? undefined : options.substitute;
-  const h = createHash("sha256");
-  h.update("transpiler\0").update(String(options.transpiler ?? describeBuild(root))).update("\0");
+  const hash = createHash("sha256");
+  // Optional audit of the exact framed inputs, in hashing order.
+  const h = {update(value) {
+    options.trace?.(value);
+    hash.update(value);
+    return this;
+  }, digest: (...args) => hash.digest(...args)};
+  h.update("transpiler\0").update(String(options.transpiler ?? buildIdentity(root))).update("\0");
   // the rule that decides a name held by two inputs is part of what the
   // output is: a generation built under another rule is another generation
   h.update("layers\0later-wins\0");

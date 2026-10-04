@@ -22,26 +22,11 @@
 // archives one, so the cache entry and `build/live` cannot travel as
 // themselves -- only `output/` tolerates arriving as a plain directory
 // (`switchTo` moves a pre-existing one aside to `build/legacy-<ts>` on the
-// first real build, "what every tree had before this existed"). Separately,
-// and enough on its own: `hashOf()` (`tools/osd-build.mjs`) folds
-// `describeBuild(root)` (`tools/osd-transpiler.mjs`) into the name, and for
-// a LOCAL transpiler build (`.local/lars/`, the shape this repo actually
-// builds against sometimes, CLAUDE.md "Known traps") that string carries an
-// absolute path and the git branch/commit/dirty flag of the MACHINE THAT
-// PACKAGED IT -- there is no way for a user's machine, materializing a
-// plain copy of `node_modules/@abaplint/transpiler` with no git metadata
-// left in it, to ever recompute the same string, so the shipped hash could
-// never be hit even after fixing the two problems above with a portable
-// STRING. Making the STRING portable (dropping the path, keeping
-// branch/commit/dirty so a dirty local build still changes the hash on the
-// packaging machine) is a small change; making the shipped `output/`
-// actually REPRODUCE that string from a plain copy of `node_modules` is
-// not, without a metadata file written at packaging time and read back in
-// preference to the on-disk shape -- more than the hour this task set
-// aside for it. So: no `output/` in the vsix. A first start is an ordinary
-// full build (measured below, ~20 s); a second start of the SAME
-// materialized copy is fast because by then it has grown its own matching
-// cache, the same way any other checkout's second build does.
+// first real build, "what every tree had before this existed"). Prebuilt
+// generations are now built from the staged seed's own input closure below,
+// instead of copying the development tree's output. Package identity uses
+// name, version and built-file content, so linked packages and the seed's
+// plain copies can describe the same code without checkout paths or Git state.
 //   - `src/`, selected `packs/` (zork by default; OSD_VSIX_PACKS selects
 //     more), `webapp/`, `tools/` (whole), `test/` minus `test/e2e/`,
 //     `test/fixtures/`, and the two synthetic fleet reports. The directories
@@ -520,10 +505,9 @@ export function excludeStagedPackSources(seedRoot, selectedPacks) {
  *  a first start finds it and reuses it instead of transpiling cold.
  *
  *  The generation's name is portable once it is built INSIDE the staged
- *  seed: the hash reads paths relative to the tree and the transpiler as a
- *  plain copy in the seed's node_modules ("published", no path, no git
- *  state), which is what a materialized copy on the user's machine
- *  computes too. Measured 2026-09-27: cold first build 22.3 s; the same
+ *  seed: the hash reads paths relative to the tree, generator-relative
+ *  filenames and package names, versions and built-file contents, which is
+ *  what a materialized copy on the user's machine computes too. Measured 2026-09-27: cold first build 22.3 s; the same
  *  generation copied into a second materialized copy under another path,
  *  "reused" in 5.4 s with gen/ regenerated, 0.1 s with gen/ shipped too.
  *

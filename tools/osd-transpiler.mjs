@@ -9,10 +9,11 @@
 // So every transpile says which one it used, and it says it in the build log
 // rather than in somebody's memory. A green run here and a red run in CI is
 // then one line apart from being explained.
+import {createHash} from "node:crypto";
 import {execFileSync} from "node:child_process";
 import {modulesOf} from "./osd-transpile.mjs";
-import {existsSync, lstatSync, readFileSync, realpathSync} from "node:fs";
-import {dirname, join} from "node:path";
+import {existsSync, lstatSync, readFileSync, realpathSync, readdirSync, statSync} from "node:fs";
+import {dirname, join, relative, sep} from "node:path";
 import {createRequire} from "node:module";
 import {runsAs} from "./osd-main.mjs";
 
@@ -100,6 +101,53 @@ export function describeRuntime(root = process.cwd()) {
 
 export function describeBuild(root = process.cwd()) {
   return describeTranspiler(root) + "\n" + describeRuntime(root);
+}
+
+// Diagnostics describe the checkout; identity describes the code. A git
+// commit alone misses rebuilt/untracked distribution files in a checkout.
+// Use the same content identity for linked and materialised packages.
+const CONTENT_DIGESTS = new Map();
+function contentDigest(file) {
+  const st = statSync(file);
+  const key = `${st.size}:${st.mtimeMs}:${st.ctimeMs}:${st.ino}`;
+  const cached = CONTENT_DIGESTS.get(file);
+  if (cached?.key === key) return cached.digest;
+  const digest = createHash("sha256").update(readFileSync(file)).digest("hex");
+  if (Date.now() - st.mtimeMs > 2000) CONTENT_DIGESTS.set(file, {key, digest});
+  else CONTENT_DIGESTS.delete(file);
+  return digest;
+}
+
+export function packageIdentity(at, name) {
+  if (!existsSync(at)) return {name, missing: true};
+  const meta = JSON.parse(readFileSync(join(at, "package.json"), "utf8"));
+  const h = createHash("sha256");
+  const walk = dir => {
+    for (const entry of readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+      const file = join(dir, entry.name);
+      if (entry.isDirectory()) walk(file);
+      // Distribution maps and TypeScript declarations are not executed;
+      // packaging drops maps, so they must not change the identity.
+      else if (!entry.name.endsWith(".map") && !entry.name.endsWith(".d.ts")) {
+        h.update(relative(at, file).split(sep).join("/")).update("\0").update(contentDigest(file)).update("\0");
+      }
+    }
+  };
+  if (existsSync(join(at, "build"))) walk(join(at, "build"));
+  return {name: meta.name ?? name, version: meta.version, main: meta.main, exports: meta.exports, type: meta.type,
+    content: h.digest("hex")};
+}
+
+export function buildIdentity(root = process.cwd()) {
+  const installed = join(root, "node_modules", "@abaplint", "transpiler");
+  let transpiler = installed;
+  if (!existsSync(transpiler)) {
+    try { transpiler = modulesOf(root).where; } catch { /* missing, reported without a location */ }
+  }
+  return JSON.stringify([
+    packageIdentity(transpiler, "@abaplint/transpiler"),
+    packageIdentity(join(root, "node_modules", "@abaplint", "runtime"), "@abaplint/runtime"),
+  ]);
 }
 
 if (runsAs("osd-transpiler.mjs")) {

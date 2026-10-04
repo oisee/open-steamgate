@@ -400,7 +400,9 @@ describe("packaging a prebuilt generation (T2, docs/ideas.md)", function () {
       // OSD_PACKS the way the launcher sets it on a first start with no
       // workspace folder: its storage, holding the empty notebook-scratch pack
       const env = {...process.env, OSD_PACKS: ensureWorkspacePacks(join(scratch, "elsewhere", "storage"), [])};
+      const firstStart = performance.now();
       const log = execFileSync(process.execPath, ["tools/osd-build.mjs"], {cwd: home, env, encoding: "utf8"});
+      console.log(`materialized first-start build check: ${(performance.now() - firstStart).toFixed(0)} ms`);
       expect(log, "the first build of a materialized copy").to.match(new RegExp(`osd-build: reused ${generations[0]} `));
       expect(log).to.not.match(/osd-build: built /);
       // the copy names the rows the way the seed did, so a first start seeds
