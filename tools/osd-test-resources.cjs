@@ -11,16 +11,18 @@ const children = new Set();
 const roots = new Map();
 exports.setOwner = (file) => { owner = file; };
 exports.environmentSnapshot = () => ({...process.env});
-// Cache the most recent (absolute path, size, mtimeMs) version. Snapshots
+// Cache the most recent (absolute path, size, mtimeMs, ctimeMs, ino) version. Snapshots
 // retain its digest even when the cache advances, so a rewrite can be
 // compared with bytes that no longer exist. Unchanged versions need no reads.
+// A write changes ctime even if utimes restores mtime; ino covers replacements.
 const genDigests = new Map();
 const genDigest = (file, stat) => {
   const cached = genDigests.get(file);
-  if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached.sha256;
+  if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs &&
+      cached.ctimeMs === stat.ctimeMs && cached.ino === stat.ino) return cached.sha256;
   const content = stat.isSymbolicLink() ? fs.readlinkSync(file) : fs.readFileSync(file);
   const sha256 = createHash('sha256').update(content).digest('hex');
-  genDigests.set(file, {size: stat.size, mtimeMs: stat.mtimeMs, sha256});
+  genDigests.set(file, {size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino, sha256});
   return sha256;
 };
 // Do not follow directory symlinks out of the checkout. Hash each file on
@@ -34,7 +36,7 @@ exports.genManifest = (root = process.cwd()) => {
       if (entry.isDirectory()) walk(path, name);
       else {
         const stat = fs.lstatSync(path);
-        const entry = {path: name, size: stat.size, mtimeMs: stat.mtimeMs};
+        const entry = {path: name, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino};
         try { entry.sha256 = genDigest(resolve(path), stat); }
         catch (error) { entry.error = error.message; }
         files.push(entry);

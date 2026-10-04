@@ -56,25 +56,32 @@ describe('per-file process isolation detector', function () {
     expect(result.output).not.to.include('0.cjs: gen:');
   });
   for (const phase of ['import', 'execution']) {
-    for (const content of ['original', 'changed!']) {
-      it(`${phase}: ${content === 'original' ? 'accepts identical bytes' : 'rejects same-size different bytes'} with a newer gen mtime`, () => {
-        const rewrite = `const fs=require('node:fs');const path='gen/probe.abap';const stamp=fs.statSync(path).mtimeMs+10000;fs.writeFileSync(path,'${content}');fs.utimesSync(path,stamp/1000,stamp/1000);`;
-        const source = phase === 'import' ? `${rewrite}it('rewrites',()=>{});` : `it('rewrites',()=>{${rewrite}});`;
-        const result = run([source, "it('inherits output',()=>{});"], [], undefined,
-          "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/probe.abap','original');");
-        if (content === 'original') {
-          expect(result.status, result.output).to.equal(0);
-          expect(result.output).not.to.include('0.cjs: gen:');
-        } else {
-          expect(result.status, result.output).to.be.greaterThan(0);
-          const changes = JSON.parse(result.output.match(/test-isolation: 0.cjs: gen: (.*)/)[1]);
-          expect(changes).to.have.length(1);
-          expect(changes[0]).to.include({path: 'gen/probe.abap', kind: 'changed', phase});
-          expect(changes[0].before.size).to.equal(changes[0].after.size);
-          expect(changes[0].after.mtimeMs).to.be.greaterThan(changes[0].before.mtimeMs);
-        }
-        expect(result.output).not.to.include('1.cjs: gen:');
-      });
+    for (const timestamp of ['newer', 'restored']) {
+      for (const content of ['original', 'changed!']) {
+        it(`${phase}: ${content === 'original' ? 'accepts identical bytes' : 'rejects same-size different bytes'} with a ${timestamp} gen mtime`, () => {
+          const rewrite = `const fs=require('node:fs');const path='gen/probe.abap';const stat=fs.statSync(path);const stamp=stat.mtimeMs${timestamp === 'newer' ? '+10000' : ''};fs.writeFileSync(path,'${content}');fs.utimesSync(path,stat.atimeMs/1000,stamp/1000);`;
+          const source = phase === 'import' ? `${rewrite}it('rewrites',()=>{});` : `it('rewrites',()=>{${rewrite}});`;
+          const result = run([source, "it('inherits output',()=>{});"], [], undefined,
+            "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/probe.abap','original');fs.utimesSync('gen/probe.abap',2000,2000);");
+          if (content === 'original') {
+            expect(result.status, result.output).to.equal(0);
+            expect(result.output).not.to.include('0.cjs: gen:');
+          } else {
+            expect(result.status, result.output).to.be.greaterThan(0);
+            const changes = JSON.parse(result.output.match(/test-isolation: 0.cjs: gen: (.*)/)[1]);
+            expect(changes).to.have.length(1);
+            expect(changes[0]).to.include({path: 'gen/probe.abap', kind: 'changed', phase});
+            expect(changes[0].before.size).to.equal(changes[0].after.size);
+            if (timestamp === 'newer') expect(changes[0].after.mtimeMs).to.be.greaterThan(changes[0].before.mtimeMs);
+            else {
+              expect(changes[0].after.mtimeMs).to.equal(changes[0].before.mtimeMs);
+              expect(changes[0].after.ctimeMs).to.be.greaterThan(changes[0].before.ctimeMs);
+              expect(changes[0].after.ino).to.equal(changes[0].before.ino);
+            }
+          }
+          expect(result.output).not.to.include('1.cjs: gen:');
+        });
+      }
     }
   }
   it('attributes an import-time sweep even when the file has no selected tests', () => {

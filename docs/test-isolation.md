@@ -37,12 +37,15 @@ release a lock, rebuild code or switch generations:
   contents. Owner:
   `osd-test-resources.cjs`, `genManifest()` / `genDifference()`. Snapshots
   read directory entries and metadata, caching a SHA-256 digest per absolute
-  path, size and `mtimeMs`. Each file is hashed once when first seen; unchanged
-  metadata reuses its cached digest. A new size or timestamp triggers a content
-  read and comparison with the digest retained in the baseline snapshot.
+  path, size, `mtimeMs`, `ctimeMs` and `ino`. Each file is hashed once when first
+  seen; unchanged metadata reuses its cached digest. A difference in any of
+  these fields triggers a content read and comparison with the digest retained
+  in the baseline snapshot. Content writes change ctime, which `utimes` cannot
+  restore, so same-size edits with restored mtime still compare bytes.
   Equal bytes pass and update the cache: legitimate builds regenerate outputs
-  with identical bytes and a newer mtime, which is not a leak. Different bytes
-  are `changed`; added and removed paths still fail. Evidence names each path
+  with identical bytes and a newer mtime, which is not a leak. Likewise, chmod,
+  rename or link operations that touch ctime cost a hash but equal bytes pass.
+  Different bytes are `changed`; added and removed paths still fail. Evidence names each path
   and retains baseline metadata and digests, including for deleted files.
   Hash errors stay red even under an allowance.
   This detects sweeps that the generation hash cannot see: `gen/` is an
@@ -106,8 +109,10 @@ The `gen` check compares both import entry/exit and execution entry/exit
 file importing them, including files with no selected tests. Each file gets
 its own observation baseline; a downstream file that leaves already missing
 outputs alone passes. Directory symlinks are not traversed; changed symlinks
-are hashed by link target. Empty directories and edits that restore both
-size and timestamp between snapshots are outside this metadata manifest.
+are hashed by link target. Empty directories are outside this metadata manifest.
+A change and full restore between two boundaries is invisible to a boundary
+observer, by design: changed metadata may trigger a hash, but restored paths
+and identical bytes pass.
 If the first file has identical entry and exit hashes but `live` differs from
 `tree`, the run began with a stale generation. An external build before the run
 restores that baseline; identical snapshots alone do not establish an exemption.
@@ -158,9 +163,12 @@ time. This total includes import observations as well as execution snapshots;
 normally there are four manifests per selected file.
 
 Local measurement (2026-10-04, Node 22.23.3, cached filesystem): the real `gen/`
-contained 582 files totaling 5.107 MB. Its initial manifest took 28.0 ms,
-including 16.8 ms reading and hashing content, with exactly one read and SHA-256
-per file. Across 100 subsequent unchanged snapshot/comparison boundaries, the
-median was 4.92 ms, with zero content reads or hashes. These are local costs,
+contained 582 files totaling 5.107 MB. With ctime and inode in the cache key,
+its initial manifest took 25.6 ms, including 14.5 ms reading and hashing content,
+with exactly one read and SHA-256 per file. Across 100 subsequent unchanged
+snapshot/comparison boundaries, the
+median was 4.39 ms, with zero content reads or hashes (454.5 ms total).
+A same-session measurement of the previous key gave 26.1 ms initially and
+4.39 ms per unchanged boundary (453.0 ms total). These are local costs,
 not CI timing guarantees. The instrumented measurement separates filesystem
 reads and hash creation/update/digest from the complete manifest capture.
