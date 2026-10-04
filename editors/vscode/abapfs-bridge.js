@@ -1,6 +1,6 @@
 "use strict";
 
-const {mkdirSync, openSync, closeSync} = require("node:fs");
+const {mkdirSync, openSync, closeSync, readFileSync, writeFileSync, unlinkSync, rmdirSync} = require("node:fs");
 const {join} = require("node:path");
 const {randomBytes} = require("node:crypto");
 const EXTENSION_ID = "murbani.vscode-abap-remote-fs";
@@ -8,6 +8,27 @@ const OFFER_KEY = "osd.abapfs.local.offered";
 const MOUNT_OFFER_KEY = "osd.abapfs.local.mountOffered";
 const RESTART_KEY = "osd.abapfs.local.wasRunning";
 const CONNECTION_ID = "osd-local";
+
+// Memento caches lag across hosts. Serialize claims in shared storage as well
+// as recording them in globalState. Completed claims never expire.
+function claimShared(context, key, claim = true, ttl = 0) {
+  const storage = context.globalStorageUri.fsPath;
+  mkdirSync(storage, {recursive: true});
+  const file = join(storage, `${key}.claim`);
+  const lock = `${file}.lock`;
+  try { mkdirSync(lock); }
+  catch (error) { if (error.code === "EEXIST") return; throw error; }
+  try {
+    try {
+      const previous = JSON.parse(readFileSync(file, "utf8") || "true");
+      if (!ttl || previous.consumed || Date.now() - previous.timestamp < ttl) return;
+      unlinkSync(file);
+    } catch (error) { if (error.code !== "ENOENT") throw error; }
+    const fd = openSync(file, "wx");
+    try { writeFileSync(fd, JSON.stringify(claim)); } finally { closeSync(fd); }
+    return file;
+  } finally { rmdirSync(lock); }
+}
 
 function canAutoConnect(workspace) {
   return workspace.workspaceFile !== undefined || (workspace.workspaceFolders?.length ?? 0) !== 1;
@@ -24,11 +45,26 @@ function startCredentials(env) {
 }
 
 async function registerAbapFsBridge(vscode, context, controller) {
-  // Consume before starting: a failed start must not loop on every activation.
-  // Keep recovery independent of whether the optional provider is installed.
-  if (context.workspaceState?.get(RESTART_KEY, false)) {
-    await context.workspaceState.update(RESTART_KEY, undefined);
-    await controller.start();
+  const session = randomBytes(16).toString("hex");
+  let stopped = false;
+  const clearRecovery = () => context.workspaceState.update(RESTART_KEY, undefined);
+  const recovery = context.workspaceState?.get(RESTART_KEY);
+  if (recovery) {
+    const mount = recovery.mount ?? "legacy";
+    const key = `${RESTART_KEY}.${mount}`;
+    const claim = {session, timestamp: Date.now()};
+    const file = claimShared(context, key, claim, 120_000);
+    if (file) {
+      await context.globalState.update(key, claim);
+      await new Promise(resolve => setTimeout(resolve, 50));
+      if (!stopped && context.globalState.get(key)?.session === session
+        && JSON.parse(readFileSync(file, "utf8")).session === session) {
+        // Consume before starting: failures must not loop, even in stale hosts.
+        writeFileSync(file, JSON.stringify({...claim, consumed: true}));
+        await context.workspaceState.update(RESTART_KEY, undefined);
+        await controller.start();
+      }
+    }
   }
   const extension = vscode.extensions?.getExtension(EXTENSION_ID);
   if (!extension) return;
@@ -40,25 +76,33 @@ async function registerAbapFsBridge(vscode, context, controller) {
   let current;
   let disposed = false;
   let offered = false;
+  context.subscriptions.push(controller.onWillStop(event => {
+    if (event.shutdown) return;
+    stopped = true;
+    event.waitUntil(clearRecovery());
+  }));
   const provider = api?.version === 2 && typeof api.registerConnectionProvider === "function";
   const offerMount = () => {
-    if (offered || context.workspaceState.get(MOUNT_OFFER_KEY, false)) return;
+    if (offered || context.globalState.get(MOUNT_OFFER_KEY, false)) return;
     offered = true;
     void (async () => {
       // Remember dismissal as well as Not now, across starts and reloads.
-      await context.workspaceState.update(MOUNT_OFFER_KEY, true);
+      if (!claimShared(context, MOUNT_OFFER_KEY)) return;
+      await context.globalState.update(MOUNT_OFFER_KEY, true);
       if (disposed) return;
       const choice = await vscode.window.showInformationMessage(
         'Open "OSD (local)" in ABAP-FS? VS Code will reload this window; the system will restart automatically afterward.',
         "Open OSD (local) in ABAP-FS", "Not now");
       if (choice !== "Open OSD (local) in ABAP-FS" || disposed || !current) return;
       const reload = !canAutoConnect(vscode.workspace);
-      if (reload) await context.workspaceState.update(RESTART_KEY, true);
+      stopped = false;
+      if (reload) await context.workspaceState.update(RESTART_KEY, {mount: randomBytes(16).toString("hex"), session, timestamp: Date.now()});
+      if (stopped || disposed || !current) { if (stopped) await clearRecovery(); return; }
       try { await api.connect(CONNECTION_ID); }
       catch {
         // Reload can withdraw/dispose the provider while connect is pending.
         // Its cancellation must leave recovery armed for the new host.
-        if (reload && !disposed && current) await context.workspaceState.update(RESTART_KEY, undefined);
+        if (reload && (!disposed || stopped)) await clearRecovery();
         if (disposed || !current) return;
         throw new Error("mount failed");
       }
@@ -88,10 +132,7 @@ async function registerAbapFsBridge(vscode, context, controller) {
         // Memento caches can lag in another extension host. An exclusive file
         // in shared global storage makes the once-only claim atomic across windows.
         if (context.globalState.get(OFFER_KEY, false)) return;
-        const storage = context.globalStorageUri.fsPath;
-        mkdirSync(storage, {recursive: true});
-        try { closeSync(openSync(join(storage, `${OFFER_KEY}.claim`), "wx")); }
-        catch (error) { if (error.code === "EEXIST") return; throw error; }
+        if (!claimShared(context, OFFER_KEY)) return;
         await context.globalState.update(OFFER_KEY, true);
         if (disposed) return;
         const choice = await vscode.window.showInformationMessage(
