@@ -16,6 +16,7 @@ import {closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, rea
 import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
+import {registryFiles} from "./osd-store-registry.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
@@ -1813,12 +1814,9 @@ export class ObjectStore {
     // local includes, and a type pool is not an ADT object but the check
     // still needs it
     for (const root of [...this.roots, ...this.libs]) {
-      for (const file of root.files ?? this.#walk(root.path, [])) {
-        if (/\.(abap|xml|asddls)$/.test(file) === false) {
-          continue;
-        }
-        registry.addFile(new abaplint.MemoryFile("/" + file, readFileSync(join(this.root, file), "utf8")));
-      }
+      registry.addFiles(registryFiles(this.root, root, root.files ?? this.#walk(root.path, []),
+        (this.served?.running === true ? this.served.generation : undefined) ?? liveHash(this.root),
+        file => this.#activeSource(file), this.excluded));
     }
     registry.parse();
     this.parsed = registry;
