@@ -56,6 +56,38 @@ captured extension output (including the system's build/boot log) and the
 persisted VS Code logs, including output channels activated before the harness.
 A PASS marker is required in addition to VS Code's exit status.
 
+The GUI test launches `/opt/code/code` directly. In pinned VS Code 1.101.2,
+the `bin/code` CLI detaches Electron, ignores its stdout/stderr and returns
+before tests finish unless special wait handling is requested
+([CLI source](https://github.com/microsoft/vscode/blob/2901c5ac6db8a986a5666c3af51ff804d05af0d4/src/vs/code/node/cli.ts#L216)).
+Using that CLI under `xvfb-run` ended the display lifetime and checked PASS
+before an extension host could start. The direct executable keeps the display
+and timeout alive until Electron exits and preserves its exit status. Both
+launches retain `--no-sandbox` and `--disable-gpu`; the image runs as `smoke`,
+not root. `xvfb-run` waits for the display before launching the process.
+The existing CommonJS `exports.run(): Promise<void>` harness protocol is
+supported by the pinned
+[extension host](https://github.com/microsoft/vscode/blob/2901c5ac6db8a986a5666c3af51ff804d05af0d4/src/vs/workbench/api/common/extHostExtensionService.ts#L743).
+
+Code stdout/stderr streams to the host and `/smoke/code.log`, installation
+output to `/smoke/install.log`, and Xvfb diagnostics to `/smoke/xvfb.log`.
+Failure reports the stage and exit code, then the last 300 lines of every file
+under the user-data logs directory (including nested exthost, renderer and
+output-channel files), plus other `.log` and osd text logs under `/smoke`.
+No extra dbus setup was justified by the supplied log; any subsequent startup
+error is now visible. Module tests cover process lifetime, launch paths and
+flags, exit status, stderr/log reporting, Xvfb failure and missing PASS.
+
+Verify this fix on the Docker host with an image rebuild (omit
+`--skip-image-build`):
+
+```sh
+node tools/osd-vsix-bare-smoke.mjs --release vscode-stable-v0.6.1666
+```
+
+Expect exit 0 and `vsix-bare: PASS` after Start, metadata and Stop checks.
+Docker execution remains unverified on the editing host.
+
 Start is bounded to 540 seconds; activation, HTTP and Stop have separate
 limits. Shell installation/test deadlines are 180/660 seconds, with a 10-second
 kill grace. Host Docker run is bounded to 960 seconds and removes its uniquely
