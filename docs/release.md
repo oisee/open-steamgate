@@ -81,8 +81,10 @@ channel-appropriate manifest, browser entry, and licence review, and publishes t
 Marketplace profile with the same version. A failed Marketplace publication
 leaves the GitHub release public and the Marketplace job red; rerun the
 tagged workflow after fixing the cause without moving the tag, provided the
-version has not reached Marketplace. Once it exists there, the early version
-check stops a tagged rerun; use a new commit for another Marketplace release.
+version has not reached Marketplace. Once it exists there, a stable tag's rerun
+stops at the early version check; a prerelease rerun can still repair its GitHub
+release and assets, and the Marketplace job then reports the duplicate. Use a
+new commit for another Marketplace release.
 To prepare a draft without pushing a tag, run **VS Code release** from the intended branch.
 Select `channel`, leave `tag` blank to derive the stamped version from that
 ref, and leave `draft` true. You may enter a tag, but it must match the version of the
