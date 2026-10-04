@@ -162,5 +162,131 @@
         }
       ]
     }
+  },
+  "test/dsl-l2.mjs": {
+    "tree": {
+      "reason": "Temporary: the L2 before hook renders 13 absent navigation companions under src/l2demo and removes only its scratch directory. The source/pack scan on base 8feda000 observed these exact execution additions; the generation hash excludes them. Restore or isolate them in the fixture.",
+      "owner": "osg-research",
+      "backlog": "docs/backlog/misc.md#isolation-dsl-l2-tree",
+      "files": [
+        {
+          "path": "src/l2demo/zcl_l2_grounded_ship_crew.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_maintenance_ship.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_recent_voyage.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_recent_voyage.clas.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_busy.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_captain.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_cargo_limit.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_max_cargo.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_min_captains.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_min_captains.clas.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_min_crew.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_restricted.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        },
+        {
+          "path": "src/l2demo/zcl_l2_ship_voyage_limit.clas.testclasses.trace.meta.json",
+          "maxCount": 1,
+          "phase": "execution",
+          "kinds": [
+            "added"
+          ]
+        }
+      ]
+    }
+  },
+  "test/vscode-vsix-packaging.mjs": {
+    "temporary-roots": {
+      "reason": "Temporary: the hidden-gen case creates vsix-hidden-gen-* before calling testScratch() outside its try/finally. The source/pack scan on base 8feda000 observed one surviving empty root when the default external scratch cache was not writable; gen was never moved. Protect all setup with cleanup.",
+      "owner": "adt-i5",
+      "backlog": "docs/backlog/misc.md#isolation-vscode-vsix-packaging-temporary-roots",
+      "roots": [
+        {
+          "prefix": "vsix-hidden-gen-",
+          "maxCount": 1
+        }
+      ]
+    }
   }
 }

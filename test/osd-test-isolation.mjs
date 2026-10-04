@@ -24,6 +24,9 @@ const genAllowancePatch = `allowances['test/gen-allowance-fixture.mjs']=${JSON.s
 function run(files, options = [], allowancePatch, preload, hook = true) {
   const root = mkdtempSync(join(tmpdir(), 'isolation-proof-'));
   try {
+    // Generation fixtures start with their config; import/execution changes
+    // then measure the behavior under test, rather than fixture construction.
+    writeFileSync(join(root, 'abap_transpile.json'), JSON.stringify({input_folder: 'src', libs: []}));
     const entries = Array.isArray(files) ? files.map((source, index) => [`${index}.cjs`, source]) : Object.entries(files);
     const paths = entries.map(([name, source]) => {
       const path = join(root, name);
@@ -49,6 +52,108 @@ function run(files, options = [], allowancePatch, preload, hook = true) {
 describe('per-file process isolation detector', function () {
   this.timeout(30000);
 
+  it('names a new source file left by its originating file', () => {
+    const result = run(["it('leaks',()=>{const fs=require('node:fs');fs.mkdirSync('src',{recursive:true});fs.writeFileSync('src/left.trace.meta.json','{}')});", "it('inherits',()=>{});"]);
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('0.cjs: tree:').and.include('src/left.trace.meta.json').and.include('"added"');
+    expect(result.output).not.to.include('1.cjs: tree:');
+    expect(result.filesAfterExit).to.include('src/left.trace.meta.json');
+  });
+  it('passes a source write restored byte-identically, including metadata changes', () => {
+    const result = run(["it('restores',()=>{const fs=require('node:fs');fs.writeFileSync('src/probe.abap','edited');fs.writeFileSync('src/probe.abap','original')});"], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('src');fs.writeFileSync('src/probe.abap','original');");
+    expect(result.status, result.output).to.equal(0);
+    expect(result.output).not.to.include('0.cjs: tree:');
+  });
+  it('does not blame a stale source run start', () => {
+    const result = run(["it('unchanged',()=>{});"], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('src');fs.writeFileSync('src/stale.trace.meta.json','stale');");
+    expect(result.status, result.output).to.equal(0);
+    expect(result.output).not.to.include('0.cjs: tree:');
+  });
+  for (const path of ['osd-pack.json', 'abap_transpile.json', 'libs.lock.json', 'src/probe.abap', 'packs/disabled/src/probe.abap', ...['osd-pack.json', 'abap_transpile.json', 'libs.lock.json'].map((file) => `packs/disabled/${file}`)]) {
+    for (const phase of ['import', 'execution']) {
+      it(`names ${phase} edits to ${path}, independent of configured build roots`, () => {
+        const edit = `fs.writeFileSync('${path}','edited');`;
+        const source = `const fs=require('node:fs');${phase === 'import' ? edit : ''}it('edits',()=>{${phase === 'execution' ? edit : ''}});`;
+        const result = run([source], [], undefined,
+          `const fs=require('node:fs');fs.mkdirSync('${dirname(path)}',{recursive:true});fs.writeFileSync('${path}','original');`);
+        expect(result.status, result.output).to.be.greaterThan(0);
+        expect(result.output).to.include('0.cjs: tree:').and.include(path).and.include('"changed"').and.include(`"phase":"${phase}"`);
+      });
+    }
+  }
+  it('discovers a newly created pack source and manifests at the next boundary', () => {
+    const result = run(["it('new pack',()=>{const fs=require('node:fs');fs.mkdirSync('packs/new/src',{recursive:true});fs.writeFileSync('packs/new/src/probe.abap','left');fs.writeFileSync('packs/new/osd-pack.json','{}');fs.writeFileSync('packs/new/data.json','unobserved')});"]);
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('0.cjs: tree:').and.include('packs/new/src/probe.abap').and.include('packs/new/osd-pack.json');
+    expect(result.output).not.to.include('packs/new/data.json');
+  });
+  for (const phase of ['import', 'execution']) {
+    it(`reports ${phase} restoration to run-start sources without excusing the origin`, () => {
+      const source = (content) => `const fs=require('node:fs');${phase === 'import' ? `fs.writeFileSync('src/probe.abap','${content}');` : ''}it('works',()=>{${phase === 'execution' ? `fs.writeFileSync('src/probe.abap','${content}');` : ''}});`;
+      const result = run([source('edited'), source('original')], [], undefined,
+        "const fs=require('node:fs');fs.mkdirSync('src');fs.writeFileSync('src/probe.abap','original');");
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('0.cjs: tree:').and.include('1.cjs: tree restoration:');
+      expect(result.output).not.to.include('1.cjs: tree:');
+    });
+  }
+  for (const options of [['--grep', 'not selected'], []]) {
+    it(`audits source mutations in unselected imports (${options.length ? 'all filtered' : 'only'})`, () => {
+      const result = run(["const fs=require('node:fs');fs.mkdirSync('src');fs.writeFileSync('src/import.abap','left');it('ignored',()=>{});", "it.only('selected',()=>{});"], options);
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('0.cjs: tree:').and.include('src/import.abap').and.include('"phase":"import"');
+    });
+  }
+  const treeAllowance = `allowances['test/tree-fixture.mjs']=${JSON.stringify({tree: {
+    reason: 'Synthetic bounded source fixture', owner: 'test fixture', backlog: 'test/osd-test-isolation.mjs',
+    files: [{path: 'src/allowed.abap', maxCount: 1, phase: 'import', kinds: ['added']}],
+  }})};`;
+  for (const mutation of ['known', 'phase', 'kind', 'path']) {
+    it(`bounds tree allowances by phase, kind and identity: ${mutation}`, () => {
+      const edit = `fs.writeFileSync('src/${mutation === 'path' ? 'other' : 'allowed'}.abap','left');`;
+      const result = run({'test/tree-fixture.mjs': `import fs from 'node:fs';${mutation !== 'phase' ? edit : ''}it('works',()=>{${mutation === 'phase' ? edit : ''}});`}, [], treeAllowance,
+        `const fs=require('node:fs');fs.mkdirSync('src');${mutation === 'kind' ? "fs.writeFileSync('src/allowed.abap','original');" : ''}`);
+      expect(result.output).to.include('test/tree-fixture.mjs: tree:');
+      if (mutation === 'known') {
+        expect(result.status, result.output).to.equal(0);
+        expect(result.output).to.include('TEMPORARY ALLOW');
+      } else {
+        expect(result.status, result.output).to.be.greaterThan(0);
+        expect(result.output).not.to.include('TEMPORARY ALLOW');
+      }
+    });
+  }
+  it('bounds a tree prefix count and rejects invalid root identities', () => {
+    const result = run({'test/tree-fixture.mjs': "import fs from 'node:fs';fs.writeFileSync('src/narrow/one.abap','one');fs.writeFileSync('src/narrow/two.abap','two');it('works',()=>{});"}, [],
+      treeAllowance + "allowances['test/tree-fixture.mjs'].tree.files=[{prefix:'src/narrow/',maxCount:1,phase:'import',kinds:['added']}];",
+      "require('node:fs').mkdirSync('src/narrow',{recursive:true});");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('test/tree-fixture.mjs: tree:').and.not.include('TEMPORARY ALLOW');
+    const invalid = run(["it('works',()=>{});"], [], treeAllowance + "allowances['test/tree-fixture.mjs'].tree.files[0].path='packs/any/data/leak.json';");
+    expect(invalid.status, invalid.output).to.be.greaterThan(0);
+    expect(invalid.output).to.include('invalid tree path/prefix/count/phase/kinds');
+  });
+  for (const mutation of ['known', 'extra']) {
+    it(`keeps the measured L2 tree allowance bounded: ${mutation}`, () => {
+      const entry = require('../tools/osd-test-isolation-allow.json')['test/dsl-l2.mjs'].tree;
+      expect(entry.owner).to.equal('osg-research');
+      expect(entry.files).to.have.length(13);
+      const paths = entry.files.map(({path}) => path);
+      if (mutation === 'extra') paths.push('src/l2demo/unrelated.trace.meta.json');
+      const result = run({'test/dsl-l2.mjs': `import fs from 'node:fs';it('renders companions',()=>{for(const path of ${JSON.stringify(paths)})fs.writeFileSync(path,'{}')});`}, [], undefined,
+        "require('node:fs').mkdirSync('src/l2demo',{recursive:true});");
+      expect(result.output).to.include('test/dsl-l2.mjs: tree:');
+      if (mutation === 'known') {
+        expect(result.status, result.output).to.equal(0);
+        expect(result.output).to.include('TEMPORARY ALLOW');
+      } else {
+        expect(result.status, result.output).to.be.greaterThan(0);
+        expect(result.output).not.to.include('TEMPORARY ALLOW');
+      }
+    });
+  }
   it('names a deleted gen file, leaves it deleted and does not blame downstream files', () => {
     const result = run([
       "it('leaves gen alone',()=>{});",
@@ -478,7 +583,7 @@ describe('per-file process isolation detector', function () {
           fs.unlinkSync('build/live');const activated='by-input/'+hashOf(process.cwd()${viewOptions});fs.symlinkSync(activated,'build/live');assert.equal(fs.readlinkSync('build/live'),activated);
           ${proofRejected ? checkMutation + reached : ''}
           try{await isolation.observeGenerationDrift()}finally{fs.writeFileSync(file,original)}
-          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`}, ['--timeout', '10000']);
+          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`}, ['--timeout', '10000'], undefined, `const fs=require('node:fs');fs.mkdirSync('src/demo',{recursive:true});fs.writeFileSync('src/demo/zcl_zstg_demo_dpc_ext.clas.abap',${JSON.stringify(original)});${inactive ? "fs.writeFileSync('src/other.clas.abap','saved');" : ''}`);
       expect(result.output).to.include(`mutation reached: warm ${mutation}`);
       if (mutation === 'known' || mutation === 'inactive-view') {
         expect(result.status, result.output).to.equal(0);
@@ -492,7 +597,7 @@ describe('per-file process isolation detector', function () {
     });
   }
   for (const mutation of ['known', 'unknown-sidecar', 'source-drift', 'config-drift']) {
-    it(`ignores navigation metadata but detects real generation drift: ${mutation}`, () => {
+    it(`checks navigation metadata independently of generation drift: ${mutation}`, () => {
       const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
       const sidecar = mutation === 'unknown-sidecar' ? 'src/l2demo/unrelated.trace.meta.json' : 'src/l2demo/zcl_l2_recent_voyage.clas.trace.meta.json';
       const extra = mutation === 'config-drift' ? "fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[],output_folder:'new-output'}));"
@@ -503,14 +608,12 @@ describe('per-file process isolation detector', function () {
         it('renders',()=>{fs.writeFileSync(${JSON.stringify(sidecar)},'{}');${extra}
           assert.equal(fs.readFileSync(${JSON.stringify(sidecar)},'utf8'),'{}');
           ${mutation === 'config-drift' ? "assert.equal(JSON.parse(fs.readFileSync('abap_transpile.json','utf8')).output_folder,'new-output');" : ''}
-          console.log('mutation reached: added-input ${mutation}');});`});
+          console.log('mutation reached: added-input ${mutation}');});`}, [], "delete allowances['test/dsl-l2.mjs'];", "const fs=require('node:fs');fs.mkdirSync('src/l2demo',{recursive:true});fs.writeFileSync('src/base.clas.abap','baseline');");
       expect(result.output).to.include(`mutation reached: added-input ${mutation}`).and.include('1 passing');
       expect(result.output).not.to.include('TEMPORARY ALLOW');
-      if (mutation === 'known' || mutation === 'unknown-sidecar') {
-        expect(result.status, result.output).to.equal(0);
-      } else {
-        expect(result.status, result.output).to.be.greaterThan(0);
-      }
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('test/dsl-l2.mjs: tree:').and.include(sidecar);
+      if (mutation === 'known' || mutation === 'unknown-sidecar') expect(result.output).not.to.include('test/dsl-l2.mjs: generation:');
     });
   }
   it('refuses parallel workers rather than sharing serial attribution state', () => {

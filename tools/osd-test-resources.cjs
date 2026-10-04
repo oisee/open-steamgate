@@ -15,41 +15,54 @@ exports.environmentSnapshot = () => ({...process.env});
 // retain its digest even when the cache advances, so a rewrite can be
 // compared with bytes that no longer exist. Unchanged versions need no reads.
 // A write changes ctime even if utimes restores mtime; ino covers replacements.
-const genDigests = new Map();
-const genDigest = (file, stat) => {
-  const cached = genDigests.get(file);
+const digests = new Map();
+const digest = (file, stat) => {
+  const cached = digests.get(file);
   if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs &&
       cached.ctimeMs === stat.ctimeMs && cached.ino === stat.ino) return cached.sha256;
   const content = stat.isSymbolicLink() ? fs.readlinkSync(file) : fs.readFileSync(file);
   const sha256 = createHash('sha256').update(content).digest('hex');
-  genDigests.set(file, {size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino, sha256});
+  digests.set(file, {size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino, sha256});
   return sha256;
 };
 // Do not follow directory symlinks out of the checkout. Hash each file on
 // first observation and after metadata changes, before its bytes can vanish.
-exports.genManifest = (root = process.cwd()) => {
+const manifests = ['osd-pack.json', 'abap_transpile.json', 'libs.lock.json'];
+// Root discovery is independent of build inputs, enabled packs and OSD_PACKS.
+// Every immediate pack directory is observed, including newly created packs.
+const namedRoots = (name, root) => {
+  if (name === 'gen') return ['gen'];
+  if (name !== 'tree') throw new Error(`Unknown isolation manifest: ${name}`);
+  const paths = ['src', ...manifests];
+  const packs = join(root, 'packs');
+  if (fs.existsSync(packs) && fs.lstatSync(packs).isDirectory()) {
+    for (const entry of fs.readdirSync(packs, {withFileTypes: true})) {
+      if (!entry.isDirectory()) continue;
+      const prefix = `packs/${entry.name}`;
+      paths.push(`${prefix}/src`, ...manifests.map((file) => `${prefix}/${file}`));
+    }
+  }
+  return paths;
+};
+exports.manifest = (name, root = process.cwd()) => {
   const files = [];
-  const walk = (folder, prefix) => {
-    for (const entry of fs.readdirSync(folder, {withFileTypes: true})) {
-      const path = join(folder, entry.name);
-      const name = `${prefix}/${entry.name}`;
-      if (entry.isDirectory()) walk(path, name);
-      else {
-        const stat = fs.lstatSync(path);
-        const entry = {path: name, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino};
-        try { entry.sha256 = genDigest(resolve(path), stat); }
-        catch (error) { entry.error = error.message; }
-        files.push(entry);
-      }
+  const walk = (path, name) => {
+    let stat;
+    try { stat = fs.lstatSync(path); }
+    catch (error) { if (error.code === 'ENOENT') return; throw error; }
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(path)) walk(join(path, entry), `${name}/${entry}`);
+    } else {
+      const entry = {path: name, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino};
+      try { entry.sha256 = digest(resolve(path), stat); }
+      catch (error) { entry.error = error.message; }
+      files.push(entry);
     }
   };
-  const folder = join(root, 'gen');
-  try { fs.lstatSync(folder); }
-  catch (error) { if (error.code === 'ENOENT') return files; throw error; }
-  walk(folder, 'gen');
+  for (const path of namedRoots(name, root)) walk(join(root, path), path);
   return files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 };
-exports.genDifference = (before, after) => {
+exports.manifestDifference = (before, after) => {
   const old = new Map(before.map((entry) => [entry.path, entry]));
   const next = new Map(after.map((entry) => [entry.path, entry]));
   const changes = [];
@@ -57,8 +70,8 @@ exports.genDifference = (before, after) => {
     const a = old.get(path);
     const b = next.get(path);
     const error = a?.error ?? b?.error;
-    // Legitimate builds rewrite identical outputs. Metadata invalidates the
-    // digest cache, but only different bytes constitute a changed output.
+    // Builds and fixtures can rewrite identical bytes. Metadata invalidates
+    // the digest cache, but only different bytes constitute a changed file.
     if (a && b && !error && a.sha256 === b.sha256) continue;
     changes.push({path, kind: !a ? 'added' : !b ? 'removed' : 'changed', before: a ?? null, after: b ?? null, ...(error ? {error} : {})});
   }
