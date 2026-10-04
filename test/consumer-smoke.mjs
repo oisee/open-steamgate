@@ -16,8 +16,10 @@ function fenced(output) {
   const token = output.match(/^::stop-commands::([\w-]+)\n/)?.[1];
   assert.ok(token);
   assert.ok(output.endsWith(`\n::${token}::\n`));
-  assert.match(output, /::set-env name=SPOOF::green/);
-  assert.match(output, /::error::spoof without newline/);
+  const body = output.slice(`::stop-commands::${token}\n`.length, -`\n::${token}::\n`.length);
+  assert.ok(!body.includes(`::${token}::`), "commands must stay disabled throughout consumer output");
+  assert.match(body, /::set-env name=SPOOF::green/);
+  assert.match(body, /::error::spoof without newline/);
   return token;
 }
 
@@ -58,7 +60,9 @@ describe("consumer smoke runner", function () {
     writeFileSync(join(consumer, "package-lock.json"), JSON.stringify({name: "smoke-fixture", version: "1.0.0", lockfileVersion: 3,
       packages: {"": {name: "smoke-fixture", version: "1.0.0", hasInstallScript: true}}}));
     writeFileSync(join(consumer, "install.cjs"), probe);
-    const installEnv = {...env, npm_config_cache: join(dir, "npm-cache"), npm_config_offline: "true", npm_config_audit: "false"};
+    // Exercise explicit forwarding even when npm is configured to hide lifecycle output.
+    const installEnv = {...env, npm_config_cache: join(dir, "npm-cache"), npm_config_offline: "true",
+      npm_config_audit: "false", npm_config_foreground_scripts: "false"};
     const result = cli("install", undefined, consumer, installEnv);
     assert.equal(result.status, 0, result.stderr);
     const token = fenced(result.stdout);

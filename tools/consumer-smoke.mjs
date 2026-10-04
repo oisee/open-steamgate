@@ -81,8 +81,9 @@ async function main() {
     }
     mkdirSync(results, {recursive: true});
     const name = mode === "install" ? "install" : key;
+    // npm versions differ in lifecycle verbosity; always forward it inside the fence.
     const record = await runConsumer(mode === "install" ? "npm" : process.execPath,
-      mode === "install" ? ["ci"] : [`test/${check.file}.mjs`], {
+      mode === "install" ? ["ci", "--foreground-scripts"] : [`test/${check.file}.mjs`], {
         env: {...process.env, ...check?.env}, timeoutMs: check?.timeoutMs,
         log: join(results, `${name}.log`),
       });
