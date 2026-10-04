@@ -25,7 +25,6 @@
 // What is warm is decided file by file, and anything else is cold -- the
 // generators read the tree too, and a change they would see has to reach
 // them (see warmRule below).
-// Warm verification children can be launched from the serving runtime.
 import {keepSourceInputs, linkGeneratedSources, completeSourceSnapshot} from "./osd-source-snapshot.mjs";
 import {spawn} from "./osd-child-process.mjs";
 import {createHash} from "node:crypto";
@@ -41,6 +40,7 @@ import {isBinaryFilename, listFiles, loadLibs, selectedModules, outputFiles, rea
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 
+import {checkView, checkRead} from "./osd-store-compile-view.mjs";
 import {rowsFromRegistry} from "./osd-xref-seed.mjs";
 
 export {warmVerdict};
@@ -336,6 +336,7 @@ export class WarmCompiler {
     // library lets a build reuse their walk until something moves in one
     this.#watchLibraries(inputsOf(root, config).libs);
     const overlay = this.overlayOf(new Set());
+    checkView(root, this.compileView, overlay);
     const raw = new Map();
     const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
     // the view names the generation it would build; one saved since the live
@@ -360,7 +361,7 @@ export class WarmCompiler {
     const wanted = view.wanted;
     const digests = view.digests;
     const read = await readAll(wanted, resolve(root, own.output_folder),
-      (source, filename) => lowerNarrowSubmit(source, filename, core));
+      (source, filename) => lowerNarrowSubmit(source, filename, core), checkRead(this.compileView));
     this.files = new Map(wanted.map((path, i) => [this.#logical(path, overlay), read[i]]));
     this.actual = new Map(view.actual);
     // where the live generation read each copied file from: its copy, when
@@ -418,7 +419,7 @@ export class WarmCompiler {
       for (const [logical, f] of this.files) if (!files.has(logical)) files.set(logical, f);
       this.files = files;
     }
-    const libs = await loadLibs(root, own);
+    const libs = await loadLibs(root, own, undefined, checkRead(this.compileView));
     const reg = new core.Registry();
     for (const f of this.files.values()) reg.addFile(new core.MemoryFile(f.filename, f.contents));
     for (const l of libs) reg.addDependency(new core.MemoryFile(l.filename, l.contents));
@@ -591,6 +592,7 @@ export class WarmCompiler {
     const input = this.#generatorInput(activating);
     if (input !== undefined) throw new NotWarm(input);
     const overlay = this.overlayOf(activating);
+    checkView(root, this.compileView, overlay);
     const raw = new Map();
     const hash = hashOf(root, inputsOf(root, config), {digests: raw, folders: this.folders, transpiler, overlay});
     const view = this.#view(overlay, raw, config, stack);
@@ -785,7 +787,7 @@ export class WarmCompiler {
       mark("generation");
       if (warmVerdict(target) === false) this.unverified.add(hash);
       this.views.set(hash, overlay);
-      switchTo(root, hash, undefined, {wanted});
+      if (this.switch !== false) switchTo(root, hash, undefined, {wanted});
       mark("switch");
       commit();
       this.hash = hash;

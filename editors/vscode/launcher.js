@@ -18,6 +18,7 @@
 "use strict";
 
 const {spawn} = require("node:child_process");
+const {killTree} = require("./process-tree");
 const {JobWorker, workerEnabled} = require("./job-worker");
 const {startCredentials} = require("./abapfs-bridge.js");
 const {createServer} = require("node:net");
@@ -484,7 +485,7 @@ function runToCompletion(cwd, script, args, env, onLine, onChild) {
   return new Promise((resolve, reject) => {
     let child;
     try {
-      child = spawn(process.execPath, [script, ...args], {cwd, env});
+      child = spawn(process.execPath, [script, ...args], {cwd, env, detached: process.platform !== "win32"});
       onChild?.(child);
     } catch (error) {
       reject(error);
@@ -633,18 +634,20 @@ function terminate(child, {signal = "SIGTERM", graceMs = 15000} = {}) {
   return new Promise((resolve) => {
     let done = false;
     let timer;
+    let killing = Promise.resolve();
     const finish = () => {
       if (done === false) {
         done = true;
         // a pending SIGKILL timer would keep the process alive for the
         // whole grace after the child is already gone
         clearTimeout(timer);
-        resolve();
+        killing.then(resolve, resolve);
       }
     };
     child.once("exit", finish);
     try {
-      child.kill(signal);
+      killing = killTree(child, signal);
+      killing.catch(finish);
     } catch {
       finish();
       return;
@@ -652,7 +655,8 @@ function terminate(child, {signal = "SIGTERM", graceMs = 15000} = {}) {
     timer = setTimeout(() => {
       if (done === false) {
         try {
-          child.kill("SIGKILL");
+          killing = killTree(child, "SIGKILL");
+          killing.catch(finish);
         } catch {
           // already gone
         }
@@ -1182,9 +1186,8 @@ class Launcher extends EventEmitter {
     this.lastLog = "";
     this.lastAttemptedPort = undefined;
     // when this start() began -- the status bar's "warming up..." (T7)
-    // shows that rather than "osd down" for a little while after this,
-    // since the prime is synchronous and the façade answers nothing at all
-    // while it runs (docs/warm-compile.md)
+    // shows that while the compiler process primes; the front keeps
+    // answering requests throughout (docs/warm-compile.md)
     this.startedAt = undefined;
     this.inspectPort = undefined;
     this.servingLock = undefined;
@@ -1387,7 +1390,7 @@ class Launcher extends EventEmitter {
       env.OSD_LAUNCHER_IDENTITY = this.launcherIdentity;
       this.adtCredentials = startCredentials(env);
       env.OSD_ADT_TOKEN = this.adtCredentials.token;
-      child = spawn(process.execPath, ["test/run.mjs"], {cwd: this.osdHome, env});
+      child = spawn(process.execPath, ["test/run.mjs"], {cwd: this.osdHome, env, detached: process.platform !== "win32"});
     } catch (error) {
       this.#setState("stopped");
       error.logText ??= this.lastLog;
@@ -1570,11 +1573,10 @@ class Launcher extends EventEmitter {
 
   /** Stops both processes: the child this module spawned (`node
    *  test/run.mjs`) and, through it, the grandchild it supervises
-   *  (`tools/osd-serve.mjs`) -- SIGTERM to the one pid this launcher holds
-   *  reaches both, because `tools/osd-runtime.mjs` installs its own
-   *  SIGTERM/SIGINT/SIGHUP handler that quiesces and reaps its children
-   *  before this process exits. Never sends a signal to a pid this launcher
-   *  did not itself spawn. */
+   *  (`tools/osd-serve.mjs`) and the compiler: signal the dedicated process
+   *  group on POSIX, taskkill /T /F on Windows. Runtime signal handlers
+   *  quiesce connections; tree termination also reaches a CPU-bound compiler
+   *  whose disconnect handler cannot run yet. */
   async stop() {
     this.jobsStopping = true;
     clearInterval(this.jobsPoll);

@@ -19,6 +19,7 @@ import {devLoop} from "../tools/osd-dev.mjs";
 import {existsSync} from "node:fs";
 import {HotLoader, rewrite} from "../tools/osd-hot.mjs";
 import {modulesOf} from "../tools/osd-transpile.mjs";
+import {WarmCompilerProcess} from "../tools/osd-warm-process.mjs";
 
 const REPO = resolve(".");
 
@@ -244,8 +245,9 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
   // call publish() side by side. They shared one build and both swapped
   // from its base; the second swap was refused ("the runtime carries h1,
   // and the swap is from h0") and recycled (vsp-i7, 2026-10-02). The real
-  // transpile() runs here over a stand-in warm compiler that, like the real
-  // one, moves its base to every generation it builds.
+  // publication coordinator runs here over a stand-in transpile boundary
+  // that moves its base to every generation it builds. Snapshot/publication
+  // checks against real generations are exercised in warm-process.mjs.
   describe("two publish() calls at once", () => {
     const setup = () => {
       const dir = mkdtempSync(join(tmpdir(), "osd-warm-concurrent-"));
@@ -267,6 +269,9 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
         },
       };
       store.warmState = {on: true, compiler, reason: undefined};
+      // This fixture models compilation with symbolic generations. Exercise
+      // the real publish coordinator; real disk compilation is tested below.
+      store.transpile = async () => ({...await store.warmState.compiler.build(), warm: true});
       const log = [];
       store.served = {
         running: true, generation: "h0", swaps: 0, recycles: 0,
@@ -445,6 +450,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
       },
     };
     store.warmState = {on: true, compiler, reason: undefined};
+    store.transpile = async () => ({...await store.warmState.compiler.build(), warm: true});
     store.served = {
       running: true, epoch: 1, generation: nameOf(src.text), swaps: 0, recycling: undefined, starting: undefined,
       async hot(swap) {
@@ -709,6 +715,8 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     const {store, done} = setup();
     const runtime = store.served;
     try {
+      writeFileSync(join(store.root, "abap_transpile.json"), JSON.stringify({input_folder: "src", libs: [], output_folder: "output"}));
+      delete store.sourceKey;
       let primed = 0;
       store.warmState.compiler = {primed: false, async prime() { primed++; this.primed = true; return {}; }};
       let settle;
@@ -991,8 +999,8 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
     store.warmState = {on: true, compiler: undefined, priming: undefined, reason: undefined, verifying: undefined, next: undefined, last: undefined, timer: undefined};
     expect(await store.warmUp()).to.not.equal(undefined, store.warmState.reason);
   });
-  after(() => {
-    store?.warmState?.compiler?.drop();
+  after(async () => {
+    await store?.warmState?.compiler?.drop();
     clearTimeout(store?.warmState?.timer);
     clearTimeout(store?.warmState?.reprime);
     if (root !== undefined) rmSync(root, {recursive: true, force: true});
@@ -1015,6 +1023,7 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
     const v = await store.warmState.compiler.verify(r.transpile.hash);
     expect(v.verdict, JSON.stringify(v)).to.equal("same");
   });
+
 
   it("a failed warm activation leaves the registry on the old view, and the next activation is warm", async () => {
     store.write("CLAS", A, src(A, 3).replace("rv = 3.", "rv = nope."));
@@ -1052,6 +1061,32 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
     const v = await store.warmState.compiler.verify(r.transpile.hash);
     expect(v.verdict, JSON.stringify(v)).to.equal("same");
   });
+  it("an activation during priming waits and publishes the saved source", async () => {
+    await store.warmState.compiler.drop();
+    await store.write("CLAS", A, src(A, 25));
+    const prime = store.warmUp();
+    expect(store.warmState.priming).to.equal(prime);
+    let settled = false;
+    prime.then(() => { settled = true; });
+    const result = await activate(A);
+    expect(settled, "activation waited for the in-flight prime").to.equal(true);
+    expect(result.ok, JSON.stringify(result.transpile)).to.equal(true);
+    expect(out(A)).to.include("IntegerFactory.get(25)");
+    expect(out(B), "the other object's active copy stays live").to.include("IntegerFactory.get(20)");
+    if (result.transpile.warm) {
+      const verified = await store.warmState.compiler.verify(result.transpile.hash);
+      expect(verified.verdict, JSON.stringify(verified)).to.equal("same");
+    }
+  });
+
+  it("closing immediately after scheduling a prime does not start a compiler afterward", async () => {
+    const compiler = new WarmCompilerProcess({root});
+    const prime = compiler.prime().catch(error => error);
+    await compiler.shutdown();
+    expect((await prime).code).to.equal("CLOSED");
+    expect(compiler.primed).to.equal(false);
+  });
+
 });
 
 // critic on ab4ded7c: a prime whose view names the live generation
@@ -1195,8 +1230,8 @@ describe("tools/osd-warm: an inactive generator input forces cold", function () 
     expect(r.ok, JSON.stringify(r.transpile)).to.equal(true);
     expect(store.stateOf(store.find("DDLS", "ZWG_V")).version).to.equal("inactive");
   });
-  after(() => {
-    store?.warmState?.compiler?.drop?.();
+  after(async () => {
+    await store?.warmState?.compiler?.drop?.();
     clearTimeout(store?.warmState?.reprime);
     if (root !== undefined) rmSync(root, {recursive: true, force: true});
   });

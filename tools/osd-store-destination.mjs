@@ -432,13 +432,13 @@ export class StoreDestination {
     };
   }
 
-  #write(type, name, include, source, started, store) {
+  async #write(type, name, include, source, started, store) {
     if (source === undefined) {
       // not "an empty source": a screen that posts a form with no text area
       // in it would otherwise silently empty the object it was showing
       return {EV_ERROR: "WRITE without IV_SOURCE: nothing was written"};
     }
-    const written = store.write(type, name, String(source), include);
+    const written = await store.write(type, name, String(source), include);
     return {
       EV_FILE: String(written.file ?? ""),
       EV_PACKAGE: String(written.package ?? ""),

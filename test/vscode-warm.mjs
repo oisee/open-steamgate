@@ -42,7 +42,7 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
     testIdentity = `osd-vscode-warm-${randomUUID()}`;
     child = spawn(process.execPath, ["test/run.mjs"], {
       env: {
-        ...process.env, STG_DB: "file", STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: undefined,
+        ...process.env, STG_DB: "file", STG_PORT: String(PORT), STG_TLS: "0", STG_SERVE: "child",
         OSD_WARM: "1", OSD_USER_FULL: testIdentity, STG_DB_BASE: join(databaseDir, "base"),
         STG_DB_PATH: join(databaseDir, "osd.sqlite"),
       },
@@ -90,15 +90,15 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
   });
 
   it("edits the demo DPC's own comment, activates it, and reads X-OSD-Build off the answer", async () => {
-    // give the background prime (docs/warm-compile.md: ~8-9 s, synchronous)
-    // a chance to finish, the way the extension's own "warming up..." does,
-    // rather than racing the first activation against it
+    // Wait for startup and its prime, as the extension's "warming up..." does.
     let serving;
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 120; i++) {
       serving = await fetch(`${BASE}/osd/serving`).then((r) => r.json()).catch(() => undefined);
-      if (serving?.warm !== undefined && serving.warm.state !== "priming") break;
+      if (serving?.ready === true && serving.warm !== undefined && serving.warm.state !== "priming" &&
+          serving.warm.reason !== "not primed yet") break;
       await new Promise((r) => setTimeout(r, 500));
     }
+    console.log(log.join("").split("\n").filter(line => line.startsWith("warm:")).join("\n"));
     expect(serving?.warm, "OSD_WARM=1 is on, and /osd/serving carries the field (#108)").to.not.equal(undefined);
 
     const edited = originalSource.replace(
