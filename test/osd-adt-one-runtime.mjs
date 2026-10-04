@@ -121,9 +121,17 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
       const duplicate = await request(url, "POST", collection, headers, body);
       expect(duplicate.status).to.equal(409);
       expect(duplicate.body).to.contain("ExceptionResourceIsModified");
-      const invalid = await request(url, "POST", collection, headers, "<program/>");
-      expect(invalid.status).to.equal(400);
-      expect(invalid.body).to.contain("ExceptionInvalidRequest");
+      // A valid ADT envelope missing its name reaches the create handler.
+      // Admission rejects malformed XML and a root outside the route's namespace.
+      for (const [badBody, exception] of [
+        [body.replace(` adtcore:name="${name}"`, ""), "ExceptionInvalidRequest"],
+        [body.slice(0, -1), "ExceptionInvalidXML"],
+        ["<program/>", "ExceptionInvalidXML"],
+      ]) {
+        const invalid = await request(url, "POST", collection, headers, badBody);
+        expect(invalid.status, invalid.body).to.equal(400);
+        expect(invalid.body).to.contain(exception);
+      }
       expect((await request(url, "DELETE", object, headers)).status).to.equal(200);
     }
   });
