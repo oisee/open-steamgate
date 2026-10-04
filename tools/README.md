@@ -11,3 +11,5 @@ The `osd-suites.mjs`, `osd-leak-scan.mjs`, and `osd-naming-scan.mjs` files run i
 `osd-vsix-bare-smoke.mjs` installs and starts a VSIX in Ubuntu without Node, npm or Git on PATH. Its self-contained [module and README](../docker/vsix-bare/README.md) cover the harness, optional layers and advisory workflow.
 
 `gogen/` holds the Go backend and its own [README](gogen/README.md). `sqlscript/` holds SQLScript parsing and analysis tools; see [the SQLScript surface](../docs/sqlscript-surface.md).
+
+[layer-version](layer-version/README.md) checks minimum `osd` requirements in pack and workspace manifests before a build and stamps the packaged system version.

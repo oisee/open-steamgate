@@ -79,6 +79,7 @@ import {describeVsixPreflight} from "../tools/osd-lock.mjs";
 import {libraryPath, vsixPreflightMissing} from "../tools/osd-lib-path.mjs";
 import {requireSupportedNode} from "../tools/osd-node-version.mjs";
 import {packAt} from "../tools/osd-packs.mjs";
+import {packagedVersion, writeVersionMarker} from "../tools/layer-version/index.mjs";
 import {readLock} from "../tools/osd-lock.mjs";
 import {writeThirdPartyNotices} from "./third-party-notices.mjs";
 import {forPublishing, generationTmpProblem} from "../tools/osd-tmp.mjs";
@@ -143,18 +144,10 @@ function log(msg) {
  *  edits deliberately do not affect the number. The seed content ID handles
  *  freshness for dirty builds. */
 export function stampStagedPackage(stagedPackagePath, root = ROOT) {
-  const sourcePackage = JSON.parse(readFileSync(join(root, "editors", "vscode", "package.json"), "utf8"));
-  const match = /^(\d+)\.(\d+)\.\d+$/.exec(sourcePackage.version ?? "");
-  if (match === null) {
-    throw new Error(`build-vsix: expected a plain major.minor.patch version in editors/vscode/package.json, got ${sourcePackage.version}`);
-  }
-  const patch = execFileSync("git", ["rev-list", "--count", "HEAD"], {cwd: root, encoding: "utf8"}).trim();
-  if (!/^\d+$/.test(patch)) {
-    throw new Error(`build-vsix: git rev-list returned an invalid commit count: ${patch}`);
-  }
+  const version = packagedVersion(root);
   const dirty = execFileSync("git", ["status", "--porcelain"], {cwd: root, encoding: "utf8"}).trim().length > 0;
   const pkg = JSON.parse(readFileSync(stagedPackagePath, "utf8"));
-  pkg.version = `${match[1]}.${match[2]}.${patch}`;
+  pkg.version = version;
   writeFileSync(stagedPackagePath, `${JSON.stringify(pkg, null, 2)}\n`);
   return {pkg, dirty};
 }
@@ -583,7 +576,7 @@ function prebuildGeneration(seedRoot, env) {
  *  its generations by its own bytes (tools/osd-build.mjs generatorIdentity),
  *  so a prebuilt generation could never be reused there: `prebuild` is the
  *  VSIX's alone. */
-export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = false} = {}) {
+export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = false, version = packagedVersion(ROOT)} = {}) {
   requireSupportedNode(process.versions.node, "system seed: ");
   const transpilerRef = pinnedTranspilerRef();
   const preflight = describeVsixPreflight(vsixPreflightMissing(ROOT));
@@ -597,6 +590,7 @@ export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = f
   if (missing.length > 0) throw new Error(describeUnfetched(missing));
   rmSync(seedRoot, {recursive: true, force: true});
   const modules = copySeedTree(seedRoot, selectedPacks);
+  writeVersionMarker(seedRoot, version);
   writeFileSync(join(seedRoot, ".osd-transpiler-ref"), `${transpilerRef}\n`);
   materializeSeedLinks(seedRoot);
   excludeStagedPackSources(seedRoot, selectedPacks);
@@ -794,7 +788,7 @@ export async function buildVsix(env = process.env, outputDir = BUILD_DIR) {
   // start then transpiles cold); the tests that only look at the archive's
   // shape use it, since the build costs ~20 s per package.
   const {seedId, modules, selectedPacks, generation} = await stageSystemSeed(seedRoot, env,
-    {prebuild: env.OSD_VSIX_PREBUILT !== "0"});
+    {prebuild: env.OSD_VSIX_PREBUILT !== "0", version: pkg.version});
   stageKernelScanner(seedRoot, extensionDir);
   log(generation === undefined ? "generation: none prebuilt, a first start builds cold"
     : `generation: ${generation} prebuilt, a first start reuses it`);

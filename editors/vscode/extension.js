@@ -1182,8 +1182,11 @@ class SystemController {
       return;
     }
     const issue = classify(logText, error);
-    const action = await vscode.window.showErrorMessage(`${label}: ${issue.message}`, ...issue.actions);
-    if (action === "Open log") {
+    const action = await vscode.window.showErrorMessage(
+      issue.kind === "version-mismatch" ? issue.message : `${label}: ${issue.message}`, ...issue.actions);
+    if (action === "Update") {
+      await vscode.commands.executeCommand("extension.open", "oisee.open-steamgate");
+    } else if (action === "Open log") {
       this.output.show(true);
     } else if (action === "Full rebuild") {
       await this.rebuild({forceBuild: true});
