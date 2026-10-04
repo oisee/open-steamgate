@@ -214,7 +214,7 @@ this section)**. They are absent from ABAPiti commit
 Both profiles report that reason; unavailable optional inputs never fail the
 job. No SSH credentials, secrets or local fixture copies are required.
 
-`tests.yml` adds `kernel-conformance`, parallel to the four suite shards after
+`tests.yml` adds `kernel-conformance`, parallel to the six suite shards after
 `build`. It restores the same pinned transpiler/runtime and libraries, then
 runs all 4,077 generated ABAPiti tests plus 10 int8 tests on
 OSG-JS. It is part of the existing `test` aggregate gate. The integration
@@ -452,3 +452,23 @@ and the changed-file size guard pass (seven inherited main breaches).
 Structural leak checks found no matches; the private identifier list is
 absent here, so private identifiers were not checked. GitHub Actions, the
 full integration suite and the heavy CI profile were not run locally.
+
+## Six-shard rebase validation, 2026-10-04
+
+Rebased kernel conformance onto `9e7687c0` (#602). The required gate and
+PR reporter retain the kernel prerequisite alongside main's six suite shards.
+The fixture reports derive all six shard identities from the workflow matrix.
+Main's pull-request-only cancellation, trusted weekly timing refresh and
+committed timing weights are preserved. Removing the kernel job and its
+gate/report integration makes `tests.yml` byte-identical to `origin/main`;
+the timing refresh workflow, script and timing weights already match it.
+
+The focused suite, kernel comparator and support checks passed 108/108 in
+16 seconds (including the synthetic new failure exiting nonzero). The
+required profile passed corpus 4077/4077 in 87.87 seconds and int8 10/10 in
+22.01 seconds, with zero known failures and semantic support drift PASS;
+total wall time was 130.74 seconds. Actionlint passed both kernel workflows
+and the retained timing refresh workflow. The suite list check passed with
+302 ordinary and seven grouped suites; the changed-file size guard passed
+with seven inherited main breaches. GitHub Actions and the heavy profile
+were not run locally.
