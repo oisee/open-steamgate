@@ -138,7 +138,7 @@ CLASS zcl_osd_adt_versions IMPLEMENTATION.
 *   READ validates the object and provides the active source, including an
 *   empty class include. HISTORY uses the same include and resolved file.
     CALL FUNCTION 'ZOSD_STORE' DESTINATION 'STORE'
-      EXPORTING iv_command = `READ` iv_type = lv_type iv_name = lv_name iv_include = lv_include
+      EXPORTING iv_command = `READ` iv_type = lv_type iv_name = lv_name iv_include = lv_include iv_revision = `active`
       IMPORTING ev_source = lv_source ev_error = lv_error
       TABLES et_object = lt_object
       EXCEPTIONS system_failure = 1 MESSAGE lv_msg communication_failure = 2 MESSAGE lv_msg OTHERS = 3.

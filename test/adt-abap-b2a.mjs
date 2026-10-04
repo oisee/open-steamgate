@@ -13,6 +13,7 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {StoreDestination, withSystem, currentSystemAnswers, COMMANDS} from "../tools/osd-store-destination.mjs";
 import {harnessEntries, runAll} from "../tools/osd-unit-all.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
+import {activeFixture} from "./helpers/source-snapshot.mjs";
 
 const base = "/sap/bc/adt/";
 const collections = ["oo/classes", "oo/interfaces", "programs/programs", "ddic/ddl/sources", "ddic/srvd/sources", "programs/includes"];
@@ -127,6 +128,7 @@ describe("ADT B2a source reads and bare documents: live Node byte diff", functio
     for(const [,name,text] of reportBoundaries) file(name,".prog.abap",text);
     for(const [name,text] of [["zentity","define\r\nroot\tview\nentity zentity as select from t {}"],["zclassic","define view zclassic as select from t {}"],["zboundary","redefine view entity2"],["zpunct","define,view entity"]]) file(name,".ddls.asddls",text);
     file("ztf_source",".ddls.asddls","define table function ZTF_ENTITY returns { id: abap.int4; } implemented by method zcl_read=>run;");
+    activeFixture(root);
     store=new ObjectStore({root,libs:[],roots:[{path:"src",package:"$TMP",writable:true}]});
     store.create("CLAS","ZCL_AUTHOR",{package:"$TMP",author:"BUILDER_A"});
     store.write("PROG","ZREPORT","REPORT z.");
@@ -216,10 +218,17 @@ describe("ADT B2a source reads and bare documents: live Node byte diff", functio
     expect((await diff(base+collections[0]+"/zcl_plain")).body.toString().match(/<class:include /g)).to.have.length(1);
   });
   it("$TMP author appears on the class document",async () => {expect((await diff(base+collections[0]+"/zcl_author")).body.toString()).to.include('changedBy="BUILDER_A"');});
-  for(const name of ["zreport","zbom","znbsp","zreports","zcomment","zline"]) it(`PROG report scan ${name}, inactive properties stay 1970/active`,async () => {
+  for(const name of ["zreport","zbom","znbsp","zreports","zcomment","zline"]) it(`PROG report scan ${name}, properties keep 1970 and equal source stays active`,async () => {
     const r=await diff(base+collections[2]+"/"+name), body=r.body.toString();
     expect(body.includes('programType="executableProgram"')).to.equal(!["zreports","zcomment"].includes(name));
     expect(body).to.include('changedAt="1970-01-01T00:00:00Z"').and.include('version="active"');
+  });
+  it("a changed saved program reports inactive, and reverting to active bytes reports active",async () => {
+    const path=base+collections[2]+"/zreport";
+    store.write("PROG","ZREPORT","REPORT z.\n* changed");
+    expect((await diff(path)).body.toString()).to.include('version="inactive"');
+    store.write("PROG","ZREPORT","REPORT z.");
+    expect((await diff(path)).body.toString()).to.include('version="active"');
   });
   for(const [label,name] of reportBoundaries) it(`PROG report scan ${label} is executable and byte-equal`,async () => {
     const r=await diff(base+collections[2]+"/"+name); expect(r.status).to.equal(200);

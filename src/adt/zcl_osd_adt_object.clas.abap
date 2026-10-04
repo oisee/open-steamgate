@@ -117,6 +117,11 @@ CLASS zcl_osd_adt_object IMPLEMENTATION.
   ENDMETHOD.
   METHOD properties.
     DATA lv_properties TYPE string.
+    DATA lv_version TYPE string.
+    lv_version = is_object-version.
+    IF lv_version IS INITIAL.
+      lv_version = `active`.
+    ENDIF.
     CASE iv_type.
       WHEN `PROG`.
         lv_properties = `program:lockedByEditor="false"`.
@@ -129,7 +134,7 @@ CLASS zcl_osd_adt_object IMPLEMENTATION.
       && |\n|
       && | xmlns:atom="http://www.w3.org/2005/Atom" { lv_properties }\n|
       && | adtcore:name="{ zcl_osd_adt_xml=>esc( is_object-name ) }" adtcore:type="PROG/P"\n|
-      && | adtcore:description="" adtcore:version="active"\n|
+      && | adtcore:description="" adtcore:version="{ lv_version }"\n|
       && | adtcore:language="EN" adtcore:masterLanguage="EN" adtcore:abapLanguageVersion="standard"\n|
       && | adtcore:createdAt="1970-01-01T00:00:00Z" adtcore:changedAt="1970-01-01T00:00:00Z"\n|
       && | adtcore:createdBy="{ zcl_osd_adt_xml=>esc( is_object-changed_by ) }" adtcore:changedBy="{ zcl_osd_adt_xml=>esc( is_object-changed_by ) }" adtcore:responsible="{ zcl_osd_adt_xml=>esc( is_object-changed_by ) }"\n|
@@ -151,7 +156,7 @@ CLASS zcl_osd_adt_object IMPLEMENTATION.
       && | xmlns:abapoo="http://www.sap.com/adt/oo"\n|
       && | xmlns:atom="http://www.w3.org/2005/Atom" { lv_properties }\n|
       && | adtcore:name="{ zcl_osd_adt_xml=>esc( is_object-name ) }" adtcore:type="INTF/OI"\n|
-      && | adtcore:description="" adtcore:version="active"\n|
+      && | adtcore:description="" adtcore:version="{ lv_version }"\n|
       && | adtcore:language="EN" adtcore:masterLanguage="EN" adtcore:abapLanguageVersion="standard"\n|
       && | adtcore:createdAt="1970-01-01T00:00:00Z" adtcore:changedAt="1970-01-01T00:00:00Z"\n|
       && | adtcore:createdBy="{ zcl_osd_adt_xml=>esc( is_object-changed_by ) }" adtcore:changedBy="{ zcl_osd_adt_xml=>esc( is_object-changed_by ) }" adtcore:responsible="{ zcl_osd_adt_xml=>esc( is_object-changed_by ) }"\n|
@@ -175,7 +180,7 @@ CLASS zcl_osd_adt_object IMPLEMENTATION.
       && |\n|
       && | xmlns:atom="http://www.w3.org/2005/Atom" { lv_properties }\n|
       && | adtcore:name="{ zcl_osd_adt_xml=>esc( is_object-name ) }" adtcore:type="DDLS/DF"\n|
-      && | adtcore:description="" adtcore:version="active"\n|
+      && | adtcore:description="" adtcore:version="{ lv_version }"\n|
       && | adtcore:language="EN" adtcore:masterLanguage="EN" adtcore:abapLanguageVersion="standard"\n|
       && | adtcore:createdAt="1970-01-01T00:00:00Z" adtcore:changedAt="1970-01-01T00:00:00Z"\n|
       && | adtcore:createdBy="{ zcl_osd_adt_xml=>esc( is_object-changed_by ) }" adtcore:changedBy="{ zcl_osd_adt_xml=>esc( is_object-changed_by ) }" adtcore:responsible="{ zcl_osd_adt_xml=>esc( is_object-changed_by ) }"\n|

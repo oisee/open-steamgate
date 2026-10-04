@@ -19,7 +19,8 @@ import {ddlsIssues} from "./osd-store-ddls.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
-import {hashOf, inputsOf, loadConfig, normalPath} from "./osd-build.mjs";
+import {hashOf, inputsOf, loadConfig, normalPath, liveHash} from "./osd-build.mjs";
+import {entityTag} from "./adt-entity.mjs";
 import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
 import {TMP_FOLDER, TMP_TEXT, isTmpPackage, tmpAuthors, tmpRoot} from "./osd-tmp.mjs";
@@ -409,9 +410,13 @@ export class ObjectStore {
     if (this.inactive.has(key)) return;
     for (const file of this.#filesOfEntry(entry)) {
       if (!existsSync(join(this.root, file))) continue;
+      const active = this.#activeFile(file, entry);
+      // Unavailable source has no copy. An empty placeholder would become
+      // false proof of activity when the saved source is also empty.
+      if (!active || !existsSync(active)) continue;
       const copy = join(this.root, this.#snapshotOf(file));
       mkdirDurable(dirname(copy));
-      copyDurable(join(this.root, file), copy);
+      copyDurable(active, copy);
       this.#crash("keep:after-copy");
     }
   }
@@ -562,7 +567,17 @@ export class ObjectStore {
     } catch {
       changedAt = undefined;
     }
-    return {changedAt, version: this.inactive.has(`${entry.type} ${entry.name}`) ? "inactive" : "active"};
+    const object = this.find(entry.type, entry.name) ?? entry;
+    const differs = TYPES[entry.type]?.source === true
+      ? this.#filesOfEntry(object).filter((f) => !/\.xml$/.test(f))
+        .some((f) => {
+          const working = join(this.root, f);
+          const active = this.#activeFile(f, entry);
+          if (!existsSync(working)) return active && existsSync(active) && readFileSync(active, "utf8") !== "";
+          return !active || !existsSync(active) || readFileSync(working, "utf8") !== readFileSync(active, "utf8");
+        })
+      : this.inactive.has(`${entry.type} ${entry.name}`);
+    return {changedAt, version: differs ? "inactive" : "active"};
   }
 
   // An activation checks one source revision. A save can arrive while the
@@ -798,7 +813,7 @@ export class ObjectStore {
     return present;
   }
 
-  read(type, name, include = "main") {
+  read(type, name, include = "main", version = "inactive") {
     // a DDLS may be read by the entity it defines, when that is not its
     // object name (FOR TABLE FUNCTION names the entity). Only a read: a
     // write or a delete resolves its target by object name, never by entity,
@@ -816,11 +831,70 @@ export class ObjectStore {
       }
       const file = entry.file.replace(/\.clas\.abap$/, suffix);
       if (!existsSync(join(this.root, file))) {
-        return {...entry, include, source: "", empty: true};
+        return this.#sourceVersion({...entry, include, file, source: "", empty: true}, version);
       }
-      return {...entry, include, file, source: readFileSync(join(this.root, file), "utf8")};
+      return this.#sourceVersion({...entry, include, file, source: readFileSync(join(this.root, file), "utf8")}, version);
     }
-    return {...entry, include, source: readFileSync(join(this.root, entry.file), "utf8")};
+    return this.#sourceVersion({...entry, include, source: readFileSync(join(this.root, entry.file), "utf8")}, version);
+  }
+
+  #activeInputs;
+
+  #activeFile(file, entry) {
+    const hash = (this.served?.running === true ? this.served.generation : undefined) ?? liveHash(this.root);
+    const generation = hash && join(this.root, "build", "by-input", hash);
+    const complete = generation && existsSync(join(generation, "source", ".complete"));
+    const snapshot = generation && join(generation, "source", file);
+    if (complete && existsSync(snapshot)) return snapshot;
+    // Pre-save copies retain proven active input, including genuinely empty
+    // bytes. #keepActive leaves unavailable input absent, never a placeholder.
+    const copy = join(this.root, this.#snapshotOf(file));
+    if (!complete && existsSync(copy)) return copy;
+    if (!generation || !existsSync(generation)) return undefined;
+    let inputs = this.#activeInputs?.generation === generation ? this.#activeInputs.inputs : undefined;
+    if (inputs === undefined) {
+      try {
+        inputs = JSON.parse(readFileSync(join(generation, "source-inputs.json"), "utf8"));
+      } catch {
+        // Older generations recorded the aggregate input hash only. Matching
+        // that hash proves every input; a partial match proves nothing.
+        try {
+          const manifest = JSON.parse(readFileSync(join(generation, "manifest.json"), "utf8"));
+          const digests = new Map();
+          if (hashOf(this.root, inputsOf(this.root), {digests, transpiler: manifest.transpiler}) !== hash) return undefined;
+          inputs = Object.fromEntries([...digests].map(([path, digest]) => [relative(this.root, path).replaceAll("\\", "/"), digest]));
+          writeFileSync(join(generation, "source-inputs.json"), JSON.stringify(inputs));
+        } catch {return undefined;}
+      }
+      if (inputs === null || typeof inputs !== "object") return undefined;
+      // A generation's proof is immutable. Reuse it for class includes and
+      // repository listings instead of parsing the full input map per part.
+      this.#activeInputs = {generation, inputs};
+    }
+    const digest = inputs[file.replaceAll("\\", "/")];
+    if (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)) return undefined;
+    const shared = join(this.root, "build", "source-by-digest", digest);
+    if (existsSync(join(generation, "source-shared")) && existsSync(shared)) return shared;
+    const target = join(generation, "source", file);
+    if (existsSync(target) && createHash("sha256").update(readFileSync(target)).digest("hex") === digest) return target;
+    const working = join(this.root, file);
+    if (!existsSync(working)) return undefined;
+    const bytes = readFileSync(working);
+    if (createHash("sha256").update(bytes).digest("hex") !== digest) return undefined;
+    mkdirSync(dirname(target), {recursive: true});
+    writeFileSync(target, bytes);
+    return target;
+  }
+
+  #activeSource(file, entry) {
+    const active = this.#activeFile(file, entry);
+    return active && existsSync(active) ? readFileSync(active, "utf8") : "";
+  }
+
+  #sourceVersion(part, version) {
+    const active = version === "active";
+    const source = active ? this.#activeSource(part.file, part) : part.source;
+    return {...part, source, etag: entityTag(active ? "active\0" + source : source)};
   }
 
   // a write lands a file; a new object goes to the first writable root unless

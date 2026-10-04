@@ -1,6 +1,6 @@
 // The ADT versions feed (tools/adt-versions.mjs) through the facade's own
 // router: a program's .../source/main/versions and a class include's
-// .../includes/<include>/versions list 00000 (the working tree) and one
+// .../includes/<include>/versions list 00000 (empty without a generation) and one
 // version per commit, oldest 00001, and each entry's content URI reads that
 // version back. What a client parses is abap-adt-api's reader contract
 // (atom:content@src, atom:title, atom:updated, atom:author/atom:name). The
@@ -51,7 +51,7 @@ describe("tools/adt-facade: versions of an object out of git", function () {
     writeFileSync(join(root, "src", "zver.prog.abap"), "REPORT zver.\nWRITE 'two'.\n");
     writeFileSync(join(root, "src", "zcl_ver.clas.locals_imp.abap"), "* two\n");
     git("commit", "-q", "-am", "second");
-    // an edit not committed: the active version is the working tree
+    // An unbuilt working tree has no known active source.
     writeFileSync(join(root, "src", "zver.prog.abap"), "REPORT zver.\nWRITE 'three'.\n");
     const app = express();
     app.use(adtRouter({store: new ObjectStore({root, libs: []}), data: {}, logMisses: false}).router);
@@ -66,7 +66,7 @@ describe("tools/adt-facade: versions of an object out of git", function () {
     rmSync(root, {recursive: true, force: true});
   });
 
-  it("lists a program's versions: 00000 the working tree, then its commits newest first", async () => {
+  it("lists a program's versions: 00000 the active source, then its commits newest first", async () => {
     const feed = await get("/sap/bc/adt/programs/programs/zver/source/main/versions");
     expect(feed.status).to.equal(200);
     expect(feed.type).to.match(/^application\/atom\+xml/);
@@ -83,7 +83,7 @@ describe("tools/adt-facade: versions of an object out of git", function () {
     const list = entries((await get("/sap/bc/adt/programs/programs/zver/source/main/versions")).text);
     const texts = await Promise.all(list.map((e) => get(e.src)));
     expect(texts.map((t) => t.status)).to.deep.equal([200, 200, 200]);
-    expect(texts.map((t) => /WRITE '(\w+)'/.exec(t.text)[1])).to.deep.equal(["three", "two", "one"]);
+    expect(texts.map((t) => t.text)).to.deep.equal(["", "REPORT zver.\nWRITE 'two'.\n", "REPORT zver.\nWRITE 'one'.\n"]);
     const missing = await get(list[0].src.replace("/00000/", "/00009/"));
     expect(missing.status).to.equal(404);
   });
@@ -129,7 +129,7 @@ describe("tools/adt-facade: versions of an object out of git", function () {
     expect(response.headers.get("x-osd-history")).to.match(/^none: .*not tracked/);
     const list = entries(await response.text());
     expect(list.map((e) => e.id)).to.deep.equal(["00000"]);
-    expect((await get(list[0].src)).text).to.equal("REPORT zloose.\n");
+    expect((await get(list[0].src)).text).to.equal("");
   });
 
   it("writes the feed root and the 00000 entry exactly as A4H does", async () => {

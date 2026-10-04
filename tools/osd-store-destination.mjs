@@ -257,7 +257,7 @@ export class StoreDestination {
             objects: (pkg.objects ?? []).map((o) => ({type: o.type, name: o.name, library: o.library === true, version: o.version}))})};
         }
         case "LIST": return this.#list(signature, store);
-        case "READ": return this.#read(type, name, include, store);
+        case "READ": return this.#read(type, name, include, store, givenText(signature, "IV_REVISION"));
         case "WRITE": return this.#write(type, name, include, source, started, store);
         case "CHECK": return this.#check(type, name, include, source, started, store);
         case "ACTIVATE": return await this.#activate(type, name, started, store);
@@ -419,11 +419,11 @@ export class StoreDestination {
     return {EV_SOURCE: found.source, EV_FILE: found.path, EV_VERSION: revision.toLowerCase().slice(0, 12)};
   }
 
-  #read(type, name, include, store) {
-    const read = store.read(type, name, include);
+  #read(type, name, include, store, version) {
+    const read = store.read(type, name, include, version);
     return {
       EV_SOURCE: read.source,
-      EV_JSON: JSON.stringify({name: read.name, changedBy: read.changedBy, empty: read.empty === true}),
+      EV_JSON: JSON.stringify({name: read.name, changedBy: read.changedBy, empty: read.empty === true, etag: read.etag}),
       EV_FILE: String(read.file ?? ""),
       EV_PACKAGE: String(read.package ?? ""),
       EV_WRITABLE: read.writable === false ? "" : "X",

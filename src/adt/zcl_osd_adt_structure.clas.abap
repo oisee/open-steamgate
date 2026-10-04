@@ -58,6 +58,11 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
   METHOD document.
     DATA lv_nl TYPE string.
     DATA lv_pad TYPE string.
+    DATA lv_version TYPE string.
+    lv_version = io_json->get_string( `/version` ).
+    IF lv_version IS NOT INITIAL.
+      lv_version = `                                   adtcore:version="` && lv_version && `"` && cl_abap_char_utilities=>newline.
+    ENDIF.
     lv_nl = cl_abap_char_utilities=>newline.
     lv_pad = `                                   `.
     rv_xml = `<?xml version="1.0" encoding="utf-8"?>` && lv_nl
@@ -67,6 +72,7 @@ CLASS zcl_osd_adt_structure IMPLEMENTATION.
       && lv_pad && `xml:base="` && zcl_osd_adt_xml=>esc( iv_base ) && `"` && lv_nl
       && lv_pad && `adtcore:name="` && zcl_osd_adt_xml=>esc( io_json->get_string( `/name` ) ) && `"` && lv_nl
       && lv_pad && `adtcore:type="` && zcl_osd_adt_xml=>esc( io_json->get_string( `/type` ) ) && `"` && lv_nl
+      && lv_version
       && lv_pad && `abapsource:sourceUri="source/main">` && lv_nl
       && children( io_json = io_json iv_path = `/children` iv_pad = `  ` ) && lv_nl
       && `</abapsource:objectStructureElement>` && lv_nl.

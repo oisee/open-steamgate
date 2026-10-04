@@ -3,6 +3,7 @@ CLASS zcl_osd_adt_source DEFINITION PUBLIC FINAL CREATE PUBLIC.
     INTERFACES zif_osd_adt_route.
     CLASS-METHODS source_type IMPORTING iv_pattern TYPE string RETURNING VALUE(rv_type) TYPE string.
     CLASS-METHODS read IMPORTING iv_type TYPE string iv_name TYPE string iv_include TYPE string DEFAULT `main`
+      iv_version TYPE string OPTIONAL
       RETURNING VALUE(rs_read) TYPE zcl_osd_adt_host=>ty_read RAISING zcx_osd_adt.
     CLASS-METHODS include_document IMPORTING iv_name TYPE string iv_include TYPE string iv_uri TYPE string
       RETURNING VALUE(rv_body) TYPE string.
@@ -26,7 +27,7 @@ CLASS zcl_osd_adt_source IMPLEMENTATION.
 *   B2a needs the extended READ/OBJECT contract. Go lacks OBJECT today.
     zcl_osd_adt_host=>require( `OBJECT` ).
     TRY.
-        rs_read = zcl_osd_adt_host=>read( iv_type = iv_type iv_name = iv_name iv_include = iv_include ).
+        rs_read = zcl_osd_adt_host=>read( iv_type = iv_type iv_name = iv_name iv_include = iv_include iv_version = iv_version ).
       CATCH zcx_osd_adt INTO lx_error.
         IF lx_error->status = 404.
           IF lx_error->message_text CS ` include `.
@@ -39,6 +40,7 @@ CLASS zcl_osd_adt_source IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
   METHOD zif_osd_adt_route~handle.
+    DATA lv_version TYPE string.
     DATA lv_type TYPE string.
     DATA lv_name TYPE string.
     DATA lv_include TYPE string VALUE `main`.
@@ -59,7 +61,8 @@ CLASS zcl_osd_adt_source IMPLEMENTATION.
         RAISE EXCEPTION lx_error.
       ENDIF.
     ENDIF.
-    ls_read = read( iv_type = lv_type iv_name = lv_name iv_include = lv_include ).
+    zcl_osd_adt_package=>query( EXPORTING is_request = is_request iv_name = `version` IMPORTING ev_value = lv_version ).
+    ls_read = read( iv_type = lv_type iv_name = lv_name iv_include = lv_include iv_version = lv_version ).
     lv_accept = zcl_osd_adt_csrf=>header( it_headers = is_request-headers iv_name = `accept` ).
     IF is_request-pattern CP `*/includes/:include` AND find( val = lv_accept sub = `application/vnd.sap.adt.oo.classes.includes.` ) >= 0.
       lv_uri = `/sap/bc/adt/oo/classes/` && zcl_osd_adt_uri=>encode_component( to_lower( lv_name ) )
@@ -69,7 +72,7 @@ CLASS zcl_osd_adt_source IMPLEMENTATION.
         iv_type = `application/vnd.sap.adt.oo.classes.includes.v2+xml` ).
     ELSE.
       rs_response = zcl_osd_adt_entity=>send( is_request = is_request iv_body = ls_read-source
-        iv_type = `text/plain; charset=utf-8` ).
+        iv_type = `text/plain; charset=utf-8` iv_etag = ls_read-etag ).
     ENDIF.
   ENDMETHOD.
   METHOD include_document.

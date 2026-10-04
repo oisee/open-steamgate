@@ -11,6 +11,7 @@ import {dialogStep} from "../tools/osd-dialog-step.mjs";
 import {undoOnExit} from "./helpers/undo-on-exit.mjs";
 import {adtAbap} from "./helpers/adt-abap.mjs";
 import {SESSION_COOKIE} from "../tools/adt-session.mjs";
+import {activeFixture} from "./helpers/source-snapshot.mjs";
 
 // The state-changing half of the façade: lock, write, unlock, activate.
 //
@@ -772,7 +773,7 @@ describe("tools/adt-facade: the development loop", () => {
     // inactive version now (a4h-adt.jsonl:486-487: PUT, then the class
     // document 200 with a new tag). Read back unchanged, with the same tag,
     // the client took its own copy for the newer one and showed nothing.
-    it("a written object reads as inactive with a new tag, and as active again once activated", async function () {
+    it("a written object reads as inactive with a new tag; check-only activation keeps the generation source", async function () {
       this.timeout(120000);
       const before = await call(`/oo/classes/${SCRATCH.toLowerCase()}`);
       const tagBefore = before.headers.get("etag");
@@ -785,7 +786,11 @@ describe("tools/adt-facade: the development loop", () => {
       const activated = await activate(SCRATCH);
       expect(activated.status).to.equal(200);
       const again = await call(`/oo/classes/${SCRATCH.toLowerCase()}?version=workingArea`);
-      expect(await again.text()).to.contain('adtcore:version="active"');
+      // This suite disables transpilation: passing the check cannot put
+      // this scratch class into the live generation or promote its source.
+      expect(await again.text()).to.contain('adtcore:version="inactive"');
+      const active = await call(`/oo/classes/${SCRATCH}/source/main?version=active`);
+      expect(await active.text()).to.equal("");
     });
 
     it("source that holds activates, and says so with its properties", async function () {
@@ -1022,7 +1027,7 @@ describe("tools/adt-facade: publication state", function () {
     expect((await failed.text())).to.contain('activationExecuted="false"');
     expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");
 
-    store.publish = async () => ({ok: true, recycled: false});
+    store.publish = async () => {activeFixture(root); return {ok: true, recycled: false};};
     const passed = await activate();
     expect((await passed.text())).to.contain('activationExecuted="true"');
     expect(store.stateOf(store.find("CLAS", name)).version).to.equal("active");
@@ -1063,9 +1068,11 @@ describe("tools/adt-facade: notebook scratch after failed activation", function 
     root = mkdtempSync(join(tmpdir(), "osd-notebook-failure-"));
     for (const layer of roots) mkdirSync(join(root, layer.path), {recursive: true});
     store = new ObjectStore({root, roots, libs: []});
-    store.publish = async () => store.read("CLAS", name).source === invalid
-      ? {ok: false, transpile: {issues: [{issues: [{message: "invalid ABAP"}]}]}}
-      : {ok: true};
+    store.publish = async () => {
+      if (store.read("CLAS", name).source === invalid) return {ok: false, transpile: {issues: [{issues: [{message: "invalid ABAP"}]}]}};
+      activeFixture(root, roots.map(layer => layer.path));
+      return {ok: true};
+    };
     store.classrun = async () => ({run: async () => ({ok: true, text: "hello", ms: 1})});
     const app = express();
     app.use(express.raw({type: "*/*", limit: "16mb"}));
@@ -1120,12 +1127,13 @@ describe("tools/adt-facade: notebook scratch after failed activation", function 
   });
 
   it("keeps a previously inactive cell inactive after a failed replacement", async () => {
-    store.write("CLAS", name, valid, "main", {root: roots[1].path});
+    const pending = valid.replace("'hello'", "'pending'");
+    store.write("CLAS", name, pending, "main", {root: roots[1].path});
     expect(await reportedVersion()).to.equal("inactive");
     store.publish = async () => ({ok: false, error: "invalid ABAP"});
     const failed = await send(invalid);
     expect(failed.status, await failed.text()).to.equal(422);
-    expect(restarted().read("CLAS", name).source).to.equal(valid);
+    expect(restarted().read("CLAS", name).source).to.equal(pending);
     expect(await reportedVersion()).to.equal("inactive");
   });
 });

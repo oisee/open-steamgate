@@ -13,9 +13,11 @@
 // the bytes sent. Nothing about the destination's own shape would catch a
 // second write path; only asking where the object actually went does.
 import {expect} from "chai";
-import {mkdirSync, writeFileSync, rmSync, readFileSync} from "node:fs";
-import {join} from "node:path";
+import {mkdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync, symlinkSync, existsSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join, resolve} from "node:path";
 import {ObjectStore} from "../tools/osd-store.mjs";
+import {build} from "../tools/osd-build.mjs";
 import {StoreDestination, withSystem} from "../tools/osd-store-destination.mjs";
 import {box, rows, answerOf} from "./helpers/destination.mjs";
 
@@ -81,6 +83,44 @@ async function call(destination, importing = {}) {
   return answerOf(signature);
 }
 
+describe("store LIST: live generation input digests without a source snapshot", function () {
+  this.timeout(60000);
+  let root, generation;
+  before(async () => {
+    root = mkdtempSync(join(tmpdir(), "store-list-provenance-"));
+    mkdirSync(join(root, FOLDER), {recursive: true});
+    writeFileSync(join(root, FILE), CLEAN);
+    symlinkSync(resolve("node_modules"), join(root, "node_modules"));
+    writeFileSync(join(root, "package.json"), "{}");
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: "src", output_folder: "output", libs: [],
+      options: {ignoreSyntaxCheck: false, addCommonJS: true, unknownTypes: "compileError"}}));
+    const result = await build({root, generators: false});
+    generation = join(root, "build/by-input", result.hash);
+    rmSync(join(generation, "source"), {recursive: true});
+    rmSync(join(generation, "source-shared"));
+    rmSync(join(root, "build/source-by-digest"), {recursive: true});
+  });
+  after(() => {if (root) rmSync(root, {recursive: true, force: true});});
+  it("a fresh store proves matching working bytes from the recorded input digest", async () => {
+    const destination = new StoreDestination({store: () => new ObjectStore({root, libs: []})});
+    const answer = await call(destination, {IV_COMMAND: "LIST", IV_FILTER: NAME});
+    expect(answer.EV_ERROR).to.equal("");
+    expect(answer.ET_OBJECT.find(row => row.NAME === NAME).VERSION).to.equal("active");
+    expect(readFileSync(join(generation, "source", FILE), "utf8")).to.equal(CLEAN);
+  });
+  it("a fresh store cannot claim edited bytes when the retained source is gone", async () => {
+    rmSync(join(generation, "source"), {recursive: true});
+    writeFileSync(join(root, FILE), CLEAN.replace("rv_answer = 42.", "rv_answer = 43."));
+    const store = new ObjectStore({root, libs: []});
+    const destination = new StoreDestination({store: () => store});
+    const answer = await call(destination, {IV_COMMAND: "LIST", IV_FILTER: NAME});
+    expect(answer.EV_ERROR).to.equal("");
+    expect(answer.ET_OBJECT.find(row => row.NAME === NAME).VERSION).to.equal("inactive");
+    expect(store.read("CLAS", NAME, "main", "active").source).to.equal("");
+    expect(existsSync(join(generation, "source", FILE))).to.equal(false);
+  });
+});
+
 describe("the store, as the destination an editor screen calls", function () {
   // a check parses the system whole, which is seconds and is the price of
   // knowing what the system contains (tools/osd-store.mjs says why the fast
@@ -117,7 +157,9 @@ describe("the store, as the destination an editor screen calls", function () {
     expect(row.TYPE).to.equal("CLAS");
     expect(row.FILE).to.equal(FILE);
     expect(row.WRITABLE, "an object of the tree is writable; a library object is not").to.equal("X");
-    expect(row.VERSION).to.equal("active");
+    // This probe was planted after the system's build and has never been
+    // activated. Existence and clean syntax do not prove live provenance.
+    expect(row.VERSION).to.equal("inactive");
     expect(answer.EV_ERROR).to.equal("");
   });
 
@@ -312,12 +354,14 @@ ENDCLASS.
     const store = new ObjectStore({root: process.cwd()});
     store.write("CLAS", NAME, CLEAN);
     let release;
-    store.publish = () => new Promise((resolve) => { release = resolve; });
+    let entered;
+    const publishing = new Promise(resolve => { entered = resolve; });
+    store.publish = () => new Promise((resolve) => { release = resolve; entered(); });
     const running = call(new StoreDestination({store: () => store}),
       {IV_COMMAND: "ACTIVATE", IV_NAME: NAME, IV_TYPE: "CLAS"});
-    for (let i = 0; i < 100 && release === undefined; i++) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
+    // The whole-tree check can take seconds. Synchronize on publication,
+    // rather than racing that check against a one-second polling budget.
+    await Promise.race([publishing, running.then(() => {throw new Error("activation ended before publication");})]);
     expect(release).to.be.a("function");
     store.write("CLAS", NAME, CLEAN.replace("42", "43"));
     release({ok: true, recycled: false});

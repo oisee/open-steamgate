@@ -1,10 +1,10 @@
 // The dev loop: a change on disk becomes a check, a build and a recycle —
-// or a report and nothing else. The build is injected, because the real
-// one is ten seconds and this is about the rule, not the transpiler.
+// or a report and nothing else. Build the small isolated tree for real:
+// claiming an active version needs the live generation's source provenance.
 import {expect} from "chai";
-import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync, symlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, resolve} from "node:path";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {devLoop} from "../tools/osd-dev.mjs";
 
@@ -25,15 +25,19 @@ describe("tools/osd-dev: a save is a check, a build and a recycle", function () 
     writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "v702", errorNamespace: "^(Z|Y)"}}));
     writeFileSync(join(root, "src/osd/zcl_dev_a.clas.abap"), CLEAN("zcl_dev_a"));
     writeFileSync(join(root, "src/osd/zcl_dev_b.clas.abap"), CALLER("zcl_dev_b", "zcl_dev_a"));
-    store = new ObjectStore({root, libs: []});
+    symlinkSync(resolve("node_modules"), join(root, "node_modules"));
+    writeFileSync(join(root, "package.json"), "{}");
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: "src", output_folder: "output", libs: [],
+      options: {ignoreSyntaxCheck: false, addCommonJS: true, unknownTypes: "compileError"}}));
+    store = new ObjectStore({root, libs: [], build: {generators: false}});
     published = [];
     loop = devLoop({
       store,
       watch: false,
       log: (m) => lines.push(m),
-      publish: async () => {
+      publish: async (activate) => {
         published.push(Date.now());
-        return {ok: true, transpile: {hash: "deadbeefdeadbeef", objects: 2, ms: 1, cached: false}, recycled: false};
+        return store.publish({activate});
       },
     });
   });
@@ -47,7 +51,7 @@ describe("tools/osd-dev: a save is a check, a build and a recycle", function () 
     expect(r.ok).to.equal(true);
     expect(r.stage).to.equal("live");
     expect(published.length).to.equal(1);
-    expect(lines.join("\n")).to.match(/check clean/).and.match(/built deadbeefdeadbeef/);
+    expect(lines.join("\n")).to.match(/check clean/).and.match(/built [a-f0-9]+/);
   });
 
   it("a change that breaks a dependent is reported and nothing is built", async () => {
@@ -133,8 +137,14 @@ describe("tools/osd-dev: a save is a check, a build and a recycle", function () 
       const before = published.length;
       expect(await touched(saved.file)).to.include({ok: true, stage: "live"});
       expect(store.stateOf(store.find("CLAS", "ZCL_DEV_A")).version, "C activated").to.equal("active");
+      expect(store.read("CLAS", "ZCL_DEV_A", "main", "active").source).to.equal(CLEAN("zcl_dev_a") + "* C\n");
+      const reopened = new ObjectStore({root, libs: []});
+      expect(reopened.stateOf(reopened.find("CLAS", "ZCL_DEV_A")).version, "C has durable build provenance").to.equal("active");
+      expect(store.stateOf(store.find("CLAS", "ZCL_DEV_OWN")).version, "the unrelated saved object stays inactive").to.equal("inactive");
       external(saved.file, CLEAN("zcl_dev_a") + "* B\n");
+      expect(store.stateOf(store.find("CLAS", "ZCL_DEV_A")).version, "B differs from live C before the next pass").to.equal("inactive");
       expect(await touched(saved.file)).to.include({ok: true, stage: "live"});
+      expect(store.read("CLAS", "ZCL_DEV_A", "main", "active").source).to.equal(CLEAN("zcl_dev_a") + "* B\n");
       expect(published.length).to.equal(before + 2);
     });
 
