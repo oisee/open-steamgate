@@ -83,7 +83,7 @@ jobs:
           status=${PIPESTATUS[0]}
           set -e
           test "$status" -ne 0
-          rg 'osd-build: FAILED:.*check_syntax' bare-evidence/bad-layer.log
+          grep -E 'osd-build: FAILED:.*check_syntax' bare-evidence/bad-layer.log
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
