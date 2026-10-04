@@ -1279,7 +1279,7 @@ export function activationFailureDocument(objects, {checkExecuted = true} = {}) 
   const message = (o, issue) => {
     const word = ACTIVATION_TYPE_WORD[ADT_TYPE[o.type] ?? o.type];
     const description = word ? word + " " + o.name : o.name;
-    const href = (/\.clas\./i.test(issue.file ?? "") ? frameUri(issue.file, issue.line, issue.column) : undefined) ??
+    const href = issue.href ?? (/\.clas\./i.test(issue.file ?? "") ? frameUri(issue.file, issue.line, issue.column) : undefined) ??
       ((uriOf(o.type, o.name) ?? "") + "/source/main#start=" + (issue.line ?? 1) + "," + (issue.column ?? 1));
     // Observed line="1" for a diagnostic at source line 3. Its meaning
     // beyond that case is unconfirmed; source position belongs in href.
@@ -1323,6 +1323,30 @@ export function objectReferencesIn(body, collections, options) {
     if (uri === undefined) continue;
     const parsed = objectFromUri(uri,collections,options);
     if (parsed !== undefined) out.push(parsed);
+  }
+  return out;
+}
+
+// Activation must account for every reference, including ones the route
+// cannot activate. Keep the submitted URI for refusal diagnostics; resolve
+// unsupported collections only to name their owning object, never to enable
+// activation. Other document readers keep objectReferencesIn's contract.
+export function activationReferencesIn(body, collections) {
+  const knownCollections = Object.entries(TYPES).filter(([, meta]) => meta.adt)
+    .map(([type, meta]) => [type, meta.adt]);
+  const resolve = (uri, supportedCollections) => {
+    try { return objectFromUri(uri, supportedCollections, {owningObject: true}); }
+    catch (error) { if (!(error instanceof URIError)) throw error; }
+  };
+  const out = [];
+  for (const element of requestElements(body)) {
+    const uri = attributeValue(element, namespaces.adtcore, "uri");
+    if (uri === undefined && !(element.uri === namespaces.adtcore && element.local === "objectReference")) continue;
+    const parsed = uri === undefined ? undefined : resolve(uri, collections);
+    const described = parsed ?? (uri === undefined ? undefined : resolve(uri, knownCollections));
+    out.push({...described,
+      name: described?.name ?? attributeValue(element, namespaces.adtcore, "name") ?? uri ?? "(missing URI)",
+      uri: uri ?? "", supported: parsed !== undefined});
   }
   return out;
 }

@@ -48,7 +48,7 @@ import {SOURCE_PROPERTY_MIME, sourcePropertiesDocument} from "./adt-source-prope
 import {ObjectStore, TYPES, INCLUDES as CLASS_INCLUDES, NotFound, ReadOnly, NotSupported, Conflict, InvalidName} from "./osd-store.mjs";
 import {cdsEntityOf} from "./adt-cds.mjs";
 import {hashOf, liveHash} from "./osd-build.mjs";
-import {emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, objectReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
+import {emptyFeedDocument, uriOf, ADT_TYPE, dataElementDocument, tableFieldsOf, tableDocument, tableSourceDocument, TREE_FOLDER, TREE_CATEGORY, TREE_TYPE_LABEL, TREE_CATEGORY_LABEL, classDocument, activationSuccessDocument, namedItemsDocument, objectStructureDocument, structureOf, objectReferencesDocument, searchObjects, packageDocument, packageOf, nodeStructureDocument, nodePathDocument, nodesOf, classIncludeDocument, lockResultDocument, exceptionDocument, lockedByOtherDocument, activationFailureDocument, inactiveObjectsDocument, activationReferencesIn, objectFromUri, checkReportDocument, checkObjectsIn, unitResultDocument, transportCheckDocument, transportCheckRequest} from "./adt-documents.mjs";
 import {checkRunReport} from "./adt-checkrun.mjs";
 import {identity as osdIdentity} from "./osd-identity.mjs";
 import {gitObjectRevision, gitObjectState} from "./osd-git-history.mjs";
@@ -2433,9 +2433,22 @@ export function adtRouter(options = {}) {
     let checked = [];
     let published = false;
     await answer(res, async () => {
-      named = objectReferencesIn(body, collections, {owningObject: true});
+      const references = activationReferencesIn(body, collections);
+      named = references.filter((o) => o.supported).map(({type, name}) => ({type, name}));
       if (named.length === 0) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
+        return;
+      }
+      // Our all-or-nothing policy: an unsupported collection, malformed
+      // reference or missing object must not silently shrink the activation
+      // set. Preserve the existing explicit 400 when none are supported.
+      const rejected = references.filter((o) => !o.supported || store.find(o.type, o.name) === undefined);
+      if (rejected.length > 0) {
+        res.status(200).type("application/xml").send(failureDocument(rejected.map((o) => ({...o, issues: [{
+          severity: "E", href: o.uri,
+          message: o.supported ? `Activation reference ${o.name} cannot be resolved to a stored object`
+            : `Activation reference ${o.name} is unsupported by this route`,
+        }]}))));
         return;
       }
       // Activation is a HOST route behind either front. Ask its session

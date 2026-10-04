@@ -4,7 +4,7 @@ import {mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync} from "node:f
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {ObjectStore, TYPES} from "../tools/osd-store.mjs";
-import {objectFromUri} from "../tools/adt-documents.mjs";
+import {activationReferencesIn, objectFromUri, exceptionDocument} from "../tools/adt-documents.mjs";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {abapRunner} from "../tools/adt-abap-front.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
@@ -48,6 +48,17 @@ describe("ADT activation reference identities", () => {
   ]) it(path, () => {
     expect(objectFromUri(`${BASE}/${path}?version=inactive#start=1,1`, collections, {owningObject: true})).to.deep.equal({type, name});
   });
+  it("retains unsupported, malformed and missing-URI references for activation preflight", () => {
+    const supported = [["CLAS", "oo/classes"]];
+    const body = references([FREE, BASE + "/functions/groups/zact_group", BASE + "/oo/classes/%ZZ"])
+      .replace("</adtcore:objectReferences>", '<adtcore:objectReference adtcore:name="MISSING_URI"/></adtcore:objectReferences>');
+    expect(activationReferencesIn(body, supported)).to.deep.equal([
+      {type: "CLAS", name: FREE, uri: uri(FREE), supported: true},
+      {type: "FUGR", name: "ZACT_GROUP", uri: BASE + "/functions/groups/zact_group", supported: false},
+      {name: BASE + "/oo/classes/%ZZ", uri: BASE + "/oo/classes/%ZZ", supported: false},
+      {name: "MISSING_URI", uri: "", supported: false},
+    ]);
+  });
 });
 
 for (const front of ["Node", "ABAP"]) for (const build of [false, true]) {
@@ -82,8 +93,8 @@ for (const front of ["Node", "ABAP"]) for (const build of [false, true]) {
         expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");
       }
       expect(store.read("CLAS", LOCKED, "implementations", "active").source).to.equal('" active include\n');
-      expect(checked, "syntax/check path ran before the lock refusal").to.equal(0);
-      expect(published, "build path ran before the lock refusal").to.equal(0);
+      expect(checked, "syntax/check path ran before the preflight refusal").to.equal(0);
+      expect(published, "build path ran before the preflight refusal").to.equal(0);
     };
     const refused = async (names = [LOCKED], query = "") => {
       const foreignLock = await request(b, uri(LOCKED) + "?_action=LOCK");
@@ -194,13 +205,51 @@ for (const front of ["Node", "ABAP"]) for (const build of [false, true]) {
         expect((await request(a, object.path + "?_action=UNLOCK&lockHandle=" + encodeURIComponent(ownHandle))).status).to.equal(200);
       }
     });
-    if (!build) for (const suffix of ["/includes/lzacttop/source/main", "/fmodules/z_act_demo/source/main"]) {
+    for (const suffix of ["", "/includes/lzacttop/source/main", "/fmodules/z_act_demo/source/main"]) {
       it(`function group ${suffix} remains unsupported by LOCK and activation`, async () => {
         const path = BASE + "/functions/groups/zact_group";
         expect((await request(a, path + "?_action=LOCK")).status).to.equal(404);
         const answer = await activate(a, [path + suffix]);
         expect(answer.status, answer.body).to.equal(400);
-        expect(answer.body).to.include("no object references in the request");
+        expect(answer.body).to.equal(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
+        unchanged();
+      });
+    }
+    it("forced mixed activation cannot discard a function group", async () => {
+      const path = BASE + "/functions/groups/zact_group";
+      const answer = await activate(a, [FREE, path], "&forced=true");
+      expect(answer.status, answer.body).to.equal(200);
+      expect(answer.body).to.include('<chkl:properties checkExecuted="false" activationExecuted="false" generationExecuted="false"/>')
+        .and.include('objDescr="ZACT_GROUP" type="E"').and.include(`href="${path}"`);
+      unchanged();
+    });
+    for (const path of [BASE + "/unsupported/zact_unknown", BASE + "/oo/classes/%ZZ", BASE + "/oo/classes/", uri("ZCL_ACT_MISSING")]) {
+      it(`an unresolvable reference activates nothing: ${path}`, async () => {
+        const answer = await activate(a, [FREE, path]);
+        expect(answer.status, answer.body).to.equal(200);
+        expect(answer.body).to.include('<chkl:properties checkExecuted="true" activationExecuted="false" generationExecuted="false"/>')
+          .and.include('type="E"').and.include(`href="${path}"`);
+        unchanged();
+      });
+    }
+    it("a reference with no URI cannot silently disappear from a mixed request", async () => {
+      const body = references([FREE]).replace("</adtcore:objectReferences>", '<adtcore:objectReference adtcore:name="MISSING_URI"/></adtcore:objectReferences>');
+      const answer = await request(a, BASE + "/activation?method=activate", body);
+      expect(answer.status, answer.body).to.equal(200);
+      expect(answer.body).to.include('activationExecuted="false"').and.include('generationExecuted="false"')
+        .and.include('objDescr="MISSING_URI" type="E"').and.include('href=""');
+      unchanged();
+    });
+    for (const suffix of ["", "/includes/lzacttop/source/main", "/fmodules/z_act_demo/source/main"]) {
+      for (const reversed of [false, true]) it(`mixed function group ${suffix} refuses the entire activation (reversed=${reversed})`, async () => {
+        const path = BASE + "/functions/groups/zact_group" + suffix;
+        const names = reversed ? [path, FREE] : [FREE, path];
+        const answer = await activate(a, names);
+        expect(answer.status, answer.body).to.equal(200);
+        expect(answer.body).to.include('<chkl:properties checkExecuted="true" activationExecuted="false" generationExecuted="false"/>')
+          .and.include('objDescr="ZACT_GROUP" type="E"')
+          .and.include(`href="${path}"`)
+          .and.include("unsupported");
         unchanged();
       });
     }

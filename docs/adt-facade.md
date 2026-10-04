@@ -234,8 +234,20 @@ from its refusal (`tools/osd-build-issues.mjs`); otherwise one line of
 reason. The build log stays in the host's console, and no answer carries a
 host path. Success answers the
 properties document (`checkExecuted`, `activationExecuted`,
-`generationExecuted`, all true). So the status code is `200` in every case
-and the body carries the verdict. `transpileOnActivate: false` is a test seam
+`generationExecuted`, all true). Check and build findings use status `200`
+and the body carries the verdict. Before checking or building, every reference
+must resolve to an object supported by this route and present in the store.
+Our policy is all-or-nothing, as for foreign editing locks: an unsupported or
+unresolvable reference in a mixed request activates nothing. It returns the
+failed `200` checklist, with `activationExecuted` and `generationExecuted`
+false (`checkExecuted` follows the ordinary/forced failure convention), and
+an `E` message naming each rejected object with its submitted URI as `href`.
+Function-group activation, including group includes and function modules, is
+unsupported here; SAP supports it. This refusal policy is our choice, not a
+measured SAP rule. Requests with no supported references retain the explicit
+pre-existing `400 ExceptionInvalidRequest` ("no object references in the
+request"), including function-group-only requests. Both fronts and both
+`OSD_ADT_ONE_RUNTIME` modes use this rule. `transpileOnActivate: false` is a test seam
 for suites that want the verdict without the build; it is not what a running
 instance does.
 
