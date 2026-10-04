@@ -63,6 +63,8 @@ function monitorReader(root, env) {
     },
     release(candidate) { if (candidate !== store) candidate.close(); },
   };
+}
+
 // Add operator metadata without exposing source paths, runtime identities or selections.
 function jobMetadata(store, run, detail = false) {
   const row = store.db.prepare("SELECT * FROM batch_runs WHERE id = ?").get(run.id);

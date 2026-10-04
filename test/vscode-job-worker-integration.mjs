@@ -52,8 +52,9 @@ ENDCLASS.`);
       let run;
       for (let i=0;i<100;i++) {
         const response = await fetch(`${base}/osd/batch-runs`, {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}});
-        expect(response.status).to.equal(200);
-        run = (await response.json()).runs.find(r => r.jobName === 'VSIX_PROOF');
+        const body = await response.json();
+        expect(response.status, JSON.stringify(body) + log.slice(-3000)).to.equal(200);
+        run = body.runs.find(r => r.jobName === 'VSIX_PROOF');
         if (run?.state === 'COMPLETED') break;
         await new Promise(r => setTimeout(r,200));
       }
