@@ -46,11 +46,14 @@ export function writeVersionMarker(root, version) {
 function layerManifest(folder) {
   const direct = join(folder, "osd-pack.json");
   if (existsSync(direct)) return direct;
-  const parent = dirname(folder);
-  const file = join(parent, "osd-pack.json");
-  if (!existsSync(file)) return undefined;
-  const manifest = JSON.parse(readFileSync(file, "utf8"));
-  return [manifest.abap ?? "src"].flat().some((entry) => resolve(parent, entry) === folder) ? file : undefined;
+  for (let parent = dirname(folder); ; parent = dirname(parent)) {
+    const file = join(parent, "osd-pack.json");
+    if (existsSync(file)) {
+      const manifest = JSON.parse(readFileSync(file, "utf8"));
+      if ([manifest.abap ?? "src"].flat().some((entry) => resolve(parent, entry) === folder)) return file;
+    }
+    if (dirname(parent) === parent) return undefined;
+  }
 }
 
 /** Runs before any generation work. No marker means a development checkout. */

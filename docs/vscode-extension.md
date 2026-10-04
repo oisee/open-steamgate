@@ -26,6 +26,22 @@ for `tools/osd-serve.mjs` (#95).
 
 `osd: Prepare abapGit zip…` (Command Palette and OSD view overflow) picks a deploy unit from the checkout’s `deploy/manifest.json`, preferring the active file’s source unit, and saves its offline zip under `build/deploy/` by default. It runs the checkout’s zip tool with the extension host’s own Node (`process.execPath`, as Start does), logs to **osd**, preserves object-naming refusals, and offers Reveal in Explorer or Copy path on success. A checkout is required; units without sources must be prepared separately. Import the zip with abapGit; delivery to a system is not part of this command.
 
+## Layer version requirements
+
+A pack or workspace layer can require a minimum system version with
+`"osd": ">=0.6.1650"` in `osd-pack.json`. Only `>=x.y.z` is supported;
+omitting `osd` means no requirement. Versions compare numerically, and an
+invalid requirement refuses the build. The check runs before generation or
+transpilation, including cached and warm builds.
+
+Packaged systems carry `osd-version.json`, stamped with the extension version;
+seeded binaries use the same version rule. A source checkout without that
+marker, including a checkout-mode binary, skips the comparison and logs a
+debug line. A mismatch leaves the live generation untouched and tells you to
+update the extension or binary. In desktop VS Code, the error notification
+shows the diagnostic verbatim; **Update** opens the installed extension's
+entry in the Extensions view.
+
 ## Key bindings
 
 *2026-09-25.* `osd.keymap` (default `"abap"`) puts an ABAP developer's

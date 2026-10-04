@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {spawnSync} from "node:child_process";
+import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
@@ -7,9 +7,10 @@ import {join, resolve} from "node:path";
 import {parseVersion, parseMinimum, compareVersions, packagedVersion, writeVersionMarker, checkLayerVersions} from "../tools/layer-version/index.mjs";
 import {build, liveHash} from "../tools/osd-build.mjs";
 import {layerList} from "../tools/osd-host.mjs";
-import {stampStagedPackage} from "../scripts/build-vsix.mjs";
+import {brotliCompressSync} from "node:zlib";
+import {finalizeSystemSeed, stampStagedPackage} from "../scripts/build-vsix.mjs";
 const require = createRequire(import.meta.url);
-const {classify, ensureWorkspacePacks} = require("../editors/vscode/launcher.js");
+const {writeTar, ensureMaterializedHome, classify, ensureWorkspacePacks} = require("../editors/vscode/launcher.js");
 
 const current = packagedVersion(resolve("."));
 const diagnostic = (kind, minimum, version = current) =>
@@ -58,15 +59,55 @@ describe("layer version requirements (U11)", function () {
     ]) expect(compareVersions(left, right)).to.equal(expected);
   });
 
-  it("writes the seed marker with the exact staged VSIX version", async () => {
+  it("stages and extracts the marker with the exact VSIX version for both hosts", async () => {
     write("staged-package.json", readFileSync("editors/vscode/package.json"));
     const {pkg} = stampStagedPackage(join(root, "staged-package.json"));
     expect(pkg.version).to.equal(current);
     const seed = join(root, "seed");
-    mkdirSync(seed);
-    writeVersionMarker(seed, pkg.version);
-    expect(JSON.parse(readFileSync(join(seed, "osd-version.json"), "utf8"))).to.deep.equal({version: current});
+    mkdirSync(join(seed, "packs"), {recursive: true});
+    // The narrow real staging function called by stageSystemSeed for both
+    // buildVsix and build-binary --seed; no test-side marker writer.
+    const {seedId} = finalizeSystemSeed(seed, [], {version: pkg.version, transpilerRef: "test-ref"});
+    const tar = join(root, "seed.tar");
+    writeTar(seed, tar);
+    write("archive/.seed-id", `${seedId}\n`);
+    write("archive/seed.tar.br", brotliCompressSync(readFileSync(tar)));
+    const vsixHome = await ensureMaterializedHome(join(root, "archive"), join(root, "vsix-storage"));
+    expect(JSON.parse(readFileSync(join(vsixHome, "osd-version.json"), "utf8"))).to.deep.equal({version: pkg.version});
+
+    const archive = join(root, "seed.tar.gz");
+    execFileSync("tar", ["-czf", archive, "-C", seed, "."]);
+    const child = spawnSync("bun", ["--no-install", "--input-type=module", "-e", `
+      import {ensureBinaryHome} from ${JSON.stringify(resolve("tools/osd-host.mjs"))};
+      console.log(await ensureBinaryHome(process.argv[1], process.argv[2]));
+    `, archive, join(root, "binary-storage")], {encoding: "utf8"});
+    expect(child.status, child.stderr).to.equal(0);
+    const binaryHome = child.stdout.trim();
+    expect(JSON.parse(readFileSync(join(binaryHome, "osd-version.json"), "utf8"))).to.deep.equal({version: pkg.version});
+    for (const home of [vsixHome, binaryHome]) {
+      writeFileSync(join(home, "osd-pack.json"), JSON.stringify({name: "osg-demo", osd: ">=99.0.0"}));
+      expect(() => checkLayerVersions(home, [], [home])).to.throw(diagnostic("layer", "99.0.0", pkg.version));
+    }
   });
+
+  for (const source of ["--layer", "OSD_LAYERS"]) {
+    it(`refuses a nested declared ABAP folder supplied by ${source}`, async () => {
+      write("workspace/osd-pack.json", JSON.stringify({name: "osg-demo", abap: "abap/src", osd: ">=99.0.0"}));
+      // An unrelated nearer manifest must not stop ancestor discovery.
+      write("workspace/abap/osd-pack.json", JSON.stringify({abap: "other"}));
+      write("workspace/abap/src/zcl_bad.clas.abap", "invalid ABAP");
+      const folder = join(root, "workspace/abap/src");
+      process.env.OSD_LAYERS = source === "--layer"
+        ? layerList(["--layer", folder], {}, root).folders.join(process.platform === "win32" ? ";" : ":")
+        : folder;
+      let error;
+      try { await build({root}); } catch (caught) { error = caught; }
+      expect(error?.code).to.equal("OSD_VERSION_MISMATCH");
+      expect(error.message).to.equal(diagnostic("layer", "99.0.0"));
+      expect(existsSync(join(root, "build"))).to.equal(false);
+      expect(existsSync(join(root, "gen"))).to.equal(false);
+    });
+  }
 
   it("refuses --layer before any generator or transpile, with one line and live untouched", async () => {
     const first = await build({root, generators: false});

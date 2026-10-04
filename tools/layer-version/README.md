@@ -10,7 +10,7 @@ The shared builder's `prepare()` calls it before taking a lock, running a
 generator or transpiling, including warm builds and cached generations.
 Packs and explicit `OSD_LAYERS` are checked; the binary's `--layer` sets those
 layers. A layer can name the manifest directory or a declared ABAP folder
-immediately below it. VS Code projects workspace manifests into ordinary packs
+at any depth below it. Ancestor discovery matches the declared ABAP path. VS Code projects workspace manifests into ordinary packs
 and preserves their `osd` field.
 
 VSIX packaging writes `{ "version": "x.y.z" }` to `osd-version.json` at the

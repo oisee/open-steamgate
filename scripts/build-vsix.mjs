@@ -590,13 +590,23 @@ export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = f
   if (missing.length > 0) throw new Error(describeUnfetched(missing));
   rmSync(seedRoot, {recursive: true, force: true});
   const modules = copySeedTree(seedRoot, selectedPacks);
+  const {seedId, generation} = finalizeSystemSeed(seedRoot, selectedPacks, {prebuild, version, transpilerRef, env});
+  return {seedId, modules, selectedPacks, generation};
+}
+
+/** Finalize the actual seed tree for both packagers, after dependency preflight
+ * and copying. Kept separate so marker stamping and extraction can be tested
+ * without installing the pinned transpiler fork. */
+export function finalizeSystemSeed(seedRoot, selectedPacks, {
+  prebuild = false, version = packagedVersion(ROOT), transpilerRef, env = process.env,
+} = {}) {
   writeVersionMarker(seedRoot, version);
   writeFileSync(join(seedRoot, ".osd-transpiler-ref"), `${transpilerRef}\n`);
   materializeSeedLinks(seedRoot);
   excludeStagedPackSources(seedRoot, selectedPacks);
   const generation = prebuild ? prebuildGeneration(seedRoot, env) : undefined;
   const seedId = writeSeedId(seedRoot);
-  return {seedId, modules, selectedPacks, generation};
+  return {seedId, generation};
 }
 
 // These npm distributions omit their repository licences.
