@@ -17,6 +17,8 @@ import {vsixPreflightMissing} from "../tools/osd-lib-path.mjs";
 const require = createRequire(import.meta.url);
 const root = resolve(import.meta.dir, "..");
 const core = require.resolve("@abaplint/core");
+const sqljs = require.resolve("sql.js");
+const sqlWasm = require.resolve("sql.js/dist/sql-wasm.wasm");
 const args = process.argv.slice(2).filter((arg) => arg !== "--seed");
 const seeded = process.argv.includes("--seed") || process.env.OSD_BINARY_SEED === "1";
 if (args.length > 2) throw new Error("Usage: bun scripts/build-binary.mjs [--seed] [outfile] [target]");
@@ -64,6 +66,21 @@ const result = await Bun.build({
     name: "one-core",
     setup(build) {
       build.onResolve({filter: /^@abaplint\/core$/}, () => ({path: core}));
+      // sql.js defaults to __dirname/sql-wasm.wasm, which Bun bakes into
+      // the bundle as the build machine's node_modules path. Wrap every
+      // bundled init (including database-sqlite's connect) at this boundary.
+      // Node/dev and the preview still import the original package.
+      build.onResolve({filter: /^sql\.js$/}, () => ({path: "sqljs-embedded", namespace: "osd-sqljs"}));
+      build.onLoad({filter: /.*/, namespace: "osd-sqljs"}, () => ({
+        contents: `
+          import initSqlJs from ${JSON.stringify(sqljs)};
+          import wasm from ${JSON.stringify(sqlWasm)} with { type: "file" };
+          export default async function init(options = {}) {
+            return initSqlJs({...options, wasmBinary: await Bun.file(wasm).bytes()});
+          }
+        `,
+        loader: "js",
+      }));
       if (!seeded) {
         build.onResolve({filter: /\/\.local\/lars\/open-abap-gui\/converter\/src\/api\.mjs$/},
           () => ({path: "gui-converter-on-checkout", namespace: "osd-stub"}));
