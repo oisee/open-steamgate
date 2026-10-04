@@ -65,8 +65,8 @@ describe("tools/adt-facade: a failed activation stays inactive", function () {
 
   const uri = (type, name) => type === "CLAS" ? `/sap/bc/adt/oo/classes/${name.toLowerCase()}`
     : `/sap/bc/adt/programs/programs/${name.toLowerCase()}`;
-  const activate = async (type, name) => {
-    const res = await fetch(`${base}/activation?method=activate&preauditRequested=true`, {
+  const activate = async (type, name, query = "") => {
+    const res = await fetch(`${base}/activation?method=activate&preauditRequested=true${query}`, {
       method: "POST",
       headers: {"content-type": "application/xml", "x-csrf-token": token, cookie},
       body: `<?xml version="1.0" encoding="UTF-8"?><adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core">` +
@@ -80,6 +80,33 @@ describe("tools/adt-facade: a failed activation stays inactive", function () {
     return existsSync(join(output, file)) ? readFileSync(join(output, file), "utf8") : undefined;
   };
   const inactive = async () => (await (await fetch(`${base}/activation/inactiveobjects`)).text());
+
+  it("forced activation builds pending source without the separate pre-check", async () => {
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+    expect(ok(await activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'forced'"));
+    store.activate = () => { throw new Error("separate pre-check ran"); };
+    const answer = await activate("CLAS", "ZCL_OSD_ACT", "&forced=SYN_INVALID");
+    expect(answer.xml).to.contain('<chkl:properties checkExecuted="false" activationExecuted="true" generationExecuted="true"/>');
+    expect(live("zcl_osd_act.clas.mjs")).to.contain("forced");
+    expect(store.read("CLAS", "ZCL_OSD_ACT", "main", "active").source).to.equal(CLASS("'forced'"));
+    expect(store.stateOf(store.find("CLAS", "ZCL_OSD_ACT")).version).to.equal("active");
+  });
+
+  it("forced activation still fails a compile with diagnostics and keeps the live version", async () => {
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("'hello'"));
+    expect(ok(await activate("CLAS", "ZCL_OSD_ACT"))).to.equal(true);
+    store.write("CLAS", "ZCL_OSD_ACT", CLASS("lv_not_declared"));
+    store.activate = () => { throw new Error("separate pre-check ran"); };
+    const answer = await activate("CLAS", "ZCL_OSD_ACT", "&forced=SYN_INVALID");
+    expect(answer.xml).to.contain('<chkl:properties checkExecuted="false" activationExecuted="false" generationExecuted="false"/>');
+    expect(answer.xml).to.contain("lv_not_declared");
+    expect(answer.xml).to.contain('type="E"');
+    expect(answer.xml).not.to.contain("separate pre-check ran");
+    expect(live("zcl_osd_act.clas.mjs")).to.contain("hello");
+    expect(store.read("CLAS", "ZCL_OSD_ACT", "main", "active").source).to.equal(CLASS("'hello'"));
+    expect(store.stateOf(store.find("CLAS", "ZCL_OSD_ACT")).version).to.equal("inactive");
+  });
 
   it("a failed activation, then a trivial one succeeds", async () => {
     store.write("PROG", "ZOSD_ACT_BAD", BROKEN);
