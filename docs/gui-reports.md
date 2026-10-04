@@ -352,7 +352,9 @@ not return the technical log.
 `?id=<run-id>` reads one record; `?id=<run-id>&output=1` reads its saved
 output after the SHA-256 check. Stored selection input values are omitted
 from run metadata; the report's detail and output may still contain business
-data or parameter values. Responses are not cached.
+data or parameter values. Metadata also includes the recorded user and start condition; detail reads include
+up to 2000 ordered technical log rows. Source database paths remain private.
+Responses are not cached.
 
 The route is **disabled by default**. An instance owner may set a random
 `OSD_BATCH_READ_TOKEN` of at least 32 letters, digits, `_` or `-` before
