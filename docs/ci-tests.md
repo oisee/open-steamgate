@@ -412,3 +412,43 @@ QuickJS content hash. It allowed only a packed private-address prefix found
 inside the independently recomputed SHA-256 of 29 local QuickJS ABAP files,
 not a hostname or a measured system address. CI no longer stages or verifies
 that folder, so there is no reason to retain its digest or the exception.
+
+### Runtime pin f3611417 remeasurement, 2026-10-04
+
+The branch was rebased onto `origin/main` at `d843715f` (#599), and the CI
+build script compiled the exact locked transpiler/runtime commit
+`f36114179f6f39e5abb42d021f2cf5dcc50b45b9`. `transpiler:which` confirmed
+both package paths and their Git HEAD; the package version alone still says
+2.13.93 and cannot distinguish this build from the previous pin. Libraries
+were synced with `osd-libs --sync`, and `osd-fetch` verified the pack pins.
+No runtime source patches were applied; the CI script sets the CLI executable
+bit in its disposable clone.
+
+With the old allowance list, the required profile correctly exited red and
+named all four fixed known failures. Corpus was 4,077/4,077 SUCCESS in
+87.16 s and int8 was 10/10 SUCCESS in 22.69 s; the full profile took
+129.15 s. The four allowances were removed, leaving `entries: []`.
+An intermediate run with the empty list passed all 4,087 tests in 129.93 s
+but correctly remained red on the 27 stale support claims while full-page
+regeneration was still running.
+
+All four JS folders were remeasured with `--db file` and the 12,288 MiB heap:
+corpus 4,077/4,077, int8 10/10, mono 10/10 (260.16 s; 1,716,472 KiB peak
+RSS), and QuickJS 9/9 (469.93 s; 8,959,844 KiB peak RSS). The full page
+covers 4,106 passing tests, 66 classes and 348,314 source lines. Its 27
+previously failing constructs now run: 165 runs, zero fails and zero fails
+in some classes. The Go generator/input content did not change, so its
+previously published evidence, helper reasons, counts and provenance were
+preserved; every osgo construct cell was checked for exact equality.
+Mono/QuickJS remain local measurements, not public CI input coverage.
+
+The final required profile is green with zero known failures: 4,077/4,077
+corpus tests in 78.63 s and 10/10 int8 tests in 23.27 s, 120.48 s total.
+The regenerated recorded evidence passes `osg:support --check`, and the
+required profile's fresh evidence agrees with the page. The synthetic
+additional int8 failure exits 1 and names its method. The 104 focused tests
+pass in 16 s with three existing pending tests; actionlint, the suites check
+and the changed-file size guard pass (seven inherited main breaches).
+Structural leak checks found no matches; the private identifier list is
+absent here, so private identifiers were not checked. GitHub Actions, the
+full integration suite and the heavy CI profile were not run locally.
