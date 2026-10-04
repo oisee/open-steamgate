@@ -40,6 +40,8 @@ import {isBinaryFilename, listFiles, loadLibs, selectedModules, outputFiles, rea
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 
+import {rowsFromRegistry} from "./osd-xref-seed.mjs";
+
 export {warmVerdict};
 
 // the tools folder, the way osd-build.mjs finds its generators: a binary
@@ -496,8 +498,9 @@ export class WarmCompiler {
   }
 
   // Who reads this object directly, from the reverse index the last build
-  // left: fresher than the seeded cross-reference, which a swap does not
-  // reseed. undefined when the registry is not primed or does not hold it.
+  // left. The serving child refreshes its derived rows under the swap lock;
+  // this index also works before a runtime starts. undefined when the
+  // registry is not primed or does not hold the object.
   readersOf(type, name) {
     if (!this.primed) return undefined;
     const obj = this.reg.getObject(type, name);
@@ -698,7 +701,8 @@ export class WarmCompiler {
       if (hash === from && stale.size === 0) {
         commit();
         settled = true;
-        return {ok: true, hash, cached: true, warm: true, live: true, ms: Date.now() - started, modules: [], hostHeld: [], stale: 0, from};
+        return {ok: true, hash, cached: true, warm: true, live: true, ms: Date.now() - started, modules: [], hostHeld: [], stale: 0, from,
+          closure: [], xrefRows: {CROSS: [], WBCROSSGT: [], WBCROSSGTX: [], D010INC: []}};
       }
       const names = new Set([...stale].map(key));
       let output;
@@ -717,6 +721,9 @@ export class WarmCompiler {
       mark("transpile");
       this.#index([...stale]);
       mark("index");
+      const closure = [...stale].map(o => ({type: o.getType(), name: o.getName()}));
+      const xrefRows = await rowsFromRegistry(this.reg, closure);
+      mark("xref");
 
       // the modules this replaces, and the check that nothing else holds one
       const liveOut = join(paths.byInput, from, "output");
@@ -800,7 +807,7 @@ export class WarmCompiler {
       const steps = Object.fromEntries(marks.slice(1).map(([w, t], i) => [w, t - marks[i][1]]));
       return {ok: true, hash, cached, warm: true, live: true, ms: Date.now() - started, objects: this.files.size,
         modules, hostHeld: modules.filter((m) => HOST_HELD.includes(m)), stale: stale.size, from, steps,
-        closure: [...stale].map((o) => ({type: o.getType(), name: o.getName()}))};
+        closure, xrefRows};
     } finally {
       unlock();
       // anything that went wrong after the registry took the edit, other than

@@ -32,8 +32,9 @@ import {runsAs} from "./osd-main.mjs";
 const TYPE_OBJECTS = new Set(["CLAS", "INTF", "TABL", "DTEL", "DOMA", "TTYP", "VIEW", "DDLS"]);
 
 export class CrossReference {
-  constructor(store = new ObjectStore()) {
-    this.store = store;
+  constructor(store, registry) {
+    this.store = registry === undefined ? store ?? new ObjectStore() : undefined;
+    this.reg = registry;
     this.cross = [];
     this.wbcrossgt = [];
     this.wbcrossgtx = [];
@@ -46,7 +47,8 @@ export class CrossReference {
       return this.byName;
     }
     const byName = new Map();
-    for (const object of this.store.list()) {
+    for (const object of this.reg === undefined ? this.store.list() :
+      [...this.reg.getObjects()].map(o => ({type: o.getType(), name: o.getName().toUpperCase()}))) {
       if (TYPE_OBJECTS.has(object.type)) {
         byName.set(object.name, object.type);
       }
@@ -78,13 +80,16 @@ export class CrossReference {
     return undefined;
   }
 
-  build() {
-    const registry = this.store.registry();
+  build(only) {
+    const selected = only === undefined ? undefined : new Set(only.map(o => `${o.type} ${o.name.toUpperCase()}`));
+    const registry = this.reg ?? this.store.registry();
     const names = this.#names();
 
-    for (const object of registry.getObjects()) {
+    for (const object of only === undefined ? registry.getObjects() :
+      only.map(o => registry.getObject(o.type, o.name)).filter(Boolean)) {
       const objectName = object.getName().toUpperCase();
       const type = object.getType();
+      if (selected !== undefined && !selected.has(`${type} ${objectName}`)) continue;
       if (object.getABAPFiles === undefined) {
         continue;
       }

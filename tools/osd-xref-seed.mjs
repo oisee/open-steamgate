@@ -77,7 +77,7 @@ const KEEP = 8;
 export async function rows(root = process.cwd(), options = {}) {
   const fs = await import(/* webpackIgnore: true */ "node:fs");
   const path = await import(/* webpackIgnore: true */ "node:path");
-  const key = options.cache === false ? undefined : await cacheKey(root);
+  const key = options.cache === false || options.only !== undefined ? undefined : await cacheKey(root);
   const dir = path.join(root, "build", "xref");
   const file = key === undefined ? undefined : path.join(dir, `${key}.json`);
   if (file !== undefined && fs.existsSync(file)) {
@@ -92,7 +92,8 @@ export async function rows(root = process.cwd(), options = {}) {
   }
   const {CrossReference} = await import(/* webpackIgnore: true */ "./osd-xref.mjs");
   const {ObjectStore} = await import(/* webpackIgnore: true */ "./osd-store.mjs");
-  const tables = new CrossReference(new ObjectStore({root})).build().tables();
+  const store = new ObjectStore({root});
+  const tables = new CrossReference(store).build(options.only).tables();
   const out = {
     CROSS: tables.cross,
     WBCROSSGT: tables.wbcrossgt,
@@ -205,7 +206,9 @@ export function insertStatements(tables, options = {}) {
   for (const table of TABLES) {
     const widths = WIDTHS[table];
     const columns = Object.keys(widths);
-    out.push(`DELETE FROM "${table.toLowerCase()}";`);
+    const owners = options.only?.map(o => quote(o.name.toUpperCase(), 40));
+    const ownerColumn = table === "D010INC" ? "master" : "include";
+    out.push(`DELETE FROM "${table.toLowerCase()}"${owners === undefined ? "" : ` WHERE "${ownerColumn}" IN (${owners.join(", ")})`};`);
     const list = (tables[table] ?? []).filter((row) => !refused.has(row));
     for (let i = 0; i < list.length; i += batch) {
       const values = list.slice(i, i + batch)
@@ -222,7 +225,8 @@ export function insertStatements(tables, options = {}) {
  *  new ones under a log line saying nothing was seeded. Every client of
  *  test/setup.mjs has beginTransaction / commit / rollback (the interface
  *  requires them). */
-export async function applyRows(client, tables) {
+export async function applyRows(client, tables, options = {}) {
+  if (options.only?.length === 0) return {...counts(tables), refused: []};
   // **Outside an LUW, or not at all.** beginTransaction() on every client
   // is a no-op when a transaction is already open, so inside somebody's LUW
   // the COMMIT below would commit their work with ours and a ROLLBACK would
@@ -235,7 +239,7 @@ export async function applyRows(client, tables) {
   // can take them too
   await client.beginTransaction?.();
   try {
-    for (const sql of insertStatements(tables)) {
+    for (const sql of insertStatements(tables, options)) {
       await client.execute(sql);
     }
     await client.commit?.();
@@ -280,4 +284,21 @@ export async function seedAtStartup(client, options = {}) {
     say(`cross-reference not seeded: ${e?.message ?? e}. Where-used and the graph tools will see empty tables.`);
     return undefined;
   }
+}
+
+/** Derive selected rows from the exact registry the warm transpiler used.
+ * No disk reads, registry invalidation or whole-tree parse. */
+export async function rowsFromRegistry(registry, only) {
+  const {CrossReference} = await import(/* webpackIgnore: true */ "./osd-xref.mjs");
+  const tables = new CrossReference(undefined, registry).build(only).tables();
+  return {CROSS: tables.cross, WBCROSSGT: tables.wbcrossgt,
+    WBCROSSGTX: tables.wbcrossgtx, D010INC: tables.d010inc};
+}
+
+/** Replace selected rows supplied by the compiler, under the swap lock. */
+export async function refreshAfterSwap(client, tables, only) {
+  if (!Array.isArray(only) || !wellFormed(tables)) {
+    throw new Error("the warm swap requires cross-reference rows from its compiler build view");
+  }
+  return applyRows(client, tables, {only});
 }

@@ -139,8 +139,8 @@ registry is primed again.
   cache (`zcl_stg_model_info`) is cleared after every swap, so an edited
   `_MPC_EXT` is read again.
 - **The catch-up recycle.** Every swap leaves its old module instances in
-  the module map, and the start-up's own work (the init script's rows, the
-  cross-reference) is only done by a start. After 25 swaps, a heap 512 MB
+  the module map, and the init script's repository rows are only refreshed
+  by a start. After 25 swaps, a heap 512 MB
   larger than at the first swap, or a minute without a save
   (`OSD_WARM_SWAPS`, `OSD_WARM_HEAP_MB`, `OSD_WARM_QUIET_MS`), the process
   is replaced by one started on the live generation, and `build/hot/` goes.
@@ -213,9 +213,20 @@ them cherry-picked).
   inactive, or a class's saved source differs from its copy in a way the
   warm rule refuses, every build is cold (`WarmCompiler#generatorInput`).
 
-- **The cross-reference after a swap** stays at the generation the process
-  started on until the catch-up recycle: where-used over a class edited
-  since reads the old rows. Incremental over the closure is the follow-up.
+- **The cross-reference after a swap** is refreshed for the build's `only`
+  set in the serving child under the module-swap work-process lock, before
+  acknowledging the swap. CROSS, WBCROSSGT, WBCROSSGTX and D010INC rows
+  owned by these objects are replaced transactionally; other rows remain.
+  The warm compiler derives the selected rows from its retained registry,
+  after transpiling the exact build view (including active-copy overlays),
+  before publishing the generation. The rows travel with the modules over
+  IPC; no checkout read or whole-tree parse runs during the swap. The child
+  applies the rows transactionally before importing modules, and a failed
+  refresh or import keeps the work-process lock until the supervisor recycles
+  it. The reported swap time includes the SQL refresh.
+  `test/adt-xref-warm.mjs` cold-builds an isolated temporary tree and checks
+  added and dropped references in WBCROSSGT and WBCROSSGTX, active copies,
+  timing, and a SQL failure with queued work held until recycle.
 - **The cross-reference is still a full parse per new generation** at every
   start (~5 s alone, 21.6 s on vsp-i7 under load). `build/xref/` now keeps
   the last eight generations' rows rather than one, so a tree that goes
@@ -227,14 +238,14 @@ them cherry-picked).
 - **The dev loop's cold path** still reparses the tree three times (the
   parent's check, the build, the child's cross-reference seed; foreman-dell's
   measurement) and runs every generator on every save. The warm path skips
-  all of it; the cold path is unchanged.
+  the parent check and generators and derives selected xref rows from the
+  compiler registry; the cold path is unchanged.
 - **The prime blocks the process that holds the store** for its 8–9 s:
   after the runtime is up, and again five seconds after the last cold build
   (a new file, DDIC, CDS, a YAML), since a cold build is a new start for the
   registry. A worker thread would take it off that process.
 - **The init script's rows** (`reposrc`, `tadir`) stay at the text the
-  process started with until the catch-up recycle, like the
-  cross-reference.
+  process started with until the catch-up recycle.
 - **A cold build in the dev loop is not reproducible** on the pinned
   transpiler (`ANOMALY-2026-09-25-in-process-numbering`), because it runs a
   second transpile in one process; #1899 is the fix.
