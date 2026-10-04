@@ -328,12 +328,15 @@ function render(report) {
       b.osgjs.failingClasses.length / b.classes.length - a.osgjs.failingClasses.length / a.classes.length
       || order(`${a.kind}: ${a.name}`, `${b.kind}: ${b.name}`));
     out.push("", `## ${title} (${rows.length})`, "", "| Construct | Occurrences | Classes | Lines | VS Code (OSG-JS) | osgo |", "|---|---:|---:|---:|---|---|");
-    const describe = (e, total) => [e.status === "fails"
-      ? `fails in ${e.failingClasses.length} of ${total} classes (${e.failingClasses.slice(0, 3).join(", ")}${e.failingClasses.length > 3 ? ", …" : ""}); passes in ${e.passingClasses.length}` : e.status,
+    const describe = (e, total) => {
+      const remainder = total - e.failingClasses.length - e.passingClasses.length;
+      return [e.status === "fails"
+      ? `fails in ${e.failingClasses.length} of ${total} classes (${e.failingClasses.slice(0, 3).join(", ")}${e.failingClasses.length > 3 ? ", …" : ""}); passes in ${e.passingClasses.length}${remainder ? `; not measured in ${remainder}` : ""}` : e.status,
       ...e.failingClasses.slice(0, 3).map((cls) => e.failures.find((f) => f.class === cls)).map((f) => `${f.class}: ${f.status}${f.message ? ": " + f.message : ""}`),
       ...e.reasons.map((f) => `${f.class}: ${f.reason}`),
       ...e.refusals.map((f) => `${f.class}: ${f.message}`),
       ...(e.missing.length ? [`missing: ${e.missing.join(", ")}`] : [])].map(safe).join("; ");
+    };
     for (const r of rows) out.push(`| ${safe(r.kind + ": " + r.name)} | ${r.count} | ${r.classes.length} | ${r.lines} | ${describe(r.osgjs, r.classes.length)} | ${describe(r.osgo, r.classes.length)} |`);
     if (!rows.length) out.push("| None | | | | | |");
   }

@@ -116,6 +116,17 @@ ENDMETHOD. ENDCLASS.`);
       [classes[2], [{status: "NOT_COMPILED"}]]])});
     assert.deepEqual(mixed.passingClasses, [classes[1]]);
     assert.equal(mixed.missing.length, 3);
+    // The share must account for compiler refusals and omitted classes too.
+    writeFileSync(js, JSON.stringify({rows: [rows[0], rows[1], {class: classes[2], status: "NOT_COMPILED"}]}));
+    const incomplete = generate([dir], {osgjs: [js], osgo: [go]}).markdown;
+    const partialAssert = incomplete.split("\n").find((line) => line.startsWith("| statement: Assert |"));
+    assert.match(partialAssert, /fails in 1 of 3 classes \(ZCL_SHARE0\); passes in 1; not measured in 1/);
+    const partialMove = incomplete.split("\n").find((line) => line.startsWith("| statement: Move |"));
+    assert.match(partialMove, /fails in 1 of 4 classes \(ZCL_SHARE0\); passes in 0; not measured in 3/);
+    const goShare = partialAssert.split("|").at(-2);
+    assert.match(goShare, /fails in 1 of 3 classes \(ZCL_SHARE1\); passes in 2/);
+    assert.ok(!goShare.includes("not measured in"));
+    assert.ok(!assertion.includes("not measured in"));
   });
   it("credits helpers only from declared successful full-folder runs and preserves partial results", () => {
     const dir = join(temp, "helpers"); mkdirSync(dir);
