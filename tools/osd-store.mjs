@@ -21,6 +21,7 @@ import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
 import {hashOf, inputsOf, loadConfig, normalPath, liveHash} from "./osd-build.mjs";
 import {entityTag} from "./adt-entity.mjs";
+import {writeSourceSnapshot} from "./osd-source-snapshot.mjs";
 import {transpileIssues, withoutHostPaths} from "./osd-build-issues.mjs";
 import {copyDurable, mkdirDurable, removeDurable, renameDurable, writeDurable} from "./osd-durable.mjs";
 import {TMP_FOLDER, TMP_TEXT, isTmpPackage, tmpAuthors, tmpRoot} from "./osd-tmp.mjs";
@@ -882,7 +883,7 @@ export class ObjectStore {
     const bytes = readFileSync(working);
     if (createHash("sha256").update(bytes).digest("hex") !== digest) return undefined;
     mkdirSync(dirname(target), {recursive: true});
-    writeFileSync(target, bytes);
+    writeSourceSnapshot(target, bytes);
     return target;
   }
 
