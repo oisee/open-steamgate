@@ -335,12 +335,12 @@ Generator file: tools/osd-kernel-compat.mjs (git blob cc4ec69d32b66077a6cd1a45fb
 
 Counts include owner class sources and test includes; lines per construct are distinct starting source lines, and occurrences count AST nodes. In a declared full-folder run where every test owner has rows and every row is SUCCESS, helpers without Unit rows count as runs: exercised by the tests in the same run. In partial runs, passing classes retain their results; omitted test owners and helpers in incomplete or failing runs are not measured. A harness crash, heap exhaustion or setup failure before any class is not measured, with its reason; fails applies only to FAILURE/ERROR test results.
 
-Folders: TestOSD_EmitUnitClasses (48 classes, 91056 lines); int8 (2 classes, 124 lines); mono (1 classes, 5371 lines); qjs (15 classes, 251768 lines).
+Folders: TestOSD_EmitUnitClasses (48 classes, 91056 lines); int8 (2 classes, 119 lines); mono (1 classes, 5371 lines); qjs (15 classes, 251768 lines).
 
 | Runtime | Classes with evidence | Lines in classes with evidence | Tests |
 |---|---:|---:|---:|
-| VS Code (OSG-JS) | 66 | 348319 | 4106 |
-| osgo | 66 | 348319 | 4106 |
+| VS Code (OSG-JS) | 66 | 348314 | 4106 |
+| osgo | 66 | 348314 | 4106 |
 
 Folder run evidence:
 

@@ -286,7 +286,7 @@ export function generate(directories, paths, options = {}) {
   return {report, markdown: render(report)};
 }
 
-function render(report) {
+export function render(report) {
   const incomplete = report.folders.some((f) => !f.evidence.osgjs || f.evidence.osgjs.startsWith("not measured:") || f.evidence.osgjs.includes("missing test owners"));
   const out = ["# OSG support evidence", "",
     "Runs means all using classes passed their recorded tests; fails means some had FAILURE/ERROR rows, and fails in some classes means most passed. Not measured means evidence is missing or incomplete, including harness crashes; class results do not prove each construct correct.",
@@ -303,7 +303,9 @@ function render(report) {
   provenance.push("", "Folder run evidence:", "");
   for (const folder of report.folders) for (const name of ["osgjs", "osgo"]) {
     const measurement = folder.measurements?.[name];
-    const metrics = measurement ? ` (${measurement.wallSeconds} s; peak RSS ${measurement.peakRssKiB} KiB)` : "";
+    const parts = [measurement?.wallSeconds !== undefined ? `${measurement.wallSeconds} s` : "",
+      measurement?.peakRssKiB !== undefined ? `peak RSS ${measurement.peakRssKiB} KiB` : ""].filter(Boolean);
+    const metrics = parts.length ? ` (${parts.join("; ")})` : "";
     provenance.push(`- ${safe(folder.name)} / ${name === "osgjs" ? "VS Code (OSG-JS)" : name}: ${safe(folder.evidence[name] ?? "not measured: no full-folder run declared; per-class rows retained")}${metrics}`);
   }
   provenance.push("", "Folder run provenance (snapshotted from installed tools; no clock or rendering environment):", "",

@@ -1,0 +1,117 @@
+name: kernel conformance (heavy)
+
+# Public pin and content hashes only. No PR trigger; artifacts survive red runs.
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  push:
+    tags: ['*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: kernel-conformance-heavy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The public corpus/int8 Go column is nightly/tag evidence, never a PR gate.
+  # Mono and QuickJS are reported as not measured until a public pinned source exists.
+  kernel-conformance-heavy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GOTOOLCHAIN: go1.26.0
+      GOFLAGS: -buildvcs=false
+      NODE_OPTIONS: --max-old-space-size=12288
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Read the corpus pin
+        id: corpus_pin
+        run: echo "ref=$(cat .github/ci/abapiti.ref)" >> "$GITHUB_OUTPUT"
+      - name: Restore the generated corpus by pin and recipe
+        id: corpus_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .local/kernelci/corpus
+          key: kernel-corpus-v1-${{ runner.os }}-${{ steps.corpus_pin.outputs.ref }}-${{ hashFiles('tools/osd-kernel-corpus.mjs', '.github/ci/kernel-corpus.json', 'test/fixtures/osgjs-unit-int8/*') }}
+      - name: Check out public ABAPiti at the exact pin on a cache miss
+        if: steps.corpus_cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: oisee/abapiti
+          ref: ${{ steps.corpus_pin.outputs.ref }}
+          path: .local/kernelci/abapiti-source
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.0'
+          cache: false
+      - name: Install the corpus C compiler
+        if: steps.corpus_cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18
+          mkdir -p .local/kernelci/clang-bin
+          ln -s /usr/bin/clang-18 .local/kernelci/clang-bin/clang
+          ln -s /usr/bin/wasm-ld-18 .local/kernelci/clang-bin/wasm-ld
+          echo "$PWD/.local/kernelci/clang-bin" >> "$GITHUB_PATH"
+      - name: Generate or verify the pinned public inputs
+        id: prepare_corpus
+        run: node tools/osd-kernel-corpus.mjs --source .local/kernelci/abapiti-source
+      - name: Cache verified generated inputs even if runtime conformance later fails
+        if: steps.corpus_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .local/kernelci/corpus
+          key: ${{ steps.corpus_cache.outputs.cache-primary-key }}
+      - name: Load the tracked library/runtime pins
+        run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
+      - name: Restore the pinned transpiler build
+        id: transpiler_cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/transpiler
+          key: transpiler-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('libs.lock.json') }}-${{ hashFiles('tools/osd-ci-transpiler-build.sh') }}
+      - name: Build and link the pinned runtime
+        env:
+          TRANSPILER: ${{ runner.temp }}/transpiler
+        run: |
+          if [[ "${{ steps.transpiler_cache.outputs.cache-hit }}" != true ]]; then
+            bash tools/osd-ci-transpiler-build.sh build
+          fi
+          bash tools/osd-ci-transpiler-build.sh verify
+          node tools/osd-link.mjs transpiler packages/transpiler
+          node tools/osd-link.mjs runtime packages/runtime
+          node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
+          echo "TRANSPILER=$TRANSPILER" >> "$GITHUB_ENV"
+      - name: Sync the pinned libraries
+        run: node tools/osd-libs.mjs --sync
+      - name: Run heavy kernel conformance and support drift
+        run: OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh timeout 4800s node tools/osd-kernel-conformance.mjs --profile heavy --source .local/kernelci/abapiti-source
+      - name: Publish the conformance summary
+        if: always()
+        run: |
+          if [[ -f .local/kernelci/report/summary.md ]]; then
+            cat .local/kernelci/report/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Kernel conformance failed before producing a report.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-conformance-heavy
+          path: |
+            .local/kernelci/report/
+            .local/kernelci/generate.log
+          if-no-files-found: error
