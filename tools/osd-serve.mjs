@@ -118,6 +118,14 @@ const output = process.env.OSD_OUTPUT ?? join(root, "output");
 const from = (file) => import(pathToFileURL(join(output, file)).href);
 const referenceCases = process.env.OSD_REFERENCE_CASES ? JSON.parse(process.env.OSD_REFERENCE_CASES) : null;
 
+// Receive the supervisor's carry before loading/seeding the generation.
+// File SQLite and cross-reference boot can keep the event loop busy past
+// the carry timeout: its timer then runs before the already queued IPC
+// reply and discards the session, token and handles. Database rows mask
+// that loss until a cold build changes the schema and setup replaces the
+// file. The timeout must bound the IPC wait, not the work done at boot.
+const initial = await initialAdtState;
+
 const {initializeABAP} = await from("init.mjs");
 const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
 const {zcl_stg_segw_registry} = await from("zcl_stg_segw_registry.clas.mjs");
@@ -177,7 +185,6 @@ const {snapshotAdtRows, restoreAdtRows, rebuildAdtLocks} = await import("./adt-r
 // run on the same file) must not turn into mirror locks or lose handles
 if (process.env.OSD_ADT_CARRY === "1") {
   bootStep("restoring ADT state and rebuilding locks");
-  const initial = await initialAdtState;
   await dialogStep(() => restoreAdtRows(globalThis.abap.context.databaseConnections.DEFAULT, initial.state,
     {replace: initial.replace === true, say: announce}), "restoring ADT carry");
   try {
