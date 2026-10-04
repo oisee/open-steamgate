@@ -220,7 +220,25 @@ describe("editors/vscode: the extension's logic", function () {
     } finally { rmSync(dir, {recursive: true, force: true}); }
   });
 
-  it("writes check and activation results to osd console and keeps status feedback", async () => {
+  it("names desktop output channels consistently and explains their contents first", () => {
+    const api = vscodeStub(), channels = [];
+    api.window.createOutputChannel = name => {
+      const channel = {name, lines: [], appendLine(line) { this.lines.push(line); }, dispose() {}};
+      channels.push(channel);
+      return channel;
+    };
+    const context = {subscriptions: []};
+    loadExtension(api).desktopOutputs(context);
+    expect(channels.map(c => c.name)).to.deep.equal(["OSD", "OSD: Console", "OSD: System log"]);
+    expect(channels.map(c => c.lines[0])).to.deep.equal([
+      "OSD: extension diagnostics and command/debugger activity.",
+      "OSD: Console: classrun (F9/▷) output and Check/Activate results.",
+      "OSD: System log: server builds, runtime and debugger attachment diagnostics.",
+    ]);
+    expect(context.subscriptions).to.deep.equal(channels);
+  });
+
+  it("writes check and activation results to OSD: Console and keeps status feedback", async () => {
     let issues = [];
     const app = express();
     app.head("/sap/bc/adt/core/discovery", (_req, res) => res.set("x-csrf-token", "test-token").end());

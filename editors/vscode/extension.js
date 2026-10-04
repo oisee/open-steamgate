@@ -629,7 +629,7 @@ class SystemController {
     return this.runningSourcesCache;
   }
 
-  /** A line on the "osd system" channel, from a command outside the class. */
+  /** A line on the "OSD: System log" channel, from a command outside the class. */
   debugNote(line) {
     this.#debugLog(line);
   }
@@ -648,7 +648,7 @@ class SystemController {
   /** `promise`, or `undefined` once `ms` have passed: no await on the debug
    *  path may hang a command for good (osg-demo, 0.5.1467: a command stopped
    *  after "inspector opened" and logged nothing). Logs the start, the end and
-   *  a give-up to the "osd system" channel. */
+   *  a give-up to the "OSD: System log" channel. */
   async #bounded(promise, ms, label) {
     const started = Date.now();
     this.#debugLog(`${label}: waiting (at most ${ms} ms)`);
@@ -2700,9 +2700,22 @@ function editorRunContext(context) {
   }
 }
 
+function desktopOutputs(context) {
+  const definitions = [
+    ["OSD", "extension diagnostics and command/debugger activity."],
+    ["OSD: Console", "classrun (F9/▷) output and Check/Activate results."],
+    ["OSD: System log", "server builds, runtime and debugger attachment diagnostics."],
+  ];
+  return definitions.map(([name, purpose]) => {
+    const channel = vscode.window.createOutputChannel(name);
+    channel.appendLine(`${name}: ${purpose}`);
+    context.subscriptions.push(channel);
+    return channel;
+  });
+}
+
 function activate(context) {
-  const output = vscode.window.createOutputChannel("osd");
-  context.subscriptions.push(output);
+  const [output, classrunOutput, systemOutput] = desktopOutputs(context);
   require("./abapgit-zip-command.js").registerAbapgitZipCommand(vscode, context, output, osdHomeOf, isOpenSteamgatePath);
   // The cleanup is synchronous and precedes this window's own launcher.
   // A live lock from another window protects its home.
@@ -2722,14 +2735,6 @@ function activate(context) {
   } catch (error) {
     output.appendLine(`Old working copy cleanup skipped: ${error.message}`);
   }
-  // Q6b "Classrun" (docs/vscode-extension.md): F9's own channel, separate
-  // from "osd" above -- a class's console output is what somebody asked
-  // for, not a log line among the status bar's and F8's, and a second run
-  // should not have to be found again in the general channel's scrollback.
-  const classrunOutput = vscode.window.createOutputChannel("osd console");
-  context.subscriptions.push(classrunOutput);
-  const systemOutput = vscode.window.createOutputChannel("osd system");
-  context.subscriptions.push(systemOutput);
   const controller = new SystemController(context, systemOutput);
   activeController = controller;
   kernelDiagnostics = registerKernelDiagnostics(vscode, context, output, {
@@ -4708,7 +4713,7 @@ async function deactivate() {
   await activeController?.stop({shutdown: true});
 }
 
-module.exports = {debugOnboarding, editorRunContext,WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {desktopOutputs, debugOnboarding, editorRunContext, WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
   httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands, startStopStatusBar, runningParts, showRunning, sampleItems, openSample,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,

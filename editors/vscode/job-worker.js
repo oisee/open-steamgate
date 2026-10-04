@@ -166,11 +166,21 @@ function jobsSummary(runs, now = Date.now()) {
   }).join('\n') || 'No jobs recorded.';
 }
 function jobsStatusBar(vscode, context, controller) {
-  const output = vscode.window.createOutputChannel('OSD jobs');
-  const raw = vscode.window.createOutputChannel('OSD jobs raw log');
-  let disposed = false, summaryShown = false, summaryBusy = false;
+  const output = vscode.window.createOutputChannel('OSD: Jobs');
+  const header = 'OSD: Jobs: recent job summaries; Show raw job log switches to worker events and diagnostics.';
+  output.appendLine(header);
+  let disposed = false, summaryShown = false, summaryBusy = false, rawShown = false;
+  const rawChunks = [];
+  const raw = {
+    appendLine(line) { this.append(line + '\n'); },
+    append(chunk) {
+      if (disposed) return;
+      rawChunks.push(chunk);
+      if (rawShown) output.append(chunk);
+    },
+  };
   const refreshSummary = async () => {
-    if (disposed || summaryBusy) return;
+    if (disposed || summaryBusy || rawShown) return;
     summaryBusy = true;
     const launcher = controller.launcher;
     let summary;
@@ -187,17 +197,24 @@ function jobsStatusBar(vscode, context, controller) {
       }
     } catch (error) { summary = `Job summary unavailable: ${error.message}. Use Show raw job log for worker diagnostics.`; }
     finally { summaryBusy = false; }
-    if (disposed || controller.launcher !== launcher) return;
-    output.clear(); output.appendLine(summary);
+    if (disposed || rawShown || controller.launcher !== launcher) return;
+    output.clear(); output.appendLine(header); output.appendLine(summary);
   };
   const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 9);
   item.command = 'osd.openJobsPanel';
-  context.subscriptions.push(output, raw, item,
+  context.subscriptions.push(output, item,
     vscode.commands.registerCommand('osd.showJobs', async () => {
       if (disposed) return;
-      summaryShown = true; await refreshSummary(); if (!disposed) output.show(true);
+      rawShown = false; summaryShown = true; await refreshSummary(); if (!disposed) output.show(true);
     }),
-    vscode.commands.registerCommand('osd.showRawJobLog', () => { if (!disposed) raw.show(true); }));
+    vscode.commands.registerCommand('osd.showRawJobLog', () => {
+      if (disposed) return;
+      rawShown = true;
+      output.clear();
+      output.appendLine('OSD: Jobs: raw worker JSON events and diagnostics; Show jobs returns to summaries.');
+      for (const chunk of rawChunks) output.append(chunk);
+      output.show(true);
+    }));
   const sessions = new Set(controller.debugSessions ?? []);
   const isSystemSession = (session) => {
     const port = controller.debuggerState?.systemPort ?? controller.launcher?.inspectPort;
@@ -260,7 +277,7 @@ function jobsStatusBar(vscode, context, controller) {
   controller.jobsOutput = raw;
   const off = controller.onDidChange(tick);
   const timer = setInterval(tick, 2000); tick();
-  context.subscriptions.push({dispose:() => { disposed = true; clearInterval(timer); off.dispose(); }});
+  context.subscriptions.push({dispose:() => { disposed = true; rawChunks.length = 0; clearInterval(timer); off.dispose(); }});
   return tick;
 }
 module.exports = {JobWorker, workerEnabled, jobsStatus, jobsStatusBar, jobsSummary};

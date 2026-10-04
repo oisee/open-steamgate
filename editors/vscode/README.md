@@ -51,9 +51,13 @@ with saved breakpoints. No launch configuration is needed. The SAP ADT and
 ABAP-FS debuggers are unrelated to osd: **Attach to server**, **ABAP on server**,
 and **ABAP Replay Debugger** target SAP systems.
 
-Output channels separate extension/debugger diagnostics, classrun output and
-Check/Activate feedback, server build/runtime logs, and background job summaries
-and raw worker logs. See Background jobs for the explicit raw-log action.
+Each Output channel starts with a line explaining its contents:
+
+- **OSD**: extension diagnostics and command/debugger activity.
+- **OSD: Console**: classrun/F9 output and Check/Activate feedback.
+- **OSD: System log**: server build/runtime logs and debugger attachment diagnostics.
+- **OSD: Jobs**: job summaries, or worker JSON events and diagnostics after
+  the explicit **Show raw job log** action. **Show jobs** restores summaries.
 
 ## ABAP values in the debugger
 
@@ -118,12 +122,14 @@ show a one-line state with **Start system**. Only imported saved runs are
 listed; unimported reservations are outside this API, and step variants/users
 are shown only when recorded. No cancel, repeat or delete actions are included.
 
-Use **OSD: Show jobs** for a readable **OSD jobs** summary:
+Use **OSD: Show jobs** for a readable **OSD: Jobs** summary:
 one line per run, newest first, with its name, state, start time, duration,
 step/output counts where available, and failure reason. The summary refreshes
 every two seconds after opening and shows up to 200 recent runs.
 **Show raw job log** in the action menu or command palette opens the unchanged
-worker JSON events and diagnostics in **OSD jobs raw log**.
+worker JSON events and diagnostics in **OSD: Jobs**. This explicit action switches the channel to raw mode;
+**Show jobs** restores summaries. Raw mode streams live events and retains
+the worker log for this window’s session.
 
 ## Local ABAP-FS connection
 
