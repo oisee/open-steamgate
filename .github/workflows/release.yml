@@ -263,6 +263,9 @@ jobs:
           if [[ "$TARGET" == bun-linux-x64-baseline ]]; then
             sudo apt-get update -qq
             sudo apt-get install -y bubblewrap
+            # Ubuntu 24.04 runners restrict unprivileged user namespaces through AppArmor;
+            # bubblewrap needs them to hide the checkout from the binary under test.
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
             node scripts/smoke-binary.mjs "build/release/$ASSET"
             node scripts/release-verify.mjs serve "build/release/$ASSET" --timeout 300
           fi

@@ -161,6 +161,9 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y bubblewrap
+          # Ubuntu 24.04 runners restrict unprivileged user namespaces through AppArmor;
+          # bubblewrap needs them to hide the checkout from the binary under test.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
           bun scripts/build-binary.mjs --seed "$RUNNER_TEMP/osd-standalone" bun-linux-x64-baseline
           node scripts/smoke-binary.mjs "$RUNNER_TEMP/osd-standalone"
 
