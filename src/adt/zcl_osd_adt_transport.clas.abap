@@ -5,21 +5,20 @@ CLASS zcl_osd_adt_transport DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS document IMPORTING iv_uri TYPE string iv_type TYPE string iv_name TYPE string
       iv_operation TYPE string iv_package TYPE string RETURNING VALUE(rv_xml) TYPE string.
   PRIVATE SECTION.
-    CLASS-METHODS field IMPORTING iv_text TYPE string iv_name TYPE string
+    CLASS-METHODS field IMPORTING it_xml TYPE zif_osd_adt_xml=>tt_element iv_name TYPE string
       EXPORTING ev_value TYPE string ev_found TYPE abap_bool.
     CLASS-METHODS value IMPORTING iv_name TYPE string iv_value TYPE string RETURNING VALUE(rv_xml) TYPE string.
 ENDCLASS.
 CLASS zcl_osd_adt_transport IMPLEMENTATION.
   METHOD field.
-    DATA lv_regex TYPE string.
+    DATA ls_element TYPE zif_osd_adt_xml=>ty_element.
     CLEAR: ev_value, ev_found.
-    lv_regex = `<` && iv_name && `>([^<]*)</` && iv_name && `>`.
-    FIND FIRST OCCURRENCE OF REGEX lv_regex IN iv_text IGNORING CASE SUBMATCHES ev_value.
+    READ TABLE it_xml INTO ls_element WITH KEY uri = `` local = iv_name.
     ev_found = boolc( sy-subrc = 0 ).
+    ev_value = ls_element-text.
   ENDMETHOD.
   METHOD zif_osd_adt_route~handle.
-    DATA lv_text TYPE string.
-    DATA lo_conv TYPE REF TO cl_abap_conv_in_ce.
+    DATA lt_xml TYPE zif_osd_adt_xml=>tt_element.
     DATA lv_uri TYPE string.
     DATA lv_operation TYPE string.
     DATA lv_package TYPE string.
@@ -27,14 +26,16 @@ CLASS zcl_osd_adt_transport IMPLEMENTATION.
     DATA ls_named TYPE zcl_osd_adt_types=>ty_object.
     DATA ls_object TYPE zcl_osd_adt_host=>ty_object.
     DATA lx_error TYPE REF TO zcx_osd_adt.
-    lo_conv = cl_abap_conv_in_ce=>create( encoding = 'UTF-8' ignore_cerr = abap_true ).
-    lo_conv->convert( EXPORTING input = is_request-body IMPORTING data = lv_text ).
-    field( EXPORTING iv_text = lv_text iv_name = `URI` IMPORTING ev_value = lv_uri ev_found = lv_found ).
-    field( EXPORTING iv_text = lv_text iv_name = `DEVCLASS` IMPORTING ev_value = lv_package ev_found = lv_found ).
+    lt_xml = is_request-xml.
+    IF lt_xml IS INITIAL AND is_request-body IS NOT INITIAL.
+      lt_xml = zcl_osd_adt_request_xml=>parse( is_request-body ).
+    ENDIF.
+    field( EXPORTING it_xml = lt_xml iv_name = `URI` IMPORTING ev_value = lv_uri ev_found = lv_found ).
+    field( EXPORTING it_xml = lt_xml iv_name = `DEVCLASS` IMPORTING ev_value = lv_package ev_found = lv_found ).
     IF lv_found = abap_false.
       lv_package = `$TMP`.
     ENDIF.
-    field( EXPORTING iv_text = lv_text iv_name = `OPERATION` IMPORTING ev_value = lv_operation ev_found = lv_found ).
+    field( EXPORTING it_xml = lt_xml iv_name = `OPERATION` IMPORTING ev_value = lv_operation ev_found = lv_found ).
     IF lv_found = abap_false.
       lv_operation = `I`.
     ENDIF.

@@ -3,7 +3,7 @@ CLASS zcl_osd_adt_vfs DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     INTERFACES zif_osd_adt_route.
     CLASS-METHODS response IMPORTING iv_body TYPE string RETURNING VALUE(rs_response) TYPE zif_osd_adt_route=>ty_response.
-    CLASS-METHODS document IMPORTING iv_xml TYPE string RETURNING VALUE(rv_body) TYPE string RAISING zcx_osd_adt.
+    CLASS-METHODS document IMPORTING iv_xml TYPE string it_xml TYPE zif_osd_adt_xml=>tt_element OPTIONAL RETURNING VALUE(rv_body) TYPE string RAISING zcx_osd_adt.
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_package,
              name TYPE string,
@@ -44,7 +44,7 @@ CLASS zcl_osd_adt_vfs DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CONSTANTS c_atom TYPE string VALUE ` xmlns:atom="http://www.w3.org/2005/Atom"`.
     CONSTANTS c_rel TYPE string VALUE `http://www.sap.com/adt/relations/informationsystem/virtualfolders/selection`.
     METHODS load RAISING zcx_osd_adt.
-    METHODS request IMPORTING iv_xml TYPE string.
+    METHODS request IMPORTING it_xml TYPE zif_osd_adt_xml=>tt_element.
     METHODS filter IMPORTING iv_pattern TYPE string.
     METHODS members IMPORTING iv_value TYPE string RETURNING VALUE(rt_names) TYPE string_table.
     METHODS children IMPORTING iv_name TYPE string RETURNING VALUE(rt_names) TYPE string_table.
@@ -62,9 +62,14 @@ ENDCLASS.
 CLASS zcl_osd_adt_vfs IMPLEMENTATION.
   METHOD document.
     DATA lo_vfs TYPE REF TO zcl_osd_adt_vfs.
+    DATA lt_xml TYPE zif_osd_adt_xml=>tt_element.
     CREATE OBJECT lo_vfs.
     lo_vfs->load( ).
-    lo_vfs->request( iv_xml ).
+    lt_xml = it_xml.
+    IF it_xml IS NOT SUPPLIED AND iv_xml IS NOT INITIAL.
+      lt_xml = zcl_osd_adt_request_xml=>parse( cl_abap_codepage=>convert_to( iv_xml ) ).
+    ENDIF.
+    lo_vfs->request( lt_xml ).
     rv_body = lo_vfs->render( ).
   ENDMETHOD.
   METHOD load.
@@ -109,29 +114,23 @@ CLASS zcl_osd_adt_vfs IMPLEMENTATION.
     mt_types = zcl_osd_adt_types=>all( ).
   ENDMETHOD.
   METHOD request.
-    DATA lt_blocks TYPE zcl_osd_adt_scan=>tt_block.
-    DATA lt_values TYPE zcl_osd_adt_scan=>tt_block.
-    DATA ls_block TYPE zcl_osd_adt_scan=>ty_block.
-    DATA ls_value TYPE zcl_osd_adt_scan=>ty_block.
+    DATA ls_element TYPE zif_osd_adt_xml=>ty_element.
+    DATA ls_child TYPE zif_osd_adt_xml=>ty_element.
     DATA ls_selection TYPE ty_selection.
-    DATA lv_found TYPE abap_bool.
+    DATA lv_id TYPE i.
     DATA lv_pattern TYPE string.
     DATA lv_values TYPE string.
     FIELD-SYMBOLS <selection> TYPE ty_selection.
-    lt_blocks = zcl_osd_adt_scan=>blocks( iv_xml = iv_xml iv_element = `vfs:preselection` ).
-    LOOP AT lt_blocks INTO ls_block.
+    LOOP AT it_xml INTO ls_element WHERE uri = `http://www.sap.com/adt/ris/virtualFolders` AND local = `preselection`.
+      lv_id = sy-tabix.
       CLEAR ls_selection.
-      zcl_osd_adt_scan=>attribute( EXPORTING iv_xml = ls_block-attributes iv_name = `facet`
-        IMPORTING ev_value = ls_selection-facet ev_found = lv_found ).
-      IF lv_found = abap_false OR ls_selection-facet IS INITIAL.
+      ls_selection-facet = zcl_osd_adt_request_xml=>attribute( is_element = ls_element iv_local = `facet` ).
+      IF ls_selection-facet IS INITIAL.
         CONTINUE.
       ENDIF.
       ls_selection-facet = to_lower( ls_selection-facet ).
-      lt_values = zcl_osd_adt_scan=>blocks( iv_xml = ls_block-content iv_element = `vfs:value` ).
-      LOOP AT lt_values INTO ls_value WHERE attributes IS INITIAL.
-        IF ls_value-content NA `<`.
-          APPEND to_upper( ls_value-content ) TO ls_selection-values.
-        ENDIF.
+      LOOP AT it_xml INTO ls_child WHERE parent = lv_id AND uri = `http://www.sap.com/adt/ris/virtualFolders` AND local = `value`.
+        APPEND to_upper( ls_child-text ) TO ls_selection-values.
       ENDLOOP.
       READ TABLE mt_selection ASSIGNING <selection> WITH KEY facet = ls_selection-facet.
       IF sy-subrc = 0.
@@ -153,22 +152,19 @@ CLASS zcl_osd_adt_vfs IMPLEMENTATION.
         CLEAR mv_one.
       ENDIF.
     ENDIF.
-    zcl_osd_adt_scan=>first_tag_value( EXPORTING iv_xml = iv_xml iv_tag = `vfs:facet`
-      IMPORTING ev_value = mv_facet ).
-*   Empty facets are ignored by the Node regex; find the first nonempty one.
-    IF mv_facet IS INITIAL.
-      lt_blocks = zcl_osd_adt_scan=>blocks( iv_xml = iv_xml iv_element = `vfs:facet` ).
-      LOOP AT lt_blocks INTO ls_block WHERE attributes IS INITIAL AND content IS NOT INITIAL.
-        IF ls_block-content NA `<`.
-          mv_facet = ls_block-content.
-          EXIT.
-        ENDIF.
-      ENDLOOP.
+    LOOP AT it_xml INTO ls_element WHERE uri = `http://www.sap.com/adt/ris/virtualFolders` AND local = `facet` AND text IS NOT INITIAL.
+      mv_facet = to_lower( ls_element-text ).
+      EXIT.
+    ENDLOOP.
+    READ TABLE it_xml INTO ls_element WITH KEY uri = `http://www.sap.com/adt/ris/virtualFolders` local = `virtualFoldersRequest` parent = 0.
+    IF sy-subrc <> 0.
+*     Preserve the request root accepted by the former request extractors.
+      READ TABLE it_xml INTO ls_element WITH KEY uri = `http://www.sap.com/adt/ris/virtualFolders` local = `request` parent = 0.
     ENDIF.
-    mv_facet = to_lower( mv_facet ).
-    zcl_osd_adt_scan=>attribute( EXPORTING iv_xml = iv_xml iv_name = `objectSearchPattern`
-      IMPORTING ev_value = lv_pattern ev_found = lv_found ).
-    IF lv_found = abap_false OR lv_pattern IS INITIAL.
+    IF sy-subrc = 0.
+      lv_pattern = zcl_osd_adt_request_xml=>attribute( is_element = ls_element iv_local = `objectSearchPattern` ).
+    ENDIF.
+    IF lv_pattern IS INITIAL.
       lv_pattern = `*`.
     ENDIF.
     filter( to_upper( lv_pattern ) ).
@@ -440,7 +436,7 @@ CLASS zcl_osd_adt_vfs IMPLEMENTATION.
     DATA lv_xml TYPE string.
     lo_decoder = cl_abap_conv_in_ce=>create( encoding = `UTF-8` ignore_cerr = abap_true ).
     lo_decoder->convert( EXPORTING input = is_request-body IMPORTING data = lv_xml ).
-    rs_response = response( document( lv_xml ) ).
+    rs_response = response( document( iv_xml = lv_xml it_xml = is_request-xml ) ).
   ENDMETHOD.
   METHOD response.
     rs_response-status = 200.

@@ -44,7 +44,7 @@ describe('B6 full repository wire cost', function () {
         sides.push(server);
         const warm=await fetch(url+'/sap/bc/adt/b6/warmup',{headers:{'x-csrf-token':'fetch'}}); await warm.arrayBuffer();
         const headers={cookie:warm.headers.getSetCookie().map((c)=>c.split(';')[0]).join('; '),'x-csrf-token':warm.headers.get('x-csrf-token')};
-        for(const [name,path,method,body] of [['search','search?query=ZCL*&maxResults=100','GET',undefined],['vfs','virtualfolders/contents','POST','<vfs:facet>group</vfs:facet>']]) {
+        for(const [name,path,method,body] of [['search','search?query=ZCL*&maxResults=100','GET',undefined],['vfs','virtualfolders/contents','POST','<vfs:facet xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders">group</vfs:facet>']]) {
           const times=[];
           for(let i=0;i<21;i++) {
             const start=performance.now();

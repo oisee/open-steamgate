@@ -3,8 +3,8 @@ CLASS zcl_osd_adt_checkrun DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     INTERFACES zif_osd_adt_route.
     CLASS-METHODS reporters RETURNING VALUE(rv_xml) TYPE string.
-    CLASS-METHODS decode_content IMPORTING iv_text TYPE string RETURNING VALUE(rv_text) TYPE string.
-    CLASS-METHODS document IMPORTING iv_body TYPE string RETURNING VALUE(rv_xml) TYPE string RAISING zcx_osd_adt.
+    CLASS-METHODS decode_content IMPORTING iv_text TYPE string iv_decoded TYPE abap_bool DEFAULT abap_false RETURNING VALUE(rv_text) TYPE string.
+    CLASS-METHODS document IMPORTING iv_body TYPE string it_xml TYPE zif_osd_adt_xml=>tt_element OPTIONAL RETURNING VALUE(rv_xml) TYPE string RAISING zcx_osd_adt.
   PRIVATE SECTION.
     TYPES: BEGIN OF ty_object,
              type TYPE string,
@@ -20,7 +20,7 @@ CLASS zcl_osd_adt_checkrun DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS object IMPORTING iv_uri TYPE string iv_canonical TYPE abap_bool DEFAULT abap_false
       RETURNING VALUE(rs_object) TYPE ty_object RAISING zcx_osd_adt.
     CLASS-METHODS uri IMPORTING iv_type TYPE string iv_name TYPE string RETURNING VALUE(rv_uri) TYPE string.
-    CLASS-METHODS packages IMPORTING iv_body TYPE string CHANGING ct_objects TYPE tt_object
+    CLASS-METHODS packages IMPORTING it_xml TYPE zif_osd_adt_xml=>tt_element CHANGING ct_objects TYPE tt_object
       ct_reports TYPE zcl_osd_adt_checkreport=>tt_report RAISING zcx_osd_adt.
     CLASS-METHODS report IMPORTING is_object TYPE ty_object
       RETURNING VALUE(rs_report) TYPE zcl_osd_adt_checkreport=>ty_report RAISING zcx_osd_adt.
@@ -45,7 +45,7 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
       zcl_osd_adt_host=>require( `CHECKRUN` ).
       zcl_osd_adt_host=>require( `PACKAGE` ).
       lv_body = cl_abap_codepage=>convert_from( is_request-body ).
-      rs_response-body = document( lv_body ).
+      rs_response-body = document( iv_body = lv_body it_xml = is_request-xml ).
       rs_response-content_type = `application/vnd.sap.adt.checkmessages+xml; charset=utf-8`.
     ENDIF.
     rs_response-status = 200.
@@ -134,11 +134,13 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
     ENDWHILE.
     lv_text = substring( val = iv_text off = lv_off len = lv_end - lv_off ).
     rv_text = lv_text.
-    REPLACE ALL OCCURRENCES OF `&lt;` IN rv_text WITH `<`.
-    REPLACE ALL OCCURRENCES OF `&gt;` IN rv_text WITH `>`.
-    REPLACE ALL OCCURRENCES OF `&quot;` IN rv_text WITH `"`.
-    REPLACE ALL OCCURRENCES OF `&apos;` IN rv_text WITH `'`.
-    REPLACE ALL OCCURRENCES OF `&amp;` IN rv_text WITH `&`.
+    IF iv_decoded = abap_false.
+      REPLACE ALL OCCURRENCES OF `&lt;` IN rv_text WITH `<`.
+      REPLACE ALL OCCURRENCES OF `&gt;` IN rv_text WITH `>`.
+      REPLACE ALL OCCURRENCES OF `&quot;` IN rv_text WITH `"`.
+      REPLACE ALL OCCURRENCES OF `&apos;` IN rv_text WITH `'`.
+      REPLACE ALL OCCURRENCES OF `&amp;` IN rv_text WITH `&`.
+    ENDIF.
     DO strlen( lv_text ) TIMES.
       lv_off = sy-index - 1.
       lv_char = lv_text+lv_off(1).
@@ -224,79 +226,68 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
     ENDTRY.
   ENDMETHOD.
   METHOD document.
+    DATA lt_xml TYPE zif_osd_adt_xml=>tt_element.
+    DATA ls_element TYPE zif_osd_adt_xml=>ty_element.
+    DATA ls_child TYPE zif_osd_adt_xml=>ty_element.
+    DATA lv_id TYPE i.
+    DATA lv_parent TYPE i.
+    DATA ls_parent TYPE zif_osd_adt_xml=>ty_element.
     DATA lt_objects TYPE tt_object.
     DATA ls_object TYPE ty_object.
     DATA lt_reports TYPE zcl_osd_adt_checkreport=>tt_report.
     DATA ls_report TYPE zcl_osd_adt_checkreport=>ty_report.
     DATA lv_offset TYPE i.
-    DATA lv_pos TYPE i.
-    DATA lv_inner_offset TYPE i.
-    DATA lv_found TYPE abap_bool.
-    DATA lv_attrs TYPE string.
-    DATA lv_inner TYPE string.
-    DATA lv_tail TYPE string.
     DATA lv_uri TYPE string.
-    DATA lv_content TYPE string.
-    DATA lv_include TYPE string.
+    DATA lv_found TYPE abap_bool.
     DATA lx_error TYPE REF TO zcx_osd_adt.
-    WHILE lv_offset < strlen( iv_body ).
-      take( EXPORTING iv_text = iv_body iv_open = `<chkrun:checkObject` iv_close = `>`
-        IMPORTING ev_value = lv_attrs ev_found = lv_found CHANGING cv_offset = lv_offset ).
-      IF lv_found = abap_false.
-        EXIT.
-      ENDIF.
-*     JS word boundary: do not consume checkObjectList as a block.
-      IF lv_attrs IS NOT INITIAL AND lv_attrs(1) CA `ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_`.
-        CONTINUE.
-      ENDIF.
-      lv_tail = substring( val = iv_body off = lv_offset ).
-      FIND FIRST OCCURRENCE OF `</chkrun:checkObject>` IN lv_tail MATCH OFFSET lv_pos.
-      IF sy-subrc <> 0.
-        EXIT.
-      ENDIF.
-      lv_pos = lv_pos + lv_offset.
-      lv_inner = substring( val = iv_body off = lv_offset len = lv_pos - lv_offset ).
-      lv_offset = lv_pos + 21.
-      lv_inner_offset = 0.
-      take( EXPORTING iv_text = lv_attrs iv_open = `adtcore:uri="` iv_close = `"`
-        IMPORTING ev_value = lv_uri ev_found = lv_found CHANGING cv_offset = lv_inner_offset ).
-      IF lv_found = abap_false OR lv_uri IS INITIAL.
+    lt_xml = it_xml.
+    IF it_xml IS NOT SUPPLIED AND iv_body IS NOT INITIAL.
+      lt_xml = zcl_osd_adt_request_xml=>parse( cl_abap_codepage=>convert_to( iv_body ) ).
+    ENDIF.
+    LOOP AT lt_xml INTO ls_element WHERE uri = `http://www.sap.com/adt/checkrun` AND local = `checkObject`.
+      lv_id = sy-tabix.
+      lv_uri = zcl_osd_adt_request_xml=>attribute( is_element = ls_element iv_uri = `http://www.sap.com/adt/core` iv_local = `uri` ).
+      IF lv_uri IS INITIAL.
         CONTINUE.
       ENDIF.
       ls_object = object( lv_uri ).
       IF ls_object-type IS INITIAL.
         CONTINUE.
       ENDIF.
-      lv_inner_offset = 0.
-      take( EXPORTING iv_text = lv_inner iv_open = `<chkrun:content>` iv_close = `</chkrun:content>`
-        IMPORTING ev_value = lv_content ev_found = ls_object-has_source CHANGING cv_offset = lv_inner_offset ).
-      IF ls_object-has_source = abap_true.
-        ls_object-source = decode_content( lv_content ).
-      ENDIF.
-      lv_inner_offset = 0.
-      take( EXPORTING iv_text = lv_inner iv_open = `chkrun:uri="` iv_close = `"`
-        IMPORTING ev_value = lv_uri ev_found = lv_found CHANGING cv_offset = lv_inner_offset ).
-      lv_inner_offset = 0.
-      take( EXPORTING iv_text = lv_uri iv_open = `/includes/` iv_close = `/`
-        IMPORTING ev_value = lv_include ev_found = lv_found CHANGING cv_offset = lv_inner_offset ).
-      ls_object-include = lv_include.
+      LOOP AT lt_xml INTO ls_child WHERE uri = `http://www.sap.com/adt/checkrun`.
+        lv_parent = ls_child-parent.
+        WHILE lv_parent <> 0 AND lv_parent <> lv_id.
+          READ TABLE lt_xml INTO ls_parent INDEX lv_parent.
+          lv_parent = ls_parent-parent.
+        ENDWHILE.
+        IF lv_parent <> lv_id.
+          CONTINUE.
+        ENDIF.
+        IF ls_child-local = `content` AND ls_object-has_source = abap_false.
+          ls_object-has_source = abap_true.
+          ls_object-source = decode_content( iv_text = ls_child-text iv_decoded = abap_true ).
+        ELSEIF ls_child-local = `artifact`.
+          lv_uri = zcl_osd_adt_request_xml=>attribute( is_element = ls_child iv_uri = `http://www.sap.com/adt/checkrun` iv_local = `uri` ).
+          lv_offset = 0.
+          take( EXPORTING iv_text = lv_uri iv_open = `/includes/` iv_close = `/`
+            IMPORTING ev_value = ls_object-include ev_found = lv_found CHANGING cv_offset = lv_offset ).
+        ENDIF.
+      ENDLOOP.
       APPEND ls_object TO lt_objects.
-    ENDWHILE.
+    ENDLOOP.
     IF lt_objects IS INITIAL.
-      lv_offset = 0.
-      DO.
-        take( EXPORTING iv_text = iv_body iv_open = `adtcore:uri="` iv_close = `"`
-          IMPORTING ev_value = lv_uri ev_found = lv_found CHANGING cv_offset = lv_offset ).
-        IF lv_found = abap_false.
-          EXIT.
+      LOOP AT lt_xml INTO ls_element.
+        lv_uri = zcl_osd_adt_request_xml=>attribute( is_element = ls_element iv_uri = `http://www.sap.com/adt/core` iv_local = `uri` ).
+        IF lv_uri IS INITIAL.
+          CONTINUE.
         ENDIF.
         ls_object = object( iv_uri = lv_uri iv_canonical = abap_true ).
         IF ls_object-type IS NOT INITIAL.
           APPEND ls_object TO lt_objects.
         ENDIF.
-      ENDDO.
+      ENDLOOP.
     ENDIF.
-    packages( EXPORTING iv_body = iv_body CHANGING ct_objects = lt_objects ct_reports = lt_reports ).
+    packages( EXPORTING it_xml = lt_xml CHANGING ct_objects = lt_objects ct_reports = lt_reports ).
     IF lt_objects IS INITIAL AND lt_reports IS INITIAL.
       lx_error = zcx_osd_adt=>invalid_request( `no check object in the request` ).
       RAISE EXCEPTION lx_error.
@@ -308,10 +299,10 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
     rv_xml = zcl_osd_adt_checkreport=>document( lt_reports ).
   ENDMETHOD.
   METHOD packages.
-    DATA lv_offset TYPE i.
+    DATA ls_element TYPE zif_osd_adt_xml=>ty_element.
+    DATA lv_uri TYPE string.
     DATA lv_name TYPE string.
     DATA lv_decoded TYPE string.
-    DATA lv_found TYPE abap_bool.
     DATA lv_ok TYPE abap_bool.
     DATA lx_error TYPE REF TO zcx_osd_adt.
     DATA ls_answer TYPE zcl_osd_adt_host=>ty_answer.
@@ -322,13 +313,12 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
     DATA lv_path TYPE string.
     DATA ls_object TYPE ty_object.
     DATA ls_report TYPE zcl_osd_adt_checkreport=>ty_report.
-    lv_offset = 0.
-    DO.
-      take( EXPORTING iv_text = iv_body iv_open = `adtcore:uri="/sap/bc/adt/packages/` iv_close = `"`
-        IMPORTING ev_value = lv_name ev_found = lv_found CHANGING cv_offset = lv_offset ).
-      IF lv_found = abap_false.
-        EXIT.
+    LOOP AT it_xml INTO ls_element.
+      lv_uri = zcl_osd_adt_request_xml=>attribute( is_element = ls_element iv_uri = `http://www.sap.com/adt/core` iv_local = `uri` ).
+      IF lv_uri NP `/sap/bc/adt/packages/*`.
+        CONTINUE.
       ENDIF.
+      lv_name = lv_uri+21.
       IF lv_name IS INITIAL.
         CONTINUE.
       ENDIF.
@@ -362,6 +352,6 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
           ls_report-status_text = `package ` && lv_name && ` does not exist`.
       ENDTRY.
       APPEND ls_report TO ct_reports.
-    ENDDO.
+    ENDLOOP.
   ENDMETHOD.
 ENDCLASS.

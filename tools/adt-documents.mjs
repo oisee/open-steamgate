@@ -1,3 +1,4 @@
+import {requestElements, elementsNamed, descendantsOf, attributeValue, namespaces} from "./adt-request-xml.mjs";
 // The XML documents the ADT façade answers with, apart from the two that
 // wave 0 already had. One file, because they share a vocabulary: every ADT
 // document names things with `adtcore:name`, `adtcore:type` and a URI that
@@ -1148,28 +1149,20 @@ ${reports.map(report).join("\n")}
 // inline because it is checking what a person has typed, so the content is
 // the payload and the URI only says what it is.
 export function checkObjectsIn(body, collections) {
-  const text = Buffer.isBuffer(body) ? body.toString("utf8") : String(body ?? "");
-  const out = [];
-  for (const block of text.matchAll(/<chkrun:checkObject\b([^>]*)>([\s\S]*?)<\/chkrun:checkObject>/g)) {
-    const uri = block[1].match(/adtcore:uri="([^"]+)"/)?.[1];
-    const object = uri === undefined ? undefined : objectFromUri(uri, collections);
-    if (object === undefined) {
-      continue;
-    }
-    const artifact = block[2].match(/<chkrun:content>([\s\S]*?)<\/chkrun:content>/) ?? undefined;
-    const includeUri = block[2].match(/chkrun:uri="([^"]+)"/)?.[1] ?? "";
-    out.push({
-      ...object,
-      uri,
-      include: includeUri.match(/\/includes\/([^/]+)\//)?.[1],
-      source: artifact === undefined ? undefined : decodeContent(artifact[1]),
-    });
+  const elements = requestElements(body), out = [];
+  for (const element of elementsNamed(elements,namespaces.chkrun,"checkObject")) {
+    const uri = attributeValue(element,namespaces.adtcore,"uri");
+    const object = uri === undefined ? undefined : objectFromUri(uri,collections);
+    if (object === undefined) continue;
+    const id = elements.indexOf(element)+1;
+    const children = descendantsOf(elements,id);
+    const content = elementsNamed(children,namespaces.chkrun,"content")[0];
+    const artifact = elementsNamed(children,namespaces.chkrun,"artifact")[0];
+    const includeUri = attributeValue(artifact,namespaces.chkrun,"uri") ?? "";
+    out.push({...object,uri,include:includeUri.match(/\/includes\/([^/]+)\//)?.[1],
+      source:content === undefined ? undefined : decodeContent(content.text)});
   }
-  // a client that sends no check object at all still names the object the
-  // old way, as a plain object reference
-  if (out.length === 0) {
-    return objectReferencesIn(body, collections).map((o) => ({...o, uri: uriOf(o.type, o.name)}));
-  }
+  if (out.length === 0) return objectReferencesIn(body,collections).map(o => ({...o,uri:uriOf(o.type,o.name)}));
   return out;
 }
 
@@ -1181,12 +1174,7 @@ function decodeContent(raw) {
   if (text === "") {
     return "";
   }
-  const plain = text
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&apos;", "'")
-    .replaceAll("&amp;", "&");
+  const plain = text;
   if (/^[A-Za-z0-9+/\s]+={0,2}$/.test(text) === false) {
     return plain;
   }
@@ -1338,13 +1326,12 @@ ${objects.map((o) => inactiveEntry(o, user)).join("\n")}
 // small documents of a known shape, so they are read with a pattern rather
 // than with a parser we would otherwise not need.
 export function objectReferencesIn(body, collections) {
-  const text = Buffer.isBuffer(body) ? body.toString("utf8") : String(body ?? "");
   const out = [];
-  for (const match of text.matchAll(/adtcore:uri="([^"]+)"/g)) {
-    const parsed = objectFromUri(match[1], collections);
-    if (parsed !== undefined) {
-      out.push(parsed);
-    }
+  for (const element of requestElements(body)) {
+    const uri = attributeValue(element,namespaces.adtcore,"uri");
+    if (uri === undefined) continue;
+    const parsed = objectFromUri(uri,collections);
+    if (parsed !== undefined) out.push(parsed);
   }
   return out;
 }
@@ -1412,9 +1399,9 @@ ${value("URI", object.uri)}
 // client sends. A body we cannot read is not a reason to refuse: the answer
 // is the same for every object in this system.
 export function transportCheckRequest(body) {
-  const text = Buffer.isBuffer(body) ? body.toString("utf8") : String(body ?? "");
-  const field = (name) => new RegExp(`<${name}>([^<]*)</${name}>`, "i").exec(text)?.[1];
-  return {uri: field("URI"), devclass: field("DEVCLASS"), operation: field("OPERATION")};
+  const elements=requestElements(body);
+  const field = local => elementsNamed(elements,"",local)[0]?.text;
+  return {uri:field("URI"),devclass:field("DEVCLASS"),operation:field("OPERATION")};
 }
 
 // The result of a test run: a program, its test classes, their methods, and

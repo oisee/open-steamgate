@@ -147,13 +147,26 @@ describe("ADT B6: search and virtual folders Node diff", function () {
   for(const method of ["GET","HEAD"]) it(`search ${method} uppercase and trailing slash`, async () => {
     expect((await diff((base+"search/").toUpperCase(),method)).status).to.equal(200);
   });
-  const request = (selected,order=[],pattern) => '<vfs:request'+(pattern === undefined ? '' : ` objectSearchPattern="${pattern}"`)+'>'+
+  const request = (selected,order=[],pattern) => '<vfs:virtualFoldersRequest xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders"'+(pattern === undefined ? '' : ` objectSearchPattern="${pattern}"`)+'>'+
     selected.map(([facet,values]) => `<vfs:preselection facet="${facet}">${values.map((v)=>`<vfs:value>${v}</vfs:value>`).join('')}</vfs:preselection>`).join('')+
-    order.map((f)=>`<vfs:facet>${f}</vfs:facet>`).join('')+'</vfs:request>';
+    order.map((f)=>`<vfs:facet>${f}</vfs:facet>`).join('')+'</vfs:virtualFoldersRequest>';
   it("VFS preserves Node byte order for 12 objects", async () => {
     const res = await diff(base+"virtualfolders/contents", "POST", {}, request([["package",["$ROOT"]]], [], "ZSEED_B_*"));
     const names = [...res.body.toString().matchAll(/(?:adtcore:)?name="(ZSEED_B_[^"]+)"/g)].map((m) => m[1]);
     expect(names).to.deep.equal(Array.from({length:12}, (_,i) => `ZSEED_B_${String(i).padStart(2,"0")}`));
+    expect(res.body.toString()).not.to.include('name="ZT_PROG"');
+    expect(res.body.toString()).not.to.include('name="ZCL_TREE"');
+    expect(res.body.toString()).not.to.include('name="ZSEED_END_B"');
+  });
+  it("VFS restrictive patterns exclude nonmatching objects on both supported roots", async () => {
+    for (const local of ["virtualFoldersRequest", "request"]) {
+      const body=request([["package",["$ROOT"]]], [], "ZT_PROG").replaceAll("virtualFoldersRequest",local);
+      const res=await diff(base+"virtualfolders/contents", "POST", {}, body);
+      expect(res.status).to.equal(200);
+      expect(res.body.toString()).to.include('name="ZT_PROG"');
+      for (const excluded of ["ZCL_TREE","ZT_INCLUDE","ZT_DDL","ZSEED_B_00","ZSEED_END_B"])
+        expect(res.body.toString(),local).not.to.include(`name="${excluded}"`);
+    }
   });
   const selections = [[], [["package",["$ROOT"]]], [["package",["..$ROOT"]]], [["package",["$ZT_A","$ZTA"]]], [["package",["$UNKNOWN"]]],
     [["package",["$ROOT_CHILD"]]], [["package",["$LIB"]]], [["package",["$ROOT"]],["type",["REPO"]]],
@@ -188,7 +201,8 @@ describe("ADT B6: search and virtual folders Node diff", function () {
     finally {abap.Classes.ZCL_AJSON.parse=original;}
   });
   it("VFS invalid UTF-8 and case-sensitive captures", async () => {
-    for(const body of [Buffer.from([255]), '<vfs:preselection FACET="package"><vfs:value>$UNKNOWN</vfs:value></vfs:preselection>', '<vfs:facet></vfs:facet>'])
+    expect((await diff(base+"virtualfolders/contents","POST",{},Buffer.from([255]))).status).to.equal(400);
+    for(const body of [ '<vfs:preselection xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders" FACET="package"><vfs:value>$UNKNOWN</vfs:value></vfs:preselection>', '<vfs:facet xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders"></vfs:facet>'])
       expect((await diff(base+"virtualfolders/contents","POST",{},body)).status).to.equal(200);
   });
   it("VFS host throw is a byte-equal 500, never a hanging request", async () => {

@@ -1,3 +1,4 @@
+import {requestXMLProfile} from "./adt-request-xml.mjs";
 // The ABAP front of the ADT façade (ADR 0007, slice 3, option B): every
 // request under /sap/bc/adt and the Node logoff path enters the handler.
 //
@@ -153,10 +154,11 @@ export async function answerOf(handler, view, session) {
     }
   }
   // The body goes to ABAP only for a row ABAP serves, asked of the router
-  // itself (ZCL_OSD_ADT_ROUTER=>MATCH over its own table): a big PUT that a
+  // itself (ZCL_OSD_ADT_ROUTER=>MATCH over its own table): XML envelopes
+  // always enter ABAP validation, including HOST routes. A big PUT that a
   // Node route serves is not turned into hex, three times its size, for
   // nothing. A route ending in a continuation is an ABAP row here.
-  if (view.body.length > 0 && await abapServes(view.method, view.path)) {
+  if (view.body.length > 0 && (requestXMLProfile(view.method, view.path) !== undefined || await abapServes(view.method, view.path))) {
     r.body.set(view.body.toString("hex").toUpperCase());
   }
   const response = params.ES_RESPONSE.type();
@@ -204,8 +206,9 @@ export function abapRunner({handler, step, stale, remote}) {
             const identity = await options.system?.("IDENTITY", "", req, "");
             if (identity !== undefined) systemIdentity = JSON.parse(JSON.stringify(identity));
           } catch (error) { identityError = String(error.message ?? error); }
-          // Ask the child's router before encoding: HOST bodies stay in the parent.
-          const needsBody = body.length > 0 && (await stepJSON(await remoteStep(runtime, {view: request, bodyRequired: true}))).bodyRequired;
+          // XML envelopes require validation in the child, including HOST
+          // routes. Ask its router about other bodies before encoding them.
+          const needsBody = body.length > 0 && (requestXMLProfile(view.method, view.path) !== undefined || (await stepJSON(await remoteStep(runtime, {view: request, bodyRequired: true}))).bodyRequired);
           const response = await remoteStep(runtime, {view: request, bodyHex: needsBody ? body.toString("hex") : "",
             identity: options.sessions.identity, context, systemIdentity, identityError});
           const result = await stepJSON(response);

@@ -1,3 +1,5 @@
+import {requestElements, elementsNamed, attributeValue, namespaces} from "./adt-request-xml.mjs";
+import {requestXMLProfile, readRequestXML, RequestXMLError, XML_ERROR_TYPE, XML_ERROR_MESSAGE} from "./adt-request-xml.mjs";
 import {segwRegistrationsOf} from "./osd-store-destination.mjs";
 import {xrefFact} from "./adt-xref-facts.mjs";
 // Consume the serving credential before any runtime, job or build starts.
@@ -825,7 +827,30 @@ export function adtRouter(options = {}) {
     }
     next();
   });
-  if (options.abap === undefined) pass("sessions", BASE, sessions.middleware());
+  // Validate the entire XML request before any Node route reads the store.
+  // ABAP validates original bytes before resolving its session. HOST
+  // requests then parse the same bytes for their Node consumers.
+  const admitXML = async (req, res, next) => {
+    const profile = requestXMLProfile(req.method, req.originalUrl ?? req.url);
+    if (profile === undefined) return next();
+    const path = (req.originalUrl ?? req.url).split("?")[0].toLowerCase();
+    if (path === `${BASE}/activation` && req.query.method !== "activate") return next();
+    try {
+      const body = await rawBody(req);
+      if (body.length === 0 && (profile.length === 0 || profile[0] === "asx" || profile[0] === "vfs")) return next();
+      req.requestXML = readRequestXML(body, profile);
+      req.body = body; // Retain original bytes when admission consumed the stream.
+      next();
+    } catch (error) {
+      if (error instanceof RequestXMLError) refuse(res, 400, XML_ERROR_TYPE, XML_ERROR_MESSAGE);
+      else next(error);
+    }
+  };
+
+  if (options.abap === undefined) {
+    pass("request-xml", BASE, admitXML);
+    pass("sessions", BASE, sessions.middleware());
+  }
   // every answer names the generation of the system it describes
   pass("generation", BASE, (req, res, next) => {
     const generation = liveHash(store.root);
@@ -888,6 +913,8 @@ export function adtRouter(options = {}) {
       if (kind === "XREF_WARM") return xrefFact(store, kind, {...JSON.parse(json || "{}"), limit: options.xrefLimit ?? 5000});
       return undefined;
     })}));
+
+  if (options.abap !== undefined) pass("request-xml", BASE, admitXML);
 
   // ---- What an ABAP Cloud Project needs that an ordinary one does not.
   //
@@ -1025,7 +1052,7 @@ export function adtRouter(options = {}) {
   // objects :92, the direct-only spelling :233 and :239.
   router.post(`${BASE}/repository/informationsystem/virtualfolders/contents`, (req, res) => answer(res, async () => {
     res.type("application/vnd.sap.adt.repository.virtualfolders.result.v1+xml; charset=utf-8")
-      .send(virtualFoldersDocument(store, (await rawBody(req)).toString("utf8")));
+      .send(virtualFoldersDocument(store, await rawBody(req)));
   }));
 
   // ---- The rest of what a client asks for before it will work.
@@ -1932,13 +1959,16 @@ export function adtRouter(options = {}) {
   // /packages, with its parent in pack:superPackage. Function groups and
   // modules are not created here yet: a group is a folder of includes with
   // a header of its own, and nothing has asked for one.
-  const attribute = (xml, element, name) => {
-    const scope = element === undefined ? xml : (new RegExp(`<${element}\\b[^>]*>`).exec(xml)?.[0] ?? "");
-    return new RegExp(`\\b${name}="([^"]*)"`).exec(scope)?.[1];
+  const attribute = (body, element, name) => {
+    const [prefix,local]=name.split(":"), elements=requestElements(body);
+    const scope=element === undefined ? elements[0] : (() => {
+      const [p,l]=element.split(":"); return elementsNamed(elements,namespaces[p],l)[0];
+    })();
+    return attributeValue(scope,namespaces[prefix],local);
   };
   for (const {type, adt} of [...SOURCE_TYPES, {type: "DEVC", adt: "packages"}]) {
     router.post(`${BASE}/${adt}`, async (req, res) => {
-      const body = (await rawBody(req)).toString("utf8");
+      const body = await rawBody(req);
       answer(res, () => {
         const name = attribute(body, undefined, "adtcore:name");
         if (name === undefined || name === "") {
@@ -2136,7 +2166,7 @@ export function adtRouter(options = {}) {
       // and the answer 201 with the include's URI. The include starts
       // empty; its source is the client's next PUT.
       router.post(`${BASE}/${adt}/:name/includes`, async (req, res) => {
-        const body = (await rawBody(req)).toString("utf8");
+        const body = await rawBody(req);
         if (mayWrite(req, res) === false) {
           return;
         }
@@ -2272,8 +2302,8 @@ export function adtRouter(options = {}) {
       // the package itself, not its subpackages: the tree here can be several
       // thousand objects deep and a check that takes a minute is reported as
       // a hang rather than as thoroughness.
-      const packages = [...body.toString("utf8").matchAll(
-        new RegExp(`adtcore:uri="${BASE}/packages/([^"]+)"`, "g"))].map((m) => decodeURIComponent(m[1]));
+      const packages = requestElements(body).map(e => attributeValue(e,namespaces.adtcore,"uri"))
+        .filter(uri => uri?.startsWith(`${BASE}/packages/`)).map(uri => decodeURIComponent(uri.slice(`${BASE}/packages/`.length)));
       const packageReports = [];
       for (const name of packages) {
         const uri = `${BASE}/packages/${encodeURIComponent(name.toLowerCase())}`;
@@ -2528,13 +2558,17 @@ export function adtRouter(options = {}) {
     );
   });
 
+  const unitReferences = body => elementsNamed(requestElements(body),namespaces.adtcore,"objectReference")
+    .map(e => attributeValue(e,namespaces.adtcore,"uri")).filter(uri => uri !== undefined);
+  const unitObjects = references => references.map(uri => objectFromUri(uri,collections)).filter(Boolean);
+
   // The evaluation of a run: the same result for the objects named, which
   // the client asks for after the run to show the report and to navigate
   // from a result to its method (a4h-adt.jsonl:497). Its references carry
   // the test class and method as a fragment; the run is that of the object.
   router.post(`${BASE}/abapunit/testruns/evaluation`, async (req, res) => {
     const body = await rawBody(req);
-    const named = objectReferencesIn(body.toString("utf8").replaceAll(/#testclass=[^"]*/g, ""), collections);
+    const named = unitObjects(unitReferences(body));
     if (named.length === 0) {
       res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
       return;
@@ -2552,10 +2586,8 @@ export function adtRouter(options = {}) {
 
   router.post(`${BASE}/abapunit/testruns`, async (req, res) => {
     const body = await rawBody(req);
-    const named = objectReferencesIn(body, collections);
-    const references = [...body.toString("utf8").matchAll(
-      /<(?:[\w-]+:)?objectReference\b[^>]*\b(?:[\w-]+:)?uri="([^"]+)"/gi,
-    )].map((match) => match[1]);
+    const references = unitReferences(body);
+    const named = unitObjects(references);
     if (named.length !== 1 || references.length !== 1) {
       res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest",
         references.length > 1 ? "exactly one object reference is supported" : "one object reference is required"));
@@ -2672,8 +2704,8 @@ export function adtRouter(options = {}) {
     answer(res, () => {
       const name = req.query.parent_name ?? req.query.parentName ?? req.query.package ?? "";
       const parentType = req.query.parent_type ?? req.query.parentType;
-      const nodeKeys = [...body.toString("utf8").matchAll(/<TV_NODEKEY>([^<]+)<\/TV_NODEKEY>/g)]
-        .map((match) => match[1]).filter((key) => key !== "000000");
+      const nodeKeys = elementsNamed(requestElements(body),"","TV_NODEKEY").map(e => e.text)
+        .filter(key => key !== "" && key !== "000000");
       // Answered in the type the client asked for, which is not the one this
       // resource is named after.
       //

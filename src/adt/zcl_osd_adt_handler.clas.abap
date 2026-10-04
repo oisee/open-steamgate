@@ -19,7 +19,7 @@
 "!
 "! The session (slice 3): when a ZIF_OSD_ADT_SESSION is in use (IO_SESSION
 "! of ANSWER, which the Node front passes per request; USE_SESSION for the
-"! ICF path), requests under /sap/bc/adt resolve their session first; the
+"! ICF path), XML requests are admitted before any session resolution; the
 "! ZCL_OSD_ADT_CSRF runs before the router, and every answer carries the
 "! session's token and cookies. A session that ended while its request
 "! waited (ZCX_OSD_ADT=>SESSION_ENDED) is answered as the CSRF refusal,
@@ -148,6 +148,15 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
     CLEAR ls_request-session.
     ls_request-sessions = io_session.
     lv_path = to_lower( is_request-path ).
+*   XML admission precedes session upgrades, binding and token issuance.
+    TRY.
+        ls_request = zcl_osd_adt_request_xml=>prepare( ls_request ).
+      CATCH zcx_osd_adt INTO lx_adt.
+        ev_served_by = zcl_osd_adt_router=>c_abap.
+        es_response = refusal( lx_adt ).
+        RETURN.
+    ENDTRY.
+
     IF io_session IS NOT BOUND OR
         ( lv_path <> `/sap/bc/adt` AND lv_path NP `/sap/bc/adt/*` ).
       route( EXPORTING is_request   = ls_request
@@ -156,8 +165,8 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-*   the session first: its cookies and its token go on every answer, the
-*   refusal included, as the Node middleware set them before its gate
+*   Admitted requests resolve their session and pass the CSRF gate.
+*   Session/CSRF refusals retain their existing wire headers.
     TRY.
         ls_session = io_session->resolve( it_cookies = zcl_osd_adt_csrf=>cookies_of( is_request-headers )
                                           it_headers = is_request-headers ).
@@ -257,13 +266,15 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
 
   METHOD route.
     DATA ls_result TYPE zcl_osd_adt_router=>ty_result.
+    DATA ls_request TYPE zif_osd_adt_route=>ty_request.
     DATA lx_adt TYPE REF TO zcx_osd_adt.
     DATA lx_root TYPE REF TO cx_root.
     DATA lv_text TYPE string.
 
     CLEAR: es_response, ev_served_by.
     TRY.
-        ls_result = fence( is_request = is_request it_routes = gt_routes ).
+        ls_request = is_request.
+        ls_result = fence( is_request = ls_request it_routes = gt_routes ).
         ev_served_by = ls_result-served_by.
         IF ls_result-response-continuation-kind IS NOT INITIAL.
 *         the route's own HOST verdict: its answer and what follows it

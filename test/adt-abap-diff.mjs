@@ -1113,7 +1113,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       const put = await send(one, "PUT", `${at(LOCKED)}/source/main?lockHandle=${handle}`, {headers: {"content-type": "text/plain"}, body: "* no\n"});
       expect(put.status).to.equal(409);
       const include = await send(one, "POST", `${at(LOCKED)}/includes?lockHandle=${handle}`,
-        {body: `<class:abapClassInclude adtcore:name="${LOCKED}" class:includeType="testclasses"/>`});
+        {body: `<class:abapClassInclude xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="${LOCKED}" class:includeType="testclasses"/>`});
       expect(include.status).to.equal(409);
       expect((await sessions.get(one.id))?.token, "the session and its token stay").to.equal(one.token);
       await logoff(one);

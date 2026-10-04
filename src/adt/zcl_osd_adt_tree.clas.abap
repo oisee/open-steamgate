@@ -22,7 +22,7 @@ CLASS zcl_osd_adt_tree DEFINITION PUBLIC FINAL CREATE PUBLIC.
       RETURNING VALUE(rs_response) TYPE zif_osd_adt_route=>ty_response RAISING zcx_osd_adt.
     CLASS-METHODS package_nodes IMPORTING io_json TYPE REF TO zcl_ajson iv_folders TYPE abap_bool
       RETURNING VALUE(rt_nodes) TYPE tt_node.
-    CLASS-METHODS node_keys IMPORTING iv_body TYPE xstring RETURNING VALUE(rt_keys) TYPE string_table.
+    CLASS-METHODS node_keys IMPORTING it_xml TYPE zif_osd_adt_xml=>tt_element RETURNING VALUE(rt_keys) TYPE string_table.
     CLASS-METHODS kinds IMPORTING it_nodes TYPE tt_node RETURNING VALUE(rt_kinds) TYPE tt_kind.
     CLASS-METHODS type_info IMPORTING it_kinds TYPE tt_kind EXPORTING ev_types TYPE string et_categories TYPE string_table.
     CLASS-METHODS categories_document IMPORTING it_categories TYPE string_table RETURNING VALUE(rv_xml) TYPE string.
@@ -196,7 +196,7 @@ CLASS zcl_osd_adt_tree IMPLEMENTATION.
     ENDIF.
     rs_response-status = 200.
     rs_response-content_type = zcl_osd_adt_xml=>as_xml_type( it_headers = is_request-headers iv_fallback = `com.sap.adt.RepositoryObjectTreeContent` ).
-    rs_response-body = document( it_nodes = lt_nodes iv_flat = lv_flat it_keys = node_keys( is_request-body ) ).
+    rs_response-body = document( it_nodes = lt_nodes iv_flat = lv_flat it_keys = node_keys( is_request-xml ) ).
   ENDMETHOD.
   METHOD package_nodes.
     DATA ls_node TYPE ty_node.
@@ -233,28 +233,12 @@ CLASS zcl_osd_adt_tree IMPLEMENTATION.
     ENDLOOP.
   ENDMETHOD.
   METHOD node_keys.
-    DATA lv_off TYPE i.
-    DATA lv_key TYPE string.
-    DATA lv_rest TYPE string.
-    DATA lo_decoder TYPE REF TO cl_abap_conv_in_ce.
-    lo_decoder = cl_abap_conv_in_ce=>create( encoding = `UTF-8` ignore_cerr = abap_true ).
-    lo_decoder->convert( EXPORTING input = iv_body IMPORTING data = lv_rest ).
-    DO.
-      FIND FIRST OCCURRENCE OF `<TV_NODEKEY>` IN lv_rest MATCH OFFSET lv_off.
-      IF sy-subrc <> 0.
-        EXIT.
+    DATA ls_element TYPE zif_osd_adt_xml=>ty_element.
+    LOOP AT it_xml INTO ls_element WHERE uri = `` AND local = `TV_NODEKEY`.
+      IF ls_element-text IS NOT INITIAL AND ls_element-text <> `000000`.
+        APPEND ls_element-text TO rt_keys.
       ENDIF.
-      lv_rest = substring( val = lv_rest off = lv_off + 12 ).
-      FIND FIRST OCCURRENCE OF `</TV_NODEKEY>` IN lv_rest MATCH OFFSET lv_off.
-      IF sy-subrc <> 0.
-        EXIT.
-      ENDIF.
-      lv_key = lv_rest(lv_off).
-      lv_rest = substring( val = lv_rest off = lv_off + 13 ).
-      IF lv_key IS NOT INITIAL AND lv_key <> `000000` AND lv_key NS `<`.
-        APPEND lv_key TO rt_keys.
-      ENDIF.
-    ENDDO.
+    ENDLOOP.
   ENDMETHOD.
   METHOD path_document.
     DATA ls_node TYPE ty_node.

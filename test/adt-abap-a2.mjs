@@ -90,6 +90,7 @@ describe("A2 editor helpers live Node byte diff",function () {
     }
   });
   const uri=base+"oo/classes/zcl_editor";
+  const transportBody = fields => `<asx:abap xmlns:asx="http://www.sap.com/abapxml"><asx:values><DATA>${fields}</DATA></asx:values></asx:abap>`;
   const cases=[...['','/source/main','#start=1,1','?version=active','/source/main?version=active#start=1,1'].map((suffix) => `<URI>${uri+suffix}</URI>`),
     ...['','<DEVCLASS></DEVCLASS>','<DEVCLASS/>','<DEVCLASS>ZPKG</DEVCLASS>'].map((tag) => `<URI>${base}oo/classes/zmissing</URI>${tag}`),
     ...['oo/classes','oo/interfaces','programs/programs','ddic/ddl/sources','ddic/srvd/sources','programs/includes','OO/classes','packages','ddic/tables'].map((coll) => `<URI>${base+coll}/x</URI>`),
@@ -98,11 +99,11 @@ describe("A2 editor helpers live Node byte diff",function () {
     `<URI>${uri}</URI><OPERATION>D</OPERATION>`,`<uri>${uri}</uri><URI>ignored</URI>`,
     `<URI>${uri}&amp;x</URI>`,...['%zz','%FF'].map((name) => `<URI>${base}oo/classes/${name}</URI>`),
     Buffer.from([255]),Buffer.concat([Buffer.from(`<URI>${uri}</URI>`),Buffer.from([255])])];
-  for(const [i,body] of cases.entries()) it(`transport ${i}: ${String(body)}`,async () => {const r=await diff(transport,"POST",body,{"content-type":"application/xml"});expect(r.status).to.equal(String(body).includes('%zz') || String(body).includes('%FF') ? 500 : 200);});
-  it("library package survives OBJECT",async () => {expect((await diff(transport,"POST",`<URI>${base}oo/classes/zcl_library</URI>`)).body).to.include("<DEVCLASS>$LIBRARY</DEVCLASS>");});
+  for(const [i,body] of cases.entries()) it(`transport ${i}: ${String(body)}`,async () => {const r=await diff(transport,"POST",Buffer.isBuffer(body) ? body : transportBody(body),{"content-type":"application/xml"});expect(r.status).to.equal(Buffer.isBuffer(body) ? 400 : String(body).includes('%zz') || String(body).includes('%FF') ? 500 : 200);});
+  it("library package survives OBJECT",async () => {expect((await diff(transport,"POST",transportBody(`<URI>${base}oo/classes/zcl_library</URI>`))).body).to.include("<DEVCLASS>$LIBRARY</DEVCLASS>");});
   it("OBJECT errors are swallowed",async () => {
     const original=store.find;store.find=() => {throw new Error("OBJECT refused");};
-    try {expect((await diff(transport,"POST",`<URI>${uri}</URI><DEVCLASS>ZASKED</DEVCLASS>`)).body).to.include("<DEVCLASS>ZASKED</DEVCLASS>");} finally {store.find=original;}
+    try {expect((await diff(transport,"POST",transportBody(`<URI>${uri}</URI><DEVCLASS>ZASKED</DEVCLASS>`))).body).to.include("<DEVCLASS>ZASKED</DEVCLASS>");} finally {store.find=original;}
   });
   for(const query of ["uri="+encodeURIComponent(uri),"","uri=","uri","uri=a&uri=b","uri[x]=1","URI=x","uri=%","uri=a&uri[x]=b","%75ri=a"]) {
     it(`occurrences ${query}`,async () => {await diff(occurrences+"?"+query,"POST","ignored body");});

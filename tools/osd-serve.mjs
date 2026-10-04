@@ -1,3 +1,4 @@
+import {requestXMLBodyError, XML_BODY_LIMIT} from "./adt-request-xml.mjs";
 import {previewSQL} from "./adt-preview-sql.mjs";
 // The serving half of OSD, on its own, in a process that can be replaced.
 //
@@ -205,8 +206,9 @@ const guardAdtDoor = (req, res, next) => {
 };
 app.use("/osd/adt-step", guardAdtDoor, express.raw({type: "application/json", limit: "34mb"}));
 app.use("/osd/adt-sessions", guardAdtDoor, express.raw({type: "application/json", limit: "1mb"}));
-app.use("/osd/adt-resume", guardAdtDoor, express.raw({type: "application/json", limit: "16mb"}));
-app.use(express.raw({type: "*/*", limit: "16mb"}));
+app.use("/osd/adt-resume", guardAdtDoor, express.raw({type: "application/json", limit: XML_BODY_LIMIT}));
+app.use(express.raw({type: "*/*", limit: XML_BODY_LIMIT}));
+app.use(requestXMLBodyError);
 mountPortableCells(app, () => globalThis.abap.context.databaseConnections.DEFAULT,
   (work) => exclusive(work, "SQLScript notebook cell"));
 // every answer says which code produced it: the generation the supervisor
