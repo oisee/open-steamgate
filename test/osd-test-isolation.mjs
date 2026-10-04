@@ -48,15 +48,46 @@ describe('per-file process isolation detector', function () {
     expect(result.status, result.output).to.be.greaterThan(0);
     expect(result.output).to.include('test/webgui.mjs: generation');
   });
-  it('rejects an already stale live generation at the first file boundary', () => {
-    const result = run(["it('does not mutate the tree',()=>{});"], [], undefined,
+  it('uses an already stale live generation as the run baseline without blaming unchanged files', () => {
+    const result = run([
+      "it('does not mutate the tree',()=>{});",
+      "it('also leaves the tree unchanged',()=>{});",
+      "describe.skip('pending',()=>it('unchanged',()=>{}));",
+    ], [], undefined,
       "const fs=require('node:fs');fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));fs.symlinkSync('by-input/pre-existing-stale','build/live');");
-    expect(result.status, result.output).to.be.greaterThan(0);
-    expect(result.output).to.include('1 passing');
-    const diff = JSON.parse(result.output.match(/test-isolation: 0\.cjs: generation: (.*)/)[1]);
-    expect(diff.before).to.deep.equal(diff.after);
-    expect(diff.before.live).to.equal('pre-existing-stale').and.not.equal(diff.before.tree);
+    expect(result.status, result.output).to.equal(0);
+    expect(result.output).to.include('2 passing').and.include('checked 0.cjs').and.include('checked 1.cjs').and.include('checked 2.cjs');
+    expect(result.output.match(/test-isolation: run-setup: generation: /g)).to.have.length(1);
+    const start = JSON.parse(result.output.match(/test-isolation: run-setup: generation: (.*)/)[1]);
+    expect(start.live).to.equal('pre-existing-stale').and.not.equal(start.tree);
+    for (const file of ['0.cjs', '1.cjs', '2.cjs']) expect(result.output).not.to.include(`${file}: generation:`);
   });
+  it('does not blame proof metadata changes when the stale live/tree pair stays unchanged', () => {
+    const result = run({'test/vscode-warm.mjs': "import fs from 'node:fs';it('changes only metadata',()=>{fs.mkdirSync('build/inactive');fs.writeFileSync('build/inactive/inactive.json',JSON.stringify({inactive:{}}))});"}, [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));fs.symlinkSync('by-input/pre-existing-stale','build/live');");
+    expect(result.status, result.output).to.equal(0);
+    expect(result.output).to.include('run-setup: generation:').and.include('checked test/vscode-warm.mjs');
+    expect(result.output).not.to.include('test/vscode-warm.mjs: generation:');
+  });
+  for (const mutation of ['live', 'tree', 'delete', 'hash-error']) {
+    it(`rejects a fresh ${mutation} change from a stale run baseline`, () => {
+      const edit = mutation === 'live' ? "fs.unlinkSync('build/live');fs.symlinkSync('by-input/new-stale','build/live')"
+        : mutation === 'tree' ? "fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[],output_folder:'changed'}))"
+        : mutation === 'delete' ? "fs.unlinkSync('build/live')" : "fs.unlinkSync('abap_transpile.json')";
+      const result = run([
+        "it('inherits setup state',()=>{});",
+        `const fs=require('node:fs');it('changes generation',()=>{${edit}});`,
+        "it('inherits the reported drift',()=>{});",
+      ], [], undefined,
+        "const fs=require('node:fs');fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));fs.symlinkSync('by-input/pre-existing-stale','build/live');");
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output.match(/test-isolation: run-setup: generation: /g)).to.have.length(1);
+      expect(result.output).not.to.include('0.cjs: generation:');
+      expect(result.output).to.include('1.cjs: generation:');
+      // An unreadable hash remains an error rather than a usable baseline.
+      if (mutation !== 'hash-error') expect(result.output).not.to.include('2.cjs: generation:');
+    });
+  }
   it('critic environment-import-red-green: rejects restoration of contaminated import values', () => {
     const result = run([
       "process.env.CRITIC_IMPORT='a';after(()=>delete process.env.CRITIC_IMPORT);it('a',()=>{});",

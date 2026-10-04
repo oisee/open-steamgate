@@ -40,7 +40,9 @@ const dialogReady = moduleOf('osd-dialog-step.mjs').then(({registerDialogObserve
     },
   });
 });
-const sameGeneration = (a, b) => a && b && !a.error && !b.error && a.root === b.root && a.live === b.live && a.tree === b.tree && (a.inactive === undefined || a.inactive === b.inactive);
+// Inactive metadata is evidence for drift allowances below; the generation
+// invariant itself attributes a change in the live/tree pair.
+const sameGeneration = (a, b) => a && b && !a.error && !b.error && a.root === b.root && a.live === b.live && a.tree === b.tree;
 const envDifference = (expected, actual, keys = new Set([...Object.keys(expected), ...Object.keys(actual)])) =>
   Object.fromEntries([...keys].filter((key) => expected[key] !== actual[key]).map((key) => [key, {before: expected[key] === undefined ? 'absent' : 'set', after: actual[key] === undefined ? 'absent' : 'set', changed: true}]));
 const inputSnapshot = async (inputs) => {
@@ -226,12 +228,12 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
     const inherited = sameGeneration(lastGeneration, before?.generation ?? after.generation);
     const unchanged = sameGeneration(before?.generation ?? lastGeneration, after.generation);
     const generationBad = after.generation.error || after.generation.live !== after.generation.tree || (before?.generation.live && after.generation.live === null);
-    // A previous boundary already reported this exact drift. Only observation
-    // state is re-baselined; the working tree and live link remain untouched.
-    if (generationBad && !(inherited && unchanged) && (!intentional.has(file) || after.generation.error || after.generation.live === null)) {
+    // A file owns changes across its boundary, including fresh drift from an
+    // already stale baseline. A mismatch it merely inherited is setup state.
+    if (generationBad && !unchanged && (!intentional.has(file) || after.generation.error || after.generation.live === null)) {
       violations.push(['generation', {before: before?.generation, after: after.generation, ...(inherited ? {previousOrigin: generationOrigin} : {})}]);
     }
-    if (generationBad && !(inherited && unchanged)) generationOrigin = file;
+    if (generationBad && !unchanged) generationOrigin = file;
     if (!generationBad) generationOrigin = undefined;
     if (after.resources.children.length || after.serving.length) violations.push(['children', {before: [], after: {tracked: after.resources.children, serving: after.serving}}]);
     if (after.resources.roots.length) violations.push(['temporary-roots', {before: [], after: after.resources.roots}]);
@@ -295,6 +297,17 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
   return result;
 };
 exports.mochaHooks = {
+  async beforeAll() {
+    this.timeout(30000);
+    const {generationStateSnapshot} = await moduleOf('osd-build.mjs');
+    lastGeneration = generationStateSnapshot();
+    // Restored CI artifacts can name a different generation from this tree
+    // (the hash includes linked toolchain paths). Report that once, without
+    // assigning it to a file or changing the live link or any build inputs.
+    if (lastGeneration.live !== lastGeneration.tree) {
+      console.error(`test-isolation: run-setup: generation: ${JSON.stringify(lastGeneration)}`);
+    }
+  },
   async afterAll() {
     this.timeout(0);
     const missed = [];
