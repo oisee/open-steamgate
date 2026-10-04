@@ -5,6 +5,7 @@
 // objects with the runtime's lowercase column names.
 import {DuckDBInstance} from "@duckdb/node-api";
 import {resolve} from "node:path";
+import {randomBytes} from "node:crypto";
 import {bindValue} from "./abap-types.mjs";
 import {trimLiterals} from "./sql-literals.mjs";
 import {osqlSemanticsError} from "./osql-error.mjs";
@@ -19,6 +20,7 @@ function plain(value) {
 
 export class DuckDBDatabaseClient {
   constructor(input = {}) {
+    this.direct = input.direct === true;
     this.name = "duckdb";
     this.path = input.path ?? ":memory:";
     this.connected = false;
@@ -29,9 +31,16 @@ export class DuckDBDatabaseClient {
     // successful modifying statements of the open LUW, replayed when a
     // failed statement aborts the DuckDB transaction (savepoint emulation)
     this.luw = [];
+    this.relationScope = randomBytes(6).toString("hex");
   }
 
   async connect() {
+    if (!this.direct && this.path !== "" && this.path !== ":memory:") {
+      const {connectFile} = await import("./duckdb-file-host.mjs");
+      await connectFile(this);
+      if (globalThis.abap?.context?.databaseConnections?.DEFAULT === this) globalThis.abap.builtin.sy.get().dbsys?.set(this.name);
+      return;
+    }
     // initializeABAP can open the same file again in one process. Separate
     // engines can overwrite each other's checkpoints; the native cache gives
     // every connection to that file one engine. In-memory clients stay private.
@@ -289,7 +298,7 @@ export class DuckDBDatabaseClient {
       throw new Error("defineRelation: params are not supported on a definition; materialise it, or bind at use");
     }
     this.relationCount = (this.relationCount ?? 0) + 1;
-    const ident = `OSD_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${process.pid}_${this.relationCount}`;
+    const ident = `OSD_${String(name).replace(/[^A-Za-z0-9_]/g, "_").toUpperCase()}_${this.relationScope}_${this.relationCount}`;
     const handle = {ident, ref: `"${ident}"`, kind: materialise === undefined ? "definition" : "materialised", reason: materialise};
     // an ordinary table rather than a temporary one, for the same reason as
     // in the HANA client: the reference must be spliceable anywhere. The

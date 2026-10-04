@@ -108,6 +108,7 @@ const GENERATORS = {
   "osd-tran-registry.mjs": () => import("../tools/osd-tran-registry.mjs"),
   "osd-gui-convert.mjs": () => import("../tools/osd-gui-convert.mjs"),
   // not a generator: the warm build's comparison with a cold transpile
+  "duckdb-file-host.mjs": () => import("../tools/duckdb-file-host.mjs"),
   "osd-warm.mjs": () => import("../tools/osd-warm.mjs"),
   // not a generator: osabap, for `osd run`; a checkout's tool, so imported
   // by a computed URL the bundler leaves alone rather than carried in it
