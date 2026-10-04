@@ -45,6 +45,15 @@ describe("VS Code ABAP values (serialized js-debug generators)", () => {
     expect(describeValue(new t.Date())).to.equal("0000-00-00 (d)");
     expect(describeValue(new t.Time())).to.equal("00:00:00 (t)");
   });
+  it("rejects inexact numeric Packed storage without calling runtime methods", () => {
+    for (const raw of [1.5, Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
+      const value = new t.Packed({length: 8, decimals: 2});
+      value.value = raw;
+      value.get = () => {throw Error("must not inspect via get()");};
+      expect(describeValue(value)).to.equal("default JS");
+      expect(props(value)).to.equal(value);
+    }
+  });
   it("returns prototype-free property bags for all ABAP expansions", () => {
     class Probe {
       static INTERNAL_TYPE = "CLAS";
