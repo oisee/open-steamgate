@@ -68,6 +68,7 @@ const executableText = (expression) => upper(expression.getTokens().map((token) 
   return /^['`|]/.test(value) ? " " : value;
 }).join(" ")).replace(/\s*(->|=>|~)\s*/g, "$1");
 const referenceTypes = (text) => new Map([...text.matchAll(/(?:VALUE\(\s*)?(<[^>]+>|[\w]+)\s*\)?\s+TYPE\s+REF\s+TO\s+([/\w]+)/g)].map((m) => [m[1], m[2]]));
+const referenceDeclarations = new Set(["Data", "ClassData", "Constant", "Static", "FieldSymbol", "Type"]);
 const location = (node, statement) => ({object: node.object, method: `${node.className}=>${node.name}`,
   file: node.file, line: statement.getStart().getRow(), column: statement.getStart().getCol()});
 const literalName = (expression) => {
@@ -91,41 +92,45 @@ export class UnitRisk {
       let currentClass, currentNode;
       for (const file of object.getABAPFiles?.() ?? []) {
         for (const statement of file.getStatements()) {
-          const text = upper(statement.concatTokens());
           const kind = statement.get().constructor.name;
+          // Index declarations here; executable bodies are compiled only when
+          // reached. Formatting every body's statements makes cold discovery
+          // pay for code unrelated to the requested tests.
+          let formatted;
+          const text = () => formatted ??= upper(statement.concatTokens());
           if (kind === "ClassDefinition" || kind === "ClassImplementation") {
-            const name = text.match(/^CLASS\s+(\S+)/)?.[1];
+            const name = text().match(/^CLASS\s+(\S+)/)?.[1];
             const key = classKey(objectName, name);
             currentClass = classes.get(key) ?? {key, name, object: objectName, types: new Map(), methods: new Map(), signatures: new Map(), returns: new Map(), aliases: new Map(), interfaces: []};
             classes.set(key, currentClass);
             if (kind === "ClassDefinition") {
-              currentClass.parent = text.match(/INHERITING FROM\s+([^ .]+)/)?.[1];
-              currentClass.testing = /FOR TESTING/.test(text);
+              currentClass.parent = text().match(/INHERITING FROM\s+([^ .]+)/)?.[1];
+              currentClass.testing = /FOR TESTING/.test(text());
               currentClass.at = statement;
               currentClass.file = file.getFilename().split(/[\\/]/).pop();
             }
           } else if (kind === "EndClass") {
             currentClass = undefined;
           } else if (kind === "InterfaceDef" && currentClass) {
-            currentClass.interfaces.push(text.match(/^INTERFACES\s+([^ .]+)/)?.[1]);
+            currentClass.interfaces.push(text().match(/^INTERFACES\s+([^ .]+)/)?.[1]);
           } else if (kind === "Aliases" && currentClass) {
-            const alias = text.match(/^ALIASES\s+(\w+)\s+FOR\s+([/\w~]+)/);
+            const alias = text().match(/^ALIASES\s+(\w+)\s+FOR\s+([/\w~]+)/);
             if (alias) currentClass.aliases.set(alias[1], alias[2]);
           } else if (kind === "MethodDef" && currentClass) {
-            const methodName = text.match(/^(?:CLASS-)?METHODS\s+([^ .]+)/)?.[1];
-            currentClass.signatures.set(methodName, referenceTypes(text));
-            const returning = text.match(/RETURNING\s+VALUE\(\s*\w+\s*\)\s+TYPE REF TO\s+([/\w]+)/);
+            const methodName = text().match(/^(?:CLASS-)?METHODS\s+([^ .]+)/)?.[1];
+            currentClass.signatures.set(methodName, referenceTypes(text()));
+            const returning = text().match(/RETURNING\s+VALUE\(\s*\w+\s*\)\s+TYPE REF TO\s+([/\w]+)/);
             if (returning) currentClass.returns.set(methodName, returning[1]);
-            if (/FOR TESTING/.test(text)) {
+            if (/FOR TESTING/.test(text())) {
               currentClass.tests ??= new Set();
-              currentClass.tests.add(text.match(/^(?:CLASS-)?METHODS\s+([^ .]+)/)?.[1]);
+              currentClass.tests.add(text().match(/^(?:CLASS-)?METHODS\s+([^ .]+)/)?.[1]);
             }
           } else if (kind === "MethodImplementation" || kind === "FunctionModule") {
-            const name = text.match(/^(?:METHOD|FUNCTION)\s+([^ .]+)/)?.[1];
+            const name = text().match(/^(?:METHOD|FUNCTION)\s+([^ .]+)/)?.[1];
             const owner = currentClass ?? {key: classKey(objectName, objectName), name: objectName, object: objectName, types: new Map()};
             currentNode = {key: `${owner.key}:${name}`, object: objectName, className: owner.name, owner,
               name, file: file.getFilename().split(/[\\/]/).pop(), registryObject: object, fullFile: file.getFilename(), statements: [], types: new Map(currentClass?.signatures.get(name)), at: statement,
-              amdp: /\bBY DATABASE (?:PROCEDURE|FUNCTION)\b/.test(text)};
+              amdp: /\bBY DATABASE (?:PROCEDURE|FUNCTION)\b/.test(text())};
             nodes.set(currentNode.key, currentNode);
             if (currentClass) currentClass.methods.set(name, currentNode);
             else functions.set(name, currentNode);
@@ -134,7 +139,8 @@ export class UnitRisk {
           } else {
             if (currentNode) currentNode.statements.push(statement);
             const types = currentNode?.types ?? currentClass?.types;
-            if (types) for (const [variable, type] of referenceTypes(text)) types.set(variable, type);
+            if (types && referenceDeclarations.has(kind))
+              for (const [variable, type] of referenceTypes(text())) types.set(variable, type);
           }
         }
       }

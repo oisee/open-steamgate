@@ -289,3 +289,62 @@ breach in files this branch touches; six inherited main breaches remain
 advisory. The structural leak scan read the six changed files and found zero
 matches; the private identifier list is unavailable, so identifier-specific
 coverage could not be completed.
+
+## Discovery latency (round 6, 2026-10-04)
+
+Measured the actual `GET /sap/bc/adt/core/http/unit/object?type=CLAS&name=…`
+route on the local `origin/main` reference (`312110fb`) and this branch
+(`c59c53bb` before the latency fix). Node 26.9.0, the same machine,
+dependencies, generated inputs and library/pack sources; main had 2241
+registry objects and the branch 2244. Each sample starts a fresh Node process
+and an Express façade with a fresh ObjectStore, then times the first and
+second HTTP requests through response JSON consumption. Five samples per
+object/revision, alternating main and branch, sequentially under
+`OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh`. Main was extracted into a temporary
+directory inside this checkout. Generation caches remain available between
+processes, as on a server restart; the in-memory registry and graph start cold.
+
+The façade uses the JS front with startup pre-warming disabled, matching the
+independent façade in `adt-devloop` and exposing the full request cost.
+Production's existing unit-plan pre-warm uses this same registry and graph;
+it does not eliminate their computation. These are request timings, excluding
+process startup and runtime boot, rather than measurements of server readiness.
+
+Initial five-run medians (milliseconds):
+
+| Object | Main cold | Branch cold before fix | Main warm | Branch warm before fix |
+| --- | ---: | ---: | ---: | ---: |
+| `ZCL_STG_PHASE0_TEST` (small carrier) | 6673.73 | 7137.21 | 3.46 | 6.73 |
+| `ZCL_OSD_ABAP_TOKENS` | 6682.65 | 7101.45 | 3.44 | 4.70 |
+| `ZCL_STG_SEGW_TEST` | 6767.63 | 7209.60 | 3.73 | 7.07 |
+
+The 419–463 ms cold increase crossed the 300 ms review threshold. The graph
+index formatted every ABAP statement, including unrelated method bodies, to
+look for reference declarations. It now formats metadata and declaration
+statements only; executable bodies still receive full analysis when reached.
+Method parameters, factory return types, class attributes, local references,
+statics, type aliases and field symbols retain their declaration indexing.
+The parsed registry and graph continue to be reused within a generation.
+
+Repeated five-run medians after the fix (milliseconds), remeasuring main too:
+
+| Object | Main cold | Fixed branch cold | Main warm | Fixed branch warm |
+| --- | ---: | ---: | ---: | ---: |
+| `ZCL_STG_PHASE0_TEST` | 6632.43 | 6532.43 | 3.50 | 7.16 |
+| `ZCL_OSD_ABAP_TOKENS` | 6582.15 | 6585.94 | 3.42 | 4.48 |
+| `ZCL_STG_SEGW_TEST` | 6710.44 | 6572.31 | 3.79 | 6.83 |
+
+Cold discovery is within 4 ms of main or faster. Warm discovery remains under
+10 ms (the executable analysis adds 1–4 ms to the warm medians). Main's original
+2 s test timeout cannot cover this cold route: the maximum across all 60 cold
+samples was 7452.50 ms, and the fixed branch's maximum was 6745.74 ms. The
+independent façade's discovery test therefore uses 10 s instead of 30 s,
+allowing headroom above the measured cold parse without masking a 30 s stall.
+
+Validation: `adt-devloop`, `adt-abap-c2a`, `unit-risk` and `unit-risk-calls`
+passed **274 checks in JS mode and 274 in ABAP mode**, with the 10 s discovery
+timeout. The suite manifest has no drift (287 ordinary / 6 grouped suites).
+The size guard finds no breach in branch-touched files and reports five
+inherited main breaches. Structural leak scanning of the three changed files
+finds no matches; the private identifier list is absent, so identifier-specific
+scanning remains unavailable.

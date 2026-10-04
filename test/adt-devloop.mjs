@@ -488,7 +488,9 @@ describe("tools/adt-facade: the development loop", () => {
     });
 
     it("discovers test classes and methods without running them", async function () {
-      this.timeout(30000); // cold risk discovery parses the system registry
+      // Five cold HTTP runs: SEGW median main 6.71 s, fixed 6.57 s;
+      // maximum across all objects/revisions 7.45 s. See docs/unit-risk.md.
+      this.timeout(10000);
       const res = await call("/core/http/unit/object?type=CLAS%2FOC&name=ZCL_STG_SEGW_TEST");
       expect(res.status).to.equal(200);
       const found = await res.json();
