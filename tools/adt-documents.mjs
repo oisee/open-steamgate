@@ -1316,24 +1316,34 @@ ${objects.map((o) => inactiveEntry(o, user)).join("\n")}
 // The objects a client named in an activation or a check run. The bodies are
 // small documents of a known shape, so they are read with a pattern rather
 // than with a parser we would otherwise not need.
-export function objectReferencesIn(body, collections) {
+export function objectReferencesIn(body, collections, options) {
   const out = [];
   for (const element of requestElements(body)) {
     const uri = attributeValue(element,namespaces.adtcore,"uri");
     if (uri === undefined) continue;
-    const parsed = objectFromUri(uri,collections);
+    const parsed = objectFromUri(uri,collections,options);
     if (parsed !== undefined) out.push(parsed);
   }
   return out;
 }
 
-// /sap/bc/adt/oo/classes/zcl_x -> {type: "CLAS", name: "ZCL_X"}
-export function objectFromUri(uri, collections) {
+// For activation, references to a source or include belong to the collection's object,
+// the same identity LOCK uses: class includes -> CLAS, interface main ->
+// INTF, standalone program includes -> INCL. A function group's nested
+// includes/fmodules likewise name the FUGR when that collection is supplied
+// (the activation/LOCK routes do not support function groups yet).
+// Other callers retain their existing source-suffix and malformed-URI
+// behavior, including the ABAP helpers' byte-for-byte transport contract.
+export function objectFromUri(uri, collections, {owningObject = false} = {}) {
   const path = String(uri).split("#")[0].split("?")[0].replace(/\/source\/main$/, "");
   for (const [type, collection] of collections) {
     const prefix = `/sap/bc/adt/${collection}/`;
     if (path.startsWith(prefix)) {
-      return {type, name: decodeURIComponent(path.slice(prefix.length)).toUpperCase()};
+      // Split before decoding: an encoded slash is part of a namespaced
+      // object name, whereas a literal slash starts a subordinate resource.
+      const rest = path.slice(prefix.length);
+      const name = owningObject ? rest.split("/")[0] : rest;
+      if (!owningObject || name !== "") return {type, name: decodeURIComponent(name).toUpperCase()};
     }
   }
   return undefined;

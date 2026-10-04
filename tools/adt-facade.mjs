@@ -2433,7 +2433,7 @@ export function adtRouter(options = {}) {
     let checked = [];
     let published = false;
     await answer(res, async () => {
-      named = objectReferencesIn(body, collections);
+      named = objectReferencesIn(body, collections, {owningObject: true});
       if (named.length === 0) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no object references in the request"));
         return;
