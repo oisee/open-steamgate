@@ -167,7 +167,7 @@ const manifestDifference = (name, before, after, phase, file) => {
       const original = stats.start.get(change.path);
       const restored = !change.error && !original?.error && (change.after === null
         ? !stats.start.has(change.path)
-        : original?.sha256 && change.after.sha256 === original.sha256);
+        : original?.sha256 && change.after.type === original.type && change.after.sha256 === original.sha256);
       (restored ? restorations : violations).push(change);
     }
     if (restorations.length) console.log(`test-isolation: ${file}: ${name} restoration: ${JSON.stringify(restorations)}`);

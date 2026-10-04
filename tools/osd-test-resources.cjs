@@ -2,7 +2,7 @@
 // Wrappers preserve arguments/results and never close, kill or delete anything.
 const fs = require('node:fs');
 const cp = require('node:child_process');
-const {join, resolve} = require('node:path');
+const {isAbsolute, join, relative, resolve, sep} = require('node:path');
 const {createHash} = require('node:crypto');
 const {syncBuiltinESMExports} = require('node:module');
 const {promisify} = require('node:util');
@@ -11,55 +11,88 @@ const children = new Set();
 const roots = new Map();
 exports.setOwner = (file) => { owner = file; };
 exports.environmentSnapshot = () => ({...process.env});
-// Cache the most recent (absolute path, size, mtimeMs, ctimeMs, ino) version. Snapshots
+// Cache the most recent (absolute path, type, size, mtimeMs, ctimeMs, ino) version. Snapshots
 // retain its digest even when the cache advances, so a rewrite can be
 // compared with bytes that no longer exist. Unchanged versions need no reads.
 // A write changes ctime even if utimes restores mtime; ino covers replacements.
 const digests = new Map();
+const nodeType = (stat) => stat.isSymbolicLink() ? 'symlink' : stat.isFile() ? 'file' : 'other';
 const digest = (file, stat) => {
+  const type = nodeType(stat);
   const cached = digests.get(file);
-  if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs &&
+  if (cached && cached.type === type && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs &&
       cached.ctimeMs === stat.ctimeMs && cached.ino === stat.ino) return cached.sha256;
+  if (type === 'other') throw new Error('Unobserved node: unsupported type');
   const content = stat.isSymbolicLink() ? fs.readlinkSync(file) : fs.readFileSync(file);
-  const sha256 = createHash('sha256').update(content).digest('hex');
-  digests.set(file, {size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino, sha256});
+  const sha256 = createHash('sha256').update(type).update('\0').update(content).digest('hex');
+  digests.set(file, {type, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino, sha256});
   return sha256;
 };
-// Do not follow directory symlinks out of the checkout. Hash each file on
-// first observation and after metadata changes, before its bytes can vanish.
+// Follow named directory roots only inside the checkout. Nested symlinks are
+// observed as links, without traversal. Unobservable roots carry explicit errors.
+const inside = (root, path) => {
+  const name = relative(root, path);
+  return name !== '..' && !name.startsWith(`..${sep}`) && !isAbsolute(name);
+};
 const manifests = ['osd-pack.json', 'abap_transpile.json', 'libs.lock.json'];
 // Root discovery is independent of build inputs, enabled packs and OSD_PACKS.
 // Every immediate pack directory is observed, including newly created packs.
-const namedRoots = (name, root) => {
+const namedRoots = (name, root, checkout) => {
   if (name === 'gen') return ['gen'];
   if (name !== 'tree') throw new Error(`Unknown isolation manifest: ${name}`);
   const paths = ['src', ...manifests];
   const packs = join(root, 'packs');
-  if (fs.existsSync(packs) && fs.lstatSync(packs).isDirectory()) {
-    for (const entry of fs.readdirSync(packs, {withFileTypes: true})) {
-      if (!entry.isDirectory()) continue;
-      const prefix = `packs/${entry.name}`;
-      paths.push(`${prefix}/src`, ...manifests.map((file) => `${prefix}/${file}`));
-    }
+  // Observe the container link too, and never enumerate an external container.
+  let stat;
+  try { stat = fs.lstatSync(packs); }
+  catch (error) { if (error.code === 'ENOENT') return paths; throw error; }
+  if (stat.isSymbolicLink()) paths.push('packs');
+  // Let walk() report broken/unresolvable container links as unobserved roots.
+  try {
+    if (!inside(checkout, fs.realpathSync(packs)) || !fs.statSync(packs).isDirectory()) return paths;
+  } catch (error) { if (stat.isSymbolicLink()) return paths; throw error; }
+  for (const entry of fs.readdirSync(packs, {withFileTypes: true})) {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+    const prefix = `packs/${entry.name}`;
+    if (entry.isSymbolicLink()) paths.push(prefix);
+    paths.push(`${prefix}/src`, ...manifests.map((file) => `${prefix}/${file}`));
   }
   return paths;
 };
 exports.manifest = (name, root = process.cwd()) => {
   const files = [];
-  const walk = (path, name) => {
+  const checkout = fs.realpathSync(root);
+  const walk = (path, name, namedRoot = false) => {
     let stat;
     try { stat = fs.lstatSync(path); }
     catch (error) { if (error.code === 'ENOENT') return; throw error; }
-    if (stat.isDirectory()) {
+    const entry = {path: name, type: nodeType(stat), size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino};
+    let directory = stat.isDirectory();
+    if (namedRoot) {
+      try {
+        if (!inside(checkout, fs.realpathSync(path))) throw new Error('resolves outside checkout');
+        directory = fs.statSync(path).isDirectory();
+      } catch (error) {
+        entry.error = `Unobserved root: ${error.message}`;
+        files.push(entry);
+        return;
+      }
+    }
+    // A pack/container link is recorded here; only its named src/manifests walk.
+    const linkOnly = namedRoot && (name === 'packs' || /^packs\/[^/]+$/.test(name));
+    if (directory && !linkOnly) {
+      if (stat.isSymbolicLink() && name !== 'gen') {
+        entry.sha256 = digest(resolve(path), stat);
+        files.push(entry);
+      }
       for (const entry of fs.readdirSync(path)) walk(join(path, entry), `${name}/${entry}`);
     } else {
-      const entry = {path: name, size: stat.size, mtimeMs: stat.mtimeMs, ctimeMs: stat.ctimeMs, ino: stat.ino};
       try { entry.sha256 = digest(resolve(path), stat); }
       catch (error) { entry.error = error.message; }
       files.push(entry);
     }
   };
-  for (const path of namedRoots(name, root)) walk(join(root, path), path);
+  for (const path of namedRoots(name, root, checkout)) walk(join(root, path), path, true);
   return files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 };
 exports.manifestDifference = (before, after) => {
@@ -71,8 +104,8 @@ exports.manifestDifference = (before, after) => {
     const b = next.get(path);
     const error = a?.error ?? b?.error;
     // Builds and fixtures can rewrite identical bytes. Metadata invalidates
-    // the digest cache, but only different bytes constitute a changed file.
-    if (a && b && !error && a.sha256 === b.sha256) continue;
+    // the digest cache; identity includes node type as well as content.
+    if (a && b && !error && a.type === b.type && a.sha256 === b.sha256) continue;
     changes.push({path, kind: !a ? 'added' : !b ? 'removed' : 'changed', before: a ?? null, after: b ?? null, ...(error ? {error} : {})});
   }
   return changes;

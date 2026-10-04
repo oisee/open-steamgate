@@ -445,11 +445,10 @@ The complete 39-file source/pack scan ended with **1,369 passing, two pending,
 11 failures**. Two were isolation failures observed before their new allowances:
 the L2 `tree` additions and one surviving `vsix-hidden-gen-*` root from the
 packaging fixture. Nine packaging failures were `EROFS` from its default external
-scratch cache, outside this workspace's writable roots. The hidden-gen case
-creates its root before `testScratch()` and before its try/finally, so the scratch
-failure leaves an empty root; it never moved `gen/`. The new exception is bounded
-to one root with that prefix, owned by `adt-i5`, with [its repair
-entry](backlog/misc.md#isolation-vscode-vsix-packaging-temporary-roots).
+scratch cache, outside this workspace's writable roots. The hidden-gen setup
+failure left an empty root without moving `gen/`.
+Its setup now runs inside cleanup, including scratch-directory creation and
+the generation move; no packaging temporary-root allowance remains.
 The packaging rerun uses `OSD_VSIX_SCRATCH` inside the heavy runner's temporary
 directory, outside the checkout; ordinary failures remain part of the verdict.
 The scan additionally printed existing allowances for `amdp-pack`, `osd-bsp` and

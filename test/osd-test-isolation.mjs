@@ -89,6 +89,79 @@ describe('per-file process isolation detector', function () {
     expect(result.output).to.include('0.cjs: tree:').and.include('packs/new/src/probe.abap').and.include('packs/new/osd-pack.json');
     expect(result.output).not.to.include('packs/new/data.json');
   });
+  it('walks an in-checkout symlinked gen root', () => {
+    const result = run(["it('leaves output',()=>require('node:fs').writeFileSync('gen/left.abap','left'));"], [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('actual-gen');fs.writeFileSync('actual-gen/old.abap','original');fs.symlinkSync('actual-gen','gen','dir');");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    const changes = JSON.parse(result.output.match(/test-isolation: 0.cjs: gen: (.*)/)[1]);
+    expect(changes.map(({path, kind}) => ({path, kind}))).to.deep.equal([{path: 'gen/left.abap', kind: 'added'}]);
+  });
+  for (const mutation of ['new-link', 'source', 'retarget']) {
+    it(`observes an in-checkout symlinked pack root: ${mutation}`, () => {
+      const edit = mutation === 'new-link' ? "fs.symlinkSync('../local/first','packs/disabled','dir');"
+        : mutation === 'source' ? "fs.writeFileSync('packs/disabled/src/probe.abap','edited');"
+        : "fs.unlinkSync('packs/disabled');fs.symlinkSync('../local/second','packs/disabled','dir');";
+      const result = run([`it('mutates',()=>{const fs=require('node:fs');${edit}});`], [], undefined,
+        `const fs=require('node:fs');for(const name of ['first','second']){fs.mkdirSync('local/'+name+'/src',{recursive:true});fs.writeFileSync('local/'+name+'/src/probe.abap','same bytes')}fs.mkdirSync('packs');${mutation === 'new-link' ? '' : "fs.symlinkSync('../local/first','packs/disabled','dir');"}`);
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('0.cjs: tree:');
+      expect(result.output).to.include(mutation === 'retarget' ? '"path":"packs/disabled"' : 'packs/disabled/src/probe.abap');
+    });
+  }
+  for (const target of ['outside', 'missing']) {
+    it(`reports a symlinked pack's ${target} target as an unobserved root`, () => {
+      const result = run([`it('adds link',()=>{const fs=require('node:fs');fs.mkdirSync('packs');fs.symlinkSync(${target === 'outside' ? "require('node:path').dirname(process.cwd())" : "'../missing'"},'packs/disabled','dir')});`]);
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('0.cjs: tree:').and.include('"path":"packs/disabled"').and.include('Unobserved root:');
+      if (target === 'outside') expect(result.output).to.include('resolves outside checkout');
+    });
+  }
+  for (const [invariant, path] of [['gen', 'gen/probe.abap'], ['tree', 'packs/disabled/src/probe.abap']]) {
+    for (const initial of ['file', 'symlink']) {
+      it(`${invariant}: distinguishes ${initial} replacement from equal content and restoration`, () => {
+        const create = (type, content) => type === 'file' ? `fs.writeFileSync('${path}','${content}');` : `fs.symlinkSync('${content}','${path}');`;
+        const other = initial === 'file' ? 'symlink' : 'file';
+        const replace = (type, content) => `fs.unlinkSync('${path}');${create(type, content)}`;
+        const result = run([
+          `it('replaces equal content',()=>{const fs=require('node:fs');${replace(other, 'replacement.abap')}require('node:assert/strict').equal(fs.readFileSync('${path}','utf8'),'${other === 'symlink' ? 'other bytes' : 'replacement.abap'}')});`,
+          `it('restores original type',()=>{const fs=require('node:fs');${replace(initial, 'replacement.abap')}});`,
+          `it('changes bytes',()=>{const fs=require('node:fs');${replace(initial, 'changed.abap')}});`,
+          `it('changes type',()=>{const fs=require('node:fs');${replace(other, 'replacement.abap')}});`,
+          `it('restores type',()=>{const fs=require('node:fs');${replace(initial, 'replacement.abap')}});`,
+        ], [], undefined, `const fs=require('node:fs');fs.mkdirSync('${dirname(path)}',{recursive:true});fs.writeFileSync('${dirname(path)}/replacement.abap','other bytes');${create(initial, 'replacement.abap')}`);
+        expect(result.status, result.output).to.be.greaterThan(0);
+        for (const index of [0, 3]) expect(result.output).to.include(`${index}.cjs: ${invariant}:`).and.not.include(`${index}.cjs: ${invariant} restoration:`);
+        for (const index of [1, 4]) expect(result.output).to.include(`${index}.cjs: ${invariant} restoration:`).and.not.include(`${index}.cjs: ${invariant}:`);
+        const changes = JSON.parse(result.output.match(new RegExp(`test-isolation: 0.cjs: ${invariant}: (.*)`))[1]);
+        expect(changes).to.have.length(1);
+        expect(changes[0].before.type).to.equal(initial);
+        expect(changes[0].after.type).to.equal(other);
+        expect(changes[0].before.sha256).not.to.equal(changes[0].after.sha256);
+      });
+    }
+  }
+  it('removes the hidden-gen scratch root when VSIX setup throws', () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'isolation-vsix-setup-'));
+    const resources = require('../tools/osd-test-resources.cjs');
+    const before = resources.manifest('gen');
+    const hiddenRoots = () => readdirSync('.local').filter((name) => name.startsWith('vsix-hidden-gen-')).sort();
+    const rootsBefore = hiddenRoots();
+    try {
+      const blocked = join(scratch, 'blocked');
+      writeFileSync(blocked, 'scratch creation must fail');
+      const result = spawnSync(process.execPath, [mocha, '--require', plugin, '--grep', 'builds a Zork-only archive without checkout gen/', 'test/vscode-vsix-packaging.mjs'], {
+        cwd: process.cwd(), env: {...process.env, OSD_VSIX_SCRATCH: blocked}, encoding: 'utf8', timeout: 20000,
+      });
+      const output = result.stdout + result.stderr;
+      expect(result.status, output).to.equal(1);
+      expect(output, output).to.match(/EEXIST|ENOTDIR/);
+      expect(output).to.include(blocked).and.include('1 failing');
+      expect(output).not.to.include('temporary-roots:').and.not.to.include('TEMPORARY ALLOW');
+      expect(hiddenRoots()).to.deep.equal(rootsBefore);
+      expect(resources.manifestDifference(before, resources.manifest('gen'))).to.deep.equal([]);
+      expect(require('../tools/osd-test-isolation-allow.json')).not.to.have.property('test/vscode-vsix-packaging.mjs');
+    } finally { rmSync(scratch, {recursive: true, force: true}); }
+  });
   for (const phase of ['import', 'execution']) {
     it(`reports ${phase} restoration to run-start sources without excusing the origin`, () => {
       const source = (content) => `const fs=require('node:fs');${phase === 'import' ? `fs.writeFileSync('src/probe.abap','${content}');` : ''}it('works',()=>{${phase === 'execution' ? `fs.writeFileSync('src/probe.abap','${content}');` : ''}});`;

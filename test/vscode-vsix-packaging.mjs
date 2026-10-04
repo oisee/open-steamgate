@@ -189,17 +189,25 @@ describe("packaging selected packs", function () {
   it("builds a Zork-only archive without checkout gen/", async function () {
     const gen = join(root, "gen");
     const scratch = mkdtempSync(join(root, ".local", "vsix-hidden-gen-"));
-    const outputDir = testScratch("hidden-gen-build");
     const hidden = join(scratch, "gen");
-    const hadGen = existsSync(gen);
-    if (hadGen) renameSync(gen, hidden);
+    let outputDir;
+    let movedGen = false;
     try {
+      outputDir = testScratch("hidden-gen-build");
+      if (existsSync(gen)) {
+        renameSync(gen, hidden);
+        movedGen = true;
+      }
       const {out} = await buildTestVsix(outputDir);
       expect(packagedPacks(out)).to.deep.equal(["zork"]);
     } finally {
-      if (hadGen) renameSync(hidden, gen);
-      rmSync(scratch, {recursive: true, force: true});
-      rmSync(outputDir, {recursive: true, force: true});
+      try {
+        if (movedGen) renameSync(hidden, gen);
+      } finally {
+        // Preserve the hidden generation if restoring it itself failed.
+        if (!existsSync(hidden)) rmSync(scratch, {recursive: true, force: true});
+        if (outputDir) rmSync(outputDir, {recursive: true, force: true});
+      }
     }
   });
 

@@ -275,18 +275,5 @@
         }
       ]
     }
-  },
-  "test/vscode-vsix-packaging.mjs": {
-    "temporary-roots": {
-      "reason": "Temporary: the hidden-gen case creates vsix-hidden-gen-* before calling testScratch() outside its try/finally. The source/pack scan on base 8feda000 observed one surviving empty root when the default external scratch cache was not writable; gen was never moved. Protect all setup with cleanup.",
-      "owner": "adt-i5",
-      "backlog": "docs/backlog/misc.md#isolation-vscode-vsix-packaging-temporary-roots",
-      "roots": [
-        {
-          "prefix": "vsix-hidden-gen-",
-          "maxCount": 1
-        }
-      ]
-    }
   }
 }
