@@ -267,6 +267,15 @@ describe("ABAP-FS local bridge", () => {
       if (rejected) expect(f.logs[0]).to.contain("Explorer unavailable");
     });
   }
+  it("does not refresh Explorer after restore when ABAP-FS registers no connection provider (API v1)", async () => {
+    const f = fixture({version: 1});
+    f.saved.set(recoveryKey, {...transitionEvidence, mount: "refresh-v1", timestamp: Date.now()});
+    f.controller.start = async () => { f.start(); return true; };
+    await registerAbapFsBridge(f.vscode, f.context, f.controller);
+    await settled();
+    expect(f.controller.launcher.state).to.equal("running");
+    expect(f.commands).to.deep.equal([]);
+  });
   it("does not refresh Explorer on manual starts", async () => {
     const f = fixture({version: 2, registerConnectionProvider: () => ({dispose() {}})});
     await registerAbapFsBridge(f.vscode, f.context, f.controller);

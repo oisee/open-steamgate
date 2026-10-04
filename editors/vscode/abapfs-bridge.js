@@ -196,7 +196,7 @@ async function registerAbapFsBridge(vscode, context, controller) {
   // Reload may have cached a failed root resolution before the system was
   // ready. Retry once, after publishing its connection; provider changes and
   // ABAP-FS refresh alone cannot clear Explorer's workspace-folder error.
-  if (restored && current && !disposed && (vscode.workspace.workspaceFolders ?? [])
+  if (provider && restored && current && !disposed && (vscode.workspace.workspaceFolders ?? [])
     .some(folder => folderRecoveryKey(folder.uri) === folderRecoveryKey({toString: () => `adt://${CONNECTION_ID}`}))) {
     try { await vscode.commands.executeCommand("workbench.files.action.refreshFilesExplorer"); }
     catch (error) {
