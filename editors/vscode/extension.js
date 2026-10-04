@@ -2672,6 +2672,29 @@ function debugOnDemand(context, controllerOf = () => activeController) {
   }));
 }
 
+/** Title actions follow the active object; F8 retains its test-first dispatch. */
+function editorRunContext(context) {
+  const refresh = () => {
+    const document = vscode.window.activeTextEditor?.document;
+    const object = document && adtObjectOf(document.fileName);
+    let source = document?.getText() ?? "", tests = false;
+    if (object?.type === "CLAS") {
+      const dir = path.dirname(document.fileName);
+      try {
+        if (object.include !== "main") source = fs.readFileSync(fileOf(dir, object, "main"), "utf8");
+        tests = hasTestMethods(fs.readFileSync(fileOf(dir, object, "testclasses"), "utf8"));
+      } catch { /* Missing includes carry no test methods. */ }
+    }
+    void vscode.commands.executeCommand("setContext", "osd.editorClassrun", object?.type === "CLAS" && implementsClassrun(source));
+    void vscode.commands.executeCommand("setContext", "osd.editorTests", tests);
+  };
+  refresh();
+  for (const subscribe of [vscode.window.onDidChangeActiveTextEditor, vscode.workspace.onDidChangeTextDocument,
+    vscode.workspace.onDidSaveTextDocument]) {
+    if (subscribe) context.subscriptions.push(subscribe(refresh));
+  }
+}
+
 function activate(context) {
   const output = vscode.window.createOutputChannel("osd");
   context.subscriptions.push(output);
@@ -2735,6 +2758,9 @@ function activate(context) {
   // for both, so an activation that passes clears what a check had left, and
   // the other way round.
   registerCheckActivateCommands(context, output, classrunOutput);
+  editorRunContext(context);
+  context.subscriptions.push(vscode.commands.registerCommand("osd.runTitle", () => run(output, classrunOutput)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.runUnit", () => vscode.commands.executeCommand("testing.runCurrentFile")));
   context.subscriptions.push(vscode.commands.registerCommand("osd.run", () => run(output, classrunOutput)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.runWithDebugger", () => run(output, classrunOutput, true)));
 
@@ -4641,7 +4667,7 @@ async function deactivate() {
   await activeController?.stop({shutdown: true});
 }
 
-module.exports = {WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {editorRunContext,WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
   httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands, startStopStatusBar, runningParts, showRunning, sampleItems, openSample,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,

@@ -22,6 +22,11 @@ The status bar shows **OSD running/stopped**, the serving **OSD generation**, an
 
 VS Code 1.101 or newer is required. The system runs locally on desktop or in a Remote-WSL or Remote-SSH workspace. It does not need a SAP or ADT connection.
 
+The editor’s ▷ button runs classrun (F9) when the class implements
+`IF_OO_ADT_CLASSRUN`. The beaker runs ABAP Unit and appears for classes
+with test methods. F8 keeps its object dispatch: tests take precedence over
+classrun when a class has both. Each button’s tooltip names its action.
+
 ## What works
 
 - Start and stop the local server; inspect its services and generation in the OSD tree.

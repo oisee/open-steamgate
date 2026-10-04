@@ -184,7 +184,7 @@ describe("editors/vscode: the extension's logic", function () {
   it("shows Check and Activate before Run and Debug for supported source objects", () => {
     const {contributes} = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
     const menu = contributes.menus["editor/title"];
-    expect(menu.map(({command}) => command)).to.deep.equal(["osd.check", "osd.activate", "osd.run", "osd.runWithDebugger"]);
+    expect(menu.map(({command}) => command)).to.deep.equal(["osd.check", "osd.activate", "osd.classrun", "osd.runTitle", "osd.runUnit", "osd.runWithDebugger"]);
     for (const [command, title, icon] of [["osd.check", "osd: Check (Ctrl+F2)", "$(check)"],
       ["osd.activate", "osd: Activate (Ctrl+F3)", "$(zap)"]]) {
       expect(contributes.commands.find((row) => row.command === command)).to.include({title, icon});
@@ -202,6 +202,22 @@ describe("editors/vscode: the extension's logic", function () {
         expect(pattern.test(file), file).to.equal(false);
       }
     }
+  });
+
+  it("offers classrun and ABAP Unit independently on a class with tests", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "osd-title-"));
+    try {
+      const api = vscodeStub();
+      const file = path.join(dir, "zcl_demo.clas.abap");
+      writeFileSync(path.join(dir, "zcl_demo.clas.testclasses.abap"), "CLASS ltcl DEFINITION FOR TESTING. METHODS known_line FOR TESTING. ENDCLASS.");
+      api.window.activeTextEditor = {document: {fileName: file, getText: () => "INTERFACES if_oo_adt_classrun."}};
+      loadExtension(api).editorRunContext({subscriptions: []});
+      expect(api.executedCommands).to.deep.include(["setContext", "osd.editorClassrun", true]);
+      expect(api.executedCommands).to.deep.include(["setContext", "osd.editorTests", true]);
+      const {contributes} = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
+      expect(contributes.commands.find(c => c.command === "osd.classrun").title).to.equal("osd: Run classrun (F9)");
+      expect(contributes.commands.find(c => c.command === "osd.runUnit")).to.include({title: "osd: Run ABAP Unit", icon: "$(beaker)"});
+    } finally { rmSync(dir, {recursive: true, force: true}); }
   });
 
   it("writes check and activation results to osd console and keeps status feedback", async () => {
