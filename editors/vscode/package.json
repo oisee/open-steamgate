@@ -121,7 +121,7 @@
           "type": "string",
           "enum": ["same", "sqlite", "postgres", "hana", "duckdb"],
           "default": "same",
-          "description": "What a Test Explorer run (or osd.run's own detached run) uses, when it should be a DIFFERENT database than osd.database.system -- e.g. the live system on sqlite while tests run on a real hana. \"same\" (the default) sends no override at all."
+          "description": "What a Test Explorer run uses, when it should be a DIFFERENT database than osd.database.system -- e.g. the live system on sqlite while tests run on a real hana. \"same\" (the default) sends no override at all."
         },
         "osd.database.postgres.host": {
           "type": "string",
@@ -208,7 +208,7 @@
       {"command": "osd.check", "title": "osd: Check (Ctrl+F2)", "icon": "$(check)"},
       {"command": "osd.activate", "title": "osd: Activate (Ctrl+F3)", "icon": "$(zap)"},
       {"command": "osd.runTitle", "title": "osd: Run object (F8 dispatch)", "icon": "$(play)"},
-      {"command": "osd.runUnit", "title": "osd: Run ABAP Unit", "icon": "$(beaker)"},
+      {"command": "osd.runUnit", "title": "osd: Run ABAP Unit (Ctrl+Shift+F10)", "icon": "$(beaker)"},
       {"command": "osd.run", "title": "osd: Run", "icon": "$(play)"},
       {"command": "osd.runWithDebugger", "title": "osd: Run with debugger", "icon": "$(debug)"},
       {"command": "osd.classrun", "title": "osd: Run classrun (F9)", "icon": "$(play)"},
@@ -325,7 +325,7 @@
         {"command": "osd.check", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(clas|prog|intf)(\\.(locals_def|locals_imp|macros|testclasses))?\\.abap$/i", "group": "navigation@0"},
         {"command": "osd.activate", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(clas|prog|intf)(\\.(locals_def|locals_imp|macros|testclasses))?\\.abap$/i", "group": "navigation@0.5"},
         {"command": "osd.classrun", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && osd.editorClassrun", "group": "navigation@1"},
-        {"command": "osd.runTitle", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && !osd.editorClassrun && !osd.editorTests", "group": "navigation@1"},
+        {"command": "osd.runTitle", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && !osd.editorClassrun", "group": "navigation@1"},
         {"command": "osd.runUnit", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/ && osd.editorTests", "group": "navigation@1.5"},
         {"command": "osd.runWithDebugger", "when": "!isWeb && !osd.web && resourceFilename =~ /\\.(abap|tabl\\.xml|ddls\\.asddls|ddls\\.xml)$/", "group": "navigation@2"}
       ],

@@ -216,7 +216,7 @@ describe("editors/vscode: the extension's logic", function () {
       expect(api.executedCommands).to.deep.include(["setContext", "osd.editorTests", true]);
       const {contributes} = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
       expect(contributes.commands.find(c => c.command === "osd.classrun").title).to.equal("osd: Run classrun (F9)");
-      expect(contributes.commands.find(c => c.command === "osd.runUnit")).to.include({title: "osd: Run ABAP Unit", icon: "$(beaker)"});
+      expect(contributes.commands.find(c => c.command === "osd.runUnit")).to.include({title: "osd: Run ABAP Unit (Ctrl+Shift+F10)", icon: "$(beaker)"});
     } finally { rmSync(dir, {recursive: true, force: true}); }
   });
 
@@ -1975,10 +1975,10 @@ describe("editors/vscode: the extension's logic", function () {
   }
 
   it("SE80's F8, one entry per object type: what this build does, or the route its turn would use", () => {
-    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: true})).to.deep.equal({kind: "unit"});
-    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false}).kind).to.equal("not-yet");
+    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: true})).to.deep.equal({kind: "nothing-to-run", text: "Nothing to run for ZCL_DEMO. Tests: Ctrl+Shift+F10."});
+    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false}).kind).to.equal("nothing-to-run");
     // a service's own class, cursor outside any entity-set method: F8 there
-    // means a Gateway client, before ABAP Unit -- still not yet
+    // means a Gateway client -- still not yet
     const dpc = runActionFor({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT"}, {hasUnitTests: true});
     expect(dpc.kind).to.equal("not-yet");
     expect(dpc.text).to.contain("get_entityset");
@@ -2069,19 +2069,18 @@ describe("editors/vscode: the extension's logic", function () {
     expect(facadeImplementsClassrun(demo)).to.equal(implementsClassrun(demo));
   });
 
-  it("Q6b: F8 dispatches a no-tests classrun class to a run, tests still win, neither loses to the other", () => {
+  it("Q6b: F8 runs classrun regardless of tests and never dispatches to ABAP Unit", () => {
     expect(runActionFor({type: "CLAS", name: "ZCL_OSD_CLASSRUN_DEMO"}, {hasUnitTests: false, hasClassrun: true}))
       .to.deep.equal({kind: "classrun"});
-    // ABAP Unit still wins when a class happens to carry both
+    // Classrun runs even when the class carries tests
     expect(runActionFor({type: "CLAS", name: "ZCL_OSD_CLASSRUN_DEMO"}, {hasUnitTests: true, hasClassrun: true}))
-      .to.deep.equal({kind: "unit"});
-    // neither: the same "not yet" as before Q6b existed
-    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false, hasClassrun: false}).kind)
-      .to.equal("not-yet");
-    // a DPC_EXT's own dispatch (Q2b) still comes first, classrun or not
+      .to.deep.equal({kind: "classrun"});
+    // Neither: explain how to run tests independently
+    expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: false, hasClassrun: false}))
+      .to.deep.equal({kind: "nothing-to-run", text: "Nothing to run for ZCL_DEMO. Tests: Ctrl+Shift+F10."});
+    // An explicit classrun interface also runs on a DPC_EXT
     const dpc = runActionFor({type: "CLAS", name: "ZCL_ZSTG_DEMO_DPC_EXT"}, {hasUnitTests: false, hasClassrun: true});
-    expect(dpc.kind).to.equal("not-yet");
-    expect(dpc.text).to.contain("get_entityset");
+    expect(dpc).to.deep.equal({kind: "classrun"});
   });
 
   // ---- Q2b "Runner": the CodeLens over a SEGW _DPC_EXT class's own

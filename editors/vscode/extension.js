@@ -2677,7 +2677,7 @@ function debugOnDemand(context, controllerOf = () => activeController) {
   }));
 }
 
-/** Title actions follow the active object; F8 retains its test-first dispatch. */
+/** Title run and test actions follow the active object independently. */
 function editorRunContext(context) {
   const refresh = () => {
     const document = vscode.window.activeTextEditor?.document;
@@ -2778,7 +2778,7 @@ function activate(context) {
   // Q6b "Classrun" (docs/vscode-extension.md): F9, "Run as ABAP Application
   // (Console)" -- osd.classrun on the current class, standalone (F9's own
   // binding) or reached through F8's dispatch (run(), above) when the class
-  // implements IF_OO_ADT_CLASSRUN and has no ABAP Unit tests.
+  // implements IF_OO_ADT_CLASSRUN, regardless of ABAP Unit tests.
   context.subscriptions.push(vscode.commands.registerCommand("osd.classrun", () => classrunCurrent(classrunOutput)));
   context.subscriptions.push(vscode.commands.registerCommand("osd.generateTaxiData", generateTaxiData));
   context.subscriptions.push(vscode.commands.registerCommand("osd.resetTaxiData", resetTaxiData));
@@ -3299,10 +3299,8 @@ async function activationDiagnosticUri(href, editor, current) {
 }
 
 // ---- F8: SE80's own key, dispatched by object type (lib.js RUN_TABLE).
-// A class with ABAP Unit tests, and now the cursor inside a SEGW _DPC_EXT
-// class's own `<set>_get_entityset` / `<set>_get_entity` method (Q2b,
-// below), reach a real action; everything else answers the text of the
-// server work its turn would add.
+// Classrun, reports, data preview and SEGW entity methods reach a run
+// action. ABAP Unit runs only through the testing commands.
 
 async function requireDebugSystem(output, action, controller = activeController) {
   controller?.debugNote?.(`${action} with debugger: attaching`);
@@ -3338,7 +3336,6 @@ async function run(output, classrunOutput, forceDebugger = false) {
   }
   const {editor, object} = current;
   if (kernelDiagnostics && !(await kernelDiagnostics.allow(editor.document.fileName))) return;
-  const hasUnitTests = fs.existsSync(fileOf(path.dirname(editor.document.fileName), object, "testclasses"));
   // Q6b: read straight off the buffer VS Code already has, not necessarily
   // saved -- the same "the editor's own text" Ctrl+F2 already does for a
   // check. Only asked for a CLAS; the regex would never match anything
@@ -3359,16 +3356,11 @@ async function run(output, classrunOutput, forceDebugger = false) {
       }
     }
   }
-  const action = runActionFor(object, {hasUnitTests, hasClassrun, entitySet, forceDebugger, file: editor.document.fileName});
+  const action = runActionFor(object, {hasClassrun, entitySet, forceDebugger, file: editor.document.fileName});
   // Q4: a run is server work, so it is a point the table this object's own
   // heat comes from may have changed -- fire-and-forget, the same as the
   // timer, so F8 does not wait on it.
   void refreshHotspots(output);
-  if (action.kind === "unit") {
-    if (forceDebugger) await vscode.commands.executeCommand("osd.debugCurrentTests", object);
-    else await vscode.commands.executeCommand("testing.runCurrentFile");
-    return;
-  }
   if (action.kind === "call-entityset") {
     await callEntitySet({service: action.service, set: action.set, kind: action.entityKind,
       file: editor.document.fileName, withDebugger: forceDebugger}, output);
@@ -3390,7 +3382,7 @@ async function run(output, classrunOutput, forceDebugger = false) {
     return;
   }
   output.appendLine(`osd run ${object.name}: ${action.text}`);
-  vscode.window.showInformationMessage(`osd: ${action.text}`);
+  vscode.window.showInformationMessage(action.kind === "nothing-to-run" ? action.text : `osd: ${action.text}`);
 }
 
 // ---- 0.5 O: F8 on a report -- `osd run` (tools/osd-run.mjs) builds it

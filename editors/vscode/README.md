@@ -24,8 +24,14 @@ VS Code 1.101 or newer is required. The system runs locally on desktop or in a R
 
 The editor’s ▷ button runs classrun (F9) when the class implements
 `IF_OO_ADT_CLASSRUN`. The beaker runs ABAP Unit and appears for classes
-with test methods. F8 keeps its object dispatch: tests take precedence over
-classrun when a class has both. Each button’s tooltip names its action.
+with test methods; it runs exactly the same command as **Ctrl+Shift+F10**
+(`testing.runCurrentFile`). Tests also run through the Test Explorer.
+**F8 / ▷ / F9 never run ABAP Unit.** F8 runs classrun for a class implementing
+`IF_OO_ADT_CLASSRUN`, even when it has tests; reports run in a terminal,
+and tables/CDS views open Data Preview. Other supported run actions keep
+their object dispatch. A class with nothing to run shows
+“Nothing to run for <OBJ>. Tests: Ctrl+Shift+F10.” Each button’s tooltip
+names its action and key.
 
 ## What works
 
