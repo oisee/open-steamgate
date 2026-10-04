@@ -836,7 +836,7 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
     const logoff = (client) => fetch(`http://127.0.0.1:${client.server.address().port}/sap/public/bc/icf/logoff`,
       {headers: {cookie: `${SESSION_COOKIE}=${client.id}`}}).then((r) => r.status);
 
-    // Protocol facts measured 2026-10-04; synthetic fixtures only. Use Node's
+    // Measured facts and explicit local policies; synthetic fixtures only. Use Node's
     // HTTP client here because fetch adds Accept: */* when it is absent.
     const lockOffer = (client, accept, accessMode = "MODIFY", object = at(LOCKED)) => new Promise((resolve, reject) => {
       const query = accessMode == null ? "" : `&accessMode=${encodeURIComponent(accessMode)}`;
@@ -871,13 +871,24 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
       ["result only", result],
       ["result2 only", result2],
       ["capitalized Result2", `${AS_XML}; dataname=com.sap.adt.lock.Result2`],
+    ];
+    const POLICY_OFFERS = [
       ["uppercase media type", "APPLICATION/VND.SAP.AS+XML; DATANAME=UNKNOWN; Q=0"],
+      ["tabs around media and parameters", `${AS_XML}\t;\tcharset=utf-8`],
+      ["mixed SP/HTAB around media and parameters", ` \t${AS_XML}\t ; \tcharset \t=\t utf-8 ;\tdataname = UNKNOWN\t; q = 0`],
+      ["empty list", ","],
+      ["SP/HTAB empty list elements", " , \t,\t "],
+      ["empty elements around an offer", `,\t${AS_XML}\t; charset=utf-8, `],
+      ["any media wildcard", "*/*"],
+      ["application wildcard", "application/*"],
+      ["zero-quality wildcard", "*/*;q=0"],
+      ["other charset", `${AS_XML};charset=ISO-8859-1`],
     ];
     const expectResult = (answer) => {
       expect(answer.status).to.equal(200);
       expect(answer.type).to.equal(RESULT_TYPE);
       expect(answer.handle).to.match(/^[0-9a-f-]{36}$/);
-      // Independent measured shape: Result has nine DATA fields, with empty
+      // Independent measured shape: Result has eight children of DATA, with empty
       // modification support. Do not derive this oracle from our serializer.
       expect([...answer.body.matchAll(/<([A-Z_]+)(?:>|\/>)/g)].map((m) => m[1])).to.deep.equal([
         "DATA", "LOCK_HANDLE", "CORRNR", "CORRUSER", "CORRTEXT", "IS_LOCAL", "IS_LINK_UP",
@@ -909,12 +920,27 @@ describe("ADT façade in ABAP: gate 1 against the Node façade", function () {
             if (front === "ABAP") expect(served).to.include(`ABAP POST ${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`);
           });
         }
+        for (const [title, accept] of POLICY_OFFERS) {
+          it(`T03 policy: ${title} answers Result`, async () => {
+            expectResult(await lockOffer(one, accept));
+            if (front === "ABAP") expect(served).to.include(`ABAP POST ${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`);
+          });
+        }
         it("T03 application/xml is 406 and leaves no enqueue or handle", async () => {
           const refused = await lockOffer(one, "application/xml");
           expect(refused.status).to.equal(406);
           expect(refused.type).to.equal("application/xml; charset=utf-8");
           expect(refused.body).to.equal(exceptionDocument("ExceptionResourceNotAcceptable",
-            "The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml"));
+            "The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml", {properties: [
+              ["T100KEY-ID", "SADT_RESOURCE"], ["T100KEY-NO", "044"], ["T100KEY-V1", AS_XML],
+            ]}));
+          // Check the measured identity independently of the shared serializer.
+          expect(refused.body).to.contain('<type id="ExceptionResourceNotAcceptable"/>');
+          expect(refused.body).to.contain('<message lang="EN">The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml</message>');
+          expect([...refused.body.matchAll(/<entry key="([^"]+)">([^<]*)<\/entry>/g)].map((m) => [m[1], m[2]])).to.deep.equal([
+            ["T100KEY-ID", "SADT_RESOURCE"], ["T100KEY-NO", "044"], ["T100KEY-V1", AS_XML],
+          ]);
+          if (front === "ABAP") expect(served).to.include(`ABAP POST ${at(LOCKED)}?_action=LOCK&accessMode=MODIFY`);
           const fresh = await lockOffer(two, result);
           expectResult(fresh);
           expect((await unlock(two, fresh.handle)).status).to.equal(200);

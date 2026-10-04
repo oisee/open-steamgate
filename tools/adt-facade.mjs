@@ -2054,12 +2054,16 @@ export function adtRouter(options = {}) {
       }
 
       if (action === "LOCK") {
-        // Measured 2026-10-04: ignore q and dataname, always return Result.
+        // Program offers measured 2026-10-04 ignore q and dataname, returning Result.
+        // Our policies: case-insensitive media types, wildcards, and empty
+        // list elements alone treated like missing Accept. HTTP OWS is SP/HTAB.
         // Negotiate before enqueue: SAP's 406 leaks a lock with no handle.
-        const offers = String(req.headers.accept ?? "").split(",").map((offer) => offer.split(";")[0].trim().toLowerCase());
+        const offers = String(req.headers.accept ?? "").split(",").map((offer) => offer.split(";")[0].replace(/^[ \t]+|[ \t]+$/g, "").toLowerCase());
         if (offers.some(Boolean) && !offers.some((type) => ["application/vnd.sap.as+xml", "application/*", "*/*"].includes(type))) {
           return void refuse(res, 406, "ExceptionResourceNotAcceptable",
-            "The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml");
+            "The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml", {properties: [
+              ["T100KEY-ID", "SADT_RESOURCE"], ["T100KEY-NO", "044"], ["T100KEY-V1", "application/vnd.sap.as+xml"],
+            ]});
         }
         const contentType = "application/vnd.sap.as+xml; charset=utf-8; dataname=com.sap.adt.lock.Result";
         if (entry.writable === false) {

@@ -72,7 +72,7 @@ gate and structure, program structure).
 |------|----------|------|
 | Read source | `GET <collection>/:name/source/main` | ETag + 304; a class carries its includes |
 | Object document | `GET <collection>/:name` | version and changedAt from the store's state |
-| Lock | `POST <collection>/:name?_action=LOCK` | dataname `com.sap.adt.lock.Result2`; a library object answers an empty handle |
+| Lock | `POST <collection>/:name?_action=LOCK` | dataname `com.sap.adt.lock.Result`, empty `MODIFICATION_SUPPORT`; a library object answers an empty handle |
 | Write | `PUT <collection>/:name/source/main?lockHandle=` | stores with the repo's line endings (CRLF/CR → LF); returns the ETag of the stored source; a written-not-activated object reads `version=inactive` so the editor is not wiped |
 | Activate | `POST activation` | success is `chkl:messages` with `checkExecuted`/`activationExecuted`/`generationExecuted="true"`; a break names the caller that broke; the modules are transpiled before the answer |
 | Unit test | `POST abapunit/testruns` (+ `/evaluation`) | result named by Accept version (Eclipse v2, vsp junit) |

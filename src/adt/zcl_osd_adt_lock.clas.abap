@@ -255,6 +255,10 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
     DATA lv_offer TYPE string.
     DATA lv_media TYPE string.
     DATA lv_params TYPE string.
+    DATA lv_ows_pattern TYPE string.
+    DATA lv_has_media TYPE abap_bool.
+    DATA lt_properties TYPE tihttpnvp.
+    DATA ls_property TYPE ihttpnvp.
     DATA lx_error TYPE REF TO zcx_osd_adt.
 
     rv_type = |application/vnd.sap.as+xml; charset=utf-8; dataname={ c_result_type }|.
@@ -262,19 +266,41 @@ CLASS zcl_osd_adt_lock IMPLEMENTATION.
     IF lv_accept IS INITIAL.
       RETURN.
     ENDIF.
+*   HTTP OWS is space or HTAB; trim only the media token's edges.
+    lv_ows_pattern = `^[ ` && cl_abap_char_utilities=>horizontal_tab
+      && `]+|[ ` && cl_abap_char_utilities=>horizontal_tab && `]+$`.
     SPLIT lv_accept AT `,` INTO TABLE lt_offers.
     LOOP AT lt_offers INTO lv_offer.
       SPLIT lv_offer AT `;` INTO lv_media lv_params.
-      CONDENSE lv_media.
+      REPLACE ALL OCCURRENCES OF REGEX lv_ows_pattern IN lv_media WITH ``.
+      IF lv_media IS INITIAL.
+        CONTINUE.
+      ENDIF.
+      lv_has_media = abap_true.
       lv_media = to_lower( lv_media ).
-*     q and dataname do not affect LOCK, measured 2026-10-04
+*     Program offers measured 2026-10-04 ignore q and dataname.
+*     Media-type case and wildcard acceptance are our policies.
       IF lv_media = `application/vnd.sap.as+xml` OR lv_media = `application/*` OR lv_media = `*/*`.
         RETURN.
       ENDIF.
     ENDLOOP.
+*   Our choice: empty list elements alone behave like missing Accept.
+    IF lv_has_media = abap_false.
+      RETURN.
+    ENDIF.
+    ls_property-name = `T100KEY-ID`.
+    ls_property-value = `SADT_RESOURCE`.
+    APPEND ls_property TO lt_properties.
+    ls_property-name = `T100KEY-NO`.
+    ls_property-value = `044`.
+    APPEND ls_property TO lt_properties.
+    ls_property-name = `T100KEY-V1`.
+    ls_property-value = `application/vnd.sap.as+xml`.
+    APPEND ls_property TO lt_properties.
     CREATE OBJECT lx_error
       EXPORTING iv_status = 406 iv_type = `ExceptionResourceNotAcceptable`
-        iv_message = `The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml`.
+        iv_message = `The message content is not acceptable. Accepted content types: application/vnd.sap.as+xml`
+        it_properties = lt_properties.
     RAISE EXCEPTION lx_error.
   ENDMETHOD.
 

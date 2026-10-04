@@ -1185,7 +1185,7 @@ function decodeContent(raw) {
 }
 
 // The Result envelope measured 2026-10-04: empty modification support and
-// nine DATA fields. A handle (empty for a read-only object) permits a write.
+// eight children of DATA. A handle (empty for a read-only object) permits a write.
 export function lockResultDocument(handle, options = {}) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0">
