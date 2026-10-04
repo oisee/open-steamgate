@@ -174,7 +174,7 @@ function applyBackendAuth(headers, auth) {
 async function fetchCsrfToken(backend, auth, session, timeoutMs) {
   const target = backendRequestTarget("/sap/bc/adt/core/discovery", backend, auth);
   for (const method of ["HEAD", "GET"]) {
-    const headers = new Headers({accept: "*/*", "x-csrf-token": "fetch"});
+    const headers = new Headers({accept: "*/*", "x-csrf-token": "fetch", "x-sap-adt-sessiontype": "stateful"});
     applyBackendAuth(headers, auth);
     if (session.jar.size) headers.set("cookie", [...session.jar].map(([name, value]) => `${name}=${value}`).join("; "));
     const controller = new AbortController();
@@ -190,6 +190,26 @@ async function fetchCsrfToken(backend, auth, session, timeoutMs) {
     }
   }
   return "";
+}
+
+async function endBackendSession(backend, auth, session, timeoutMs, log) {
+  if (!session.jar.size) return;
+  const headers = new Headers({cookie: [...session.jar].map(([name, value]) => `${name}=${value}`).join("; ")});
+  applyBackendAuth(headers, auth);
+  try {
+    const response = await fetch(backendRequestTarget("/sap/public/bc/icf/logoff", backend, auth), {
+      headers, redirect: "manual", signal: AbortSignal.timeout(Math.min(timeoutMs, 5000)),
+    });
+    await readBoundedBody(response);
+    log({function: "backend-logoff", status: response.status});
+  } catch {
+    // The peer is already gone. If the backend is unavailable its own idle
+    // expiry remains the fallback; never retry or expose session material.
+    log({function: "backend-logoff", status: "unavailable"});
+  } finally {
+    session.jar.clear();
+    session.csrfToken = "";
+  }
 }
 
 function responseHeaders(headers) {
@@ -211,6 +231,10 @@ async function forwardAdt(backend, auth, request, session, timeoutMs) {
     for (const [name, value] of request.headers) {
       if (!REQUEST_MANAGED.has(name.toLowerCase()) && !(modifying(request.method) && name.toLowerCase() === "x-csrf-token")) headers.append(name, value);
     }
+    // RFC has a conversation, not an HTTP context. Its bridge owns that
+    // context and must establish state for editing, just as it owns CSRF
+    // and the cookie jar. Eclipse's tunneled LOCK need not ask for it.
+    if (!headers.has("x-sap-adt-sessiontype")) headers.set("x-sap-adt-sessiontype", "stateful");
     applyBackendAuth(headers, auth);
     if (modifying(request.method)) {
       if (!session.csrfToken) session.csrfToken = await fetchCsrfToken(backend, auth, session, timeoutMs);
@@ -348,6 +372,11 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
       try { decoder.finish(); } catch (error) { socket.destroy(error); }
     });
     socket.on("error", (error) => log({error: error.message}));
+    socket.once("close", () => {
+      // A request already in flight may still acquire a lock or issue
+      // cookies. Finish that chain before ending this conversation's context.
+      void chain.catch(() => {}).then(() => endBackendSession(backendURL, backendAuth, session, timeoutMs, log));
+    });
   });
   server.maxConnections = maxConnections;
   // no host given: OSD_BIND, with the ::1 twin of the loopback default

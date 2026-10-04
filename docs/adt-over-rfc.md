@@ -232,6 +232,15 @@ What that means in practice:
 - keep the token beside the cookie jar whose session it belongs to, one per
   conversation, because a jar shared between two clients shares an ADT context
   between them;
+- establish a stateful backend context for each conversation: the bridge
+  sends `X-SAP-ADT-SessionType: stateful` on its CSRF probes and defaults
+  tunneled requests to it when the client omitted the header. An explicit
+  client session-type header is retained; a stateless read does not end an
+  established stateful context;
+- when the RFC socket closes, wait for any pending backend request, then
+  log off its context using that conversation's cookie jar. Cleanup is
+  bounded to five seconds and is not retried; backend idle expiry remains
+  the fallback when it is unavailable;
 - send it on `POST`, `PUT`, `DELETE` and `PATCH`;
 - `"Required"` arrives in the same header as a token and **is not one**;
 - a `403` that is *not* a CSRF refusal is the backend's own answer and belongs
@@ -239,6 +248,23 @@ What that means in practice:
 - a backend that mints no token is not an error, it is a backend without CSRF
   protection — this project's own façade is one — so the request goes without
   the header.
+
+Measured on A4H with a disposable program, 2026-10-04: a LOCK in a session
+that never requested state returns 200 and a 40-character handle, but the
+lock does not survive the request: another session can also LOCK it and a
+subsequent PUT returns 423. After establishing a stateful context, LOCK,
+read, PUT and UNLOCK work without repeating the session-type header, and a
+foreign LOCK returns 403. OSG retains its 400 refusal for a direct HTTP LOCK
+without a persistent context; the RFC bridge now establishes that context
+instead of handing the client a handle whose lock has already gone.
+
+The Eclipse reproduction entered a separate RFC conversation for LOCK after
+opening the source. Before this fix the new conversation's CSRF probe
+created a stateless context and LOCK returned 400. The regression in
+`test/adt-rfc-context.mjs` sends header-free synthetic RFC requests through
+the real bridge and ABAP front, checks both a read-first and write-first
+conversation, owner-only writes, UNLOCK, stale handles, explicit logoff and
+disconnect cleanup, including a disconnect while LOCK is still in flight.
 
 ## Identity
 
