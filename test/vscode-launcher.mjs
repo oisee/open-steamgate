@@ -759,7 +759,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
     writeFileSync(join(osdHome, "tools", "osd-build.mjs"), "process.exit(0);\n");
     writeFileSync(join(osdHome, "test", "run.mjs"),
       "import {createServer} from 'node:http';\n" +
-      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake'})); })" +
+      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake', launcherPid: process.pid})); })" +
       ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n");
     return osdHome;
   };
@@ -779,6 +779,9 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
         if (how === "stop") {
           await launcher.stop();
           expect(launcher.state).to.equal("stopped");
+          expect(launcher.port).to.equal(undefined);
+          expect(launcher.pid).to.equal(undefined);
+          expect(launcher.generation).to.equal(undefined);
         } else {
           await launcher.rebuild();
           expect(launcher.state).to.equal("running");
@@ -855,7 +858,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
       "let signals = 0;\n" +
       "process.on('SIGTERM', () => {\n" +
       `  if (++signals > 1) { writeFileSync(${JSON.stringify(join(osdHome, "twice"))}, 'twice'); return; }\n` +
-      "  createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'late'})); })" +
+      "  createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'late', launcherPid: process.pid})); })" +
       ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n" +
       "  setTimeout(() => process.exit(0), 1500);\n" +
       "});\n" +
@@ -1063,6 +1066,8 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
       // storage folder, so plain HTTP is what a fresh install gets
       const serving = await fetch(`http://localhost:${result.port}/osd/serving`).then((r) => r.json());
       expect(serving.ready).to.equal(true);
+      expect(serving.launcherPid).to.equal(result.pid);
+      expect(launcher.ownsServing(serving)).to.equal(true);
 
       // every byte this run needed lives under storageDir
       expect(existsSync(join(storageDir, "db", "osd.sqlite")) || existsSync(join(storageDir, "db"))).to.equal(true);

@@ -477,6 +477,8 @@ export function startServer(quiet) {
     // /osd/serving is the child's answer plus what only this process knows:
     // the warm build (tools/osd-warm.mjs), which lives here with the store;
     // still the declared node, forwarded like the others, with one field more
+    // The launcher owns this front PID, not the recyclable runtime worker PID.
+    // Editors use it to reject a different system that later takes this port.
     const withWarm = (proxy) => async (req, res, next) => {
       if (req.method !== "GET") {
         proxy(req, res, next);
@@ -485,13 +487,13 @@ export function startServer(quiet) {
       // still booting: say so now, with the step, rather than hold the
       // question for the boot (the VS Code launcher waits on this answer)
       if (runtime.booting !== undefined && runtime.running !== true) {
-        res.status(200).json({...startingAnswer(runtime), warm: facade.store.warmStatus(), bind: bindAddresses()});
+        res.status(200).json({...startingAnswer(runtime), launcherPid: process.pid, warm: facade.store.warmStatus(), bind: bindAddresses()});
         return;
       }
       try {
         const answer = await fetch(`${runtime.url}${req.originalUrl}`, {signal: AbortSignal.timeout(5000)});
         const body = await answer.json();
-        res.status(answer.status).json({...body, warm: facade.store.warmStatus(), bind: bindAddresses()});
+        res.status(answer.status).json({...body, launcherPid: process.pid, warm: facade.store.warmStatus(), bind: bindAddresses()});
       } catch {
         proxy(req, res, next);
       }

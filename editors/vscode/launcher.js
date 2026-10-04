@@ -594,10 +594,12 @@ async function waitForServing(port, options = {}) {
       throw new Error("osd readiness poll cancelled");
     }
     const serving = await servingOnce(port);
-    if (serving?.ready === true && serving.generation !== undefined) {
+    if (serving?.ready === true && serving.generation !== undefined
+      && (options.launcherPid === undefined || serving.launcherPid === options.launcherPid)) {
       return serving;
     }
-    if (serving?.starting === true) {
+    if (serving?.starting === true
+      && (options.launcherPid === undefined || serving.launcherPid === options.launcherPid)) {
       deadline = Math.min(Math.max(deadline, Date.now() + timeoutMs), started + Math.max(bootMs, timeoutMs));
       lastPhase = serving.phase ?? lastPhase;
       options.onStarting?.(serving);
@@ -1186,6 +1188,11 @@ class Launcher extends EventEmitter {
     this.servingLock = undefined;
   }
 
+  ownsServing(serving) {
+    return this.state === "running" && Number.isInteger(this.pid)
+      && serving?.launcherPid === this.pid;
+  }
+
   async refreshJobsGeneration(serving) {
     if (this.state !== "running" || this.jobsStopping || serving?.ready !== true
         || serving.generation === undefined || serving.generation === this.generation) return;
@@ -1210,6 +1217,9 @@ class Launcher extends EventEmitter {
       this.servingLock = undefined;
     }
     if (state === "stopped") {
+      this.port = undefined;
+      this.pid = undefined;
+      this.generation = undefined;
       this.adtCredentials = undefined;
       if (this.env) delete this.env.OSD_ADT_TOKEN;
     }
@@ -1434,7 +1444,7 @@ class Launcher extends EventEmitter {
     this.#poll = poll;
     try {
       serving = await Promise.race([
-        waitForServing(port, {timeoutMs: this.timeoutMs, signal: poll.signal, onStarting: (answer) => {
+        waitForServing(port, {launcherPid: child.pid, timeoutMs: this.timeoutMs, signal: poll.signal, onStarting: (answer) => {
           // the boot's step, once each, in the system's own log
           if (answer.phase !== undefined && answer.phase !== this.#bootPhase) {
             this.#bootPhase = answer.phase;
@@ -1489,7 +1499,7 @@ class Launcher extends EventEmitter {
       checking = true;
       try {
         const current = await servingOnce(port, 2000);
-        if (this.child === child) await this.refreshJobsGeneration(current);
+        if (this.child === child && this.ownsServing(current)) await this.refreshJobsGeneration(current);
       } catch (error) { this.#log(`OSD jobs: ${error.message}\n`); }
       finally { checking = false; }
     }, 250);

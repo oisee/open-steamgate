@@ -77,8 +77,9 @@ function systemOverviewModel(input = {}) {
   const storage = serving?.databaseIdentity?.storage ?? firstStatusValue(databaseRows, "Storage") ?? "unknown";
   const databasePath = storage === "file" && serving?.database && serving.database !== ":memory:"
     ? serving.database : undefined;
-  const port = launcher.port;
-  const baseUrl = input.baseUrl ?? (port === undefined ? undefined : `http://localhost:${port}`);
+  const port = input.state === "running" ? launcher.port : undefined;
+  const baseUrl = input.state === "running"
+    ? input.baseUrl ?? (port === undefined ? undefined : `http://localhost:${port}`) : undefined;
   return {
     state: input.state ?? "stopped",
     running: input.state === "running",

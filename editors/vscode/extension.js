@@ -1253,7 +1253,8 @@ class SystemController {
   }
 
   async #overviewModel() {
-    const state = this.launcher?.state ?? "stopped";
+    let state = this.launcher?.state ?? "stopped";
+    const launcher = this.launcher;
     const choice = osdHomeChoiceFor(this.context, this.homeMode);
     const homePath = this.launcher?.osdHome ?? choice.path;
     const layerFolders = this.launcher?.layers ?? (homePath === undefined ? [] : detectWorkspaceLayers(workspaceFoldersFor(homePath)));
@@ -1268,6 +1269,12 @@ class SystemController {
         client.serving().catch(() => undefined),
         client.systemStatus().catch(() => undefined),
       ]);
+    }
+    if (state === "running" && (launcher !== this.launcher || launcher.state !== "running"
+        || !launcher.ownsServing?.(serving))) {
+      state = "stopped";
+      serving = undefined;
+      status = undefined;
     }
     const model = systemOverviewModel({
       state,
@@ -2900,12 +2907,20 @@ function statusBar(context, findingCount = () => kernelFindingCount, controller 
     if (disposed) return;
     visibility();
     if (transitioning()) return;
+    if (controller?.launcher && controller.launcher.state !== "running") {
+      setServingAvailability(false);
+      return;
+    }
     const epoch = pollEpoch;
     const client = osd(), url = client.url;
     const current = () => !disposed && epoch === pollEpoch && osd() === client && client.url === url;
     try {
       const serving = await client.serving();
       if (!current()) return;
+      if (controller?.launcher && !controller.launcher.ownsServing?.(serving)) {
+        awaitingServing = false;
+        throw new Error("serving instance mismatch");
+      }
       setServingAvailability(true);
       await activeController?.launcher?.refreshJobsGeneration(serving);
       await activeController?.refreshDebuggerGeneration().catch((error) =>

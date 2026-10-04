@@ -42,6 +42,8 @@ import {namesOf as guiConvertNamesOf} from "../tools/osd-gui-convert.mjs";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const Module = require("node:module");
+const {Launcher} = require("../editors/vscode/launcher.js");
+const ownedLauncher = {pid: 12345, ownsServing: Launcher.prototype.ownsServing};
 
 function loadExtension(vscodeApi) {
   const extensionPath = require.resolve("../editors/vscode/extension.js");
@@ -1244,7 +1246,7 @@ describe("editors/vscode: the extension's logic", function () {
     const SystemController = loadSystemController(api);
     const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
     controller.launcher = {
-      state: "running", port: 3542, osdHome: "/work/osd", homeKind: "osd.home", layers: [],
+      ...ownedLauncher, state: "running", port: 3542, osdHome: "/work/osd", homeKind: "osd.home", layers: [],
       databaseLabel: "SQLite", generation: "abc123",
     };
     const oldFetch = globalThis.fetch;
@@ -1252,7 +1254,7 @@ describe("editors/vscode: the extension's logic", function () {
     globalThis.fetch = async (url) => {
       requested.push(String(url));
       const body = String(url).endsWith("/osd/serving")
-        ? {ready: true, database: "/work/db/osd.sqlite", databaseIdentity: {engine: "sqlite", storage: "file"}, warm: {state: "primed"}}
+        ? {ready: true, launcherPid: 12345, database: "/work/db/osd.sqlite", databaseIdentity: {engine: "sqlite", storage: "file"}, warm: {state: "primed"}}
         : {d: {results: []}};
       return {ok: true, status: 200, json: async () => body};
     };
@@ -1272,6 +1274,29 @@ describe("editors/vscode: the extension's logic", function () {
     expect(api.panels[0].webview.html).to.contain("http://localhost:3542/app/flp.html");
     expect(api.panels.find((panel) => panel.args[0] === "osdSystemOverview").args[3].enableCommandUris)
       .to.include.members(["osd.openLaunchpad", "osd.openLaunchpadExternal"]);
+  });
+
+  it("renders stopped when a foreign server answers on the cached overview port", async () => {
+    const foreign = express();
+    foreign.get("/osd/serving", (_req, res) => res.json({
+      ready: true, launcherPid: 54321, generation: "foreign-system",
+      databaseIdentity: {engine: "foreign-database"},
+    }));
+    foreign.use((_req, res) => res.json({d: {results: [{Name: "foreign-system"}]}}));
+    const server = await new Promise(resolve => {
+      const listening = foreign.listen(0, "127.0.0.1", () => resolve(listening));
+    });
+    const api = vscodeStub();
+    const Controller = loadSystemController(api);
+    const controller = new Controller(controllerContext(), {append() {}, appendLine() {}, show() {}});
+    controller.launcher = {...ownedLauncher, state: "running", port: server.address().port, layers: []};
+    try {
+      await controller.openSystemOverview();
+      const html = api.panels[0].webview.html;
+      expect(html).to.include("Stopped").and.not.include("Running on port")
+        .and.not.include("foreign-system").and.not.include("foreign-database");
+      expect(api.externalUris).to.deep.equal([]);
+    } finally { await new Promise(resolve => server.close(resolve)); }
   });
 
   it("keeps the quick-start preset, DX2 home rule, and state menus in pure logic", () => {
@@ -1348,8 +1373,10 @@ describe("editors/vscode: the extension's logic", function () {
     expect(single).to.contain("<tr><th>Sid</th><td>OSD</td></tr>");
     // sections are stacked, not two to a row
 
-    const stopped = systemOverviewModel({state: "stopped", homeKind: "osd.home", homePath: "/work/osd", layers: ["/work/app"]});
+    const stopped = systemOverviewModel({state: "stopped", launcher: {port: 3532}, baseUrl: "http://localhost:3532", homeKind: "osd.home", homePath: "/work/osd", layers: ["/work/app"]});
     expect(stopped.running).to.equal(false);
+    expect(stopped.listener).to.include({port: undefined, url: undefined});
+    expect(stopped.launchpadUrl).to.equal(undefined);
     expect(stopped.home.path).to.equal("/work/osd");
     expect(systemOverviewHtml(stopped)).to.contain("Start system");
     const statusFallback = systemOverviewModel({state: "running", launcher: {port: 3542}, status: {
@@ -3156,7 +3183,7 @@ describe("editors/vscode: Services tree (grouping, sorting, URLs, normalization)
     writeFileSync(path.join(osdHome, "tools", "osd-build.mjs"), "process.exit(0);\n");
     writeFileSync(path.join(osdHome, "test", "run.mjs"),
       "import {createServer} from 'node:http';\n" +
-      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake'})); })" +
+      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake', launcherPid: process.pid})); })" +
       ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n");
     const controller = new SystemController(controllerContext(), {append() {}, appendLine() {}, show() {}});
     const launcher = new Launcher({osdHome, storageDir, workspaceFolders: [], timeoutMs: 15000});
@@ -4103,6 +4130,7 @@ describe("editors/vscode: running parts status and actions", () => {
 describe("editors/vscode: serving generation status", () => {
   // Critic round 2: drive the exported status function with a deterministic
   // clock and deferred responses, restoring globals even on assertion failure.
+  const nativeFetch = globalThis.fetch;
   async function handoffProbe(run, {realController = false, findingCount = () => 2} = {}) {
     const h = runningStatusApi();
     const base = vscodeStub();
@@ -4123,10 +4151,10 @@ describe("editors/vscode: serving generation status", () => {
       clear: globalThis.clearInterval, now: Date.now};
     const controller = realController
       ? new SystemController(context, {append() {}, appendLine() {}, show() {}})
-      : {launcher: {state: "stopped"}, onDidChange(fn) { refresh = fn; return {dispose() {}}; }};
+      : {launcher: {...ownedLauncher, state: "stopped"}, onDidChange(fn) { refresh = fn; return {dispose() {}}; }};
     if (realController) {
       const launcher = new NodeEventEmitter();
-      Object.assign(launcher, {state: "stopped", port: 8060, async start() {
+      Object.assign(launcher, {...ownedLauncher, state: "stopped", port: 8060, async start() {
         for (const state of ["starting", "running"]) { this.state = state; this.emit("state", state); }
         return {port: this.port, generation: "local123"};
       }});
@@ -4190,7 +4218,7 @@ describe("editors/vscode: serving generation status", () => {
       expect(p.item.text).to.include("awaiting serving");
       expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
       p.respond(async url => ({ok: true, json: async () => url.endsWith("/osd/dumps")
-        ? [] : {generation: "fresh123"}}));
+        ? [] : {launcherPid: 12345, generation: "fresh123"}}));
       await p.tick();
       expect(p.item.text).to.include("fresh123");
       expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
@@ -4201,6 +4229,30 @@ describe("editors/vscode: serving generation status", () => {
         expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
       }
     }, {findingCount: () => { throw Error("count failed"); }});
+  });
+
+  it("shows down for a foreign serving PID and never polls after Stop", async () => {
+    await handoffProbe(async p => {
+      p.start();
+      let requests = 0;
+      const foreign = express();
+      foreign.get("/osd/serving", (_req, res) => { requests++; res.json({
+        launcherPid: 54321, ready: true, generation: "foreign-system",
+      }); });
+      const server = await new Promise(resolve => {
+        const listening = foreign.listen(0, "127.0.0.1", () => resolve(listening));
+      });
+      p.respond(() => nativeFetch(`http://127.0.0.1:${server.address().port}/osd/serving`));
+      try {
+        await p.tick();
+        expect(p.item.text).to.include("osd down").and.not.include("foreign-system");
+        expect(requests).to.equal(1); // No dump read from the foreign system.
+        p.state("stopped");
+        await p.tick();
+        expect(requests).to.equal(1);
+        expect(p.item.text).to.include("osd down");
+      } finally { await new Promise(resolve => server.close(resolve)); }
+    });
   });
 
   it("leaves awaiting immediately when the launcher stops or fails", async () => {
@@ -4234,7 +4286,7 @@ describe("editors/vscode: serving generation status", () => {
         expect(requests).to.deep.equal(["http://external:3030/osd/serving"]);
         p.respond(async url => {
           requests.push(url);
-          return {ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {generation: "fresh123"}};
+          return {ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {launcherPid: 12345, generation: "fresh123"}};
         });
         await p.tick();
         expect(p.item.text).to.include("fresh123");
@@ -4260,7 +4312,7 @@ describe("editors/vscode: serving generation status", () => {
     h.api.workspace = {getConfiguration() { return {get: (_, fallback) => fallback}; }};
     const {statusBar} = loadExtension(h.api);
     let refresh, rejectPoll;
-    const controller = {launcher: {state: "stopped", startedAt: Date.now() - 60000},
+    const controller = {launcher: {...ownedLauncher, state: "running", startedAt: Date.now() - 60000},
       onDidChange(fn) { refresh = fn; return {dispose() { refresh = undefined; }}; }};
     const originalFetch = globalThis.fetch;
     const context = {subscriptions: []};
@@ -4304,11 +4356,12 @@ describe("editors/vscode: serving generation status", () => {
     const originalClearInterval = globalThis.clearInterval;
     const context = {subscriptions: []};
     let tick, refresh, resolveOld, respond;
-    const controller = {launcher: {state: "stopped"},
+    const controller = {launcher: {...ownedLauncher, state: "stopped"},
       onDidChange(fn) { refresh = fn; return {dispose() {}}; }};
     try {
       globalThis.setInterval = fn => { tick = fn; return 1; };
       globalThis.clearInterval = () => {};
+      controller.launcher.state = "running";
       respond = () => new Promise(resolve => { resolveOld = resolve; });
       globalThis.fetch = (...args) => respond(...args);
       const item = statusBar(context, () => 0, controller);
@@ -4323,7 +4376,7 @@ describe("editors/vscode: serving generation status", () => {
       expect(item.visible).to.equal(true);
       expect(item.text).to.include("awaiting serving");
       expect(item.backgroundColor).to.equal(undefined);
-      respond = async url => ({ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {generation: "fresh123"}});
+      respond = async url => ({ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {launcherPid: 12345, generation: "fresh123"}});
       await tick();
       expect(item.text).to.include("OSD generation fresh123");
       respond = async () => { throw Error("crashed"); };
