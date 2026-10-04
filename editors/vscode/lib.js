@@ -602,6 +602,13 @@ class Osd {
     return this.json("/osd/dumps");
   }
 
+  /** Cheap read of the activated include, bounded so F9 stays responsive. */
+  async activeSource(object, include = object.include ?? "main") {
+    const suffix = include === "main" ? "/source/main" : `/includes/${encodeURIComponent(include)}/source/main`;
+    return (await this.request(`${uriOf(object)}${suffix}?version=active`,
+      {headers: {accept: "text/plain"}, signal: AbortSignal.timeout(750)})).text();
+  }
+
   /** Test classes and methods of an object, without running anything. */
   discover(object) {
     return this.json(`/sap/bc/adt/core/http/unit/object?type=${encodeURIComponent(object.type)}&name=${encodeURIComponent(object.name)}`);

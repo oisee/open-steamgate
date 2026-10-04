@@ -270,7 +270,7 @@ describe("editors/vscode: the extension's logic", function () {
     const {classrunObject} = loadExtension(api);
     const lines = [];
     const output = {show() {}, appendLine: (line) => lines.push(line)};
-    const warning = "osd: running the active version; your saved changes are not activated yet (Ctrl+F3)";
+    const warning = "osd: running the active version; your editor changes are not activated yet (Ctrl+F3)";
     const options = {client: () => ({classrun: async () => {
       expect(lines[0]).to.equal(document.isDirty && document.fileName === file ? warning : "--- classrun ZCL_A ---");
       return {text: "hello", ms: 1};
@@ -286,6 +286,31 @@ describe("editors/vscode: the extension's logic", function () {
     lines.length = 0;
     await classrunObject("ZCL_A", output, false, file, options);
     expect(lines).not.to.include(warning);
+  });
+
+  it("compares saved source with the active ADT include before F9, falling back when unavailable", async () => {
+    const api = vscodeStub();
+    const file = "/project/zcl_a.clas.abap", lines = [], requests = [];
+    let active = "old", unavailable = false;
+    api.window.activeTextEditor = {document: {fileName: file, isDirty: false, getText: () => "new\r\n"}};
+    const client = new Osd("http://local", async (url, options) => {
+      requests.push([url, options]);
+      if (unavailable) throw Error("timeout");
+      return {ok: true, text: async () => active};
+    });
+    client.classrun = async () => ({text: "ok", ms: 1});
+    const run = () => loadExtension(api).classrunObject("ZCL_A", {show() {}, appendLine: line => lines.push(line)},
+      false, file, {client: () => client});
+    await run();
+    expect(lines[0]).to.include("editor changes are not activated");
+    expect(requests[0][0]).to.equal("http://local/sap/bc/adt/oo/classes/zcl_a/source/main?version=active");
+    expect(requests[0][1].signal).to.be.instanceOf(AbortSignal);
+    active = "new\n"; lines.length = 0;
+    await run();
+    expect(lines[0]).to.equal("--- classrun ZCL_A ---");
+    unavailable = true; lines.length = 0;
+    await run();
+    expect(lines[0]).to.equal("--- classrun ZCL_A ---");
   });
 
   it("uses paused debug state for ABAP run and stepping keys", () => {

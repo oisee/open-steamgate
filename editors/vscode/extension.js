@@ -3533,10 +3533,16 @@ async function classrunObject(name, classrunOutput, withDebugger = false, file,
   if (withDebugger) controller.debugNote?.(`classrun ${name}: sending the run`);
   classrunOutput.show(true);
   const document = vscode.window.activeTextEditor?.document;
-  // Source maps identify paths, but do not prove the active source content.
-  // Use the cheap buffer signal until a digest-proven comparison is available.
-  if (document?.isDirty && file && path.resolve(document.fileName) === path.resolve(file)) {
-    classrunOutput.appendLine("osd: running the active version; your saved changes are not activated yet (Ctrl+F3)");
+  if (file && document && path.resolve(document.fileName) === path.resolve(file)) {
+    let changed = document.isDirty;
+    if (!changed && typeof document.getText === "function") {
+      try {
+        const object = adtObjectOf(file);
+        const source = await client().activeSource(object);
+        changed = source.replace(/\r\n/g, "\n") !== document.getText().replace(/\r\n/g, "\n");
+      } catch { /* An unavailable active source leaves the dirty-only hint. */ }
+    }
+    if (changed) classrunOutput.appendLine("osd: running the active version; your editor changes are not activated yet (Ctrl+F3)");
   }
   classrunOutput.appendLine(`--- classrun ${name} ---`);
   try {
