@@ -19,7 +19,11 @@ for (const [file, entries] of Object.entries(allowances)) {
       throw new Error(`test-isolation: ${file}: invalid root identity/count`);
     }
     if (invariant === 'generation' && (!['restored-inputs', 'added-inputs'].includes(entry.drift?.kind) || !Number.isInteger(entry.drift.maxCount) || entry.drift.maxCount < 1)) throw new Error(`test-isolation: ${file}: invalid originating drift`);
-    if (!['temporary-roots', 'generation'].includes(invariant)) throw new Error(`test-isolation: ${file}: unsupported allowance invariant ${invariant}`);
+    if (invariant === 'gen' && (!Array.isArray(entry.files) || !entry.files.length || !entry.files.every(({path, prefix, maxCount, phase, kinds}) => {
+      const identity = path ?? prefix;
+      return (path === undefined) !== (prefix === undefined) && typeof identity === 'string' && identity.startsWith('gen/') && !identity.includes('..') && !identity.includes('\\') && identity !== 'gen/' && (!prefix || prefix.endsWith('/')) && Number.isInteger(maxCount) && maxCount > 0 && (!path || maxCount === 1) && ['import', 'execution'].includes(phase) && Array.isArray(kinds) && kinds.length > 0 && kinds.every((kind) => ['removed', 'changed', 'added'].includes(kind));
+    }))) throw new Error(`test-isolation: ${file}: invalid gen path/prefix/count/phase/kinds`);
+    if (!['temporary-roots', 'generation', 'gen'].includes(invariant)) throw new Error(`test-isolation: ${file}: unsupported allowance invariant ${invariant}`);
   }
 }
 const originalEnv = resources.environmentSnapshot();
@@ -133,7 +137,77 @@ exports.observeGenerationDrift = async ({pack} = {}) => {
 };
 let current;
 const costs = [];
+const genCosts = [];
+let genDiffMs = 0;
+let runGen;
+const genSnapshot = () => {
+  const started = process.hrtime.bigint();
+  const manifest = resources.genManifest();
+  // Keep the first import-entry snapshot even as file baselines and the
+  // digest cache advance. Later files may restore an earlier file's edits.
+  runGen ??= new Map(manifest.map((entry) => [entry.path, entry]));
+  genCosts.push({ms: Number(process.hrtime.bigint() - started) / 1e6, files: manifest.length,
+    ...(genCosts.length === 0 ? {bytes: manifest.reduce((sum, {size}) => sum + size, 0)} : {})});
+  return manifest;
+};
+const genDifference = (before, after, phase, file) => {
+  const started = process.hrtime.bigint();
+  try {
+    const changes = resources.genDifference(before, after).map((change) => ({...change, phase}));
+    const restorations = [];
+    const violations = [];
+    for (const change of changes) {
+      const original = runGen.get(change.path);
+      const restored = !change.error && !original?.error && (change.after === null
+        ? !runGen.has(change.path)
+        : original?.sha256 && change.after.sha256 === original.sha256);
+      (restored ? restorations : violations).push(change);
+    }
+    if (restorations.length) console.log(`test-isolation: ${file}: gen restoration: ${JSON.stringify(restorations)}`);
+    return violations;
+  }
+  catch (error) { return [{error: error.message, phase}]; }
+  finally { genDiffMs += Number(process.hrtime.bigint() - started) / 1e6; }
+};
+const genAllowed = (diff, allowance) => {
+  if (!allowance || !diff.every(({path, error}) => typeof path === 'string' && !error)) return false;
+  const matches = (entry, change) => entry.phase === change.phase && entry.kinds.includes(change.kind) &&
+    (entry.path === change.path || (entry.prefix && change.path.startsWith(entry.prefix)));
+  // Validate every observation before counting unique paths within each
+  // identity's phase/kinds. Overlapping identities each retain their bound.
+  return diff.every((change) => allowance.files.some((entry) => matches(entry, change))) &&
+    allowance.files.every((entry) => new Set(diff.filter((change) => matches(entry, change)).map(({path}) => path)).size <= entry.maxCount);
+};
 const fileChecks = [];
+// With no matching tests Mocha skips even root hooks. Audit completed
+// imports before its end callback computes the CLI exit status.
+const auditImports = (fail) => {
+  for (const entry of fileChecks) {
+    const {file, checked, importGenChanges} = entry;
+    if (checked() || entry.importReported || !importGenChanges.length) continue;
+    entry.importReported = true;
+    const allowance = allowances[file]?.gen;
+    const allowed = genAllowed(importGenChanges, allowance);
+    const message = `test-isolation: ${file}: gen: ${JSON.stringify(importGenChanges)}`;
+    console.error(`${message}${allowed ? ` TEMPORARY ALLOW: ${JSON.stringify(allowance)}` : ''}`);
+    if (!allowed) fail(file, message);
+  }
+};
+const runnerEmit = Mocha.Runner.prototype.emit;
+Mocha.Runner.prototype.emit = function (event, ...args) {
+  if (event === 'end') auditImports((file, message) => {
+    const hook = new Mocha.Hook(`${file}: import gen invariant`);
+    hook.parent = this.suite;
+    hook.file = file;
+    const error = new Error(message);
+    error.code = 'OSD_TEST_ISOLATION';
+    this.fail(hook, error);
+  });
+  return runnerEmit.call(this, event, ...args);
+};
+// Also cover early process exits after completed imports. No async hooks
+// can run here; the normal runner-end audit avoids Mocha overwriting our code.
+process.once('exit', () => auditImports(() => { process.exitCode = process.exitCode || 1; }));
 const intentional = new Map();
 exports.allowGenerationMismatch = (reason) => {
   if (!current || typeof reason !== 'string' || !reason.trim()) throw new Error('allowGenerationMismatch needs a running file and a reason');
@@ -147,12 +221,13 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
   if (event === 'pre-require') {
     if (args[2]?.options?.parallel || args[2]?.options?.isWorker) throw new Error('osd-test-isolation requires serial mocha');
     resources.setOwner(file);
-    this.osdLoading = {file, env: resources.environmentSnapshot(), suites: this.suites.length, tests: this.tests.length, onlySuites: this._onlySuites.length, onlyTests: this._onlyTests.length,
+    this.osdLoading = {file, gen: genSnapshot(), env: resources.environmentSnapshot(), suites: this.suites.length, tests: this.tests.length, onlySuites: this._onlySuites.length, onlyTests: this._onlyTests.length,
       hooks: Object.fromEntries(hooks.map((key) => [key, this[key].length]))};
     return emit.call(this, event, ...args);
   }
   const result = emit.call(this, event, ...args);
   const loading = this.osdLoading;
+  const importGenChanges = genDifference(loading.gen, genSnapshot(), 'import', file);
   const suites = this.suites.splice(loading.suites);
   const tests = this.tests.splice(loading.tests);
   const fileHooks = Object.fromEntries(hooks.map((key) => [key, this[key].splice(loading.hooks[key])]));
@@ -175,7 +250,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
     resources.setOwner(file);
     await dialogReady;
     const {generationStateSnapshot} = await moduleOf('osd-build.mjs');
-    before = {env: resources.environmentSnapshot(), generation: generationStateSnapshot()};
+    before = {gen: genSnapshot(), env: resources.environmentSnapshot(), generation: generationStateSnapshot()};
     generationBaseline = allowances[file]?.generation && before.generation.live !== null ? await inputSnapshot() : undefined;
     if (generationBaseline) generationBaseline.beforeTree = before.generation.tree;
     if (allowances[file]?.generation?.drift.kind === 'restored-inputs' || lastGeneration?.inactive !== undefined) {
@@ -224,6 +299,8 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
     const ownedPids = new Set(after.resources.children.map(({pid}) => pid));
     after.serving = after.serving.filter(({pid}) => ownedPids.has(pid));
     const violations = [];
+    const genChanges = [...importGenChanges, ...(before ? genDifference(before.gen, genSnapshot(), 'execution', file) : [])];
+    if (genChanges.length) violations.push(['gen', genChanges]);
     if (after.dialog.held || after.dialog.waiting || after.dialog.open.length) violations.push(['dialog', {before: {held: false, waiting: 0, open: []}, after: after.dialog}]);
     const inherited = sameGeneration(lastGeneration, before?.generation ?? after.generation);
     const unchanged = sameGeneration(before?.generation ?? lastGeneration, after.generation);
@@ -251,6 +328,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
       const message = `test-isolation: ${file}: ${invariant}: ${JSON.stringify(diff)}`;
       const allowance = allowances[file]?.[invariant];
       let allowed = false;
+      if (invariant === 'gen') allowed = genAllowed(diff, allowance);
       if (invariant === 'temporary-roots' && allowance) {
         const counts = new Map(allowance.roots.map(({prefix}) => [prefix, 0]));
         allowed = after.resources.roots.every((path) => {
@@ -293,7 +371,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
     if (failures.length) { const error = new Error(failures.join('\n')); if (violations.length) error.code = 'OSD_TEST_ISOLATION'; throw error; }
   });
   const finalHook = wrapper._afterAll.at(-1);
-  fileChecks.push({file, checked: () => checked, hook: finalHook});
+  fileChecks.push({file, checked: () => checked, hook: finalHook, importGenChanges});
   return result;
 };
 exports.mochaHooks = {
@@ -326,6 +404,12 @@ exports.mochaHooks = {
     const sorted = [...costs].sort((a, b) => a - b);
     const median = sorted.length ? (sorted[Math.floor((sorted.length - 1) / 2)] + sorted[Math.floor(sorted.length / 2)]) / 2 : 0;
     console.log(`test-isolation: ${costs.length} files checked; ${(costs.reduce((sum, ms) => sum + ms, 0)).toFixed(3)} ms total; median ${median.toFixed(3)} ms/file`);
+    const genSorted = genCosts.map(({ms}) => ms).sort((a, b) => a - b);
+    const genMedian = genSorted.length ? (genSorted[Math.floor((genSorted.length - 1) / 2)] + genSorted[Math.floor(genSorted.length / 2)]) / 2 : 0;
+    console.log(`test-isolation: gen manifests: ${genCosts.length} boundaries; ${genCosts.at(0)?.files ?? 0} files at start; ${genCosts.reduce((sum, {ms}) => sum + ms, 0).toFixed(3)} ms total; median ${genMedian.toFixed(3)} ms/boundary`);
+    const genStart = genCosts.at(0);
+    console.log(`test-isolation: gen baseline hashing/manifest: ${genStart?.files ?? 0} files; ${((genStart?.bytes ?? 0) / 1e6).toFixed(3)} MB; ${(genStart?.ms ?? 0).toFixed(3)} ms`);
+    console.log(`test-isolation: gen comparison/hash: ${genDiffMs.toFixed(3)} ms; gen observation total: ${(genDiffMs + genCosts.reduce((sum, {ms}) => sum + ms, 0)).toFixed(3)} ms`);
     if (missed.length) {
       const error = new Error(missed.map((error) => error.message).join('\n'));
       error.code = 'OSD_TEST_ISOLATION';

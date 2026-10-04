@@ -1,5 +1,78 @@
 # Isolation detector run record
 
+## Generated-output invariant, working tree over 9bd399d8 (2026-10-04)
+
+The new `gen` invariant observes sorted relative paths, size and `mtimeMs`
+before/after both file imports and execution. Only differing files still
+present receive content hashes. Removed files are named from baseline metadata.
+A metadata rewrite remains a change even when bytes are identical. No detector
+path restores output; this check is separate from the tree hash excluding `gen/`.
+
+The deletion regression was run before changing the hook: its inner three
+files all passed, so the parent assertion failed (one pass, one failure).
+With the invariant, the deleting file goes red naming
+`gen/pack/probe.clas.abap`, the file stays deleted and unchanged neighbors pass.
+Final focused detector/runner validation: **118 passing, exit 0**. Cases cover
+import-time sweeps in unselected files, added/same-size changed outputs, no
+reads of unchanged contents, bounded allowances and unallowable hash errors.
+
+A hooked scan ran `shadowed-objects`, `stg-compile`, `osd-packs`, `osd-bsp`,
+`segw` and `generation-hash`: **86 passing, one invariant failure**.
+`test/shadowed-objects.mjs` calls `compileAll("src", "gen/stg")` during import,
+omitting generated CDS and pack models. It removed **50 files** under four CDS
+service folders plus `zvdb_100`, and rewrote **74 files** under nine retained
+service folders. Its removed `zcl_zvdb_100_dpc.clas.abap` is the superclass
+of the pack's hand-written DPC_EXT, needed by the old xref fixture.
+[PR #575's final commit](https://github.com/oisee/open-steamgate/pull/575)
+describes regenerating that fixture independently of swept pack outputs.
+Other scanned files inherited the state and were not blamed. The allowance
+bounds each of the 14 service prefixes by its observed file count and links
+to [the stoker repair](backlog/misc.md#isolation-shadowed-objects-gen).
+An external transpile restored `gen/` before the ADT run.
+
+A standalone metadata benchmark on the real generated tree used 10 warm-ups
+and 101 timed snapshots: **582 files, 3.721 ms median per boundary**.
+Run accounting includes import observations and comparisons as well as
+execution snapshots; it measures added observation work, not an estimated
+causal change in total suite wall time.
+
+The first ADT mode-0 fragment run checked 48 files: **2,311 passing, one
+generation hook failure**, with no `gen` violation. Shard 1 was started
+before the final ADT cases finished; its `cds-check` fixture temporarily
+edited checkout sources during `osd-adt-fork`'s generation snapshot. That
+overlap invalidates the run as an isolation validation and is retained as
+`adt-overlap.log`, with no allowance added. Its `gen` accounting was
+192 manifest boundaries, 748.591 ms manifest time, 3.751 ms median per
+boundary, 27.118 ms comparison/hash time, **775.710 ms added observation**.
+
+Required shard 1 via `node tools/osd-suites.mjs --shard 1/4`: **1,974
+passing, 27 pending, exit 0**, 71 files checked. Reporter completion is true,
+with zero failures and zero internal retries; the retry report is empty.
+No new `gen` leak was observed. Its manifest total was 1,107.694 ms over
+284 boundaries, median 3.807 ms/boundary, plus 39.143 ms comparison/hash
+time: **1,146.837 ms total added `gen` observation**.
+
+After shard 1 finished, an external transpile established the baseline and
+the complete sorted ADT fragment ran sequentially with
+`OSD_ADT_ONE_RUNTIME=0` and `--require ./tools/osd-test-isolation.cjs`:
+**2,311 passing, zero failures, exit 0**, 48 files, 441.078 s wall time.
+Its 192 manifest boundaries cost **744.029 ms**, median **3.826 ms/boundary**;
+comparison/hash cost **26.835 ms**, for **770.865 ms total added `gen`
+observation work**. There were no `gen` violations or new ADT allowances.
+
+The six-file originating-sweep scan was repeated with the bounded exception:
+**86 passing, zero failures, exit 0**. It still printed all 124 `gen` changes
+and the `stoker` ownership/backlog evidence as `TEMPORARY ALLOW`. Only
+`shadowed-objects` was named; other files remained unblamed. An external
+transpile after the scan restored generated outputs. Final suite registration,
+changed-file leak scan (seven files, zero matches) and `git diff --check` pass.
+
+Every heavy command used `OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4`
+and `tools/osd-heavy.sh`; the build ran first. Local evidence is retained
+under `.local/gen-invariant/` (ignored): red/green logs, originating sweep scan,
+ADT/shard logs and manifest benchmark output. HEAD and branch are unchanged;
+no commit or Git metadata write was made.
+
 ## Fix round 2, working tree over 822da6d7 (2026-10-04)
 
 The warm proof fixture now generates its UUID with `randomUUID()`, matching

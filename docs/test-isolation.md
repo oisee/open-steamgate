@@ -14,7 +14,11 @@ Mocha's pre/post-require file events to place every file's suites, root tests
 and file hooks into a file suite. Its final hook checks after the file's own
 `after` hooks, including when a file hook throws. Pending suites are checked
 as well. Files with no selected tests receive a final root audit of their
-import-time state, without invoking their unexecuted cleanup hooks. Parallel Mocha is refused; the suite runner uses serial Mocha inside
+import-time state, without invoking their unexecuted cleanup hooks. A runner-end
+audit reports unchecked completed imports even when every test is excluded
+and Mocha skips the root hooks; unallowed changes fail the run. A synchronous
+exit fallback also reports completed imports if the process exits early.
+Parallel Mocha is refused; the suite runner uses serial Mocha inside
 each independent shard process. A file boundary adds its path to title paths.
 
 The checks never kill children, remove directories, reset environment variables,
@@ -29,6 +33,25 @@ release a lock, rebuild code or switch generations:
   by the builder's own hash function, including libraries and generators.
   Trees with no live generation have nothing to compare. Owner:
   `osd-build.mjs`, `generationStateSnapshot()`.
+- **gen:** generated outputs under checkout `gen/` keep the same paths and
+  contents. Owner:
+  `osd-test-resources.cjs`, `genManifest()` / `genDifference()`. Snapshots
+  read directory entries and metadata, caching a SHA-256 digest per absolute
+  path, size, `mtimeMs`, `ctimeMs` and `ino`. Each file is hashed once when first
+  seen; unchanged metadata reuses its cached digest. A difference in any of
+  these fields triggers a content read and comparison with the digest retained
+  in the baseline snapshot. Content writes change ctime, which `utimes` cannot
+  restore, so same-size edits with restored mtime still compare bytes.
+  Equal bytes pass and update the cache: legitimate builds regenerate outputs
+  with identical bytes and a newer mtime, which is not a leak. Likewise, chmod,
+  rename or link operations that touch ctime cost a hash but equal bytes pass.
+  Different bytes are `changed`; added and removed paths fail unless they
+  restore the run-start state described below. Evidence names each path
+  and retains baseline metadata and digests, including for deleted files.
+  Hash errors stay red even under an allowance.
+  This detects sweeps that the generation hash cannot see: `gen/` is an
+  output and excluded from that hash. It does not validate pre-existing
+  output against a build manifest or assign a stale run start to a file.
 - **children:** no serving child or asynchronous spawned process remains
   alive. Owner: `osd-runtime.mjs`, `servingStateSnapshot()`, and
   `osd-test-resources.cjs`, `resourceStateSnapshot(file)`.
@@ -51,7 +74,8 @@ records; removed directories disappear from snapshots. Temporary roots use
 absolute paths resolved against the cwd at helper invocation, including callback
 and promise completion after a cwd change. This does not enumerate
 arbitrary directories, grandchildren, or processes started by native extensions.
-A run terminated during import or with `process.exit()` cannot finish checks.
+A run terminated during import or with `process.exit()` cannot finish all checks;
+the exit audit can still report gen changes from already completed imports.
 
 ## Intentional generation changes
 
@@ -81,6 +105,28 @@ paths; environment evidence names the changed keys. An unchanged inherited gener
 boundary. The detector re-baselines its observation state for the next file;
 a new live link, missing generation, hash error or additional tree drift remains red.
 The detector does not re-baseline the filesystem.
+The `gen` check compares both import entry/exit and execution entry/exit
+(after user cleanup). Import-time generator calls therefore belong to the
+file importing them, including files with no selected tests. Each file gets
+its own observation baseline; a downstream file that leaves already missing
+outputs alone passes. The first import-entry manifest is also retained as the
+run-start baseline (paths and digests). At each import or execution boundary,
+a change that returns a path to that state is a restoration: re-adding or
+rewriting it with its run-start digest, or removing a path absent at run start.
+Restorations pass without an allowance and print an informational
+`test-isolation: test/example.mjs: gen restoration: [...]` naming the restoring
+file, paths, phase and before/after evidence. They do not excuse the originating
+mutation or any other changes made by the restoring file. Re-adding different
+bytes or adding a path absent at run start remains red. Hash errors cannot
+prove restoration and stay red.
+For example, the allowed import sweep in `shadowed-objects.mjs` can remove
+generated services; a later legitimate build in `vscode-debug.mjs` that puts
+back their run-start bytes reports restorations and passes.
+Directory symlinks are not traversed; changed symlinks
+are hashed by link target. Empty directories are outside this metadata manifest.
+A change and full restore between two boundaries is invisible to a boundary
+observer, by design: changed metadata may trigger a hash, but restored paths
+and identical bytes pass.
 If the first file has identical entry and exit hashes but `live` differs from
 `tree`, the run began with a stale generation. An external build before the run
 restores that baseline; identical snapshots alone do not establish an exemption.
@@ -91,6 +137,19 @@ Each invariant entry requires `reason`, `owner` and a `backlog` item link;
 malformed entries fail at load time. Root exceptions enumerate basename prefixes
 and maximum surviving counts. A different prefix or an excess count remains red.
 Generation exceptions describe the originating input changes and maximum count.
+`gen` exceptions use a nonempty `files` array of `{path, maxCount: 1, phase, kinds}` or
+`{prefix, maxCount, phase, kinds}` identities rooted under `gen/`. Each identity
+requires `phase: 'import' | 'execution'` and a nonempty `kinds` array containing
+only `'removed'`, `'changed'` or `'added'`. Evidence preserves each observation's
+phase and kind, so an import allowance cannot waive an execution mutation of
+the same path. Prefixes end in `/`
+and must name a narrower directory than `gen/` itself. Every changed path
+must match an identity and every identity's count must stay within its bound;
+overlapping identities cannot multiply a bound. Counts cover unique paths
+matching each identity's phase and kinds. The shadowed-objects exception allows
+only the observed import removals and rewrites, with its existing prefix/count
+bounds. Evidence is still printed in full. The
+`allowGenerationMismatch()` API cannot waive this separate invariant.
 For added trace sidecars the detector proves that excluding exactly those new
 paths returns the baseline hash. For restored activation inputs the originating
 fixture calls the already-loaded detector's `observeGenerationDrift()` while
@@ -111,3 +170,19 @@ is complete. See the [run report](test-isolation-runs.md).
 
 Each checked file prints total baseline and final snapshot time in milliseconds;
 this includes detector proof captures and excludes test work and user cleanup.
+The run also prints the one-time `gen` baseline hashing/manifest cost (files,
+decimal MB and milliseconds), manifest boundary count, initial file count, median
+milliseconds per boundary, comparison/hash time and total added observation
+time. This total includes import observations as well as execution snapshots;
+normally there are four manifests per selected file.
+
+Local measurement (2026-10-04, Node 22.23.3, cached filesystem): the real `gen/`
+contained 582 files totaling 5.107 MB. With ctime and inode in the cache key,
+its initial manifest took 25.6 ms, including 14.5 ms reading and hashing content,
+with exactly one read and SHA-256 per file. Across 100 subsequent unchanged
+snapshot/comparison boundaries, the
+median was 4.39 ms, with zero content reads or hashes (454.5 ms total).
+A same-session measurement of the previous key gave 26.1 ms initially and
+4.39 ms per unchanged boundary (453.0 ms total). These are local costs,
+not CI timing guarantees. The instrumented measurement separates filesystem
+reads and hash creation/update/digest from the complete manifest capture.

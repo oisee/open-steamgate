@@ -194,3 +194,4 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
 - <a id="isolation-osd-routes-temporary-roots"></a> `test/osd-routes.mjs` — `temporary-roots`; evidence: the isolated route inventory case at test/osd-routes.mjs:56 creates osd-routes-* without cleanup. Shared shard 3 on base 11122e9f observed one surviving root. Owner: **stoker**.
 
 - <a id="isolation-prove-on-system-temporary-roots"></a> `test/prove-on-system.mjs` — `temporary-roots`; evidence: fake-system proof cases use run() at test/prove-on-system.mjs:364 and explicit receipt directories, each creating osd-prove-runs-* without removal. Shared shard 3 on base 11122e9f observed 80 roots. Receipt cleanup belongs to the fixture owner. Owner: **stoker**.
+
