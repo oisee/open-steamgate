@@ -59,7 +59,9 @@ function inspection() {
     if (["Character", "Hex", "Packed"].includes(name) && !Number.isInteger(data(value, "length"))) return undefined;
     if (["Character", "String", "Date", "Time", "Hex", "XString"].includes(name)) return typeof raw === "string" ? name : undefined;
     if (["Integer", "Float"].includes(name)) return typeof raw === "number" ? name : undefined;
-    if (["Integer8", "Packed"].includes(name)) return typeof raw === "bigint" ? name : undefined;
+    if (name === "Integer8") return typeof raw === "bigint" ? name : undefined;
+    // Packed stores safe scaled integers as Number and larger values as bigint.
+    if (name === "Packed") return typeof raw === "bigint" || Number.isSafeInteger(raw) ? name : undefined;
     if (["Structure", "Table", "HashedTable", "ABAPObject", "FieldSymbol", "DataReference"].includes(name)) return name;
     return undefined;
   };
