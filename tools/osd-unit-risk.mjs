@@ -70,6 +70,13 @@ const executableText = (expression) => upper(expression.getTokens().map((token) 
 const referenceTypes = (text) => new Map([...text.matchAll(/(?:VALUE\(\s*)?(<[^>]+>|[\w]+)\s*\)?\s+TYPE\s+REF\s+TO\s+([/\w]+)/g)].map((m) => [m[1], m[2]]));
 const location = (node, statement) => ({object: node.object, method: `${node.className}=>${node.name}`,
   file: node.file, line: statement.getStart().getRow(), column: statement.getStart().getCol()});
+const literalName = (expression) => {
+  const tokens = expression?.getTokens() ?? [];
+  if (tokens.length !== 1) return undefined;
+  const text = tokens[0].getStr(), quote = text[0];
+  if (!["'", "`"].includes(quote) || text.at(-1) !== quote) return undefined;
+  return upper(text.slice(1, -1).replaceAll(quote + quote, quote)).trim();
+};
 
 export class UnitRisk {
   constructor(store) { this.store = store; }
@@ -162,6 +169,18 @@ export class UnitRisk {
     if (node.body) return node.body;
     const types = new Map([...node.owner.types, ...node.types]), ops = [];
     const emit = (statement, op) => ops.push({statement, ...op});
+    const designation = (expression, statement, reason, classRequired = false) => {
+      const name = literalName(expression);
+      if (name === undefined) { emit(statement, {action: "unknown", reason}); return; }
+      // Absolute RTTI class names, reference types and static component names
+      // all identify the class to load. Ordinary literal local/DDIC names do not.
+      const absolute = name.match(/\\CLASS=([/\w]+)/)?.[1];
+      const reference = name.match(/^REF\s+TO\s+([/\w]+)/)?.[1];
+      const component = name.match(/^([/\w]+)=>/)?.[1];
+      const type = absolute ?? reference ?? component ?? name;
+      if (graph.lookup(node.owner, type) || absolute || reference || component || classRequired)
+        emit(statement, {action: "init", type});
+    };
     // Native bodies have no ABAP call AST; even an empty or READ-ONLY AMDP is
     // a database escape, as are ADBC calls without available library bodies.
     if (node.amdp) emit(node.at, {action: "write", kind: "AMDP call"});
@@ -219,6 +238,14 @@ export class UnitRisk {
           receiver = receiverOf(child);
         } else if (kind === "MethodCall" || kind === "AttributeName" && i === children.length - 1) {
           const method = upper((child.findDirectExpression?.(Expressions.MethodName) ?? child).concatTokens());
+          if (/^CL_ABAP_\w*DESCR$/.test(receiver.type ?? "") && method === "DESCRIBE_BY_NAME") {
+            const params = child.findDirectExpression(Expressions.MethodCallParam)
+              ?? (kind === "AttributeName" ? statement.findDirectExpression(Expressions.MethodCallBody) : undefined);
+            const named = params?.findAllExpressions(Expressions.ParameterS)
+              .find((p) => upper(p.findDirectExpression(Expressions.ParameterName)?.concatTokens()) === "P_NAME");
+            const target = named?.findDirectExpression(Expressions.Source) ?? params?.findDirectExpression(Expressions.Source);
+            designation(target, statement, "a dynamic RTTI DESCRIBE_BY_NAME call");
+          }
           emit(statement, {action: "call", ...receiver, method});
           if (adbc(receiver.type) || adbcOwner(graph, graph.lookup(node.owner, receiver.type)))
             emit(statement, {action: "write", kind: "ADBC call"});
@@ -247,9 +274,10 @@ export class UnitRisk {
       else if (verdict && !(kind === "NativeSQL" && (nativeBlock || node.amdp))) emit(statement, {action: "write", kind: verdict});
       if (kind === "ExecSQL") nativeBlock = true;
       if (kind === "EndExec") nativeBlock = false;
-      const dynamicMethod = /(?:->|=>)\s*\(/.test(executable) || /^CALL METHOD\s+\(/.test(executable);
+      const dynamicMethod = kind === "Call" && (/(?:->|=>)\s*\(/.test(executable) || /^CALL METHOD\s+\(/.test(executable));
       if (dynamicMethod) emit(statement, {action: "unknown", reason: "a dynamic method call"});
       const classification = statementKindOf(kind);
+      const designationLabel = {Assign: "ASSIGN", AssignLocalCopy: "ASSIGN LOCAL COPY", CreateData: "CREATE DATA", Describe: "DESCRIBE"}[kind];
       if (classification === "unknown" || classification === "write" && !verdict)
         emit(statement, {action: "unknown", reason: `an unknown ${kind} statement`});
 
@@ -261,7 +289,11 @@ export class UnitRisk {
         for (let i = 0; i < children.length; i++) {
           if (children[i].get().constructor.name === "StaticArrow") {
             const previous = children[i - 1];
-            if (previous?.get().constructor.name === "ClassName")
+            if (previous?.get().constructor.name === "Dynamic")
+              designation(previous.findDirectExpression(Expressions.Constant) ?? previous.findDirectExpression(Expressions.FieldChain),
+                statement, `a dynamic ${designationLabel ?? kind} class designation`, true);
+            else if (previous?.get().constructor.name === "ClassName"
+                || classification === "designation" && /^[/\w]+$/.test(previous?.concatTokens() ?? ""))
               emit(statement, {action: "init", type: upper(previous.concatTokens())});
             else emit(statement, {action: "unknown", reason: "an unresolved static access"});
           }
@@ -269,6 +301,33 @@ export class UnitRisk {
         }
       };
       scanStatic(statement);
+      if (classification === "designation") {
+        const scanDesignation = (expression) => {
+          const children = expression.getChildren?.() ?? [];
+          for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            if (child.get().constructor.name === "Dynamic") {
+              // A dynamic table key cannot name a class. StaticArrow's left
+              // operand was already handled with the required-class policy.
+              if ((kind === "CreateData" && !["TYPE", "TO", "OF", "LIKE"].includes(upper(children[i - 1]?.concatTokens())))
+                  || children[i + 1]?.get().constructor.name === "StaticArrow") continue;
+              const target = child.findDirectExpression(Expressions.Constant) ?? child.findDirectExpression(Expressions.FieldChain);
+              const arrow = children[i - 1]?.get().constructor.name;
+              // The right side names an attribute, even when its spelling
+              // happens to match an unrelated class's name.
+              if (!["StaticArrow", "InstanceArrow"].includes(arrow) || literalName(target) === undefined)
+                designation(target, statement, `a dynamic ${designationLabel} designation`);
+              if (arrow === "InstanceArrow") {
+                const source = children[i - 2];
+                const field = source?.findDirectExpression(Expressions.FieldChain) ?? source;
+                const type = field && fieldType(field);
+                if (graph.lookup(node.owner, type)) emit(statement, {action: "init", type});
+              }
+            } else if (child.getChildren) scanDesignation(child);
+          }
+        };
+        scanDesignation(statement);
+      }
       if (kind === "CreateObject" && !verdict?.startsWith("a dynamic")) {
         const target = statement.findDirectExpression(Expressions.Target);
         const name = statement.findDirectExpression(Expressions.ClassName)?.concatTokens();

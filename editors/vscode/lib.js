@@ -388,7 +388,7 @@ function riskWarning(testClass, found = {}) {
       return `RISK LEVEL HARMLESS, but the tests may reach a database write: call analysis could not complete (${found.riskError}). It runs one at a time while the target is unknown.`;
     const dynamic = found.dynamicCalls?.[0];
     if (dynamic === undefined) return undefined;
-    const reason = dynamic.kind?.startsWith("an unknown ") ? dynamic.kind
+    const reason = dynamic.kind?.startsWith("an unknown ") || /^a dynamic (?:ASSIGN|CREATE DATA|DESCRIBE|RTTI)\b/.test(dynamic.kind ?? "") ? dynamic.kind
       : dynamic.kind?.includes("dynamic") ? "a dynamic call" : "an unresolved call";
     return `RISK LEVEL HARMLESS, but the tests may reach a database write through ${reason} in ${dynamic.method ?? dynamic.object} (${dynamic.file}:${dynamic.line}). It runs one at a time while the target is unknown.`;
   }

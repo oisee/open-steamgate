@@ -3,11 +3,11 @@
 // coverage test and give an unknown finding until someone classifies it.
 const groups = {
   harmless: `
-    Add AddCorresponding Append Assert Assign AssignLocalCopy AuthorityCheck
+    Add AddCorresponding Append Assert AuthorityCheck
     Break BreakId Case CaseType Catch CatchSystemExceptions Check
     Clear CloseCursor Collect Compute Concatenate Condense Continue Convert
-    ConvertText CreateData Data DataBegin DataEnd DeleteInternal DeleteMemory
-    Describe Divide Do Else ElseIf EndAt EndCase EndCatch EndDo EndIf EndLoop
+    ConvertText Data DataBegin DataEnd DeleteInternal DeleteMemory
+    Divide Do Else ElseIf EndAt EndCase EndCatch EndDo EndIf EndLoop
     EndOn EndProvide EndSelect EndTry EndWhile EndWith Exit FetchNextCursor
     FieldSymbol Find Free FreeMemory GetBit GetCursor GetLocale GetParameter
     GetReference GetRunTime GetTime If Import InsertInternal Local Loop
@@ -36,6 +36,9 @@ const groups = {
   // expression walk (which also runs for assignments, reads and control flow).
   call: `Call CallFunction`,
   construction: `CreateObject Raise`,
+  // Dynamic data/type designations can load classes without constructing an
+  // instance. Their literal names and unknown targets need a separate audit.
+  designation: `Assign AssignLocalCopy CreateData Describe`,
   write: `
     InsertDatabase UpdateDatabase ModifyDatabase DeleteDatabase MergeDatabase
     Commit Rollback CommitEntities RollbackEntities ModifyEntities

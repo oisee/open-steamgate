@@ -22,6 +22,17 @@ writes initialize the class and its entire superclass chain. Constant access
 is included conservatively; type-only references such as `TYPE class=>type`
 remain declarations. Instantiation also follows the parents' instance
 constructors, preserving the concrete receiver through `super->constructor`.
+Dynamic data/type designations in `ASSIGN` (including component access and
+`CASTING TYPE`), `ASSIGN LOCAL COPY` and `CREATE DATA` also initialize literal
+class targets. This includes `class=>attribute`, `REF TO class` and absolute
+RTTI `\CLASS=class` names. `DESCRIBE` static component operands and RTTI
+`describe_by_name` calls, including named parameters and legacy `CALL METHOD`,
+follow the same superclass initialization chain. Non-literal names produce
+uncertainty naming the statement and source position, without expanding to
+unrelated classes. Literal local/DDIC names, ordinary local/component access
+and `ASSIGN dref->*` remain quiet. Dynamic attribute access through a typed
+instance also initializes its known class; an unknown attribute name keeps
+the separate uncertainty finding.
 Assertion methods are followed when
 called; the test runner is not implicitly a root.
 
@@ -180,3 +191,21 @@ kinds, plus the parser's synthetic kinds (including NativeSQL and Unknown).
 OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh node node_modules/mocha/bin/mocha.js \
   test/unit-risk-calls.mjs --grep 'critic r2|fleet fixture|statement registry'
 ```
+
+## Round 4 regression proof
+
+Before changing the analyzer, the critic's literal dynamic `ASSIGN` regression
+failed (**0 passing / 1 failing**) with **1 reached object / 0 writes /
+0 uncertainties**. With the fix it reaches **2 objects / 1 write /
+0 uncertainties**, and the warning shows the test-to-class-constructor path.
+Related regressions cover literal and non-literal data/type names, dynamic
+class and attribute names, superclass initialization, RTTI call forms, and
+local/data-reference accesses. The fleet fixture remains **2 objects /
+0 writes / 0 uncertainties** before and after this round.
+
+The repository's token tests call `ASSERT_EQUALS`, whose table-comparison
+helper reaches RTTI's `CREATE DATA ref TYPE (p_name)`. That non-literal type
+now contributes uncertainty and schedules the object serially; there is no
+framework exemption. Its integration regression checks that finding, and
+the separate runtime regression explicitly enables the guard to verify that
+the actual read-only run still passes.

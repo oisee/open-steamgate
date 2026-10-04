@@ -38,7 +38,7 @@ describe("tools/osd-unit-risk: a declared RISK LEVEL against what the test reach
     expect(scheduledRisk({riskLevel: "critical", riskLevelDeclared: true}, [])).to.equal("critical");
   });
 
-  it("keeps writing SEGW tests DANGEROUS and a read-only test HARMLESS", async () => {
+  it("keeps writing SEGW tests DANGEROUS and exposes RTTI uncertainty in assertion helpers", async () => {
     const segw = await runner.withRisk(runner.classes("CLAS", "ZCL_STG_SEGW_TEST"));
     expect(segw.writesTotal).to.be.greaterThan(0);
     // the test's own statements are named first
@@ -50,11 +50,14 @@ describe("tools/osd-unit-risk: a declared RISK LEVEL against what the test reach
 
     const tokens = await runner.withRisk(runner.classes("CLAS", "ZCL_OSD_ABAP_TOKENS"));
     expect(tokens.writesTotal, JSON.stringify(tokens.writes)).to.equal(0);
+    // ASSERT_EQUALS compares tables through RTTI. Its describe_by_name body
+    // executes CREATE DATA TYPE (p_name), whose runtime type can name a class.
+    expect(tokens.dynamicCallsTotal).to.be.greaterThan(0);
+    expect(tokens.dynamicCalls.some((c) => c.method === "CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME"
+      && c.kind === "a dynamic CREATE DATA designation")).to.equal(true);
     for (const testClass of tokens.classes) {
-      expect(testClass, testClass.name).to.include({schedule: testClass.riskLevelDeclared ? testClass.riskLevel : "dangerous"});
-      expect(testClass.guard).to.equal(testClass.schedule === "harmless");
+      expect(testClass, testClass.name).to.include({schedule: "dangerous", guard: false});
     }
-    expect(tokens.classes.some((c) => c.guard), "at least one guarded class to run below").to.equal(true);
   });
 
   // the runtime half, against real runs: a guarded class that writes fails
@@ -84,9 +87,12 @@ describe("tools/osd-unit-risk: a declared RISK LEVEL against what the test reach
     expect(plan.classes.every((c) => c.schedule === "dangerous" && c.guard === false)).to.equal(true);
   });
 
-  it("a guarded class that reaches no write passes", async () => {
-    const plan = await runner.withRisk(runner.classes("CLAS", "ZCL_OSD_ABAP_TOKENS"));
-    const result = await runner.runDetached("CLAS", "ZCL_OSD_ABAP_TOKENS", {plan});
+  it("the runtime guard permits a read-only run even when static RTTI targets are uncertain", async () => {
+    const plan = runner.classes("CLAS", "ZCL_OSD_ABAP_TOKENS");
+    // Exercise the runtime guard explicitly; discovery above correctly keeps
+    // this object's unknown RTTI targets serial and unguarded by default.
+    const guarded = {...plan, classes: plan.classes.map((c) => ({...c, guard: true}))};
+    const result = await runner.runDetached("CLAS", "ZCL_OSD_ABAP_TOKENS", {plan: guarded});
     expect(result.ok, JSON.stringify(result.testClasses.flatMap((c) => c.testMethods.flatMap((m) => m.alerts))).slice(0, 800)).to.equal(true);
     expect(result.counts.methods).to.be.greaterThan(0);
   });
