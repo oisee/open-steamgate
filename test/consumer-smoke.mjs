@@ -55,14 +55,27 @@ describe("consumer smoke runner", function () {
     assert.equal(record.timedOut, false);
   });
 
-  it("applies the same protection to real npm install lifecycle scripts", () => {
-    writeFileSync(join(consumer, "package.json"), JSON.stringify({name: "smoke-fixture", version: "1.0.0", scripts: {postinstall: "node install.cjs"}}));
-    writeFileSync(join(consumer, "package-lock.json"), JSON.stringify({name: "smoke-fixture", version: "1.0.0", lockfileVersion: 3,
-      packages: {"": {name: "smoke-fixture", version: "1.0.0", hasInstallScript: true}}}));
-    writeFileSync(join(consumer, "install.cjs"), probe);
+  it("applies the same protection to real npm install lifecycle scripts", async () => {
+    mkdirSync(join(consumer, "dependency"));
+    writeFileSync(join(consumer, "package.json"), JSON.stringify({name: "smoke-fixture", version: "1.0.0",
+      dependencies: {"smoke-dependency": "file:dependency"}}));
+    writeFileSync(join(consumer, "dependency", "package.json"), JSON.stringify({name: "smoke-dependency", version: "1.0.0",
+      scripts: {postinstall: "node install.cjs"}}));
+    writeFileSync(join(consumer, "dependency", "install.cjs"), probe);
+    // Copy the local dependency so npm treats its lifecycle like a registry package.
+    writeFileSync(join(consumer, ".npmrc"), "install-links=true\n");
     // Exercise explicit forwarding even when npm is configured to hide lifecycle output.
     const installEnv = {...env, npm_config_cache: join(dir, "npm-cache"), npm_config_offline: "true",
       npm_config_audit: "false", npm_config_foreground_scripts: "false"};
+    let output = "";
+    const install = await runConsumer("npm", ["install"], {
+      cwd: consumer, env: installEnv, log: join(dir, "install.log"), output: {write: chunk => { output += chunk; }},
+    });
+    assert.equal(install.code, 0, output);
+    fenced(output);
+    assert.match(output, /\n\{\}\n/);
+    for (const key of commandFiles) assert.equal(readFileSync(env[key], "utf8"), "");
+    // npm install creates the lockfile used by the CLI's npm ci path.
     const result = cli("install", undefined, consumer, installEnv);
     assert.equal(result.status, 0, result.stderr);
     const token = fenced(result.stdout);

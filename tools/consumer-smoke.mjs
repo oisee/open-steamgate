@@ -25,6 +25,9 @@ export async function runConsumer(command, args, {env = process.env, cwd = proce
   timeoutMs = 6 * 60_000, log, output = process.stdout} = {}) {
   const safeEnv = Object.fromEntries(Object.entries(env).filter(([name]) =>
     !/^GITHUB_(STEP_SUMMARY|ENV|OUTPUT|PATH|STATE)$|^ACTIONS_/i.test(name)));
+  // npm install/ci must forward dependency lifecycle output into the fence,
+  // even when the caller configures npm to run those scripts in the background.
+  safeEnv.npm_config_foreground_scripts = "true";
   const token = randomUUID();
   const start = performance.now();
   let timedOut = false;
@@ -81,9 +84,8 @@ async function main() {
     }
     mkdirSync(results, {recursive: true});
     const name = mode === "install" ? "install" : key;
-    // npm versions differ in lifecycle verbosity; always forward it inside the fence.
     const record = await runConsumer(mode === "install" ? "npm" : process.execPath,
-      mode === "install" ? ["ci", "--foreground-scripts"] : [`test/${check.file}.mjs`], {
+      mode === "install" ? ["ci"] : [`test/${check.file}.mjs`], {
         env: {...process.env, ...check?.env}, timeoutMs: check?.timeoutMs,
         log: join(results, `${name}.log`),
       });
