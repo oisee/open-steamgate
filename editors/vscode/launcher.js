@@ -1182,9 +1182,8 @@ class Launcher extends EventEmitter {
     this.lastLog = "";
     this.lastAttemptedPort = undefined;
     // when this start() began -- the status bar's "warming up..." (T7)
-    // shows that rather than "osd down" for a little while after this,
-    // since the prime is synchronous and the façade answers nothing at all
-    // while it runs (docs/warm-compile.md)
+    // shows that while the compiler process primes; the front keeps
+    // answering requests throughout (docs/warm-compile.md)
     this.startedAt = undefined;
     this.inspectPort = undefined;
     this.servingLock = undefined;

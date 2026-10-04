@@ -15,6 +15,7 @@
     "test/vscode-serving-front.mjs",
     "test/vscode-vsix.mjs",
     "test/vscode-warm.mjs",
+    "test/vscode-warm-ready.mjs",
     "test/vsix-content-types.mjs"
   ],
   "groups": {

@@ -90,7 +90,7 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
   });
 
   it("edits the demo DPC's own comment, activates it, and reads X-OSD-Build off the answer", async () => {
-    // give the background prime (docs/warm-compile.md: ~8-9 s, synchronous)
+    // give the compiler process's background prime a chance to finish
     // a chance to finish, the way the extension's own "warming up..." does,
     // rather than racing the first activation against it
     let serving;

@@ -24,9 +24,16 @@ watcher and a 30 ms debounce.
 
 ## How it works
 
-1. **The registry is kept.** `tools/osd-warm.mjs` holds the abaplint
+1. **The registry is kept in a compiler process.** `tools/osd-warm.mjs` holds the abaplint
    registry of the live generation for as long as the process lives. It is
-   primed once, in the background, after the runtime is up (8–9 s), and the
+   primed once after the runtime is up. `tools/osd-warm-process.mjs` starts
+   `osd-warm-worker.mjs` through `osd-host.mjs`, including in the Bun binary
+   and VSIX host. Both the full prime and subsequent warm builds run there;
+   the launcher can answer HTTP and proxy requests throughout. The warm
+   path becomes available only when the prime completes. An activation
+   during priming waits for it, as before, while other requests keep using
+   the serving generation. The source view and inactive copies are sent
+   with each compiler operation, using the store's shared overlay rule. The
    prime checks its premise rather than assuming it: a full run of the kept
    registry must give the live generation's files byte for byte.
 2. **A save builds what it reaches.** The changed file replaces its copy in
@@ -181,8 +188,22 @@ registry is primed again.
 - **The prime waits for a runtime changing hands**, and a cold build stops
   a comparison of a warm generation the tree has left (it could only end
   inconclusive, and it was a second cold transpile beside the build). The
-  prime blocks the process that supervises the runtime; landing in the
-  middle of a recycle, it made that recycle read 17-30 s slower.
+  prime formerly blocked the process that supervises the runtime; landing
+  in the middle of a recycle made that recycle read 17-30 s slower. It now
+  runs in its own compiler process. Closing the front kills and awaits that
+  process, including during a CPU-bound prime; the exit reaper also covers
+  launcher shutdown.
+
+Startup regression measured on 2026-10-04: the supplied bare VSIX smoke
+reported its first `/osd/serving` answer **12.99 s after Start resolved**,
+beside a **12.833 s** prime. With the compiler process, the same bare VS Code
+1.101.2 harness and a rebuilt VSIX answered in **0.27–0.34 s** across two runs.
+The checkout regression (`test/vscode-warm-ready.mjs`) answered serving in **0.127 s**
+and its first ADT classrun in **0.103 s**, both while still priming, then
+kept polling through the full run. `test/warm.mjs` also covers activation
+during priming, inactive source views, comparison and process cleanup. A
+seeded Bun binary with no tool scripts in its test checkout answered serving
+in **0.143 s** and classrun in **138 ms** during an **18.077 s** prime.
 
 ## What a swap means, compared with a system
 

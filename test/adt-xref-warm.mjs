@@ -3,7 +3,7 @@ import express from "express";
 import {cpSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
-import {WarmCompiler} from "../tools/osd-warm.mjs";
+import {WarmCompilerProcess} from "../tools/osd-warm-process.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {StoreDestination} from "../tools/osd-store-destination.mjs";
@@ -60,7 +60,8 @@ describe("ADT xref after a warm swap", function () {
     const cold = await build({root});
     expect(cold.ok, JSON.stringify(cold)).to.equal(true);
     store = new ObjectStore({root});
-    compiler = new WarmCompiler({root, overlay:s => store.overlay(s), keyOf:f => store.objectKeyOf(f)});
+    compiler = new WarmCompilerProcess({root, overlay:s => store.overlay(s),
+      inactiveSources:s => store.inactiveSources(s)});
     runtime = new ServingRuntime({root, env:{OSD_WARM:"1", OSD_ADT_ONE_RUNTIME:"1", STG_DB:"sqlite", STG_DB_PATH:"", STG_TLS:"0",
       NODE_OPTIONS:`--import=${preload}`}});
     runtime.storeDestination = new StoreDestination({store});
@@ -76,7 +77,7 @@ describe("ADT xref after a warm swap", function () {
   after(async () => {
     if (server) await new Promise(done=>server.close(done));
     await runtime?.stop();
-    compiler?.close();
+    await compiler?.shutdown();
     if(root) rmSync(root,{recursive:true,force:true});
   });
   const readers = async name => {
@@ -99,6 +100,8 @@ describe("ADT xref after a warm swap", function () {
     // The child's tree is deliberately changed AFTER compilation: the
     // swap must use the compiled generation, not today's checkout files.
     const built = await compiler.build();
+    expect(compiler.readersOf("CLAS", target)).to.deep.include({type:"CLAS", name:edited});
+    expect(compiler.closureOf("CLAS", target)).to.deep.include({type:"CLAS", name:edited});
     expect(built.xrefRows.WBCROSSGT).to.deep.include({OTYPE:"TY",NAME:target,INCLUDE:edited});
     expect(built.xrefRows.WBCROSSGTX).to.deep.include({OTYPE:"TY",NAME:long,INCLUDE:edited});
     writeFileSync(file(edited), source(edited));

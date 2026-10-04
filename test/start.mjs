@@ -20,6 +20,7 @@ import {abapRunner} from "../tools/adt-abap-front.mjs";
 import {kernelFreshness} from "../tools/adt-abap-kernel.mjs";
 import {liveHash} from "../tools/osd-build.mjs";
 import {warmUnitPlan} from "../tools/osd-unit.mjs";
+import {closeWarm} from "../tools/osd-store-warm.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 import {DEFAULT_DATABASE} from "../tools/sqlite-file-client.mjs";
@@ -675,20 +676,16 @@ export function startServer(quiet) {
   // holds the port and the database the next listener needs, and `void` on
   // it meant "start stopping and carry on".
   server.close = (cb) => {
-    if (typeof cb === "function") {
-      secure?.close();
-      void runtime?.stop();
-      closing = new Promise((resolve) => close((...a) => {
-        cb(...a);
-        resolve();
-      }));
-      return server;
-    }
     closing = (async () => {
+      await closeWarm(facade.store);
       await new Promise((resolve) => (secure === undefined ? resolve() : secure.close(resolve)));
       await runtime?.stop();
       await new Promise((resolve) => close(resolve));
     })();
+    if (typeof cb === "function") {
+      closing.then(() => cb(), error => cb(error));
+      return server;
+    }
     return closing;
   };
   return server;

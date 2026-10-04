@@ -1,3 +1,4 @@
+import {warmUp} from "./osd-store-warm.mjs";
 // The object store of OSD, the off-stack doppelgänger: what sits behind
 // the ADT façade. A client asks for an object by type and name; this finds
 // the file, reads it, writes it, checks it and activates it. The façade
@@ -1143,39 +1144,7 @@ export class ObjectStore {
 
   // prime in the background; a failure leaves every build cold and says why
   warmUp() {
-    const w = this.warm();
-    if (w.on !== true) return undefined;
-    if (w.priming !== undefined) return w.priming;
-    // not while the runtime changes hands: the prime holds this process for
-    // seconds (11 s on vsp-i7, 17-30 s here under load), and a boot the
-    // supervisor cannot hear meanwhile is a recycle that reads as that much
-    // slower -- the reprime five seconds after a cold build landed in the
-    // middle of that build's recycle every time. Not as `priming` either: a
-    // build awaits that, and must not wait on a transition through it.
-    const changing = this.served?.recycling ?? this.served?.starting;
-    if (changing !== undefined) {
-      return changing.catch(() => undefined).then(() => this.warmUp());
-    }
-    w.primeDue = false;
-    clearTimeout(w.reprime);
-    w.priming = (async () => {
-      const {WarmCompiler} = await import("./osd-warm.mjs");
-      // primed on the build view: inactive objects as their active copies
-      w.compiler ??= new WarmCompiler({root: this.root, log: (m) => console.log(m), overlay: (activating) => this.overlay(activating),
-        keyOf: (file) => this.objectKeyOf(file), inactiveSources: (activating) => this.inactiveSources(activating)});
-      try {
-        const r = await w.compiler.prime();
-        w.reason = undefined;
-        return r;
-      } catch (error) {
-        w.reason = error.message;
-        console.log(`warm: builds stay cold: ${error.message}`);
-        return undefined;
-      } finally {
-        w.priming = undefined;
-      }
-    })();
-    return w.priming;
+    return warmUp(this);
   }
 
   // after a swap: compare the generation with a cold transpile of the same
@@ -1543,8 +1512,7 @@ export class ObjectStore {
           error: withoutHostPaths(String(error.message).split("\n")[0], this.root)};
       } finally {
         // a cold build is a new start for the warm registry, primed once the
-        // saves have stopped for a while: the prime holds this process for
-        // its 8-9 s, and a burst of cold saves would pay it each time
+        // saves have stopped for a while; coalesce a burst of cold saves
         if (w.on === true && w.compiler?.primed !== true) {
           clearTimeout(w.reprime);
           w.reprime = setTimeout(() => this.warmUp(), WARM_REPRIME_MS);

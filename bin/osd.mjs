@@ -109,6 +109,7 @@ const GENERATORS = {
   "osd-gui-convert.mjs": () => import("../tools/osd-gui-convert.mjs"),
   // not a generator: the warm build's comparison with a cold transpile
   "osd-warm.mjs": () => import("../tools/osd-warm.mjs"),
+  "osd-warm-worker.mjs": () => import("../tools/osd-warm-worker.mjs"),
   // not a generator: osabap, for `osd run`; a checkout's tool, so imported
   // by a computed URL the bundler leaves alone rather than carried in it
   "osabap.mjs": () => import(new URL("../tools/gogen/osabap.mjs", import.meta.url).href),

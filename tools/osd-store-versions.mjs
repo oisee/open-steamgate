@@ -1,3 +1,4 @@
+import {warmOverlay} from "./osd-warm-overlay.mjs";
 // Active/inactive versions, source snapshots and activation provenance.
 import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {createHash} from "node:crypto";
@@ -278,40 +279,12 @@ export class StoreVersions {
   // publication's objects are not this one's: each build is given its own.
   // undefined when there is nothing to keep out.
   overlay(activating = new Set()) {
-    const kept = [];
-    const copied = [];
-    const unused = [];
-    const owned = new Set();
-    for (const key of this.#store.inactive) {
+    const entries = [...this.#store.inactive].flatMap(key => {
       const [type, ...rest] = key.split(" ");
       const entry = this.#store.find(type, rest.join(" "));
-      if (entry === undefined) continue;
-      const mine = activating.has(key);
-      for (const file of this.#filesOfEntry(entry)) {
-        const copy = this.#snapshotOf(file);
-        const hasCopy = existsSync(join(this.#store.root, copy));
-        if (mine) {
-          if (hasCopy) unused.push(resolve(this.#store.root, copy));
-          continue;
-        }
-        if (existsSync(join(this.#store.root, file))) kept.push(resolve(this.#store.root, file));
-        if (hasCopy) {
-          copied.push(copy);
-          owned.add(resolve(this.#store.root, copy));
-        }
-      }
-    }
-    // no copy is an input: the tree's own inactive files are all there is
-    // to leave out, and nothing at all is the build as it always was --
-    // which keeps an ordinary save-then-activate on the warm path
-    if (copied.length === 0) return kept.length === 0 ? undefined : {exclude: kept.sort()};
-    // a copy nobody inactive owns any more (an object deleted under us) is
-    // not an input either
-    const folder = join(this.#store.root, this.#store.inactiveDir, "active");
-    for (const file of walkFiles(folder)) {
-      if (!owned.has(resolve(file))) unused.push(resolve(file));
-    }
-    return {exclude: [...new Set([...kept, ...unused])].sort(), folder: join(this.#store.inactiveDir, "active")};
+      return entry === undefined ? [] : [{key, files: this.#filesOfEntry(entry)}];
+    });
+    return warmOverlay(this.#store.root, join(this.#store.inactiveDir, "active"), entries, activating);
   }
 
   // The registry as the build of `activating` would see the system: every
