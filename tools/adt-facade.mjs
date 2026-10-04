@@ -2181,7 +2181,9 @@ export function adtRouter(options = {}) {
           // showed nothing at all after the save had in fact succeeded.
           const stored = store.read(type, req.params.name, include).source;
           res.set("ETag", entityTag(stored));
-          res.status(200).type("text/plain").send("");
+          // A4H acknowledges SAVE with no representation or Content-Type.
+          // An empty text/plain representation can replace the editor text.
+          res.status(200).end();
         });
       });
     };

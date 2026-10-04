@@ -274,6 +274,12 @@ or a pooled SAVE is still in flight. The same Eclipse run reproduced a 409
 on SAVE in a different RFC conversation; continuing the known handle's
 context addresses that failure without relaxing direct HTTP ownership.
 
+The same disposable A4H probe returned an empty 200 for successful source
+PUT with no Content-Type. OSG now sends that acknowledgement and retains
+the saved source's ETag. Its former empty `text/plain` representation
+coincided with Eclipse clearing the editor after a successful SAVE, while
+the file and subsequent GET still contained the full saved source.
+
 ## Identity
 
 The logon answer says what system this is, and Eclipse is configured with a

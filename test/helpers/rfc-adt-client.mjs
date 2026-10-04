@@ -73,6 +73,6 @@ export async function connectAdt(port, user = "DEVELOPER") {
     const doc = Buffer.concat(chain.fields.filter((f) => f.tag === 0x3c05).map((f) => f.value)).toString();
     const status = Number(/<STATUS_CODE>(\d+)<\/STATUS_CODE>/.exec(doc)?.[1]);
     const text = Buffer.from(/<MESSAGE_BODY>([^<]*)<\/MESSAGE_BODY>/.exec(doc)?.[1] ?? "","base64").toString();
-    return {status, body:text, handle:/<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(text)?.[1]};
+    return {status, body:text, responseXml:doc, handle:/<LOCK_HANDLE>([^<]+)<\/LOCK_HANDLE>/.exec(text)?.[1]};
   }};
 }

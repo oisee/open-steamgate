@@ -72,7 +72,10 @@ describe("RFC editing context without client sessiontype headers", function () {
     expect((await two.call("POST",lock)).status).to.equal(403);
     expect((await two.call("PUT",object+"/source/main?lockHandle="+"0".repeat(40),source,{"Content-Type":"text/plain"})).status).to.equal(409);
     const edited=source+"* saved over RFC\n";
-    expect((await two.call("PUT",path,edited,{"Content-Type":"text/plain"})).status).to.equal(200);
+    const saved=await two.call("PUT",path,edited,{"Content-Type":"text/plain"});
+    expect(saved.status).to.equal(200); expect(saved.body).to.equal("");
+    expect(saved.responseXml).not.to.match(/<NAME>content-type<\/NAME>/i);
+    expect(saved.responseXml).to.match(/<NAME>etag<\/NAME>/i);
     expect((await one.call("GET",object+"/source/main")).body).to.equal(edited);
     expect((await two.call("POST",object+"?_action=UNLOCK&lockHandle="+held.handle)).status).to.equal(200);
     expect((await one.call("PUT",path,source,{"Content-Type":"text/plain"})).status).to.equal(409);
