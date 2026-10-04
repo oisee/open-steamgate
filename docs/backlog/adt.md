@@ -526,3 +526,21 @@ SUBTRACT returns on a real kernel (an A4H probe; not a blocker).
   dump without writing it; if one-runtime ever runs through it, it needs the
   shared recorder in `tools/osd-dumps.mjs` (#561). Owner: adt-i5.
 
+- flaky: **the program outline handshake can exceed mocha's 2 s default.**
+  `test/adt-facade.mjs`, "OSD answers ADT wave 0: the handshake lists a
+  program's subroutines, events and local classes by the workbench's codes",
+  timed out once in a full mode-0 ADT run on 2026-10-04 and passed when its
+  file was rerun alone. Suspected cause: the first outline after a build parses
+  cold while other files share the machine. Reproduce:
+  `OSD_ADT_ONE_RUNTIME=0 OSD_HEAVY_RANGE=<lo-hi> tools/osd-heavy.sh npx mocha
+  $(node -e 'console.log(require("./test/suites.d/adt.json").files.join(" "))')`
+  and look for that title. Fix by warming the outline path or measuring it,
+  not by raising the timeout. Owner: adt-i5.
+- decided: **no count limit on request XML (2026-10-04).** Both readers are
+  linear (#582), but the ABAP reader parses synchronously: a legal 1.5 MB
+  document that rebinds every prefix at each of 64 levels takes about 7.5 s on
+  the transpiled runtime, and a 16,000-attribute element about 1.3 s. For a
+  local single-user system the 16 MiB body limit and the 64-level depth limit
+  are enough; revisit with a count limit (attributes per element, namespace
+  declarations per document, explicit 400) if this is seen in practice.
+  Owner: adt-i5.
