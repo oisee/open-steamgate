@@ -1,0 +1,144 @@
+import assert from "node:assert/strict";
+import {copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {join, resolve} from "node:path";
+import {spawnSync} from "node:child_process";
+
+const sourceHook = resolve(".githooks/pre-push");
+const zero = "0".repeat(40);
+
+describe("pre-push guards", function () {
+  this.timeout(10000);
+  let folder, repo, hook, log, behind, main, ahead;
+  const git = (...args) => {
+    const result = spawnSync("git", args, {cwd: repo, encoding: "utf8"});
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  const ref = (sha = ahead, destination = "refs/heads/topic", old = zero) =>
+    `refs/heads/topic ${sha} ${destination} ${old}\n`;
+  const run = (input = ref(), extra = {}) => spawnSync("sh", [hook], {
+    cwd: repo, input, encoding: "utf8",
+    env: {...process.env, OSD_PUSH_ALLOW_EMPTY: "", SCAN_LOG: log, SCAN_EXIT: "0", ...extra},
+  });
+  const refused = (input, pattern, extra) => {
+    const result = run(input, extra);
+    assert.equal(result.status, 1, result.stdout + result.stderr);
+    assert.match(result.stderr, pattern);
+    assert.equal(existsSync(log), false, "guard must run before the scanner");
+  };
+  const scans = () => existsSync(log)
+    ? readFileSync(log, "utf8").trim().split("\n").map(line => JSON.parse(line)) : [];
+  const passes = (input = ref(), extra = {}) => {
+    const result = run(input, extra);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    return scans();
+  };
+
+  beforeEach(() => {
+    folder = mkdtempSync(resolve(".pre-push-test-"));
+    repo = join(folder, "repo");
+    mkdirSync(repo);
+    git("init", "-q", "-b", "main");
+    git("config", "user.name", "Hook Test");
+    git("config", "user.email", "hook@example.invalid");
+    git("config", "core.hooksPath", ".githooks");
+    writeFileSync(join(repo, "file"), "base\n");
+    git("add", "file");
+    git("commit", "-qm", "base");
+    behind = git("rev-parse", "HEAD");
+    git("commit", "--allow-empty", "-qm", "main advance");
+    main = git("rev-parse", "HEAD");
+    git("update-ref", "refs/remotes/origin/main", main);
+    git("switch", "-qc", "topic");
+    git("commit", "--allow-empty", "-qm", "topic advance");
+    ahead = git("rev-parse", "HEAD");
+    mkdirSync(join(repo, ".githooks"));
+    hook = join(repo, ".githooks", "pre-push");
+    copyFileSync(sourceHook, hook);
+    mkdirSync(join(repo, "tools"));
+    log = join(folder, "scan.log");
+    // Record the existing scanner contract without scanning unrelated fixtures.
+    writeFileSync(join(repo, "tools", "osd-leak-scan.mjs"),
+      'import {appendFileSync} from "node:fs";\n' +
+      'appendFileSync(process.env.SCAN_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");\n' +
+      'process.exit(Number(process.env.SCAN_EXIT));\n');
+  });
+  afterEach(() => rmSync(folder, {recursive: true, force: true}));
+
+  for (const operation of ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"]) {
+    it(`refuses ${operation} even with the empty-branch override`, () => {
+      const marker = resolve(repo, git("rev-parse", "--git-path", operation));
+      if (operation.startsWith("rebase-")) mkdirSync(marker);
+      else writeFileSync(marker, main + "\n");
+      refused(ref(), new RegExp(`unfinished Git operation \\(${operation}\\)`), {OSD_PUSH_ALLOW_EMPTY: "1"});
+    });
+  }
+
+  it("refuses an unmerged index without an operation marker", () => {
+    const blob = git("rev-parse", `${main}:file`);
+    git("update-index", "--force-remove", "file");
+    const result = spawnSync("git", ["update-index", "--index-info"], {
+      cwd: repo, encoding: "utf8",
+      input: [1, 2, 3].map(stage => `100644 ${blob} ${stage}\tfile\n`).join(""),
+    });
+    assert.equal(result.status, 0, result.stderr);
+    refused(ref(), /unmerged paths/);
+  });
+
+  it("resolves rebase markers in a linked worktree", () => {
+    const worktree = join(folder, "worktree");
+    git("worktree", "add", "--detach", worktree, ahead);
+    repo = worktree;
+    mkdirSync(resolve(repo, git("rev-parse", "--git-path", "rebase-merge")));
+    refused(ref(), /unfinished Git operation \(rebase-merge\)/);
+  });
+
+  for (const label of ["equal", "behind"]) {
+    it(`refuses a branch ${label} to local origin/main`, () => {
+      refused(ref(label === "equal" ? main : behind), /no commits over origin\/main\./);
+    });
+    it(`allows the explicit override for a branch ${label} to main`, () => {
+      assert.equal(passes(ref(label === "equal" ? main : behind), {OSD_PUSH_ALLOW_EMPTY: "1"}).length, 1);
+    });
+  }
+
+  it("allows an ahead branch and preserves the new-ref scan range", () => {
+    assert.deepEqual(passes(), [[repo, "--range", ahead, "--not", "--remotes=origin"]]);
+  });
+  it("preserves the existing-ref scan range", () => {
+    assert.deepEqual(passes(ref(ahead, "refs/heads/topic", main)), [[repo, "--range", `${main}..${ahead}`]]);
+  });
+  it("allows a destination of main even from a differently named local branch", () => {
+    assert.equal(passes(ref(behind, "refs/heads/main")).length, 1);
+  });
+  it("checks the destination when local main is pushed to a topic", () => {
+    refused(`refs/heads/main ${main} refs/heads/topic ${zero}\n`, /no commits over origin\/main/);
+  });
+  it("allows an empty ref list without scanning", () => {
+    assert.deepEqual(passes(""), []);
+  });
+  it("allows deletions without scanning them", () => {
+    assert.deepEqual(passes(ref(zero, "refs/heads/topic", main)), []);
+  });
+  it("checks every ref before any scan", () => {
+    refused(ref() + ref(main, "refs/heads/empty"), /refs\/heads\/empty has no commits/);
+  });
+  it("scans every allowed ref", () => {
+    assert.equal(passes(ref() + ref(ahead, "refs/heads/second")).length, 2);
+  });
+  it("does not treat other override values as permission", () => {
+    refused(ref(main), /no commits over origin\/main/, {OSD_PUSH_ALLOW_EMPTY: "true"});
+  });
+  it("keeps working for repositories without origin/main", () => {
+    git("update-ref", "-d", "refs/remotes/origin/main");
+    assert.equal(passes().length, 1);
+  });
+  it("keeps leak failures blocking even with the empty-branch override", () => {
+    const result = run(ref(main), {OSD_PUSH_ALLOW_EMPTY: "1", SCAN_EXIT: "1"});
+    assert.equal(result.status, 1);
+    assert.equal(scans().length, 1);
+  });
+  it("keeps scanner exit 2 nonblocking", () => {
+    assert.equal(passes(ref(), {SCAN_EXIT: "2"}).length, 1);
+  });
+});

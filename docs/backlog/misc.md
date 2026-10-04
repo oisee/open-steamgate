@@ -76,6 +76,7 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
      └─ Alice's call, 2026-09-14, and the right one
      └─ built 2026-09-14, `tools/osd-leak-scan.mjs`, `npm run leak`, hook in
         `.githooks/pre-commit`, CI in `.github/workflows/leak-scan.yml`
+     └─ `.githooks/pre-push` refuses unfinished Git operations and non-main destinations with no commits over local `origin/main` (no fetch); `OSD_PUSH_ALLOW_EMPTY=1` overrides only the empty-branch guard.
      └─ and it caught one the same hour, in the repository it was written
         for. A 746-byte logon template committed to open-rfc-go carried the
         captured system's host name, instance, address, logon string and
