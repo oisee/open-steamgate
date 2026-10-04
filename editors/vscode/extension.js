@@ -3030,9 +3030,10 @@ function currentObject() {
 
 function registerCheckActivateCommands(context, output) {
   const diagnostics = vscode.languages.createDiagnosticCollection("osd-abap");
+  const activationDiagnostics = new Map();
   context.subscriptions.push(diagnostics);
   context.subscriptions.push(vscode.commands.registerCommand("osd.check", () => check(diagnostics, output)));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(diagnostics, output)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(diagnostics, output, activationDiagnostics)));
 }
 
 // severity -> vscode.DiagnosticSeverity; A and X are ABAP's abort/exception
@@ -3068,19 +3069,32 @@ async function check(diagnostics, output) {
   }
 }
 
-async function activateCurrent(diagnostics, output) {
+async function activateCurrent(diagnostics, output, activationDiagnostics) {
   const current = currentObject();
   if (current === undefined) return;
   const {editor, object} = current;
   if (editor.document.isDirty) await editor.document.save();
   try {
+    // Includes share an activation scope; other objects, source directories
+    // and systems keep their own last set of affected document URIs.
+    const scope = JSON.stringify([osd().url, path.dirname(editor.document.fileName), object.type, object.name]);
+    const writeDiagnostics = (byFile) => {
+      for (const [file, uri] of activationDiagnostics.get(scope) ?? []) {
+        if (!byFile.has(file)) diagnostics.set(uri, []);
+      }
+      for (const {uri, issues} of byFile.values()) diagnostics.set(uri, issues);
+      if (byFile.size === 0) activationDiagnostics.delete(scope);
+      else activationDiagnostics.set(scope, new Map([...byFile].map(([file, {uri}]) => [file, uri])));
+    };
     const result = await osd().activate(object);
     if (result.ok) {
+      writeDiagnostics(new Map());
       await activeController?.refreshDebuggerGeneration();
       try {
         const reports = await osd().check(object, object.include, editor.document.getText());
-        diagnostics.set(editor.document.uri, reports.flatMap((r) => r.issues)
-          .map((i) => diagnosticAt(i.line, i.column, i.message, i.severity)));
+        writeDiagnostics(new Map([[editor.document.fileName, {uri: editor.document.uri,
+          issues: reports.flatMap((r) => r.issues).map((i) => diagnosticAt(i.line, i.column, i.message, i.severity)),
+        }]]));
       } catch (error) {
         output.appendLine(`osd activate ${object.name}: post-activation check: ${String(error.message ?? error)}`);
       }
@@ -3111,7 +3125,7 @@ async function activateCurrent(diagnostics, output) {
         byFile.get(uri.fsPath).issues.push(diagnosticAt(issue.line, issue.column, issue.message, issue.severity));
         located++;
       }
-      for (const {uri, issues} of byFile.values()) diagnostics.set(uri, issues);
+      writeDiagnostics(byFile);
       vscode.window.showErrorMessage(`osd: ${object.name} did not activate (${located || "no"} issue(s), see ${located ? "Problems" : "Output"})`);
     }
     // Q4: an activation is the point a class's own line numbers can have
