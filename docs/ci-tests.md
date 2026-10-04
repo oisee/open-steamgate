@@ -332,6 +332,8 @@ A mismatch never silently refreshes the manifest.
 When an allowed failure starts passing, the gate says "remove this entry
 from .github/ci/kernel-known-failures.json" and names its class/testclass/method.
 The JSON has one entry per test method, with its signature, reason and upstream link.
+The list is currently empty: pin `f3611417` fixes all four int8 allowances;
+keep `entries: []` valid rather than removing the file.
 Remove the exact entry and regenerate the measured support claims from
 complete folder results, preserving claims for unmeasured folders; the
 allowance is not inverted
