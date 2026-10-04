@@ -4103,7 +4103,7 @@ describe("editors/vscode: running parts status and actions", () => {
 describe("editors/vscode: serving generation status", () => {
   // Critic round 2: drive the exported status function with a deterministic
   // clock and deferred responses, restoring globals even on assertion failure.
-  async function handoffProbe(run, {realController = false} = {}) {
+  async function handoffProbe(run, {realController = false, findingCount = () => 2} = {}) {
     const h = runningStatusApi();
     const base = vscodeStub();
     Object.assign(h.api, {EventEmitter: base.EventEmitter, debug: base.debug,
@@ -4138,7 +4138,7 @@ describe("editors/vscode: serving generation status", () => {
       globalThis.setInterval = fn => { tick = fn; return 1; };
       globalThis.clearInterval = () => {};
       Date.now = () => now;
-      const item = statusBar(context, () => 2, controller);
+      const item = statusBar(context, findingCount, controller);
       await new Promise(resolve => setImmediate(resolve));
       await run({item, controller, errors, tick: () => tick(),
         time: value => { now = value; }, url: value => { url = value; },
@@ -4179,6 +4179,28 @@ describe("editors/vscode: serving generation status", () => {
       p.state("stopped"); p.start();
       expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
     });
+  });
+
+  it("treats a throwing findings provider as unknown through state notifications and polls", async () => {
+    await handoffProbe(async p => {
+      expect(() => p.start()).not.to.throw();
+      expect(p.item.text).to.include("awaiting serving");
+      expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
+      await p.tick();
+      expect(p.item.text).to.include("awaiting serving");
+      expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
+      p.respond(async url => ({ok: true, json: async () => url.endsWith("/osd/dumps")
+        ? [] : {generation: "fresh123"}}));
+      await p.tick();
+      expect(p.item.text).to.include("fresh123");
+      expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
+      for (const state of ["stopped", "failed"]) {
+        p.start();
+        expect(() => p.state(state)).not.to.throw();
+        expect(p.item.text).to.include("osd down");
+        expect(p.item.tooltip).to.include("OSD kernel: unknown finding(s)");
+      }
+    }, {findingCount: () => { throw Error("count failed"); }});
   });
 
   it("leaves awaiting immediately when the launcher stops or fails", async () => {

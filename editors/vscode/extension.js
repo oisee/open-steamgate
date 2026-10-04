@@ -2865,7 +2865,11 @@ function statusBar(context, findingCount = () => kernelFindingCount, controller 
   let disposed = false, pollEpoch = 0, observedLauncher, observedState;
   let awaitingServing = false, misses = 0, firstMiss;
   const resetMisses = () => { misses = 0; firstMiss = undefined; };
-  const kernelTooltip = text => `${text}\nOSD kernel: ${findingCount()} finding(s)`;
+  const kernelTooltip = text => {
+    let count;
+    try { count = findingCount(); } catch { count = "unknown"; }
+    return `${text}\nOSD kernel: ${count} finding(s)`;
+  };
   const transitioning = () => ["building", "starting", "stopping"].includes(controller?.launcher?.state);
   const visibility = () => {
     if (disposed) return;
