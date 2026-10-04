@@ -1195,7 +1195,7 @@ describe("tools/adt-facade: create and delete over the wire", () => {
     const el = roots[type];
     const ns = el.split(":")[0];
     return `<?xml version="1.0" encoding="UTF-8"?>
-<${el} xmlns:${ns}="http://www.sap.com/adt/x" xmlns:adtcore="http://www.sap.com/adt/core"
+<${el} xmlns:${ns}="http://www.sap.com/adt/${{CLAS:"oo/classes",INTF:"oo/interfaces",PROG:"programs/programs",DDLS:"ddic/ddlsources"}[type]}" xmlns:adtcore="http://www.sap.com/adt/core"
   adtcore:description="${description}" adtcore:name="${name}" adtcore:type="${type}" adtcore:responsible="OSD">
   <adtcore:packageRef adtcore:name="${pkg}"/>
 </${el}>`;

@@ -116,7 +116,7 @@ describe("tools/adt-facade: async tree errors", () => {
     it(`answers virtualfolders store.${method} throw with 500`, async () => {
       store[method] = () => { throw new Error("synthetic store failure <&>"); };
       const res = await call("/repository/informationsystem/virtualfolders/contents",
-        '<vfs:facetorder><vfs:facet>package</vfs:facet></vfs:facetorder>');
+        '<vfs:facetorder xmlns:vfs="http://www.sap.com/adt/ris/virtualFolders"><vfs:facet>package</vfs:facet></vfs:facetorder>');
       expect(res.status).to.equal(500);
       expect(res.headers.get("content-type")).to.equal("application/xml; charset=utf-8");
       expect(await res.text()).to.equal(exceptionDocument("ExceptionInternalError", "synthetic store failure <&>",
@@ -1081,7 +1081,7 @@ describe("tools/adt-facade: OSD answers ADT", () => {
       const selected = await (await call(path, {
         method: "POST",
         headers: {"content-type": "application/vnd.sap.as+xml"},
-        body: `<asx:abap><asx:values><DATA><TV_NODEKEY>${classType}</TV_NODEKEY></DATA></asx:values></asx:abap>`,
+        body: `<asx:abap xmlns:asx="http://www.sap.com/abapxml"><asx:values><DATA><TV_NODEKEY>${classType}</TV_NODEKEY></DATA></asx:values></asx:abap>`,
       })).text();
       expect(selected).to.contain("<OBJECT_TYPE>CLAS/OC</OBJECT_TYPE>");
       expect(selected).to.not.contain("<OBJECT_TYPE>INTF/OI</OBJECT_TYPE>");
@@ -1504,7 +1504,7 @@ describe("tools/adt-facade: a host without a body parser", () => {
       const selected = await (await fetch(path, {
         method: "POST",
         headers: {"x-csrf-token": token, cookie, "content-type": "application/vnd.sap.as+xml"},
-        body: `<asx:abap><asx:values><DATA><TV_NODEKEY>${classType}</TV_NODEKEY></DATA></asx:values></asx:abap>`,
+        body: `<asx:abap xmlns:asx="http://www.sap.com/abapxml"><asx:values><DATA><TV_NODEKEY>${classType}</TV_NODEKEY></DATA></asx:values></asx:abap>`,
       })).text();
       expect(selected).to.contain("<OBJECT_TYPE>CLAS/OC</OBJECT_TYPE>");
       expect(selected).to.not.contain("<OBJECT_TYPE>INTF/OI</OBJECT_TYPE>");

@@ -1,3 +1,4 @@
+import {requestXMLBodyError, XML_BODY_LIMIT} from "../tools/adt-request-xml.mjs";
 import {parentAdtSnapshot} from "../tools/adt-runtime-state.mjs";
 import {databasePath} from "../tools/osd-persist.mjs";
 import {dialogStep, lockedClient} from "../tools/osd-dialog-step.mjs";
@@ -126,7 +127,8 @@ export function startServer(quiet) {
   app.disable("x-powered-by");
   app.set("etag", false);
   // an IWPR of a real SEGW project is a few hundred KB (ImportSet takes it as JSON)
-  app.use(express.raw({type: "*/*", limit: "16mb"}));
+  app.use(express.raw({type: "*/*", limit: XML_BODY_LIMIT}));
+  app.use(requestXMLBodyError);
   if (MODE === "inline") mountPortableCells(app, () => globalThis.abap.context.databaseConnections.DEFAULT,
     (work) => dialogStep(work, "SQLScript notebook cell"));
 

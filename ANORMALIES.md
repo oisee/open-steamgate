@@ -3644,3 +3644,26 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Upstream version containing a fix: `unknown`
 - Verification: int8 folder 10/10 SUCCESS; OSG opt-in harness 1 pass (default 1 pending); upstream 154 new tests, 192 runtime passes, 99 affected ABAP passes with 4 existing pending. All 26 supplied xstring conversion methods pass. Folder 007 is 12/17 overall: five of seven byte/integer equality methods fail in the separate comparison path; folder 008 is 16/16. This fix does not change comparison operators.
 - Dependency isolation: proof used core 2.120.64 (declared upstream minimum); 2.120.65 changes CREATE DATA TYPE HANDLE operand nodes and breaks the unchanged compiler on the library tree. The original shared dependencies were already a local 2.13.93 build, not published; their symlink and contents were preserved, and the disposable copy was removed.
+
+### ANOMALY-2026-10-04-sxml-byte-find - XML quote search can match between bytes
+
+- Status: `workaround`
+- Discovery: clean-room T12 request XML tests; no SAP system consulted.
+- Affected path: open-abap-core `cl_sxml_string_reader` binary parser's `seek`, through runtime `FIND ... IN BYTE MODE`.
+- Reproducer: `<chkrun:checkObjectList xmlns:chkrun='http://www.sap.com/adt/checkrun' xmlns:adtcore='http://www.sap.com/adt/core'/>` fails as not well formed, while double quotes succeed. Searching hex `27` can match between byte boundaries in ASCII data; the first attribute is cut short.
+- Expected: public XML syntax allows both quote delimiters with identical semantics.
+- Workaround: the ADT request reader validates UTF-8, then supplies a BOM-marked UTF-16LE buffer to the same implemented sXML reader. This selects its character parser, whose search uses string offsets. No dependency source is changed.
+- Regression: `test/adt-request-xml.mjs`, single quotes on checkruns and virtual folders.
+- Upstream: needs an issue in abaplint/transpiler for byte-aligned FIND; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-04-sxml-outside-root - sXML ignores text outside the root
+
+- Status: `workaround`
+- Discovery: repository source inspection during the clean-room XML request review; no SAP system consulted.
+- Affected path: open-abap-core local XML parser `next`: text with an empty element stack is skipped before entity decoding.
+- Reproducer: `<a/>tail` is not a well-formed XML document under the public XML contract, but its trailing text is not returned by sXML.
+- Workaround: the ADT reader puts the validated UTF-8 text inside a private parser wrapper, skips only that wrapper's open/close events and rejects all value events at request depth zero. Root counting and the 64-level limit still count only the original request.
+- Regression: `zcl_osd_adt_request_xml` Unit tests and `test/adt-request-xml.mjs` trailing-text rejection with an unchanged state digest.
+- Upstream: needs an issue in open-abap-core; no upstream filing requested.
+- Upstream version containing a fix: unknown.

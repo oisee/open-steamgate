@@ -139,6 +139,8 @@ const MOUNTS = [/odataProxy|mountServices|inline\.cl_express_icf_shim|icf\b/];
 // of the ADT facade) and a regex over source text got this wrong in both
 // directions twice in one night.
 export const SERVED_BY = {
+  "test/start.mjs requestXMLBodyError": {wrapper: "maps raw-body size errors on declared ADT XML request routes to their communicationframework refusal before dispatch"},
+  "tools/osd-serve.mjs requestXMLBodyError": {wrapper: "maps raw-body size errors on declared ADT XML request routes to their communicationframework refusal before dispatch"},
   "test/start.mjs /osd/job-counts": {wrapper: "explicit loopback-guarded forwarding of the internal job-counts node; the child checks its per-launch bearer token"},
   "tools/osd-serve.mjs /osd/adt-resume": {wrapper: "guards the declared /osd/adt-resume node (switch, JSON only, per-spawn step key) before any body parser: it refuses, it does not answer"},
   "tools/osd-serve.mjs (no path: middleware)": {wrapper: "sets X-OSD-Generation on every answer: it decorates, it does not decide"},

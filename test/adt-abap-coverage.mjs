@@ -87,6 +87,7 @@ const SAMPLE = {name: "zosd_coverage", include: "testclasses", stamp: "197001011
 // handler IS one of those functions, mounted on that path, so an endpoint
 // mounted with use() cannot pass by resembling one. Every id needs a reason.
 const MIDDLEWARE = {
+  "request-xml": "complete namespace-aware request validation before Node dispatch",
   "local-logon": "host loopback bearer validation before sessions or captures",
   "sessions": "Node Sessions' gate, mounted only without the ABAP front (OSD_ADT=js, child mode)",
   "generation": "stamps X-OSD-Generation on every answer and passes on",
@@ -266,8 +267,8 @@ describe("ADT on ABAP: the variant C done gate", function () {
   after(() => { if (root !== undefined) rmSync(root, {recursive: true, force: true}); });
 
   it("every middleware layer is known and only ported session fallbacks disappear in ABAP mounts", () => {
-    const expected = {node: ["local-logon", "sessions", "generation"], dump: ["local-logon", "sessions", "generation", "dump"],
-      abap: ["local-logon", "generation", "abap-front"], "dump+abap": ["local-logon", "generation", "dump", "abap-front"]};
+    const expected = {node: ["local-logon", "sessions", "generation", "request-xml"], dump: ["local-logon", "sessions", "generation", "dump", "request-xml"],
+      abap: ["local-logon", "generation", "abap-front", "request-xml"], "dump+abap": ["local-logon", "generation", "dump", "abap-front", "request-xml"]};
     const retired = new Set([
       "GET /sap/bc/adt/core/http/sessions",
       "DELETE /sap/bc/adt/core/http/sessions/:id",

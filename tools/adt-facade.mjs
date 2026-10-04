@@ -1,3 +1,4 @@
+import {requestXMLProfile, readRequestXML, RequestXMLError, XML_ERROR_TYPE, XML_ERROR_MESSAGE} from "./adt-request-xml.mjs";
 import {segwRegistrationsOf} from "./osd-store-destination.mjs";
 import {xrefFact} from "./adt-xref-facts.mjs";
 // Consume the serving credential before any runtime, job or build starts.
@@ -888,6 +889,25 @@ export function adtRouter(options = {}) {
       if (kind === "XREF_WARM") return xrefFact(store, kind, {...JSON.parse(json || "{}"), limit: options.xrefLimit ?? 5000});
       return undefined;
     })}));
+
+  // Validate the entire XML request before any Node route reads the store.
+  // ABAP validates the original bytes itself before its dispatch; HOST
+  // requests then use this same adapter when they reach the Node routes.
+  pass("request-xml", BASE, async (req, res, next) => {
+    const profile = requestXMLProfile(req.method, req.originalUrl ?? req.url);
+    if (profile === undefined) return next();
+    const path = (req.originalUrl ?? req.url).split("?")[0].toLowerCase();
+    if (path === `${BASE}/activation` && req.query.method !== "activate") return next();
+    try {
+      const body = await rawBody(req);
+      if (body.length === 0 && (profile.length === 0 || profile[0] === "asx" || profile[0] === "vfs")) return next();
+      req.body = Buffer.from(readRequestXML(body, profile).canonical);
+      next();
+    } catch (error) {
+      if (error instanceof RequestXMLError) refuse(res, 400, XML_ERROR_TYPE, XML_ERROR_MESSAGE);
+      else next(error);
+    }
+  });
 
   // ---- What an ABAP Cloud Project needs that an ordinary one does not.
   //

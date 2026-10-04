@@ -257,13 +257,15 @@ CLASS zcl_osd_adt_handler IMPLEMENTATION.
 
   METHOD route.
     DATA ls_result TYPE zcl_osd_adt_router=>ty_result.
+    DATA ls_request TYPE zif_osd_adt_route=>ty_request.
     DATA lx_adt TYPE REF TO zcx_osd_adt.
     DATA lx_root TYPE REF TO cx_root.
     DATA lv_text TYPE string.
 
     CLEAR: es_response, ev_served_by.
     TRY.
-        ls_result = fence( is_request = is_request it_routes = gt_routes ).
+        ls_request = zcl_osd_adt_request_xml=>prepare( is_request ).
+        ls_result = fence( is_request = ls_request it_routes = gt_routes ).
         ev_served_by = ls_result-served_by.
         IF ls_result-response-continuation-kind IS NOT INITIAL.
 *         the route's own HOST verdict: its answer and what follows it

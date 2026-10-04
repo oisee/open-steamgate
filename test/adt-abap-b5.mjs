@@ -218,11 +218,14 @@ describe("ADT B5: package and repository tree Node diff", function () {
       expect(res.body.toString()).not.to.include(user === "BUILDER_A" ? "ZT_USER_B" : "ZT_USER_A");
     }
   });
-  it("invalid UTF-8 in a nodestructure body is decoded leniently", async () => {
-    expect((await diff("/sap/bc/adt/repository/nodestructure?parent_name=%24ROOT","POST",{},Buffer.from([0xff]))).status).to.equal(200);
+  it("invalid UTF-8 in a nodestructure body is a request error", async () => {
+    expect((await diff("/sap/bc/adt/repository/nodestructure?parent_name=%24ROOT","POST",{},Buffer.from([0xff]))).status).to.equal(400);
   });
   for (const keys of [["000001"],["000002"],["000001","000002"],["000000"],["999999"],["000000","000002"]])
-    it(`node keys ${keys}`, async () => { await diff("/sap/bc/adt/repository/nodestructure?parent_name=%24ROOT","POST",{},keys.map((k) => `<TV_NODEKEY>${k}</TV_NODEKEY>`).join("")); });
+    it(`node keys ${keys}`, async () => {
+      const body = `<asx:abap xmlns:asx="http://www.sap.com/abapxml"><asx:values><DATA>${keys.map((k) => `<TV_NODEKEY>${k}</TV_NODEKEY>`).join("")}</DATA></asx:values></asx:abap>`;
+      expect((await diff("/sap/bc/adt/repository/nodestructure?parent_name=%24ROOT","POST",{},body)).status).to.equal(200);
+    });
 });
 
 describe("B5 PACKAGE destination envelope", () => {
