@@ -33,6 +33,10 @@ accepts any credentials and the RFC bridge runs in demo mode. Whoever
 publishes the ports secures them: publish on `127.0.0.1:` only
 (`"127.0.0.1:3130:3030"`), keep the host behind a firewall, or put an
 authenticating proxy in front. Do not publish them on a public address.
+The per-start bearer token the VS Code extension hands to ABAP-FS is accepted
+from loopback only; it does not close this. Keeping remote logon open on a
+non-loopback bind is a decision (2026-10-03: stands stay on the home network),
+to be revisited before any stand gets a public address.
 
 ## Historical Bun release experiment
 

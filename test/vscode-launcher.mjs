@@ -1037,6 +1037,13 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
       expect(result.pid).to.be.a("number");
       expect(result.generation).to.be.a("string").and.not.equal("");
       expect(launcher.state).to.equal("running");
+      const token = launcher.adtCredentials.token;
+      expect(launcher.env.OSD_ADT_TOKEN).to.equal(token);
+      const discovery = `http://127.0.0.1:${result.port}/sap/bc/adt/discovery`;
+      expect((await fetch(discovery, {headers: {Authorization: `Bearer ${token}`}})).status).to.equal(200);
+      expect((await fetch(discovery, {headers: {Authorization: "Bearer wrong"}})).status).to.equal(401);
+      expect(lines.join("")).not.to.contain(token);
+      expect(JSON.stringify(result)).not.to.contain(token);
       expect(states).to.include.members(["building", "starting", "running"]);
 
       const res = await fetch(`http://localhost:${result.port}/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet?$format=json`);
@@ -1055,6 +1062,8 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
       const pid = launcher.pid;
       await launcher.stop();
       expect(launcher.state).to.equal("stopped");
+      expect(launcher.adtCredentials).to.equal(undefined);
+      expect(launcher.env).not.to.have.property("OSD_ADT_TOKEN");
       if (pid !== undefined) {
         expect(() => process.kill(pid, 0)).to.throw();
       }

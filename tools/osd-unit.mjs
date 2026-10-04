@@ -21,7 +21,8 @@
 import {fileURLToPath} from "node:url";
 import {existsSync, readFileSync, rmSync} from "node:fs";
 import {unitCommand} from "./osd-host.mjs";
-import {spawn} from "node:child_process";
+// Detached unit/debug children can be launched from the serving runtime.
+import {spawn} from "./osd-child-process.mjs";
 import {tmpdir} from "node:os";
 import {basename, join} from "node:path";
 import {resolveFrame} from "./osd-where.mjs";

@@ -19,6 +19,7 @@
 
 const {spawn} = require("node:child_process");
 const {JobWorker, workerEnabled} = require("./job-worker");
+const {startCredentials} = require("./abapfs-bridge.js");
 const {createServer} = require("node:net");
 const {EventEmitter} = require("node:events");
 const {createHash, randomUUID} = require("node:crypto");
@@ -1204,6 +1205,10 @@ class Launcher extends EventEmitter {
       try { fs.rmSync(this.servingLock); } catch { /* A leftover lock conservatively keeps the home. */ }
       this.servingLock = undefined;
     }
+    if (state === "stopped") {
+      this.adtCredentials = undefined;
+      if (this.env) delete this.env.OSD_ADT_TOKEN;
+    }
     this.state = state;
     this.emit("state", state);
   }
@@ -1317,6 +1322,7 @@ class Launcher extends EventEmitter {
     delete env.OSD_JOB_WORKER;
     if (workerEnabled(this.jobsWorkerMode, env)) env.OSD_JOB_WORKER = "extension";
     env.OSD_BATCH_READ_TOKEN = randomUUID().replaceAll("-", "");
+    delete env.OSD_ADT_TOKEN; // Never pass an inherited credential to a build.
     this.env = env;
     this.databaseLabel = describeDatabase(this.database);
     try {
@@ -1358,6 +1364,8 @@ class Launcher extends EventEmitter {
       // If the host dies between spawn and recording the child's PID, this
       // malformed pending value makes another window keep the home.
       if (this.servingLock !== undefined) fs.writeFileSync(this.servingLock, `${process.pid}\npending\n`);
+      this.adtCredentials = startCredentials(env);
+      env.OSD_ADT_TOKEN = this.adtCredentials.token;
       child = spawn(process.execPath, ["test/run.mjs"], {cwd: this.osdHome, env});
     } catch (error) {
       this.#setState("stopped");

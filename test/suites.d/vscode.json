@@ -7,6 +7,7 @@
     "test/third-party-notices.mjs",
     "test/vscode-abap-debug-view.mjs",
     "test/vscode-abapgit-zip.mjs",
+    "test/vscode-abapfs-bridge.mjs",
     "test/vscode-debug.mjs",
     "test/vscode-extension.mjs",
     "test/vscode-kernel-diagnostics.mjs",
