@@ -3,6 +3,7 @@
 // global or allowed to survive COMMIT, ROLLBACK, WAIT, dump, or step exit.
 import {randomUUID} from "node:crypto";
 import {DatabaseSync} from "node:sqlite";
+import {setupSqliteBusyTimeout} from "./sqlite-connection.mjs";
 import {resolve} from "node:path";
 import {currentStepToken, onStepLuwEnd} from "./osd-dialog-step.mjs";
 import {givenText, fill} from "./osd-destination.mjs";
@@ -317,6 +318,7 @@ export class JobDestination {
             const reader = new DatabaseSync(sourceDb, {readOnly: true});
             let committed;
             try {
+              setupSqliteBusyTimeout(reader);
               committed = reader.prepare(`SELECT owner, intent_id FROM zosd_job_identity
                 WHERE mandt = ? AND jobname = ? AND jobcount = ?`).get(who.client, name, count);
             } finally { reader.close(); }

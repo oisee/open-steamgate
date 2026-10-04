@@ -5,6 +5,7 @@ import {chmodSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, 
 import {basename, dirname, join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {DatabaseSync} from "node:sqlite";
+import {setupSqliteBusyTimeout} from "./sqlite-connection.mjs";
 import {setTimeout as delay} from "node:timers/promises";
 import {dialogStep} from "./osd-dialog-step.mjs";
 import {drainJobOutbox} from "./osd-job-outbox.mjs";
@@ -64,12 +65,23 @@ function publicStep(row, {revealInput = false} = {}) {
 export class BatchRuns {
   static { installTimedJobs(BatchRuns, (store, ...args) => store.#appendJobLog(...args)); }
 
-  constructor(root = process.cwd(), env = process.env) {
+  constructor(root = process.cwd(), env = process.env, {readOnly = false} = {}) {
     this.path = operationsPath(root, env);
-    mkdirSync(dirname(this.path), {recursive: true, mode: 0o700});
-    this.db = new DatabaseSync(this.path);
-    chmodSync(this.path, 0o600);
-    this.db.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL");
+    this.artifacts = join(dirname(this.path), "batch-output");
+    const empty = readOnly && !existsSync(this.path);
+    this.memoryOnly = empty;
+    if (!readOnly) mkdirSync(dirname(this.path), {recursive: true, mode: 0o700});
+    this.db = new DatabaseSync(empty ? ":memory:" : this.path, {readOnly: readOnly && !empty});
+    setupSqliteBusyTimeout(this.db);
+    if (readOnly && !empty) {
+      // GET reads the committed ledger; writers alone own schema migration.
+      try {
+        if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'batch_runs'").get()) return;
+      } catch (error) { this.db.close(); throw error; }
+      this.db.close(); this.db = new DatabaseSync(":memory:"); this.memoryOnly = true;
+    }
+    if (!readOnly) chmodSync(this.path, 0o600);
+    this.db.exec("PRAGMA journal_mode=WAL");
     this.db.exec(`CREATE TABLE IF NOT EXISTS batch_runs (
       id TEXT PRIMARY KEY, program TEXT NOT NULL, generation TEXT NOT NULL,
       started_at TEXT NOT NULL, ended_at TEXT, state TEXT NOT NULL,
@@ -171,8 +183,7 @@ export class BatchRuns {
       this.db.exec("ROLLBACK");
       throw error;
     }
-    this.artifacts = join(dirname(this.path), "batch-output");
-    mkdirSync(this.artifacts, {recursive: true, mode: 0o700});
+    if (!readOnly) mkdirSync(this.artifacts, {recursive: true, mode: 0o700});
   }
 
   close() { this.db.close(); }

@@ -6,6 +6,7 @@ import {createHash} from "node:crypto";
 import {existsSync} from "node:fs";
 import {resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
+import {setupSqliteBusyTimeout} from "./sqlite-connection.mjs";
 import {operationsPath} from "./osd-batch-runs.mjs";
 import {jobInputJson} from "./osd-job-input.mjs";
 import {checkSchedule, scheduleOfOutbox, scheduledPayload} from "./osd-job-schedule.mjs";
@@ -26,6 +27,7 @@ export class JobSnapshotError extends Error {
 function readOnly(path, work) {
   const db = new DatabaseSync(path, {readOnly: true});
   try {
+    setupSqliteBusyTimeout(db);
     db.exec("BEGIN");
     try { return work(db); }
     finally { db.exec("ROLLBACK"); } // release a read snapshot; never commit
