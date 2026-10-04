@@ -18,6 +18,7 @@ const run = {id, jobName:'DEMO_JOB', jobCount:'12000000', user:'DEMO', program:'
   steps:[{number:1, program:'DEMO_REPORT', variant:'TEST'}], namedEvent:{id:'DEMO_EVENT',param:'test'},
   log:[{at:'2026-10-01T00:00:01Z', severity:'I',event:'STEP_STARTED',step:1,text:'Report step started'}]};
 function fakeVscode() {
+  const closed = new EventEmitter();
   const commands = new Map(), providers = new Map(), messages = [], shown = [], output = [];
   class Emitter { constructor() { this.e = new EventEmitter(); this.event = fn => { this.e.on('change',fn); return {dispose:()=>this.e.off('change',fn)}; }; } fire(value) { this.e.emit('change',value); } dispose() { this.e.removeAllListeners(); } }
   const vscode = {StatusBarAlignment:{Left:1},ThemeColor:class {constructor(name){this.name=name;}},EventEmitter:Emitter, Uri:{parse:text=>({toString:()=>text})},
@@ -25,9 +26,9 @@ function fakeVscode() {
     window:{registerTreeDataProvider:(name,p)=>{providers.set(name,p);return {dispose(){}};},showInformationMessage:async text=>messages.push(text),
       showTextDocument:async doc=>shown.push(doc),showInputBox:async()=>inputs.shift(),createOutputChannel:()=>({append:s=>output.push(s),appendLine:s=>output.push(s),clear(){},show(){},dispose(){}}),
       createStatusBarItem:()=>{const item={show(){},hide(){},dispose(){}};providers.set('statusBar',item);return item;}},
-    workspace:{registerTextDocumentContentProvider:(scheme,p)=>{providers.set(scheme,p);return {dispose(){}};},openTextDocument:async uri=>({uri,text:providers.get('osd-job').provideTextDocumentContent(uri)})},
+    workspace:{onDidCloseTextDocument:fn=>{closed.on('close',fn);return {dispose:()=>closed.off('close',fn)};},registerTextDocumentContentProvider:(scheme,p)=>{providers.set(scheme,p);return {dispose(){}};},openTextDocument:async uri=>({uri,text:providers.get('osd-job').provideTextDocumentContent(uri)})},
     env:{clipboard:{writeText:async text=>shown.push(text)}}};
-  let inputs = []; return {vscode,commands,providers,messages,shown,output,setInputs:values=>{inputs=values;}};
+  let inputs = []; return {vscode,commands,providers,messages,shown,output,close:doc=>closed.emit('close',doc),setInputs:values=>{inputs=values;}};
 }
 const until = async fn => { for (let i=0;i<100;i++) { if (fn()) return; await new Promise(r=>setTimeout(r,10)); } throw Error('timeout'); };
 describe('VS Code read-only jobs panel', function() {
@@ -77,6 +78,22 @@ describe('VS Code read-only jobs panel', function() {
     expect(ui.shown[0].uri.toString()).to.equal(`osd-job:${id}/log`);expect(ui.shown[0].text).to.include('STEP_STARTED step 1: Report step started');
     expect(ui.shown[1].text).to.equal('saved WRITE output');expect(ui.shown[2]).to.equal('DEMO_JOB/12000000');
     expect(requests.at(-1).url).to.include('output=1');
+  });
+  it('evicts repeatedly closed outputs and bounds cached UTF-8 bytes with LRU',async()=>{
+    provider.request=async()=>({output:{lines:['é'.repeat(512*1024)]}});
+    for(let i=0;i<20;i++) {
+      await provider.open({run:{id:'closed-'+i}},'output');
+      ui.close(ui.shown.at(-1));
+      expect(provider.documents.size).to.equal(0);
+    }
+    for(let i=0;i<40;i++) await provider.open({run:{id:'open-'+i}},'output');
+    expect([...provider.documents.values()].reduce((n,text)=>n+Buffer.byteLength(text),0)).to.be.at.most(32*1024*1024);
+    expect(provider.documents.has('osd-job:open-0/output')).to.equal(false);
+    expect(provider.documents.has('osd-job:open-39/output')).to.equal(true);
+    provider.request=async()=>({output:{lines:['x'.repeat(33*1024*1024)]}});
+    await provider.open({run:{id:'oversized'}},'output');
+    expect(provider.documents.has('osd-job:oversized/output')).to.equal(false);
+    expect(ui.shown.at(-1).text.length).to.equal(33*1024*1024);
   });
   it('does not invent a retained job key for legacy report runs',async()=>{
     await ui.commands.get('osd.copyJobKey')({run:{id,program:'DEMO_REPORT'}});

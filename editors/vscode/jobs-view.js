@@ -88,6 +88,21 @@ class JobsView {
     if (next.from && next.to && next.from > next.to) { await this.vscode.window.showInformationMessage('From date must precede to date.'); return; }
     this.filter = next; this.events.fire();
   }
+  evictDocument(key) {
+    const content = this.documents.get(key);
+    if (content !== undefined) this.documentBytes -= Buffer.byteLength(content);
+    this.documents.delete(key);
+  }
+  cacheDocument(key, content) {
+    this.evictDocument(key);
+    this.documents.set(key, content); this.documentBytes += Buffer.byteLength(content);
+    while (this.documentBytes > 32 * 1024 * 1024 && this.documents.size > 1) this.evictDocument(this.documents.keys().next().value);
+  }
+  documentContent(uri) {
+    const key = uri.toString(), content = this.documents.get(key);
+    if (content !== undefined) { this.documents.delete(key); this.documents.set(key, content); }
+    return content || '';
+  }
   async open(node, kind) {
     if (!node?.run) return;
     const launcher = this.controller.launcher, token = launcher?.env?.OSD_BATCH_READ_TOKEN;
@@ -97,9 +112,10 @@ class JobsView {
       const content = kind === 'log' ? (answer.run.log?.map(row => `${row.at} ${row.severity} ${row.event} ${row.step ? `step ${row.step}: ` : ''}${row.text}`).join('\n') || 'No technical log recorded.')
         : (answer.output.lines?.join('\n') || answer.output.terminal || JSON.stringify(answer.output, null, 2));
       const uri = this.vscode.Uri.parse(`osd-job:${node.run.id}/${kind}`);
-      this.documents.set(uri.toString(), content);
+      this.cacheDocument(uri.toString(), content);
       this.documentEvents.fire(uri);
-      await this.vscode.window.showTextDocument(await this.vscode.workspace.openTextDocument(uri), {preview:false});
+      try { await this.vscode.window.showTextDocument(await this.vscode.workspace.openTextDocument(uri), {preview:false}); }
+      finally { if (Buffer.byteLength(content) > 32 * 1024 * 1024) this.evictDocument(uri.toString()); }
     } catch (error) {
       await this.vscode.window.showInformationMessage(kind === 'output' && error.status === 404 ? 'No saved output is available for this job.'
         : `Job ${kind} is unavailable${error.status ? ` (HTTP ${error.status})` : '; system busy or paused'}.`);
@@ -109,11 +125,12 @@ class JobsView {
 }
 function registerJobsView(vscode, context, controller) {
   const provider = new JobsView(vscode, controller);
-  provider.documents = new Map(); provider.documentEvents = new vscode.EventEmitter();
+  provider.documents = new Map(); provider.documentBytes = 0; provider.documentEvents = new vscode.EventEmitter();
   const register = (name, fn) => context.subscriptions.push(vscode.commands.registerCommand(name, fn));
   context.subscriptions.push(provider, vscode.window.registerTreeDataProvider('osdJobs', provider),
     vscode.workspace.registerTextDocumentContentProvider('osd-job', {onDidChange:provider.documentEvents.event,
-      provideTextDocumentContent:uri => provider.documents.get(uri.toString()) || ''}));
+      provideTextDocumentContent:uri => provider.documentContent(uri)}),
+    vscode.workspace.onDidCloseTextDocument(doc => provider.evictDocument(doc.uri.toString())));
   const safely = fn => async (...args) => { try { return await fn(...args); } catch { await vscode.window.showInformationMessage('Jobs API is busy or unavailable. Refresh to retry.'); } };
   register('osd.openJobsPanel', () => vscode.commands.executeCommand('osdJobs.focus'));
   register('osd.refreshJobs', safely(() => provider.refresh()));
