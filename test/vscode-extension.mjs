@@ -4101,6 +4101,138 @@ describe("editors/vscode: running parts status and actions", () => {
 });
 
 describe("editors/vscode: serving generation status", () => {
+  // Critic round 2: drive the exported status function with a deterministic
+  // clock and deferred responses, restoring globals even on assertion failure.
+  async function handoffProbe(run, {realController = false} = {}) {
+    const h = runningStatusApi();
+    const base = vscodeStub();
+    Object.assign(h.api, {EventEmitter: base.EventEmitter, debug: base.debug,
+      ConfigurationTarget: base.ConfigurationTarget});
+    let url = "http://external:3030", now = 0, tick, refresh;
+    let respond = async () => { throw Error("unreachable"); };
+    const errors = [];
+    h.api.workspace = {...base.workspace, getConfiguration: () => ({
+      get: (key, fallback) => key === "url" ? url : fallback,
+      update: async () => { throw Error("settings are read-only"); },
+    })};
+    h.api.window.showErrorMessage = message => errors.push(message);
+    h.api.window.setStatusBarMessage = () => {};
+    const {statusBar, SystemController} = loadExtension(h.api);
+    const context = controllerContext();
+    const saved = {fetch: globalThis.fetch, interval: globalThis.setInterval,
+      clear: globalThis.clearInterval, now: Date.now};
+    const controller = realController
+      ? new SystemController(context, {append() {}, appendLine() {}, show() {}})
+      : {launcher: {state: "stopped"}, onDidChange(fn) { refresh = fn; return {dispose() {}}; }};
+    if (realController) {
+      const launcher = new NodeEventEmitter();
+      Object.assign(launcher, {state: "stopped", port: 8060, async start() {
+        for (const state of ["starting", "running"]) { this.state = state; this.emit("state", state); }
+        return {port: this.port, generation: "local123"};
+      }});
+      controller.attachLauncher(launcher);
+      controller.ensureLauncher = async () => launcher;
+    }
+    try {
+      globalThis.fetch = (...args) => respond(...args);
+      globalThis.setInterval = fn => { tick = fn; return 1; };
+      globalThis.clearInterval = () => {};
+      Date.now = () => now;
+      const item = statusBar(context, () => 2, controller);
+      await new Promise(resolve => setImmediate(resolve));
+      await run({item, controller, errors, tick: () => tick(),
+        time: value => { now = value; }, url: value => { url = value; },
+        respond: fn => { respond = fn; },
+        state: value => { controller.launcher.state = value; refresh(); },
+        refresh: () => refresh(),
+        start: () => { controller.launcher.state = "starting"; refresh(); controller.launcher.state = "running"; refresh(); }});
+    } finally {
+      context.subscriptions.forEach(s => s.dispose());
+      globalThis.fetch = saved.fetch; globalThis.setInterval = saved.interval;
+      globalThis.clearInterval = saved.clear; Date.now = saved.now;
+    }
+  }
+
+  for (const times of [[0, 5000, 14999, 15000], [0, 60000, 60001]]) {
+    it(`bounds a never-serving handoff with both three misses and fifteen seconds (${times.join(",")})`, async () => {
+      await handoffProbe(async p => {
+        p.start();
+        for (const time of times.slice(0, -1)) {
+          p.time(time); await p.tick();
+          expect(p.item.text).to.include("awaiting serving");
+        }
+        p.time(times.at(-1)); await p.tick();
+        expect(p.item.text).to.include("osd down");
+        expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
+        p.start(); await p.tick();
+        expect(p.item.text, "restart resets the grace").to.include("awaiting serving");
+      });
+    });
+  }
+
+  it("keeps two kernel findings in immediate and polled awaiting tooltips", async () => {
+    await handoffProbe(async p => {
+      p.start();
+      expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
+      await p.tick();
+      expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
+      p.state("stopped"); p.start();
+      expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
+    });
+  });
+
+  it("leaves awaiting immediately when the launcher stops or fails", async () => {
+    await handoffProbe(async p => {
+      for (const state of ["stopped", "failed"]) {
+        p.start(); p.state(state);
+        expect(p.item.text, state).to.include("osd down");
+        expect(p.item.tooltip).to.include("OSD kernel: 2 finding(s)");
+      }
+    });
+  });
+
+  for (const notify of [true, false]) {
+    it(`ignores an old URL serving response after a URL switch (state notification: ${notify})`, async () => {
+      await handoffProbe(async p => {
+        p.start();
+        let resolveOld;
+        const requests = [];
+        p.respond(url => {
+          requests.push(url);
+          return url.endsWith("/osd/serving")
+            ? new Promise(resolve => { resolveOld = resolve; })
+            : Promise.resolve({ok: true, json: async () => []});
+        });
+        const pending = p.tick();
+        p.url("http://localhost:8060");
+        if (notify) p.refresh();
+        resolveOld({ok: true, json: async () => ({generation: "old-system"})});
+        await pending;
+        expect(p.item.text).to.include("awaiting serving");
+        expect(requests).to.deep.equal(["http://external:3030/osd/serving"]);
+        p.respond(async url => {
+          requests.push(url);
+          return {ok: true, json: async () => url.endsWith("/osd/dumps") ? [] : {generation: "fresh123"}};
+        });
+        await p.tick();
+        expect(p.item.text).to.include("fresh123");
+        expect(p.item.tooltip).to.include("http://localhost:8060");
+        expect(requests.slice(1)).to.deep.equal(["http://localhost:8060/osd/serving", "http://localhost:8060/osd/dumps"]);
+      });
+    });
+  }
+
+  it("bounds awaiting when a successful launch cannot update osd.url", async () => {
+    await handoffProbe(async p => {
+      expect(await p.controller.start()).to.equal(true);
+      expect(p.errors.some(message => message.includes("could not update osd.url"))).to.equal(true);
+      expect(p.item.text).to.include("awaiting serving");
+      for (const time of [0, 5000, 15000]) { p.time(time); await p.tick(); }
+      expect(p.item.text).to.include("osd down");
+      expect(p.item.tooltip).to.include("http://external:3030");
+    }, {realController: true});
+  });
+
   it("hides immediately throughout long startup, guards a late poll, and restores stopped/crashed status", async () => {
     const h = runningStatusApi();
     h.api.workspace = {getConfiguration() { return {get: (_, fallback) => fallback}; }};

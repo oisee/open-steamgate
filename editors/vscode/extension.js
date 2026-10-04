@@ -2863,17 +2863,21 @@ function statusBar(context, findingCount = () => kernelFindingCount, controller 
   item.show();
   let dumpsSeen;
   let disposed = false, pollEpoch = 0, observedLauncher, observedState;
-  let awaitingServing = false;
+  let awaitingServing = false, misses = 0, firstMiss;
+  const resetMisses = () => { misses = 0; firstMiss = undefined; };
+  const kernelTooltip = text => `${text}\nOSD kernel: ${findingCount()} finding(s)`;
   const transitioning = () => ["building", "starting", "stopping"].includes(controller?.launcher?.state);
   const visibility = () => {
     if (disposed) return;
     const launcher = controller?.launcher;
     if (launcher !== observedLauncher || launcher?.state !== observedState) {
       observedLauncher = launcher; observedState = launcher?.state; pollEpoch++;
+      resetMisses();
       if (["building", "starting", "running"].includes(observedState)) awaitingServing = true;
-      else if (observedState === "stopped") {
+      else if (["stopped", "failed"].includes(observedState)) {
         awaitingServing = false;
         item.text = "$(debug-disconnect) osd down";
+        item.tooltip = kernelTooltip(`System ${observedState}`);
         item.backgroundColor = undefined;
       }
     }
@@ -2881,7 +2885,7 @@ function statusBar(context, findingCount = () => kernelFindingCount, controller 
     else {
       if (awaitingServing) {
         item.text = "$(sync~spin) OSD generation: awaiting serving";
-        item.tooltip = "Waiting for the first serving response after Start";
+        item.tooltip = kernelTooltip("Waiting for the first serving response after Start");
         item.backgroundColor = undefined;
       }
       item.show();
@@ -2893,17 +2897,18 @@ function statusBar(context, findingCount = () => kernelFindingCount, controller 
     visibility();
     if (transitioning()) return;
     const epoch = pollEpoch;
-    const current = () => !disposed && epoch === pollEpoch;
+    const client = osd(), url = client.url;
+    const current = () => !disposed && epoch === pollEpoch && osd() === client && client.url === url;
     try {
-      const serving = await osd().serving();
+      const serving = await client.serving();
       if (!current()) return;
-      awaitingServing = false;
       setServingAvailability(true);
       await activeController?.launcher?.refreshJobsGeneration(serving);
       await activeController?.refreshDebuggerGeneration().catch((error) =>
         activeController.output.appendLine(`osd debugger: ${String(error?.message ?? error)}`));
-      const dumps = await osd().dumps().catch(() => []);
+      const dumps = await client.dumps().catch(() => []);
       if (!current()) return;
+      awaitingServing = false; resetMisses();
       const generation = String(serving.generation ?? "?").slice(0, 8);
       const warm = serving.warm;
       // T7 (docs/vscode-extension.md "Warm"): the swap count from the warm
@@ -2916,7 +2921,7 @@ function statusBar(context, findingCount = () => kernelFindingCount, controller 
       item.text = `$(server) OSD generation ${generation}${dbLabel ? ` · ${dbLabel}` : ""}${warmText ? ` · ${warmText}` : ""}${swaps ? ` +${swaps}` : ""}${dumps.length ? `  $(bug) ${dumps.length}` : ""}`;
       const lastVerify = warm?.lastVerify === undefined ? "never"
         : `${warm.lastVerify.verdict ?? "?"} at ${warm.lastVerify.at ?? "?"}`;
-      item.tooltip = `${osd().url}\ngeneration ${serving.generation}\ndatabase ${dbLabel ?? "unknown"}\npid ${serving.pid}` +
+      item.tooltip = `${url}\ngeneration ${serving.generation}\ndatabase ${dbLabel ?? "unknown"}\npid ${serving.pid}` +
         (warm === undefined ? "" : `\nwarm: ${warm.state}${warm.reason ? ` (${warm.reason})` : ""}` +
           `\nwarm generation: ${warm.generation ?? "n/a"}\nunverified: ${(warm.unverified ?? []).join(", ") || "none"}` +
           `\nswaps: ${warm.swaps ?? 0}\ncopies: ${warm.copies ?? 0}\nlast verify: ${lastVerify}`) +
@@ -2926,13 +2931,18 @@ function statusBar(context, findingCount = () => kernelFindingCount, controller 
       dumpsSeen ??= dumps.length;
     } catch {
       if (!current()) return;
-      if (awaitingServing) { visibility(); return; }
+      if (awaitingServing) {
+        firstMiss ??= Date.now(); misses++;
+        // Match the jobs grace: require both repeated misses and elapsed time.
+        if (misses < 3 || Date.now() - firstMiss < 15000) { visibility(); return; }
+        awaitingServing = false;
+      }
       setServingAvailability(false);
       item.text = "$(debug-disconnect) osd down";
-      item.tooltip = `nothing answers /osd/serving at ${osd().url} (setting osd.url)`;
+      item.tooltip = `nothing answers /osd/serving at ${url} (setting osd.url)`;
       item.backgroundColor = undefined;
     }
-    item.tooltip += `\nOSD kernel: ${findingCount()} finding(s)`;
+    item.tooltip = kernelTooltip(item.tooltip);
     // A poll begun before Start may finish after the launcher changes state.
     visibility();
   };
