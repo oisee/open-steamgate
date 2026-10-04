@@ -1,7 +1,19 @@
 // Immutable source inputs beside a generation, never in the database.
-import {createHash} from "node:crypto";
-import {existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, linkSync, copyFileSync, rmSync} from "node:fs";
+import {createHash, randomUUID} from "node:crypto";
+import {existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, linkSync, copyFileSync, rmSync, renameSync} from "node:fs";
 import {dirname, join, relative, resolve} from "node:path";
+
+// Snapshot paths may share an inode with other generations and the digest
+// cache. Publish complete bytes by rename, replacing only this path's link.
+export function writeSourceSnapshot(target, bytes) {
+  const temp = `${target}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temp, bytes, {flag: "wx"});
+    renameSync(temp, target);
+  } finally {
+    rmSync(temp, {force: true});
+  }
+}
 
 export function keepSourceInputs(root, generation, digests, actual = undefined, overlay = undefined, previous = undefined) {
   const copies = resolve(root, overlay?.folder ?? "build/inactive/active").replaceAll("\\", "/") + "/";
@@ -38,7 +50,7 @@ export function keepSourceInputs(root, generation, digests, actual = undefined, 
         throw changedSource(path);
       }
       ensureDirectory(target);
-      writeFileSync(target, bytes);
+      writeSourceSnapshot(target, bytes);
     }
     const retained = join(shared, digest);
     if (!existsSync(retained)) {

@@ -1,7 +1,7 @@
 import {once} from "node:events";
 import {expect} from "chai";
 import express from "express";
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, realpathSync, readFileSync, existsSync} from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, realpathSync, readFileSync, existsSync, linkSync, statSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve, win32} from "node:path";
 import {createHash} from "node:crypto";
@@ -136,15 +136,52 @@ CLASS zcl_empty_live IMPLEMENTATION. METHOD run. rv = lcl_value=>get( ). ENDMETH
 
 describe("generation source provenance", function () {
   this.timeout(180000);
+  for (const repair of ["active backfill", "input retention"]) it(`${repair} replaces a corrupt snapshot without changing its hard-link peers`, async () => {
+    const {keepSourceInputs} = await import("../tools/osd-source-snapshot.mjs");
+    const root = mkdtempSync(join(tmpdir(), "adt-snapshot-links-"));
+    try {
+      const file = "src/zsnapshot.prog.abap";
+      const source = "REPORT zsnapshot. WRITE 'active'.\n";
+      const digest = createHash("sha256").update(source).digest("hex");
+      const generation = join(root, "build/by-input/fixture");
+      const target = join(generation, "source", file);
+      const peer = join(root, "other-generation.prog.abap");
+      mkdirSync(join(root, "src"));
+      writeFileSync(join(root, file), source);
+      const digests = new Map([[join(root, file), digest]]);
+      keepSourceInputs(root, generation, digests);
+      linkSync(target, peer);
+      writeFileSync(target, "corrupt snapshot\n");
+      const peerBytes = readFileSync(peer);
+      const shared = join(root, "build/source-by-digest", digest);
+      expect(statSync(target).ino).to.equal(statSync(peer).ino);
+      expect(statSync(target).ino).to.equal(statSync(shared).ino);
+      if (repair === "active backfill") {
+        // An incomplete snapshot without shared lookup must backfill this path.
+        rmSync(join(generation, "source-shared"));
+        const store = new ObjectStore({root, libs: [], roots: [{path: "src", writable: true}]});
+        store.served = {running: true, generation: "fixture"};
+        expect(store.read("PROG", "ZSNAPSHOT", "main", "active").source).to.equal(source);
+      } else {
+        keepSourceInputs(root, generation, digests);
+      }
+      expect(readFileSync(peer).equals(peerBytes), "peer bytes remain unchanged").to.equal(true);
+      expect(readFileSync(shared).equals(peerBytes), "shared digest bytes remain unchanged").to.equal(true);
+      expect(statSync(target).ino).not.to.equal(statSync(peer).ino);
+      expect(createHash("sha256").update(readFileSync(target)).digest("hex")).to.equal(digest);
+    } finally {
+      rmSync(root, {recursive: true, force: true});
+    }
+  });
   it("normalizes Windows overlay paths in the real snapshot helper", () => {
     const module = readFileSync(join(REPO, "tools/osd-source-snapshot.mjs"), "utf8");
     const code = module.slice(module.indexOf("export function keepSourceInputs"), module.indexOf("// gen/"))
       .replace("export function", "function");
     const bytes = Buffer.from("REPORT ztest. WRITE 'P1'.\n");
     const written = [];
-    const keep = new Function("createHash", "existsSync", "mkdirSync", "readFileSync", "writeFileSync", "linkSync", "copyFileSync",
+    const keep = new Function("createHash", "existsSync", "mkdirSync", "readFileSync", "writeSourceSnapshot", "writeFileSync", "linkSync", "copyFileSync",
       "dirname", "join", "relative", "resolve", "sep", code + ";return keepSourceInputs;")(
-      createHash, () => true, () => {}, () => bytes, file => written.push(file), () => {}, () => {},
+      createHash, () => true, () => {}, () => bytes, file => written.push(file), () => {}, () => {}, () => {},
       win32.dirname, win32.join, win32.relative, win32.resolve, win32.sep);
     const root = "C:\\repo", target = "C:\\repo\\build\\tmp\\hash";
     keep(root, target, new Map([["C:/repo/build/inactive/active/src/ztest.prog.abap", createHash("sha256").update(bytes).digest("hex")]]));
