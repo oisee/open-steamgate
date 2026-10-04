@@ -3029,11 +3029,14 @@ function currentObject() {
 }
 
 function registerCheckActivateCommands(context, output) {
+  // check and activation keep separate collections: activation clears the
+  // documents it no longer reports, which must never erase a check's findings
   const diagnostics = vscode.languages.createDiagnosticCollection("osd-abap");
+  const activation = vscode.languages.createDiagnosticCollection("osd-activation");
   const activationDiagnostics = new Map();
-  context.subscriptions.push(diagnostics);
+  context.subscriptions.push(diagnostics, activation);
   context.subscriptions.push(vscode.commands.registerCommand("osd.check", () => check(diagnostics, output)));
-  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(diagnostics, output, activationDiagnostics)));
+  context.subscriptions.push(vscode.commands.registerCommand("osd.activate", () => activateCurrent(activation, output, activationDiagnostics)));
 }
 
 // severity -> vscode.DiagnosticSeverity; A and X are ABAP's abort/exception

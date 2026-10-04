@@ -1520,11 +1520,13 @@ describe("editors/vscode: the extension's logic", function () {
       await new Promise((resolve) => server.once("listening", resolve));
       try {
         const api = vscodeStub({url: `http://127.0.0.1:${server.address().port}`});
-        const handlers = new Map(), problems = new Map(), output = [];
+        const handlers = new Map(), collections = new Map(), output = [];
         api.commands.registerCommand = (name, handler) => { handlers.set(name, handler); return {dispose() {}}; };
-        api.languages = {createDiagnosticCollection: () => ({
-          set: (uri, issues) => problems.set(uri.fsPath, issues), dispose() {},
-        })};
+        api.languages = {createDiagnosticCollection: (name) => {
+          const problems = new Map();
+          collections.set(name, problems);
+          return {set: (uri, issues) => problems.set(uri.fsPath, issues), dispose() {}};
+        }};
         api.DiagnosticSeverity = {Error: 0, Warning: 1, Information: 2};
         api.Diagnostic = class { constructor(range, message, severity) { Object.assign(this, {range, message, severity}); } };
         api.Position = class {
@@ -1535,6 +1537,7 @@ describe("editors/vscode: the extension's logic", function () {
         api.window.activeTextEditor = {document: {fileName: activeFile, uri: api.Uri.file(activeFile), isDirty: false, getText: () => ""}};
         api.workspace.findFiles = async (pattern) => pattern === "**/x.prog.abap" ? [api.Uri.file("/other/x.prog.abap")] : [];
         loadExtension(api).registerCheckActivateCommands({subscriptions: []}, {appendLine: (line) => output.push(line)});
+        const problems = collections.get("osd-activation");
         await handlers.get("osd.activate")();
         const actual = [...problems].filter(([, issues]) => issues.length).map(([file, issues]) => [file,
           issues.map((issue) => [issue.message, issue.range.start.line, issue.range.start.character, issue.severity])]);
@@ -1578,11 +1581,13 @@ describe("editors/vscode: the extension's logic", function () {
     await new Promise((resolve) => server.once("listening", resolve));
     try {
       const api = vscodeStub({url: `http://127.0.0.1:${server.address().port}`});
-      const handlers = new Map(), problems = new Map();
+      const handlers = new Map(), collections = new Map();
       api.commands.registerCommand = (name, handler) => { handlers.set(name, handler); return {dispose() {}}; };
-      api.languages = {createDiagnosticCollection: () => ({
-        set: (uri, issues) => problems.set(uri.fsPath, issues), dispose() {},
-      })};
+      api.languages = {createDiagnosticCollection: (name) => {
+        const problems = new Map();
+        collections.set(name, problems);
+        return {set: (uri, issues) => problems.set(uri.fsPath, issues), dispose() {}};
+      }};
       api.DiagnosticSeverity = {Error: 0, Warning: 1, Information: 2};
       api.Diagnostic = class { constructor(range, message, severity) { Object.assign(this, {range, message, severity}); } };
       api.Position = class {
@@ -1595,6 +1600,7 @@ describe("editors/vscode: the extension's logic", function () {
       const x = "/project/zcl_x.clas.abap", y = "/project/zcl_y.clas.abap";
       api.workspace.findFiles = async (pattern) => pattern === "**/zcl_y.clas.abap" ? [api.Uri.file(y)] : [];
       loadExtension(api).registerCheckActivateCommands({subscriptions: []}, {appendLine() {}});
+      const problems = collections.get("osd-activation");
       select(x);
       await handlers.get("osd.activate")();
       expect(problems.get(y).map((issue) => issue.message)).to.deep.equal(["Error from X"]);
@@ -1619,6 +1625,62 @@ describe("editors/vscode: the extension's logic", function () {
       await new Promise((resolve) => server.close(resolve));
     }
   });
+
+  for (const first of ["check", "activation"]) {
+    it(`check/activation diagnostic isolation: ${first} findings survive the other command succeeding`, async () => {
+      let checkIssues = first === "check" ? [{severity: "E", message: "Check error", line: 5, column: 2}] : [];
+      const activationXml = first === "activation" ? activationFailureDocument([
+        {type: "CLAS", name: "ZCL_A", issues: [{severity: "E", message: "Activation error", line: 7, column: 3}]},
+      ]) : activationSuccessDocument();
+      const app = express();
+      app.head("/sap/bc/adt/core/discovery", (_req, res) => res.set("x-csrf-token", "test-token").end());
+      app.post("/sap/bc/adt/activation", (_req, res) => res.type("application/xml").send(activationXml));
+      app.post("/sap/bc/adt/checkruns", (_req, res) => res.type("application/xml").send(
+        checkReportDocument([{uri: "/sap/bc/adt/oo/classes/zcl_a", issues: checkIssues}])));
+      const server = app.listen(0, "127.0.0.1");
+      await new Promise((resolve) => server.once("listening", resolve));
+      try {
+        const api = vscodeStub({url: `http://127.0.0.1:${server.address().port}`});
+        const handlers = new Map(), collections = new Map(), output = [];
+        api.commands.registerCommand = (name, handler) => { handlers.set(name, handler); return {dispose() {}}; };
+        api.languages = {createDiagnosticCollection: (name) => {
+          const problems = new Map();
+          collections.set(name, problems);
+          return {set: (uri, issues) => problems.set(uri.fsPath, issues), dispose() {}};
+        }};
+        api.DiagnosticSeverity = {Error: 0, Warning: 1, Information: 2};
+        api.Diagnostic = class { constructor(range, message, severity) { Object.assign(this, {range, message, severity}); } };
+        api.Position = class {
+          constructor(line, character) { Object.assign(this, {line, character}); }
+          translate(line, character) { return new api.Position(this.line + line, this.character + character); }
+        };
+        api.window.setStatusBarMessage = () => {};
+        const file = "/project/zcl_a.clas.abap";
+        api.window.activeTextEditor = {document: {fileName: file, uri: api.Uri.file(file), isDirty: false, getText: () => ""}};
+        loadExtension(api).registerCheckActivateCommands({subscriptions: []}, {appendLine: (line) => output.push(line)});
+        const checks = collections.get("osd-abap"), activations = collections.get("osd-activation");
+        expect(checks).not.to.equal(activations);
+        // A failed activation is expected to show an error to the user.
+        api.window.showErrorMessage = () => {};
+        const owner = first === "check" ? checks : activations;
+        const message = first === "check" ? "Check error" : "Activation error";
+        await handlers.get(first === "check" ? "osd.check" : "osd.activate")();
+        const original = owner.get(file);
+        expect(original.map((issue) => issue.message)).to.deep.equal([message]);
+
+        // Successful activation also runs a clean post-activation check.
+        checkIssues = [];
+        await handlers.get(first === "check" ? "osd.activate" : "osd.check")();
+        expect(owner.get(file), "the other command preserves the original diagnostics").to.equal(original);
+        const other = first === "check" ? activations : checks;
+        expect(other.get(file)).to.deep.equal([]);
+        expect([...other.values()].flat()).to.deep.equal([]);
+        expect(output.join("\n")).not.to.contain("post-activation check:");
+      } finally {
+        await new Promise((resolve) => server.close(resolve));
+      }
+    });
+  }
 
   it("SE80's F8, one entry per object type: what this build does, or the route its turn would use", () => {
     expect(runActionFor({type: "CLAS", name: "ZCL_DEMO"}, {hasUnitTests: true})).to.deep.equal({kind: "unit"});
