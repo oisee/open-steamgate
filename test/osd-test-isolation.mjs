@@ -8,6 +8,19 @@ import {createRequire} from 'node:module';
 const require = createRequire(import.meta.url);
 const mocha = require.resolve('mocha/bin/mocha.js');
 const plugin = resolve('tools/osd-test-isolation.cjs');
+// Installed only by run()'s child preload, before the hook requires its JSON.
+// These synthetic rules retain the removed allowance's bounds/phase/kinds.
+const genAllowancePatch = `allowances['test/gen-allowance-fixture.mjs']=${JSON.stringify({
+  gen: {
+    reason: 'Fixture import removes generated output and rewrites retained output',
+    owner: 'test fixture',
+    backlog: 'test/osd-test-isolation.mjs',
+    files: [
+      {prefix: 'gen/stg/zvdb_100/', maxCount: 10, phase: 'import', kinds: ['removed']},
+      {prefix: 'gen/stg/zstg_demo/', maxCount: 2, phase: 'import', kinds: ['changed']},
+    ],
+  },
+})};`;
 function run(files, options = [], allowancePatch, preload, hook = true) {
   const root = mkdtempSync(join(tmpdir(), 'isolation-proof-'));
   try {
@@ -62,11 +75,11 @@ describe('per-file process isolation detector', function () {
         const content = mutation === 'different' ? 'different' : 'original';
         const regenerate = `fs.writeFileSync('${path}','${content}');`;
         const result = run({
-          'test/shadowed-objects.mjs': "import fs from 'node:fs';fs.rmSync('gen/stg/zvdb_100/output.abap');it('removes output',()=>{});",
+          'test/gen-allowance-fixture.mjs': "import fs from 'node:fs';fs.rmSync('gen/stg/zvdb_100/output.abap');it('removes output',()=>{});",
           'test/regenerate.mjs': `import fs from 'node:fs';${phase === 'import' ? regenerate : ''}it('regenerates',()=>{${phase === 'execution' ? regenerate : ''}});`,
-        }, [], undefined,
+        }, [], genAllowancePatch,
         "const fs=require('node:fs');fs.mkdirSync('gen/stg/zvdb_100',{recursive:true});fs.writeFileSync('gen/stg/zvdb_100/output.abap','original');");
-        expect(result.output).to.include('test/shadowed-objects.mjs: gen:').and.include('TEMPORARY ALLOW');
+        expect(result.output).to.include('test/gen-allowance-fixture.mjs: gen:').and.include('TEMPORARY ALLOW');
         if (mutation === 'identical') {
           expect(result.status, result.output).to.equal(0);
           expect(result.output).to.include('test/regenerate.mjs: gen restoration:').and.include(`"phase":"${phase}"`);
@@ -160,26 +173,26 @@ describe('per-file process isolation detector', function () {
     expect(result.output).to.include('0 passing').and.include('0.cjs: gen:').and.include('gen/probe.abap');
     expect(result.filesAfterExit).not.to.include('gen/probe.abap');
   });
-  it('rejects execution corruption under the real shadowed-objects gen allowance', () => {
-    const result = run({'test/shadowed-objects.mjs': "import fs from 'node:fs';it('corrupts base',()=>fs.writeFileSync('gen/stg/zvdb_100/zcl_zvdb_100_dpc.clas.abap','unrelated corruption'));"}, [], undefined,
+  it('rejects execution corruption under the fixture gen allowance', () => {
+    const result = run({'test/gen-allowance-fixture.mjs': "import fs from 'node:fs';it('corrupts base',()=>fs.writeFileSync('gen/stg/zvdb_100/zcl_zvdb_100_dpc.clas.abap','unrelated corruption'));"}, [], genAllowancePatch,
       "const fs=require('node:fs');fs.mkdirSync('gen/stg/zvdb_100',{recursive:true});fs.writeFileSync('gen/stg/zvdb_100/zcl_zvdb_100_dpc.clas.abap','original');");
     expect(result.status, result.output).to.be.greaterThan(0);
-    expect(result.output).to.include('test/shadowed-objects.mjs: gen:').and.include('gen/stg/zvdb_100/zcl_zvdb_100_dpc.clas.abap');
+    expect(result.output).to.include('test/gen-allowance-fixture.mjs: gen:').and.include('gen/stg/zvdb_100/zcl_zvdb_100_dpc.clas.abap');
     expect(result.output).not.to.include('TEMPORARY ALLOW');
   });
   for (const mutation of ['import-removal', 'import-retained-rewrite', 'import-rewrite', 'execution-removal', 'import-and-execution']) {
-    it(`scopes the real gen allowance by phase and kind: ${mutation}`, () => {
+    it(`scopes the fixture gen allowance by phase and kind: ${mutation}`, () => {
       const folder = mutation === 'import-retained-rewrite' ? 'zstg_demo' : 'zvdb_100';
       const path = `gen/stg/${folder}/probe.clas.abap`;
       const edit = mutation.includes('rewrite') ? `fs.writeFileSync('${path}','unrelated corruption');` : `fs.rmSync('${path}');`;
       const execution = mutation === 'execution-removal' ? edit : mutation === 'import-and-execution' ? `fs.writeFileSync('${path}','added in execution');` : '';
       const source = `import fs from 'node:fs';${mutation === 'execution-removal' ? '' : edit}it('unselected',()=>{${execution}});`;
       const options = execution ? [] : ['--grep', ' selected$'];
-      const result = run({'test/shadowed-objects.mjs': source}, options, undefined,
+      const result = run({'test/gen-allowance-fixture.mjs': source}, options, genAllowancePatch,
         `const fs=require('node:fs');fs.mkdirSync('gen/stg/${folder}',{recursive:true});fs.writeFileSync('${path}','original');`);
       const allowed = ['import-removal', 'import-retained-rewrite'].includes(mutation);
       expect(result.status, result.output).to.equal(allowed ? 0 : 1);
-      expect(result.output).to.include('test/shadowed-objects.mjs: gen:').and.include(`"phase":"${mutation === 'execution-removal' ? 'execution' : 'import'}"`);
+      expect(result.output).to.include('test/gen-allowance-fixture.mjs: gen:').and.include(`"phase":"${mutation === 'execution-removal' ? 'execution' : 'import'}"`);
       if (allowed) expect(result.output).to.include('TEMPORARY ALLOW');
       else expect(result.output).not.to.include('TEMPORARY ALLOW');
     });
