@@ -1,7 +1,7 @@
 import {expect} from "chai";
 import {execFile} from "node:child_process";
 import {promisify} from "node:util";
-import {mkdtempSync, readFileSync, readdirSync, rmSync} from "node:fs";
+import {existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {DatabaseSync} from "node:sqlite";
@@ -46,10 +46,10 @@ const boot = `
   save(db);
   await db.disconnect();
 `;
-async function start(path, backend, strict = false) {
+async function start(path, backend, strict = false, source = boot, extraEnv = {}) {
   const env = {...process.env, STG_DB_PATH: path, STG_DB_STRICT: strict ? "1" : "0", STG_TLS: "0", OSD_JOB_WORKER: "extension"};
   if (backend === "heap") delete env.STG_DB; else env.STG_DB = backend;
-  const {stdout} = await run(process.execPath, ["--input-type=module", "-e", boot], {cwd: resolve("."), env, timeout: 60000, maxBuffer: 4 * 1024 * 1024});
+  const {stdout} = await run(process.execPath, ["--input-type=module", "-e", source], {cwd: resolve("."), env: {...env, ...extraEnv}, timeout: 60000, maxBuffer: 4 * 1024 * 1024});
   return JSON.parse(stdout.match(/MIGRATION_RESULT=(.*)/)[1]);
 }
 function assertBoot(result) {
@@ -77,6 +77,18 @@ describe("ADT handle DDIC upgrade preserves persistent business data", function 
   afterEach(() => { rmSync(dir, {recursive: true, force: true}); });
 
   for (const backend of ["file", "heap"]) {
+    it(`${backend}: an already-current fingerprint preserves existing handles and business rows`, async () => {
+      const path = join(dir, "current.sqlite");
+      sqliteFixture(path, ddl.sqlite);
+      assertBoot(await start(path, backend, true));
+      const db = new DatabaseSync(path);
+      try {
+        expect(db.prepare("SELECT COUNT(*) AS n FROM zosd_adt_shdl WHERE objname = 'ZOLD'").get().n).to.equal(1);
+        expect(db.prepare("SELECT fingerprint FROM osd_schema").get().fingerprint).to.equal(fingerprintOf(ddl.sqlite));
+      } finally { db.close(); }
+      expect(readdirSync(dir).filter(name => name.includes(".drift"))).to.deep.equal([]);
+    });
+
     it(`${backend}: a stamped CHAR36 database starts without drift, keeps user rows and LOCK stores/returns all 40 characters`, async () => {
       const path = join(dir, "business.sqlite");
       const old = oldHandle(ddl.sqlite);
@@ -96,6 +108,199 @@ describe("ADT handle DDIC upgrade preserves persistent business data", function 
       } finally { db.close(); }
     });
   }
+
+  it("file: independently constructed pre-release job layout plus CHAR36 keeps a pending job through setup", async () => {
+    const old = oldHandle(ddl.sqlite).map(sql => /CREATE TABLE ['"]zosd_job_outbox['"]/i.test(sql)
+      ? sql.replace(", 'release_seq' NCHAR(16)", "")
+      : /CREATE TABLE ['"]zosd_l3_stage['"]/i.test(sql) ? sql.replace(", 'run_bind' NCHAR(255) COLLATE RTRIM", "") : sql);
+    expect(fingerprintOf(old)).not.to.equal(fingerprintOf(oldHandle(ddl.sqlite)));
+    const path = join(dir, "pending.sqlite");
+    sqliteFixture(path, old);
+    const db = new DatabaseSync(path);
+    db.exec("INSERT INTO zosd_job_outbox (mandt, intent_id, jobname, jobcount, owner, program) VALUES ('123', 'old-intent', 'KEEP_JOB', '00000001', 'OWNER', 'REPORT')");
+    db.close();
+    assertBoot(await start(path, "file", true));
+    const migrated = new DatabaseSync(path);
+    try {
+      expect(migrated.prepare("SELECT intent_id, jobname, jobcount, release_seq FROM zosd_job_outbox").all())
+        .to.deep.equal([{intent_id: "old-intent", jobname: "KEEP_JOB", jobcount: "00000001", release_seq: ""}]);
+    } finally { migrated.close(); }
+    expect(readdirSync(dir).filter(name => name.includes(".drift"))).to.deep.equal([]);
+  });
+
+  it("sql.js: failed restamp rolls back the handle table and does not export over the original file", async () => {
+    const path = join(dir, "heap-rollback.sqlite"), old = oldHandle(ddl.sqlite);
+    sqliteFixture(path, old);
+    const native = new DatabaseSync(path);
+    native.exec("CREATE TRIGGER reject_stamp BEFORE UPDATE ON osd_schema BEGIN SELECT RAISE(ABORT, 'stamp failure'); END");
+    native.close();
+    const original = readFileSync(path);
+    const result = await start(path, "heap", true, `
+      let error;
+      try { await import('./output/init.mjs'); } catch (e) { error = e.message; }
+      const db = globalThis.abap.context.databaseConnections.DEFAULT;
+      const stamp = (await db.select({select: 'SELECT fingerprint FROM osd_schema'})).rows[0].fingerprint;
+      const handle = (await db.select({select: 'SELECT handle FROM zosd_adt_shdl'})).rows[0].handle;
+      const columns = (await db.select({select: 'PRAGMA table_info(zosd_adt_shdl)'})).rows;
+      console.log('MIGRATION_RESULT=' + JSON.stringify({error, stamp, handle, columns}));
+      await db.disconnect();
+    `);
+    expect(result.error).to.match(/stamp failure/);
+    expect(result.stamp).to.equal(fingerprintOf(old));
+    expect(result.handle).to.have.length(36);
+    expect(result.columns.find(column => column.name === "handle").type).to.equal("NCHAR(36)");
+    expect(readFileSync(path).equals(original)).to.equal(true);
+  });
+
+  for (const olderJobs of [false, true]) {
+    it(`file: two overlapping setup runtimes preserve data (${olderJobs ? "old jobs + CHAR36" : "current jobs + CHAR36"})`, async () => {
+      const old = olderJobs ? beforeJobReleaseDDL(oldHandle(ddl.sqlite)) : oldHandle(ddl.sqlite);
+      const path = join(dir, "overlap.sqlite"), gate = join(dir, "gate");
+      sqliteFixture(path, old);
+      // Stop runtime A after its initial stamp read; runtime B then completes
+      // setup before A resumes. This forces the stale-snapshot interleaving.
+      const source = `
+        import {existsSync, writeFileSync} from 'node:fs';
+        import {FileSqliteClient} from './tools/sqlite-file-client.mjs';
+        const gate = process.env.MIGRATION_GATE;
+        if (gate) {
+          const original = FileSqliteClient.prototype.stampedSchema;
+          FileSqliteClient.prototype.stampedSchema = async function () {
+            const found = await original.call(this);
+            writeFileSync(gate + '.ready', found);
+            const deadline = Date.now() + 30000;
+            while (!existsSync(gate + '.release')) {
+              if (Date.now() > deadline) throw new Error('migration gate timeout');
+              await new Promise(resolve => setTimeout(resolve, 10));
+            }
+            return found;
+          };
+        }
+        await import('./output/init.mjs');
+        const db = globalThis.abap.context.databaseConnections.DEFAULT;
+        const rows = (await db.select({select: "SELECT description, seats FROM zstg_demo WHERE travel_id = 'MIG_KEEP'"})).rows;
+        const stamp = (await db.select({select: 'SELECT fingerprint FROM osd_schema'})).rows[0].fingerprint;
+        console.log('MIGRATION_RESULT=' + JSON.stringify({rows, stamp}));
+        await db.disconnect();
+      `;
+      const first = start(path, "file", false, source, {MIGRATION_GATE: gate});
+      let second;
+      try {
+        const deadline = Date.now() + 30000;
+        while (!existsSync(gate + ".ready")) {
+          if (Date.now() > deadline) throw new Error("runtime A did not reach migration gate");
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        expect(readFileSync(gate + ".ready", "utf8")).to.equal(fingerprintOf(old));
+        second = await start(path, "file", false, source);
+      } finally { writeFileSync(gate + ".release", "go"); }
+      const resumed = await first;
+      expect({second, resumed, drift: readdirSync(dir).filter(name => name.includes(".drift"))}).to.deep.equal({
+        second: {rows: [{description: "survives handle upgrade", seats: 7}], stamp: fingerprintOf(ddl.sqlite)},
+        resumed: {rows: [{description: "survives handle upgrade", seats: 7}], stamp: fingerprintOf(ddl.sqlite)},
+        drift: [],
+      });
+    });
+  }
+
+  it("file: resumes from the current intermediate stamp when B finished only the job migrations", async () => {
+    const intermediate = oldHandle(ddl.sqlite), old = beforeJobScheduleDDL(beforeJobReleaseDDL(intermediate));
+    const path = join(dir, "intermediate.sqlite"), gate = join(dir, "gate");
+    sqliteFixture(path, old);
+    const fixture = new DatabaseSync(path);
+    fixture.exec("INSERT INTO zosd_job_outbox (mandt, intent_id, jobname, jobcount, owner, program) VALUES ('123', 'old-intent', 'KEEP_JOB', '00000001', 'OWNER', 'REPORT')");
+    fixture.close();
+    const first = start(path, "file", false, `
+      import {existsSync, writeFileSync} from 'node:fs';
+      import {FileSqliteClient} from './tools/sqlite-file-client.mjs';
+      const original = FileSqliteClient.prototype.stampedSchema;
+      FileSqliteClient.prototype.stampedSchema = async function () {
+        const found = await original.call(this);
+        const gate = process.env.MIGRATION_GATE;
+        writeFileSync(gate + '.ready', found);
+        const deadline = Date.now() + 30000;
+        while (!existsSync(gate + '.release')) {
+          if (Date.now() > deadline) throw new Error('migration gate timeout');
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+        return found;
+      };
+      ${boot.replace("import {initializeABAP} from './output/init.mjs';", "const {initializeABAP} = await import('./output/init.mjs');")}
+    `, {MIGRATION_GATE: gate});
+    try {
+      const deadline = Date.now() + 30000;
+      while (!existsSync(gate + ".ready")) {
+        if (Date.now() > deadline) throw new Error("runtime A did not reach migration gate");
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      expect(readFileSync(gate + ".ready", "utf8")).to.equal(fingerprintOf(old));
+      // Runtime B commits the real job migrations and exits before widening
+      // handles. A must select the remaining migration using B's stamp.
+      const second = await start(path, "file", false, `
+        import {DatabaseSync} from 'node:sqlite';
+        import {beforeJobReleaseDDL, migrateJobScheduleFile, migrateJobReleaseFile} from './test/setup.mjs';
+        import {fingerprintOf} from './tools/osd-persist.mjs';
+        const db = new DatabaseSync(process.env.STG_DB_PATH);
+        const schema = ${JSON.stringify(intermediate)};
+        const found = db.prepare('SELECT fingerprint FROM osd_schema').get().fingerprint;
+        const beforeRelease = beforeJobReleaseDDL(schema);
+        const scheduled = migrateJobScheduleFile(db, found, fingerprintOf(beforeRelease), beforeRelease, fingerprintOf);
+        const migrated = scheduled && migrateJobReleaseFile(db, fingerprintOf(beforeRelease), fingerprintOf(schema), schema, fingerprintOf);
+        const stamp = db.prepare('SELECT fingerprint FROM osd_schema').get().fingerprint;
+        const handleWidth = db.prepare('PRAGMA table_info(zosd_adt_shdl)').all().find(c => c.name === 'handle').type;
+        const pending = db.prepare('SELECT intent_id, release_seq FROM zosd_job_outbox').all();
+        console.log('MIGRATION_RESULT=' + JSON.stringify({migrated, stamp, handleWidth, pending}));
+        db.close();
+      `);
+      expect(second).to.deep.equal({migrated: true, stamp: fingerprintOf(intermediate), handleWidth: "NCHAR(36)",
+        pending: [{intent_id: "old-intent", release_seq: ""}]});
+      expect(second.stamp).not.to.equal(fingerprintOf(old));
+      expect(second.stamp).not.to.equal(fingerprintOf(ddl.sqlite));
+    } finally { writeFileSync(gate + ".release", "go"); }
+    const resumed = await first;
+    assertBoot(resumed);
+    expect(resumed.stamp).to.equal(fingerprintOf(ddl.sqlite));
+    const migrated = new DatabaseSync(path);
+    try {
+      expect(migrated.prepare("SELECT intent_id, jobname, jobcount, release_seq FROM zosd_job_outbox").all())
+        .to.deep.equal([{intent_id: "old-intent", jobname: "KEEP_JOB", jobcount: "00000001", release_seq: ""}]);
+      expect(migrated.prepare("PRAGMA table_info(zosd_adt_shdl)").all().find(c => c.name === "handle").type).to.equal("NCHAR(40)");
+    } finally { migrated.close(); }
+    expect(readdirSync(dir).filter(name => name.includes(".drift"))).to.deep.equal([]);
+  });
+
+  it("file: failed handle restamp rolls back the composed job migration and releases the write lock", async () => {
+    const path = join(dir, "composed-rollback.sqlite"), old = beforeJobReleaseDDL(oldHandle(ddl.sqlite));
+    sqliteFixture(path, old);
+    const fixture = new DatabaseSync(path);
+    fixture.exec(`CREATE TRIGGER reject_handle_stamp BEFORE UPDATE ON osd_schema
+      WHEN NEW.fingerprint = '${fingerprintOf(ddl.sqlite)}'
+      BEGIN SELECT RAISE(ABORT, 'handle stamp failure'); END`);
+    fixture.close();
+    const result = await start(path, "file", true, `
+      let error;
+      try { await import('./output/init.mjs'); } catch (e) { error = e.message; }
+      const db = globalThis.abap.context.databaseConnections.DEFAULT;
+      const inTransaction = db.db.isTransaction;
+      const stamp = (await db.select({select: 'SELECT fingerprint FROM osd_schema'})).rows[0].fingerprint;
+      console.log('MIGRATION_RESULT=' + JSON.stringify({error, inTransaction, stamp}));
+      await db.disconnect();
+    `);
+    expect(result).to.deep.equal({error: "handle stamp failure", inTransaction: false, stamp: fingerprintOf(old)});
+    const original = new DatabaseSync(path);
+    try {
+      // Another writer can acquire the lock after the failed startup.
+      original.exec("BEGIN IMMEDIATE");
+      expect(original.prepare("SELECT description, seats FROM zstg_demo WHERE travel_id = 'MIG_KEEP'").all())
+        .to.deep.equal([{description: "survives handle upgrade", seats: 7}]);
+      expect(original.prepare("PRAGMA table_info(zosd_job_outbox)").all().map(c => c.name)).not.to.include("release_seq");
+      expect(original.prepare("PRAGMA table_info(zosd_l3_stage)").all().map(c => c.name)).not.to.include("run_bind");
+      expect(original.prepare("PRAGMA table_info(zosd_adt_shdl)").all().find(c => c.name === "handle").type).to.equal("NCHAR(36)");
+      expect(original.prepare("SELECT handle FROM zosd_adt_shdl WHERE objname = 'ZOLD'").get().handle).to.have.length(36);
+      original.exec("COMMIT");
+    } finally { original.close(); }
+    expect(readdirSync(dir).filter(name => name.includes(".drift"))).to.deep.equal([]);
+  });
 
   const stages = [beforeJobReleaseDDL, beforeJobScheduleDDL, beforeJobStepInputDDL, beforeJobEventDDL, beforeJobPredecessorDDL,
     schema => schema.filter(sql => !/^CREATE TABLE ['"]zosd_job_identity['"]/i.test(sql)),
