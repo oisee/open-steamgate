@@ -6,6 +6,7 @@ import {generate, render} from "./osg-support.mjs";
 import {compareFailures, compareDrift, identityDigest} from "./osd-kernel-check.mjs";
 import {root, readJSON, pin, prepare, verifyCorpus, goEnv} from "./osd-kernel-corpus.mjs";
 import {runsAs} from "./osd-main.mjs";
+import {toolCommand} from "./osd-host.mjs";
 
 export const publicFolders = ["TestOSD_EmitUnitClasses", "int8"];
 export const unmeasuredInputs = ["mono", "QuickJS"].map((name) =>
@@ -48,7 +49,8 @@ export function main(args = process.argv.slice(2)) {
       catch (error) { errors.push(error.message); continue; }
       const t = performance.now(), file = `${folder}-${runtime}.json`;
       console.log(`kernel conformance: ${folder}/${runtime}`);
-      const child = spawnSync(process.execPath, [join(root, `tools/${runtime === "osgo" ? "osgo" : "osgjs"}-unit.mjs`), join(corpus, folder), "--json", ...(runtime === "osgjs" ? ["--db", "file"] : [])], {
+      const [command, ...argv] = toolCommand(join(root, `tools/${runtime === "osgo" ? "osgo" : "osgjs"}-unit.mjs`), [join(corpus, folder), "--json", ...(runtime === "osgjs" ? ["--db", "file"] : [])]);
+      const child = spawnSync(command, argv, {
         cwd: root, env, encoding: "utf8", timeout: 1200000, maxBuffer: 32e6,
       });
       writeFileSync(join(out, file), child.stdout ?? "");

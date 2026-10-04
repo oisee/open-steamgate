@@ -646,7 +646,11 @@ jobs:
               }
             }
             const results = JSON.parse(process.env.JOB_RESULTS);
-            const gatePassed = ['build', 'suites', 'e2e', 'osgo-host', 'kernel-conformance'].every((job) => results[job].result === 'success') &&
+            const required = ['build', 'suites', 'e2e', 'osgo-host', 'kernel-conformance'];
+            for (const job of [...required, 'packaging']) {
+              if (!results[job]?.result) throw new Error(`Missing required job result: ${job}`);
+            }
+            const gatePassed = required.every((job) => results[job].result === 'success') &&
               (process.env.VSIX_PROFILE === 'full' ? results.packaging.result === 'success' :
                 process.env.VSIX_PROFILE === 'fast' && results.packaging.result === 'skipped');
             const marker = '<!-- osd-pr-test-report -->';
