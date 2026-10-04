@@ -57,7 +57,7 @@ function forwardable(headers, body) {
 // treats Host as a forbidden header and silently replaces it with the
 // address it dialled. That puts the child's ephemeral port into every
 // absolute link OData builds, which is the one thing this must not do.
-export function forward(runtime, req, res) {
+export function forward(runtime, req, res, options = {}) {
   const url = runtime.url;
   if (url === undefined) {
     return Promise.reject(new NotForwardable("no serving runtime is up"));
@@ -76,7 +76,8 @@ export function forward(runtime, req, res) {
     }, (answer) => {
       res.status(answer.statusCode ?? 502);
       for (const [name, value] of Object.entries(answer.headers)) {
-        if (HOP_BY_HOP.has(name.toLowerCase()) || value === undefined) {
+        if (HOP_BY_HOP.has(name.toLowerCase()) || value === undefined
+            || (options.mapJSONAnswer && ["content-length", "etag"].includes(name.toLowerCase()))) {
           continue;
         }
         res.setHeader(name, value);
@@ -87,8 +88,20 @@ export function forward(runtime, req, res) {
       if (generation !== undefined) {
         res.setHeader("x-osd-generation", String(generation));
       }
-      answer.pipe(res);
-      answer.on("end", resolve);
+      // Serving status is small JSON; other proxy responses stay streamed.
+      if (options.mapJSONAnswer) {
+        const chunks = [];
+        answer.on("data", chunk => chunks.push(chunk));
+        answer.on("end", () => {
+          try {
+            res.json(options.mapJSONAnswer(JSON.parse(Buffer.concat(chunks).toString("utf8"))));
+            resolve();
+          } catch (error) { reject(error); }
+        });
+      } else {
+        answer.pipe(res);
+        answer.on("end", resolve);
+      }
       answer.on("error", reject);
     });
     forwarded.on("error", reject);
@@ -131,6 +144,7 @@ export function odataProxy(runtime, options = {}) {
   // hears "starting": a boot on a remote HANA takes minutes, and a request
   // held for all of them is a socket nobody is reading any more
   const wait = options.startingWaitMs ?? (Number(process.env.OSD_STARTING_WAIT_MS) || 20000);
+  const encode = body => JSON.stringify(options.mapJSONAnswer ? options.mapJSONAnswer(body) : body);
   return async function (req, res) {
     try {
       const ready = runtime.ensure();
@@ -143,14 +157,14 @@ export function odataProxy(runtime, options = {}) {
         // the boot goes on; this request is answered
         ready.catch(() => undefined);
         const answer = startingAnswer(runtime);
-        res.status(503).set("Retry-After", "5").type("application/json").send(JSON.stringify({
+        res.status(503).set("Retry-After", "5").type("application/json").send(encode({
           error: {code: "STG/STARTING", message: {lang: "en",
             value: `the system is ${answer.phase === "recycling" ? "recycling" : "starting"}${answer.seconds === undefined ? "" : ` (${answer.seconds} s)`}: ${answer.phase}`}},
           ...answer,
         }));
         return;
       }
-      await forward(runtime, req, res);
+      await forward(runtime, req, res, options);
     } catch (e) {
       if (res.headersSent) {
         res.end();
@@ -161,7 +175,7 @@ export function odataProxy(runtime, options = {}) {
       const died = runtime.died;
       const detail = died === undefined ? String(e?.message ?? e)
         : `${e?.message ?? e} (last runtime exited ${died.signal ?? died.code})`;
-      res.status(503).type("application/json").send(JSON.stringify({
+      res.status(503).type("application/json").send(encode({
         error: {code: "STG/NOT_SERVING", message: {lang: "en", value: detail}},
       }));
       console.error("OData proxy:", detail);

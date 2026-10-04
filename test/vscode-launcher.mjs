@@ -532,6 +532,31 @@ describe("editors/vscode/launcher.js: waitForServing / servingOnce", function ()
     }
   });
 
+  it("rejects copied PIDs without the per-launch identity during readiness and starting polls", async () => {
+    const http = await import("node:http");
+    let body = {launcherPid: 12345, launcherIdentity: "foreign", ready: true, generation: "foreign"};
+    server = http.createServer((_req, res) => res.end(JSON.stringify(body)));
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+    port = server.address().port;
+    let phases = 0;
+    const options = {launcherPid: 12345, launcherIdentity: "owned", timeoutMs: 100, intervalMs: 10,
+      bootMs: 400, onStarting: () => phases++};
+    await rejects(waitForServing(port, options), /never answered ready/);
+    body = {launcherPid: 12345, starting: true, phase: "foreign boot"};
+    await rejects(waitForServing(port, options), /never answered ready/);
+    expect(phases).to.equal(0);
+    body = {launcherPid: 12345, launcherIdentity: "owned", ready: true, generation: "owned"};
+    expect((await waitForServing(port, options)).generation).to.equal("owned");
+  });
+  it("rejects copied PIDs and stale launch identities when checking serving ownership", () => {
+    const launcher = {state: "running", pid: 12345, launcherIdentity: "owned"};
+    const owns = serving => Launcher.prototype.ownsServing.call(launcher, serving);
+    expect(owns({launcherPid: 12345})).to.equal(false);
+    expect(owns({launcherPid: 12345, launcherIdentity: "foreign"})).to.equal(false);
+    expect(owns({launcherPid: 12345, launcherIdentity: "owned"})).to.equal(true);
+    launcher.launcherIdentity = "restarted";
+    expect(owns({launcherPid: 12345, launcherIdentity: "owned"})).to.equal(false);
+  });
   it("servingOnce answers undefined when nothing listens", async () => {
     const free = await pickPort(testPortRange);
     expect(await servingOnce(free)).to.equal(undefined);
@@ -759,7 +784,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
     writeFileSync(join(osdHome, "tools", "osd-build.mjs"), "process.exit(0);\n");
     writeFileSync(join(osdHome, "test", "run.mjs"),
       "import {createServer} from 'node:http';\n" +
-      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake'})); })" +
+      "createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'fake', launcherPid: process.pid, launcherIdentity: process.env.OSD_LAUNCHER_IDENTITY})); })" +
       ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n");
     return osdHome;
   };
@@ -775,15 +800,23 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
       launcher.on("log", (l) => lines.push(l));
       try {
         await launcher.start();
+        const identity = launcher.launcherIdentity;
+        expect(identity).to.match(/^[0-9a-f-]{36}$/);
+        expect(launcher.env.OSD_LAUNCHER_IDENTITY).to.equal(identity);
         expect(launcher.state).to.equal("running");
         if (how === "stop") {
           await launcher.stop();
           expect(launcher.state).to.equal("stopped");
+          expect(launcher.port).to.equal(undefined);
+          expect(launcher.pid).to.equal(undefined);
+          expect(launcher.generation).to.equal(undefined);
         } else {
           await launcher.rebuild();
+          expect(launcher.launcherIdentity).not.to.equal(identity);
           expect(launcher.state).to.equal("running");
         }
         expect(exits, "an intended stop is not an unexpected exit").to.deep.equal([]);
+        expect(lines.join("")).not.to.contain(identity);
         expect(lines.join("")).to.contain("--- osd stopped ---");
       } finally {
         await launcher.stop();
@@ -855,7 +888,7 @@ describe("editors/vscode/launcher.js: an intended stop is not an unexpected exit
       "let signals = 0;\n" +
       "process.on('SIGTERM', () => {\n" +
       `  if (++signals > 1) { writeFileSync(${JSON.stringify(join(osdHome, "twice"))}, 'twice'); return; }\n` +
-      "  createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'late'})); })" +
+      "  createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ready: true, generation: 'late', launcherPid: process.pid, launcherIdentity: process.env.OSD_LAUNCHER_IDENTITY})); })" +
       ".listen(Number(process.env.STG_PORT), '127.0.0.1');\n" +
       "  setTimeout(() => process.exit(0), 1500);\n" +
       "});\n" +
@@ -1063,6 +1096,20 @@ describe("editors/vscode/launcher.js: Launcher end to end (against this checkout
       // storage folder, so plain HTTP is what a fresh install gets
       const serving = await fetch(`http://localhost:${result.port}/osd/serving`).then((r) => r.json());
       expect(serving.ready).to.equal(true);
+      expect(serving.launcherPid).to.equal(result.pid);
+      expect(serving.launcherIdentity).to.equal(launcher.launcherIdentity);
+      expect(lines.join("")).not.to.contain(launcher.launcherIdentity);
+      expect(launcher.ownsServing(serving)).to.equal(true);
+      // The front survives replacement of its runtime worker. Its launch
+      // identity must stay stable while the worker PID changes.
+      expect(serving.pid).not.to.equal(result.pid);
+      process.kill(serving.pid, "SIGTERM");
+      const recycled = await waitForServing(result.port, {launcherPid: result.pid,
+        launcherIdentity: launcher.launcherIdentity, timeoutMs: 30000, intervalMs: 100});
+      expect(recycled.pid).not.to.equal(serving.pid);
+      expect(recycled.launcherIdentity).to.equal(serving.launcherIdentity);
+      expect(launcher.ownsServing(recycled)).to.equal(true);
+
 
       // every byte this run needed lives under storageDir
       expect(existsSync(join(storageDir, "db", "osd.sqlite")) || existsSync(join(storageDir, "db"))).to.equal(true);
@@ -1568,6 +1615,8 @@ describe("editors/vscode/launcher.js: the inspector on demand", function () {
 
   function makeLauncher(storageDir = tmpdir()) {
     const launcher = createLauncher({osdHome: process.cwd(), storageDir});
+    launcher.pid = 12345;
+    launcher.launcherIdentity = "inspector-test";
     launchers.push(launcher);
     return launcher;
   }
@@ -1602,7 +1651,7 @@ describe("editors/vscode/launcher.js: the inspector on demand", function () {
             requested = JSON.parse(text).port;
             answer = {open: true, port: requested, [early]: true};
           } else if (req.url === "/osd/serving") {
-            answer = {ready, generation: "test"};
+            answer = {ready, generation: "test", launcherPid: 12345, launcherIdentity: "inspector-test"};
             sawServing();
           } else {
             answer = {open: true, port: confirmed ? requested : requested + 1};
