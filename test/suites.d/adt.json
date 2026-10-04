@@ -50,6 +50,7 @@
     "test/unit-risk-calls.mjs",
     "test/adt-request-xml.mjs",
     "test/adt-request-xml-corpus.mjs",
-    "test/adt-request-xml-scaling.mjs"
+    "test/adt-request-xml-scaling.mjs",
+    "test/adt-unit-object-cold.mjs"
   ]
 }

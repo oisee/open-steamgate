@@ -171,11 +171,13 @@ export async function unitPlan(store, type, name, {risk = false} = {}) {
   return risk ? runner.withRisk(plan) : plan;
 }
 
-// Cold measurement on this tree: 2055 objects, 5600 ms; warm 0.026 ms.
-// Pre-warm the same runner/registry/graph the first discovery request uses.
+// Pre-warm in discovery order: find() needs the object index before the
+// registry. Building that index invalidates any earlier parse, so warming
+// only the registry/graph made the first GET parse the entire tree again.
 export async function warmUnitPlan(store) {
   const started = performance.now();
   store.unitWarmHeard = Date.now();
+  store.list();
   const runner = await store.unit();
   store.unitWarmHeard = Date.now();
   runner.risk ??= new UnitRisk(store);
