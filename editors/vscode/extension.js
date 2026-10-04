@@ -1372,7 +1372,12 @@ class SystemController {
           `osd: ${changed.objects.length} object(s) activated${build ? ` (${build})` : ""}${tests ? `, ${tests}` : ""}`, 5000);
       } else {
         this.output.appendLine(`osd rebuild (warm): ${result.issues.map((i) => `${i.objDescr || "?"}: ${i.message}`).join("; ")}`);
-        vscode.window.showErrorMessage(`osd rebuild (warm): ${result.issues.length} issue(s), see the output channel`);
+        const logText = result.issues.map((i) => i.message).join("\n");
+        if (classify(logText).kind === "version-mismatch") {
+          await this.#launcherError(this.launcher, {logText}, "osd rebuild (warm)");
+        } else {
+          vscode.window.showErrorMessage(`osd rebuild (warm): ${result.issues.length} issue(s), see the output channel`);
+        }
       }
       this.emitter.fire();
       return undefined;

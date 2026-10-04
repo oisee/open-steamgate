@@ -176,31 +176,55 @@ describe("layer version requirements (U11)", function () {
       .to.deep.equal({kind: "version-mismatch", message: text, actions: ["Update"]});
   });
 
-  it("shows the exact diagnostic to the user and opens the extension on Update", async () => {
-    const text = diagnostic("pack", "0.6.1650", "0.5.1467");
-    const errors = [], commands = [];
-    const subscribe = () => ({dispose() {}});
-    const api = {
-      TreeItem: class {},
-      EventEmitter: class { event = subscribe; fire() {} dispose() {} },
-      debug: {onDidTerminateDebugSession: subscribe},
-      workspace: {onDidChangeWorkspaceFolders: subscribe},
-      window: {showErrorMessage: async (...args) => { errors.push(args); return "Update"; }},
-      commands: {executeCommand: async (...args) => { commands.push(args); }},
-    };
-    const Module = require("node:module"), original = Module._load;
-    const file = require.resolve("../editors/vscode/extension.js");
-    delete require.cache[file];
-    let SystemController;
-    Module._load = function (name, ...args) { return name === "vscode" ? api : original.call(this, name, ...args); };
-    try { ({SystemController} = require(file)); } finally { Module._load = original; }
-    try {
-      const controller = new SystemController({subscriptions: [], workspaceState: {get() {}}}, {show() {}, appendLine() {}});
-      controller.ensureLauncher = async () => ({state: "stopped", lastLog: `${text}\nosd-build: live generation untouched`,
-        async start() { throw new Error("build failed (exit 1)"); }});
-      expect(await controller.rebuild()).to.equal(false);
-      expect(errors).to.deep.equal([[text, "Update"]]);
-      expect(commands).to.deep.equal([["extension.open", "oisee.open-steamgate"]]);
-    } finally { delete require.cache[file]; }
-  });
+  for (const source of ["launcher", "warm rebuild"]) {
+    it(`shows the exact ${source} diagnostic once and opens the extension on Update`, async () => {
+      const text = diagnostic("pack", "0.6.1650", "0.5.1467");
+      const errors = [], commands = [];
+      const subscribe = () => ({dispose() {}});
+      const api = {
+        TreeItem: class {},
+        EventEmitter: class { event = subscribe; fire() {} dispose() {} },
+        debug: {onDidTerminateDebugSession: subscribe},
+        workspace: {onDidChangeWorkspaceFolders: subscribe,
+          getConfiguration: () => ({get: (_key, fallback) => fallback})},
+        window: {showErrorMessage: async (...args) => { errors.push(args); return "Update"; }},
+        commands: {executeCommand: async (...args) => { commands.push(args); }},
+      };
+      const Module = require("node:module"), original = Module._load;
+      const file = require.resolve("../editors/vscode/extension.js");
+      delete require.cache[file];
+      let SystemController;
+      let activations = 0;
+      Module._load = function (name, ...args) {
+        if (name === "vscode") return api;
+        const loaded = original.call(this, name, ...args);
+        if (name === "./lib.js") return {...loaded, Osd: class {
+          constructor(url) { this.url = url; }
+          async serving() { return {warm: {state: "primed"}}; }
+          async changed() { return {objects: [{type: "CLAS", name: "ZCL_ONE"}]}; }
+          async activateMany() {
+            activations++;
+            return {ok: false, issues: [{objDescr: "ZCL_ONE", message: text}]};
+          }
+        }};
+        return loaded;
+      };
+      try { ({SystemController} = require(file)); } finally { Module._load = original; }
+      try {
+        const controller = new SystemController({subscriptions: [], workspaceState: {get() {}}}, {show() {}, appendLine() {}});
+        controller.ensureLauncher = async () => ({state: "stopped", lastLog: `${text}\nosd-build: live generation untouched`,
+          async start() { throw new Error("build failed (exit 1)"); }});
+        if (source === "launcher") {
+          expect(await controller.rebuild()).to.equal(false);
+        } else {
+          controller.launcher = {state: "running"};
+          controller.rebuild = async () => { throw new Error("unexpected full rebuild"); };
+          await controller.rebuildWarm();
+          expect(activations).to.equal(1);
+        }
+        expect(errors).to.deep.equal([[text, "Update"]]);
+        expect(commands).to.deep.equal([["extension.open", "oisee.open-steamgate"]]);
+      } finally { delete require.cache[file]; }
+    });
+  }
 });
