@@ -35,6 +35,7 @@
     "test/adt-activation.mjs",
     "test/adt-activation-wire.mjs",
     "test/adt-devloop.mjs",
+    "test/adt-ddls-recovery.mjs",
     "test/adt-editor.mjs",
     "test/adt-facade.mjs",
     "test/adt-host-seam.mjs",

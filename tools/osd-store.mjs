@@ -16,6 +16,7 @@ import {closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, rea
 import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {ddlsIssues} from "./osd-store-ddls.mjs";
+import {fileIdentity, registryFiles, registryKey} from "./osd-store-registry.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
@@ -113,8 +114,8 @@ function libraryRoots(root) {
 }
 
 // Parsing the system costs seconds and every store of the same tree parses
-// the same thing, so the answer is kept per root and dropped the moment
-// anything is written. A façade that makes a store per request pays once.
+// the same thing, so the answer is kept per root with its input identity.
+// Writes also drop it. A façade that makes a store per request pays once.
 const PARSED = new Map();
 
 const packageWord = (s) => s.toUpperCase().replace(/[^A-Z0-9]+/g, "_");
@@ -841,8 +842,7 @@ export class ObjectStore {
 
   #activeInputs;
 
-  #activeFile(file, entry) {
-    const hash = (this.served?.running === true ? this.served.generation : undefined) ?? liveHash(this.root);
+  #activeFile(file, entry, hash = (this.served?.running === true ? this.served.generation : undefined) ?? liveHash(this.root)) {
     const generation = hash && join(this.root, "build", "by-input", hash);
     const complete = generation && existsSync(join(generation, "source", ".complete"));
     const snapshot = generation && join(generation, "source", file);
@@ -852,7 +852,9 @@ export class ObjectStore {
     const copy = join(this.root, this.#snapshotOf(file));
     if (!complete && existsSync(copy)) return copy;
     if (!generation || !existsSync(generation)) return undefined;
-    let inputs = this.#activeInputs?.generation === generation ? this.#activeInputs.inputs : undefined;
+    const proof = fileIdentity(join(generation, "source-inputs.json"));
+    let inputs = this.#activeInputs?.generation === generation && this.#activeInputs.proof === proof
+      ? this.#activeInputs.inputs : undefined;
     if (inputs === undefined) {
       try {
         inputs = JSON.parse(readFileSync(join(generation, "source-inputs.json"), "utf8"));
@@ -870,9 +872,9 @@ export class ObjectStore {
         } catch {return undefined;}
       }
       if (inputs === null || typeof inputs !== "object") return undefined;
-      // A generation's proof is immutable. Reuse it for class includes and
-      // repository listings instead of parsing the full input map per part.
-      this.#activeInputs = {generation, inputs};
+      // Reuse the proof for class includes and repository listings until
+      // its identity changes (a forced build can replace the same generation).
+      this.#activeInputs = {generation, proof: fileIdentity(join(generation, "source-inputs.json")), inputs};
     }
     const digest = inputs[file.replaceAll("\\", "/")];
     if (typeof digest !== "string" || !/^[a-f0-9]{64}$/.test(digest)) return undefined;
@@ -889,8 +891,8 @@ export class ObjectStore {
     return target;
   }
 
-  #activeSource(file, entry) {
-    const active = this.#activeFile(file, entry);
+  #activeSource(file, entry, generation) {
+    const active = this.#activeFile(file, entry, generation);
     return active && existsSync(active) ? readFileSync(active, "utf8") : "";
   }
 
@@ -1794,13 +1796,20 @@ export class ObjectStore {
 
   // the whole registry, so a check sees the system and not one file
   #build_registry(configPath = "abaplint.jsonc") {
-    if (this.parsed !== undefined) {
+    const generation = (this.served?.running === true ? this.served.generation : undefined) ?? liveHash(this.root);
+    const layers = [...this.roots, ...this.libs].map(layer => ({...layer, files: layer.files ?? this.#walk(layer.path, [])}));
+    // Publication can change generated consumers without a source write.
+    // Saved inactive sources, snapshot replacement and differing store
+    // configurations also describe different registries, even at one root.
+    const key = registryKey(this.root, layers, generation, this.excluded, configPath);
+    if (this.parsed !== undefined && this.parsedKey === key) {
       return this.parsed;
     }
     const shared = PARSED.get(this.root);
-    if (shared !== undefined) {
-      this.parsed = shared;
-      return shared;
+    if (shared?.key === key) {
+      this.parsed = shared.registry;
+      this.parsedKey = key;
+      return shared.registry;
     }
     const text = readFileSync(join(this.root, configPath), "utf8").split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
     const config = JSON.parse(text);
@@ -1812,17 +1821,14 @@ export class ObjectStore {
     // everything, not only what the index calls an object: a class needs its
     // local includes, and a type pool is not an ADT object but the check
     // still needs it
-    for (const root of [...this.roots, ...this.libs]) {
-      for (const file of root.files ?? this.#walk(root.path, [])) {
-        if (/\.(abap|xml|asddls)$/.test(file) === false) {
-          continue;
-        }
-        registry.addFile(new abaplint.MemoryFile("/" + file, readFileSync(join(this.root, file), "utf8")));
-      }
+    for (const root of layers) {
+      registry.addFiles(registryFiles(this.root, root, root.files, generation,
+        file => this.#activeSource(file, undefined, generation), this.excluded));
     }
     registry.parse();
     this.parsed = registry;
-    PARSED.set(this.root, registry);
+    this.parsedKey = key;
+    PARSED.set(this.root, {key, registry});
     return registry;
   }
 
