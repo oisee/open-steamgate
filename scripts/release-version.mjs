@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Keep a vscode-v tag tied to the version build-vsix.mjs stamps from HEAD.
+// Keep a VS Code release tag tied to the version build-vsix.mjs stamps from HEAD.
 import {execFileSync} from "node:child_process";
 import {readFileSync} from "node:fs";
 import {basename} from "node:path";
@@ -21,8 +21,8 @@ export function suggestedTag() {
 }
 
 export function checkReleaseVersion(tag, vsix, {requireTag = true} = {}) {
-  if (!/^vscode-v\d+\.\d+\.\d+$/.test(tag ?? "")) {
-    throw new Error("release tag must be vscode-v<major>.<minor>.<patch>");
+  if (!/^vscode-(?:stable-)?v\d+\.\d+\.\d+$/.test(tag ?? "")) {
+    throw new Error("release tag must be vscode-v<major>.<minor>.<patch> or vscode-stable-v<major>.<minor>.<patch>");
   }
   const head = git("rev-parse", "HEAD");
   const tagExists = (() => {
@@ -33,8 +33,9 @@ export function checkReleaseVersion(tag, vsix, {requireTag = true} = {}) {
   const tagged = tagExists ? git("rev-parse", `refs/tags/${tag}^{commit}`) : undefined;
   if (tagged && tagged !== head) throw new Error(`${tag} points to ${tagged}, but checkout HEAD is ${head}`);
   const version = suggestedTag().slice("vscode-v".length);
-  if (tag !== `vscode-v${version}`) {
-    throw new Error(`tag ${tag} disagrees with stamped VSIX version ${version}; tag this commit as vscode-v${version}`);
+  const prefix = tag.startsWith("vscode-stable-v") ? "vscode-stable-v" : "vscode-v";
+  if (tag !== `${prefix}${version}`) {
+    throw new Error(`tag ${tag} disagrees with stamped VSIX version ${version}; tag this commit as ${prefix}${version}`);
   }
   if (vsix) {
     if (basename(vsix) !== `open-steamgate-${version}.vsix`) {
@@ -56,7 +57,7 @@ export function parseReleaseArgs(args) {
 }
 
 export function validateReleaseTarget({tag, head, tagCommit, release}) {
-  if (!/^vscode-v\d+\.\d+\.\d+$/.test(tag ?? "")) throw new Error("invalid release tag");
+  if (!/^vscode-(?:stable-)?v\d+\.\d+\.\d+$/.test(tag ?? "")) throw new Error("invalid release tag");
   if (!/^[0-9a-f]{40}$/.test(head ?? "")) throw new Error("invalid checkout commit");
   if (tagCommit) {
     if (tagCommit !== head) throw new Error(`Release ${tag} tag resolves to ${tagCommit}, but this run builds ${head}`);

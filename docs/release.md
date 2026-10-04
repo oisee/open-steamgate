@@ -1,4 +1,4 @@
-# VS Code prerelease
+# VS Code release
 
 For a local Marketplace candidate, run `npm run vsix:marketplace` after
 `npm run bootstrap`. This profile includes the Zork pack with its Zork I story
@@ -6,7 +6,8 @@ rebuilt from Microsoft's MIT source release, omits the browser entry,
 adds the VS Code prerelease manifest property, and writes staged
 `THIRD-PARTY-NOTICES.md`. Review the build's `LICENSE REVIEW` lines before
 uploading anything. This command does not publish; the release workflow below
-continues to build its separate GitHub prerelease VSIX.
+continues to build its separate GitHub VSIX. For a local stable Marketplace
+candidate, use `OSD_VSIX_PROFILE=marketplace OSD_VSIX_PRERELEASE=0 npm run vsix`.
 
 ## Marketplace screenshots
 
@@ -22,18 +23,29 @@ as a PNG at the path shown, then add its HTTPS raw GitHub URL to
 The Fiori list report image at `editors/vscode/media/screenshots/fiori-list-report.png`
 is already a real capture and remains in the Marketplace README.
 
-The [release workflow](../.github/workflows/release.yml) publishes a GitHub
-prerelease. On a `vscode-v*` tag push, it also builds the separate Marketplace
-prerelease profile and publishes that VSIX to Visual Studio Marketplace after
-the GitHub release and tagged `tests` workflow pass. A manual draft dispatch
-never publishes to Marketplace. Configure the `VSCE_PAT` repository Actions
-secret for the `oisee` publisher; the job reads it only for the final publish
-step. The release tag
-must be `vscode-v<major>.<minor>.<patch>`. The major and minor come from
+The [release workflow](../.github/workflows/release.yml) publishes both channels:
+`vscode-v*` tags publish prereleases; `vscode-stable-v*` tags publish stable
+versions on Visual Studio Marketplace and a GitHub release marked **Latest**.
+The Marketplace profile publishes after the GitHub release and tagged `tests`
+workflow pass. Manual dispatch selects `channel` (`prerelease` by default or
+`stable`) for the GitHub release; it never publishes to Marketplace.
+Configure the `VSCE_PAT` repository Actions secret for the `oisee` publisher;
+the job reads it only for the final publish step.
+
+The tag must equal `vscode-v<stamped version>` or
+`vscode-stable-v<stamped version>` for its channel. Major and minor come from
 `editors/vscode/package.json`; `scripts/build-vsix.mjs` stamps patch from
 `git rev-list --count HEAD`. The workflow checks the tag against that version
 and checks the VSIX filename and packaged manifest. Full git history is
-required for this count.
+required for this count. Before installing dependencies or building artifacts,
+stable releases query Marketplace and fail clearly if that version already
+exists, including as a prerelease (a prerelease rerun is not refused here, so it
+can still repair its GitHub release). A prerelease version cannot
+be republished as stable: use a new commit and its new stamped version.
+
+VS Code users on the stable channel receive stable releases. Users who opt
+into pre-release receive the higher version across both channels, including a
+stable release when it is newer ([VS Code publishing documentation](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#prerelease-extensions)).
 
 ## Cut or repeat a release
 
@@ -46,23 +58,43 @@ git tag "$tag"
 git push origin "$tag"
 ```
 
-A `vscode-v*` tag push builds a draft prerelease and publishes it only after
+To cut a stable release, merge a new commit whose stamped version has never
+been published on Marketplace, then use the stable tag prefix:
+
+```sh
+tag="$(node scripts/release-version.mjs --suggest | sed 's/^vscode-v/vscode-stable-v/')"
+git tag "$tag"
+git push origin "$tag"
+```
+
+Stable publication omits `vsce publish --pre-release` and the VSIX prerelease
+property. GitHub creation and editing use `--prerelease=false --latest`, with
+the same title and notes as prereleases. Both tag patterns trigger identical
+tests, binaries, OSGo, Compose, Docker image tags, leak scans and smoke checks.
+
+A tag push for either channel builds a draft release and publishes it only after
 the VSIX, binary, and Compose uploads all succeed and the complete tagged
 `tests.yml` push run passes for the tag's exact commit. The shared gate
 resolves one run ID and follows it; failure, cancellation, or a 60-minute
 timeout leaves the release in draft. The Marketplace job then checks package version and zip integrity,
-prerelease manifest, browser entry, and licence review, and publishes the
+channel-appropriate manifest, browser entry, and licence review, and publishes the
 Marketplace profile with the same version. A failed Marketplace publication
-leaves the GitHub prerelease public and the Marketplace job red; rerun the
-tagged workflow after fixing the cause without moving the tag. To prepare a draft
-without pushing a tag, run **VS Code prerelease** from the intended branch.
-Leave `tag` blank to derive the stamped version from that ref, and leave
-`draft` true. You may enter a tag, but it must match the version of the
-selected ref; any existing tag must point to that commit. The workflow uses
-`gh release create --draft --prerelease --target <commit>` and never runs
-`git push`. A dispatch with `draft=true` does not change the release's draft
+leaves the GitHub release public and the Marketplace job red; rerun the
+tagged workflow after fixing the cause without moving the tag, provided the
+version has not reached Marketplace. Once it exists there, a stable tag's rerun
+stops at the early version check; a prerelease rerun can still repair its GitHub
+release and assets, and the Marketplace job then reports the duplicate. Use a
+new commit for another Marketplace release.
+To prepare a draft without pushing a tag, run **VS Code release** from the intended branch.
+Select `channel`, leave `tag` blank to derive the stamped version from that
+ref, and leave `draft` true. You may enter a tag, but it must match the version of the
+selected ref and selected channel; any existing tag must point to that commit.
+The workflow uses `gh release create --draft --target <commit>` with the
+selected channel flags and never runs `git push`. A dispatch with `draft=true` does not change the release's draft
 state. To publish an existing draft through the workflow, push its tag and
-pass tagged tests on that commit, then rerun with `draft=false`. An untagged
+pass tagged tests on that commit, then rerun with `draft=false` (prerelease only: a stable dispatch is
+always a draft for review, and stable is published by pushing a
+`vscode-stable-v<version>` tag). An untagged
 draft cannot be published by dispatch because no tagged test run exists for it.
 A new dispatch must first create the draft. An existing release
 is updated only when its commit matches the run's checkout commit. When the
@@ -94,7 +126,7 @@ runtime dependency closure is already staged from the root lockfile. The local
 VSIX measured 13.2 MiB before and 13.2 MiB after this change (unpacked 133.9
 to 134.3 MiB, Node 24, default Zork pack).
 Before creating or editing a release, it generates CHANGELOG.md from first-parent
-GitHub PR merge titles since the nearest previous `vscode-v*` tag. A merge
+GitHub PR merge titles since the nearest previous `vscode-v*` or `vscode-stable-v*` tag. A merge
 commit without a title in its body gets its title from the PR API. Squash
 commits and manually copied changes have no PR merge commit and do not
 appear. The generated CHANGELOG.md, release README, and `FILE_ID.DIZ` pass through
@@ -122,7 +154,7 @@ by hand after a local `npm run leak`. A match (exit 1) always stops the release.
 | `osgo-linux-x64`, `osgo-linux-arm64`, `osgo-darwin-arm64`, `osgo-darwin-x64`, `osgo-windows-x64.exe`, `osgo-windows-arm64.exe`, each with `.sha256` | `go build` with `CGO_ENABLED=0` per `GOOS`/`GOARCH` ([docs/osgo-release.md](osgo-release.md)) |
 | `sqlite.yml`, `duckdb.yml`, `postgres.yml`, `hana.yml` | [Tracked Compose sources](../docker/compose/), validated with `docker compose config` |
 | `README.md` | Short instructions for starting every asset, also included in the release notes |
-| `CHANGELOG.md` | Merged PR titles since the previous prerelease; the release body points to it |
+| `CHANGELOG.md` | Merged PR titles since the previous release; the release body points to it |
 | `FILE_ID.DIZ` | Classic BBS description generated from the version, with printable ASCII and CRLF lines |
 
 The binary and Compose jobs start after the VSIX job creates the draft.

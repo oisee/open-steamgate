@@ -1,5 +1,5 @@
 import {strict as assert} from "node:assert";
-import {execFileSync} from "node:child_process";
+import {execFileSync, spawnSync} from "node:child_process";
 import {mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {breakingConsumerSection, generateNotes, mergedPullRequests} from "../scripts/release-notes.mjs";
@@ -78,7 +78,7 @@ describe("release notes and version checks", () => {
   });
 
   it("checks a release against the tag commit, or an untagged draft's recorded SHA", () => {
-    const tag = "vscode-v0.1.42";
+    const tag = "vscode-stable-v0.1.42";
     const head = "a".repeat(40);
     const other = "b".repeat(40);
     assert.doesNotThrow(() => validateReleaseTarget({tag, head, tagCommit: head, release: {isDraft: false, targetCommitish: "main"}}));
@@ -118,6 +118,11 @@ describe("release notes and version checks", () => {
       assert.match(notes, /since vscode-v0\.1\.2/);
       assert.match(notes, /## Breaking for consumers\n\n- Breaking: regenerate osg-demo's book for the new output format\. \(#2\)/);
       assert.deepEqual(reads, ["2"]);
+      git("tag", "vscode-stable-v0.1.3");
+      const stableNotes = generateNotes({cwd, tag: "vscode-stable-v0.1.3", prFor});
+      assert.match(stableNotes, /^# vscode-stable-v0\.1\.3/);
+      assert.match(stableNotes, /since vscode-v0\.1\.2/);
+      assert.match(stableNotes, /Second improvement/);
       git("commit", "-q", "--allow-empty", "-m", "Unreleased change");
       git("commit", "-q", "--allow-empty", "-m", "Squashed improvement (#3)\n\n* one\n* two");
       const squashSha = git("rev-parse", "HEAD");
@@ -125,7 +130,7 @@ describe("release notes and version checks", () => {
       const mergeShaFor = (number) => (number === "3" ? `2026-10-02T00:00:00Z ${squashSha}` : "null deadbeef");
       const draftNotes = generateNotes({cwd, tag: "vscode-v0.1.4", to: "HEAD", mergeShaFor, prFor});
       assert.doesNotMatch(draftNotes, /Direct maintenance/);
-      assert.match(draftNotes, /since vscode-v0\.1\.3/);
+      assert.match(draftNotes, /since vscode-(?:stable-)?v0\.1\.3/);
       assert.doesNotMatch(draftNotes, /Second improvement/);
       assert.doesNotMatch(draftNotes, /Unreleased change/);
       assert.match(draftNotes, /^- Squashed improvement \(#3\)$/m);
@@ -137,14 +142,46 @@ describe("release notes and version checks", () => {
       }});
       assert.equal(apiNotes, draftNotes);
       assert.deepEqual(reads, ["4", "3"]); // one read for the squash SHA and body
+      // Version validation executes against the fixture's real commit count.
+      const env = {...process.env, GIT_DIR: join(cwd, ".git"), GIT_WORK_TREE: cwd};
+      const versionScript = "scripts/release-version.mjs";
+      const suggested = execFileSync(process.execPath, [versionScript, "--suggest"], {env, encoding: "utf8"}).trim();
+      const stableTag = suggested.replace("vscode-v", "vscode-stable-v");
+      const stamped = suggested.slice("vscode-v".length);
+      const validate = (...args) => spawnSync(process.execPath, [versionScript, ...args], {env, encoding: "utf8"});
+      assert.equal(validate(stableTag, "--allow-untagged").stdout.trim(), stamped);
+      assert.equal(validate(stableTag).status, 1); // a push requires the tag
+      git("tag", stableTag);
+      assert.equal(validate(stableTag).stdout.trim(), stamped);
+      const wrong = validate(stableTag + "0", "--allow-untagged");
+      assert.equal(wrong.status, 1);
+      assert.match(wrong.stderr, /disagrees with stamped VSIX version/);
+      git("commit", "-q", "--allow-empty", "-m", "After the stable tag");
+      assert.match(validate(stableTag).stderr, /but checkout HEAD is/);
+      git("reset", "--hard", "HEAD^");
+      git("tag", "-d", stableTag);
+      git("tag", "-d", "vscode-v0.1.3");
+      const afterStable = generateNotes({cwd, tag: "vscode-v0.1.4", to: "HEAD", mergeShaFor, prFor});
+      assert.match(afterStable, /since vscode-stable-v0\.1\.3/);
+      assert.doesNotMatch(afterStable, /Second improvement/);
       // Exercise the real gh/API path with a local fixture, without network access.
       writeFileSync(join(cwd, "gh"), `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(JSON.stringify({body: bodies[2]}))});\n`, {mode: 0o755});
-      const cli = execFileSync(process.execPath, ["scripts/release-notes.mjs", "--from", "vscode-v0.1.2", "--to", "vscode-v0.1.3"], {
+      const cli = execFileSync(process.execPath, ["scripts/release-notes.mjs", "--from", "vscode-v0.1.2", "--to", "vscode-stable-v0.1.3"], {
         cwd: process.cwd(), encoding: "utf8",
         env: {...process.env, PATH: `${cwd}:${process.env.PATH}`, GIT_DIR: join(cwd, ".git"), GIT_WORK_TREE: cwd},
       });
       assert.match(cli, /Second improvement \(#2\)/);
       assert.match(cli, /## Breaking for consumers/);
+      writeFileSync(join(cwd, "gh"), `#!/usr/bin/env node
+const base = {id: 42, event: "push", head_branch: "${stableTag}", head_sha: "${git("rev-parse", "HEAD")}"};
+console.log(JSON.stringify(process.argv.at(-1).includes("/workflows/")
+  ? {workflow_runs: [base]} : {...base, status: "completed", conclusion: "success"}));
+`, {mode: 0o755});
+      const gate = execFileSync(process.execPath, ["tools/osd-ci-wait-tests.mjs", stableTag, git("rev-parse", "HEAD")], {
+        encoding: "utf8", env: {...env, PATH: `${cwd}:${process.env.PATH}`,
+          GITHUB_REPOSITORY: "example/repo", GITHUB_TOKEN: "test-token"},
+      });
+      assert.match(gate, /run 42 passed/);
     } finally {
       rmSync(cwd, {recursive: true, force: true});
     }
