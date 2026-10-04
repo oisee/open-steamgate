@@ -1,5 +1,64 @@
 # Isolation detector run record
 
+## Fix round 1, f2716315 (2026-10-04)
+
+This working-tree fix replaces 63 invariant allowances across 62 files with
+**13 originating entries**: ten root identities/count limits and three measured
+generation drifts. All have owners and individual
+[backlog items](backlog/misc.md#test-isolation-fixture-repairs). Unchanged inherited
+generation drift is reported once; downstream files have no generation entries.
+Environment import edits are reconciled across all files and checked again at
+run end against the original environment. Temporary roots use creation-time
+absolute paths for sync, callback and promise helpers.
+
+Node v22.23.3, requested prep script, linked local transpiler (already dirty),
+pinned libraries. Every heavy command used range `90-99`, four slots. The ADT
+modes ran sequentially, then shard 1. Independent run setup uses an external
+transpile; the detector performs no restoration or cleanup.
+
+| Check | Files | Passing | Pending | Failing | Measured time |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Final detector + runner | 2 | 98 | 0 | 0 | 10.834 s wrapper wall |
+| ADT mode 0 | 46 | 2,135 | 0 | 0 | 431.985 s wrapper wall |
+| ADT mode 1 | 46 | 2,135 | 0 | 0 | 477.308 s wrapper wall |
+| Full shard 1/4 repeat | 71 | 1,563 | 24 | 0 | 736.160 s reporter execution |
+| Real warm fixture, final code | 1 | 1 | 0 | 0 | 28.945 s wrapper wall |
+| Detector + runner + real notebook job worker | 3 | 99 | 0 | 0 | Notebook body 105.632 s |
+
+The full-shard log spans approximately 739.926 s including startup. All three
+reporter artifacts have completion markers, zero failures and zero internal
+retries. The final shard retry report is empty. Manifest check: 289 ordinary
+and six grouped suites, no drift.
+
+The expanded critic regressions against frozen original modules ran **13 pass /
+18 fail**, exit 18 (4.482 s). The final isolation suite has 42 cases. Probes include
+plain/hooked error controls and both mutants; the temporary-root mutant confirms
+its directory remains after the detector exits. The first full shard was retained
+red: 1,560 pass, 24 pending and two warm hook failures in 757.759 s. Its proof used
+the saved-tree view; warm compilation can use persisted active copies of inactive
+objects. The corrected read-only proof verifies that view stayed unchanged and
+uses the builder overlay hash. Real warm and full-shard repeats pass. A subsequent
+focused run corrected two mistaken plain-control expectations: plain Mocha exits
+zero for those critic cases, while the detector now surfaces their hook errors.
+
+Snapshot totals / medians per file: ADT 0 **41,000.222 / 826.802 ms**; ADT 1
+**44,362.520 / 914.949 ms**; final shard **94,372.739 / 1,431.908 ms**. Entry and
+exit tree hashes and proof captures are included; test and cleanup work are not.
+These measurements are accounting, not causal wall-time overhead estimates.
+
+Without the detector, the dialog step uses one null observer check, with no
+observation Set or per-step add/delete. The same benchmark tool ran sequentially
+before/after: 10,000 warm-up steps, 11 samples of 100,000 empty exclusive steps.
+The median was **683.34747 → 533.83553 ns/step (-21.88%)**. This is a local
+measurement, not an end-to-end speedup claim.
+
+Evidence and executable reproducers remain under `.local/isolation-round1/`,
+including `report.md`, command status JSON, timing artifacts, failed and clean
+shard logs, final focused/warm logs, original-module regression logs, and both
+benchmark sample arrays. HEAD remains `f2716315`; no commit was made.
+
+## Original discovery record
+
 Base HEAD: `11122e9f4a815e0118b8361223fc899e2f7d773e` (2026-10-04), with the detector changes in the working tree. No commit and no leaking-fixture repair were made. Setup used the requested prep script and `npm run transpile`, with pinned libraries and Node v22.23.3. Heavy runs used `OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh`.
 
 Each independent run starts from a transpile of its working tree; the detector never rebuilds at file boundaries. The complete ADT fragment has 44 files, sorted as in `loadSuites()`, and was run with `OSD_ADT_ONE_RUNTIME=0` and `1`, the isolation plugin, no-retries plugin and timing reporter. Each CI shard uses `node tools/osd-suites.mjs --report-skips --shard i/4 --timings ... --report ...`.

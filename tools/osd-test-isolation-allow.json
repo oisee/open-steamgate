@@ -1,189 +1,192 @@
 {
   "test/adt-facade.mjs": {
-    "temporary-roots": "Temporary: the program subroutines/events/local-classes case creates osd-parts-* at test/adt-facade.mjs:527 and never removes it. Confirmed in the shared ADT mode-0 run on base 11122e9f. The detector still prints the surviving root; repair belongs to the fixture owner."
+    "temporary-roots": {
+      "reason": "Temporary: the program subroutines/events/local-classes case creates osd-parts-* at test/adt-facade.mjs:527 and never removes it. Confirmed in the shared ADT mode-0 run on base 11122e9f. The detector still prints the surviving root; repair belongs to the fixture owner.",
+      "owner": "adt-i5",
+      "backlog": "docs/backlog/misc.md#isolation-adt-facade-temporary-roots",
+      "roots": [
+        {
+          "prefix": "osd-parts-",
+          "maxCount": 1
+        }
+      ]
+    }
   },
   "test/osd-store.mjs": {
-    "temporary-roots": "Temporary: the CRLF formatting fixture at test/osd-store.mjs:478 creates osd-crlf-* without a finally/after removal. Shard 1 on base 11122e9f observed one surviving root; the fixture owner must restore isolation."
+    "temporary-roots": {
+      "reason": "Temporary: the CRLF formatting fixture at test/osd-store.mjs:478 creates osd-crlf-* without a finally/after removal. Shard 1 on base 11122e9f observed one surviving root; the fixture owner must restore isolation.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-osd-store-temporary-roots",
+      "roots": [
+        {
+          "prefix": "osd-crlf-",
+          "maxCount": 1
+        }
+      ]
+    }
   },
   "test/prove-inplace.mjs": {
-    "temporary-roots": "Temporary: run() at test/prove-inplace.mjs:304 defaults to a fresh osd-prove-inplace-* directory and does not remove it; the explicit runs directory near line 688 also survives. Shard 1 on base 11122e9f observed 31 roots. Keep evidence visible until the fixture owner fixes cleanup."
+    "temporary-roots": {
+      "reason": "Temporary: run() at test/prove-inplace.mjs:304 defaults to a fresh osd-prove-inplace-* directory and does not remove it; the explicit runs directory near line 688 also survives. Shard 1 on base 11122e9f observed 31 roots. Keep evidence visible until the fixture owner fixes cleanup.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-prove-inplace-temporary-roots",
+      "roots": [
+        {
+          "prefix": "osd-prove-inplace-",
+          "maxCount": 31
+        }
+      ]
+    }
   },
   "test/vscode-warm.mjs": {
-    "generation": "Temporary: the shared shard-1 run changed live from 759177bda0d12f33 to ee8b686b9cf3721d, then restored source bytes without restoring the live generation. The final tree still hashes to 759177bda0d12f33. Confirmed on base 11122e9f; fixture owner must restore both."
-  },
-  "test/webgui.mjs": {
-    "generation": "Temporary: inherited the stale live generation left by earlier test/vscode-warm.mjs in shard 1. Both entry and exit live links were ee8b686b9cf3721d while the final working tree was 759177bda0d12f33. This is a downstream contamination observation, not evidence that this file caused the mismatch. Remove with the vscode-warm fixture repair."
-  },
-  "test/xref-seed.mjs": {
-    "generation": "Temporary: inherited the stale live generation left by earlier test/vscode-warm.mjs in shard 1. Both entry and exit live links were ee8b686b9cf3721d while the final working tree was 759177bda0d12f33. This is a downstream contamination observation, not evidence that this file caused the mismatch. Remove with the vscode-warm fixture repair."
+    "generation": {
+      "reason": "Temporary: the shared shard-1 run changed live from 759177bda0d12f33 to ee8b686b9cf3721d, then restored source bytes without restoring the live generation. The final tree still hashes to 759177bda0d12f33. Confirmed on base 11122e9f; fixture owner must restore both.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-vscode-warm-generation",
+      "drift": {
+        "kind": "restored-inputs",
+        "paths": [
+          "src/demo/zcl_zstg_demo_dpc_ext.clas.abap"
+        ],
+        "maxCount": 1,
+        "restoreContent": {
+          "pattern": "\\* The hand-written part a developer owns on a real system \\(T7 warm test [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\)\\. Reads the",
+          "replacement": "* The hand-written part a developer owns on a real system. Reads the"
+        }
+      }
+    }
   },
   "test/dsl-l2.mjs": {
-    "generation": "Temporary: setup at test/dsl-l2.mjs:112 writes 13 previously absent ignored trace.meta.json sidecars under src/l2demo and leaves live at 759177bda0d12f33 while the tree becomes a1e53ac46cfb6ea1. A read-only hash excluding exactly those 13 files returns 759177bda0d12f33. Recorded in shard 2 on base 11122e9f; no cleanup/rebuild is performed by the detector."
+    "generation": {
+      "reason": "Temporary: setup at test/dsl-l2.mjs:112 writes 13 previously absent ignored trace.meta.json sidecars under src/l2demo and leaves live at 759177bda0d12f33 while the tree becomes a1e53ac46cfb6ea1. A read-only hash excluding exactly those 13 files returns 759177bda0d12f33. Recorded in shard 2 on base 11122e9f; no cleanup/rebuild is performed by the detector.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-dsl-l2-generation",
+      "drift": {
+        "kind": "added-inputs",
+        "maxCount": 13,
+        "paths": [
+          "src/l2demo/zcl_l2_grounded_ship_crew.clas.testclasses.trace.meta.json",
+          "src/l2demo/zcl_l2_maintenance_ship.clas.testclasses.trace.meta.json",
+          "src/l2demo/zcl_l2_recent_voyage.clas.testclasses.trace.meta.json",
+          "src/l2demo/zcl_l2_recent_voyage.clas.trace.meta.json",
+          "src/l2demo/zcl_l2_ship_busy.clas.testclasses.trace.meta.json",
+          "src/l2demo/zcl_l2_ship_captain.clas.testclasses.trace.meta.json",
+          "src/l2demo/zcl_l2_ship_cargo_limit.clas.testclasses.trace.meta.json",
+          "src/l2demo/zcl_l2_ship_max_cargo.clas.testclasses.trace.meta.json",
+          "src/l2demo/zcl_l2_ship_min_captains.clas.testclasses.trace.meta.json",
+          "src/l2demo/zcl_l2_ship_min_captains.clas.trace.meta.json",
+          "src/l2demo/zcl_l2_ship_min_crew.clas.testclasses.trace.meta.json",
+          "src/l2demo/zcl_l2_ship_restricted.clas.testclasses.trace.meta.json",
+          "src/l2demo/zcl_l2_ship_voyage_limit.clas.testclasses.trace.meta.json"
+        ]
+      }
+    }
   },
   "test/osd-bsp.mjs": {
-    "temporary-roots": "Temporary: the osd-bsp fixture creates an osd-bsp-* root and leaves it on disk. Shared shard 2 on base 11122e9f observed one survivor; the fixture owner must remove it.",
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/dsl-l3-chaos.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/dsl-l3-remote.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/dsl-l3-resilience.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/dsl-regions.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/gui-reports.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/http-case.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/ir-host-relation.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/ir-ranges-a4h.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/job-tail-events.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/leak-scan.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/lift-r1.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/lift-r3.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/mocha.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-bind.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-child.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-db.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-destinations.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-dev.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-git-history.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-icf-apply.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-main.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-parent-exit.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-suites.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-test-isolation.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-unit.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/osd-where.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/pages-index.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/pins.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/protocol-ni.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/rfc-proxy.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/rfc-replay.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/se16.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/seed-batching.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/sql-trace.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/sqlscript-divergences.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/sqlscript-dml.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/sqlscript-engines.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/sqlscript-lexer.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/sqlscript-parser.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/sqlscript-procedure-source.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/sqlscript-scope.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/sqlscript-treatments.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/store-destination.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/store-history.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/taxi-import.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
-  },
-  "test/transaction.mjs": {
-    "generation": "Temporary: inherited tree drift from test/dsl-l2.mjs in shard 2. Its 13 new src/l2demo trace.meta.json sidecars leave live 759177bda0d12f33 against tree a1e53ac46cfb6ea1. Entry and exit live links were identical at this boundary. Explicit downstream exception pending the dsl-l2 fixture repair."
+    "temporary-roots": {
+      "reason": "Temporary: the osd-bsp fixture creates an osd-bsp-* root and leaves it on disk. Shared shard 2 on base 11122e9f observed one survivor; the fixture owner must remove it.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-osd-bsp-temporary-roots",
+      "roots": [
+        {
+          "prefix": "osd-bsp-",
+          "maxCount": 1
+        }
+      ]
+    }
   },
   "test/vscode-job-worker-integration.mjs": {
-    "generation": "Temporary: this fixture starts Launcher over process.cwd() with a disposable notebook pack, activates its class and removes the pack in finally, but leaves the repository live link at e5315ee4149d11ec while the restored tree hashes to a1e53ac46cfb6ea1. A second originating generation leak in shard 2 on base 11122e9f."
-  },
-  "test/zosd-test.mjs": {
-    "generation": "Temporary: inherited the live link e5315ee4149d11ec left by test/vscode-job-worker-integration.mjs in shard 2; entry and exit links are identical while the working tree is a1e53ac46cfb6ea1. Downstream observation, pending the originating fixture repair."
+    "generation": {
+      "reason": "Temporary: this fixture starts Launcher over process.cwd() with a disposable notebook pack, activates its class and removes the pack in finally, but leaves the repository live link at e5315ee4149d11ec while the restored tree hashes to a1e53ac46cfb6ea1. A second originating generation leak in shard 2 on base 11122e9f.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-vscode-job-worker-integration-generation",
+      "drift": {
+        "kind": "restored-inputs",
+        "pathSuffixes": [
+          "/packs/notebook-scratch/src/zcl_vs_jobs_probe.clas.abap"
+        ],
+        "maxCount": 1,
+        "packSuffix": "/packs/notebook-scratch",
+        "contentDigest": "865dbefb97ac563e3bec65a5ec558a79025e028909390bb2748d4030ba8acee9"
+      }
+    }
   },
   "test/amdp-pack.mjs": {
-    "temporary-roots": "Temporary: shared shard 4 on base 11122e9f observed one osd-amdp-pack-* fixture root still present at the file boundary. The generated AMDP pack fixture has no removal; repair belongs to its test owner. The detector retains the full root evidence."
+    "temporary-roots": {
+      "reason": "Temporary: shared shard 4 on base 11122e9f observed one osd-amdp-pack-* fixture root still present at the file boundary. The generated AMDP pack fixture has no removal; repair belongs to its test owner. The detector retains the full root evidence.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-amdp-pack-temporary-roots",
+      "roots": [
+        {
+          "prefix": "osd-amdp-pack-",
+          "maxCount": 1
+        }
+      ]
+    }
   },
   "test/segw-tree.mjs": {
-    "temporary-roots": "Temporary: shard 4 on base 11122e9f left one segw-repo-* directory when spawnSync zip failed with ENOENT. tools/segw-tree.mjs:401 creates the root but line 411 removes it only after successful zipFolder(), not in finally. This records the measured error-path leak; the ordinary missing-zip test failure remains red."
+    "temporary-roots": {
+      "reason": "Temporary: shard 4 on base 11122e9f left one segw-repo-* directory when spawnSync zip failed with ENOENT. tools/segw-tree.mjs:401 creates the root but line 411 removes it only after successful zipFolder(), not in finally. This records the measured error-path leak; the ordinary missing-zip test failure remains red.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-segw-tree-temporary-roots",
+      "roots": [
+        {
+          "prefix": "segw-repo-",
+          "maxCount": 1
+        }
+      ]
+    }
   },
   "test/stg-compile.mjs": {
-    "temporary-roots": "Temporary: the hand-written DPC_EXT beside a pack model case at test/stg-compile.mjs:409 creates stg-pack-src-* without a finally/after removal. Shard 4 on base 11122e9f observed one surviving root. Leave evidence visible until the fixture owner fixes it."
+    "temporary-roots": {
+      "reason": "Temporary: the hand-written DPC_EXT beside a pack model case at test/stg-compile.mjs:409 creates stg-pack-src-* without a finally/after removal. Shard 4 on base 11122e9f observed one surviving root. Leave evidence visible until the fixture owner fixes it.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-stg-compile-temporary-roots",
+      "roots": [
+        {
+          "prefix": "stg-pack-src-",
+          "maxCount": 1
+        }
+      ]
+    }
   },
   "test/generation-diff.mjs": {
-    "temporary-roots": "Temporary: fixture() at test/generation-diff.mjs:23 creates gen-* roots and returns them without cleanup. Shared shard 3 on base 11122e9f observed 17 roots, including the standalone fixture near line 117."
+    "temporary-roots": {
+      "reason": "Temporary: fixture() at test/generation-diff.mjs:23 creates gen-* roots and returns them without cleanup. Shared shard 3 on base 11122e9f observed 17 roots, including the standalone fixture near line 117.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-generation-diff-temporary-roots",
+      "roots": [
+        {
+          "prefix": "gen-",
+          "maxCount": 17
+        }
+      ]
+    }
   },
   "test/osd-routes.mjs": {
-    "temporary-roots": "Temporary: the isolated route inventory case at test/osd-routes.mjs:56 creates osd-routes-* without cleanup. Shared shard 3 on base 11122e9f observed one surviving root."
+    "temporary-roots": {
+      "reason": "Temporary: the isolated route inventory case at test/osd-routes.mjs:56 creates osd-routes-* without cleanup. Shared shard 3 on base 11122e9f observed one surviving root.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-osd-routes-temporary-roots",
+      "roots": [
+        {
+          "prefix": "osd-routes-",
+          "maxCount": 1
+        }
+      ]
+    }
   },
   "test/prove-on-system.mjs": {
-    "temporary-roots": "Temporary: fake-system proof cases use run() at test/prove-on-system.mjs:364 and explicit receipt directories, each creating osd-prove-runs-* without removal. Shared shard 3 on base 11122e9f observed 80 roots. Receipt cleanup belongs to the fixture owner."
+    "temporary-roots": {
+      "reason": "Temporary: fake-system proof cases use run() at test/prove-on-system.mjs:364 and explicit receipt directories, each creating osd-prove-runs-* without removal. Shared shard 3 on base 11122e9f observed 80 roots. Receipt cleanup belongs to the fixture owner.",
+      "owner": "stoker",
+      "backlog": "docs/backlog/misc.md#isolation-prove-on-system-temporary-roots",
+      "roots": [
+        {
+          "prefix": "osd-prove-runs-",
+          "maxCount": 80
+        }
+      ]
+    }
   }
 }

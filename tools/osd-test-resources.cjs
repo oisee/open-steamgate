@@ -2,6 +2,7 @@
 // Wrappers preserve arguments/results and never close, kill or delete anything.
 const fs = require('node:fs');
 const cp = require('node:child_process');
+const {resolve} = require('node:path');
 const {syncBuiltinESMExports} = require('node:module');
 const {promisify} = require('node:util');
 let owner;
@@ -42,24 +43,27 @@ exports.install = () => {
   }
   const original = fs.mkdtempSync;
   fs.mkdtempSync = function (...args) {
+    const cwd = process.cwd();
     const path = original.apply(this, args);
-    roots.set(String(path), owner);
+    roots.set(resolve(cwd, String(path)), owner);
     return path;
   };
   const asyncOriginal = fs.mkdtemp;
   fs.mkdtemp = function (...args) {
     const file = owner;
+    const cwd = process.cwd();
     const callback = args.pop();
     return asyncOriginal.call(this, ...args, (error, path) => {
-      if (!error) roots.set(String(path), file);
+      if (!error) roots.set(resolve(cwd, String(path)), file);
       callback(error, path);
     });
   };
   const promiseOriginal = fs.promises.mkdtemp;
   fs.promises.mkdtemp = async function (...args) {
     const file = owner;
+    const cwd = process.cwd();
     const path = await promiseOriginal.apply(this, args);
-    roots.set(String(path), file);
+    roots.set(resolve(cwd, String(path)), file);
     return path;
   };
   syncBuiltinESMExports();

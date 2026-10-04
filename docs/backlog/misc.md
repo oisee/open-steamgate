@@ -166,3 +166,31 @@ speed task than splitting the costly integration cases (`docs/ci-tests.md`).
         on a real backend; prove crash recovery and schema-version checks
         before reusing a slot, then measure two slots against serial wall time
 ```
+
+## Test isolation fixture repairs
+
+- <a id="isolation-adt-facade-temporary-roots"></a> `test/adt-facade.mjs` — `temporary-roots`; evidence: the program subroutines/events/local-classes case creates osd-parts-* at test/adt-facade.mjs:527 and never removes it. Confirmed in the shared ADT mode-0 run on base 11122e9f. The detector still prints the surviving root; repair belongs to the fixture owner. Owner: **adt-i5**.
+
+- <a id="isolation-osd-store-temporary-roots"></a> `test/osd-store.mjs` — `temporary-roots`; evidence: the CRLF formatting fixture at test/osd-store.mjs:478 creates osd-crlf-* without a finally/after removal. Shard 1 on base 11122e9f observed one surviving root; the fixture owner must restore isolation. Owner: **stoker**.
+
+- <a id="isolation-prove-inplace-temporary-roots"></a> `test/prove-inplace.mjs` — `temporary-roots`; evidence: run() at test/prove-inplace.mjs:304 defaults to a fresh osd-prove-inplace-* directory and does not remove it; the explicit runs directory near line 688 also survives. Shard 1 on base 11122e9f observed 31 roots. Keep evidence visible until the fixture owner fixes cleanup. Owner: **stoker**.
+
+- <a id="isolation-vscode-warm-generation"></a> `test/vscode-warm.mjs` — `generation`; evidence: the shared shard-1 run changed live from 759177bda0d12f33 to ee8b686b9cf3721d, then restored source bytes without restoring the live generation. The final tree still hashes to 759177bda0d12f33. Confirmed on base 11122e9f; fixture owner must restore both. Owner: **stoker**.
+
+- <a id="isolation-dsl-l2-generation"></a> `test/dsl-l2.mjs` — `generation`; evidence: setup at test/dsl-l2.mjs:112 writes 13 previously absent ignored trace.meta.json sidecars under src/l2demo and leaves live at 759177bda0d12f33 while the tree becomes a1e53ac46cfb6ea1. A read-only hash excluding exactly those 13 files returns 759177bda0d12f33. Recorded in shard 2 on base 11122e9f; no cleanup/rebuild is performed by the detector. Owner: **stoker**.
+
+- <a id="isolation-osd-bsp-temporary-roots"></a> `test/osd-bsp.mjs` — `temporary-roots`; evidence: the osd-bsp fixture creates an osd-bsp-* root and leaves it on disk. Shared shard 2 on base 11122e9f observed one survivor; the fixture owner must remove it. Owner: **stoker**.
+
+- <a id="isolation-vscode-job-worker-integration-generation"></a> `test/vscode-job-worker-integration.mjs` — `generation`; evidence: this fixture starts Launcher over process.cwd() with a disposable notebook pack, activates its class and removes the pack in finally, but leaves the repository live link at e5315ee4149d11ec while the restored tree hashes to a1e53ac46cfb6ea1. A second originating generation leak in shard 2 on base 11122e9f. Owner: **stoker**.
+
+- <a id="isolation-amdp-pack-temporary-roots"></a> `test/amdp-pack.mjs` — `temporary-roots`; evidence: shared shard 4 on base 11122e9f observed one osd-amdp-pack-* fixture root still present at the file boundary. The generated AMDP pack fixture has no removal; repair belongs to its test owner. The detector retains the full root evidence. Owner: **stoker**.
+
+- <a id="isolation-segw-tree-temporary-roots"></a> `test/segw-tree.mjs` — `temporary-roots`; evidence: shard 4 on base 11122e9f left one segw-repo-* directory when spawnSync zip failed with ENOENT. tools/segw-tree.mjs:401 creates the root but line 411 removes it only after successful zipFolder(), not in finally. This records the measured error-path leak; the ordinary missing-zip test failure remains red. Owner: **stoker**.
+
+- <a id="isolation-stg-compile-temporary-roots"></a> `test/stg-compile.mjs` — `temporary-roots`; evidence: the hand-written DPC_EXT beside a pack model case at test/stg-compile.mjs:409 creates stg-pack-src-* without a finally/after removal. Shard 4 on base 11122e9f observed one surviving root. Leave evidence visible until the fixture owner fixes it. Owner: **stoker**.
+
+- <a id="isolation-generation-diff-temporary-roots"></a> `test/generation-diff.mjs` — `temporary-roots`; evidence: fixture() at test/generation-diff.mjs:23 creates gen-* roots and returns them without cleanup. Shared shard 3 on base 11122e9f observed 17 roots, including the standalone fixture near line 117. Owner: **stoker**.
+
+- <a id="isolation-osd-routes-temporary-roots"></a> `test/osd-routes.mjs` — `temporary-roots`; evidence: the isolated route inventory case at test/osd-routes.mjs:56 creates osd-routes-* without cleanup. Shared shard 3 on base 11122e9f observed one surviving root. Owner: **stoker**.
+
+- <a id="isolation-prove-on-system-temporary-roots"></a> `test/prove-on-system.mjs` — `temporary-roots`; evidence: fake-system proof cases use run() at test/prove-on-system.mjs:364 and explicit receipt directories, each creating osd-prove-runs-* without removal. Shared shard 3 on base 11122e9f observed 80 roots. Receipt cleanup belongs to the fixture owner. Owner: **stoker**.

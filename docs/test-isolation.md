@@ -21,7 +21,9 @@ release a lock, rebuild code or switch generations:
 
 - **dialog:** the FIFO work-process lock is free, the queue is empty and no
   execution remains open, including executions suspended in `WAIT`.
-  Owner: `osd-dialog-step.mjs`, `dialogStateSnapshot()`.
+  Owner: `osd-dialog-step.mjs`, `dialogStateSnapshot()`. The detector installs
+  an observer slot and owns the open-token Set. Without the detector a step
+  performs one null check, with no Set allocation or add/delete operations.
 - **generation:** `build/live` names the current working tree hash, computed
   by the builder's own hash function, including libraries and generators.
   Trees with no live generation have nothing to compare. Owner:
@@ -33,8 +35,10 @@ release a lock, rebuild code or switch generations:
   during registration or execution, no longer exist. Owner:
   `osd-test-resources.cjs`, `resourceStateSnapshot(file)`.
 - **environment:** added, changed and deleted environment keys are restored
-  to their values before the file. Import-time changes are checked against
-  the pre-import snapshot. Owner: `osd-test-resources.cjs`,
+  to their values before the file. Keys changed anywhere in the import sequence
+  are reconciled against the original process environment, so later imports
+  cannot adopt an earlier import's contaminated baseline. A final run-wide check
+  also compares with the original environment. Owner: `osd-test-resources.cjs`,
   `environmentSnapshot()`. Values are redacted in diagnostics; key names,
   presence and changes remain visible.
 
@@ -42,7 +46,9 @@ The resource observer wraps Node's spawn/fork/exec/execFile and synchronous,
 callback and promise mkdtemp helpers before suite imports, and synchronizes
 builtin ESM exports. The original calls and results are preserved. This also
 covers repository helpers built on those functions. Exit events retire child
-records; removed directories disappear from snapshots. This does not enumerate
+records; removed directories disappear from snapshots. Temporary roots use
+absolute paths resolved against the cwd at helper invocation, including callback
+and promise completion after a cwd change. This does not enumerate
 arbitrary directories, grandchildren, or processes started by native extensions.
 A run terminated during import or with `process.exit()` cannot finish checks.
 
@@ -67,19 +73,37 @@ with `--require` before importing it in a test.
 ## Reading a failure
 
 `test-isolation: test/example.mjs: generation: {"before":...,"after":...}`
-names the file and invariant. Generation final evidence includes both hashes (the baseline reads only the live
-link to avoid hashing twice); dialog
+names the file and invariant. Generation evidence includes live and tree hashes
+at entry and exit; dialog
 evidence includes queued/open work; resources include PIDs/commands or root
-paths; environment evidence names the changed keys. A baseline already dirty
-means contamination arrived from an earlier file; retain the earlier evidence.
+paths; environment evidence names the changed keys. An unchanged inherited generation drift is reported only at its originating
+boundary. The detector re-baselines its observation state for the next file;
+a new live link, missing generation, hash error or additional tree drift remains red.
+The detector does not re-baseline the filesystem.
 The runner cannot recover an isolation failure through an isolated retry.
 
-`tools/osd-test-isolation-allow.json` is the explicit temporary allow-list. Each entry is
-a file path mapping an invariant to a nonempty reason. Environment exceptions
-map individual key names to reasons instead of allowing the entire environment. Exceptions still print
-the complete evidence and `TEMPORARY ALLOW`; they never perform cleanup. The
-initial environment allow-list is empty. Add only measured, explained exceptions
-and remove them when their owner is fixed. See the [run report](test-isolation-runs.md).
+`tools/osd-test-isolation-allow.json` contains only originating exceptions.
+Each invariant entry requires `reason`, `owner` and a `backlog` item link;
+malformed entries fail at load time. Root exceptions enumerate basename prefixes
+and maximum surviving counts. A different prefix or an excess count remains red.
+Generation exceptions describe the originating input changes and maximum count.
+For added trace sidecars the detector proves that excluding exactly those new
+paths returns the baseline hash. For restored activation inputs the originating
+fixture calls the already-loaded detector's `observeGenerationDrift()` while
+edited inputs still exist; it verifies their identity/count, the hash they name,
+and the restored tree hash. A warm runtime may use persisted active copies of
+inactive objects. The detector reads their existing metadata and bytes, proves
+that view did not change during the known edit, and checks the builder's hash
+with that overlay. It never constructs a store or invokes its recovery path.
+The view fingerprint also participates in downstream comparisons. This observer
+is absent in plain Mocha runs. A later live or active-copy change cannot reuse
+that proof. Snapshot errors and generation deletion
+have no exception.
+
+Exceptions still print full evidence, ownership, backlog and `TEMPORARY ALLOW`;
+they never perform cleanup. There are no environment exceptions. Remove each
+entry when its [fixture repair](backlog/misc.md#test-isolation-fixture-repairs)
+is complete. See the [run report](test-isolation-runs.md).
 
 Each checked file prints total baseline and final snapshot time in milliseconds;
-this excludes tests and user cleanup hooks.
+this includes detector proof captures and excludes test work and user cleanup.

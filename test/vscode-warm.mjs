@@ -20,7 +20,8 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {createRequire} from "node:module";
 
-const {Osd} = createRequire(import.meta.url)("../editors/vscode/lib.js");
+const require = createRequire(import.meta.url);
+const {Osd} = require("../editors/vscode/lib.js");
 
 const PORT = Number(process.env.STG_PORT ?? 3621);
 const BASE = `http://localhost:${PORT}`;
@@ -70,13 +71,19 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
   });
 
   after(async () => {
-    writeFileSync(CLASS_FILE, originalSource);
-    if (child && child.exitCode === null && child.signalCode === null) {
-      const stopped = once(child, "exit");
-      child.kill("SIGTERM");
-      await stopped;
+    // Only the preloaded detector receives this proof, while edited inputs
+    // still identify the live generation. Plain Mocha installs no observer.
+    const isolation = require.cache[require.resolve('../tools/osd-test-isolation.cjs')]?.exports;
+    try { await isolation?.observeGenerationDrift(); }
+    finally {
+      writeFileSync(CLASS_FILE, originalSource);
+      if (child && child.exitCode === null && child.signalCode === null) {
+        const stopped = once(child, "exit");
+        child.kill("SIGTERM");
+        await stopped;
+      }
+      if (databaseDir) rmSync(databaseDir, {recursive: true, force: true});
     }
-    if (databaseDir) rmSync(databaseDir, {recursive: true, force: true});
   });
 
   it("edits the demo DPC's own comment, activates it, and reads X-OSD-Build off the answer", async () => {
