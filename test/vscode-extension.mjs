@@ -1409,6 +1409,42 @@ describe("editors/vscode: the extension's logic", function () {
     expect(calls, "nothing to attach to while stopped").to.have.length(3);
   });
 
+  it("explains debugging on the first workspace ABAP breakpoint and remembers dismissal", () => {
+    const api = debugApi(), saved = new Map(), messages = [];
+    let changed;
+    api.workspace.workspaceFolders = [{uri: {toString: () => "file:///workspace"}}];
+    api.workspace.getWorkspaceFolder = uri => uri.fsPath.startsWith("/w/") ? {} : undefined;
+    api.debug.onDidChangeBreakpoints = fn => { changed = fn; return {dispose() {}}; };
+    api.window.showInformationMessage = (...args) => messages.push(args);
+    const context = {subscriptions: [], globalState: {get: key => saved.get(key), update: async (key, value) => saved.set(key, value)}};
+    const {debugOnboarding} = loadExtension(api);
+    debugOnboarding(context);
+    changed({added: [new api.SourceBreakpoint("/outside/z.clas.abap")]});
+    changed({added: [new api.SourceBreakpoint("/w/x.mjs")]});
+    expect(messages).to.have.length(0);
+    changed({added: [new api.SourceBreakpoint("/w/z.clas.abap")]});
+    changed({added: [new api.SourceBreakpoint("/w/z2.clas.abap")]});
+    expect(messages).to.deep.equal([["osd debugs without a launch configuration: set a breakpoint and press F9 or ▷. 'Attach to server' / 'ABAP on server' belong to the ABAP-FS extension and SAP systems.", "Got it"]]);
+    debugOnboarding(context);
+    changed({added: [new api.SourceBreakpoint("/w/z.clas.abap")]});
+    expect(messages).to.have.length(1);
+    expect(api.debug.started).to.have.length(0);
+  });
+
+  it("never attaches on system Start, even with saved ABAP breakpoints and legacy debug enabled", async () => {
+    const api = debugApi();
+    api.debug.breakpoints = [new api.SourceBreakpoint("/w/z.clas.abap")];
+    api.window.setStatusBarMessage = () => {};
+    const controller = new (loadSystemController(api))(controllerContext(), {show() {}, appendLine() {}});
+    const launcher = fakeLauncher({state: "stopped", debug: true, databaseLabel: "SQLite", async start() { this.state = "running"; return {port: 3100}; }});
+    controller.ensureLauncher = async () => launcher;
+    let attaches = 0;
+    controller.attachSystemDebugger = async () => { attaches++; return true; };
+    expect(await controller.start()).to.equal(true);
+    expect(attaches).to.equal(0);
+    expect(api.debug.started).to.have.length(0);
+  });
+
   it("osd.debug is gone from the settings UI, and read silently for one release", () => {
     const manifest = JSON.parse(readFileSync(path.join(ROOT, "editors/vscode/package.json"), "utf8"));
     expect(manifest.contributes.configuration.properties).to.not.have.property("osd.debug");

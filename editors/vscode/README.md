@@ -34,6 +34,27 @@ classrun when a class has both. Each button’s tooltip names its action.
 - Open local OData and Fiori apps, inspect short dumps, use SQL notebooks, and debug ABAP through VS Code's Node debugger.
 - Add an abapGit-style workspace layer over the bundled source.
 
+## What connects to what
+
+The **osd system** is a local ABAP server. Start builds and launches it on
+its allocated HTTP port (shown in **OSD running** and System overview).
+`osd.url` points extension requests to that listener; independently started
+systems default to port 3030.
+
+The ABAP-FS mount **OSD (local)** (`osd-local`) exposes source from that
+same server over ADT. It is a filesystem connection, independent of debugging.
+
+The osd debugger attaches VS Code’s Node debugger on demand when you set an
+ABAP breakpoint while the system runs, or press **F9** / **▷** with a
+breakpoint already set. **Start system never starts a debug session**, even
+with saved breakpoints. No launch configuration is needed. The SAP ADT and
+ABAP-FS debuggers are unrelated to osd: **Attach to server**, **ABAP on server**,
+and **ABAP Replay Debugger** target SAP systems.
+
+Output channels separate extension/debugger diagnostics, classrun output and
+Check/Activate feedback, server build/runtime logs, and background job summaries
+and raw worker logs. See Background jobs for the explicit raw-log action.
+
 ## ABAP values in the debugger
 
 When stopped on an ABAP line, Variables, Watch and hover show ABAP values:

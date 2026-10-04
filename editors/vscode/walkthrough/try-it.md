@@ -8,3 +8,8 @@
 6. Open the Fiori launchpad from the OSD view or the System overview page.
 
 The status row in the OSD view opens the same overview page, combining the status service with the System information app.
+
+Set an `.abap` breakpoint and press **F9** or the classrun **▷** to debug.
+OSD starts its debugger on demand and needs no launch configuration; starting
+the system does not start a debug session. ABAP-FS “Attach to server” and
+“ABAP on server” are SAP debuggers. See [What connects to what](../README.md#what-connects-to-what).

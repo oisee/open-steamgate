@@ -1142,7 +1142,6 @@ class SystemController {
         : await launcher.start({...options, force});
       if (result === undefined) return false;
       await this.#pointUrlAt(launcher.port);
-      await this.#attachAfterStart();
       this.emitter.fire();
       return true;
     } catch (e) {
@@ -1163,21 +1162,10 @@ class SystemController {
     }
     if (result === undefined) return false;
     await this.#pointUrlAt(result.port);
-    await this.#attachAfterStart();
     vscode.window.setStatusBarMessage(
       `osd: running on :${result.port} · ${launcher.databaseLabel}, generation ${String(result.generation).slice(0, 8)}`, 5000);
     this.emitter.fire();
     return true;
-  }
-
-  // a system started with its inspector is attached to; one started
-  // without is given one now if .abap breakpoints are already waiting
-  async #attachAfterStart() {
-    const wanted = this.launcher?.debug === true || abapBreakpoints().length > 0;
-    if (!wanted) return;
-    if (await this.attachSystemDebugger({onDemand: true}) !== true && this.debuggerError !== undefined) {
-      this.output.appendLine(`osd debugger: ${this.debuggerError}`);
-    }
   }
 
   async #launcherError(launcher, error, label) {
@@ -2650,6 +2638,23 @@ function breakpointGuard(context) {
   }
 }
 
+/** Explain the independent debuggers once per workspace, including while stopped. */
+function debugOnboarding(context) {
+  if (!vscode.debug.onDidChangeBreakpoints) return;
+  const workspace = vscode.workspace.workspaceFile?.toString() ??
+    (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.toString()).sort().join("|");
+  const key = `osd.debugOnboarding.v1:${workspace}`;
+  let seen = context.globalState.get(key, false);
+  context.subscriptions.push(vscode.debug.onDidChangeBreakpoints(event => {
+    if (seen || !(event.added ?? []).some(bp => bp instanceof vscode.SourceBreakpoint &&
+      /\.abap$/i.test(bp.location?.uri?.path ?? bp.location?.uri?.fsPath ?? "") &&
+      (!vscode.workspace.getWorkspaceFolder || vscode.workspace.getWorkspaceFolder(bp.location.uri)))) return;
+    seen = true;
+    void context.globalState.update(key, true);
+    void vscode.window.showInformationMessage("osd debugs without a launch configuration: set a breakpoint and press F9 or ▷. 'Attach to server' / 'ABAP on server' belong to the ABAP-FS extension and SAP systems.", "Got it");
+  }));
+}
+
 /** The debugger on demand, driven by breakpoints: one set (or enabled) in
  *  an .abap file while the system runs opens its inspector and attaches;
  *  the last one removed (or disabled) closes it again once the debug
@@ -2741,6 +2746,7 @@ function activate(context) {
   jobsStatusBar(vscode, context, controller);
   breakpointToggleStatusBar(context);
   breakpointGuard(context);
+  debugOnboarding(context);
   debugOnDemand(context);
   context.subscriptions.push(testExplorer(context, output));
   context.subscriptions.push(vscode.commands.registerCommand("osd.showDumps", () => showDumps(output)));
@@ -3517,6 +3523,7 @@ async function resetTaxiData() {
 
 async function classrunObject(name, classrunOutput, withDebugger = false, file,
   {attach = requireDebugSystem, controller = activeController, client = osd} = {}) {
+  withDebugger ||= abapBreakpoints().length > 0;
   if (kernelDiagnostics && !(await kernelDiagnostics.allow(file, {type: "CLAS", name}))) return;
   if (withDebugger && !(await attach(classrunOutput, "Classrun"))) return;
   // A wait that gives up says so and runs anyway, as 0.4 did: an unattended
@@ -4388,7 +4395,7 @@ function testExplorer(context, output, {
     let subscription;
     const runObjectIds = new Set();
     try {
-      const useDebugger = forceDebugger || osdDebugEnabled();
+      const useDebugger = forceDebugger || osdDebugEnabled() || abapBreakpoints().length > 0;
       // `osd.database.tests` (docs/vscode-extension.md, "Databases"): read
       // once per run, not once per object -- it does not change mid-run, and
       // a per-object read would mean one call to context.secrets per object.
@@ -4701,7 +4708,7 @@ async function deactivate() {
   await activeController?.stop({shutdown: true});
 }
 
-module.exports = {editorRunContext,WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
+module.exports = {debugOnboarding, editorRunContext,WAIT_CANCELLED, INSPECTOR_STEP_ESCAPE_MS, activate, deactivate, runReportInTerminal, SystemController, classrunObject, registerEntitySetCommands, debugOnDemand, testExplorer, readersLensProvider, OsdTreeProvider, TransactionItem, EntitySetItem,
   httpLensProvider, openEntitySetMethod, statusBar, registerCheckActivateCommands, startStopStatusBar, runningParts, showRunning, sampleItems, openSample,
   openDataPreview,
   transactionProgramPath, clickTransaction, clickTreeNode, openPage, registerOpenCommands, closePageTabs, reloadPageTabs,
