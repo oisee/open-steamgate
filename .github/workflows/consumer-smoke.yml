@@ -21,7 +21,7 @@ defaults:
 jobs:
   consumer-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 75
     env:
       OSD_HOME: ${{ github.workspace }}/osd
       GOPROXY: "off"
@@ -38,6 +38,7 @@ jobs:
           cache: npm
           cache-dependency-path: osd/package-lock.json
       - name: Install and bootstrap runtime
+        timeout-minutes: 10
         working-directory: osd
         run: |
           npm ci
@@ -55,13 +56,9 @@ jobs:
           persist-credentials: false
       - name: Install consumer dependencies
         working-directory: demo
-        run: |
-          if [ -f package.json ]; then
-            npm ci
-          else
-            echo 'Pinned consumer has no package.json: no npm dependencies to install.'
-          fi
+        run: node ../osd/tools/consumer-smoke.mjs install
       - uses: actions/setup-go@v5
+        timeout-minutes: 5
         if: success() || failure()
         with:
           go-version: '1.26'

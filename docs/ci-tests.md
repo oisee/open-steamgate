@@ -186,7 +186,13 @@ a later pin with a package manifest must support `npm ci`.
 **Advisory for the first week by agreement:** `consumer-smoke` can go red,
 but is outside the required `test` aggregate and does not change the
 `test` + `scan` merge gate. Promotion to required status needs a separate
-agreement. Its timeout is 20 minutes; expected runtime is about 5–6 minutes.
+agreement. Its job timeout is 75 minutes; expected runtime is about 5–6 minutes.
+Slice checks are bounded at eight minutes each, other checks and consumer
+installation at six minutes each. A timeout kills the command’s process group,
+records “timeout”, and allows the remaining checks and summary to run. Runtime
+setup and Go setup are bounded at ten and five minutes respectively. Consumer
+commands and install scripts receive no runner command-file variables or
+`ACTIONS_*` tokens, and their output is fenced with `stop-commands`.
 The job summary gives each command's result and elapsed time, lists lines
 containing `drift` as “generator output changed for consumers”, and supplies
 the exact command for each failure. Missing runs are shown explicitly.
