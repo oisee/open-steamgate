@@ -1,6 +1,5 @@
-// One store source lock for warm/cold compilation and source mutations.
-// Reads run to completion over a stable store view. A save arriving during
-// compilation is acknowledged only after its queued write has landed.
+// One store source lock for short snapshot/publication turns and mutations.
+// Compilation never holds this lock. Saves proceed while a compiler works.
 const locks = new Map();
 function lockOf(store) {
   let lock = locks.get(store.root);
@@ -23,7 +22,7 @@ export function withSourceLock(store, work) {
     else run();
   });
 }
-// Preserve the synchronous store API when idle. During a compile callers
+// Preserve the synchronous store API when idle. During a snapshot callers
 // must await the result, just as the HTTP and ABAP destination adapters do.
 export function deferSourceMutation(store, method, args) {
   const lock = locks.get(store.root);

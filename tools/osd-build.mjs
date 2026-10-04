@@ -18,7 +18,11 @@
 //
 // Content hashing takes 105 ms here, 170 ms for the largest library;
 // generations are 44 MB. See docs/generations.md for the design.
-import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot, materializeSourceSnapshot, gcSourceInputs} from "./osd-source-snapshot.mjs";
+import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot, materializeSourceSnapshot} from "./osd-source-snapshot.mjs";
+import {gc} from "./osd-build-gc.mjs";
+import {normalPath, stampOf, changedError} from "./osd-build-input-check.mjs";
+export {normalPath};
+export {gc};
 import {createHash} from "node:crypto";
 import {libraryPath} from "./osd-lib-path.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
@@ -246,7 +250,6 @@ export function runGenerators(root, log = () => {}) {
   }
   return output;
 }
-
 
 /**
  * What identifies the generators that will actually RUN.
@@ -721,8 +724,8 @@ export async function build(options = {}) {
   const stamps = new Map(watched.map((file) => [file, stampOf(file)]));
   const moved = watched.filter((file) => (existsSync(file) ? digestOf(file) : undefined) !== named.get(file));
   if (moved.length > 0) throw changedError(root, moved);
+  if (options.expectedHash !== undefined && hash !== options.expectedHash) throw changedError(root, []);
   const target = join(paths.byInput, hash);
-
   // a generation a warm build made (tools/osd-warm.mjs) is not a cache hit
   // until a cold transpile has been compared with it: it is built again,
   // compared, and replaced if it differs
@@ -817,7 +820,7 @@ export async function build(options = {}) {
           generatedDigests.set(normalPath(file), createHash("sha256").update(bytes).digest("hex"));
         }
         const known = digests.get(normalPath(file));
-        if (known !== undefined && createHash("sha256").update(bytes).digest("hex") !== known) changed.push(file);
+        if (known !== undefined && createHash("sha256").update(bytes).digest("hex") !== known) throw changedError(root, [file]);
       }});
     // and nothing the generators or the transpiler read was written since
     // it was named
@@ -929,42 +932,6 @@ export async function build(options = {}) {
   }
 }
 
-// keep the live generation and the newest N; drop the rest, every leftover
-// tmp, and the directories moved aside by the first switch
-export function gc(root, options = {}) {
-  const paths = layout(root);
-  const unlock = lock(paths);
-  try {
-    const keep = options.keep ?? 5;
-    const live = liveHash(root);
-    const removed = [];
-    const all = generations(root).reverse(); // newest first
-    for (const g of all.slice(keep)) {
-      if (g.hash === live) {
-        continue;
-      }
-      rmSync(join(paths.byInput, g.hash), {recursive: true, force: true});
-      removed.push(g.hash);
-    }
-    if (existsSync(paths.tmp)) {
-      for (const e of readdirSync(paths.tmp)) {
-        rmSync(join(paths.tmp, e), {recursive: true, force: true});
-        removed.push(`tmp/${e}`);
-      }
-    }
-    if (existsSync(paths.build)) {
-      for (const e of readdirSync(paths.build)) {
-        if (e.startsWith("legacy-")) {
-          rmSync(join(paths.build, e), {recursive: true, force: true});
-          removed.push(e);
-        }
-      }
-    }
-    gcSourceInputs(root);
-    return removed;
-  } finally {unlock();}
-}
-
 export async function main(args) {
   // a build for publishing leaves $TMP out (tools/osd-tmp.mjs)
   if (args.includes("--publish")) forPublishing(process.env);
@@ -1013,26 +980,4 @@ export async function main(args) {
 
 if (runsAs("osd-build.mjs")) {
   main(process.argv.slice(2)).then((code) => process.exit(code));
-}
-
-// a path spelled one way: absolute, forward slashes
-export function normalPath(file) {
-  return resolve(file).split("\\").join("/");
-}
-
-// what changes with any write to a file, a write of the same bytes included
-function stampOf(file) {
-  try {
-    const st = statSync(file, {bigint: true});
-    return `${st.size}:${st.mtimeNs}:${st.ctimeNs}:${st.ino}`;
-  } catch {
-    return "absent";
-  }
-}
-
-function changedError(root, files) {
-  const names = [...new Set(files.map((f) => relative(root, f)))];
-  const error = new Error(`the tree changed while it was built: ${names.slice(0, 5).join(", ")}`);
-  error.code = "CHANGED";
-  return error;
 }

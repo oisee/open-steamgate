@@ -245,8 +245,9 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
   // call publish() side by side. They shared one build and both swapped
   // from its base; the second swap was refused ("the runtime carries h1,
   // and the swap is from h0") and recycled (vsp-i7, 2026-10-02). The real
-  // transpile() runs here over a stand-in warm compiler that, like the real
-  // one, moves its base to every generation it builds.
+  // publication coordinator runs here over a stand-in transpile boundary
+  // that moves its base to every generation it builds. Snapshot/publication
+  // checks against real generations are exercised in warm-process.mjs.
   describe("two publish() calls at once", () => {
     const setup = () => {
       const dir = mkdtempSync(join(tmpdir(), "osd-warm-concurrent-"));
@@ -268,6 +269,9 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
         },
       };
       store.warmState = {on: true, compiler, reason: undefined};
+      // This fixture models compilation with symbolic generations. Exercise
+      // the real publish coordinator; real disk compilation is tested below.
+      store.transpile = async () => ({...await store.warmState.compiler.build(), warm: true});
       const log = [];
       store.served = {
         running: true, generation: "h0", swaps: 0, recycles: 0,
@@ -446,6 +450,7 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
       },
     };
     store.warmState = {on: true, compiler, reason: undefined};
+    store.transpile = async () => ({...await store.warmState.compiler.build(), warm: true});
     store.served = {
       running: true, epoch: 1, generation: nameOf(src.text), swaps: 0, recycling: undefined, starting: undefined,
       async hot(swap) {
@@ -710,6 +715,8 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     const {store, done} = setup();
     const runtime = store.served;
     try {
+      writeFileSync(join(store.root, "abap_transpile.json"), JSON.stringify({input_folder: "src", libs: [], output_folder: "output"}));
+      delete store.sourceKey;
       let primed = 0;
       store.warmState.compiler = {primed: false, async prime() { primed++; this.primed = true; return {}; }};
       let settle;

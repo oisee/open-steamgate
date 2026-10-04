@@ -1,4 +1,4 @@
-import {withSourceLock} from "./osd-store-source-lock.mjs";
+import {acceptView, captureView} from "./osd-store-compile-view.mjs";
 // Background priming belongs to the compiler process, never the HTTP front.
 export function warmUp(store) {
   const w = store.warm();
@@ -18,9 +18,22 @@ export function warmUp(store) {
     w.compiler ??= new WarmCompilerProcess({root: store.root, log: (m) => console.log(m), overlay: (activating) => store.overlay(activating),
       keyOf: (file) => store.objectKeyOf(file), inactiveSources: (activating) => store.inactiveSources(activating)});
     try {
-      const r = await withSourceLock(store, () => warmOperation(store, () => w.compiler.prime()));
-      w.reason = undefined;
-      return r;
+      for (;;) {
+        const view = await captureView(store);
+        try {
+          const r = await warmOperation(store, () => w.compiler.prime(view));
+          await acceptView(store, view, new Set(), undefined, true);
+          w.reason = undefined;
+          return r;
+        } catch (error) {
+          try { await acceptView(store, view, new Set(), undefined, true); } catch (changed) { error = changed; }
+          if (!["CHANGED", "INPUT_CHANGED"].includes(error.code) || w.closed || w.disabled) throw error;
+          // Saves landed during prime. Rebuild the baseline from their active
+          // copies before advertising the registry as available.
+          console.log(`warm: ${error.message}`);
+          await w.compiler.drop();
+        }
+      }
     } catch (error) {
       if (w.closed === true || w.compiler.closing === true) return undefined;
       w.reason = error.message;

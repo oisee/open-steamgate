@@ -98,6 +98,7 @@ describe("T7 warm: OSD_WARM=1, an edit through Osd#activate() (editors/vscode/li
           serving.warm.reason !== "not primed yet") break;
       await new Promise((r) => setTimeout(r, 500));
     }
+    console.log(log.join("").split("\n").filter(line => line.startsWith("warm:")).join("\n"));
     expect(serving?.warm, "OSD_WARM=1 is on, and /osd/serving carries the field (#108)").to.not.equal(undefined);
 
     const edited = originalSource.replace(

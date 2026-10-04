@@ -60,6 +60,11 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
   process.send({type: "paused"});
   await new Promise(resolve => process.once("message", resolve));
  }
+}, afterCompile: async ({method}) => {
+ if (readFileSync("control", "utf8") === "pause-finished-" + method) {
+  process.send({type: "paused"});
+  await new Promise(resolve => process.once("message", resolve));
+ }
 }});`);
     store = new ObjectStore({root, roots: [{path: "src", writable: true}], libs: [], build: {generators: false}});
     expect((await store.publish()).ok).to.equal(true);
@@ -73,17 +78,20 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
   });
   afterEach(async () => { await closeWarm(store); rmSync(root, {recursive: true, force: true}); });
 
-  it("queues an unrelated save after dispatch, before hashing; B stays inactive and verification cannot approve its edit", async () => {
+  it("saves an unrelated object within 200 ms after dispatch, before hashing; B stays inactive", async () => {
     await save("zcl_a", 2);
     const checked = store.warmActivation("CLAS", "ZCL_A");
     mode("pause-build");
     const publishing = activate();
     await waitPaused();
     let saved = false;
+    const saveStarted = performance.now();
     const saving = Promise.resolve(save("zcl_b", 20)).then(() => { saved = true; });
     await sleep(20);
     const savedBeforeResume = saved;
+    const saveMs = performance.now() - saveStarted;
     const beforeResume = store.read("CLAS", "ZCL_B").source;
+    mode("normal");
     child.send({method: "resume"});
     const result = await publishing;
     await saving;
@@ -92,16 +100,119 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     expect(store.completeActivation(checked, result.transpile.built)).to.equal(true);
     expect(out("zcl_a")).to.include("IntegerFactory.get(2)");
     expect(out("zcl_b"), "an unrelated save must never enter A's live generation").to.include("IntegerFactory.get(1)").and.not.include("get(20)");
-    expect(savedBeforeResume, "save waits for the frozen compile view").to.equal(false);
-    expect(beforeResume).to.include("rv = 1.");
+    expect(savedBeforeResume, "save completes while compilation is paused").to.equal(true);
+    expect(saveMs).to.be.lessThan(200);
+    expect(beforeResume).to.include("rv = 20.");
     expect(store.stateOf(store.find("CLAS", "ZCL_B")).version).to.equal("inactive");
-    // The old dispatch overlay sees B's save and cannot certify this build.
-    expect((await compiler.verify(result.transpile.hash)).verdict).to.equal("inconclusive");
+    // The superseded dispatch was discarded; only the current isolated view is certified.
+    expect(result.transpile.superseded).to.equal(1);
+    expect((await compiler.verify(result.transpile.hash)).verdict).to.equal("same");
     mode("normal");
     const b = await store.publish({activate: [{type: "CLAS", name: "ZCL_B"}]});
     expect(b.ok).to.equal(true);
     expect(out("zcl_b")).to.include("IntegerFactory.get(20)");
     expect((await compiler.verify(b.transpile.hash)).verdict).to.equal("same");
+  });
+
+
+  it("saves within 200 ms during priming and catches up before warm becomes available", async () => {
+    await compiler.drop();
+    mode("pause-prime"); paused = false;
+    const priming = store.warmUp();
+    await waitPaused();
+    const started = performance.now();
+    const saving = Promise.resolve(save("zcl_a", 7));
+    await Promise.race([saving, sleep(200).then(() => { throw new Error("save blocked by prime"); })]);
+    expect(performance.now() - started).to.be.lessThan(200);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(1)");
+    mode("normal"); child.send({method: "resume"});
+    expect(await priming).to.not.equal(undefined, store.warmState.reason);
+    expect(compiler.primed).to.equal(true);
+    const result = await activate();
+    expect(result.ok).to.equal(true);
+    expect(result.transpile.warm).to.equal(true);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(7)");
+  });
+
+  it("supersedes a changed compile input and recompiles without publishing stale bytes", async () => {
+    await save("zcl_a", 2);
+    mode("pause-build");
+    const publishing = activate();
+    await waitPaused();
+    const started = performance.now();
+    await Promise.race([Promise.resolve(save("zcl_a", 8)), sleep(200).then(() => { throw new Error("save blocked by build"); })]);
+    expect(performance.now() - started).to.be.lessThan(200);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(1)");
+    mode("normal"); child.send({method: "resume"});
+    const result = await publishing;
+    expect(result.ok, JSON.stringify(result)).to.equal(true);
+    expect(result.transpile.superseded).to.equal(1);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(8)").and.not.include("get(2)");
+  });
+
+  it("saves within 200 ms during a cold compile, discards its result and retries", async () => {
+    let release, reached;
+    const pausedBuild = new Promise(r => { reached = r; });
+    const gate = new Promise(r => { release = r; });
+    let builds = 0;
+    store.buildOptions.onStep = async () => { if (++builds === 1) { reached(); await gate; } };
+    await save("zcl_a", 2);
+    const publishing = store.publish({force: true, activate: [{type: "CLAS", name: "ZCL_A"}]});
+    await pausedBuild;
+    try {
+      const started = performance.now();
+      await Promise.race([Promise.resolve(save("zcl_a", 9)), sleep(200).then(() => { throw new Error("save blocked by cold compile"); })]);
+      expect(performance.now() - started).to.be.lessThan(200);
+      expect(out("zcl_a")).to.include("IntegerFactory.get(1)");
+    } finally { release(); }
+    const result = await publishing;
+    expect(result.ok, JSON.stringify(result)).to.equal(true);
+    expect(result.transpile.superseded).to.equal(1);
+    expect(builds).to.equal(2);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(9)").and.not.include("get(2)");
+  });
+
+  it("rejects a completed warm generation if a save lands before publication", async () => {
+    await save("zcl_a", 2);
+    mode("pause-finished-build");
+    const publishing = activate();
+    await waitPaused();
+    const started = performance.now();
+    await Promise.race([Promise.resolve(save("zcl_a", 10)), sleep(200).then(() => { throw new Error("save blocked by publication"); })]);
+    await save("zcl_b", 20);
+    expect(performance.now() - started).to.be.lessThan(200);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(1)");
+    let release, reached;
+    const gate = new Promise(r => { release = r; });
+    const retry = new Promise(r => { reached = r; });
+    store.buildOptions.onStep = async () => { reached(); await gate; };
+    mode("normal"); child.send({method: "resume"});
+    await retry;
+    expect(out("zcl_a"), "the superseded warm generation was never made live").to.include("IntegerFactory.get(1)");
+    expect(out("zcl_b")).to.include("IntegerFactory.get(1)");
+    release();
+    const result = await publishing;
+    expect(result.ok, JSON.stringify(result)).to.equal(true);
+    expect(result.transpile.superseded).to.equal(1);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(10)").and.not.include("get(2)");
+    expect(out("zcl_b")).to.include("IntegerFactory.get(1)").and.not.include("get(20)");
+  });
+
+  it("catches up a prime whose frozen inputs were already loaded when the save landed", async () => {
+    await compiler.drop(); paused = false;
+    mode("pause-finished-prime");
+    const priming = store.warmUp();
+    await waitPaused();
+    const started = performance.now();
+    await Promise.race([Promise.resolve(save("zcl_a", 11)), sleep(200).then(() => { throw new Error("save blocked by loaded prime"); })]);
+    expect(performance.now() - started).to.be.lessThan(200);
+    mode("normal"); child.send({method: "resume"});
+    expect(await priming).to.not.equal(undefined, store.warmState.reason);
+    expect(compiler.primed).to.equal(true);
+    const result = await activate();
+    expect(result.ok).to.equal(true);
+    expect(result.transpile.warm).to.equal(true);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(11)");
   });
 
   it("kills and awaits a hung mid-prime child, activates cold within the deadline, and leaves subsequent publications available", async () => {

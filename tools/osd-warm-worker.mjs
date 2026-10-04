@@ -1,10 +1,11 @@
 // Private IPC compiler tool; osd-host dispatches it in checkout, VSIX and binary.
 import {WarmCompiler} from "./osd-warm.mjs";
+import {checkView} from "./osd-store-compile-view.mjs";
 import {warmOverlay} from "./osd-warm-overlay.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {join} from "node:path";
 
-export function main({beforeCompile = () => {}, heapLimit = 512 * 1048576} = {}) {
+export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLimit = 512 * 1048576} = {}) {
   let inactive = [];
   let folder;
   const root = process.env.OSD_ROOT ?? process.cwd();
@@ -33,7 +34,11 @@ export function main({beforeCompile = () => {}, heapLimit = 512 * 1048576} = {})
       folder = message.folder;
       try {
         await beforeCompile(message);
+        compiler.compileView = message.view;
+        compiler.switch = message.view === undefined;
+        checkView(root, message.view, compiler.overlayOf(new Set(message.activating)));
         const result = await compiler[message.method](new Set(message.activating));
+        await afterCompile(message, result);
         if (message.method === "prime") heapBase = process.memoryUsage().heapUsed;
         process.send({id: message.id, result, state: state()});
       } catch (e) {

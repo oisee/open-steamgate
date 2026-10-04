@@ -67,21 +67,29 @@ watcher and a 30 ms debounce.
 
 ## The build view, with objects inactive
 
-The compiler's disk reads and store mutations share `osd-store-source-lock.mjs`.
-This is the serialization option: the lock spans the overlay snapshot, IPC,
-hashing, source reads and generation switch, for both warm and cold builds.
-A save, create, delete or promotion arriving in that interval queues behind
-it. The ADT and ABAP destination adapters await that write before acknowledging
-it. The synchronous store API remains available when idle; callers that mutate
-a running store must await the result. Priming takes the same lock, with its
-30-second deadline, and compilation acquires it only after priming settles.
-An external editor still uses the existing digest and revision checks.
+The source lock covers only snapshot and publication turns. A snapshot in
+`osd-store-compile-view.mjs` captures the overlay, inactive source metadata,
+and input digests, including generated sources read by prime. Compilation
+runs outside that lock. The child checks the snapshot's hash before reading,
+and checks source and library bytes against their digests before adding them
+to its registry. Cold builds also check their expected hash, read digests and
+generator-input stamps. Saves, creates, deletes and promotions can proceed
+while either compiler works.
 
-`test/warm-process.mjs` pauses the child after dispatch and before hashing,
-then saves an unrelated B while activating A. With the unguarded save restored,
-the test fails because B's saved-only value enters A's live generation. With
-the lock, B waits and stays inactive. Other regressions inject a CPU-bound hung
-prime, child exit and IPC loss; cold fallback returns only after child exit.
+The compiler builds beside the live generation without switching it. Under
+the source lock, the parent compares the current activation view's digest
+with the snapshot before switching. A mismatch discards that result and
+retries the current view; the response records the number of superseded
+attempts. Unrelated inactive edits remain excluded on the retry. Priming
+uses the same checks and catches up on intervening saves before warm becomes
+available. Its process deadline and shutdown/reaping rules still apply.
+
+`test/warm-process.mjs` pauses compilation before hashing and after generation
+construction. Saves must finish within 200 ms, while no stale or unrelated
+inactive source reaches the live generation. It also covers a cold-build
+retry and saves both before and after prime has loaded its registry. Other
+regressions inject a CPU-bound hung prime, child exit and IPC loss; cold
+fallback returns only after child exit.
 
 An ADT save makes its object inactive, and an inactive object is kept out
 of every build (`ObjectStore#overlay`, #460): its last active copy from
@@ -268,6 +276,40 @@ The full guard still reports five inherited breaches in untouched files.
 Local evidence is under `.local/warm-round2/`, including the failing race
 control and the first binary run that exposed the stale classrun export.
 
+Round 3 verification (2026-10-04), after replacing the compile-wide source
+lock with snapshot and publication turns:
+
+| Measurement | Result |
+| --- | --- |
+| Save during paused prime or warm/cold compile | **under 200 ms**, asserted before resuming the compiler |
+| Fresh seeded binary: first serving answer after Start | **0.137 s** |
+| Fresh seeded binary: first classrun, still priming | **0.132 s** |
+| Binary prime, front polled throughout | **14.619 s**, 1537 files |
+| Binary warm activation and acknowledged swap | **7.168 s**, swap **3 ms** |
+| Bare VS Code 1.101.2: first serving answer after Start | **0.27 s**, supplied baseline **12.99 s** |
+| Checkout startup: serving and classrun during prime | **0.107 s** and **0.123 s** |
+| Checkout VS Code warm swap | **6 ms** |
+
+All **83 focused tests**, **166 store/destination/launcher tests**, and
+**45 build/active-version tests** passed with isolation (**294 total**).
+Five new compiler-process regressions cover save latency, superseded builds,
+publication after a late save, and prime catch-up before warm is advertised.
+The paused dispatch/hash contamination regression still passes: B's inactive
+edit never enters A's live generation. No new isolation allowances were added
+and no compiler workers or processes leaked. The existing `vscode-warm`
+restored-source generation allowance still applies.
+
+Suite registration has no drift (308 ordinary and seven grouped suites).
+The changed-file size guard passes with no budget increases; the full guard
+has four inherited Go breaches outside this change. Extracting retention and
+input race checks reduced `osd-build.mjs` below its 1000-line limit. The
+structural leak scan found no matches; the private identifier check remains
+unavailable because this checkout lacks `.local/leak-identifiers.json`.
+Evidence, including the failing save-latency controls, is under
+`.local/warm-round3/`. The final seeded binary and rebuilt bare-system VSIX
+both exercised the compiler child through `osd-host.mjs`, after rebasing onto
+`origin/main` at `45d2e383` (extension metadata and documentation only).
+
 Launcher shutdown uses `taskkill /T /F` on Windows and a dedicated process
 group on POSIX, with kill escalation. The platform strategies are unit tested
 (Windows mocked); they do not depend on the CPU-bound compiler processing
@@ -329,10 +371,9 @@ them cherry-picked).
   measurement) and runs every generator on every save. The warm path skips
   the parent check and generators and derives selected xref rows from the
   compiler registry; the cold path is unchanged.
-- **The prime blocks the process that holds the store** for its 8–9 s:
-  after the runtime is up, and again five seconds after the last cold build
-  (a new file, DDIC, CDS, a YAML), since a cold build is a new start for the
-  registry. A worker thread would take it off that process.
+- **Priming after a cold build** still costs a full transpile in the compiler
+  process. Saves during it can require another prime to catch up; requests
+  continue to answer and saves no longer wait for that work.
 - **The init script's rows** (`reposrc`, `tadir`) stay at the text the
   process started with until the catch-up recycle.
 - **A cold build in the dev loop is not reproducible** on the pinned

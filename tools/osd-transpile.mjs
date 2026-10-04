@@ -181,7 +181,7 @@ export function listFiles(root, config) {
 
 // the libraries: a folder beside the tree when there is one, a shallow
 // clone into a temporary folder when there is only a URL, gone after
-export async function loadLibs(root, config, log = () => {}) {
+export async function loadLibs(root, config, log = () => {}, onRead = undefined) {
   const files = [];
   for (const lib of config.libs ?? []) {
     let dir;
@@ -209,7 +209,7 @@ export async function loadLibs(root, config, log = () => {}) {
     const found = matching(dir, patterns)
       .filter((f) => f.endsWith(".clas.testclasses.abap") === false)
       .filter((f) => exclude.length === 0 || exclude.some((r) => r.test(f)) === false);
-    files.push(...await readAll(found, root));
+    files.push(...await readAll(found, root, undefined, onRead));
     log(`\t${found.length} files added from lib`);
     if (cleanup) {
       rmSync(dir, {recursive: true, force: true});
@@ -272,7 +272,7 @@ export async function transpile(options = {}) {
   if (config.write_source_map === true) mapStatementStarts(Chunk);
   const {files, skipped} = await loadFiles(root, config, core, options.onRead);
   log(`${files.length} files added from source, ${skipped} skipped`);
-  const libs = await loadLibs(root, config, log);
+  const libs = await loadLibs(root, config, log, options.onRead);
   const settings = {...config.options};
   if (config.write_source_map !== true) {
     settings.ignoreSourceMap = true;
