@@ -17,8 +17,8 @@
 //   div_zero          a guard on one engine and a written-down divergence on
 //                     the other -> assert both, so the accepted loss is
 //                     pinned instead of remembered
-//   like_case         the CONNECTION, not the dialect -> assert the pragma's
-//                     effect through the client
+//   like_case         the CONNECTION, not the dialect -> assert the shared
+//                     setup through the client
 //   fn_log            a refusal -> assert the lowering declines
 //
 // The expected values are read from the tracked oracle rather than typed
@@ -145,7 +145,7 @@ describe("the treatments the verdicts claim, executed", function () {
     }
   });
 
-  it("like_case: the pragma makes SQLite's LIKE case-sensitive, and the dialect passes LIKE through", async () => {
+  it("like_case: shared setup makes SQLite's LIKE case-sensitive, and the dialect passes LIKE through", async () => {
     // The treatment is at the CONNECTION, so it is asserted through the
     // client rather than through the lowering -- which is why the conformance
     // table, opening its own connections, keeps showing this row as a

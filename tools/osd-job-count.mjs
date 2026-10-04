@@ -20,6 +20,7 @@
 // latest instance stays, and can reach ZZ after about 1296 days.
 import {existsSync} from "node:fs";
 import {DatabaseSync} from "node:sqlite";
+import {setupSqliteBusyTimeout} from "./sqlite-connection.mjs";
 import {msStamp} from "./osd-job-schedule.mjs";
 import {operationsPath} from "./osd-batch-runs.mjs";
 import {identity} from "./osd-identity.mjs";
@@ -80,6 +81,7 @@ export function legacyCountUsed(root, env, sourceDb, client, name, count) {
   if (!existsSync(path)) return false;
   const reader = new DatabaseSync(path, {readOnly: true});
   try {
+    setupSqliteBusyTimeout(reader);
     const table = reader.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'batch_runs'").get();
     if (!table) return false;
     const columns = new Set(reader.prepare("PRAGMA table_info(batch_runs)").all().map((row) => row.name));

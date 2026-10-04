@@ -1,7 +1,9 @@
 // Opt-in, read-only operations door. The token is supplied by the instance
 // owner; without it the route is absent rather than exposing saved output.
 import {createHash, timingSafeEqual} from "node:crypto";
-import {BatchRuns} from "./osd-batch-runs.mjs";
+import {statSync} from "node:fs";
+import {BatchRuns, operationsPath} from "./osd-batch-runs.mjs";
+import {retainOperationsReader} from "./osd-operations-files.mjs";
 
 const tokenHash = (value) => createHash("sha256").update(value).digest();
 
@@ -27,8 +29,45 @@ function authorized(req, res, env) {
   return true;
 }
 
+// Keep the WAL open between requests: otherwise a retiring worker can be the
+// last connection and checkpoint under an exclusive lock during handoff.
+function monitorReader(root, env) {
+  let store, fileId, releaseReader;
+  const servers = new WeakSet();
+  const close = () => { store?.close(); store = undefined; releaseReader?.(); releaseReader = undefined; };
+  return {
+    close,
+    attachServer(server) {
+      if (!servers.has(server)) { servers.add(server); server.once("close", close); }
+      if (env.OSD_BATCH_READ_TOKEN) {
+        const candidate = this.open({socket: {server}}); this.release(candidate);
+      }
+    },
+    open(req) {
+      let nextId;
+      try { const file = statSync(operationsPath(root, env)); nextId = `${file.dev}:${file.ino}`; }
+      catch (error) { if (error.code !== "ENOENT") throw error; }
+      if (store && nextId !== fileId) close();
+      if (!store) {
+        const candidate = new BatchRuns(root, env, {readOnly: true});
+        // An empty fallback must not hide a ledger created by a later worker.
+        if (candidate.memoryOnly) return candidate;
+        store = candidate; fileId = nextId;
+        releaseReader = retainOperationsReader(store.path, close);
+      }
+      const server = req.socket?.server;
+      if (server && !servers.has(server)) {
+        servers.add(server); server.once("close", close);
+      }
+      return store;
+    },
+    release(candidate) { if (candidate !== store) candidate.close(); },
+  };
+}
+
 export function batchMonitorHandler(root, env = process.env) {
-  return function (req, res) {
+  const reader = monitorReader(root, env);
+  return Object.assign(function (req, res) {
     if (!authorized(req, res, env)) return;
     const query = req.query;
     if (Object.keys(query).some((key) => !["id", "output", "limit"].includes(key))) {
@@ -36,7 +75,7 @@ export function batchMonitorHandler(root, env = process.env) {
       return;
     }
     try {
-      const store = new BatchRuns(root, env);
+      const store = reader.open(req);
       try {
         if (query.id !== undefined) {
           if (query.limit !== undefined || (query.output !== undefined && query.output !== "1")
@@ -73,17 +112,18 @@ export function batchMonitorHandler(root, env = process.env) {
         }
         res.json({runs: store.list(limit)});
       } finally {
-        store.close();
+        reader.release(store);
       }
     } catch (error) {
       res.status(500).json({error: {code: "MONITOR_FAILED", message: String(error.message ?? error)}});
     }
-  };
+  }, {close: reader.close, attachServer: server => reader.attachServer(server)});
 }
 
 // The extension's private counts door shares authentication with the monitor.
 export function batchCountsHandler(root, env = process.env) {
-  return function (req, res) {
+  const reader = monitorReader(root, env);
+  return Object.assign(function (req, res) {
     const address = req.socket.remoteAddress ?? "";
     if (address !== "::1" && !/^127\./.test(address) && !/^::ffff:127\./.test(address)) {
       res.status(403).json({error: {code: "LOCAL_ONLY"}});
@@ -95,15 +135,15 @@ export function batchCountsHandler(root, env = process.env) {
       return;
     }
     try {
-      const store = new BatchRuns(root, env);
+      const store = reader.open(req);
       try {
         const counts = store.readSnapshot(() => store.db.prepare(`SELECT
           COALESCE(SUM(state = 'RUNNING'), 0) AS running,
           COALESCE(SUM(state = 'QUEUED'), 0) AS queued FROM batch_runs`).get());
         res.json({counts});
-      } finally { store.close(); }
+      } finally { reader.release(store); }
     } catch (error) {
       res.status(500).json({error: {code: "MONITOR_FAILED", message: String(error.message ?? error)}});
     }
-  };
+  }, {close: reader.close, attachServer: server => reader.attachServer(server)});
 }

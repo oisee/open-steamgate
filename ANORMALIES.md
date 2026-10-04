@@ -29,6 +29,22 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-04-sqlite-like-case -- sql.js Open SQL LIKE ignores ASCII case
+
+- Status: `workaround`
+- Discovery date: `2026-10-04`
+- Affected versions: `@abaplint/database-sqlite 2.13.83`, `sql.js 1.14.2`.
+- Affected adapter: SQLite connection setup, SELECT and cursors with LIKE.
+- Minimal ABAP reproducer: transpiled SELECT in `test/sqlite-like.mjs`.
+- Exact command: `OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh npx mocha test/sqlite-like.mjs`.
+- Expected SAP behaviour: case-sensitive LIKE; lowercase pattern selects 0 and uppercase pattern 32 in the A4H measurement (`docs/osql-where.md`).
+- Actual open-abap behaviour: `'A' LIKE 'a'` returns 1 through the default sql.js adapter; the file adapter previously returned 0 through a connection pragma.
+- Impact: browser preview and default Node connection selected different rows from file SQLite.
+- Smallest safe workaround: shared `tools/sqlite-connection.mjs` enables SQLite case-sensitive LIKE per connection with `PRAGMA case_sensitive_like = ON`, verifies its effect (fail if omitted), and reinstalls it after sql.js export reopens the connection. Native LIKE preserves value conversion and indexed prefix searches.
+- Upstream issue: not reported; local work only authorized.
+- Regression-test location: `test/sqlite-like.mjs` (SQL, cursors, escaping, export/reconnect and transpiled ABAP; DuckDB and optionally PostgreSQL).
+- Upstream version containing a fix: unknown.
+
 ### ANOMALY-2026-10-03-none-dump-luw -- Local NONE leaves receiver partial writes pending
 
 - Status: `open`

@@ -4,6 +4,7 @@
 // committed after it; the ledger in BatchRuns makes a crash between the
 // import and that commit safe to retry.
 import {DatabaseSync} from "node:sqlite";
+import {setupSqliteBusyTimeout} from "./sqlite-connection.mjs";
 import {resolve} from "node:path";
 import {exclusive, currentStepToken} from "./osd-dialog-step.mjs";
 import {identity} from "./osd-identity.mjs";
@@ -24,6 +25,7 @@ export async function drainJobOutbox(store, {env = process.env, afterRead, after
     const reader = new DatabaseSync(sourceDb, {readOnly: true});
     let rows, sourceInstanceOnDisk, hasTail, hasSchedule;
     try {
+      setupSqliteBusyTimeout(reader);
       reader.exec("BEGIN");
       const hasInput = reader.prepare("PRAGMA table_info(zosd_job_step)").all()
         .some((column) => column.name.toLowerCase() === "input_json");
@@ -149,6 +151,7 @@ export async function drainJobOutbox(store, {env = process.env, afterRead, after
           const check = new DatabaseSync(sourceDb, {readOnly: true});
           let pending;
           try {
+            setupSqliteBusyTimeout(check);
             pending = check.prepare("SELECT 1 FROM zosd_job_outbox WHERE mandt = ? AND intent_id = ?")
               .get(who.client, intent.intentId);
           } finally { check.close(); }

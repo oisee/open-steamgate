@@ -195,6 +195,20 @@ describe("wire", () => {
     expect(rows).to.deep.equal([["A", 12], ["X", 4]]);
   });
 
+  it("SADL substringof and startswith filters preserve mixed case", async () => {
+    const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_SADL_SRV/Zc_Stg_TravelSet`;
+    for (const [filter, ids] of [
+      ["startswith(DESCRIPTION,'Berlin')", ["T0001"]],
+      ["startswith(DESCRIPTION,'berlin')", []],
+      ["substringof('erlin',DESCRIPTION)", ["T0001"]],
+      ["substringof('ERLIN',DESCRIPTION)", []],
+    ]) {
+      const res = await fetch(`${S}?$filter=${encodeURIComponent(filter)}&$format=json`);
+      expect(res.status, filter).to.equal(200);
+      expect((await res.json()).d.results.map(row => row.TRAVELID), filter).to.deep.equal(ids);
+    }
+  });
+
   it("virtual elements: a CDS field an ABAP class calculates after the read", async () => {
     const S = `http://localhost:${PORT}/sap/opu/odata/sap/ZSTG_SADL_SRV`;
     // the model says they exist and that the database cannot order or filter by them

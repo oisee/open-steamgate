@@ -346,8 +346,12 @@ hostNodes["adt-resume"] = (a, node) => a.post(node.path, async (req, res) => {
     res.status(500).json({error: {code: error.code ?? "FAILED", message: String(error.message?.get?.() ?? error.message ?? error)}});
   }
 });
-hostNodes["job-counts"] = (a, node) => a.get(node.path, batchCountsHandler(root));
-hostNodes["batch-runs"] = (a, node) => a.get(node.path, batchMonitorHandler(root));
+const batchReaders = [];
+function mountBatchReader(a, node, make) {
+  const handler = make(root); batchReaders.push(handler); a.get(node.path, handler);
+}
+hostNodes["job-counts"] = (a, node) => mountBatchReader(a, node, batchCountsHandler);
+hostNodes["batch-runs"] = (a, node) => mountBatchReader(a, node, batchMonitorHandler);
 
 // The end of a dialog step lives in tools/osd-dialog-step.mjs, because it is
 // the kernel's rule and every host that runs the ABAP needs it -- this one,
@@ -509,6 +513,9 @@ app.all("/sap/opu/odata/sap/*", async function (req, res) {
 
 const wanted = Number(process.argv[2] ?? process.env.OSD_SERVE_PORT ?? 0);
 const server = app.listen(wanted, "127.0.0.1", () => {
+  // Pin an existing operations WAL before announcing the new generation.
+  try { for (const reader of batchReaders) reader.attachServer(server); }
+  catch (error) { for (const reader of batchReaders) reader.close(); server.close(); throw error; }
   const port = server.address().port;
   // push channels answer their upgrade on this listener; the parent proxies
   // the upgrade here, so a recycled channel handler is the one that answers

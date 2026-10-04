@@ -48,7 +48,7 @@ ENDCLASS.`);
       const submit = await fetch(`${base}/osd/classrun`, {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'ZCL_VS_JOBS_PROBE'})});
       const submitted = await submit.json();
       expect(submit.status, JSON.stringify(submitted)).to.equal(200);
-      expect(submitted.text).to.include('SUBMITTED');
+      expect(submitted.text, JSON.stringify(submitted) + log.slice(-3000)).to.include('SUBMITTED');
       let run;
       for (let i=0;i<100;i++) {
         const response = await fetch(`${base}/osd/batch-runs`, {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}});
@@ -79,7 +79,9 @@ ENDCLASS.`);
       let nextRun;
       for (let i=0;i<150;i++) {
         const answer = await fetch(`${base}/osd/batch-runs`, {headers:{Authorization:`Bearer ${launcher.env.OSD_BATCH_READ_TOKEN}`}});
-        nextRun = (await answer.json()).runs.find(r=>r.jobName === 'VSIX_NEW_GENERATION');
+        const body = await answer.json();
+        expect(answer.status, JSON.stringify(body) + log.slice(-3000)).to.equal(200);
+        nextRun = body.runs.find(r=>r.jobName === 'VSIX_NEW_GENERATION');
         if (nextRun?.state === 'COMPLETED' || nextRun?.state === 'FAILED') break;
         await new Promise(r=>setTimeout(r,200));
       }

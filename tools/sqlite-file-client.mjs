@@ -20,6 +20,9 @@ import {existsSync, mkdirSync, renameSync, rmSync} from "node:fs";
 import {dirname} from "node:path";
 import {fingerprintOf} from "./osd-persist.mjs";
 import {osqlSemanticsError} from "./osql-error.mjs";
+import {prepareOperationsFileChange} from "./osd-operations-files.mjs";
+
+import {setupSqliteConnection, setupSqliteBusyTimeout} from "./sqlite-connection.mjs";
 
 const STAMP = "osd_schema";
 
@@ -69,6 +72,8 @@ export const BASE_DIR = process.env.STG_DB_BASE ?? ".local/db/base";
 export const SIDECARS = ["-wal", "-shm"];
 
 export function setAsideDatabase(path, aside) {
+  prepareOperationsFileChange(path);
+  if (aside !== undefined) prepareOperationsFileChange(aside);
   if (aside === undefined) {
     rmSync(path, {force: true});
   } else {
@@ -98,10 +103,12 @@ export function forkDatabase(from, to) {
   const temporary = `${to}.forking`;
   const src = new DatabaseSync(from, {readOnly: true});
   try {
+    setupSqliteBusyTimeout(src);
     src.exec(`VACUUM INTO '${temporary.replace(/'/g, "''")}'`);
   } finally {
     src.close();
   }
+  prepareOperationsFileChange(to);
   renameSync(temporary, to);
   return to;
 }
@@ -145,17 +152,14 @@ export class FileSqliteClient {
       mkdirSync(dirname(this.path), {recursive: true});
     }
     this.db = new DatabaseSync(this.path, {readOnly: this.readOnly});
+    setupSqliteBusyTimeout(this.db);
     if (this.path !== ":memory:" && !this.readOnly) {
       // WAL: readers do not block the writer and see the last commit;
       // NORMAL: durable at checkpoint, which is what a local system wants
       this.db.exec("PRAGMA journal_mode = WAL");
       this.db.exec("PRAGMA synchronous = NORMAL");
     }
-    this.db.exec("PRAGMA busy_timeout = 5000");
-    // HANA's LIKE is case-sensitive and SQLite's is not, for ASCII, unless
-    // this is on (measured 2026-09-19). The native channel's lowering passes
-    // a LIKE through on the strength of this line.
-    this.db.exec("PRAGMA case_sensitive_like = ON");
+    setupSqliteConnection(this.db);
     if (globalThis.abap?.context?.databaseConnections?.DEFAULT === this) {
       globalThis.abap.builtin.sy.get().dbsys?.set(this.name);
     }

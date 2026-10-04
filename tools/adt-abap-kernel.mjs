@@ -150,7 +150,7 @@ export async function loadAdtKernel({output, setup}) {
   // whole-system init.mjs would install another runtime over this one and
   // take the sessions and locks with it
   globalThis.__osdAdtKernel = {output, hash};
-  const {SQLiteDatabaseClient} = await import("@abaplint/database-sqlite");
+  const {SQLiteDatabaseClient} = await import("./sqlite-heap-client.mjs");
   const {installTrim} = await import("./sql-literals.mjs");
   const {bootIdentity} = await import("./osd-identity.mjs");
   const {installEnq} = await import("./osd-enq-host.mjs");
