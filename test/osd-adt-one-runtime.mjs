@@ -1,8 +1,8 @@
 import {expect} from "chai";
 import express from "express";
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync} from "node:fs";
+import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, resolve} from "node:path";
 import {EventEmitter, once} from "node:events";
 import {adtRouter} from "../tools/adt-facade.mjs";
 import {RemoteSessions} from "../tools/adt-remote-sessions.mjs";
@@ -29,10 +29,11 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
   before(async () => {
     root = mkdtempSync(join(tmpdir(), "osd-one-runtime-"));
     mkdirSync(join(root, "src"));
+    symlinkSync(resolve("node_modules"), join(root, "node_modules"), "dir");
     writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "v702"}}));
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
     writeFileSync(join(root, "src", "zosd_remote.prog.abap"), "REPORT zosd_remote.\n");
-    store = new ObjectStore({root, libs: []});
+    store = new ObjectStore({root, libs: [], build: {generators: false}});
     runtime = new ServingRuntime({root: process.cwd(), env: {OSD_ADT_ONE_RUNTIME: "1", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
     runtime.storeDestination = new StoreDestination({store});
     await runtime.start();
@@ -40,7 +41,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     for (const runner of [undefined, abapRunner({remote: runtime})]) {
       const app = express();
       app.use(express.raw({type: "*/*"}));
-      const facade = adtRouter({store, data: {}, watch: false, logMisses: false, transpileOnActivate: false, abap: runner});
+      const facade = adtRouter({store, data: {}, watch: false, logMisses: false, abap: runner});
       if (runner !== undefined) nodeSessions = facade.sessions;
       app.use(facade.router);
       servers.push(await listen(app));
@@ -65,6 +66,40 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     expect(answer.served).to.equal("ABAP");
   };
   const gate = ({status, type, body}) => ({status, type, body});
+
+  it("remote ABAP and Node activation agree on forced success and invalid source", async () => {
+    const source = "REPORT zosd_remote.\n";
+    const body = '<adtcore:objectReferences xmlns:adtcore="http://www.sap.com/adt/core"><adtcore:objectReference adtcore:uri="/sap/bc/adt/programs/programs/zosd_remote"/></adtcore:objectReferences>';
+    try {
+      for (const url of [node, remote]) {
+        const login = await request(url, "HEAD", BASE + "/core/discovery", {"x-csrf-token": "fetch"});
+        const headers = {cookie: login.cookies.map(c => c.split(";")[0]).join("; "),
+          "x-csrf-token": login.token, "content-type": "application/xml"};
+        const activate = query => request(url, "POST", BASE + "/activation?method=activate" + query, headers, body);
+        for (const query of ["", "&forced=", "&preauditRequested=SYN_INVALID", "&preauditRequested="]) {
+          store.write("PROG", "ZOSD_REMOTE", source);
+          expect((await activate(query)).body).to.contain('<chkl:properties checkExecuted="true" activationExecuted="true" generationExecuted="true"/>');
+        }
+        store.write("PROG", "ZOSD_REMOTE", source + "WRITE 'forced'.\n");
+        const success = await activate("&preauditRequested=true&forced=SYN_INVALID");
+        expect(success.status, success.body).to.equal(200);
+        expect(success.body).to.contain('<chkl:properties checkExecuted="false" activationExecuted="true" generationExecuted="true"/>');
+        expect(store.stateOf(store.find("PROG", "ZOSD_REMOTE")).version).to.equal("active");
+        expect(store.read("PROG", "ZOSD_REMOTE", "main", "active").source).to.equal(source + "WRITE 'forced'.\n");
+        store.write("PROG", "ZOSD_REMOTE", source + "lv_not_declared = 1.\n");
+        const failure = await activate("&forced=SYN_INVALID");
+        expect(failure.status, failure.body).to.equal(200);
+        expect(failure.body).to.contain('<chkl:properties checkExecuted="false" activationExecuted="false" generationExecuted="false"/>');
+        expect(failure.body).to.contain("lv_not_declared");
+        expect(failure.body).to.contain('type="E"');
+        expect(store.stateOf(store.find("PROG", "ZOSD_REMOTE")).version).to.equal("inactive");
+        expect(store.read("PROG", "ZOSD_REMOTE", "main", "active").source).to.equal(source + "WRITE 'forced'.\n");
+      }
+    } finally {
+      store.write("PROG", "ZOSD_REMOTE", source);
+      store.completeActivation(store.activate("PROG", "ZOSD_REMOTE"));
+    }
+  });
 
   it("static, sysinfo, versions, misses and CSRF refusals equal the Node facade", async () => {
     for (const [method, path] of [

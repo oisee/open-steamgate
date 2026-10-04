@@ -1256,8 +1256,8 @@ export function lockedByOtherDocument(user, object) {
 
 // A4H activation wire facts: qualified properties, unqualified messages, no
 // inactive/CTS content. preauditRequested does not alter this document.
-export function activationSuccessDocument() {
-  return '<?xml version="1.0" encoding="utf-8"?><chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"><chkl:properties checkExecuted="true" activationExecuted="true" generationExecuted="true"/></chkl:messages>';
+export function activationSuccessDocument({checkExecuted = true} = {}) {
+  return `<?xml version="1.0" encoding="utf-8"?><chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"><chkl:properties checkExecuted="${checkExecuted}" activationExecuted="true" generationExecuted="true"/></chkl:messages>`;
 }
 
 // Type words derived from ADT types. Program and Class are observed;
@@ -1283,7 +1283,7 @@ const ACTIVATION_TYPE_WORD = {
   "DEVC/K": "",
 };
 
-export function activationFailureDocument(objects) {
+export function activationFailureDocument(objects, {checkExecuted = true} = {}) {
   const type = (issue) => (/^w/i.test(String(issue.severity ?? "")) ? "W" : /^i/i.test(String(issue.severity ?? "")) ? "I" : "E");
   const message = (o, issue) => {
     const word = ACTIVATION_TYPE_WORD[ADT_TYPE[o.type] ?? o.type];
@@ -1294,7 +1294,7 @@ export function activationFailureDocument(objects) {
     // beyond that case is unconfirmed; source position belongs in href.
     return `<msg objDescr="${xmlEscape(description)}" type="${type(issue)}" line="1" href="${xmlEscape(href)}" forceSupported="true"><shortText><txt>${xmlEscape(issue.message)}</txt></shortText></msg>`;
   };
-  return '<?xml version="1.0" encoding="utf-8"?><chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"><chkl:properties checkExecuted="true" activationExecuted="false" generationExecuted="false"/>' +
+  return `<?xml version="1.0" encoding="utf-8"?><chkl:messages xmlns:chkl="http://www.sap.com/abapxml/checklist"><chkl:properties checkExecuted="${checkExecuted}" activationExecuted="false" generationExecuted="false"/>` +
     '<msg objDescr="" type="W" line="0" href=""><shortText><txt>Activation was cancelled.</txt><txt>"Editing canceled" (EU 202)</txt></shortText></msg>' +
     objects.flatMap((o) => (o.issues ?? []).map((i) => message(o, i))).join("") +
     '</chkl:messages>';

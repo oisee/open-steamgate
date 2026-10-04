@@ -2392,6 +2392,12 @@ export function adtRouter(options = {}) {
       res.status(200).end();
       return;
     }
+    // Observed 2026-10-04: forced is not parsed as a boolean. "false", empty
+    // and absent keep the check; "0", "true" and junk (SYN_INVALID) skip it.
+    const forced = [req.query.forced].flat().some((value) => typeof value === "string" && value !== "" && value !== "false");
+    const checklist = {checkExecuted: !forced};
+    const successDocument = () => activationSuccessDocument(checklist);
+    const failureDocument = (entries) => activationFailureDocument(entries, checklist);
     const body = await rawBody(req);
     let named = [];
     let checked = [];
@@ -2427,8 +2433,12 @@ export function adtRouter(options = {}) {
       // issues come back per object, dependents included. The check below
       // reparses the tree, ~3 s here, and stays for everything else.
       const warm = store.warm?.();
-      if (options.transpileOnActivate !== false && warm?.compiler?.primed === true &&
-          named.every((o) => o.type === "CLAS" || o.type === "INTF")) {
+      // Forced cold activation also takes only a revision here: publish()
+      // still compiles/generates and must succeed before promotion. With
+      // transpilation disabled, activate() is the only validation, so keep
+      // it to prevent this test/embedded configuration promoting bad source.
+      if (options.transpileOnActivate !== false && (forced || (warm?.compiler?.primed === true &&
+          named.every((o) => o.type === "CLAS" || o.type === "INTF")))) {
         checked = named.map((o) => store.warmActivation(o.type, o.name));
         published = true;
         return;
@@ -2439,7 +2449,7 @@ export function adtRouter(options = {}) {
         // Include diagnostics for the named objects and any dependents
         // whose active source would break.
         const entries = failed.flatMap((r) => [r, ...(r.dependents ?? [])]);
-        res.status(200).type("application/xml").send(activationFailureDocument(entries));
+        res.status(200).type("application/xml").send(failureDocument(entries));
         return;
       }
       published = true;
@@ -2447,17 +2457,15 @@ export function adtRouter(options = {}) {
     if (published === false || options.transpileOnActivate === false) {
       if (published === true) {
         if (!store.completeActivations(checked)) {
-          res.status(200).type("application/xml").send(activationFailureDocument(
+          res.status(200).type("application/xml").send(failureDocument(
             named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
           ));
           return;
         }
-        // A successful activation answers with its properties, not with
-        // nothing: checkExecuted, activationExecuted and generationExecuted,
-        // all true, under chkl:messages (a4h-adt.jsonl:489). The note that used
-        // to stand here, that a clean activation "answers nothing at all", was wrong.
+        // A successful activation reports whether the separate check ran;
+        // activation and generation remain executed, including when forced.
         warmOutline();
-        res.status(200).type("application/xml").send(activationSuccessDocument());
+        res.status(200).type("application/xml").send(successDocument());
       }
       return;
     }
@@ -2486,32 +2494,30 @@ export function adtRouter(options = {}) {
             issues: result.transpile.issues.filter((i) => same(i, o)).flatMap((i) => i.issues ?? [])})),
           ...result.transpile.issues.filter((o) => !named.some((n) => same(n, o))),
         ];
-        res.status(200).type("application/xml").send(activationFailureDocument(entries));
+        res.status(200).type("application/xml").send(failureDocument(entries));
         return;
       }
       if (result?.ok === false) {
         // one line, without the build log: that is the host's console's
         const why = withoutHostPaths(result.error ?? result.transpile?.error ?? "the build after activation failed", store.root);
-        res.status(200).type("application/xml").send(activationFailureDocument(
+        res.status(200).type("application/xml").send(failureDocument(
           named.map((o) => ({type: o.type, name: o.name, issues: [{message: String(why).split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}]})),
         ));
         return;
       }
       // promoted only if what was built is what was checked (and still saved)
       if (!store.completeActivations(checked, result?.transpile?.built)) {
-        res.status(200).type("application/xml").send(activationFailureDocument(
+        res.status(200).type("application/xml").send(failureDocument(
           named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
         ));
         return;
       }
-      // A successful activation answers with its properties, not with
-      // nothing: checkExecuted, activationExecuted and generationExecuted,
-      // all true, under chkl:messages (a4h-adt.jsonl:489). The note that used
-      // to stand here, that a clean activation "answers nothing at all", was wrong.
+      // Forced activation skips only the separate check. Compilation and
+      // generation have succeeded before these properties are returned.
       warmOutline();
-      res.status(200).type("application/xml").send(activationSuccessDocument());
+      res.status(200).type("application/xml").send(successDocument());
     } catch (e) {
-      res.status(200).type("application/xml").send(activationFailureDocument(
+      res.status(200).type("application/xml").send(failureDocument(
         named.map((o) => ({type: o.type, name: o.name, issues: [{message: withoutHostPaths(String(e?.message ?? e), store.root).split("\n")[0].slice(0, 500), severity: "E", line: 1, column: 1}]})),
       ));
     }

@@ -672,7 +672,7 @@ Still in Node, to be ported to ABAP with the ADT façade: the package and
 create routes, the author record and the tree filter.
 
 
-### Activation checklist wire (A4H observations, 2026-10-03)
+### Activation checklist wire (SAP observations, 2026-10-03 and 2026-10-04)
 
 Activation remains Node host orchestration (variant C, HOST_ALLOWED A6/A7).
 Only POST with `method=activate` activates. A missing `method` (including no
@@ -680,12 +680,38 @@ query) answers 400, `application/xml`, with `ExceptionParameterNotFound` and
 "Parameter method could not be found." (SADT_RESOURCE 017, V1 method). Other
 present values answer 200 with an empty body and no Content-Type. Both refusals
 leave active and inactive state unchanged. `preauditRequested=true` and `false` answer alike.
+On 2026-10-04, `preauditRequested=SYN_INVALID` and an empty value, without
+`forced`, also activated a valid pending disposable program and reported
+true/true/true. The facade continues to ignore `preauditRequested`.
+
+The same observation with `preauditRequested=true&forced=SYN_INVALID`
+activated the valid pending source and reported false/true/true: the separate
+check was skipped. A second probe the same day measured the other values:
+`forced=false` and an empty value keep the check (true/true/true; with an
+invalid source the activation fails and the active version is unchanged),
+while `forced=0` and `forced=true` skip it (false/true/true). So `forced` is
+not parsed as a boolean: the facade treats it as forced unless it is absent,
+empty or exactly `false`. Case variants such as `FALSE` were not measured;
+they count as forced here. Repeated `forced` parameters count as forced if any
+value is forced; that is an implementation choice, not a measured case.
+
+Both the Node front and the ABAP front (including `OSD_ADT_ONE_RUNTIME=0`
+and `1`) delegate this endpoint to the same Node host handler and checklist
+serializers. Forced activation bypasses the separate `ObjectStore.activate()`
+pre-check and captures the source revision for publication instead. The warm
+and cold builds still compile/generate, and promotion still requires a
+successful build of the unchanged revision. A failing forced compile returns
+diagnostics and false/false/false; that failure combination was **not measured
+on SAP**. In the embedded/test configuration `transpileOnActivate=false`, the
+store validation remains mandatory because it is the only source validation
+available; the checklist follows the requested forced semantics there too.
 
 Both success and syntax failure answer 200, `application/xml; charset=utf-8`,
 with an XML declaration and `chkl:messages`. Its only attribute is the checklist
 namespace. Qualified `chkl:properties` carries unqualified `checkExecuted`,
-`activationExecuted`, and `generationExecuted`: true/true/true on success,
-true/false/false on failure. Success has no messages. Failure starts with the
+`activationExecuted`, and `generationExecuted`: true/true/true on ordinary success,
+true/false/false on ordinary failure, with `checkExecuted=false` when forced
+as described above. Success has no messages. Failure starts with the
 unqualified cancellation warning (EU 202), followed by unqualified diagnostic
 `msg` elements with `forceSupported="true"`. There is no inactive-object or
 CTS content in this answer; the inactive-object feed remains separate.

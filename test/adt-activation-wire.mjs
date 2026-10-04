@@ -14,7 +14,7 @@ const FAILURE = '<?xml version="1.0" encoding="utf-8"?><chkl:messages xmlns:chkl
 const MISSING_METHOD = '<?xml version="1.0" encoding="utf-8"?><exc:exception xmlns:exc="http://www.sap.com/abapxml/types/communicationframework"><namespace id="com.sap.adt"/><type id="ExceptionParameterNotFound"/><message lang="EN">Parameter method could not be found.</message><localizedMessage lang="EN">Parameter method could not be found.</localizedMessage><properties><entry key="T100KEY-ID">SADT_RESOURCE</entry><entry key="T100KEY-NO">017</entry><entry key="T100KEY-V1">method</entry></properties></exc:exception>';
 const SOURCE = "REPORT zwire.\n\nWRITE 'active'.\n";
 
-describe("ADT activation: A4H wire bytes", function () {
+for (const front of ["Node", "ABAP"]) describe(`ADT activation: A4H wire bytes (${front})`, function () {
   this.timeout(120000);
   let root, store, server, base, headers;
   before(async () => {
@@ -27,7 +27,7 @@ describe("ADT activation: A4H wire bytes", function () {
     store = new ObjectStore({root, libs: []});
     const app = express();
     app.use(express.raw({type: "*/*"}));
-    app.use(adtRouter({store, watch: false, transpileOnActivate: false, abap: await adtAbap()}).router);
+    app.use(adtRouter({store, watch: false, transpileOnActivate: false, abap: front === "ABAP" ? await adtAbap() : undefined}).router);
     server = await new Promise(resolve => { const s = app.listen(0, () => resolve(s)); });
     base = `http://localhost:${server.address().port}/sap/bc/adt`;
     const hello = await fetch(base + "/core/discovery", {method: "HEAD", headers: {"x-csrf-token": "fetch"}});
@@ -62,6 +62,36 @@ describe("ADT activation: A4H wire bytes", function () {
   it("preauditRequested false and true give identical success bytes", async () => {
     store.write("PROG", "ZWIRE", SOURCE);
     expect(await activate("method=activate&preauditRequested=false")).to.deep.equal(await activate());
+  });
+
+  for (const value of ["SYN_INVALID", "0", "true"]) it(`forced=${value} reports a skipped check and successful activation (as observed)`, async () => {
+    store.write("PROG", "ZWIRE", SOURCE);
+    await activate();
+    const pending = SOURCE.replace("active", "forced");
+    store.write("PROG", "ZWIRE", pending);
+    expect(await activate(`method=activate&preauditRequested=true&forced=${value}`))
+      .to.deep.equal({status: 200, contentType: "application/xml; charset=utf-8", body: SUCCESS.replace('checkExecuted="true"', 'checkExecuted="false"')});
+    expect(store.read("PROG", "ZWIRE").source).to.equal(pending);
+  });
+
+  for (const query of ["method=activate", "method=activate&forced=", "method=activate&preauditRequested=true&forced=false", "method=activate&preauditRequested=false&forced=false", "method=activate&preauditRequested=SYN_INVALID", "method=activate&preauditRequested="]) {
+    it(`${query} keeps the ordinary success checklist`, async () => {
+      store.write("PROG", "ZWIRE", SOURCE);
+      expect((await activate(query)).body).to.equal(SUCCESS);
+    });
+  }
+
+  it("forced invalid source still returns failure diagnostics and preserves active source", async () => {
+    store.write("PROG", "ZWIRE", SOURCE);
+    await activate();
+    store.write("PROG", "ZWIRE", "REPORT zwire.\n\nTHIS is invalid.\n");
+    const answer = await activate("method=activate&forced=SYN_INVALID");
+    expect(answer.status).to.equal(200);
+    expect(answer.body).to.contain('<chkl:properties checkExecuted="false" activationExecuted="false" generationExecuted="false"/>');
+    expect(answer.body).to.contain('type="E"');
+    expect(answer.body).to.contain("#start=3,");
+    expect(store.read("PROG", "ZWIRE", "main", "active").source).to.equal(SOURCE);
+    expect(store.stateOf(store.find("PROG", "ZWIRE")).version).to.equal("inactive");
   });
 
   it("other present methods, including empty, do no work and return 200 without content type", async () => {
