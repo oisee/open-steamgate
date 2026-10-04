@@ -103,9 +103,12 @@ describe("osgjs unit CI entry point", function () {
 import {getHeapStatistics} from 'node:v8';
 if (process.argv[1]?.endsWith('/osgjs-unit-run.mjs')) writeFileSync(${JSON.stringify(heapFile)}, JSON.stringify(getHeapStatistics().heap_size_limit));
 `);
-    const result = parsed(invoke(dir, ["--json", "--db", "file"], {execArgv: ["--max-old-space-size=4096", "--max-old-space-size=5120", "--import", preload], env: {...process.env, NODE_OPTIONS: "--max-old-space-size=2048 --max-old-space-size=3072", OSD_PACKS: join(temp, "packs")}}));
+    const result = parsed(invoke(dir, ["--json", "--db", "file"], {execArgv: ["--max-old-space-size=4096", "--max-old-space-size=5120", "--import", preload], env: {...process.env, NODE_OPTIONS: "--max-old-space-size=2048 --max-old-space-size=3072", OSD_PACKS: join(temp, "packs"), OSGJS_TRACE: "1"}}));
     assert.deepEqual(result.totals, {success: 14, failure: 0, not_compiled: 0, error: 0, tests: 14});
     assert.equal(result.classes, 2); assert.equal(result.compiled, 2);
+    for (const row of result.rows) assert.ok(Number.isInteger(row.ms) && row.ms >= 0);
+    for (const key of ["staging", "kernel-scan", "checkout", "parse-input", "transpile", "write-modules", "import", "database-setup"])
+      assert.ok(Number.isInteger(result.timingMs[key]) && result.timingMs[key] >= 0, key);
     assert.equal(result.provenance.database, "--db file (node:sqlite)");
     assert.equal(result.provenance.heap, "--max-old-space-size=5120 MiB");
     const reference = spawnSync(process.execPath, ["--max-old-space-size=5120", "-e", "console.log(require('node:v8').getHeapStatistics().heap_size_limit)"], {encoding: "utf8"});

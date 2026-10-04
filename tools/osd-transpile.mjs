@@ -16,6 +16,7 @@
 // transpiler and the registry it is handed must come from ONE copy of
 // @abaplint/core, because the transpiler checks its input with instanceof.
 // So core is resolved from where the transpiler package is, not from here.
+import {phase} from "./osgjs-trace.mjs";
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {createRequire} from "node:module";
@@ -264,13 +265,16 @@ export async function transpile(options = {}) {
   for (const l of libs) {
     reg.addDependency(new core.MemoryFile(l.filename, l.contents));
   }
-  const output = await t.run(reg, options.progress ?? QUIET);
+  const output = await phase("transpile", () => t.run(reg, options.progress ?? QUIET));
   const outputFolder = resolve(root, config.output_folder);
   mkdirSync(outputFolder, {recursive: true});
-  const written = outputFiles(output, config, outputFolder, files);
-  for (const file of written) {
-    writeFileSync(file.path, file.contents, isBinaryFilename(file.path) ? {encoding: "latin1"} : undefined);
-  }
-  log(`${output.objects.length} objects written to disk`);
+  let written;
+  await phase("write-modules", async () => {
+    written = outputFiles(output, config, outputFolder, files);
+    for (const file of written) {
+      writeFileSync(file.path, file.contents, isBinaryFilename(file.path) ? {encoding: "latin1"} : undefined);
+    }
+    log(`${output.objects.length} objects written to disk`);
+  });
   return {objects: output.objects.length, files: files.length, libs: libs.length, written: written.length, version, ms: Date.now() - started};
 }

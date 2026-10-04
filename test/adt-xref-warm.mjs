@@ -27,7 +27,7 @@ describe("ADT xref after a warm swap", function () {
   let root, compiler, store, runtime, server, file, marker, timingMarker, served;
   before(async () => {
     root = mkdtempSync(join(tmpdir(), "osd-xref-warm-"));
-    for (const folder of ["src", "gen", "packs", "data"]) cpSync(resolve(folder), join(root, folder), {recursive:true});
+    for (const folder of ["src", "gen", "packs", "data", "webapp"]) cpSync(resolve(folder), join(root, folder), {recursive:true});
     for (const folder of ["test", "node_modules", ".local"]) symlinkSync(resolve(folder), join(root, folder));
     cpSync(resolve("abap_transpile.json"), join(root,"abap_transpile.json"));
     cpSync(resolve("libs.lock.json"), join(root,"libs.lock.json"));
@@ -55,7 +55,9 @@ describe("ADT xref after a warm swap", function () {
         }
         return result;
       };`);
-    const cold = await build({root, generators:false});
+    // Other suites can sweep pack outputs from checkout gen/. Recreate this
+    // tree's complete baseline from its owned sources before warming it.
+    const cold = await build({root});
     expect(cold.ok, JSON.stringify(cold)).to.equal(true);
     store = new ObjectStore({root});
     compiler = new WarmCompiler({root, overlay:s => store.overlay(s), keyOf:f => store.objectKeyOf(f)});

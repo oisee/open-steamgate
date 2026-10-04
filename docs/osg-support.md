@@ -354,6 +354,12 @@ Folder run evidence:
 - qjs / VS Code (OSG-JS): not measured: 30-minute timeout after a successful build with the larger heap and private file-backed SQLite; no class results; exit 124 (1800.45 s; peak RSS 8879396 KiB)
 - qjs / osgo: all 9 tests SUCCESS
 
+Follow-up, 2026-10-04: qjs on OSG-JS now passes **9/9 SUCCESS** with the
+large-xstring SECTION buffer workaround: 492.1 s overall, 42.599 s in test
+methods, sampled process-tree peak RSS 8,972 MiB. The 2026-10-03 counts above
+are the original inventory snapshot. The [QuickJS investigation](backlog/jsqjs.md)
+records the baseline, CI comparison, per-test timings and regression checks.
+
 Folder run provenance (snapshotted from installed tools; no clock or rendering environment):
 
 | Folder | Runtime | Database backend | Heap setting | Installed versions |
