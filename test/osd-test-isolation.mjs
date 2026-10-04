@@ -65,6 +65,37 @@ describe('per-file process isolation detector', function () {
     expect(result.output).to.include('0.cjs: gen:').and.include('gen/probe.abap');
     expect(result.output).not.to.include('1.cjs: gen:');
   });
+  for (const exitOptions of [[], ['--exit']]) it(`rejects an import-time sweep when every imported test is excluded ${exitOptions.join(' ')}`, () => {
+    const result = run(["require('node:fs').rmSync('gen/probe.abap');it('unselected',()=>{});"], ['--grep', ' selected$', ...exitOptions], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/probe.abap','generated');");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('0 passing').and.include('0.cjs: gen:').and.include('gen/probe.abap');
+    expect(result.filesAfterExit).not.to.include('gen/probe.abap');
+  });
+  it('rejects execution corruption under the real shadowed-objects gen allowance', () => {
+    const result = run({'test/shadowed-objects.mjs': "import fs from 'node:fs';it('corrupts base',()=>fs.writeFileSync('gen/stg/zvdb_100/zcl_zvdb_100_dpc.clas.abap','unrelated corruption'));"}, [], undefined,
+      "const fs=require('node:fs');fs.mkdirSync('gen/stg/zvdb_100',{recursive:true});fs.writeFileSync('gen/stg/zvdb_100/zcl_zvdb_100_dpc.clas.abap','original');");
+    expect(result.status, result.output).to.be.greaterThan(0);
+    expect(result.output).to.include('test/shadowed-objects.mjs: gen:').and.include('gen/stg/zvdb_100/zcl_zvdb_100_dpc.clas.abap');
+    expect(result.output).not.to.include('TEMPORARY ALLOW');
+  });
+  for (const mutation of ['import-removal', 'import-retained-rewrite', 'import-rewrite', 'execution-removal', 'import-and-execution']) {
+    it(`scopes the real gen allowance by phase and kind: ${mutation}`, () => {
+      const folder = mutation === 'import-retained-rewrite' ? 'zstg_demo' : 'zvdb_100';
+      const path = `gen/stg/${folder}/probe.clas.abap`;
+      const edit = mutation.includes('rewrite') ? `fs.writeFileSync('${path}','unrelated corruption');` : `fs.rmSync('${path}');`;
+      const execution = mutation === 'execution-removal' ? edit : mutation === 'import-and-execution' ? `fs.writeFileSync('${path}','added in execution');` : '';
+      const source = `import fs from 'node:fs';${mutation === 'execution-removal' ? '' : edit}it('unselected',()=>{${execution}});`;
+      const options = execution ? [] : ['--grep', ' selected$'];
+      const result = run({'test/shadowed-objects.mjs': source}, options, undefined,
+        `const fs=require('node:fs');fs.mkdirSync('gen/stg/${folder}',{recursive:true});fs.writeFileSync('${path}','original');`);
+      const allowed = ['import-removal', 'import-retained-rewrite'].includes(mutation);
+      expect(result.status, result.output).to.equal(allowed ? 0 : 1);
+      expect(result.output).to.include('test/shadowed-objects.mjs: gen:').and.include(`"phase":"${mutation === 'execution-removal' ? 'execution' : 'import'}"`);
+      if (allowed) expect(result.output).to.include('TEMPORARY ALLOW');
+      else expect(result.output).not.to.include('TEMPORARY ALLOW');
+    });
+  }
   it('reports added and same-size changed files with content hashes, after cleanup', () => {
     const result = run(["const fs=require('node:fs');it('edits output',()=>{});after(()=>{fs.writeFileSync('gen/added.abap','new');fs.writeFileSync('gen/probe.abap','changed!');fs.utimesSync('gen/probe.abap',new Date(),new Date(2000))});"], [], undefined,
       "const fs=require('node:fs');fs.mkdirSync('gen');fs.writeFileSync('gen/probe.abap','original');");
@@ -86,7 +117,7 @@ describe('per-file process isolation detector', function () {
   });
   it('keeps a gen hash error red even with a matching allowance', () => {
     const result = run(["it('adds output',()=>require('node:fs').writeFileSync('gen/probe.abap','new'));"], [],
-      "allowances['0.cjs']={gen:{reason:'fixture',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:[{path:'gen/probe.abap',maxCount:1}]}};",
+      "allowances['0.cjs']={gen:{reason:'fixture',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:[{path:'gen/probe.abap',maxCount:1,phase:'execution',kinds:['added']}]}};",
       "const fs=require('node:fs');fs.mkdirSync('gen');const read=fs.readFileSync;fs.readFileSync=function(path,...args){if(String(path).endsWith('gen/probe.abap'))throw Error('cannot hash generated output');return read.call(this,path,...args)};");
     expect(result.status, result.output).to.be.greaterThan(0);
     expect(result.output).to.include('0.cjs: gen:').and.include('gen/probe.abap').and.include('cannot hash generated output');
@@ -96,7 +127,7 @@ describe('per-file process isolation detector', function () {
     it(`bounds gen allowances by prefix and count: ${mutation}`, () => {
       const edit = mutation === 'extra' ? "fs.writeFileSync('gen/pack/extra.abap','new');" : mutation === 'other' ? "fs.writeFileSync('gen/other.abap','new');" : '';
       const result = run([`const fs=require('node:fs');it('sweeps',()=>{fs.rmSync('gen/pack/probe.abap');${edit}});`], [],
-        "allowances['0.cjs']={gen:{reason:'measured fixture',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:[{prefix:'gen/pack/',maxCount:1}]}};",
+        "allowances['0.cjs']={gen:{reason:'measured fixture',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:[{prefix:'gen/pack/',maxCount:1,phase:'execution',kinds:['removed','added']}]}};",
         "const fs=require('node:fs');fs.mkdirSync('gen/pack',{recursive:true});fs.writeFileSync('gen/pack/probe.abap','generated');");
       if (mutation === 'known') expect(result.status, result.output).to.equal(0);
       else expect(result.status, result.output).to.be.greaterThan(0);
@@ -107,9 +138,18 @@ describe('per-file process isolation detector', function () {
   }
   for (const files of [[], [{prefix: 'gen/', maxCount: 1}], [{prefix: 'gen/pack/'}], [{path: 'gen/../probe', maxCount: 1}], [{path: 'gen/probe', maxCount: 2}]]) {
     it(`rejects unbounded or invalid gen allowances: ${JSON.stringify(files)}`, () => {
-      const result = run(["it('works',()=>{});"], [], `allowances['0.cjs']={gen:{reason:'fixture',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:${JSON.stringify(files)}}};`);
+      const scopedFiles = files.map((entry) => ({...entry, phase: 'import', kinds: ['removed']}));
+      const result = run(["it('works',()=>{});"], [], `allowances['0.cjs']={gen:{reason:'fixture',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:${JSON.stringify(scopedFiles)}}};`);
       expect(result.status, result.output).to.be.greaterThan(0);
       expect(result.output).to.include('invalid gen path/prefix/count');
+    });
+  }
+  for (const scope of [{kinds: ['removed']}, {phase: 'import'}, {phase: 'any', kinds: ['removed']}, {phase: 'import', kinds: []}, {phase: 'import', kinds: ['any']}, {phase: 'import', kinds: 'removed'}]) {
+    it(`rejects a malformed gen phase/kinds even without selected tests: ${JSON.stringify(scope)}`, () => {
+      const files = [{prefix: 'gen/pack/', maxCount: 1, ...scope}];
+      const result = run(["it('unselected',()=>{});"], ['--grep', ' selected$'], `allowances['0.cjs']={gen:{reason:'fixture',owner:'stoker',backlog:'docs/backlog/misc.md#fixture',files:${JSON.stringify(files)}}};`);
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('invalid gen path/prefix/count/phase/kinds');
     });
   }
 

@@ -19,10 +19,10 @@ for (const [file, entries] of Object.entries(allowances)) {
       throw new Error(`test-isolation: ${file}: invalid root identity/count`);
     }
     if (invariant === 'generation' && (!['restored-inputs', 'added-inputs'].includes(entry.drift?.kind) || !Number.isInteger(entry.drift.maxCount) || entry.drift.maxCount < 1)) throw new Error(`test-isolation: ${file}: invalid originating drift`);
-    if (invariant === 'gen' && (!Array.isArray(entry.files) || !entry.files.length || !entry.files.every(({path, prefix, maxCount}) => {
+    if (invariant === 'gen' && (!Array.isArray(entry.files) || !entry.files.length || !entry.files.every(({path, prefix, maxCount, phase, kinds}) => {
       const identity = path ?? prefix;
-      return (path === undefined) !== (prefix === undefined) && typeof identity === 'string' && identity.startsWith('gen/') && !identity.includes('..') && !identity.includes('\\') && identity !== 'gen/' && (!prefix || prefix.endsWith('/')) && Number.isInteger(maxCount) && maxCount > 0 && (!path || maxCount === 1);
-    }))) throw new Error(`test-isolation: ${file}: invalid gen path/prefix/count`);
+      return (path === undefined) !== (prefix === undefined) && typeof identity === 'string' && identity.startsWith('gen/') && !identity.includes('..') && !identity.includes('\\') && identity !== 'gen/' && (!prefix || prefix.endsWith('/')) && Number.isInteger(maxCount) && maxCount > 0 && (!path || maxCount === 1) && ['import', 'execution'].includes(phase) && Array.isArray(kinds) && kinds.length > 0 && kinds.every((kind) => ['removed', 'changed', 'added'].includes(kind));
+    }))) throw new Error(`test-isolation: ${file}: invalid gen path/prefix/count/phase/kinds`);
     if (!['temporary-roots', 'generation', 'gen'].includes(invariant)) throw new Error(`test-isolation: ${file}: unsupported allowance invariant ${invariant}`);
   }
 }
@@ -145,13 +145,51 @@ const genSnapshot = () => {
   genCosts.push({ms: Number(process.hrtime.bigint() - started) / 1e6, files: manifest.length});
   return manifest;
 };
-const genDifference = (before, after) => {
+const genDifference = (before, after, phase) => {
   const started = process.hrtime.bigint();
-  try { return resources.genDifference(before, after); }
-  catch (error) { return [{error: error.message}]; }
+  try { return resources.genDifference(before, after).map((change) => ({...change, phase})); }
+  catch (error) { return [{error: error.message, phase}]; }
   finally { genDiffMs += Number(process.hrtime.bigint() - started) / 1e6; }
 };
+const genAllowed = (diff, allowance) => {
+  if (!allowance || !diff.every(({path, error}) => typeof path === 'string' && !error)) return false;
+  const matches = (entry, change) => entry.phase === change.phase && entry.kinds.includes(change.kind) &&
+    (entry.path === change.path || (entry.prefix && change.path.startsWith(entry.prefix)));
+  // Validate every observation before counting unique paths within each
+  // identity's phase/kinds. Overlapping identities each retain their bound.
+  return diff.every((change) => allowance.files.some((entry) => matches(entry, change))) &&
+    allowance.files.every((entry) => new Set(diff.filter((change) => matches(entry, change)).map(({path}) => path)).size <= entry.maxCount);
+};
 const fileChecks = [];
+// With no matching tests Mocha skips even root hooks. Audit completed
+// imports before its end callback computes the CLI exit status.
+const auditImports = (fail) => {
+  for (const entry of fileChecks) {
+    const {file, checked, importGenChanges} = entry;
+    if (checked() || entry.importReported || !importGenChanges.length) continue;
+    entry.importReported = true;
+    const allowance = allowances[file]?.gen;
+    const allowed = genAllowed(importGenChanges, allowance);
+    const message = `test-isolation: ${file}: gen: ${JSON.stringify(importGenChanges)}`;
+    console.error(`${message}${allowed ? ` TEMPORARY ALLOW: ${JSON.stringify(allowance)}` : ''}`);
+    if (!allowed) fail(file, message);
+  }
+};
+const runnerEmit = Mocha.Runner.prototype.emit;
+Mocha.Runner.prototype.emit = function (event, ...args) {
+  if (event === 'end') auditImports((file, message) => {
+    const hook = new Mocha.Hook(`${file}: import gen invariant`);
+    hook.parent = this.suite;
+    hook.file = file;
+    const error = new Error(message);
+    error.code = 'OSD_TEST_ISOLATION';
+    this.fail(hook, error);
+  });
+  return runnerEmit.call(this, event, ...args);
+};
+// Also cover early process exits after completed imports. No async hooks
+// can run here; the normal runner-end audit avoids Mocha overwriting our code.
+process.once('exit', () => auditImports(() => { process.exitCode = process.exitCode || 1; }));
 const intentional = new Map();
 exports.allowGenerationMismatch = (reason) => {
   if (!current || typeof reason !== 'string' || !reason.trim()) throw new Error('allowGenerationMismatch needs a running file and a reason');
@@ -171,7 +209,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
   }
   const result = emit.call(this, event, ...args);
   const loading = this.osdLoading;
-  const importGenChanges = genDifference(loading.gen, genSnapshot());
+  const importGenChanges = genDifference(loading.gen, genSnapshot(), 'import');
   const suites = this.suites.splice(loading.suites);
   const tests = this.tests.splice(loading.tests);
   const fileHooks = Object.fromEntries(hooks.map((key) => [key, this[key].splice(loading.hooks[key])]));
@@ -243,7 +281,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
     const ownedPids = new Set(after.resources.children.map(({pid}) => pid));
     after.serving = after.serving.filter(({pid}) => ownedPids.has(pid));
     const violations = [];
-    const genChanges = [...importGenChanges, ...(before ? genDifference(before.gen, genSnapshot()) : [])];
+    const genChanges = [...importGenChanges, ...(before ? genDifference(before.gen, genSnapshot(), 'execution') : [])];
     if (genChanges.length) violations.push(['gen', genChanges]);
     if (after.dialog.held || after.dialog.waiting || after.dialog.open.length) violations.push(['dialog', {before: {held: false, waiting: 0, open: []}, after: after.dialog}]);
     const inherited = sameGeneration(lastGeneration, before?.generation ?? after.generation);
@@ -272,13 +310,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
       const message = `test-isolation: ${file}: ${invariant}: ${JSON.stringify(diff)}`;
       const allowance = allowances[file]?.[invariant];
       let allowed = false;
-      if (invariant === 'gen' && allowance && diff.every(({path, error}) => typeof path === 'string' && !error)) {
-        const paths = [...new Set(diff.map(({path}) => path))];
-        // Every path must fit an identity; every matching identity must stay
-        // within its own bound, even when identities overlap.
-        allowed = paths.every((path) => allowance.files.some((entry) => entry.path === path || (entry.prefix && path.startsWith(entry.prefix)))) &&
-          allowance.files.every((entry) => paths.filter((path) => entry.path === path || (entry.prefix && path.startsWith(entry.prefix))).length <= entry.maxCount);
-      }
+      if (invariant === 'gen') allowed = genAllowed(diff, allowance);
       if (invariant === 'temporary-roots' && allowance) {
         const counts = new Map(allowance.roots.map(({prefix}) => [prefix, 0]));
         allowed = after.resources.roots.every((path) => {
@@ -321,7 +353,7 @@ Mocha.Suite.prototype.emit = function (event, ...args) {
     if (failures.length) { const error = new Error(failures.join('\n')); if (violations.length) error.code = 'OSD_TEST_ISOLATION'; throw error; }
   });
   const finalHook = wrapper._afterAll.at(-1);
-  fileChecks.push({file, checked: () => checked, hook: finalHook});
+  fileChecks.push({file, checked: () => checked, hook: finalHook, importGenChanges});
   return result;
 };
 exports.mochaHooks = {

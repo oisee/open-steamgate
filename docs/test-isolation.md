@@ -14,7 +14,11 @@ Mocha's pre/post-require file events to place every file's suites, root tests
 and file hooks into a file suite. Its final hook checks after the file's own
 `after` hooks, including when a file hook throws. Pending suites are checked
 as well. Files with no selected tests receive a final root audit of their
-import-time state, without invoking their unexecuted cleanup hooks. Parallel Mocha is refused; the suite runner uses serial Mocha inside
+import-time state, without invoking their unexecuted cleanup hooks. A runner-end
+audit reports unchecked completed imports even when every test is excluded
+and Mocha skips the root hooks; unallowed changes fail the run. A synchronous
+exit fallback also reports completed imports if the process exits early.
+Parallel Mocha is refused; the suite runner uses serial Mocha inside
 each independent shard process. A file boundary adds its path to title paths.
 
 The checks never kill children, remove directories, reset environment variables,
@@ -62,7 +66,8 @@ records; removed directories disappear from snapshots. Temporary roots use
 absolute paths resolved against the cwd at helper invocation, including callback
 and promise completion after a cwd change. This does not enumerate
 arbitrary directories, grandchildren, or processes started by native extensions.
-A run terminated during import or with `process.exit()` cannot finish checks.
+A run terminated during import or with `process.exit()` cannot finish all checks;
+the exit audit can still report gen changes from already completed imports.
 
 ## Intentional generation changes
 
@@ -109,12 +114,18 @@ Each invariant entry requires `reason`, `owner` and a `backlog` item link;
 malformed entries fail at load time. Root exceptions enumerate basename prefixes
 and maximum surviving counts. A different prefix or an excess count remains red.
 Generation exceptions describe the originating input changes and maximum count.
-`gen` exceptions use a nonempty `files` array of `{path, maxCount: 1}` or
-`{prefix, maxCount}` identities rooted under `gen/`. Prefixes end in `/`
+`gen` exceptions use a nonempty `files` array of `{path, maxCount: 1, phase, kinds}` or
+`{prefix, maxCount, phase, kinds}` identities rooted under `gen/`. Each identity
+requires `phase: 'import' | 'execution'` and a nonempty `kinds` array containing
+only `'removed'`, `'changed'` or `'added'`. Evidence preserves each observation's
+phase and kind, so an import allowance cannot waive an execution mutation of
+the same path. Prefixes end in `/`
 and must name a narrower directory than `gen/` itself. Every changed path
 must match an identity and every identity's count must stay within its bound;
 overlapping identities cannot multiply a bound. Counts cover unique paths
-across import and execution. Evidence is still printed in full. The
+matching each identity's phase and kinds. The shadowed-objects exception allows
+only the observed import removals and rewrites, with its existing prefix/count
+bounds. Evidence is still printed in full. The
 `allowGenerationMismatch()` API cannot waive this separate invariant.
 For added trace sidecars the detector proves that excluding exactly those new
 paths returns the baseline hash. For restored activation inputs the originating
