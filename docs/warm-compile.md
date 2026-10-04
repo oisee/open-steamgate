@@ -217,9 +217,16 @@ them cherry-picked).
   set in the serving child under the module-swap work-process lock, before
   acknowledging the swap. CROSS, WBCROSSGT, WBCROSSGTX and D010INC rows
   owned by these objects are replaced transactionally; other rows remain.
-  `test/adt-xref-warm.mjs` checks the table-backed readers route after adding
-  and removing a class reference, with the same child PID throughout.
-  Derivation still parses the full tree; per-object parsing is a follow-up.
+  The warm compiler derives the selected rows from its retained registry,
+  after transpiling the exact build view (including active-copy overlays),
+  before publishing the generation. The rows travel with the modules over
+  IPC; no checkout read or whole-tree parse runs during the swap. The child
+  applies the rows transactionally before importing modules, and a failed
+  refresh or import keeps the work-process lock until the supervisor recycles
+  it. The reported swap time includes the SQL refresh.
+  `test/adt-xref-warm.mjs` cold-builds an isolated temporary tree and checks
+  added and dropped references in WBCROSSGT and WBCROSSGTX, active copies,
+  timing, and a SQL failure with queued work held until recycle.
 - **The cross-reference is still a full parse per new generation** at every
   start (~5 s alone, 21.6 s on vsp-i7 under load). `build/xref/` now keeps
   the last eight generations' rows rather than one, so a tree that goes
@@ -231,8 +238,8 @@ them cherry-picked).
 - **The dev loop's cold path** still reparses the tree three times (the
   parent's check, the build, the child's cross-reference seed; foreman-dell's
   measurement) and runs every generator on every save. The warm path skips
-  the parent check and generators, but now parses the child's xref sources
-  to refresh the swapped objects; the cold path is unchanged.
+  the parent check and generators and derives selected xref rows from the
+  compiler registry; the cold path is unchanged.
 - **The prime blocks the process that holds the store** for its 8–9 s:
   after the runtime is up, and again five seconds after the last cold build
   (a new file, DDIC, CDS, a YAML), since a cold build is a new start for the

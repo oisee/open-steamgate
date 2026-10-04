@@ -1365,7 +1365,7 @@ export class ObjectStore {
     if (transpile.warm === true && (transpile.hostHeld ?? []).length === 0) {
       try {
         const swap = await runtime.hot({generation: transpile.hash, from: transpile.from,
-          modules: transpile.modules, only: transpile.closure, verified: transpile.unverified !== true});
+          modules: transpile.modules, only: transpile.closure, xrefRows: transpile.xrefRows, verified: transpile.unverified !== true});
         this.lastLoad = {generation: transpile.hash, epoch: runtime.epoch, hot: true, ms: swap.ms};
         // the swap limit or the heap: the catch-up recycle is part of this
         // activation, and its answer is the load that recycle made
@@ -2006,7 +2006,7 @@ export class ObjectStore {
             return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, warm: true,
               built: built(w.compiler.digests),
               modules: r.modules, hostHeld: r.hostHeld, from: r.from, stale: r.stale, steps: r.steps,
-              closure: r.closure, unverified: w.compiler.unverified.has(r.hash)};
+              closure: r.closure, xrefRows: r.xrefRows, unverified: w.compiler.unverified.has(r.hash)};
           } catch (error) {
             if (error.code !== "NOT_WARM") {
               // `check`: the transpiler refused the change; anything else

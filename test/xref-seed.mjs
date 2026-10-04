@@ -325,3 +325,21 @@ function fakeClient(sql) {
   };
   return db;
 }
+
+// The warm builder already parsed its exact view. Derivation must visit
+// selected ABAP files only, with no fresh ObjectStore or Registry.parse().
+describe("tools/osd-xref-seed: rows from the warm compiler", () => {
+  it("reads only selected objects from the supplied parsed registry", async () => {
+    const {modulesOf} = await import("../tools/osd-transpile.mjs");
+    const {core} = modulesOf(process.cwd());
+    const registry = new core.Registry().addFiles([
+      new core.MemoryFile("/src/zcl_rows_a.clas.abap", "CLASS zcl_rows_a DEFINITION PUBLIC. PUBLIC SECTION. DATA ref TYPE REF TO zcl_rows_b. ENDCLASS. CLASS zcl_rows_a IMPLEMENTATION. ENDCLASS."),
+      new core.MemoryFile("/src/zcl_rows_b.clas.abap", "CLASS zcl_rows_b DEFINITION PUBLIC. ENDCLASS. CLASS zcl_rows_b IMPLEMENTATION. ENDCLASS."),
+    ]).parse();
+    registry.parse = () => {throw new Error("warm rows reparsed the registry");};
+    registry.getObject("CLAS", "ZCL_ROWS_B").getABAPFiles = () => {throw new Error("visited an unselected object's source");};
+    const {rowsFromRegistry} = await import("../tools/osd-xref-seed.mjs");
+    const tables = await rowsFromRegistry(registry, [{type:"CLAS",name:"ZCL_ROWS_A"}]);
+    expect(tables.WBCROSSGT).to.deep.equal([{OTYPE:"TY",NAME:"ZCL_ROWS_B",INCLUDE:"ZCL_ROWS_A"}]);
+  });
+});

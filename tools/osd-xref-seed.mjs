@@ -93,8 +93,6 @@ export async function rows(root = process.cwd(), options = {}) {
   const {CrossReference} = await import(/* webpackIgnore: true */ "./osd-xref.mjs");
   const {ObjectStore} = await import(/* webpackIgnore: true */ "./osd-store.mjs");
   const store = new ObjectStore({root});
-  // Startup may have left a shared parse of this root. A swap needs current files.
-  if (options.only !== undefined) store.build();
   const tables = new CrossReference(store).build(options.only).tables();
   const out = {
     CROSS: tables.cross,
@@ -288,8 +286,19 @@ export async function seedAtStartup(client, options = {}) {
   }
 }
 
-/** Replace only the swapped objects' derived rows, under the caller's work-process lock. */
-export async function refreshAfterSwap(client, root, only) {
-  if (only.length === 0) return;
-  return applyRows(client, await rows(root, {only}), {only});
+/** Derive selected rows from the exact registry the warm transpiler used.
+ * No disk reads, registry invalidation or whole-tree parse. */
+export async function rowsFromRegistry(registry, only) {
+  const {CrossReference} = await import(/* webpackIgnore: true */ "./osd-xref.mjs");
+  const tables = new CrossReference(undefined, registry).build(only).tables();
+  return {CROSS: tables.cross, WBCROSSGT: tables.wbcrossgt,
+    WBCROSSGTX: tables.wbcrossgtx, D010INC: tables.d010inc};
+}
+
+/** Replace selected rows supplied by the compiler, under the swap lock. */
+export async function refreshAfterSwap(client, tables, only) {
+  if (!Array.isArray(only) || !wellFormed(tables)) {
+    throw new Error("the warm swap requires cross-reference rows from its compiler build view");
+  }
+  return applyRows(client, tables, {only});
 }

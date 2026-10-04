@@ -548,22 +548,27 @@ process.on("message", (message) => {
     return;
   }
   exclusive(async () => {
-    const done = await applyRuntimeHotSwap(hot, message);
-    // The compiler's only set owns these rows. Keep deletion and insertion
-    // under the same lock as module loading, before acknowledging the swap.
-    await refreshAfterSwap(connection(), root, message.only ?? message.modules
-      .filter(m => /\.(clas|intf)\.mjs$/.test(m))
-      .map(m => ({type: m.endsWith(".clas.mjs") ? "CLAS" : "INTF",
-        name: m.replace(/\.(clas|intf)\.mjs$/, "").replaceAll("#", "/").toUpperCase()})));
-    // Every consumer of this process's loaded code changes generation under
-    // the same work-process lock, before the next ABAP step can start.
-    generation = message.generation;
-    unverified = message.verified !== true;
-    return done;
+    const started = Date.now();
+    try {
+      // Rows were derived before publication, from the compiler's exact view.
+      // Apply them before importing modules; any later failure also quarantines
+      // the child since imports and class constructors cannot be rolled back.
+      await refreshAfterSwap(connection(), message.xrefRows, message.only);
+      const xrefMs = Date.now() - started;
+      const done = await applyRuntimeHotSwap(hot, message);
+      generation = message.generation;
+      unverified = message.verified !== true;
+      return {...done, moduleMs: done.ms, xrefMs, ms: Date.now() - started};
+    } catch (error) {
+      tell({type: "hot-done", id: message.id, ok: false, error: String(error?.stack ?? error)});
+      // Never hand the work process to queued requests after a failed swap.
+      // The supervisor's fallback kills this child and boots the generation.
+      await new Promise(() => {});
+    }
   }, "a warm swap").then((done) => {
-    process.send?.({type: "hot-done", id: message.id, ok: true, ...done, heap: process.memoryUsage().heapUsed});
+    tell({type: "hot-done", id: message.id, ok: true, ...done, heap: process.memoryUsage().heapUsed});
   }, (error) => {
-    process.send?.({type: "hot-done", id: message.id, ok: false, error: String(error?.stack ?? error)});
+    tell({type: "hot-done", id: message.id, ok: false, error: String(error?.stack ?? error)});
   });
 });
 
