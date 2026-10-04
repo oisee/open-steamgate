@@ -1,0 +1,1 @@
+Captured from `go build` with a `-toolexec` wrapper named `compile` that kills itself with SIGKILL for compiler invocations (and delegates version queries and other tools). The parent Go command exits 1 with no signal or spawn error. The local wrapper path is replaced with `/opt/go/pkg/tool/linux_amd64/compile`; diagnostics are otherwise unchanged.

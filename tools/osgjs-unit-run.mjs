@@ -50,7 +50,7 @@ try {
       output = join(root, "build/by-input", made.hash, "output");
     }
     catch (error) {
-      for (const owner of owners) rows.push({class: owner, status: "NOT_COMPILED", message: error.message + (error.output ? "\n" + error.output : "")});
+      for (const owner of owners) rows.push({class: owner, status: "NOT_COMPILED", ...(error.signal || error.spawnError ? {source: "harness"} : {}), message: error.message + (error.output ? "\n" + error.output : "")});
     }
     if (!rows.length) {
       const {initializeABAP} = await import(pathToFileURL(join(output, "init.mjs")).href);
@@ -99,7 +99,7 @@ try {
       }
     }
   }
-} catch (error) { rows.push({status: "ERROR", message: error.message}); }
+} catch (error) { rows.push({source: "harness", status: "ERROR", message: error.message}); }
 await new Promise((done) => process.stdout.write(JSON.stringify({classes: owners.length, compiled, rows}), done));
 // Setup may install timers: this process owns them and its private database.
 process.exit(0);

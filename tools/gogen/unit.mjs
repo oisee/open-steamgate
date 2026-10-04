@@ -8,7 +8,7 @@ import {performance} from "node:perf_hooks";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo, referencedClasses} from "./emit-go.mjs";
-import {reconcile} from "./unit-results.mjs";
+import {reconcile, killedGoTool, markBuildFailure} from "./unit-results.mjs";
 import {home} from "./home.mjs";
 import {cacheLocation, frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
 import {unitInputs} from "./unit-inputs.mjs";
@@ -50,7 +50,7 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
       cwd: home, encoding: "utf8", timeout: 180000, maxBuffer: 20e6, env: process.env,
     });
     if (!child.stdout) {
-      rows.push({class: owner, status: "NOT_COMPILED", message: child.stderr || child.error?.message || `exit ${child.status}`});
+      rows.push({class: owner, source: "harness", status: "NOT_COMPILED", message: child.stderr || child.error?.message || `exit ${child.status}`});
       continue;
     }
     try {
@@ -60,7 +60,7 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
       timingMs.frontendClosureRounds.push(...(result.timingMs?.frontendClosureRounds ?? []));
       for (const phase of ["emit", "goBuild", "run"]) timingMs[phase] += result.timingMs?.[phase] ?? 0;
     }
-    catch { rows.push({class: owner, status: "NOT_COMPILED", message: child.stderr || "invalid child result"}); }
+    catch { rows.push({class: owner, source: "harness", status: "NOT_COMPILED", message: child.stderr || "invalid child result"}); }
   }
   const compiled = owners.filter((owner) => {
     const own = rows.filter((r) => r.class === owner);
@@ -510,14 +510,13 @@ for (let attempt = 0; attempt < 100; attempt++) {
   if (process.env.GOGEN_GO_BUILD_X) appendFileSync(join(runDir, "go-build-x.log"), build.stderr ?? "");
   timingMs.goBuild += Math.round(performance.now() - buildStarted);
   if (build.status === 0) break;
-  if (!program || !stubGoErrors(build.stderr ?? "")) break;
+  if (build.signal || build.error || killedGoTool(build.stderr) || !program || !stubGoErrors(build.stderr ?? "")) break;
   const emitRetryStarted = performance.now();
   writeGeneratedGo(join(goDir, "cmd", "unit"));
   timingMs.emit += Math.round(performance.now() - emitRetryStarted);
 }
 if (build.status !== 0) {
-  const message = (build.stderr || build.error?.message || "go build failed").trim().split("\n").slice(0, 12).join("\n");
-  for (const r of ready) { r.status = "NOT_COMPILED"; r.message = message; }
+  markBuildFailure(ready, build);
   updateCompiledCount();
   console.log(JSON.stringify({...summary, rows}));
   process.exit(2);
@@ -532,7 +531,7 @@ timingMs.run = Math.round(performance.now() - runStarted);
 timingMs.runDetail = runDetail;
 timingMs.total = Math.round(performance.now() - commandStarted);
 const reconciled = reconcile(ready, actual);
-for (let i = 0; i < ready.length; i++) { ready[i].status = reconciled[i].status; ready[i].message = reconciled[i].message; }
+for (let i = 0; i < ready.length; i++) { ready[i].status = reconciled[i].status; ready[i].message = reconciled[i].message; if (reconciled[i].source) ready[i].source = reconciled[i].source; }
 updateCompiledCount();
 console.log(JSON.stringify({...summary, rows}));
 if (ready.some((x) => x.status === "FAILED")) process.exit(1);

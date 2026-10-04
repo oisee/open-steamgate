@@ -5,6 +5,13 @@ import {join, resolve} from "node:path";
 import {KERNEL_FORMS, kernelWarnings} from "../tools/osd-kernel-compat.mjs";
 import {generate, inventory, evidence} from "../tools/osg-support.mjs";
 
+import {run as buildCommand} from "../tools/osd-build-command.mjs";
+import {alertOf} from "../tools/osd-unit.mjs";
+import {summarize} from "../tools/osd-unit-ci.mjs";
+import {reconcile, killedGoTool, markBuildFailure} from "../tools/gogen/unit-results.mjs";
+
+import {unitProvenance} from "../tools/osd-unit-provenance.mjs";
+
 const root = resolve(import.meta.dirname, "..");
 describe("generated corpus support evidence", function () {
   this.timeout(15000);
@@ -51,21 +58,153 @@ CLASS zcl_${cls} IMPLEMENTATION. ENDCLASS.
     const all = generate([dir], paths);
     assert.ok(all.report.constructs.every((c) => c.osgo.status === "runs"));
     assert.match(all.markdown, /ZCL_HELPER: exercised by 2 tests in the same run/);
-    assert.match(all.markdown, /helpers \/ osgjs: no evidence: runner crashed: heap exhausted/);
+    assert.match(all.markdown, /## Not measured on JS \([1-9]/);
+    assert.match(all.markdown, /## osgo only \(0\)/);
+    assert.match(all.markdown, /helpers \/ VS Code \(OSG-JS\): not measured: runner crashed: heap exhausted/);
     assert.equal(all.report.runtime.osgo.classes, 3);
     rows[1] = {...rows[1], status: "FAILURE", message: "expected 2, got 1\nstack trace"};
     writeFileSync(file, JSON.stringify({rows}));
     const partial = generate([dir], paths);
     const result = partial.report.constructs[0].osgo;
     assert.equal(result.status, "fails");
-    assert.equal(result.missing.length, 0);
-    assert.ok(result.failures.some((f) => f.class === "ZCL_HELPER" && f.status === "unknown"));
+    assert.equal(result.missing.length, 1);
+    assert.ok(result.missing.includes("ZCL_HELPER"));
+    assert.ok(!result.failures.some((f) => f.class === "ZCL_HELPER"));
     assert.ok(result.failures.some((f) => f.class === "ZCL_FAIL" && f.message === "expected 2, got 1"));
     assert.equal(evidence(["ZCL_PASS"], {rows: new Map([["ZCL_PASS", [rows[0]]]])}).status, "runs");
     // A selected class result alone cannot confer full-folder credit.
     assert.ok(generate([dir], {osgo: [file], osgjs: []}).report.constructs.every((c) => c.osgo.missing.includes("ZCL_HELPER")));
     writeFileSync(file, JSON.stringify({rows: []}));
-    assert.ok(generate([dir], paths).report.constructs.every((c) => c.osgo.status === "no evidence"));
+    assert.ok(generate([dir], paths).report.constructs.every((c) => c.osgo.status === "not measured"));
+  });
+  it("marks a killed Go toolchain subprocess as unmeasured with captured build stderr", () => {
+    const stderr = readFileSync(join(root, "test/fixtures/go-build-killed/stderr.txt"), "utf8");
+    const row = {class: "OWNER", status: "READY"};
+    markBuildFailure([row], {status: 1, stderr});
+    assert.equal(row.source, "harness");
+    assert.equal(row.status, "NOT_COMPILED");
+    assert.equal(evidence([row.class], {rows: new Map([[row.class, [row]]])}).status, "not measured");
+    assert.equal(killedGoTool(stderr.replaceAll("signal: killed", "signal: terminated")), true);
+    for (const diagnostic of [
+      "owner.clas.abap:42: compile: signal: killed",
+      "generated.go:42: compile: signal: killed",
+      "owner.clas.abap: /opt/go/pkg/tool/linux_amd64/compile: signal: killed",
+      "generated.go: /opt/go/pkg/tool/linux_amd64/compile: signal: killed",
+      "example.invalid/pkg: undefined: signal: killed",
+      'example.invalid/pkg: /opt/go/pkg/tool/linux_amd64/compile: undefined: "signal: killed"',
+    ]) {
+      const refused = {class: "OWNER", status: "READY"};
+      markBuildFailure([refused], {status: 1, stderr: diagnostic});
+      assert.equal(refused.source, undefined, diagnostic);
+      assert.equal(evidence([refused.class], {rows: new Map([[refused.class, [refused]]])}).status, "refused");
+    }
+  });
+  it("records the last Node heap override with command-line precedence over NODE_OPTIONS", () => {
+    const options = process.env.NODE_OPTIONS, argv = process.execArgv;
+    try {
+      process.env.NODE_OPTIONS = "--max-old-space-size=1024 --max_old_space_size=2048";
+      process.execArgv = [];
+      assert.equal(unitProvenance("osgjs").heap, "--max-old-space-size=2048 MiB");
+      process.execArgv = ["--max-old-space-size=3072", "--max_old_space_size", "4096"];
+      assert.equal(unitProvenance("osgjs").heap, "--max-old-space-size=4096 MiB");
+    } finally {
+      process.execArgv = argv;
+      if (options === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = options;
+    }
+  });
+  it("retains subprocess signal provenance separately from compiler diagnostics", () => {
+    assert.throws(() => buildCommand(process.execPath, ["-e", "process.kill(process.pid, 'SIGTERM')"], root),
+      (error) => error.signal === "SIGTERM" && error.code === "FAILED");
+    assert.throws(() => buildCommand(process.execPath, ["-e", "console.error('syntax error'); process.exit(1)"], root),
+      (error) => !error.signal && !error.spawnError && error.output.includes("syntax error"));
+  });
+  it("keeps assertion text beginning runner: as a failure through alertOf and both CI paths", () => {
+    class kernel_cx_assert {}
+    const error = Object.assign(new kernel_cx_assert(), {
+      msg: {get: () => "runner: returned incorrect value"},
+      expected: {get: () => "2"}, actual: {get: () => "1"},
+    });
+    const alert = alertOf(error, "CHECK");
+    assert.equal(alert.kind, "failedAssertion");
+    const row = {class: "ZCL_ASSERT", testclass: "LTCL_TEST", method: "CHECK", status: "FAILURE",
+      message: [alert.title, ...alert.details].join("; ")};
+    for (const candidate of [row, {...row, status: "FAILED"}]) {
+      const normalized = summarize({rows: [candidate]});
+      assert.equal(normalized.code, 1);
+      assert.equal(normalized.result.rows[0].status, "FAILURE");
+      const result = evidence([row.class], {rows: new Map([[row.class, normalized.result.rows]])});
+      assert.equal(result.status, "fails");
+      assert.match(result.failures[0].message, /Expected \[2\]; Actual \[1\]/);
+    }
+    // A process failure retains its identity and is still unmeasured after reconciliation.
+    const harness = reconcile([row], [{...row, source: "harness", status: "FAILED", message: "startup crashed"}]);
+    const normalized = summarize({rows: harness});
+    assert.equal(normalized.code, 2);
+    assert.equal(evidence([row.class], {rows: new Map([[row.class, normalized.result.rows]])}).status, "not measured");
+    // Compiler refusal text and real test errors cannot manufacture harness provenance.
+    for (const message of ["runner died: SIGABRT", "seed image: refused", "FATAL ERROR: heap exhaustion"]) {
+      assert.equal(evidence([row.class], {rows: new Map([[row.class, [{...row, message, status: "ERROR"}]]])}).status, "fails");
+      assert.equal(evidence([row.class], {rows: new Map([[row.class, [{class: row.class, message, status: "NOT_COMPILED"}]]])}).status, "refused");
+    }
+  });
+  it("marks crashes and setup ERROR JSON as not measured, retaining real test failures", () => {
+    const dir = join(root, "tools/testdata-kernel-valid");
+    const file = join(temp, "setup.json"), manifest = join(temp, "setup-runs.json");
+    const paths = {osgo: [], osgjs: [], runs: [manifest]};
+    writeFileSync(manifest, JSON.stringify([{folder: "testdata-kernel-valid", runtime: "osgjs", file: "setup.json",
+      wallSeconds: 12.5, peakRssKiB: 1024}]));
+    for (const row of [{status: "ERROR", message: "memory access out of bounds"},
+      {class: "ZCL_KERNEL_VALID", status: "ERROR", message: "setup failed"},
+      {source: "harness", class: "ZCL_KERNEL_VALID", method: "CHECK", status: "ERROR", message: "runner died: SIGABRT"},
+      {source: "harness", class: "ZCL_KERNEL_VALID", status: "NOT_COMPILED", message: "node tools/osd-transpile.mjs exited SIGABRT"},
+      {source: "harness", class: "ZCL_KERNEL_VALID", status: "NOT_COMPILED", message: "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory"}]) {
+      writeFileSync(file, JSON.stringify({compiled: 0, rows: [row]}));
+      const {report, markdown} = generate([dir], paths);
+      assert.ok(report.constructs.every((c) => c.osgjs.status === "not measured"));
+      assert.ok(report.constructs.every((c) => c.osgjs.failures.length === 0));
+      assert.match(markdown, /The JS column is incomplete; remeasurement in progress\./);
+      assert.ok(markdown.includes(row.message));
+      assert.match(markdown, /12.5 s; peak RSS 1024 KiB/);
+      assert.equal(report.runtime.osgjs.tests, 0);
+    }
+    writeFileSync(file, JSON.stringify({compiled: 1, rows: [{class: "ZCL_KERNEL_VALID", testclass: "LTCL_TEST",
+      method: "CHECK", status: "ERROR", message: "ASSERT failed"}]}));
+    const failed = generate([dir], paths);
+    assert.ok(failed.report.constructs.every((c) => c.osgjs.status === "fails"));
+    assert.ok(!failed.markdown.includes("The JS column is incomplete"));
+    writeFileSync(file, JSON.stringify({compiled: 1, rows: [{class: "ZCL_KERNEL_VALID", method: "CHECK", status: "SUCCESS"}]}));
+    const successful = generate([dir], paths);
+    assert.ok(!successful.markdown.includes("The JS column is incomplete"));
+    assert.match(successful.markdown, /## JS only \([1-9]/);
+    writeFileSync(manifest, JSON.stringify([{folder: "testdata-kernel-valid", runtime: "osgjs",
+      reason: "SIGABRT: heap exhaustion; no JSON", wallSeconds: 30, peakRssKiB: 2048}]));
+    const crash = generate([dir], paths);
+    assert.ok(crash.report.constructs.every((c) => c.osgjs.status === "not measured"));
+    assert.match(crash.markdown, /SIGABRT: heap exhaustion; no JSON/);
+    assert.match(crash.markdown, /30 s; peak RSS 2048 KiB/);
+  });
+  it("renders stored backend and tool versions per folder without consulting the rendering environment", () => {
+    const dir = join(root, "tools/testdata-kernel-valid");
+    const file = join(temp, "provenance.json"), manifest = join(temp, "provenance-runs.json");
+    const provenance = {database: "--db file (node:sqlite)", heap: "--max-old-space-size=12288 MiB",
+      versions: {"@abaplint/runtime": "2.13.93", "@abaplint/transpiler": "2.13.93", Node: "v26.9.0", "node:sqlite (SQLite)": "3.53.4"}};
+    writeFileSync(file, JSON.stringify({provenance, rows: [{class: "ZCL_KERNEL_VALID", method: "CHECK", status: "SUCCESS"}]}));
+    writeFileSync(manifest, JSON.stringify([{folder: "testdata-kernel-valid", runtime: "osgjs", file: "provenance.json"},
+      {folder: "testdata-kernel-valid", runtime: "osgo", reason: "no JSON", provenance: {...provenance, database: "modernc.org/sqlite", versions: {...provenance.versions, Go: "go1.26.0"}}}]));
+    const paths = {osgo: [], osgjs: [], runs: [manifest]};
+    const page = generate([dir], paths);
+    assert.deepEqual(page.report.folders[0].provenance.osgjs, provenance);
+    for (const text of ["--db file (node:sqlite)", "--max-old-space-size=12288 MiB", "@abaplint/runtime 2.13.93", "@abaplint/transpiler 2.13.93", "Node v26.9.0", "node:sqlite (SQLite) 3.53.4", "Go go1.26.0"])
+      assert.ok(page.markdown.includes(text), text);
+    const previous = process.env.NODE_OPTIONS;
+    try {
+      process.env.NODE_OPTIONS = "--max-old-space-size=512";
+      assert.equal(generate([dir], paths).markdown, page.markdown);
+    } finally {
+      if (previous === undefined) delete process.env.NODE_OPTIONS;
+      else process.env.NODE_OPTIONS = previous;
+    }
   });
   it("does not credit omitted test owners or helpers from real --class output declared full-folder", () => {
     const dir = join(root, "test/fixtures/osg-support-selected");
@@ -83,10 +222,10 @@ CLASS zcl_helper IMPLEMENTATION. METHOD check. RETURN. ENDMETHOD. ENDCLASS.
     const {report, markdown} = generate([input], {osgo: [], osgjs: [], runs: [manifest]});
     const omitted = report.constructs.find((c) => c.kind === "type" && c.name === "x LENGTH 2");
     assert.deepEqual(omitted.classes, ["ZCL_ABAPITI_INT8Y"]);
-    assert.equal(omitted.osgo.status, "no evidence");
+    assert.equal(omitted.osgo.status, "not measured");
     assert.deepEqual(omitted.osgo.missing, ["ZCL_ABAPITI_INT8Y"]);
     const helper = report.constructs.find((c) => c.name === "Return");
-    assert.equal(helper.osgo.status, "no evidence");
+    assert.equal(helper.osgo.status, "not measured");
     assert.deepEqual(helper.osgo.missing, ["ZCL_HELPER"]);
     assert.equal(report.runtime.osgo.classes, 1);
     assert.equal(report.runtime.osgo.tests, 6);
@@ -160,14 +299,16 @@ ENDMETHOD. ENDCLASS.
     assert.equal(conversion.classes.size, 1);
   });
   it("joins every row, retains failures/refusals, and requires evidence for every using class", () => {
-    const rows = new Map([["A", [{status: "SUCCESS"}, {status: "FAILURE"}]],
+    const rows = new Map([["A", [{status: "SUCCESS", method: "CHECK"}, {status: "FAILURE", method: "OTHER"}]],
       ["B", [{status: "NOT_COMPILED", message: "unsupported form\nprivate detail"}]],
-      ["C", [{status: "SUCCESS"}]], ["D", [{status: "ERROR"}]]]);
+      ["C", [{status: "SUCCESS"}]], ["D", [{status: "ERROR", method: "CHECK"}]]]);
     assert.equal(evidence(["A", "C"], {rows}).status, "fails");
     assert.equal(evidence(["D"], {rows}).status, "fails");
     assert.deepEqual(evidence(["B"], {rows}).refusals, [{class: "B", message: "unsupported form"}]);
-    assert.equal(evidence(["C", "MISSING"], {rows}).status, "no evidence");
+    assert.equal(evidence(["C", "MISSING"], {rows}).status, "not measured");
     assert.equal(evidence(["C"], {rows}).status, "runs");
+    assert.equal(evidence(["D"], {rows: new Map([["D", [{status: "FAILURE", message: "no test ran"}]]])}).status, "not measured");
+    assert.equal(evidence(["D"], {rows: new Map([["D", [{source: "harness", status: "NOT_COMPILED", message: "node exited SIGABRT"}]]])}).status, "not measured");
   });
   it("generates every section from kernel fixtures and checks equal and changed pages via CLI", () => {
     const dirs = ["compat", "valid", "bits"].map((name) => join(root, "tools/testdata-kernel-" + name));
@@ -186,10 +327,13 @@ DO 1 TIMES. CONTINUE. ENDDO. RETURN. ENDMETHOD. ENDCLASS.
     ]}));
     writeFileSync(js, JSON.stringify({rows: [{class: "ZCL_KERNEL_VALID", status: "SUCCESS", method: "CHECK"}]}));
     const {markdown, report} = generate(dirs, {osgo: [go], osgjs: [js]});
-    for (const title of ["Runs on both", "Runs on one only", "Fails", "Refused", "Warned", "Seen but no evidence"])
-      assert.ok(markdown.includes("## " + title));
-    for (const title of ["Runs on both", "Fails", "Refused", "Seen but no evidence"])
-      assert.match(markdown, new RegExp("## " + title + " \\([1-9]"));
+    const titles = ["Runs on JS (osgo agrees)", "JS only", "osgo only", "Fails on JS", "Not measured on JS"];
+    let previous = -1;
+    for (const title of titles) {
+      const index = markdown.indexOf("## " + title);
+      assert.ok(index > previous, title); previous = index;
+    }
+    assert.match(markdown, /\| Lines \| VS Code \(OSG-JS\) \| osgo \|/);
     assert.match(markdown, /ZCL_KERNEL_BITS: FAILURE/);
     assert.match(markdown, /ZCL_KERNEL_COMPAT: unsupported write/);
     assert.ok(!markdown.includes("second line"));
@@ -200,12 +344,14 @@ DO 1 TIMES. CONTINUE. ENDDO. RETURN. ENDMETHOD. ENDCLASS.
     // A separate successful Go class creates the one-runtime section.
     const one = join(temp, "one.json");
     writeFileSync(one, JSON.stringify({rows: [{class: "ZCL_EXTRA", status: "SUCCESS", method: "CHECK"}]}));
-    const paths = {osgo: [go, one], osgjs: [js]};
+    const refused = join(temp, "js-refused.json");
+    writeFileSync(refused, JSON.stringify({rows: [{class: "ZCL_EXTRA", status: "NOT_COMPILED", message: "unsupported form"}]}));
+    const paths = {osgo: [go, one], osgjs: [js, refused]};
     const page = generate(dirs, paths).markdown;
-    assert.match(page, /## Runs on one only \([1-9]/);
+    assert.match(page, /## osgo only \([1-9]/);
     assert.equal(generate([...dirs].reverse(), paths).markdown, page);
     const file = join(temp, "page.md"), json = join(temp, "page.json");
-    const args = ["tools/osg-support.mjs", ...dirs, "--osgo", go, "--osgo", one, "--osgjs", js];
+    const args = ["tools/osg-support.mjs", ...dirs, "--osgo", go, "--osgo", one, "--osgjs", js, "--osgjs", refused];
     const cli = (more) => spawnSync(process.execPath, [...args, ...more], {cwd: root, encoding: "utf8"});
     assert.equal(cli(["--out", file, "--json", json]).status, 0);
     assert.equal(readFileSync(file, "utf8"), page);
@@ -216,7 +362,7 @@ DO 1 TIMES. CONTINUE. ENDDO. RETURN. ENDMETHOD. ENDCLASS.
     const changed = cli(["--check", file]);
     assert.equal(changed.status, 1); assert.match(changed.stderr, /first changed line/);
     const none = generate(dirs, {osgo: [], osgjs: []});
-    assert.ok(none.report.constructs.every((r) => r.osgo.status === "no evidence" && r.osgjs.status === "no evidence"));
+    assert.ok(none.report.constructs.every((r) => r.osgo.status === "not measured" && r.osgjs.status === "not measured"));
   });
   it("rejects malformed evidence and duplicate owners", () => {
     const bad = join(temp, "bad.json"); writeFileSync(bad, '{"rows":[{"status":"SUCCESS"}]}');

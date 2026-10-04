@@ -1,12 +1,9 @@
 // A generation: the transpiled system, built to the side, named by what
 // went into it, made live by renaming a link.
 //
-// Why this exists: `npm run transpile` used to do `rm -rf output` and then
-// build into the hole. A build that failed left the hole. The process that
-// was serving survived, because its modules were already loaded, and the
-// next recycle or restart did not, because there was nothing left to load.
-// So a bad save could quietly turn a working system into one that would not
-// come back up, and nobody found out until it did not.
+// A build into output/ used to destroy the previous generation before
+// succeeding. The serving process survived, but a restart could not.
+// Build beside the live generation so a failed save leaves it usable.
 //
 // Here a build never touches anything that is live. It goes into a
 // directory of its own under build/tmp, and only a complete one is renamed
@@ -19,15 +16,13 @@
 // so the runtime child, which reads OSD_ROOT/output and nothing else, is
 // switched by one rename and knows nothing about any of this.
 //
-// Measured before deciding: hashing every input by content is 105 ms for
-// this tree and 170 ms for the largest library, so the hash is computed on
-// every build and nobody has to reason about mtimes or commits. A
-// generation is 44 MB; keeping the last few is cheap. docs/generations.md
-// is the design this implements.
+// Content hashing takes 105 ms here, 170 ms for the largest library;
+// generations are 44 MB. See docs/generations.md for the design.
 import {createHash} from "node:crypto";
 import {libraryPath} from "./osd-lib-path.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
-import {execFileSync, spawnSync} from "node:child_process";
+import {execFileSync} from "node:child_process";
+import {run} from "./osd-build-command.mjs";
 import {existsSync, lstatSync, mkdirSync, openSync, closeSync, readdirSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, relative, resolve, resolve as resolvePath, sep} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -431,19 +426,6 @@ export function lock(paths) {
   }
   throw new Error("could not take the build lock");
 }
-
-function run(cmd, args, cwd) {
-  const r = spawnSync(cmd, args, {cwd, encoding: "utf8", maxBuffer: 64 << 20});
-  const output = (r.stdout ?? "") + (r.stderr ?? "");
-  if (r.status !== 0) {
-    const e = new Error(`${basename(cmd)} ${args.join(" ")} exited ${r.status ?? r.signal}`);
-    e.code = "FAILED";
-    e.output = output;
-    throw e;
-  }
-  return output;
-}
-
 
 // The transpiled modules reach outside output/ for one thing: the setup
 // hook the config names as "../test/setup.mjs" (and whatever else a config
