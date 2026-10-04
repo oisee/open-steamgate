@@ -33,7 +33,8 @@ function fixture(body = "zcl_report=>read( ).", implementations = {}) {
   for (const [name, source] of Object.entries(files)) registry.addFile(new core.MemoryFile(name, source));
   registry.parse();
   const objects = [...registry.getObjects()];
-  const store = {registry: () => registry, list: () => objects.map((o) => ({type: o.getType(), name: o.getName().toUpperCase()}))};
+  const store = {registry: () => registry, list: () => objects.map((o) => ({type: o.getType(), name: o.getName().toUpperCase()})),
+    find(type, name) { return this.list().find((o) => o.type === type && o.name === name.toUpperCase()); }};
   return {store, risk: new UnitRisk(store)};
 }
 const warning = (result) => riskWarning(harmless, {object: {name: "ZCL_TEST"}, writesTotal: result.total, ...result});
@@ -57,26 +58,17 @@ describe("ABAP Unit executable call closure", () => {
   const rtti = {
     "cl_abap_typedescr.clas.abap": `CLASS cl_abap_typedescr DEFINITION PUBLIC. PUBLIC SECTION.
       CLASS-METHODS describe_by_name IMPORTING p_name TYPE string.
-      ENDCLASS. CLASS cl_abap_typedescr IMPLEMENTATION. METHOD describe_by_name. ENDMETHOD. ENDCLASS.`,
+      CLASS-METHODS describe_by_object_ref IMPORTING p_object_ref TYPE REF TO object.
+      ENDCLASS. CLASS cl_abap_typedescr IMPLEMENTATION. METHOD describe_by_name. ENDMETHOD. METHOD describe_by_object_ref. ENDMETHOD. ENDCLASS.`,
   };
   for (const body of [
     "ASSIGN (`ZCL_WRITER=>VALUE`) TO <fs>.",
     "ASSIGN ('ZCL_WRITER')=>('VALUE') TO <fs>.",
     "ASSIGN ('ZCL_WRITER')=>value TO <fs>.",
     "ASSIGN zcl_writer=>('VALUE') TO <fs>.",
-    "DATA lo TYPE REF TO zcl_writer. ASSIGN lo->('VALUE') TO <fs>.",
     "ASSIGN COMPONENT comp OF STRUCTURE zcl_writer=>value TO <fs>.",
-    "ASSIGN local TO <fs> CASTING TYPE ('ZCL_WRITER').",
-    "ASSIGN local TO <fs> CASTING TYPE ('ZCL_WRITER=>TY_VALUE').",
-    "ASSIGN LOCAL COPY OF INITIAL ('ZCL_WRITER') TO <fs>.",
-    "CREATE DATA dref TYPE REF TO ('ZCL_WRITER').",
-    "CREATE DATA dref TYPE ('REF TO ZCL_WRITER').",
-    "DESCRIBE FIELD zcl_writer=>value TYPE typ.",
-    "cl_abap_typedescr=>describe_by_name( 'ZCL_WRITER' ).",
-    "cl_abap_typedescr=>describe_by_name( p_name = 'ZCL_WRITER' ).",
-    "cl_abap_typedescr=>describe_by_name( p_name = '\\CLASS=ZCL_WRITER' ).",
-    "CALL METHOD cl_abap_typedescr=>describe_by_name EXPORTING p_name = 'ZCL_WRITER'.",
-  ]) it(`class data/type designation follows superclass initialization: ${body}`, async () => {
+    "CREATE DATA dref TYPE c LENGTH zcl_writer=>value.",
+  ]) it(`static component designation follows superclass initialization: ${body}`, async () => {
     const result = await fixture(body, {...rtti,
       "zcl_base.clas.abap": `CLASS zcl_base DEFINITION PUBLIC. PUBLIC SECTION.
         CLASS-METHODS class_constructor. ENDCLASS. CLASS zcl_base IMPLEMENTATION.
@@ -94,19 +86,13 @@ describe("ABAP Unit executable call closure", () => {
   for (const [body, statement] of [
     ["ASSIGN (name) TO <fs>.", "ASSIGN"],
     ["ASSIGN (class)=>(attr) TO <fs>.", "ASSIGN"],
-    ["ASSIGN lo->(attr) TO <fs>.", "ASSIGN"],
-    ["ASSIGN local TO <fs> CASTING TYPE (name).", "ASSIGN"],
-    ["CREATE DATA dref TYPE (name).", "CREATE DATA"],
-    ["CREATE DATA dref TYPE REF TO (name).", "CREATE DATA"],
-    ["cl_abap_typedescr=>describe_by_name( p_name = name ).", "RTTI DESCRIBE_BY_NAME"],
-    ["CALL METHOD cl_abap_typedescr=>describe_by_name EXPORTING p_name = name.", "RTTI DESCRIBE_BY_NAME"],
-  ]) it(`non-literal data/type designation remains uncertain: ${body}`, async () => {
+  ]) it(`non-literal static component designation remains uncertain: ${body}`, async () => {
     const result = await fixture(body, {...staticWriter, ...rtti}).risk.writesReached("ZCL_TEST");
     expect(result.total).to.equal(0);
     expect(result.dynamicCallsTotal).to.equal(1);
     expect(warning(result)).to.contain(`may reach a database write through a dynamic ${statement}`)
       .and.contain("LTCL_TEST=>RUN (zcl_test.clas.testclasses.abap:");
-    expect(result.reached).to.equal(statement === "RTTI DESCRIBE_BY_NAME" ? 2 : 1);
+    expect(result.reached).to.equal(1);
   });
 
   it("unknown attributes retain uncertainty alongside the known class initializer", async () => {
@@ -116,8 +102,62 @@ describe("ABAP Unit executable call closure", () => {
   });
 
   for (const body of [
+    "DATA lo TYPE REF TO zcl_writer. ASSIGN lo->('VALUE') TO <fs>.",
+    "ASSIGN lo->(attr) TO <fs>.",
+    "ASSIGN local TO <fs> CASTING TYPE ('ZCL_WRITER').",
+    "ASSIGN local TO <fs> CASTING TYPE ('ZCL_WRITER=>TY_VALUE').",
+    "ASSIGN local TO <fs> CASTING TYPE zcl_writer=>ty_value.",
+    "ASSIGN local TO <fs> CASTING TYPE (name).",
+    "ASSIGN LOCAL COPY OF INITIAL ('ZCL_WRITER') TO <fs>.",
+    "ASSIGN LOCAL COPY OF INITIAL (name) TO <fs>.",
+    "CREATE DATA dref TYPE REF TO ('ZCL_WRITER').",
+    "CREATE DATA dref TYPE ('REF TO ZCL_WRITER').",
+    "CREATE DATA dref TYPE ('ZCL_WRITER=>TY_VALUE').",
+    "CREATE DATA dref TYPE ('\\CLASS=ZCL_WRITER').",
+    "CREATE DATA dref TYPE (name).",
+    "DATA lv_class TYPE string. CREATE DATA lr TYPE REF TO (lv_class).",
+    "CREATE DATA dref LIKE zcl_writer=>value.",
+    "DESCRIBE FIELD zcl_writer=>value TYPE typ.",
+    "cl_abap_typedescr=>describe_by_name( 'ZCL_WRITER' ).",
+    "cl_abap_typedescr=>describe_by_name( p_name = 'ZCL_WRITER' ).",
+    "cl_abap_typedescr=>describe_by_name( p_name = '\\CLASS=ZCL_WRITER' ).",
+    "cl_abap_typedescr=>describe_by_name( p_name = name ).",
+    "DATA lo TYPE REF TO zcl_writer. cl_abap_typedescr=>describe_by_object_ref( lo ).",
+    "CALL METHOD cl_abap_typedescr=>describe_by_name EXPORTING p_name = name.",
+    "CALL METHOD cl_abap_typedescr=>describe_by_name EXPORTING p_name = 'ZCL_WRITER'.",
+  ]) it(`noise guard: type inspection and instance designations stay quiet: ${body}`, async () => {
+    const {risk, store} = fixture(body, {...staticWriter, ...rtti});
+    const result = await risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(0);
+    expect(result.dynamicCallsTotal).to.equal(0);
+    expect(warning(result)).to.equal(undefined);
+    const runner = new UnitRun(store);
+    const plan = await runner.withRisk(runner.classes("CLAS", "ZCL_TEST"));
+    expect(plan.classes[0]).to.include({schedule: "harmless", guard: true});
+  });
+
+  for (const declaration of [
+    "DATA name TYPE c LENGTH 1.", "DATA name TYPE i.", "DATA name TYPE n LENGTH 40.",
+    "TYPES ty_name TYPE c LENGTH 1. DATA name TYPE ty_name.",
+    "DATA: BEGIN OF local, name TYPE c LENGTH 1, END OF local.",
+  ]) it(`noise guard: a name whose type cannot contain => stays quiet: ${declaration}`, async () => {
+    const field = declaration.includes("BEGIN OF") ? "local-name" : "name";
+    const result = await fixture(`${declaration} ASSIGN (${field}) TO <fs>.`, staticWriter).risk.writesReached("ZCL_TEST");
+    expect(result.total).to.equal(0);
+    expect(result.dynamicCallsTotal).to.equal(0);
+  });
+
+  for (const declaration of ["DATA name TYPE string.", "DATA name TYPE c LENGTH 80."])
+    it(`names capable of containing a static selector remain uncertain: ${declaration}`, async () => {
+      const result = await fixture(`${declaration} ASSIGN (name) TO <fs>.`, staticWriter).risk.writesReached("ZCL_TEST");
+      expect(result.total).to.equal(0);
+      expect(result.dynamicCallsTotal).to.equal(1);
+    });
+
+  for (const body of [
     "ASSIGN dref->* TO <fs>.", "ASSIGN <fs>-comp TO <other>.", "ASSIGN local TO <fs>.",
-    "ASSIGN ('LOCAL') TO <fs>.", "ASSIGN COMPONENT comp OF STRUCTURE local TO <fs>.",
+    "ASSIGN ('LOCAL') TO <fs>.", "ASSIGN ('ZCL_WRITER') TO <fs>.",
+    "ASSIGN COMPONENT comp OF STRUCTURE local TO <fs>.",
     "ASSIGN local TO <fs> CASTING TYPE ('I').", "CREATE DATA dref TYPE ('I').",
     "DESCRIBE FIELD local TYPE typ.", "cl_abap_typedescr=>describe_by_name( 'I' ).",
     "ASSIGN zcl_reader=>('ZCL_WRITER') TO <fs>.",

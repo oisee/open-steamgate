@@ -22,17 +22,22 @@ writes initialize the class and its entire superclass chain. Constant access
 is included conservatively; type-only references such as `TYPE class=>type`
 remain declarations. Instantiation also follows the parents' instance
 constructors, preserving the concrete receiver through `super->constructor`.
-Dynamic data/type designations in `ASSIGN` (including component access and
-`CASTING TYPE`), `ASSIGN LOCAL COPY` and `CREATE DATA` also initialize literal
-class targets. This includes `class=>attribute`, `REF TO class` and absolute
-RTTI `\CLASS=class` names. `DESCRIBE` static component operands and RTTI
-`describe_by_name` calls, including named parameters and legacy `CALL METHOD`,
-follow the same superclass initialization chain. Non-literal names produce
-uncertainty naming the statement and source position, without expanding to
-unrelated classes. Literal local/DDIC names, ordinary local/component access
-and `ASSIGN dref->*` remain quiet. Dynamic attribute access through a typed
-instance also initializes its known class; an unknown attribute name keeps
-the separate uncertainty finding.
+Dynamic `ASSIGN` follows initialization only when its operand designates a
+static component: `ASSIGN ('class=>attribute')`, `ASSIGN ('class')=>attribute`
+and `ASSIGN (class)=>(attribute)`. Unknown class/component designations give
+uncertainty without expanding to unrelated classes. A literal without `=>`
+is local data, not class access. For `ASSIGN (name)`, a declared numeric,
+date/time or one-character type cannot contain `=>` and stays quiet; longer
+character names and unavailable types remain uncertain. Component names and
+attributes reached through instance references are not static class names.
+
+Type-only designations do not initialize the designated class: `TYPE REF TO`,
+`CREATE DATA ... TYPE`/`LIKE`, `CASTING TYPE`, `ASSIGN LOCAL COPY OF INITIAL`,
+`DESCRIBE` and RTTI `describe_by_name`/`describe_by_object_ref`. RTTI methods
+remain ordinary executable calls: their bodies, constructions, and real
+static accesses are still followed. There is no assertion-framework exemption.
+Value operands such as `CREATE DATA ... LENGTH class=>attribute` still access
+the static component and initialize its class.
 Assertion methods are followed when
 called; the test runner is not implicitly a root.
 
@@ -203,9 +208,84 @@ class and attribute names, superclass initialization, RTTI call forms, and
 local/data-reference accesses. The fleet fixture remains **2 objects /
 0 writes / 0 uncertainties** before and after this round.
 
-The repository's token tests call `ASSERT_EQUALS`, whose table-comparison
-helper reaches RTTI's `CREATE DATA ref TYPE (p_name)`. That non-literal type
-now contributes uncertainty and schedules the object serially; there is no
-framework exemption. Its integration regression checks that finding, and
-the separate runtime regression explicitly enables the guard to verify that
-the actual read-only run still passes.
+Round 4 also treated type-only designations as initialization. Round 5 removes
+that overreach: the token tests' `ASSERT_EQUALS` table comparison reaches RTTI's
+`CREATE DATA ref TYPE (p_name)`, which creates data, not a class instance.
+The integration noise guard now requires **0 writes / 0 uncertainties** and
+HARMLESS parallel scheduling with the runtime database guard enabled. The
+read-only run passes through that discovered plan. Literal static `ASSIGN`
+still reaches **2 objects / 1 write / 0 uncertainties**; the fleet fixture
+remains **2 objects / 0 writes / 0 uncertainties**.
+
+## Round 5 scheduling audit
+
+Risk discovery over every test-bearing object in this checkout found **96
+objects / 131 test classes**. The main baseline is `origin/main` at `b3d1b5dc`;
+the audit used that revision's analyzer and ABAP sources (restoring the two
+ADT discovery sources that differ on this branch). It derives xref rows from
+those sources, without a database or running tests. Library and generated
+inputs are identical between the comparisons. Separate snapshots recorded
+round 4 and the current analyzer against the branch's sources.
+
+| Analyzer | HARMLESS parallel | Serial |
+| --- | ---: | ---: |
+| main | 33 | 98 |
+| round 4 | 1 | 130 |
+| round 5 | 39 | 92 |
+
+Versus main, **34 classes in 26 objects change schedule: 20 serial →
+parallel and 14 parallel → serial**; 97 classes keep their schedule. Each
+changed case is listed below. The 14 extra serial classes already had these
+findings before round 5: they reflect the earlier unresolved-execution policy,
+including conservative interface-constant findings, not type-name uncertainty
+introduced by this fix. No confirmed database write was found in those 14
+classes. Versus round 4, **38 classes return to parallel and none become
+serial**. `ZCL_OSD_ABAP_TOKENS` stays parallel versus main and returns to
+parallel versus round 4, with 0 writes and 0 uncertainty.
+
+| Object | Changed test classes | Main → branch | Reason |
+| --- | --- | --- | --- |
+| `ZCL_OSD_ADT_CHECKRUN` | `LTCL_PROTOCOL` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_CLASSRUN` | `LTCL_CLASSRUN` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_DISCOVERY` | `LTCL_DISCOVERY` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_ENTITY` | `LTCL_HELPER` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_LISTENERS` | `LTCL_LISTENERS` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_OBJECT` | `LTCL_OBJECT` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_REENTRANCE` | `LTCL_REENTRANCE` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_RIS_STATIC` | `LTCL_STATIC` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_SCAN` | `LTCL_HELPER` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_SEARCH` | `LTCL_SEARCH` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_SOURCE` | `LTCL_SOURCE` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_TREE` | `LTCL_TREE` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_TYPES` | `LTCL_HELPER` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_TYPESTRUCTURE` | `LTCL_TYPESTRUCTURE` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ADT_VFS` | `LTCL_VFS` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_BSP` | `LTCL_SPLIT`, `LTCL_BASE`, `LTCL_NAMESPACE` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_FORM_TEST` | `ZCL_OSD_FORM_TEST`, `LTCL_FORM` | parallel → serial | Unresolved request-interface call in `ZCL_OSD_FORM=>FIELDS`, line 77; the concrete request is supplied externally. |
+| `ZCL_OSD_SXML_CONTRACT_TEST` | `LTCL_SOURCES`, `LTCL_NORMALISE`, `LTCL_CONTRACT`, `LTCL_READERS` | parallel → serial | Unresolved interface constants/static accesses in `EVENTS` (lines 223–244) and unmodeled execution in reader bodies; conservative uncertainty, not a confirmed write. |
+| `ZCL_OSD_SXML_RECORDER_TEST` | `LTCL_RECORDER` | parallel → serial | Calls the same contract/reader paths as the contract tests; retains their conservative uncertainty. |
+| `ZCL_OSD_SXML_STREAM_TEST` | `LTCL_STREAM`, `LTCL_PULL`, `LTCL_DATASET` | parallel → serial | Interface node-type constants in `NODE_API` (lines 53–71) and reader paths remain unresolved. |
+| `ZCL_OSD_SXML_TEST` | `LTCL_READER` | parallel → serial | Reader interface constants in `CL_SXML_STRING_READER` (lines 1223–1247) and unmodeled reader execution remain uncertain. |
+| `ZCL_OSD_TIMER_TEST` | `LTCL_TIMER` | serial → parallel | Main counted 472 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_OSD_ZIP_TEST` | `LTCL_ZIP` | parallel → serial | Dataset execution (`OPEN DATASET`, `TRANSFER`, `CLOSE DATASET`, `DELETE DATASET`) remains unmodeled and uncertain. |
+| `ZCL_STG_ICF_DEMO` | `LTCL_STG_ICF_DEMO` | serial → parallel | Main counted 909 writes across dependency objects; executable test calls reach 0 writes and 0 uncertainty. |
+| `ZCL_VDB_100_ANYDB` | `LTCL_RANK` | parallel → serial | Conservative unresolved interface constant `ZIF_VDB_100_ENGINE=>GC_MAX_DIMS`, line 33. |
+| `ZCL_ZOSD_TEST_DEMO` | `LTCL_ZOSD_TEST_DEMO` | parallel → serial | Conservative unresolved interface constants in `GREET`/`STATUS_TEXT`, lines 31 and 45. |
+
+The round-4 analyzer fails the new type-inspection noise guards (**21 failing /
+2 passing**), including literal/dynamic `CREATE DATA`, casting, RTTI and
+instance attributes. The dedicated internal-table `ASSERT_EQUALS` noise guard
+also fails against round 4; it passes with the current analyzer and the real
+assertion library. Restoring main's original graph expansion again makes the
+fleet no-warning assertions fail: **5 reached objects / 2 writes**, versus
+**2 objects / 0 writes / 0 uncertainty** now. The legacy type edge leaves the
+report's executable reach at its unused interface reference, then fans out
+to the unrelated writer implementation.
+
+Focused validation passed **149 risk/call checks, 359 xref/closure/VSIX/ADT/size
+checks and 55 suite-runner checks** (563 total). The suite manifest reports
+287 ordinary and 5 grouped suites with no drift. The size guard reports no
+breach in files this branch touches; six inherited main breaches remain
+advisory. The structural leak scan read the six changed files and found zero
+matches; the private identifier list is unavailable, so identifier-specific
+coverage could not be completed.

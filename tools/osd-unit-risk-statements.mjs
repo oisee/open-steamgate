@@ -6,6 +6,7 @@ const groups = {
     Add AddCorresponding Append Assert AuthorityCheck
     Break BreakId Case CaseType Catch CatchSystemExceptions Check
     Clear CloseCursor Collect Compute Concatenate Condense Continue Convert
+    CreateData Describe AssignLocalCopy
     ConvertText Data DataBegin DataEnd DeleteInternal DeleteMemory
     Divide Do Else ElseIf EndAt EndCase EndCatch EndDo EndIf EndLoop
     EndOn EndProvide EndSelect EndTry EndWhile EndWith Exit FetchNextCursor
@@ -36,9 +37,9 @@ const groups = {
   // expression walk (which also runs for assignments, reads and control flow).
   call: `Call CallFunction`,
   construction: `CreateObject Raise`,
-  // Dynamic data/type designations can load classes without constructing an
-  // instance. Their literal names and unknown targets need a separate audit.
-  designation: `Assign AssignLocalCopy CreateData Describe`,
+  // ASSIGN can access a static attribute through a dynamic name. Type-only
+  // designations (CREATE DATA, CASTING TYPE, DESCRIBE) do not initialize classes.
+  designation: `Assign`,
   write: `
     InsertDatabase UpdateDatabase ModifyDatabase DeleteDatabase MergeDatabase
     Commit Rollback CommitEntities RollbackEntities ModifyEntities

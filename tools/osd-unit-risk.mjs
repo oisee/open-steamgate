@@ -171,15 +171,20 @@ export class UnitRisk {
     const emit = (statement, op) => ops.push({statement, ...op});
     const designation = (expression, statement, reason, classRequired = false) => {
       const name = literalName(expression);
-      if (name === undefined) { emit(statement, {action: "unknown", reason}); return; }
-      // Absolute RTTI class names, reference types and static component names
-      // all identify the class to load. Ordinary literal local/DDIC names do not.
-      const absolute = name.match(/\\CLASS=([/\w]+)/)?.[1];
-      const reference = name.match(/^REF\s+TO\s+([/\w]+)/)?.[1];
+      if (name === undefined) {
+        // A component index or a one-character/numeric name cannot contain
+        // the static selector =>. Unknown and longer character names can.
+        const type = dataType(expression);
+        const local = type instanceof BasicTypes.CharacterType && type.getLength() < 2
+          || ["IntegerType", "Integer8Type", "PackedType", "FloatType", "NumericType",
+            "DateType", "TimeType", "DecFloat16Type", "DecFloat34Type"].includes(type?.constructor.name);
+        if (classRequired || !local) emit(statement, {action: "unknown", reason});
+        return;
+      }
+      // Only a static component designation executes class initialization.
+      // Bare class names, REF TO and RTTI names merely designate types.
       const component = name.match(/^([/\w]+)=>/)?.[1];
-      const type = absolute ?? reference ?? component ?? name;
-      if (graph.lookup(node.owner, type) || absolute || reference || component || classRequired)
-        emit(statement, {action: "init", type});
+      if (classRequired || component) emit(statement, {action: "init", type: classRequired ? name : component});
     };
     // Native bodies have no ABAP call AST; even an empty or READ-ONLY AMDP is
     // a database escape, as are ADBC calls without available library bodies.
@@ -191,6 +196,23 @@ export class UnitRisk {
     };
     // Syntax scopes are lazy and cached per object; simple declared references
     // do not pay for a whole syntax pass. Complex fields use abaplint's types.
+    const dataType = (expression) => {
+      if (!expression) return undefined;
+      const children = expression.getChildren();
+      const variable = upper(children[0]?.concatTokens() ?? "");
+      try {
+        node.scope ??= new SyntaxLogic(graph.registry, node.registryObject).run().spaghetti
+          .lookupPosition(node.statements[0]?.getStart() ?? node.at.getStart(), node.fullFile);
+        let type = node.scope?.findVariable(variable)?.getType();
+        for (const child of children.slice(1)) {
+          const kind = child.get().constructor.name;
+          if (kind === "TableExpression") type = type?.getRowType?.();
+          else if (kind === "ComponentName") type = type?.getComponentByName?.(upper(child.concatTokens()));
+          else if (kind !== "Dash") return undefined;
+        }
+        return type;
+      } catch { return undefined; } // caller records uncertainty, never silence
+    };
     const fieldType = (expression) => {
       const children = expression.getChildren();
       const first = children[0];
@@ -238,14 +260,6 @@ export class UnitRisk {
           receiver = receiverOf(child);
         } else if (kind === "MethodCall" || kind === "AttributeName" && i === children.length - 1) {
           const method = upper((child.findDirectExpression?.(Expressions.MethodName) ?? child).concatTokens());
-          if (/^CL_ABAP_\w*DESCR$/.test(receiver.type ?? "") && method === "DESCRIBE_BY_NAME") {
-            const params = child.findDirectExpression(Expressions.MethodCallParam)
-              ?? (kind === "AttributeName" ? statement.findDirectExpression(Expressions.MethodCallBody) : undefined);
-            const named = params?.findAllExpressions(Expressions.ParameterS)
-              .find((p) => upper(p.findDirectExpression(Expressions.ParameterName)?.concatTokens()) === "P_NAME");
-            const target = named?.findDirectExpression(Expressions.Source) ?? params?.findDirectExpression(Expressions.Source);
-            designation(target, statement, "a dynamic RTTI DESCRIBE_BY_NAME call");
-          }
           emit(statement, {action: "call", ...receiver, method});
           if (adbc(receiver.type) || adbcOwner(graph, graph.lookup(node.owner, receiver.type)))
             emit(statement, {action: "write", kind: "ADBC call"});
@@ -277,56 +291,47 @@ export class UnitRisk {
       const dynamicMethod = kind === "Call" && (/(?:->|=>)\s*\(/.test(executable) || /^CALL METHOD\s+\(/.test(executable));
       if (dynamicMethod) emit(statement, {action: "unknown", reason: "a dynamic method call"});
       const classification = statementKindOf(kind);
-      const designationLabel = {Assign: "ASSIGN", AssignLocalCopy: "ASSIGN LOCAL COPY", CreateData: "CREATE DATA", Describe: "DESCRIBE"}[kind];
       if (classification === "unknown" || classification === "write" && !verdict)
         emit(statement, {action: "unknown", reason: `an unknown ${kind} statement`});
 
       // Static component references are initialization, including constants
       // conservatively. TypeName nodes are declarations, not executable access.
       const scanStatic = (expression) => {
-        if (expression.get().constructor.name === "TypeName") return;
+        if (expression.get().constructor.name === "TypeName" || kind === "Describe") return;
         const children = expression.getChildren?.() ?? [];
         for (let i = 0; i < children.length; i++) {
           if (children[i].get().constructor.name === "StaticArrow") {
             const previous = children[i - 1];
             if (previous?.get().constructor.name === "Dynamic")
               designation(previous.findDirectExpression(Expressions.Constant) ?? previous.findDirectExpression(Expressions.FieldChain),
-                statement, `a dynamic ${designationLabel ?? kind} class designation`, true);
+                statement, `a dynamic ${kind === "Assign" ? "ASSIGN" : kind} class designation`, true);
             else if (previous?.get().constructor.name === "ClassName"
                 || classification === "designation" && /^[/\w]+$/.test(previous?.concatTokens() ?? ""))
               emit(statement, {action: "init", type: upper(previous.concatTokens())});
             else emit(statement, {action: "unknown", reason: "an unresolved static access"});
           }
+          // LIKE inspects a data object's type, while LENGTH/DECIMALS read
+          // their values and still count as real static component access.
+          if (kind === "CreateData" && upper(children[i - 1]?.concatTokens()) === "LIKE") continue;
           if (children[i].getChildren) scanStatic(children[i]);
         }
       };
       scanStatic(statement);
-      if (classification === "designation") {
-        const scanDesignation = (expression) => {
-          const children = expression.getChildren?.() ?? [];
-          for (let i = 0; i < children.length; i++) {
-            const child = children[i];
-            if (child.get().constructor.name === "Dynamic") {
-              // A dynamic table key cannot name a class. StaticArrow's left
-              // operand was already handled with the required-class policy.
-              if ((kind === "CreateData" && !["TYPE", "TO", "OF", "LIKE"].includes(upper(children[i - 1]?.concatTokens())))
-                  || children[i + 1]?.get().constructor.name === "StaticArrow") continue;
-              const target = child.findDirectExpression(Expressions.Constant) ?? child.findDirectExpression(Expressions.FieldChain);
-              const arrow = children[i - 1]?.get().constructor.name;
-              // The right side names an attribute, even when its spelling
-              // happens to match an unrelated class's name.
-              if (!["StaticArrow", "InstanceArrow"].includes(arrow) || literalName(target) === undefined)
-                designation(target, statement, `a dynamic ${designationLabel} designation`);
-              if (arrow === "InstanceArrow") {
-                const source = children[i - 2];
-                const field = source?.findDirectExpression(Expressions.FieldChain) ?? source;
-                const type = field && fieldType(field);
-                if (graph.lookup(node.owner, type)) emit(statement, {action: "init", type});
-              }
-            } else if (child.getChildren) scanDesignation(child);
-          }
-        };
-        scanDesignation(statement);
+      if (kind === "Assign") {
+        // Inspect only the assigned operand. CASTING TYPE, component names
+        // and attributes through an instance cannot designate a static class.
+        const source = statement.findDirectExpression(Expressions.AssignSource);
+        const children = source?.getChildren() ?? [];
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+          if (child.get().constructor.name !== "Dynamic"
+              || children[i + 1]?.get().constructor.name === "StaticArrow") continue;
+          const target = child.findDirectExpression(Expressions.Constant) ?? child.findDirectExpression(Expressions.FieldChain);
+          if (children[i - 1]?.get().constructor.name === "StaticArrow") {
+            if (literalName(target) === undefined)
+              emit(statement, {action: "unknown", reason: "a dynamic ASSIGN attribute designation"});
+          } else if (children.length === 1) designation(target, statement, "a dynamic ASSIGN designation");
+        }
       }
       if (kind === "CreateObject" && !verdict?.startsWith("a dynamic")) {
         const target = statement.findDirectExpression(Expressions.Target);
