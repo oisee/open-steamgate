@@ -5,6 +5,13 @@ const {join} = require("node:path");
 const {randomBytes} = require("node:crypto");
 const EXTENSION_ID = "murbani.vscode-abap-remote-fs";
 const OFFER_KEY = "osd.abapfs.local.offered";
+const MOUNT_OFFER_KEY = "osd.abapfs.local.mountOffered";
+const RESTART_KEY = "osd.abapfs.local.wasRunning";
+const CONNECTION_ID = "osd_local";
+
+function canAutoConnect(workspace) {
+  return workspace.workspaceFile !== undefined || (workspace.workspaceFolders?.length ?? 0) !== 1;
+}
 
 // Called only at the serving process boundary, after the build. Never persist it.
 function startCredentials(env) {
@@ -17,6 +24,12 @@ function startCredentials(env) {
 }
 
 async function registerAbapFsBridge(vscode, context, controller) {
+  // Consume before starting: a failed start must not loop on every activation.
+  // Keep recovery independent of whether the optional provider is installed.
+  if (context.workspaceState?.get(RESTART_KEY, false)) {
+    await context.workspaceState.update(RESTART_KEY, undefined);
+    await controller.start();
+  }
   const extension = vscode.extensions?.getExtension(EXTENSION_ID);
   if (!extension) return;
   let api;
@@ -28,19 +41,42 @@ async function registerAbapFsBridge(vscode, context, controller) {
   let disposed = false;
   let offered = false;
   const provider = api?.version === 2 && typeof api.registerConnectionProvider === "function";
+  const offerMount = () => {
+    if (offered || context.workspaceState.get(MOUNT_OFFER_KEY, false)) return;
+    offered = true;
+    void (async () => {
+      // Remember dismissal as well as Not now, across starts and reloads.
+      await context.workspaceState.update(MOUNT_OFFER_KEY, true);
+      if (disposed) return;
+      const choice = await vscode.window.showInformationMessage(
+        'Open "OSD (local)" in ABAP-FS? VS Code will reload this window; the system will restart automatically afterward.',
+        "Open OSD (local) in ABAP-FS", "Not now");
+      if (choice !== "Open OSD (local) in ABAP-FS" || disposed || !current) return;
+      const reload = !canAutoConnect(vscode.workspace);
+      if (reload) await context.workspaceState.update(RESTART_KEY, true);
+      try { await api.connect(CONNECTION_ID); }
+      catch {
+        if (reload) await context.workspaceState.update(RESTART_KEY, undefined);
+        throw new Error("mount failed");
+      }
+    })().catch(() => vscode.window.showWarningMessage("osd: Could not open the local ABAP-FS connection."));
+  };
   const refresh = () => {
     const launcher = controller.launcher;
     const credentials = launcher?.state === "running" ? launcher.adtCredentials : undefined;
     if (current === credentials) return;
     current = credentials;
     connections = credentials ? [{
-      id: "osd_local", name: "OSD (local)", url: `http://127.0.0.1:${launcher.port}`,
+      id: CONNECTION_ID, name: "OSD (local)", url: `http://127.0.0.1:${launcher.port}`,
       client: credentials.client, language: credentials.language, user: credentials.user,
-      autoConnect: true,
+      autoConnect: canAutoConnect(vscode.workspace),
       auth: {kind: "provider", getHeaders: async () => current === credentials && !disposed
         ? {Authorization: `Bearer ${credentials.token}`} : {}},
     }] : [];
-    if (provider) changed.fire();
+    if (provider) {
+      changed.fire();
+      if (credentials && !canAutoConnect(vscode.workspace)) offerMount();
+    }
     else if (credentials && !offered) {
       const url = `http://127.0.0.1:${launcher.port}`;
       offered = true;
