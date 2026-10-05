@@ -51,6 +51,8 @@ describe("C1 checkruns live Node byte diff",function () {
       params.set("packagename", "$MISSING");
       expect((await fronts.diff(base+resource+"?"+params,"POST")).body.toString()).to.include("<SEVERITY>ERROR</SEVERITY>");
     }
+    const mixed = new URLSearchParams({objtype:"DEVC/K",objname:"$MIXED",packagename:"$TMP"});
+    expect((await fronts.diff(base+"PaCkAgEs/VaLiDaTiOn/?"+mixed,"POST")).body.toString()).to.include("<CHECK_RESULT>X</CHECK_RESULT>");
     for (const name of ["ZNEW", "$TMP_"]) {
       const params = new URLSearchParams({objtype:"DEVC/K",objname:name,packagename:"$TMP"});
       // $TMP_ is a local name but CREATE refuses its empty folder suffix.

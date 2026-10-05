@@ -13,7 +13,8 @@ CLASS zcl_osd_adt_create_valid IMPLEMENTATION.
     DATA lv_result TYPE string.
     DATA lv_severity TYPE string VALUE `ERROR`.
     DATA lv_message TYPE string.
-    IF is_request-path = `/sap/bc/adt/packages/validation`.
+    IF to_lower( is_request-path ) = `/sap/bc/adt/packages/validation`
+        OR to_lower( is_request-path ) = `/sap/bc/adt/packages/validation/`.
       lv_resource = `PACKAGE`.
     ENDIF.
     CREATE OBJECT lo_input.
