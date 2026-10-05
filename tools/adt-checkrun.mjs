@@ -1,7 +1,6 @@
 // Shared analysis only: ADT request scanning and documents belong to the routes.
 import {TYPES} from "./osd-store-types.mjs";
 import {portabilityWarnings} from "./amdp-gen.mjs";
-import {warmCheck} from "./adt-warm-check.mjs";
 import {frameUri, uriOf} from "./adt-documents.mjs";
 
 export async function checkRunReport(store, object, configured = process.env.STG_DB ?? "sqlite") {
@@ -10,7 +9,7 @@ export async function checkRunReport(store, object, configured = process.env.STG
       store.read(object.type, object.name);
       return {status: "processed", issues: [], statusText: "no dictionary check here; the object is present and readable"};
     }
-    const result = await warmCheck(store, object) ?? store.check(object.type, object.name, {source: object.source, include: object.include});
+    const result = await store.checkWarm?.(object) ?? store.check(object.type, object.name, {source: object.source, include: object.include});
     const source = object.source ?? (object.type === "CLAS" ? store.read(object.type, object.name)?.source : undefined);
     const engine = ["file", "memory", "sqljs"].includes(configured) ? "sqlite" : configured;
     const warnings = object.type === "CLAS" && (object.include === undefined || object.include === "main") && source

@@ -578,6 +578,14 @@ export class WarmCompiler {
       if (!(o instanceof core.ABAPObject)) continue;
       for (const t of this.reads.get(key(o)) ?? []) this.readers.get(t)?.delete(o);
       const reads = new Set();
+      // INCLUDE is a dependency even when its body declares no identifier
+      // the consumer references (for example, it only writes a literal).
+      for (const file of o.getABAPFiles()) for (const statement of file.getStatements()) {
+        if (!(statement.get() instanceof core.Statements.Include)) continue;
+        const name = statement.findFirstExpression(core.Expressions.IncludeName)?.concatTokens();
+        const included = name && this.reg.getObject("PROG", name);
+        if (included && included !== o) reads.add(key(included));
+      }
       const top = new core.SyntaxLogic(this.reg, o).run().spaghetti?.getTop();
       const stack = top === undefined ? [] : [top];
       while (stack.length > 0) {

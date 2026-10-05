@@ -24,12 +24,15 @@ ENDCLASS.
     "zcl_wc_caller.clas.abap": provider.replaceAll("zcl_wc", "zcl_wc_caller").replace("rv = 1.", "rv = zcl_wc=>get( )."),
     "zw_inc.prog.abap": "DATA gv_value TYPE i.\ngv_value = 1.\n",
     "zw_report.prog.abap": "REPORT zw_report.\nINCLUDE zw_inc.\nWRITE gv_value.\n",
+    "zw_text_inc.prog.abap": "WRITE 'constant'.\n",
+    "zw_text_report.prog.abap": "REPORT zw_text_report.\nINCLUDE zw_text_inc.\n",
   };
   before(async () => {
     root = mkdtempSync(join(tmpdir(), "osd-warm-edit-"));
     mkdirSync(join(root, "src"));
     for (const [name, source] of Object.entries(sources)) writeFileSync(join(root, "src", name), source);
     writeFileSync(join(root, "src", "zw_inc.prog.xml"), '<abapGit><asx:abap xmlns:asx="http://www.sap.com/abapxml"><asx:values><PROGDIR><NAME>ZW_INC</NAME><SUBC>I</SUBC></PROGDIR></asx:values></asx:abap></abapGit>');
+    writeFileSync(join(root, "src", "zw_text_inc.prog.xml"), '<abapGit><asx:abap xmlns:asx="http://www.sap.com/abapxml"><asx:values><PROGDIR><NAME>ZW_TEXT_INC</NAME><SUBC>I</SUBC></PROGDIR></asx:values></asx:abap></abapGit>');
     writeFileSync(join(root, "package.json"), '{}');
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: "src", input_filter: [], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
       options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"}}));
@@ -56,6 +59,16 @@ ENDCLASS.
     const result = await compiler.build();
     expect(result.modules).to.include("zw_report.prog.mjs");
     expect(result.hostHeld).to.include("zw_report.prog.mjs");
+    const verification = await compiler.verify(result.hash);
+    expect(verification.verdict, JSON.stringify(verification)).to.equal("same");
+  });
+
+  it("tracks INCLUDE consumers without an identifier reference into the include", async () => {
+    expect(compiler.closureOf("PROG", "ZW_TEXT_INC").map(o => o.name)).to.include("ZW_TEXT_REPORT");
+    writeFileSync(join(root, "src", "zw_text_inc.prog.abap"), "WRITE 'changed'.\n");
+    const result = await compiler.build();
+    expect(result.modules).to.include("zw_text_report.prog.mjs");
+    expect(result.hostHeld).to.include("zw_text_report.prog.mjs");
     const verification = await compiler.verify(result.hash);
     expect(verification.verdict, JSON.stringify(verification)).to.equal("same");
   });

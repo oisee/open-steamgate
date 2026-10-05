@@ -20,6 +20,7 @@ import {createHash} from "node:crypto";
 import {CREATABLE} from "./osd-store-create.mjs";
 import {StoreVersions} from "./osd-store-versions.mjs";
 import {buildRegistry, forgetRegistry, registryIssues, walkStoreFiles, withSource} from "./osd-store-registry.mjs";
+import {warmCheck} from "./adt-warm-check.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
@@ -1300,6 +1301,9 @@ export class ObjectStore {
     const target = this.#fileFor(type, name, entry, options.include ?? "main");
     return withSource(this, target.file, options.source, (registry) => registryIssues(registry, type, target.name));
   }
+
+  // The Node store owns compiler IPC; browser check runners remain portable.
+  checkWarm(object) { return warmCheck(this, object); }
 
 
   // which file a source belongs in: the object's own, the class include the
