@@ -348,6 +348,9 @@ const ACCEPT = {
 // "repository" as "respository", because a client matching on the string
 // would not forgive the correction.
 const CATEGORY = {
+  "packages/settings": ["settings", "http://www.sap.com/wbobj/packages"],
+  "packages/validation": ["devck/validation", "http://www.sap.com/wbobj/packages"],
+  "oo/validation/objectname": ["validation", "http://www.sap.com/adt/categories/oo"],
   "programs/programs": ["programs", "http://www.sap.com/adt/categories/programs"],
   "programs/includes": ["includes", "http://www.sap.com/adt/categories/programs"],
   "oo/classes": ["classes", "http://www.sap.com/adt/categories/oo"],
@@ -416,6 +419,11 @@ const SEARCH_TEMPLATE =
   "{&userName*}{&releaseState*}{&language*}{&system*}{&version*}{&docu*}{&fav*}{&created*}{&month*}{&date*}{&comp*}";
 
 const TEMPLATE_LINKS = {
+  "packages": [
+    ["http://www.sap.com/wbobj/packages/devck/properties", "/sap/bc/adt/packages/{object_name}{?corrNr,lockHandle,version,accessMode,_action}"],
+    ...["applicationcomponents", "softwarecomponents", "transportlayers", "translationrelevances", "abaplanguageversions"].map((name) =>
+      [name, `/sap/bc/adt/packages/valuehelps/${name}`, "application/vnd.sap.adt.nameditems.v1+xml"]),
+  ],
   // the system's own template for a data element (a4h-adt.jsonl:121):
   // the lock handle and transport it carries are for the editor's save
   "ddic/dataelements": [
@@ -488,6 +496,9 @@ const WORKSPACE = (adt) => {
 };
 
 const TITLE = {
+  "packages/settings": "Package Settings",
+  "packages/validation": "Package Name Validation",
+  "oo/validation/objectname": "Validation of Object Name",
   "programs/programs": "Programs",
   "programs/includes": "Includes",
   "oo/classes": "Classes",
@@ -2681,6 +2692,9 @@ export function adtRouter(options = {}) {
   // a real repository arrives with its DEVC objects, the same two resources
   // answer from those instead.
   advertise("packages");
+  advertise("packages/validation");
+  advertise("packages/settings");
+  advertise("oo/validation/objectname");
   // The dropdowns of the package editor. Empty, because this façade has no
   // application components, software components or transport layers, and an
   // empty list is the true answer rather than a missing resource.

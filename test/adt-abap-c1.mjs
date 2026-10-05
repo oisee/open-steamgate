@@ -63,6 +63,17 @@ describe("C1 checkruns live Node byte diff",function () {
     expect(store.find("CLAS","ZCL_NEW")).to.equal(undefined);
     expect(readFileSync(join(root,"src/zcl_check.clas.abap"),"utf8")).to.equal(before);
   });
+  it("discovery tells the creation wizard both validation addresses and package property/value-help templates", async () => {
+    const r = await fronts.diff(base+"discovery");
+    const xml = r.body.toString();
+    expect(xml).to.include('href="/sap/bc/adt/packages/validation"');
+    expect(xml).to.include('href="/sap/bc/adt/packages/settings"');
+    expect(xml).to.include('term="devck/validation" scheme="http://www.sap.com/wbobj/packages"');
+    expect(xml).to.include('href="/sap/bc/adt/oo/validation/objectname"');
+    expect(xml).to.include('rel="http://www.sap.com/wbobj/packages/devck/properties"');
+    for (const name of ["applicationcomponents", "softwarecomponents", "transportlayers", "translationrelevances", "abaplanguageversions"])
+      expect(xml).to.include(`rel="${name}" template="/sap/bc/adt/packages/valuehelps/${name}"`);
+  });
   it("pins TYPES order",async () => { expect((await abap.Classes.ZCL_OSD_ADT_TYPES.all()).array().map((r) => r.get().type.get())).to.deep.equal(Object.keys(TYPES)); });
   it("1 clean base64 overlay and empty message list",async () => { const r = await post(block(uri,Buffer.from(clean).toString("base64"))); expect(r.body.toString()).to.include("<chkrun:checkMessageList>\n\n").and.include(`chkrun:statusText="no errors"`); });
   it("single-line base64 artifact is checked as ABAP without writing", async () => {
@@ -142,6 +153,13 @@ describe("C1 CHECKRUN bound destination",() => {
       const result = answerOf(signature); expect(result.EV_ERROR).to.equal(""); expect(JSON.parse(result.EV_JSON).issues[0]).to.deep.equal({severity:"E",line:1,column:1,message:"ZCL_BOUND"});
     }
     expect(overlays).to.deep.equal(["",undefined]);
+  });
+});
+describe("C1 discovery ABAP Unit", () => {
+  for (const method of ["ordered_collections", "workspace_order", "document_quirks", "head_and_get"]) it(method, async () => {
+    const {ltcl_discovery} = await import("../output/zcl_osd_adt_discovery.clas.testclasses.mjs");
+    const instance = new ltcl_discovery(); await instance.constructor_();
+    await instance.FRIENDS_ACCESS_INSTANCE[method]();
   });
 });
 describe("C1 focused ABAP Unit",() => {

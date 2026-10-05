@@ -227,3 +227,12 @@ cleanup; VSP `WriteSource(mode=create)` passed source check, write and
 activation. VSP `GetPackage` reads a node inventory; its empty top-level URI
 is not a measurement of the package document's URI. Eclipse wizard acceptance
 still needs an interactive check after deployment.
+
+Eclipse follow-up: discovery also advertises both implemented validation
+resources and measured package properties/value-help templates. A resource
+that works at a fixed URL is insufficient for clients that discover its URI.
+In demo RFC mode without configured backend credentials, the bridge forwards
+the logon user's name to the local backend, so new `$TMP` objects are owned
+by that user and appear in their tree. Explicit backend credentials stay
+unchanged. RFC tests cover owner-filtered trees and nodepath for the editor
+and source URI, including the `Link with Editor` follow-up.

@@ -305,6 +305,7 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
     const decoder = new NIFrameDecoder({maxPayloadLength: MAX_FRAME});
     const session = {jar: new Map(), csrfToken: "", requests: Promise.resolve(), closed: false};
     let principal;
+    let conversationAuth = backendAuth;
     let phase = "gateway";
     let conversationID;
     let sequence;
@@ -335,6 +336,11 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
       if (phase === "logon") {
         const caller = authenticateLogon(frame, rfcAuth);
         principal = JSON.stringify([caller.client, caller.user]);
+        // Demo logons name local repository owners. A configured backend
+        // credential remains authoritative; tunneled headers cannot replace it.
+        if (rfcAuthMode === "demo" && !backendUser) {
+          conversationAuth = {...backendAuth, user: caller.user};
+        }
         const identity = {
           systemID,
           host: systemHost,
@@ -359,7 +365,7 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
       }
       if (call.functionName !== "SADT_REST_RFC_ENDPOINT") throw new Error(`unsupported RFC function ${call.functionName}`);
       const request = admitAdtRequest(call.compact ? parseAdtBxmlRequest(call.compact) : parseAdtHttpRequest(call.xml));
-      const target = backendRequestTarget(request.url, backendURL, backendAuth);
+      const target = backendRequestTarget(request.url, backendURL, conversationAuth);
       const lockHandle = target.searchParams.get("lockHandle");
       const owner = editingHandles.get(lockHandle);
       // Eclipse pools RFC connections: SAVE can use a different connection
@@ -367,7 +373,7 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
       // The backend still checks that the handle owns the requested object.
       const context = owner?.principal === principal && !owner.session.closed ? owner.session : session;
       const pending = context.requests.catch(() => {}).then(async () => {
-        const result = await forwardAdt(backendURL, backendAuth, request, context, timeoutMs);
+        const result = await forwardAdt(backendURL, conversationAuth, request, context, timeoutMs);
         if (result.status >= 200 && result.status < 300) {
           const action = target.searchParams.get("_action");
           if (request.method === "POST" && action === "LOCK" && !context.closed) {
@@ -406,7 +412,7 @@ export function createRfcAdtServer({backend, backendUser = "", backendPassword =
       // A request already in flight may still acquire a lock or issue
       // cookies. Finish that chain before ending this conversation's context.
       void chain.catch(() => {}).then(() => session.requests.catch(() => {}))
-        .then(() => endBackendSession(backendURL, backendAuth, session, timeoutMs, log));
+        .then(() => endBackendSession(backendURL, conversationAuth, session, timeoutMs, log));
     });
   });
   server.maxConnections = maxConnections;

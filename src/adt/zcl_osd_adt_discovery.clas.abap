@@ -25,6 +25,7 @@ CLASS zcl_osd_adt_discovery DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PRIVATE SECTION.
     CLASS-METHODS source_collections CHANGING ct_collections TYPE tt_collection.
     CLASS-METHODS loop_collections CHANGING ct_collections TYPE tt_collection.
+    CLASS-METHODS package_collections CHANGING ct_collections TYPE tt_collection.
     CLASS-METHODS repository_collections CHANGING ct_collections TYPE tt_collection.
     CLASS-METHODS preview_collections CHANGING ct_collections TYPE tt_collection.
     CLASS-METHODS collection_xml
@@ -46,6 +47,7 @@ CLASS zcl_osd_adt_discovery IMPLEMENTATION.
   METHOD collections.
     source_collections( CHANGING ct_collections = rt_collections ).
     loop_collections( CHANGING ct_collections = rt_collections ).
+    package_collections( CHANGING ct_collections = rt_collections ).
     repository_collections( CHANGING ct_collections = rt_collections ).
     preview_collections( CHANGING ct_collections = rt_collections ).
   ENDMETHOD.
@@ -237,6 +239,12 @@ CLASS zcl_osd_adt_discovery IMPLEMENTATION.
     APPEND `application/xml` TO ls_collection-accept.
     APPEND ls_collection TO ct_collections.
 
+
+  ENDMETHOD.
+
+  METHOD package_collections.
+    DATA ls_collection TYPE ty_collection.
+    DATA ls_link TYPE ty_link.
     CLEAR ls_collection.
     ls_collection-adt = `packages`.
     ls_collection-title = `Packages`.
@@ -245,7 +253,58 @@ CLASS zcl_osd_adt_discovery IMPLEMENTATION.
     ls_collection-scheme = `http://www.sap.com/wbobj/packages`.
     APPEND `application/vnd.sap.adt.packages.v2+xml` TO ls_collection-accept.
     APPEND `application/vnd.sap.adt.packages.v1+xml` TO ls_collection-accept.
+    CLEAR ls_link.
+    ls_link-rel = `http://www.sap.com/wbobj/packages/devck/properties`.
+    ls_link-template = `/sap/bc/adt/packages/{object_name}{?corrNr,lockHandle,version,accessMode,_action}`.
+    APPEND ls_link TO ls_collection-links.
+    CLEAR ls_link.
+    ls_link-rel = `applicationcomponents`.
+    ls_link-template = `/sap/bc/adt/packages/valuehelps/applicationcomponents`.
+    ls_link-content_type = `application/vnd.sap.adt.nameditems.v1+xml`.
+    APPEND ls_link TO ls_collection-links.
+    CLEAR ls_link.
+    ls_link-rel = `softwarecomponents`.
+    ls_link-template = `/sap/bc/adt/packages/valuehelps/softwarecomponents`.
+    ls_link-content_type = `application/vnd.sap.adt.nameditems.v1+xml`.
+    APPEND ls_link TO ls_collection-links.
+    CLEAR ls_link.
+    ls_link-rel = `transportlayers`.
+    ls_link-template = `/sap/bc/adt/packages/valuehelps/transportlayers`.
+    ls_link-content_type = `application/vnd.sap.adt.nameditems.v1+xml`.
+    APPEND ls_link TO ls_collection-links.
+    CLEAR ls_link.
+    ls_link-rel = `translationrelevances`.
+    ls_link-template = `/sap/bc/adt/packages/valuehelps/translationrelevances`.
+    ls_link-content_type = `application/vnd.sap.adt.nameditems.v1+xml`.
+    APPEND ls_link TO ls_collection-links.
+    CLEAR ls_link.
+    ls_link-rel = `abaplanguageversions`.
+    ls_link-template = `/sap/bc/adt/packages/valuehelps/abaplanguageversions`.
+    ls_link-content_type = `application/vnd.sap.adt.nameditems.v1+xml`.
+    APPEND ls_link TO ls_collection-links.
     APPEND ls_collection TO ct_collections.
+    CLEAR ls_collection.
+    ls_collection-adt = `packages/validation`.
+    ls_collection-title = `Package Name Validation`.
+    ls_collection-workspace = `Repository`.
+    ls_collection-term = `devck/validation`.
+    ls_collection-scheme = `http://www.sap.com/wbobj/packages`.
+    APPEND ls_collection TO ct_collections.
+    CLEAR ls_collection.
+    ls_collection-adt = `packages/settings`.
+    ls_collection-title = `Package Settings`.
+    ls_collection-workspace = `Repository`.
+    ls_collection-term = `settings`.
+    ls_collection-scheme = `http://www.sap.com/wbobj/packages`.
+    APPEND ls_collection TO ct_collections.
+    CLEAR ls_collection.
+    ls_collection-adt = `oo/validation/objectname`.
+    ls_collection-title = `Validation of Object Name`.
+    ls_collection-workspace = `Source Library`.
+    ls_collection-term = `validation`.
+    ls_collection-scheme = `http://www.sap.com/adt/categories/oo`.
+    APPEND ls_collection TO ct_collections.
+
 
   ENDMETHOD.
 
