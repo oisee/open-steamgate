@@ -94,7 +94,7 @@ export class WarmCompilerProcess extends WarmCompiler {
     return child;
   }
 
-  async #call(method, activating = new Set(), view = undefined) {
+  async #call(method, activating = new Set(), view = undefined, check = undefined) {
     // A drop may still be reaping the old compiler. Never start its replacement
     // before it exits, or let its exit reject the replacement's requests.
     const epoch = this.#epoch;
@@ -108,13 +108,18 @@ export class WarmCompilerProcess extends WarmCompiler {
     const folder = view?.folder ?? this.overlayOf(new Set())?.folder ?? join("build", "inactive", "active");
     return new Promise((resolve, reject) => {
       this.#pending.set(id, {resolve, reject});
-      child.send({id, method, activating: [...activating], inactive, folder, view}, error => {
+      child.send({id, method, activating: [...activating], inactive, folder, view, check}, error => {
         if (error) { this.#pending.delete(id); reject(Object.assign(error, {code: "WARM_UNAVAILABLE"})); }
       });
     });
   }
 
   prime(view) { return this.#call("prime", new Set(), view); }
+  async check(object, view) {
+    const result = await this.#call("check", new Set(), view, object);
+    if (this.recycleDue) await this.drop();
+    return result;
+  }
   async build(activating = new Set(), snapshot = undefined) {
     const view = snapshot?.overlay ?? this.overlayOf(activating);
     const result = await this.#call("build", activating, snapshot);

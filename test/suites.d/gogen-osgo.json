@@ -48,6 +48,7 @@
     "test/unit-run.mjs",
     "test/osd-dumps.mjs",
     "test/warm.mjs",
+    "test/warm-edit-loop.mjs",
     "test/warm-process.mjs",
     "test/kernel-conformance.mjs"
   ],

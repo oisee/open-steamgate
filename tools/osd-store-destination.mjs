@@ -211,7 +211,7 @@ export class StoreDestination {
         }
         case "CHECKRUN": {
           const {checkRunReport} = await import("./adt-checkrun.mjs");
-          return {EV_JSON: JSON.stringify(checkRunReport(store, {type, name,
+          return {EV_JSON: JSON.stringify(await checkRunReport(store, {type, name,
             include: givenText(signature, "IV_INCLUDE") || undefined,
             source: givenText(signature, "IV_FILTER") === "SOURCE" ? givenText(signature, "IV_SOURCE") : undefined}))};
         }

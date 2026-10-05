@@ -1,7 +1,10 @@
 import {expect} from "chai";
-import {mkdtempSync,rmSync,mkdirSync,writeFileSync,readFileSync} from "node:fs";
+import {mkdtempSync,rmSync,mkdirSync,writeFileSync,readFileSync,symlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join,resolve} from "node:path";
+import {liveHash} from "../tools/osd-build.mjs";
+import {closeWarm} from "../tools/osd-store-warm.mjs";
+import {warmCheck} from "../tools/adt-warm-check.mjs";
 import {sliceFronts} from "./helpers/adt-slice.mjs";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {TYPES} from "../tools/osd-store-types.mjs";
@@ -110,5 +113,67 @@ describe("C1 focused ABAP Unit",() => {
     const {ltcl_protocol} = await import("../output/zcl_osd_adt_checkrun.clas.testclasses.mjs");
     const instance = new ltcl_protocol(); await instance.constructor_();
     await instance.FRIENDS_ACCESS_INSTANCE[method]();
+  });
+});
+
+describe("C1 warm Check through Node and ABAP", function () {
+  this.timeout(120000);
+  let root, store, fronts;
+  const provider = `CLASS zcl_check DEFINITION PUBLIC FINAL CREATE PUBLIC.
+ PUBLIC SECTION.
+ CLASS-METHODS get RETURNING VALUE(rv) TYPE i.
+ENDCLASS.
+CLASS zcl_check IMPLEMENTATION.
+ METHOD get.
+ rv = 1.
+ ENDMETHOD.
+ENDCLASS.\n`;
+  const caller = provider.replaceAll("zcl_check", "zcl_check_caller").replace("rv = 1.", "rv = zcl_check=>get( ).");
+  const broken = provider.replaceAll("get", "renamed");
+  before(async () => {
+    root = mkdtempSync(join(tmpdir(), "osd-c1-warm-"));
+    mkdirSync(join(root, "src"));
+    writeFileSync(join(root, "src/zcl_check.clas.abap"), provider);
+    writeFileSync(join(root, "src/zcl_check_caller.clas.abap"), caller);
+    writeFileSync(join(root, "package.json"), "{}");
+    writeFileSync(join(root, "abaplint.jsonc"), JSON.stringify({syntax: {version: "v702"}}));
+    writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: "src", input_filter: [], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
+      options: {ignoreSyntaxCheck: false, addFilenames: true, addCommonJS: true, unknownTypes: "compileError"}}));
+    symlinkSync(join(resolve("."), "node_modules"), join(root, "node_modules"));
+    store = new ObjectStore({root, libs: [], roots: [{path: "src", writable: true}], build: {generators: false}});
+    expect((await store.publish()).ok).to.equal(true);
+    store.warmState = {on: true};
+    expect(await store.warmUp()).to.not.equal(undefined, store.warmState.reason);
+    fronts = await sliceFronts(store);
+  });
+  after(async () => {
+    await fronts?.close();
+    if (store) await closeWarm(store);
+    if (root) rmSync(root, {recursive: true, force: true});
+  });
+  const post = source => fronts.diff(base + "checkruns", "POST", block(uri, Buffer.from(source).toString("base64")), {"content-type": "application/xml"});
+  it("returns dependent errors with ADT severity and the dependent URI; no publication", async () => {
+    const hash = liveHash(root);
+    const response = await post(broken);
+    const xml = response.body.toString();
+    expect(xml).to.include('chkrun:type="E"').and.not.include('chkrun:type="Error"');
+    expect(xml).to.include('chkrun:uri="/sap/bc/adt/oo/classes/zcl_check_caller/source/main#start=');
+    expect(liveHash(root)).to.equal(hash);
+    expect(readFileSync(join(root, "src/zcl_check.clas.abap"), "utf8")).to.equal(provider);
+    expect((await post(provider)).body.toString()).to.include('chkrun:statusText="no errors"');
+  });
+  it("uses saved dependencies consistently when two edited objects are inactive", async () => {
+    store.write("CLAS", "ZCL_CHECK", broken);
+    store.write("CLAS", "ZCL_CHECK_CALLER", caller.replace("zcl_check=>get", "zcl_check=>renamed"));
+    expect(await warmCheck(store, {type: "CLAS", name: "ZCL_CHECK"})).to.equal(undefined);
+    const response = await post(broken);
+    expect(response.body.toString()).to.include('chkrun:statusText="no errors"');
+    expect(store.stateOf(store.find("CLAS", "ZCL_CHECK_CALLER")).version).to.equal("inactive");
+  });
+  it("keeps checking an editor overlay for an object not created yet", async () => {
+    const source = provider.replaceAll("zcl_check", "zcl_new");
+    const response = await fronts.diff(base + "checkruns", "POST", block(base + "oo/classes/zcl_new", Buffer.from(source).toString("base64")), {"content-type": "application/xml"});
+    expect(response.body.toString()).to.include('chkrun:statusText="no errors"');
+    expect(store.find("CLAS", "ZCL_NEW")).to.equal(undefined);
   });
 });

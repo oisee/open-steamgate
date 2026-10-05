@@ -84,7 +84,7 @@ export const GENERATORS_READ = [
   "osd-fm-registry.mjs", "osd-gui-convert.mjs", "osd-tran-registry.mjs",
 ];
 
-const SOURCE = /\.(clas(\.(locals_imp|locals_def|testclasses|macros))?\.abap|intf\.abap)$/i;
+const SOURCE = /\.(clas(\.(locals_imp|locals_def|testclasses|macros))?\.abap|intf\.abap|prog\.abap)$/i;
 const AMDP = /BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i;
 // every INTERFACES statement, the chained form (`INTERFACES: a, b.`) too,
 // as the words it names; a changed addition counts as a change
@@ -98,9 +98,12 @@ export function warmRule({path, before, after, amdpText = ""}) {
     return `${name}: a generated file`;
   }
   if (!SOURCE.test(name)) {
-    return `${name}: not the source of a class or an interface`;
+    return `${name}: not the source of a class, interface or include`;
   }
-  if (/\bSUBMIT\b/i.test(after)) {
+  if (/\.prog\.abap$/i.test(name) && /^\s*(REPORT|PROGRAM|FUNCTION-POOL|MODULE-POOL)\b/im.test(before + "\n" + after)) {
+    return `${name}: a program declaration (report generators read it)`;
+  }
+  if (/\bSUBMIT\b/i.test(before + "\n" + after)) {
     return `${name}: a SUBMIT source is lowered during a cold build`;
   }
   if (AMDP.test(before) || AMDP.test(after)) {
@@ -274,7 +277,7 @@ export class WarmCompiler {
   // source the warm rule would not take as an edit of its copy.
   #generatorInput(activating = new Set()) {
     for (const {key, type, files} of this.inactiveSources(activating)) {
-      if (type !== "CLAS" && type !== "INTF") return `${key} is inactive, and the generators read its saved source`;
+      if (!["CLAS", "INTF", "PROG", "INCL"].includes(type)) return `${key} is inactive, and the generators read its saved source`;
       for (const {file, before, after} of files) {
         if (before === after) continue;
         const reason = warmRule({path: file, before, after, amdpText: this.amdpText ?? ""});
@@ -522,6 +525,34 @@ export class WarmCompiler {
     return out;
   }
 
+  // Borrow the live registry for a check, without changing its build view,
+  // publishing a generation or retaining the editor's text. Invalidate the
+  // readers as well: checking a renamed method against cached callers lies.
+  async check({type, name, source, include = "main"}) {
+    if (!this.primed) throw new NotWarm("not primed");
+    if (liveHash(this.root) !== this.hash || this.#changes().edits.length) throw new NotWarm("the active sources changed");
+    const object = this.reg.getObject(type === "INCL" ? "PROG" : type, name.toUpperCase());
+    if (!object) throw new NotWarm("the check object is not in the live registry");
+    const suffix = {definitions: "locals_def", implementations: "locals_imp"}[include] ?? include;
+    const ending = type === "CLAS" && include !== "main" ? `.clas.${suffix}.abap` : `.${type === "INTF" ? "intf" : type === "CLAS" ? "clas" : "prog"}.abap`;
+    const file = [...this.files.values()].find(f => basename(f.filename).toLowerCase() === name.toLowerCase() + ending);
+    if (!file) throw new NotWarm("the check source is not in the live registry");
+    const before = this.reg.getFileByName(file.filename);
+    const affected = [...this.#closure([object])];
+    try {
+      this.reg.updateFile(new this.core.MemoryFile(file.filename, source));
+      for (const o of affected) o.setDirty();
+      this.reg.parse();
+      const found = this.#issuesOf(affected);
+      return {type, name, warm: true, issues: found.flatMap(entry => entry.issues.map(issue => ({...issue, type: entry.type, name: entry.name, severity: "E",
+        message: entry.name === name.toUpperCase() ? issue.message : `${entry.type} ${entry.name}: ${issue.message}`})))};
+    } finally {
+      this.reg.updateFile(before);
+      for (const o of affected) o.setDirty();
+      this.reg.parse();
+    }
+  }
+
   // forget the registry; the next build is cold, and prime() starts again
   drop() {
     this.reg = undefined;
@@ -547,6 +578,14 @@ export class WarmCompiler {
       if (!(o instanceof core.ABAPObject)) continue;
       for (const t of this.reads.get(key(o)) ?? []) this.readers.get(t)?.delete(o);
       const reads = new Set();
+      // INCLUDE is a dependency even when its body declares no identifier
+      // the consumer references (for example, it only writes a literal).
+      for (const file of o.getABAPFiles()) for (const statement of file.getStatements()) {
+        if (!(statement.get() instanceof core.Statements.Include)) continue;
+        const name = statement.findFirstExpression(core.Expressions.IncludeName)?.concatTokens();
+        const included = name && this.reg.getObject("PROG", name);
+        if (included && included !== o) reads.add(key(included));
+      }
       const top = new core.SyntaxLogic(this.reg, o).run().spaghetti?.getTop();
       const stack = top === undefined ? [] : [top];
       while (stack.length > 0) {
@@ -808,7 +847,9 @@ export class WarmCompiler {
       settled = true;
       const steps = Object.fromEntries(marks.slice(1).map(([w, t], i) => [w, t - marks[i][1]]));
       return {ok: true, hash, cached, warm: true, live: true, ms: Date.now() - started, objects: this.files.size,
-        modules, hostHeld: modules.filter((m) => HOST_HELD.includes(m)), stale: stale.size, from, steps,
+        // Program modules execute at import time. Compile their closure warm,
+        // but let a fresh runtime load it instead of executing it in a swap.
+        modules, hostHeld: modules.filter((m) => HOST_HELD.includes(m) || m.endsWith(".prog.mjs")), stale: stale.size, from, steps,
         closure, xrefRows};
     } finally {
       unlock();
