@@ -14,7 +14,7 @@ import {remoteForTest} from "./helpers/adt-remote.mjs";
 
 describe("RFC editing context without client sessiontype headers", function () {
   this.timeout(120000);
-  let root,server,bridge,runtime,one,two,foreign;
+  let root,store,server,bridge,runtime,one,two,foreign;
   let paused, entered, endContext;
   const object = "/sap/bc/adt/oo/classes/zcl_rfc_context";
   const source = "CLASS zcl_rfc_context DEFINITION PUBLIC. ENDCLASS.\nCLASS zcl_rfc_context IMPLEMENTATION. ENDCLASS.\n";
@@ -24,7 +24,7 @@ describe("RFC editing context without client sessiontype headers", function () {
     writeFileSync(join(root,"src/zcl_rfc_context.clas.abap"),source);
     writeFileSync(join(root,"abaplint.jsonc"),JSON.stringify({global:{files:"/src/**/*.*"},syntax:{version:"v702"},rules:{}}));
     writeFileSync(join(root,"abap_transpile.json"),JSON.stringify({input_folder:["src"]}));
-    const store=new ObjectStore({root,libs:[],roots:[{path:"src",package:"$STG_TEST",writable:true}]});
+    store=new ObjectStore({root,libs:[],roots:[{path:"src",package:"$STG_TEST",writable:true}]});
     if(process.env.OSD_ADT_ONE_RUNTIME === "1") runtime=await remoteForTest();
     const app=express();
     app.use(async (req,res,next) => {
@@ -55,6 +55,30 @@ describe("RFC editing context without client sessiontype headers", function () {
       if(server) await new Promise((resolve) => server.close(resolve));
       await runtime?.stop();
       if(root)rmSync(root,{recursive:true,force:true});
+    }
+  });
+  it("creates local objects as the RFC caller so their own TMP tree includes them", async () => {
+    const uri = "/sap/bc/adt/oo/classes/zcl_rfc_owned";
+    const body = '<class:abapClass xmlns:class="http://www.sap.com/adt/oo/classes" xmlns:adtcore="http://www.sap.com/adt/core" adtcore:name="ZCL_RFC_OWNED"><adtcore:packageRef adtcore:name="$TMP"/></class:abapClass>';
+    let made = false;
+    try {
+      const created = await one.call("POST", "/sap/bc/adt/oo/classes", body, {Authorization:"Basic " + Buffer.from("SPOOFED:ignored").toString("base64")});
+      expect(created.status).to.equal(201); made = true;
+      expect(store.authorOf("CLAS", "ZCL_RFC_OWNED")).to.equal("DEVELOPER");
+      for (const suffix of ["", "/source/main"]) {
+        const path = await one.call("POST", "/sap/bc/adt/repository/nodepath?uri=" + encodeURIComponent(uri + suffix));
+        expect(path.status).to.equal(200);
+        expect(path.body).to.include('adtcore:name="$TMP"').and.include('adtcore:name="ZCL_RFC_OWNED"');
+      }
+      const tree = "/sap/bc/adt/repository/nodestructure?parent_name=%24TMP&parent_type=DEVC%2FK&user_name=";
+      expect((await one.call("POST", tree + "DEVELOPER")).body).to.include("ZCL_RFC_OWNED");
+      expect((await foreign.call("POST", tree + "OTHER")).body).not.to.include("ZCL_RFC_OWNED");
+    } finally {
+      if (made) {
+        const locked = await one.call("POST", uri + "?_action=LOCK&accessMode=MODIFY");
+        expect(locked.handle).to.be.a("string");
+        expect((await one.call("DELETE", uri + "?lockHandle=" + locked.handle)).status).to.equal(200);
+      }
     }
   });
   it("pooled connections save with the same user's known handle and reject foreign or stale handles",async () => {

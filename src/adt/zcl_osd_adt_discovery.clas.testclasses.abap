@@ -11,10 +11,10 @@ CLASS ltcl_discovery IMPLEMENTATION.
     DATA lt_rows TYPE zcl_osd_adt_discovery=>tt_collection.
     DATA ls_row TYPE zcl_osd_adt_discovery=>ty_collection.
     lt_rows = zcl_osd_adt_discovery=>collections( ).
-    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows ) exp = 25 ).
+    cl_abap_unit_assert=>assert_equals( act = lines( lt_rows ) exp = 28 ).
     READ TABLE lt_rows INDEX 1 INTO ls_row.
     cl_abap_unit_assert=>assert_equals( act = ls_row-adt exp = `repository/informationsystem/virtualfolders` ).
-    READ TABLE lt_rows INDEX 25 INTO ls_row.
+    READ TABLE lt_rows INDEX 28 INTO ls_row.
     cl_abap_unit_assert=>assert_equals( act = ls_row-adt exp = `datapreview/freestyle` ).
     LOOP AT lt_rows INTO ls_row.
       cl_abap_unit_assert=>assert_not_initial( ls_row-term ).
@@ -46,7 +46,7 @@ CLASS ltcl_discovery IMPLEMENTATION.
     DATA lv_section TYPE string.
     lv_xml = zcl_osd_adt_discovery=>document( ).
     FIND ALL OCCURRENCES OF `<atom:category ` IN lv_xml MATCH COUNT lv_count.
-    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 25 ).
+    cl_abap_unit_assert=>assert_equals( act = lv_count exp = 28 ).
     FIND ALL OCCURRENCES OF ` type="text/plain"` IN lv_xml MATCH COUNT lv_count.
     cl_abap_unit_assert=>assert_equals( act = lv_count exp = 1 ).
     cl_abap_unit_assert=>assert_char_cp( act = lv_xml exp = `*{&amp;objectType*}*` ).

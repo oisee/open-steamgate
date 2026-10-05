@@ -106,6 +106,10 @@ CLASS zcl_osd_adt_router IMPLEMENTATION.
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/core/http/systeminformation`
                    iv_handler = `ZCL_OSD_ADT_SYSINFO`
          CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/oo/validation/objectname`
+                   iv_handler = `ZCL_OSD_ADT_CREATE_VALID` CHANGING ct_routes = rt_routes ).
+    add( EXPORTING iv_method = `POST` iv_pattern = `/sap/bc/adt/packages/validation`
+                   iv_handler = `ZCL_OSD_ADT_CREATE_VALID` CHANGING ct_routes = rt_routes ).
 *   Static package rows must precede future GET packages/:name rows.
     add( EXPORTING iv_method = `GET` iv_pattern = `/sap/bc/adt/repository/informationsystem/virtualfolders/facets`
                    iv_handler = `ZCL_OSD_ADT_RIS_STATIC` CHANGING ct_routes = rt_routes ).

@@ -167,7 +167,23 @@ describe("tools/adt-facade: the development loop", () => {
     return {status: res.status, xml, handle};
   };
 
+  it("creation preflight validates class and package before mutation", async () => {
+    const validate = async (path, values) => {
+      const res = await call(path + "?" + new URLSearchParams(values), {method: "POST"});
+      expect(res.status).to.equal(200);
+      return res.text();
+    };
+    const classValues = {objtype: "CLAS/OC", objname: "ZCL_NEW_VALID", packagename: "$TMP"};
+    expect(await validate("/oo/validation/objectname", classValues)).to.include("<CHECK_RESULT>X</CHECK_RESULT>");
+    expect(store.find("CLAS", "ZCL_NEW_VALID")).to.equal(undefined);
+    expect(await validate("/oo/validation/objectname", {...classValues, objname: "ZCL_ZOSD_TEST_DEMO"})).to.include("<SEVERITY>ERROR</SEVERITY>");
+    expect(await validate("/oo/validation/objectname", {...classValues, objname: "../invalid"})).to.include("<SEVERITY>ERROR</SEVERITY>");
+    expect(await validate("/oo/validation/objectname", {...classValues, packagename: "$NO_SUCH_PACKAGE"})).to.include("<SEVERITY>ERROR</SEVERITY>");
+    expect(await validate("/packages/validation", {objtype: "DEVC/K", objname: "$NEW_VALID", packagename: "$TMP"})).to.include("<CHECK_RESULT>X</CHECK_RESULT>");
+  });
+
   describe("locking", () => {
+
     it("a lock gives a handle in the envelope a client expects", async () => {
       // the object has to exist before it can be locked, so it is written
       // through the store first; the façade's own write is the next test

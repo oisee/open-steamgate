@@ -12,7 +12,7 @@ import {Visibility} from "@abaplint/core";
 import {TYPES, NotFound} from "./osd-store.mjs";
 import {localView} from "./osd-tmp-view.mjs";
 
-const xmlEscape = (s) => String(s)
+export const xmlEscape = (s) => String(s)
   .replaceAll("&", "&amp;")
   .replaceAll("<", "&lt;")
   .replaceAll(">", "&gt;")
@@ -543,6 +543,7 @@ export function packageDocument(pkg, options = {}) {
   return `<?xml version="1.0" encoding="utf-8"?>
 <pak:package xmlns:pak="http://www.sap.com/adt/packages"
              xmlns:adtcore="http://www.sap.com/adt/core"
+             adtcore:uri="${uriOfPackage(pkg.name)}"
              adtcore:name="${xmlEscape(pkg.name)}"
              adtcore:type="DEVC/K"
              adtcore:version="active"
@@ -1179,9 +1180,9 @@ function decodeContent(raw) {
     return plain;
   }
   const decoded = Buffer.from(text, "base64").toString("utf8");
-  // base64 of ABAP decodes to something with line breaks; base64 of nothing
-  // useful decodes to bytes that are not text at all
-  return /[\r\n]/.test(decoded) && /\uFFFD/.test(decoded) === false ? decoded : plain;
+  // Decode UTF-8 artifacts regardless of ABAP syntax: comment-only and
+  // invalid source are both legitimate inputs to a syntax check.
+  return /\uFFFD/.test(decoded) === false ? decoded : plain;
 }
 
 // The Result envelope measured 2026-10-04: empty modification support and

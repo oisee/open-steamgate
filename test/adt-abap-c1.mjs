@@ -42,8 +42,55 @@ describe("C1 checkruns live Node byte diff",function () {
   const post = (body) => fronts.diff(base+"checkruns?reporters=ignored","POST",body,{"content-type":"application/xml"});
   for (const path of ["checkruns/reporters","ChEcKrUnS/RePoRtErS/"]) for (const method of ["GET","HEAD"])
     it(`reporters ${path} ${method}`,async () => { expect((await fronts.diff(base+path,method)).status).to.equal(200); });
+  it("creation validation and package URI match on ABAP and Node", async () => {
+    const before = readFileSync(join(root,"src/zcl_check.clas.abap"),"utf8");
+    for (const [resource, type, name] of [["oo/validation/objectname", "CLAS/OC", "ZCL_NEW"], ["packages/validation", "DEVC/K", "$NEW"]]) {
+      const params = new URLSearchParams({objtype:type,objname:name,packagename:"$TMP"});
+      const r = await fronts.diff(base+resource+"?"+params,"POST");
+      expect(r.body.toString()).to.include("<CHECK_RESULT>X</CHECK_RESULT>");
+      params.set("packagename", "$MISSING");
+      expect((await fronts.diff(base+resource+"?"+params,"POST")).body.toString()).to.include("<SEVERITY>ERROR</SEVERITY>");
+    }
+    const mixed = new URLSearchParams({objtype:"DEVC/K",objname:"$MIXED",packagename:"$TMP"});
+    expect((await fronts.diff(base+"PaCkAgEs/VaLiDaTiOn/?"+mixed,"POST")).body.toString()).to.include("<CHECK_RESULT>X</CHECK_RESULT>");
+    for (const name of ["ZNEW", "$TMP_"]) {
+      const params = new URLSearchParams({objtype:"DEVC/K",objname:name,packagename:"$TMP"});
+      // $TMP_ is a local name but CREATE refuses its empty folder suffix.
+      const r = await fronts.diff(base+"packages/validation?"+params,"POST");
+      expect(r.body.toString()).to.include("<SEVERITY>ERROR</SEVERITY>");
+    }
+    expect((await fronts.diff(base+"packages/%24tmp")).body.toString()).to.include('adtcore:uri="/sap/bc/adt/packages/%24tmp"');
+    expect(store.find("CLAS","ZCL_NEW")).to.equal(undefined);
+    expect(readFileSync(join(root,"src/zcl_check.clas.abap"),"utf8")).to.equal(before);
+  });
+  it("discovery tells the creation wizard both validation addresses and package property/value-help templates", async () => {
+    const r = await fronts.diff(base+"discovery");
+    const xml = r.body.toString();
+    expect(xml).to.include('href="/sap/bc/adt/packages/validation"');
+    expect(xml).to.include('href="/sap/bc/adt/packages/settings"');
+    expect(xml).to.include('term="devck/validation" scheme="http://www.sap.com/wbobj/packages"');
+    expect(xml).to.include('href="/sap/bc/adt/oo/validation/objectname"');
+    expect(xml).to.include('rel="http://www.sap.com/wbobj/packages/devck/properties"');
+    for (const name of ["applicationcomponents", "softwarecomponents", "transportlayers", "translationrelevances", "abaplanguageversions"])
+      expect(xml).to.include(`rel="${name}" template="/sap/bc/adt/packages/valuehelps/${name}"`);
+  });
   it("pins TYPES order",async () => { expect((await abap.Classes.ZCL_OSD_ADT_TYPES.all()).array().map((r) => r.get().type.get())).to.deep.equal(Object.keys(TYPES)); });
   it("1 clean base64 overlay and empty message list",async () => { const r = await post(block(uri,Buffer.from(clean).toString("base64"))); expect(r.body.toString()).to.include("<chkrun:checkMessageList>\n\n").and.include(`chkrun:statusText="no errors"`); });
+  it("single-line base64 artifact is checked as ABAP without writing", async () => {
+    const oneLine = clean.replaceAll("\n", " ");
+    const r = await post(block(uri, Buffer.from(oneLine).toString("base64")));
+    expect(r.body.toString()).to.include('chkrun:statusText="no errors"');
+    expect(readFileSync(join(root,"src/zcl_check.clas.abap"),"utf8")).to.equal(clean);
+  });
+  it("base64 comments and invalid single-line source decode before Check", async () => {
+    const comment = "* comment";
+    const r = await post(block(uri, Buffer.from(comment).toString("base64"), "testclasses"));
+    expect(r.body.toString()).to.include('chkrun:statusText="no errors"');
+    const invalid = "THIS IS INVALID ABAP";
+    const bad = await post(block(uri, Buffer.from(invalid).toString("base64")));
+    expect(bad.body.toString()).to.include('chkrun:type="E"');
+    expect(bad.body.toString()).not.to.include(Buffer.from(invalid).toString("base64"));
+  });
   it("2 broken entity overlay never writes disk",async () => { await post(block(uri,"CLASS zcl_check DEFINITION. &lt;bad&gt; &amp; ENDCLASS.")); expect(readFileSync(join(root,"src/zcl_check.clas.abap"),"utf8")).to.equal(clean); });
   it("3 testclasses include",async () => { await post(block(uri,"CLASS ltcl_check DEFINITION FOR TESTING. ENDCLASS.","testclasses")); });
   it("4 AMDP warnings follow errors and count as messages",async () => {
@@ -106,6 +153,13 @@ describe("C1 CHECKRUN bound destination",() => {
       const result = answerOf(signature); expect(result.EV_ERROR).to.equal(""); expect(JSON.parse(result.EV_JSON).issues[0]).to.deep.equal({severity:"E",line:1,column:1,message:"ZCL_BOUND"});
     }
     expect(overlays).to.deep.equal(["",undefined]);
+  });
+});
+describe("C1 discovery ABAP Unit", () => {
+  for (const method of ["ordered_collections", "workspace_order", "document_quirks", "head_and_get"]) it(method, async () => {
+    const {ltcl_discovery} = await import("../output/zcl_osd_adt_discovery.clas.testclasses.mjs");
+    const instance = new ltcl_discovery(); await instance.constructor_();
+    await instance.FRIENDS_ACCESS_INSTANCE[method]();
   });
 });
 describe("C1 focused ABAP Unit",() => {
