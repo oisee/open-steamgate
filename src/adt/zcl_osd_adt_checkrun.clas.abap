@@ -211,6 +211,7 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
         LOOP AT lt_members INTO lv_member.
           lv_path = `/issues/` && lv_member.
           CLEAR ls_issue.
+          ls_issue-uri = lo_json->get_string( lv_path && `/uri` ).
           ls_issue-line = lo_json->get( lv_path && `/line` ).
           ls_issue-col = lo_json->get( lv_path && `/column` ).
           ls_issue-severity = lo_json->get_string( lv_path && `/severity` ).

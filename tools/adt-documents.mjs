@@ -1122,7 +1122,7 @@ export function checkReportDocument(reports, options = {}) {
   // fragment; it emits no line, column or category attributes
   // (.local/capture/oracle/a4h-adt.jsonl:154). A message whose text is a
   // child element reaches the client as a finding with no words in it.
-  const message = (uri, issue) => `      <chkrun:checkMessage chkrun:uri="${xmlEscape(uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:shortText="${xmlEscape(issue.message)}"/>`;
+  const message = (uri, issue) => `      <chkrun:checkMessage chkrun:uri="${xmlEscape(issue.uri ?? uri)}#start=${issue.line ?? 1},${issue.column ?? 1}" chkrun:type="${xmlEscape(issue.severity ?? "E")}" chkrun:shortText="${xmlEscape(issue.message)}"/>`;
 
   const report = (r) => {
     const attrs = `chkrun:reporter="abapCheckRun" chkrun:triggeringUri="${xmlEscape(r.uri)}" chkrun:status="${xmlEscape(r.status ?? "processed")}" chkrun:statusText="${xmlEscape(r.statusText ?? (r.issues.length === 0 ? "no errors" : `${r.issues.length} error(s)`))}"`;

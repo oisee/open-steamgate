@@ -28,7 +28,7 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
   });
   let queue = Promise.resolve();
   process.on("message", message => {
-    if (!["prime", "build"].includes(message.method)) return;
+    if (!["prime", "build", "check"].includes(message.method)) return;
     queue = queue.then(async () => {
       inactive = message.inactive;
       folder = message.folder;
@@ -37,7 +37,7 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
         compiler.compileView = message.view;
         compiler.switch = message.view === undefined;
         checkView(root, message.view, compiler.overlayOf(new Set(message.activating)));
-        const result = await compiler[message.method](new Set(message.activating));
+        const result = await compiler[message.method](message.method === "check" ? message.check : new Set(message.activating));
         await afterCompile(message, result);
         if (message.method === "prime") heapBase = process.memoryUsage().heapUsed;
         process.send({id: message.id, result, state: state()});

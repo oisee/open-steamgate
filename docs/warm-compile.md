@@ -24,6 +24,10 @@ watcher and a 30 ms debounce.
 
 ## How it works
 
+For ADT Save, Check, and the difference between class replacement and program
+runtime recycling, see [ADR 0009](adr/0009-warm-adt-check-and-activation.md).
+ADT Save only writes source; the warm compiler is used on Check and Activate.
+
 1. **The registry is kept in a compiler process.** `tools/osd-warm.mjs` holds the abaplint
    registry of the live generation for as long as the process lives. It is
    primed once after the runtime is up. `tools/osd-warm-process.mjs` starts

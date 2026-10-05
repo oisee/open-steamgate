@@ -1002,8 +1002,8 @@ export class ObjectStore {
       }
     }
     if (transpile.warm === true && (transpile.hostHeld ?? []).length > 0) {
-      console.log(`warm: ${transpile.hostHeld.join(", ")} is held by the serving process itself, recycling instead of swapping`);
-      why = `${transpile.hostHeld.join(", ")} is held by the serving process itself`;
+      why = `${transpile.hostHeld.join(", ")} requires a fresh runtime`;
+      console.log(`warm: ${why}, recycling instead of swapping`);
     }
     try {
       const bounded = await this.#bounded(runtime.recycle(), "the recycle");

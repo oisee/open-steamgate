@@ -2315,7 +2315,7 @@ export function adtRouter(options = {}) {
 
   router.post(`${BASE}/checkruns`, async (req, res) => {
     const body = await rawBody(req);
-    answer(res, () => {
+    answer(res, async () => {
       // Every object this façade serves may be checked, not only the ones
       // with source. The data element editor checks its object the moment
       // it opens, and a URI it did not recognise here was a 400 — "Checking
@@ -2369,7 +2369,8 @@ export function adtRouter(options = {}) {
         res.status(400).type("application/xml").send(exceptionDocument("ExceptionInvalidRequest", "no check object in the request"));
         return;
       }
-      const reports = [...packageReports, ...objects.map((o) => ({uri: o.uri, ...checkRunReport(store, o)}))];
+      const reports = [...packageReports];
+      for (const o of objects) reports.push({uri: o.uri, ...await checkRunReport(store, o)});
       res.status(200).type("application/vnd.sap.adt.checkmessages+xml").send(checkReportDocument(reports));
     });
   });
@@ -2471,7 +2472,7 @@ export function adtRouter(options = {}) {
       // transpilation disabled, activate() is the only validation, so keep
       // it to prevent this test/embedded configuration promoting bad source.
       if (options.transpileOnActivate !== false && (forced || (warm?.compiler?.primed === true &&
-          named.every((o) => o.type === "CLAS" || o.type === "INTF")))) {
+          named.every((o) => ["CLAS", "INTF", "PROG", "INCL"].includes(o.type))))) {
         checked = named.map((o) => store.warmActivation(o.type, o.name));
         published = true;
         return;
@@ -2547,7 +2548,7 @@ export function adtRouter(options = {}) {
       }
       // Forced activation skips only the separate check. Compilation and
       // generation have succeeded before these properties are returned.
-      warmOutline();
+      if (result?.transpile?.warm !== true) warmOutline();
       res.status(200).type("application/xml").send(successDocument());
     } catch (e) {
       res.status(200).type("application/xml").send(failureDocument(

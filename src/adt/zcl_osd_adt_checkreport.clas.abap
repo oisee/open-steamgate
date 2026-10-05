@@ -2,6 +2,7 @@
 CLASS zcl_osd_adt_checkreport DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     TYPES: BEGIN OF ty_issue,
+             uri TYPE string,
              line TYPE string,
              col TYPE string,
              severity TYPE string,
@@ -32,6 +33,7 @@ CLASS zcl_osd_adt_checkreport IMPLEMENTATION.
     DATA lv_col TYPE string.
     DATA lv_severity TYPE string.
     DATA lv_attrs TYPE string.
+    DATA lv_uri TYPE string.
     DATA lv_count TYPE string.
     DATA ls_report TYPE ty_report.
     DATA ls_issue TYPE ty_issue.
@@ -82,8 +84,12 @@ CLASS zcl_osd_adt_checkreport IMPLEMENTATION.
         IF lv_severity IS INITIAL AND ls_issue-has_severity = abap_false.
           lv_severity = `E`.
         ENDIF.
+        lv_uri = ls_issue-uri.
+        IF lv_uri IS INITIAL.
+          lv_uri = ls_report-uri.
+        ENDIF.
         rv_xml = rv_xml && `      <chkrun:checkMessage chkrun:uri="`
-          && zcl_osd_adt_xml=>esc( ls_report-uri ) && `#start=` && lv_line && `,` && lv_col
+          && zcl_osd_adt_xml=>esc( lv_uri ) && `#start=` && lv_line && `,` && lv_col
           && `" chkrun:type="` && zcl_osd_adt_xml=>esc( lv_severity )
           && `" chkrun:shortText="` && zcl_osd_adt_xml=>esc( ls_issue-message ) && `"/>`.
       ENDLOOP.
