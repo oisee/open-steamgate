@@ -544,3 +544,17 @@ SUBTRACT returns on a real kernel (an A4H probe; not a blocker).
   are enough; revisit with a count limit (attributes per element, namespace
   declarations per document, explicit 400) if this is seen in practice.
   Owner: adt-i5.
+
+## Lifecycle compiler readiness after creation (2026-10-05)
+
+The lifecycle timing probe in the default split-runtime mode completed its
+initial five-object activation but did not regain compiler readiness within
+90 s. The compiler reported a newly created class XML as an inactive
+generator input. The same creation sequence in ONE_RUNTIME=1 regained
+readiness and passed repeated class/interface/include edits. Reproducer:
+use the local lifecycle probe against an isolated OSD_WARM=1 server with
+OSD_ADT_ONE_RUNTIME=0; create all six types and activate the five source
+objects. Owner: adt-i5. Investigate state promotion/priming across the
+parent ADT kernel before claiming equivalent lifecycle performance in both
+modes. No timeout extension or exclusion of this finding. The CI performance
+job currently measures the ONE_RUNTIME=1 deployment used for Eclipse.

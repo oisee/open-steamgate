@@ -564,9 +564,109 @@ jobs:
             .local/kernelci/generate.log
           if-no-files-found: error
 
+  adt-lifecycle:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: built-tree
+          path: ${{ runner.temp }}
+      - name: Restore and verify the build used by the shards
+        run: |
+          tar -xf "$RUNNER_TEMP/built-tree.tar"
+          echo "TRANSPILER=$PWD/.local/ci-artifact/transpiler" >> "$GITHUB_ENV"
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler packages/transpiler
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs transpiler-cli packages/cli
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs runtime packages/runtime
+          TRANSPILER="$PWD/.local/ci-artifact/transpiler" node tools/osd-link.mjs core packages/transpiler/node_modules/@abaplint/core
+          node tools/osd-ci-artifact.mjs verify
+      - run: npm ci --prefix tools/abapfs-conformance
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.8'
+          cache: false
+      - name: Build the public VSP client at its tracked pin
+        run: |
+          ref="$(cat .github/ci/vsp.ref)"
+          [[ "$ref" =~ ^[0-9a-f]{40}$ ]]
+          git clone --filter=blob:none https://github.com/oisee/vibing-steampunk.git "$RUNNER_TEMP/vsp-source"
+          git -C "$RUNNER_TEMP/vsp-source" checkout --detach "$ref"
+          [[ "$(git -C "$RUNNER_TEMP/vsp-source" rev-parse HEAD)" == "$ref" ]]
+          mkdir -p "$RUNNER_TEMP/vsp-bin"
+          cd "$RUNNER_TEMP/vsp-source"
+          go build -o "$RUNNER_TEMP/vsp-bin/vsp" ./cmd/vsp
+          echo "VSP=$RUNNER_TEMP/vsp-bin/vsp" >> "$GITHUB_ENV"
+      - name: Measure creation, edits and activation through both clients
+        run: |
+          mkdir -p .local/adt-lifecycle/report
+          OSD_HEAVY_RANGE=90-99 OSD_HEAVY_SLOTS=4 tools/osd-heavy.sh node tools/adt-lifecycle.mjs --start 2>&1 | tee .local/adt-lifecycle/report/server.log
+      - name: Find compatible successful main timing evidence
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs');
+            const cp = require('node:child_process');
+            const current = JSON.parse(fs.readFileSync('.local/adt-lifecycle/report/report.json', 'utf8'));
+            const {owner, repo} = context.repo;
+            const runs = await github.rest.actions.listWorkflowRuns({owner, repo, workflow_id:'tests.yml', event:'push', branch:'main', status:'success', per_page:20});
+            for (const run of runs.data.workflow_runs) {
+              if (run.id === context.runId) continue;
+              const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {owner, repo, run_id:run.id});
+              const artifact = artifacts.filter(a => /^adt-lifecycle-attempt-\d+$/.test(a.name) && !a.expired)
+                .sort((a,b) => Number(b.name.split('-').at(-1)) - Number(a.name.split('-').at(-1)))[0];
+              if (!artifact) continue;
+              const zip = await github.rest.actions.downloadArtifact({owner, repo, artifact_id:artifact.id, archive_format:'zip'});
+              fs.writeFileSync(process.env.RUNNER_TEMP + '/lifecycle-baseline.zip', Buffer.from(zip.data));
+              const unpack = cp.spawnSync('unzip', ['-p', process.env.RUNNER_TEMP + '/lifecycle-baseline.zip', 'report.json'], {encoding:'utf8'});
+              if (unpack.status !== 0) throw Error('Unreadable main lifecycle artifact');
+              const base = JSON.parse(unpack.stdout);
+              const keys = ['recipe','sdk','vsp','runtime','node','platform','arch'];
+              if (!keys.every(k => current.identity[k] === base.identity[k])) continue;
+              fs.writeFileSync('.local/adt-lifecycle/baseline.json', unpack.stdout);
+              core.info('Using main baseline ' + run.head_sha);
+              break;
+            }
+      - name: Compare medians with main
+        if: success()
+        run: |
+          args=(.local/adt-lifecycle/report/report.json)
+          if [[ -f .local/adt-lifecycle/baseline.json ]]; then
+            args+=(.local/adt-lifecycle/baseline.json)
+            node tools/adt-lifecycle-report.mjs "${args[@]}" .local/adt-lifecycle/report/summary.md
+          else
+            node tools/adt-lifecycle-report.mjs "${args[@]}"
+          fi
+      - name: Publish measurements even on failure
+        if: always()
+        run: |
+          if [[ -f .local/adt-lifecycle/report/summary.md ]]; then
+            cat .local/adt-lifecycle/report/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'ADT lifecycle failed before producing measurements.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: adt-lifecycle-attempt-${{ github.run_attempt }}
+          path: .local/adt-lifecycle/report/
+          if-no-files-found: error
+          retention-days: 30
+
   test:
     if: always()
-    needs: [build, suites, packaging, e2e, osgo-host, kernel-conformance, pr-report]
+    needs: [build, suites, packaging, e2e, osgo-host, kernel-conformance, adt-lifecycle, pr-report]
     runs-on: ubuntu-latest
     steps:
       - name: Require every job to pass
@@ -576,6 +676,7 @@ jobs:
           E2E_RESULT: ${{ needs.e2e.result }}
           OSGO_RESULT: ${{ needs.osgo-host.result }}
           KERNEL_RESULT: ${{ needs.kernel-conformance.result }}
+          LIFECYCLE_RESULT: ${{ needs.adt-lifecycle.result }}
           PACKAGING_RESULT: ${{ needs.packaging.result }}
           VSIX_PROFILE: ${{ needs.build.outputs.vsix_profile }}
           EVENT_NAME: ${{ github.event_name }}
@@ -584,7 +685,7 @@ jobs:
           if [[ "$EVENT_NAME" == pull_request ]]; then
             [[ "$REPORT_RESULT" == success ]] || exit 1
           fi
-          [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success && "$OSGO_RESULT" == success && "$KERNEL_RESULT" == success ]]
+          [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success && "$OSGO_RESULT" == success && "$KERNEL_RESULT" == success && "$LIFECYCLE_RESULT" == success ]]
           case "$VSIX_PROFILE:$PACKAGING_RESULT" in
             full:success|fast:skipped) ;;
             *) echo "unexpected VSIX profile/job result: $VSIX_PROFILE:$PACKAGING_RESULT" >&2; exit 1 ;;
@@ -598,7 +699,7 @@ jobs:
   # this step. All PRs validate artifacts; only same-repository PRs write comments.
   pr-report:
     if: always() && github.event_name == 'pull_request'
-    needs: [build, suites, packaging, e2e, osgo-host, kernel-conformance]
+    needs: [build, suites, packaging, e2e, osgo-host, kernel-conformance, adt-lifecycle]
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -609,6 +710,11 @@ jobs:
         with:
           pattern: suite-results-*
           path: suite-results
+      - name: Download lifecycle measurements
+        uses: actions/download-artifact@v4
+        with:
+          pattern: adt-lifecycle-attempt-*
+          path: adt-lifecycle-results
       - name: Update one PR comment with this run's jobs
         uses: actions/github-script@v7
         env:
@@ -629,6 +735,13 @@ jobs:
             const expected = process.env.EXPECTED_SHARDS.split(',');
             const actual = fs.readdirSync('suite-results').sort();
             const reports = [];
+            const lifecycleDirs = fs.readdirSync('adt-lifecycle-results')
+              .filter(dir => /^adt-lifecycle-attempt-\d+$/.test(dir) && Number(dir.split('-').at(-1)) <= attempt)
+              .sort((a,b) => Number(a.split('-').at(-1)) - Number(b.split('-').at(-1)));
+            const lifecycleDir = lifecycleDirs.at(-1);
+            if (!lifecycleDir || (jobs.some(j => j.name === 'adt-lifecycle') && lifecycleDir !== `adt-lifecycle-attempt-${attempt}`)) throw Error('Missing current lifecycle measurements');
+            const lifecycle = fs.readFileSync(path.join('adt-lifecycle-results', lifecycleDir, 'summary.md'), 'utf8').trim();
+            if (!lifecycle) throw Error('Missing lifecycle measurements');
             for (const shard of expected) {
               // Re-run failed jobs retains successful shards from older attempts.
               const retained = actual.map((dir) => {
@@ -646,7 +759,7 @@ jobs:
               }
             }
             const results = JSON.parse(process.env.JOB_RESULTS);
-            const required = ['build', 'suites', 'e2e', 'osgo-host', 'kernel-conformance'];
+            const required = ['build', 'suites', 'e2e', 'osgo-host', 'kernel-conformance', 'adt-lifecycle'];
             for (const job of [...required, 'packaging']) {
               if (!results[job]?.result) throw new Error(`Missing required job result: ${job}`);
             }
@@ -699,6 +812,8 @@ jobs:
               ...rows,
               '',
               ...reports,
+              '',
+              lifecycle,
               '',
               'Required merge checks: test + scan. Docker, gogen, preview, size and queue are advisory on PRs (Alice, 2026-10-03).',
             ].join('\n');
