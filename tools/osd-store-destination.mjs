@@ -51,6 +51,10 @@ export const COMMANDS = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "CAPABILI
 export const CAPABILITIES = ["LIST", "READ", "WRITE", "CHECK", "ACTIVATE", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
 
 const PARSE_KINDS = {
+  CREATE_VALIDATION: async (store, input) => {
+    const {validateCreation} = await import("./adt-create-validation.mjs");
+    return validateCreation(store, {...input, kind: input.resource});
+  },
   OUTLINE: async (store, input) => {
     const {structureOf} = await import("./adt-documents.mjs");
     const outline = structureOf(store, String(input.type ?? "").toUpperCase(), input.name ?? "");

@@ -1,3 +1,4 @@
+import {packageChildName} from "./osd-object-name.mjs";
 import {transpileStore} from "./osd-store-build.mjs";
 import {deferSourceMutation} from "./osd-store-source-lock.mjs";
 import {warmUp} from "./osd-store-warm.mjs";
@@ -529,7 +530,7 @@ export class ObjectStore {
     const description = String(options.description ?? "");
     let file = tmpPackageFile(this.root, parent, upper, folder, type); // $TMP: tools/osd-store-tmp.mjs
     if (file === undefined && type === "DEVC") {
-      if (!upper.startsWith(parent + "_") || upper.length === parent.length + 1) {
+      if (!packageChildName(parent, upper)) {
         throw new NotSupported(`a package under ${parent} is named ${parent}_<FOLDER>; ${upper}`);
       }
       file = join(folder, upper.slice(parent.length + 1).toLowerCase(), "package.devc.xml");

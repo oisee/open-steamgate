@@ -225,15 +225,7 @@ export function generationTmpProblem(generationDir) {
 // a dot, a slash outside a namespace, a space -- is not a name, and a name
 // here becomes a path, so the check is also what keeps a create inside its
 // folder.
-const OBJECT_NAME = /^(\/[A-Z0-9_]{1,10}\/)?[A-Z0-9_]{1,40}$/;
-const PACKAGE_NAME = /^(\$|\/[A-Z0-9_]{1,10}\/)?[A-Z0-9_]{1,30}$/;
-
-export function nameProblem(type, name) {
-  const upper = String(name ?? "");
-  if (upper !== upper.toUpperCase()) return `${type} ${name}: a repository name is upper case`;
-  const ok = type === "DEVC" ? PACKAGE_NAME.test(upper) && upper.length <= 30 : OBJECT_NAME.test(upper);
-  return ok ? undefined : `${type} "${name}" is not a repository name (A-Z, 0-9, _${type === "DEVC" ? ", a leading $" : ""}, an optional /NAMESPACE/)`;
-}
+export {nameProblem} from "./osd-object-name.mjs";
 
 // ------------------------------------------------------------ the generation
 

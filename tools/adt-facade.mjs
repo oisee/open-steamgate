@@ -1,3 +1,4 @@
+import {validateCreation, validationDocument} from "./adt-create-validation.mjs";
 import {requestElements, elementsNamed, attributeValue, namespaces} from "./adt-request-xml.mjs";
 import {requestXMLProfile, readRequestXML, RequestXMLError, XML_ERROR_TYPE, XML_ERROR_MESSAGE} from "./adt-request-xml.mjs";
 import {segwRegistrationsOf} from "./osd-store-destination.mjs";
@@ -1939,6 +1940,13 @@ export function adtRouter(options = {}) {
       res.status(status).json({error: {code: error?.code ?? "FAILED", message: String(error?.message ?? error)}});
     }
   });
+
+  for (const [path, kind] of [["oo/validation/objectname", "OO"], ["packages/validation", "PACKAGE"]]) {
+    router.post(`${BASE}/${path}`, (req, res) => {
+      res.status(200).type("application/vnd.sap.as+xml; charset=utf-8")
+        .send(validationDocument(validateCreation(store, {...req.query, kind})));
+    });
+  }
 
   // ---- the development loop: lock, write, unlock, activate.
   //

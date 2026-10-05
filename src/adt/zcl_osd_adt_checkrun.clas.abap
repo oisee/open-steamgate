@@ -178,8 +178,7 @@ CLASS zcl_osd_adt_checkrun IMPLEMENTATION.
     TRY.
         lo_conv = cl_abap_conv_in_ce=>create( encoding = 'UTF-8' ).
         lo_conv->convert( EXPORTING input = lv_bytes IMPORTING data = lv_decoded ).
-        IF lv_decoded CA cl_abap_char_utilities=>cr_lf
-            AND lv_decoded NS cl_abap_codepage=>convert_from( 'EFBFBD' ).
+        IF lv_decoded NS cl_abap_codepage=>convert_from( 'EFBFBD' ).
           rv_text = lv_decoded.
         ENDIF.
       CATCH cx_sy_conversion_codepage.
