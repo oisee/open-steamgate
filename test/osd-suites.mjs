@@ -513,13 +513,14 @@ describe("required PR retry reports", () => {
   const workflow = readFileSync(".github/workflows/tests.yml", "utf8");
   const script = workflow.split("          script: |\n").at(-1).split("\n").map((line) => line.replace(/^            /, "")).join("\n");
   const expectedShards = workflow.match(/shard: \[(.*?)\]/)[1].split(',').map((s) => Number(s.trim()));
-  const requiredResults = {build: {result: "success"}, suites: {result: "success"}, packaging: {result: "skipped"}, e2e: {result: "success"}, "osgo-host": {result: "success"}, "kernel-conformance": {result: "success"}};
+  const requiredResults = {build: {result: "success"}, suites: {result: "success"}, packaging: {result: "skipped"}, e2e: {result: "success"}, "osgo-host": {result: "success"}, "kernel-conformance": {result: "success"}, "adt-lifecycle": {result: "success"}};
   const execute = async (mode, attempt = 1, canComment = true) => {
     const nativeRequire = createRequire(import.meta.url);
     const fs = nativeRequire("node:fs");
     const current = expectedShards.map((i) => `suite-results-${i}-attempt-${attempt}`);
     const mockedFs = {...fs,
-      readdirSync: () => {
+      readdirSync: (dir) => {
+        if (dir === "adt-lifecycle-results") return [`adt-lifecycle-attempt-${mode === "stale-lifecycle-report" ? 1 : attempt}`];
         if (mode === "missing-directory") throw Error("ENOENT suite-results");
         if (mode === "missing-shard") return current.slice(0, 1);
         if (mode === "missing-rerun-report") return expectedShards.map((i) => `suite-results-${i}-attempt-1`);
@@ -527,6 +528,7 @@ describe("required PR retry reports", () => {
         return current;
       },
       readFileSync: (file) => {
+        if (file.startsWith("adt-lifecycle-results/")) return mode === "missing-lifecycle-report" ? "" : "### ADT lifecycle: PASS";
         if (mode === "unreadable") throw Error("unreadable report");
         return mode === "retained" && file.includes("suite-results-1-attempt-1") ? "flaky: earlier isolation recovery" : "";
       },
@@ -542,7 +544,8 @@ describe("required PR retry reports", () => {
           return [{name: "suites (1)", conclusion: "failure"}];
         }
         return [{name: "suites (1)", conclusion: "success"},
-          {name: "kernel-conformance", conclusion: mode === "kernel-failed" ? "failure" : "success"}];
+          {name: "kernel-conformance", conclusion: mode === "kernel-failed" ? "failure" : "success"},
+          {name: "adt-lifecycle", conclusion:"success"}];
       },
       rest: {actions: {listJobsForWorkflowRunAttempt() {}}, issues: {
         listComments() {}, createComment(args) { body = args.body; }, updateComment(args) { body = args.body; },
@@ -563,13 +566,17 @@ describe("required PR retry reports", () => {
     }
     return {body, calls};
   };
-  for (const mode of ["missing-directory", "missing-shard", "unreadable"]) {
+  for (const mode of ["missing-directory", "missing-shard", "unreadable", "missing-lifecycle-report"]) {
     it(`fails publication for ${mode}`, async () => {
       let error;
       try { await execute(mode); } catch (caught) { error = caught; }
       expect(error, "publication must fail closed").to.be.instanceOf(Error);
     });
   }
+  it("rejects old lifecycle evidence when the job ran in the new attempt", async () => {
+    let error; try { await execute("stale-lifecycle-report",2); } catch(caught) { error=caught; }
+    expect(error?.message).to.equal("Missing current lifecycle measurements");
+  });
   it("accepts every shard’s readable empty report", async () => { await execute("complete"); });
   it("reports a failed required kernel job as red", async () => {
     const {body} = await execute("kernel-failed");
@@ -577,9 +584,16 @@ describe("required PR retry reports", () => {
     expect(body).to.contain("| kernel-conformance | 🔴 fail |");
     const gate = workflow.split("  test:\n")[1].split("  # One comment")[0];
     const shell = gate.split("        run: |\n")[1].split("\n").map((line) => line.replace(/^          /, "")).join("\n");
-    const env = {...process.env, BUILD_RESULT: "success", SUITES_RESULT: "success", E2E_RESULT: "success", OSGO_RESULT: "success", PACKAGING_RESULT: "skipped", VSIX_PROFILE: "fast", EVENT_NAME: "pull_request", REPORT_RESULT: "success"};
+    const env = {...process.env, BUILD_RESULT: "success", SUITES_RESULT: "success", E2E_RESULT: "success", OSGO_RESULT: "success", PACKAGING_RESULT: "skipped", VSIX_PROFILE: "fast", EVENT_NAME: "pull_request", REPORT_RESULT: "success", LIFECYCLE_RESULT: "success"};
     expect(spawnSync("bash", ["-e", "-c", shell], {env: {...env, KERNEL_RESULT: "success"}}).status).to.equal(0);
     expect(spawnSync("bash", ["-e", "-c", shell], {env: {...env, KERNEL_RESULT: "failure"}}).status).to.equal(1);
+  });
+  it("rejects a failed lifecycle job in the required gate", () => {
+    const gate = workflow.split("  test:\n")[1].split("  # One comment")[0];
+    const shell = gate.split("        run: |\n")[1].split("\n").map(line => line.replace(/^          /, "")).join("\n");
+    const env = {...process.env, BUILD_RESULT:"success", SUITES_RESULT:"success", E2E_RESULT:"success", OSGO_RESULT:"success", KERNEL_RESULT:"success", PACKAGING_RESULT:"skipped", VSIX_PROFILE:"fast", EVENT_NAME:"pull_request", REPORT_RESULT:"success"};
+    expect(spawnSync("bash", ["-e", "-c", shell], {env:{...env,LIFECYCLE_RESULT:"success"}}).status).to.equal(0);
+    expect(spawnSync("bash", ["-e", "-c", shell], {env:{...env,LIFECYCLE_RESULT:"failure"}}).status).to.equal(1);
   });
   for (const job of Object.keys(requiredResults)) {
     it(`rejects a missing required job result: ${job}`, async () => {

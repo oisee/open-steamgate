@@ -525,3 +525,18 @@ and the retained timing refresh workflow. The suite list check passed with
 302 ordinary and seven grouped suites; the changed-file size guard passed
 with seven inherited main breaches. GitHub Actions and the heavy profile
 were not run locally.
+
+## ADT lifecycle performance job
+
+`adt-lifecycle` runs separately beside the suite shards using their shared
+build artifact. It drives six creation types through both ABAP-FS's pinned
+SDK and VSP, checks active source readbacks and confirmed cleanup, and
+publishes every operation's time in the overall PR report. It is part of
+the required `test` gate. Three edit samples produce medians; compatible
+successful main evidence supplies the comparison. Sustained +50% and
++1000 ms regressions fail, as do unexpected cold publications for warm
+CLAS/INTF/INCL edits. Missing main baselines are reported as pending rather
+than fabricated. Known PROG/INCL/DDLS validation gaps remain MISSING.
+See [ADT lifecycle](adt-lifecycle.md) for scope, pins and local execution.
+The new job has not yet been measured on GitHub Actions; its cost includes
+cold tool downloads, initial activations and repeated cold REPORT/DDLS builds.
