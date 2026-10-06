@@ -232,6 +232,10 @@ export function upgradeProxy(runtime, paths, log = () => {}) {
       };
       socket.once("close", release);
       upstream.once("close", release);
+      // a client gone without a close frame may only half-close: its FIN
+      // ends the session, whether or not the child ever closes its side
+      socket.once("end", release);
+      upstream.once("end", release);
     });
     upstream.on("error", (e) => {
       log(`APC ${path}: upstream ${e?.message ?? e}`);

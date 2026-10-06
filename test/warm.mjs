@@ -674,6 +674,43 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
     }
   });
 
+  it("a pool's swap reports the largest heap of its work processes", async () => {
+    const pool = new RuntimePool({size: 2});
+    pool.runtimes[0].hot = async () => ({ms: 1, swaps: 1, heap: 100});
+    pool.runtimes[1].hot = async () => ({ms: 1, swaps: 1, heap: 800});
+    expect(await pool.hot({})).to.include({heap: 800, swaps: 1});
+  });
+
+  it("the APC upgrade proxy releases a socket whose client only half-closes", async () => {
+    const {createServer, connect} = await import("node:net");
+    const {upgradeProxy} = await import("../tools/osd-proxy.mjs");
+    // like the real HTTP child: an upgraded socket may stay half-open
+    const held = new Set();
+    const child = createServer({allowHalfOpen: true}, (socket) => { held.add(socket); socket.on("data", () => {}); });
+    await new Promise((ok) => child.listen(0, "127.0.0.1", ok));
+    const runtime = {url: `http://127.0.0.1:${child.address().port}`, async ensure() {}};
+    const http = (await import("node:http")).createServer();
+    http.on("upgrade", upgradeProxy(runtime, ["/sap/bc/apc/x"]));
+    await new Promise((ok) => http.listen(0, "127.0.0.1", ok));
+    let client;
+    try {
+      client = connect({port: http.address().port, host: "127.0.0.1", allowHalfOpen: true});
+      await new Promise((ok) => client.once("connect", ok));
+      client.write("GET /sap/bc/apc/x HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n");
+      for (let i = 0; i < 50 && runtime.openChannels !== 1; i++) await sleep(10);
+      expect(runtime.openChannels).to.equal(1);
+      client.end();
+      for (let i = 0; i < 50 && runtime.openChannels !== 0; i++) await sleep(10);
+      expect(runtime.openChannels, "a half-closed socket still counted").to.equal(0);
+    } finally {
+      client?.destroy();
+      for (const socket of held) socket.destroy();
+      http.closeAllConnections?.();
+      await new Promise((ok) => http.close(ok));
+      await new Promise((ok) => child.close(ok));
+    }
+  });
+
   it("the APC upgrade proxy counts the sockets it holds open on the runtime", async () => {
     const {createServer, connect} = await import("node:net");
     const {upgradeProxy} = await import("../tools/osd-proxy.mjs");

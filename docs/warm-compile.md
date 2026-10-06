@@ -194,8 +194,10 @@ registry is primed again.
   is replaced by one started on the live generation, and `build/hot/` goes.
   A recycle cuts every APC WebSocket, so the swap count and the quiet
   minute wait while a client holds one (counted by the upgrade proxy,
-  `tools/osd-proxy.mjs`). The quiet recycle is asked again one quiet period
-  after the last socket closes, and the swap count at the next swap. The
+  `tools/osd-proxy.mjs`, released at the close or the end of either side).
+  The quiet recycle is asked again every quiet period while a socket is open
+  (so it may come soon after the last one closes), and the swap count at the
+  next swap. With several work processes the heap is the largest one's. The
   heap limit does not wait: it is the safety limit. PIA's terminal dropped
   in 1-2 turns of 15 while a turn waited on its model (2026-10-06).
 - **One activation per save, answered once it is live.** `publish()` runs

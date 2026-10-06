@@ -146,13 +146,16 @@ export class RuntimePool {
   }
 
   // every work process takes the same swap; one that cannot fails the lot,
-  // and the caller recycles them all
+  // and the caller recycles them all. The heap is the largest of them: the
+  // store's safety limit has to see a work process that grows while it
+  // holds a session, not only the first one
   async hot(swap) {
     const done = [];
     for (const runtime of this.runtimes) {
       done.push(await runtime.hot(swap));
     }
-    return done[0];
+    const heaps = done.map((d) => d?.heap).filter((h) => typeof h === "number");
+    return heaps.length === 0 ? done[0] : {...done[0], heap: Math.max(...heaps)};
   }
 
   verified(generation) {
