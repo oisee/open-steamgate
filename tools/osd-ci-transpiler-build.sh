@@ -4,9 +4,15 @@ set -euo pipefail
 # Absolute on CI ($RUNNER_TEMP/transpiler): actions/cache refuses a path with "..".
 clone="${TRANSPILER:-../transpiler}"
 case "${1:-}" in
-  build)
-    git clone --filter=blob:none "$OSD_TRANSPILER_REPO" "$clone"
-    git -C "$clone" checkout "$OSD_TRANSPILER_REF"
+  build|rebuild)
+    if [[ "$1" == build ]]; then
+      git clone --filter=blob:none "$OSD_TRANSPILER_REPO" "$clone"
+      git -C "$clone" checkout "$OSD_TRANSPILER_REF"
+    elif [[ "$(git -C "$clone" rev-parse HEAD)" != "$OSD_TRANSPILER_REF" ]] \
+        || [[ -n "$(git -C "$clone" status --porcelain --untracked-files=no)" ]]; then
+      echo "Pinned transpiler rebuild requires a clean checkout at $OSD_TRANSPILER_REF: $clone" >&2
+      exit 1
+    fi
     # The root supplies @types/node; ignore its recursive install script.
     npm --prefix "$clone" install --ignore-scripts --no-audit --no-fund
     for package in runtime transpiler extras cli; do
@@ -18,7 +24,7 @@ case "${1:-}" in
     chmod +x "$clone/packages/cli/abap_transpile"
     ;;
   verify) ;;
-  *) echo 'usage: bash tools/osd-ci-transpiler-build.sh <build|verify>' >&2; exit 2 ;;
+  *) echo 'usage: bash tools/osd-ci-transpiler-build.sh <build|rebuild|verify>' >&2; exit 2 ;;
 esac
 
 if [[ ! -d "$clone/.git" ]] || [[ "$(git -C "$clone" rev-parse HEAD)" != "$OSD_TRANSPILER_REF" ]]; then
