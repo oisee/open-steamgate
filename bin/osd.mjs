@@ -22,6 +22,7 @@
 import * as runtime from "@abaplint/runtime";
 import * as core from "@abaplint/core";
 import {Transpiler, Chunk} from "@abaplint/transpiler";
+import {config as validationConfig} from "@abaplint/transpiler/build/src/validation.js";
 import {CallFunctionTranspiler} from "@abaplint/transpiler/build/src/statements/call_function.js";
 import * as guiConverter from "../.local/lars/open-abap-gui/converter/src/api.mjs";
 import * as setup from "../test/setup.mjs";
@@ -90,7 +91,7 @@ if (typeof Bun !== "undefined") {
     },
   });
 }
-setHostModules({identity: toolchainIdentity, Transpiler, Chunk, core, CallFunctionTranspiler, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
+setHostModules({identity: toolchainIdentity, Transpiler, Chunk, core, CallFunctionTranspiler, validationConfig, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
 
 const GENERATORS = {
   "gogen-unit.mjs": () => import(pathToFileURL(resolve(process.cwd(), "tools/gogen/unit.mjs")).href),
@@ -136,6 +137,8 @@ switch (mode) {
     break;
   }
   case "gen": {
+    const {installGeneratorView} = await import("../tools/osd-generator-view.mjs");
+    installGeneratorView();
     const [name, ...args] = rest;
     if (GENERATORS[name] === undefined) {
       console.error(`osd gen: not a generator: ${name}`);

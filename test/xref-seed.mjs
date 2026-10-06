@@ -8,6 +8,9 @@ import {applyAtStartup} from "../tools/osd-icf-apply.mjs";
 import {seedAtStartup} from "../tools/osd-xref-seed.mjs";
 import initSqlJs from "sql.js";
 import {TABLES, WIDTHS, applyRows, cacheKey, insertStatements, overlong, rows} from "../tools/osd-xref-seed.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 // The cross-reference is filled on every host, by one module
 // (tools/osd-xref-seed.mjs). Each host is started here the way it starts
@@ -183,7 +186,7 @@ describe("tools/osd-xref-seed: the cross-reference on every host", function () {
       const counts = [];
       try {
         for (let start = 0; start < 2; start++) {
-          const runtime = new ServingRuntime({database: join(dir, `osd.${db}`), env: {STG_DB: db}});
+          const runtime = new ServingRuntime({root: runtimeFixture.root, database: join(dir, `osd.${db}`), env: {STG_DB: db}});
           try {
             await runtime.start();
             const answer = await fetch(`${runtime.url}/osd/sql`, {
@@ -252,7 +255,7 @@ describe("tools/osd-xref-seed: the cross-reference on every host", function () {
   });
 
   it("the serving runtime (tools/osd-serve.mjs, also the binary's `osd serve`) seeds WBCROSSGT at start", async () => {
-    const serve = fork("tools/osd-serve.mjs", ["0"], {stdio: ["ignore", "ignore", "inherit", "ipc"]});
+    const serve = fork("tools/osd-serve.mjs", ["0"], {cwd: runtimeFixture.root, stdio: ["ignore", "ignore", "inherit", "ipc"]});
     try {
       const port = await new Promise((resolve, reject) => {
         serve.on("message", (m) => m?.type === "ready" && resolve(m.port));
@@ -295,6 +298,7 @@ describe("tools/osd-xref-seed: the cross-reference on every host", function () {
 function child(source, env = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(process.execPath, ["--input-type=module", "-e", `${source}\nprocess.exit(0);`], {
+      cwd: runtimeFixture.root,
       stdio: ["ignore", "ignore", "inherit", "ipc"],
       env: {...process.env, ...env},
     });

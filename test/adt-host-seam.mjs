@@ -2,6 +2,17 @@ import {expect} from "chai";
 import {StoreDestination, withSystem, COMMANDS, CAPABILITIES} from "../tools/osd-store-destination.mjs";
 import {NotFound, Conflict, ReadOnly, NotSupported, InvalidName} from "../tools/osd-store.mjs";
 import {box, rows, answerOf} from "./helpers/destination.mjs";
+import {mkdtempSync, rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
+
+const roots = [];
+const privateRoot = () => {
+  const root = mkdtempSync(join(tmpdir(), "adt-host-seam-"));
+  roots.push(root);
+  return root;
+};
+after(() => { for (const root of roots) rmSync(root, {recursive: true, force: true}); });
 
 async function call(destination, command, input = {}) {
   const signature = {
@@ -17,7 +28,7 @@ async function call(destination, command, input = {}) {
 function store(marker) {
   const entry = {type: "CLAS", name: "ZCL_SEAM", file: marker, package: "$SEAM", packages: ["$TOP", "$SEAM"], changedBy: "DEV"};
   return {
-    root: marker,
+    root: privateRoot(),
     list: () => [entry], find: () => entry,
     stateOf: () => ({version: "active", changedAt: "2000-01-01T00:00:00Z"}),
     classIncludes: () => ["testclasses"],
@@ -65,12 +76,13 @@ describe("ADT host seam", () => {
     const bound = store(".local/seam-bound-unused");
     const calls = [];
     bound.activate = () => ({active: true, issues: []});
-    bound.publish = async (options) => { calls.push(options); return {ok: true, recycled: false, transpile: {built: {}}}; };
+    bound.publish = async (options) => { calls.push(options); return {ok: true, generation: "seam-generation", recycled: false, transpile: {built: {}}}; };
     bound.completeActivation = (verdict, built) => { calls.push([verdict.active, built]); return true; };
     const destination = new StoreDestination({store: store(".local/seam-default-unused")});
     const answer = await withSystem(() => ({}), () => call(destination, "ACTIVATE"), {store: bound});
     expect(answer.EV_ERROR).to.equal("");
     expect(answer.EV_ACTIVE).to.equal("X");
+    expect(JSON.parse(answer.EV_JSON)).to.include({state: "published", generation_id: "seam-generation"});
     expect(calls).to.deep.equal([{activate: [{type: "CLAS", name: "ZCL_SEAM"}]}, [true, {}]]);
   });
 

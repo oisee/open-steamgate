@@ -2,6 +2,11 @@ import {expect} from "chai";
 import {fork} from "node:child_process";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {once} from "node:events";
+import {join} from "node:path";
+import {sendIPC} from "../tools/osd-ipc.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 describe("ADT carry IPC compatibility", function () {
   this.timeout(20000);
@@ -9,8 +14,12 @@ describe("ADT carry IPC compatibility", function () {
     ? "an opted-in IPC child times out its unanswered carry and reaches ready"
     : "a demo-data style IPC parent reaches ready without answering adt-state", async () => {
     const proc = fork("tools/osd-serve.mjs", ["0"], {
+      cwd: runtimeFixture.root,
       stdio: ["ignore", "ignore", "inherit", "ipc"],
-      env: {...process.env, STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0", OSD_ADT_CARRY: carry},
+      // This probes the IPC boot contract against the prepared artifact.
+      // A private root changes build inputs; recompiling it is a different
+      // operation and can exhaust the readiness deadline before boot starts.
+      env: {...process.env, OSD_OUTPUT: join(runtimeFixture.root, "output"), STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0", OSD_ADT_CARRY: carry},
     });
     const said = [];
     proc.on("message", (m) => {if (m?.type === "say") said.push(m.line);});
@@ -23,13 +32,25 @@ describe("ADT carry IPC compatibility", function () {
       expect(ready.port).to.be.greaterThan(0);
       expect(said.some((line) => line.includes("no adt-state after 5 s"))).to.equal(carry === "1");
     } finally {
-      if (proc.exitCode === null && proc.signalCode === null) {const gone = once(proc, "exit"); proc.kill(); await gone;}
+      if (proc.exitCode === null && proc.signalCode === null) {
+        const gone = once(proc, "exit");
+        // Use the serving child's shutdown door; module-installed signal
+        // listeners can consume SIGTERM during boot. Even a failed readiness
+        // probe must reap its child before the file invariant runs.
+        let forced = false;
+        const timer = setTimeout(() => { forced = true; proc.kill("SIGKILL"); }, 2000);
+        try {
+          sendIPC(proc, {type: "quiesce", grace: 1000}, error => { if (error) proc.kill(); });
+          await gone;
+        } finally { clearTimeout(timer); }
+        expect(forced, "IPC child did not quiesce within 2 s").to.equal(false);
+      }
     }
   });
   it("the supervisor defaults carry OFF and does not call the snapshot provider", async () => {
     let snapshots = 0;
     const runtime = new ServingRuntime({
-      env: {OSD_ADT_ONE_RUNTIME: "", OSD_ADT_CARRY: "1", STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0"},
+      root: runtimeFixture.root, env: {OSD_OUTPUT: join(runtimeFixture.root, "output"), OSD_ADT_ONE_RUNTIME: "", OSD_ADT_CARRY: "1", STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0"},
       adtSnapshot: () => {snapshots++; throw new Error("disabled snapshot was called");},
     });
     try {

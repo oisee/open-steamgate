@@ -28,6 +28,18 @@ For ADT Save, Check, and the difference between class replacement and program
 runtime recycling, see [ADR 0009](adr/0009-warm-adt-check-and-activation.md).
 ADT Save only writes source; the warm compiler is used on Check and Activate.
 
+STORE ACTIVATE uses the same activation publisher as ADT
+(`tools/osd-publish-activation.mjs`): capture the checked revision, publish via
+`ObjectStore.publish`, and promote only when that revision matches the build's
+reads and current source. A primed compiler checks the affected closure during
+the build for both callers, avoiding STORE's separate full-registry validation.
+Eligibility, inactive-source isolation, cold fallback, swap refusal/recycle and
+verification retain the rules below. STORE's durable operation reports the
+warm generation ID and `live:true` after an acknowledged swap, with
+`verified:false` until the cold comparison succeeds. ACTIVATION_STATUS reads
+the current verification observation without mutating the completed operation;
+RUN_TESTS pins that same published generation even before comparison.
+
 1. **The registry is kept in a compiler process.** `tools/osd-warm.mjs` holds the abaplint
    registry of the live generation for as long as the process lives. It is
    primed once after the runtime is up. `tools/osd-warm-process.mjs` starts

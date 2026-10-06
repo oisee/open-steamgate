@@ -17,6 +17,7 @@ import {modelR1, modelR2, modelR3} from "./lift.mjs";
 import {abapModel, constantsModel, methodTableModel} from "./dsl-abap.mjs";
 import {buildDaemonModel, traceNodes} from "./dsl-daemons.mjs";
 import {reportModel} from "./dsl-report-model.mjs";
+import {builtEngine} from "./dsl-engine.mjs";
 
 // ---------------------------------------------------------------- scanner --
 
@@ -379,7 +380,7 @@ async function engine() {
     const log = console.log;
     console.log = (...items) => console.error(...items);
     try {
-      await import("../test/start.mjs");
+      await builtEngine();
       for (const name of ["zcl_osd_tpl", "zcl_ajson", "zcl_osd_dsl_profile"]) await import(`../output/${name}.clas.mjs`);
     } finally {
       console.log = log;

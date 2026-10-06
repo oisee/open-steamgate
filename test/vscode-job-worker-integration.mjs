@@ -3,6 +3,9 @@ import {createRequire} from 'node:module';
 import {mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 const require = createRequire(import.meta.url);
 const {Launcher} = require('../editors/vscode/launcher.js');
 const {Osd} = require('../editors/vscode/lib.js');
@@ -37,10 +40,9 @@ CLASS zcl_vs_jobs_probe IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.`);
     const port = Number(process.env.STG_PORT);
-    const launcher = new Launcher({osdHome:process.cwd(), storageDir, warm:'on', jobsWorker:process.env.OSD_TEST_WORKER_OFF ? 'off':'auto',
+    const launcher = new Launcher({osdHome:runtimeFixture.root, storageDir, warm:'on', jobsWorker:process.env.OSD_TEST_WORKER_OFF ? 'off':'auto',
       portRange:{from:port,to:port}});
     let log = '';
-    let intendedDrift = false;
     launcher.on('log', s => { log += s; }); launcher.on('jobsLog', s => { log += s; });
     try {
       try { await launcher.start(); } catch (error) { throw new Error(log, {cause:error}); }
@@ -74,7 +76,6 @@ ENDCLASS.`);
       writeFileSync(file, readFileSync(file, 'utf8').replaceAll('VSIX_PROOF', 'VSIX_NEW_GENERATION'));
       const activation = await new Osd(base).activate({type:'CLAS',name:'ZCL_VS_JOBS_PROBE',base:'zcl_vs_jobs_probe'});
       expect(activation.ok, JSON.stringify(activation)).to.equal(true);
-      intendedDrift = true;
       const nextSubmit = await fetch(`${base}/osd/classrun`, {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'ZCL_VS_JOBS_PROBE'})});
       expect((await nextSubmit.json()).text).to.include('SUBMITTED');
       let nextRun;
@@ -93,15 +94,9 @@ ENDCLASS.`);
       console.log(`job worker activation: ${activation.build}`);
 
     } finally {
-      const isolation = require.cache[require.resolve('../tools/osd-test-isolation.cjs')]?.exports;
-      // Earlier failures leave no recognized edit to prove; the after-all
-      // invariant still reports any generation leak without masking the body.
-      try { if (intendedDrift) await isolation?.observeGenerationDrift({pack: join(storageDir, 'packs/notebook-scratch')}); }
-      finally {
-        await launcher.stop();
-        expect(launcher.jobWorker?.running ?? false).to.equal(false);
-        rmSync(storageDir,{recursive:true,force:true});
-      }
+      await launcher.stop();
+      expect(launcher.jobWorker?.running ?? false).to.equal(false);
+      rmSync(storageDir,{recursive:true,force:true});
     }
   });
 });

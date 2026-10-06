@@ -14,6 +14,9 @@ import {StoreDestination, withSystem, currentSystemAnswers, COMMANDS} from "../t
 import {harnessEntries, runAll} from "../tools/osd-unit-all.mjs";
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {activeFixture} from "./helpers/source-snapshot.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 const base = "/sap/bc/adt/";
 const collections = ["oo/classes", "oo/interfaces", "programs/programs", "ddic/ddl/sources", "ddic/srvd/sources", "programs/includes"];
@@ -135,7 +138,7 @@ describe("ADT B2a source reads and bare documents: live Node byte diff", functio
     restore=mutants(store);
     // Mutants run inline so they change the real methods the route calls.
     if(process.env.OSD_ADT_ONE_RUNTIME === "1" && !process.env.OSD_ADT_B2A_RED) {
-      runtime=new ServingRuntime({root:process.cwd(),watch:false,stdio:"pipe",env:{OSD_ADT_ONE_RUNTIME:"1",STG_DB:"sqlite",STG_DB_PATH:"",STG_TLS:"0"}});
+      runtime=new ServingRuntime({root:runtimeFixture.root,watch:false,stdio:"pipe",env:{OSD_ADT_ONE_RUNTIME:"1",STG_DB:"sqlite",STG_DB_PATH:"",STG_TLS:"0"}});
       runtime.storeDestination=new StoreDestination({store});
       await runtime.start();
     }

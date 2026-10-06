@@ -12,6 +12,7 @@ import {undoOnExit} from "./helpers/undo-on-exit.mjs";
 import {adtAbap} from "./helpers/adt-abap.mjs";
 import {SESSION_COOKIE} from "../tools/adt-session.mjs";
 import {activeFixture} from "./helpers/source-snapshot.mjs";
+import {liveHash} from "../tools/osd-build.mjs";
 
 // The state-changing half of the façade: lock, write, unlock, activate.
 //
@@ -1060,7 +1061,7 @@ describe("tools/adt-facade: publication state", function () {
     expect((await failed.text())).to.contain('activationExecuted="false"');
     expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");
 
-    store.publish = async () => {activeFixture(root); return {ok: true, recycled: false};};
+    store.publish = async () => {activeFixture(root); return {ok: true, generation: liveHash(root), recycled: false};};
     const passed = await activate();
     expect((await passed.text())).to.contain('activationExecuted="true"');
     expect(store.stateOf(store.find("CLAS", name)).version).to.equal("active");
@@ -1075,8 +1076,13 @@ describe("tools/adt-facade: publication state", function () {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
     expect(release).to.be.a("function");
+    // The build read the checked revision before the next save. Keep that
+    // snapshot; creating one from the newer bytes would simulate publication
+    // of those bytes and make stateOf correctly recognize them as active.
+    activeFixture(root);
+    const generation = liveHash(root);
     store.write("CLAS", name, source.replace("'hello'", "'newer'"));
-    release({ok: true, recycled: false});
+    release({ok: true, generation, recycled: false});
     const response = await pending;
     expect(await response.text()).to.contain('activationExecuted="false"');
     expect(store.stateOf(store.find("CLAS", name)).version).to.equal("inactive");

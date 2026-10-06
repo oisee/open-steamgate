@@ -10,6 +10,9 @@ import {dialogStep} from '../tools/osd-dialog-step.mjs';
 import {previewSQL} from '../tools/adt-preview-sql.mjs';
 import {OsdPostgresClient} from '../tools/postgres-client.mjs';
 import './start.mjs';
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 describe('C4 serving database and switch-off compatibility', function () {
   this.timeout(120000);
@@ -17,8 +20,8 @@ describe('C4 serving database and switch-off compatibility', function () {
   before(async () => {
     previous = process.env.OSD_ADT_ONE_RUNTIME;
     previousLocal = abap.context.RFCDestinations.STORE.localSystem;
-    store = new ObjectStore({root: process.cwd()});
-    runtime = new ServingRuntime({root: process.cwd(), env: {OSD_ADT_ONE_RUNTIME: '1', STG_DB:'sqlite', STG_DB_PATH:'', STG_TLS:'0'}});
+    store = new ObjectStore({root: runtimeFixture.root});
+    runtime = new ServingRuntime({root: runtimeFixture.root, env: {OSD_ADT_ONE_RUNTIME: '1', STG_DB:'sqlite', STG_DB_PATH:'', STG_TLS:'0'}});
     runtime.storeDestination = new StoreDestination({store});
     await runtime.start();
   });

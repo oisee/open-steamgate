@@ -16,6 +16,9 @@ import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {abapRunner} from "../tools/adt-abap-front.mjs";
 import {locks} from "../tools/osd-enq.mjs";
 import {dialogStep} from "../tools/osd-dialog-step.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 const base = "/sap/bc/adt/";
 const core = "http://www.sap.com/adt/core";
@@ -94,7 +97,7 @@ for (const front of ["node", "abap"]) describe(`T12/T13 XML requests ${front} mo
     let runner;
     if (front === "abap") {
       if (process.env.OSD_ADT_ONE_RUNTIME === "1") {
-        runtime = new ServingRuntime({root:process.cwd(),env:{OSD_ADT_ONE_RUNTIME:"1",STG_DB:"sqlite",STG_DB_PATH:"",STG_TLS:"0",NODE_OPTIONS:[process.env.NODE_OPTIONS,`--import=${new URL("./helpers/adt-xml-child.mjs",import.meta.url).pathname}`].filter(Boolean).join(" ")}});
+        runtime = new ServingRuntime({root:runtimeFixture.root,env:{OSD_ADT_ONE_RUNTIME:"1",STG_DB:"sqlite",STG_DB_PATH:"",STG_TLS:"0",NODE_OPTIONS:[process.env.NODE_OPTIONS,`--import=${new URL("./helpers/adt-xml-child.mjs",import.meta.url).pathname}`].filter(Boolean).join(" ")}});
         runtime.storeDestination = new StoreDestination({store}); await runtime.start(); runner = abapRunner({remote:runtime});
       } else runner = abapRunner({handler:abap.Classes.ZCL_OSD_ADT_HANDLER,step:dialogStep});
     }

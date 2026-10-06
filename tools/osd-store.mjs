@@ -2,6 +2,7 @@ import {packageChildName} from "./osd-object-name.mjs";
 import {transpileStore} from "./osd-store-build.mjs";
 import {deferSourceMutation} from "./osd-store-source-lock.mjs";
 import {warmUp} from "./osd-store-warm.mjs";
+import {recordBaselineGeneration, recordStoreGeneration} from "./osd-activation-journal.mjs";
 // The object store of OSD, the off-stack doppelgänger: what sits behind
 // the ADT façade. A client asks for an object by type and name; this finds
 // the file, reads it, writes it, checks it and activates it. The façade
@@ -25,7 +26,7 @@ import {warmCheck} from "./adt-warm-check.mjs";
 import {entityOf} from "./ddls-entity.mjs";
 import {inputFoldersOf, packRootsOf} from "./osd-packs.mjs";
 import {libraryFiles} from "./osd-inputs.mjs";
-import {hashOf, inputsOf, loadConfig, normalPath} from "./osd-build.mjs";
+import {hashOf, inputsOf, loadConfig, normalPath, liveHash} from "./osd-build.mjs";
 import {TMP_FOLDER, TMP_TEXT, isTmpPackage, tmpAuthors, tmpRoot} from "./osd-tmp.mjs";
 import {authorNow, checkName, indexTmp, noteAuthor, tmpChild, tmpDelete, tmpPackageFile, withTmp, writeCheck, writeChecked} from "./osd-store-tmp.mjs";
 export {InvalidName} from "./osd-store-tmp.mjs";
@@ -194,7 +195,7 @@ export class ObjectStore {
     // killed there would (#crash)
     this.crashAt = options.crashAt;
     this.#versions = new StoreVersions(this, () => this.#entries());
-    this.#versions.loadInactive();
+    if (process.env.OSD_GENERATOR_ACTIVE_VIEW !== "1") this.#versions.loadInactive();
   }
 
   #versions;
@@ -489,7 +490,8 @@ export class ObjectStore {
     this.#versions.crash("write:before-source");
     writeFileSync(join(this.root, file), text);
     this.#forget();
-    return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8")};
+    return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8"),
+      revision: this.#versions.sourceRevision(type, entry.name)};
   }
 
   // A new object, in the folder of the package it is asked for. The two
@@ -905,6 +907,15 @@ export class ObjectStore {
       if (this.#queued === entry) this.#queued = undefined;
       this.#running = entry;
       return this.#publish({...options, activating}, entry);
+    }).then(result => {
+      if (result?.ok === true && result.generation) {
+        if (result.transpile?.built && typeof result.transpile.built === "object") {
+          this.#publishedBuilds.set(result.transpile.built, result.generation);
+        }
+        // Builds with no activating source already contain only active input.
+        if (activating.size === 0) recordStoreGeneration(this, () => result.generation);
+      }
+      return result;
     }).finally(() => {
       if (this.#running === entry) this.#running = undefined;
       entry.rejectBuilt(new Error("the publish ended before its build"));
@@ -915,6 +926,7 @@ export class ObjectStore {
   }
 
   #publishing = Promise.resolve();
+  #publishedBuilds = new WeakMap();
   // the publish waiting for its turn (not forced), and the one in its turn
   #queued = undefined;
   #running = undefined;
@@ -932,6 +944,7 @@ export class ObjectStore {
   }
 
   async #publish(options, entry = {}) {
+    recordBaselineGeneration(this, () => this.served?.generation ?? liveHash(this.root));
     let transpile;
     try {
       transpile = await this.transpile(options);
@@ -956,7 +969,9 @@ export class ObjectStore {
       runtime = this.served;
     }
     if (runtime === undefined || runtime.running !== true) {
-      return {ok: true, transpile, recycled: false};
+      // The complete generation is available to a fresh detached context,
+      // even when this source host has no serving process to recycle.
+      return {ok: true, transpile, recycled: false, generation: transpile.hash};
     }
     // nothing to load: the process already serves the generation this build
     // named (a no-op warm build, a cached cold one), so no swap and no
@@ -1431,6 +1446,12 @@ export class ObjectStore {
         result.revision !== this.#versions.sourceRevision(result.type, result.name))) return false;
     for (const result of results) {
       this.#versions.markActive(result.type, result.name);
+    }
+    // ADT and STORE share promotion. Update the same publication checkpoint
+    // only for the exact successful build whose source revisions were promoted.
+    const generation = built && this.#publishedBuilds.get(built);
+    if (generation && liveHash(this.root) === generation) {
+      recordStoreGeneration(this, () => generation);
     }
     return true;
   }

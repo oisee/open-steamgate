@@ -5,6 +5,7 @@ import {AbapSessions} from "./adt-abap-sessions.mjs";
 import {sessionJSON, sessionValue} from "./adt-remote-sessions.mjs";
 import {dialogStep} from "./osd-dialog-step.mjs";
 import {withStoreIPC} from "./osd-store-ipc.mjs";
+import {sendIPC} from "./osd-ipc.mjs";
 
 const ARITY = {get: 1, logoff: 1, holderOf: 2, holds: 4, lock: 3,
   unlock: 2, release: 2, whileHeld: 4, deleteObject: 3};
@@ -46,7 +47,7 @@ export function sessionsDoor(identity) {
       }, "ADT session compatibility"));
       return res.json({value: sessionJSON(value ?? null)});
     } catch (error) {
-      if (process.connected) process.send({type: "store-context-ended", context: input.context});
+      sendIPC(process, {type: "store-context-ended", context: input.context});
       return res.status(500).json({error: {message: String(error.message ?? error)}});
     }
   };

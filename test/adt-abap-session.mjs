@@ -12,6 +12,9 @@ import {restoreAdtRows, rebuildAdtLocks, parentAdtSnapshot, snapshotAdtRows} fro
 import {ServingRuntime} from "../tools/osd-runtime.mjs";
 import {withSystem} from "../tools/osd-store-destination.mjs";
 import {identity} from "./helpers/adt-session-unit.mjs";
+import {runtimeRootFixture} from "./helpers/runtime-root.mjs";
+
+const runtimeFixture = runtimeRootFixture();
 
 const API = "zif_osd_adt_session$";
 const stamp = (ms) => Number(new Date(ms).toISOString().slice(0, 19).replace(/\D/g, ""));
@@ -369,7 +372,7 @@ describe("B0 ABAP boot rebuild measurements", function () {
 describe("B0 parent publication step", function () {
   this.timeout(30000);
   it("can boot a child while the publishing parent step is held", async () => {
-    const runtime = new ServingRuntime({env: {STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0", OSD_ADT_ONE_RUNTIME: "1"},
+    const runtime = new ServingRuntime({root: runtimeFixture.root, env: {STG_DB: "sqlite", STG_DB_PATH: "", OSD_DEMO_ROWS: "0", OSD_ADT_ONE_RUNTIME: "1"},
       adtSnapshot: parentAdtSnapshot});
     try {
       const ready = await dialogStep(() => runtime.start(), "parent publishes while holding its step");

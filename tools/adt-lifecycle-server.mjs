@@ -13,7 +13,7 @@ export function lifecycleIdentity() {
   return {recipe:1, commit:git("rev-parse", "HEAD"), sdk, vsp:pin, runtime:JSON.stringify(lock), node:process.versions.node.split(".")[0], platform:process.platform, arch:process.arch};
 }
 export async function startLifecycleServer(target) {
-  if (!process.env.OSD_HEAVY_SLOT || String(target.port) !== process.env.STG_PORT) throw Error("Run --start through tools/osd-heavy.sh on its STG_PORT");
+  if (String(target.port) !== process.env.STG_PORT) throw Error("Lifecycle server must use STG_PORT");
   process.env.STG_SERVE = "child";
   process.env.OSD_ADT_ONE_RUNTIME = "1";
   process.env.STG_DB = "file";

@@ -90,7 +90,10 @@ async function warmReady(f) {
 }
 try {
  flush();
- if(process.argv.includes('--start')) server=await startLifecycleServer(target);
+ if(process.argv.includes('--start')) {
+  if (!process.env.OSD_HEAVY_SLOT) throw Error("Run --start through tools/osd-heavy.sh on its STG_PORT");
+  server=await startLifecycleServer(target);
+ }
  vsp=await vspClient(url);
  await c.login();
  // Create all SDK objects before activating to measure one coherent initial baseline.

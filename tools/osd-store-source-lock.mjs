@@ -38,3 +38,14 @@ export function deferSourceMutation(store, method, args) {
     });
   });
 }
+
+// A synchronous mutation owns this source turn; call the normal ObjectStore
+// API without enqueueing it behind its own lock. Rechecks run in this turn.
+export function withSourceMutation(store, work) {
+  return withSourceLock(store, () => {
+    const lock = lockOf(store);
+    lock.busy = false;
+    try { return work(); }
+    finally { lock.busy = true; }
+  });
+}

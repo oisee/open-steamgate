@@ -132,6 +132,13 @@ module.exports = {
     // and the unit plan (ABAP Unit discovery), imported on the call: it spawns
     // test runs and reads build frames, and a preview has no store to plan from
     new webpack.IgnorePlugin({resourceRegExp: /osd-unit\.mjs$/}),
+    // STORE activation/completion and test execution require a source host.
+    // Keep these entry modules out just like the store itself: dynamic
+    // imports are still traversed by webpack. Built preview hosts refuse
+    // source commands before reaching any of these modules. Their imports
+    // must be dynamic behind that refusal: ignoring a static import leaves
+    // a webpackMissingModule call that throws during worker initialization.
+    new webpack.IgnorePlugin({resourceRegExp: /osd-(publish-activation|activation-journal|store-tests|store-crud|build)\.mjs$/}),
     new webpack.ProvidePlugin({
       Buffer: ["buffer", "Buffer"],
       process: "process/browser",

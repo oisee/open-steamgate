@@ -1,3 +1,4 @@
+import {sendIPC, onIPCFailure} from "./osd-ipc.mjs";
 import {requestXMLBodyError, XML_BODY_LIMIT} from "./adt-request-xml.mjs";
 import {previewSQL} from "./adt-preview-sql.mjs";
 // The serving half of OSD, on its own, in a process that can be replaced.
@@ -43,6 +44,8 @@ import {StoreIPCClient, withStoreIPC} from "./osd-store-ipc.mjs";
 import {StoreDestination, withSystem, currentSystemAnswers} from "./osd-store-destination.mjs";
 import {withAbapCase} from "./osd-case-determinism.mjs";
 
+// Install even when STORE IPC is disabled; boot and control replies also send.
+onIPCFailure(process, () => {});
 const started = Date.now();
 // setup.mjs installs this exact client while the generation boots. Its
 // database-aware SYSTEM answers attach once the database is available.
@@ -63,11 +66,11 @@ const initialAdtState = process.send === undefined || process.env.OSD_ADT_CARRY 
     process.off("message", receive);
     const line = "ADT carry: no adt-state after 5 s; continuing with database rows";
     console.log(line);
-    if (process.connected) process.send({type: "say", line});
+    sendIPC(process, {type: "say", line});
     resolve({});
   }, 5000);
   process.on("message", receive);
-  process.send({type: "adt-state-request"});
+  sendIPC(process, {type: "adt-state-request"});
 });
 
 // **Alive, and doing what.** A boot on a remote HANA can take minutes (the
@@ -84,7 +87,7 @@ let bootLast = "";
 // only while the channel is open: after the supervisor is gone, send() emits
 // ERR_IPC_CHANNEL_CLOSED on `process`, which ends a child mid-seed
 const tell = (message) => {
-  if (process.connected) process.send(message);
+  sendIPC(process, message);
 };
 // a stop during the boot goes at once, but waits out the database step
 // (tools/osd-boot-guard.mjs); the supervisor is told which, so it does not
@@ -113,6 +116,8 @@ const bootStep = (name) => {
 // from next to this file, which is what would otherwise pin an instance to
 // the checkout the script happens to live in.
 const root = process.env.OSD_ROOT ?? process.cwd();
+const {ensureSourceBuild} = await import("./osd-source-build-view.mjs");
+await ensureSourceBuild(root);
 // A reference run pins the module tree explicitly. It never changes build/live.
 const output = process.env.OSD_OUTPUT ?? join(root, "output");
 const from = (file) => import(pathToFileURL(join(output, file)).href);
@@ -536,7 +541,7 @@ const server = app.listen(wanted, "127.0.0.1", () => {
   // serving: the signals' defaults (or the file save's own handler) again
   guard.serving();
   if (process.send !== undefined) {
-    process.send({type: "ready", port, pid: process.pid, ms: Date.now() - started});
+    sendIPC(process, {type: "ready", port, pid: process.pid, ms: Date.now() - started});
   } else {
     console.log(`serving on http://127.0.0.1:${port}/sap/opu/odata/sap/ after ${Date.now() - started} ms`);
   }
@@ -597,7 +602,7 @@ process.on("message", (message) => {
     return;
   }
   import("node:inspector").then((inspector) => inspector, () => undefined).then((inspector) => {
-    process.send?.(inspectorRequest(message, inspector));
+    sendIPC(process, inspectorRequest(message, inspector));
   });
 });
 
@@ -631,7 +636,7 @@ process.on("message", (message) => {
             if (process.env.OSD_ADT_CARRY === "1") {
               const state = await snapshotAdtRows(db);
               if (process.connected) await new Promise((resolve, reject) => {
-                process.send({type: "adt-carry", state}, (error) => error ? reject(error) : resolve());
+                sendIPC(process, {type: "adt-carry", state}, (error) => error ? reject(error) : resolve());
               });
             }
           } catch (error) {

@@ -1,3 +1,4 @@
+import {prepareActivation, publishActivation} from "./osd-publish-activation.mjs";
 import {unitResultDocument, unitResultOptions} from "./adt-unit-result.mjs";
 import {validateCreation, validationDocument} from "./adt-create-validation.mjs";
 import {requestElements, elementsNamed, attributeValue, namespaces} from "./adt-request-xml.mjs";
@@ -2402,6 +2403,7 @@ export function adtRouter(options = {}) {
   // has no place for them and Eclipse ignores headers it does not know.
   const warmHeaders = (res, result) => {
     const t = result?.transpile ?? {};
+    if (result?.committed && result.generation) res.set("X-OSD-Generation", result.generation + (result.verified ? "" : " warm-unverified"));
     const w = store.warm?.();
     // a header value is one line of printable ASCII, whatever a reason says
     // and no host path, whatever a reason quotes (a refused swap names a module file)
@@ -2481,23 +2483,7 @@ export function adtRouter(options = {}) {
           return;
         }
       }
-      // With the warm registry primed (tools/osd-warm.mjs), a class or an
-      // interface is checked by the warm build itself: the transpiler checks
-      // what the change reaches and builds nothing when one is broken, and the
-      // issues come back per object, dependents included. The check below
-      // reparses the tree, ~3 s here, and stays for everything else.
-      const warm = store.warm?.();
-      // Forced cold activation also takes only a revision here: publish()
-      // still compiles/generates and must succeed before promotion. With
-      // transpilation disabled, activate() is the only validation, so keep
-      // it to prevent this test/embedded configuration promoting bad source.
-      if (options.transpileOnActivate !== false && (forced || (warm?.compiler?.primed === true &&
-          named.every((o) => ["CLAS", "INTF", "PROG", "INCL"].includes(o.type))))) {
-        checked = named.map((o) => store.warmActivation(o.type, o.name));
-        published = true;
-        return;
-      }
-      checked = named.map((o) => store.activate(o.type, o.name, {activating: named}));
+      checked = prepareActivation(store, named, {transpile: options.transpileOnActivate !== false, forced});
       const failed = checked.filter((r) => r.active === false);
       if (failed.length > 0) {
         // Include diagnostics for the named objects and any dependents
@@ -2535,7 +2521,7 @@ export function adtRouter(options = {}) {
       // inactive object is built with its last active one, or left out
       // (ObjectStore#overlay), so one broken save fails its own activation
       // and nobody else's
-      const result = await store.publish({activate: named});
+      const result = await publishActivation(store, checked);
       warmHeaders(res, result);
       if (result?.ok === false && result.transpile?.check === true && (result.transpile.issues ?? []).length > 0) {
         // the build refused, warm or cold: each object's own issues at their
@@ -2560,7 +2546,7 @@ export function adtRouter(options = {}) {
         return;
       }
       // promoted only if what was built is what was checked (and still saved)
-      if (!(await store.completeActivations(checked, result?.transpile?.built))) {
+      if (!result.committed) {
         res.status(200).type("application/xml").send(failureDocument(
           named.map((o) => ({...o, issues: [{message: "source changed during activation; check and activate again", severity: "E", line: 1, column: 1}]})),
         ));

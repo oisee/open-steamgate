@@ -131,9 +131,8 @@ export class StoreVersions {
   // that comes late -- are that same inactive source, and wait for it to be
   // activated, however long.
   // The inactive objects other than `activating`, each with its files'
-  // active copy (empty when it never had one) and saved text: what a warm
-  // build asks to refuse a generator input the build view cannot cover
-  // (WarmCompiler#generatorInput).
+  // active copy (empty when it never had one) and saved text: the captured
+  // source view sent to a warm compiler process.
   inactiveSources(activating = new Set()) {
     const out = [];
     for (const key of this.#store.inactive) {

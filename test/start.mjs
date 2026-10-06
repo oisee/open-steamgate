@@ -65,6 +65,8 @@ const MODE = process.env.STG_SERVE === "child" ? "child" : "inline";
 let closing;
 
 async function loadInline() {
+  const {ensureSourceBuild} = await import("../tools/osd-source-build-view.mjs");
+  await ensureSourceBuild(process.cwd());
   const from = (file) => import(new URL(`../output/${file}`, import.meta.url).href);
   const {initializeABAP} = await from("init.mjs");
   const {cl_express_icf_shim} = await from("cl_express_icf_shim.clas.mjs");
@@ -97,6 +99,10 @@ async function loadInline() {
   const {zcl_osd_demo_data} = await from("zcl_osd_demo_data.clas.mjs");
   await ensureDemoData(zcl_osd_demo_data);
   return {cl_express_icf_shim, zcl_osd_adt_handler, zcl_apc_host, zcl_osd_status, icf};
+}
+if (MODE === "child") {
+  const {ensureSourceBuild} = await import("../tools/osd-source-build-view.mjs");
+  await ensureSourceBuild(process.cwd());
 }
 const inline = MODE === "inline" ? await loadInline() : undefined;
 

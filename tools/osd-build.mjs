@@ -40,6 +40,7 @@ import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {forPublishing} from "./osd-tmp.mjs";
+import {sourceBuildOverlay} from "./osd-source-build-view.mjs";
 
 // the tools this build runs before the transpiler, in the order the old npm
 // script ran them; each writes its part of gen/ and says so
@@ -238,16 +239,25 @@ export function generatorClosure(toolsDir = TOOLS, generators = GENERATORS) {
     for (const m of text.matchAll(/import\("(\.[^"]+)"\)/g)) walk(join(dirname(abs), m[1]));
   };
   for (const [script] of generators) walk(join(toolsDir, script));
+  walk(join(toolsDir, "osd-generator-view.mjs"));
   return [...seen].sort();
 }
 
 /** the generators, in order, writing into the working `gen/` as they always do */
-export function runGenerators(root, log = () => {}) {
+export function runGenerators(root, log = () => {}, overlay = undefined) {
   let output = "";
   for (const [script, ...args] of GENERATORS) {
     log(`${script} ${args.join(" ")}`.trim());
     const [cmd, ...argv] = toolCommand(join(TOOLS, script), args);
-    output += run(cmd, argv, root);
+    const view = activeOverlay(overlay);
+    const env = {...process.env, OSD_ROOT: root};
+    delete env.OSD_ACTIVE_BUILD_OVERLAY;
+    if (view) {
+      env.OSD_ACTIVE_BUILD_OVERLAY = JSON.stringify({...view, exclude: [...view.exclude]});
+      // Hosted executables install this view in their gen dispatch.
+      if (!hosted()) argv.unshift("--import", join(TOOLS, "osd-generator-view.mjs"));
+    }
+    output += run(cmd, argv, root, env);
   }
   return output;
 }
@@ -698,6 +708,7 @@ export function activeOverlay(overlay) {
 
 export async function build(options = {}) {
   const root = resolve(options.root ?? process.env.OSD_ROOT ?? process.cwd());
+  options = {...options, overlay: await sourceBuildOverlay(root, options)};
   const log = options.log ?? (() => {});
   const paths = layout(root);
   const started = Date.now();
@@ -754,7 +765,7 @@ export async function build(options = {}) {
       log(`generation ${hash} is already built, but gen/ has drifted from it -- regenerating`);
       const unlockAgain = lock(paths);
       try {
-        runGenerators(root, log);
+        runGenerators(root, log, options.overlay);
       } finally {
         unlockAgain();
       }
@@ -781,7 +792,7 @@ export async function build(options = {}) {
     // generators: false is for a tree with nothing to generate (a test's
     // tree of a few classes); every real build runs them
     if (options.generators !== false) {
-      output += runGenerators(root, log);
+      output += runGenerators(root, log, options.overlay);
     }
     await options.onStep?.("generated");
     // **The layers are read again once gen/ is written.** gen/ is a layer, and
