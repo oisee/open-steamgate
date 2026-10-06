@@ -43,7 +43,7 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
         if (message.method === "prime") heapBase = process.memoryUsage().heapUsed;
         sendIPC(process, {id: message.id, result, state: state()});
       } catch (e) {
-        const error = {message: e.message, code: e.code, check: e.check, issues: e.issues, output: e.output};
+        const error = {message: e.message, code: e.code, pinMissing: e.pinMissing, check: e.check, issues: e.issues, output: e.output};
         sendIPC(process, {id: message.id, error, state: state()});
       }
     }).catch(() => process.exit(1));

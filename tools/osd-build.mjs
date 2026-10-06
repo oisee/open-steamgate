@@ -25,6 +25,7 @@ export {normalPath};
 export {gc};
 import {createHash} from "node:crypto";
 import {libraryPath} from "./osd-lib-path.mjs";
+import {checkLayerVersions} from "./layer-version/index.mjs";
 import {compareGenerations} from "./osd-generation-diff.mjs";
 import {execFileSync} from "node:child_process";
 import {run} from "./osd-build-command.mjs";
@@ -34,7 +35,7 @@ import {fileURLToPath} from "node:url";
 import {buildIdentity, assertToolchain, describeBuild} from "./osd-transpiler.mjs";
 import {describeDuplicates, excludePatterns, layers} from "./osd-inputs.mjs";
 import {transpile, selectedModules} from "./osd-transpile.mjs";
-import {inputFoldersOf, packsOf, webappsOf} from "./osd-packs.mjs";
+import {inputFoldersOf, packsOf, userFoldersOf, webappsOf} from "./osd-packs.mjs";
 import {describeUnfetched, unfetched} from "./osd-fetch.mjs";
 import {toolCommand, hosted} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -629,6 +630,7 @@ export function switchTo(root, hash, log = () => {}, options = {}) {
 // (tools/osd-warm.mjs), so the two cannot disagree about what a tree is
 export function prepare(root, log = () => {}) {
   const config = loadConfig(root);
+  checkLayerVersions(root, packsOf(root), userFoldersOf(root), log);
   const missingLibs = missingLibraries(root, config);
   if (missingLibs.length > 0) {
     const e = new Error(`the build refuses: ${describeMissingLibraries(missingLibs)}`);
@@ -980,7 +982,8 @@ export async function main(args) {
     say(`${r.cached ? "reused" : "built"} ${r.hash} in ${r.ms} ms, ${r.objects} objects${r.live ? ", live" : ""}`);
     return 0;
   } catch (error) {
-    say(`${error.code ?? "FAILED"}: ${error.message}`);
+    if (error.code === "OSD_VERSION_MISMATCH") console.error(error.message);
+    else say(`${error.code ?? "FAILED"}: ${error.message}`);
     if (error.output) {
       console.error(String(error.output).slice(-3000));
     }

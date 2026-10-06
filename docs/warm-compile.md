@@ -376,11 +376,16 @@ constructor at the first access, and a swap runs it at once.
 OSD_WARM=1 STG_DEV=1 npm start          # or: OSD_WARM=1 STG_DEV=1 build/osd up
 ```
 
-With the pinned transpiler the log says `warm: builds stay cold: the
-transpiler has no \`only\` option (abaplint/transpiler#1900)`. To try it before
-those land, link a transpiler built from the pin plus the four branches
-(`node tools/osd-link.mjs transpiler packages/transpiler` in a clone with
-them cherry-picked).
+For a local checkout, run `npm run transpiler:pin` after `npm ci` to build and
+link all four packages from `libs.lock.json`. The persistent default is
+`$HOME/.cache/osd/transpiler-<ref>`; override it with `TRANSPILER` pointing at a
+persistent checkout. Temporary directories and session scratchpads are refused.
+A verified build is reused; an incomplete clean checkout at the pin is rebuilt.
+A checkout at another commit or with tracked edits is refused: choose a new cache
+path instead. With `OSD_WARM=1`, a transpiler missing `only` or registry/config
+reuse prints `warm off: the transpiler is not the pinned build (run: npm run
+transpiler:pin)` plus the detailed reason at startup and in `osd doctor`.
+Doctor keeps this informational (exit 0): cold compilation remains available.
 
 ## Not yet
 

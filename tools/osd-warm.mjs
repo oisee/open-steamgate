@@ -168,29 +168,8 @@ export function importersOf(dir) {
 
 // ---------------------------------------------------------------------------
 
-/** whether this transpiler can build some objects of a registry kept across runs */
-export async function probe(Transpiler, core) {
-  const clas = (name, body) => new core.MemoryFile(`${name}.clas.abap`, `CLASS ${name} DEFINITION PUBLIC.
-  PUBLIC SECTION.
-    CLASS-METHODS m.
-ENDCLASS.
-CLASS ${name} IMPLEMENTATION.
-  METHOD m.
-    ${body}
-  ENDMETHOD.
-ENDCLASS.`);
-  const reg = new core.Registry();
-  reg.addFile(clas("zcl_warm_a", "DATA x TYPE i."));
-  reg.addFile(clas("zcl_warm_b", "DATA y TYPE i."));
-  await new Transpiler({ignoreSyntaxCheck: false}).run(reg);
-  const kept = reg.getObject("CLAS", "ZCL_WARM_A").syntaxResult;
-  const only = await new Transpiler({ignoreSyntaxCheck: false, only: (o) => o.getName() === "ZCL_WARM_B"}).run(reg);
-  if (only.objects.length !== 1) return "the transpiler has no `only` option (abaplint/transpiler#1900)";
-  if (kept === undefined || reg.getObject("CLAS", "ZCL_WARM_A").syntaxResult !== kept) {
-    return "a second run checks the whole registry again (abaplint/transpiler#1921)";
-  }
-  return undefined;
-}
+export {probe} from "./osd-warm-capabilities.mjs";
+import {probe} from "./osd-warm-capabilities.mjs";
 
 const key = (o) => o.getType() + " " + o.getName();
 const warmDiffers = (generationDir) => {
@@ -316,7 +295,7 @@ export class WarmCompiler {
     }
     const missing = await probe(Transpiler, core);
     if (missing !== undefined) {
-      throw new NotWarm(missing);
+      throw Object.assign(new NotWarm(missing), {pinMissing: true});
     }
     const live = liveHash(root);
     if (live === undefined) {
