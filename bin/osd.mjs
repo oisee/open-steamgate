@@ -206,6 +206,8 @@ switch (mode) {
       console.log(`system id: invalid -- ${error.message}`);
       process.exitCode = 1;
     }
+    const {doctorWarmPin} = await import("../tools/osd-warm-capabilities.mjs");
+    await doctorWarmPin(Transpiler, core);
     // what the bundle did to the runtime: a class the runtime looks up by
     // its name must still carry that name after bundling
     const renamed = [];

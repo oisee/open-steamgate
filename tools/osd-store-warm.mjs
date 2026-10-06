@@ -1,3 +1,4 @@
+import {warnWarmPin} from "./osd-warm-capabilities.mjs";
 import {acceptView, captureView} from "./osd-store-compile-view.mjs";
 // Background priming belongs to the compiler process, never the HTTP front.
 export function warmUp(store) {
@@ -38,6 +39,10 @@ export function warmUp(store) {
       if (w.closed === true || w.compiler.closing === true) return undefined;
       w.reason = error.message;
       await w.compiler.drop?.();
+      if (error.pinMissing === true && !w.pinWarned) {
+        warnWarmPin(error.message);
+        w.pinWarned = true;
+      }
       console.log(`warm: builds stay cold: ${error.message}`);
       return undefined;
     } finally {
