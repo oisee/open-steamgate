@@ -190,6 +190,23 @@ packs/my-pack/
 }
 ```
 
+A pack or workspace layer can require a minimum system version with
+`"osd": ">=0.6.1650"` in `osd-pack.json`. Only `>=x.y.z` is supported;
+omitting `osd` means no requirement. Versions compare numerically, and an
+invalid requirement refuses the build. The check runs before generation or
+transpilation, including cached and warm builds.
+
+Packaged systems carry `osd-version.json`, stamped with the extension version;
+seeded binaries use the same version rule. A source checkout without that
+marker, including a checkout-mode binary, skips the comparison and logs a
+debug line. A mismatch leaves the live generation untouched and tells you to
+update the extension or binary. In desktop VS Code, the error notification
+shows the diagnostic verbatim; **Update** opens the installed extension's
+entry in the Extensions view.
+
+Explicit `--layer` and `OSD_LAYERS` inputs can name the manifest directory or
+its declared ABAP folder, including a nested path such as `"abap": "abap/src"`.
+
 Where packs are found: `packs/` beside the tree, and every directory
 `OSD_PACKS` names (a pack itself, or a folder full of them, colon-separated).
 

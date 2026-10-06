@@ -51,6 +51,14 @@ the `/IWBEP/` framework whose runtime this project reimplements.
 - **VS Code.** The OSD tree, F8 data preview, ABAP Unit in the Test Explorer,
   debugging, and a `.http` CodeLens that finds the DPC method behind a request.
 
+For warm local development (`OSD_WARM=1 STG_DEV=1 npm start`), run
+`npm run transpiler:pin` after `npm ci`. It builds the `libs.lock.json` pin in
+`$HOME/.cache/osd/transpiler-<ref>` and links transpiler, CLI, runtime and core;
+a verified build is reused. Override the persistent location with `TRANSPILER`;
+temporary directories and session scratchpads are refused. Startup and
+`osd doctor` print a prominent install hint if warm capabilities are missing.
+See [warm setup](docs/warm-compile.md#running-it).
+
 The launchpad in the browser build:
 
 | tile | what it is |
@@ -159,7 +167,8 @@ copies the configured checkout layers into a disposable checkout, excluding all
 content packs (including `OSD_PACKS`), runs the generators and transpiles
 the **whole tree** (roughly 20 seconds for transpilation), then runs ABAP Unit
 only for the selected owners, including class and instance lifecycle hooks.
-The pinned transpiler lacks the `only` option needed for a smaller build.
+This command still builds the whole tree; the local warm path can use the
+pinned transpiler's `only` option.
 For large generated folders, use Node with a larger heap and a private SQLite
 file instead of in-memory sql.js:
 

@@ -88,6 +88,7 @@
     "stg:compile": "node tools/stg-compile.mjs",
     "segw:closure": "node tools/segw-closure.mjs",
     "packs:fetch": "node tools/osd-fetch.mjs",
+    "transpiler:pin": "node tools/osd-transpiler-pin.mjs",
     "transpiler:which": "node tools/osd-transpiler.mjs",
     "transpiler:local": "node tools/osd-link.mjs transpiler packages/transpiler && node tools/osd-link.mjs transpiler-cli packages/cli",
     "transpiler:published": "npm install @abaplint/transpiler @abaplint/transpiler-cli && node tools/osd-transpiler.mjs",

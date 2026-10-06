@@ -58,6 +58,7 @@ jobs:
   build:
     outputs:
       vsix_profile: ${{ steps.vsix_profile.outputs.profile }}
+      adt_lifecycle: ${{ steps.adt_lifecycle.outputs.adt_lifecycle }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -220,6 +221,36 @@ jobs:
             echo "VSIX profile: $profile" >> "$GITHUB_STEP_SUMMARY"
           fi
           echo "profile=$profile" >> "$GITHUB_OUTPUT"
+
+      # Same shape as the VSIX profile above, for the ADT lifecycle job:
+      # scheduled, manual, tag and main-push runs always measure; a PR runs
+      # the measurements only when the diff reaches an ADT-relevant path.
+      - name: Select ADT lifecycle profile
+        id: adt_lifecycle
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == schedule || "$GITHUB_EVENT_NAME" == workflow_dispatch || "$GITHUB_REF" == refs/tags/* ]]; then
+            adt_lifecycle=run
+            echo 'ADT lifecycle: run (scheduled, manual, or tag)' >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            base='${{ github.event.pull_request.base.sha }}'
+            if [[ "$base" =~ ^0+$ ]]; then
+              adt_lifecycle=run
+            else
+              git fetch --no-tags --depth=1 origin "$base"
+              decision="$(node tools/osd-ci-lifecycle-gate.mjs "$base" "$(git rev-parse HEAD)")"
+              case "$decision" in
+                OSD_CI_ADT_LIFECYCLE=1) adt_lifecycle=run ;;
+                OSD_CI_ADT_LIFECYCLE=0) adt_lifecycle=skip ;;
+                *) echo "unexpected ADT lifecycle decision: $decision" >&2; exit 1 ;;
+              esac
+            fi
+            echo "ADT lifecycle: $adt_lifecycle" >> "$GITHUB_STEP_SUMMARY"
+          else
+            # Push to main: the branch protection baseline must stay measured.
+            adt_lifecycle=run
+            echo 'ADT lifecycle: run (push)' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "adt_lifecycle=$adt_lifecycle" >> "$GITHUB_OUTPUT"
 
   suites:
     needs: build
@@ -566,8 +597,11 @@ jobs:
 
   adt-lifecycle:
     needs: build
+    if: needs.build.outputs.adt_lifecycle == 'run'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Measured 21-24 min on green main runs (2026-10-05/06), so 25 cancelled
+    # healthy runs on slower runners. 40 leaves headroom without hiding a hang.
+    timeout-minutes: 40
     permissions:
       contents: read
       actions: read
@@ -679,16 +713,21 @@ jobs:
           LIFECYCLE_RESULT: ${{ needs.adt-lifecycle.result }}
           PACKAGING_RESULT: ${{ needs.packaging.result }}
           VSIX_PROFILE: ${{ needs.build.outputs.vsix_profile }}
+          ADT_LIFECYCLE: ${{ needs.build.outputs.adt_lifecycle }}
           EVENT_NAME: ${{ github.event_name }}
           REPORT_RESULT: ${{ needs.pr-report.result }}
         run: |
           if [[ "$EVENT_NAME" == pull_request ]]; then
             [[ "$REPORT_RESULT" == success ]] || exit 1
           fi
-          [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success && "$OSGO_RESULT" == success && "$KERNEL_RESULT" == success && "$LIFECYCLE_RESULT" == success ]]
+          [[ "$BUILD_RESULT" == success && "$SUITES_RESULT" == success && "$E2E_RESULT" == success && "$OSGO_RESULT" == success && "$KERNEL_RESULT" == success ]]
           case "$VSIX_PROFILE:$PACKAGING_RESULT" in
             full:success|fast:skipped) ;;
             *) echo "unexpected VSIX profile/job result: $VSIX_PROFILE:$PACKAGING_RESULT" >&2; exit 1 ;;
+          esac
+          case "$ADT_LIFECYCLE:$LIFECYCLE_RESULT" in
+            run:success|skip:skipped) ;;
+            *) echo "unexpected ADT lifecycle gate/job result: $ADT_LIFECYCLE:$LIFECYCLE_RESULT" >&2; exit 1 ;;
           esac
 
   # One comment per PR with the jobs of this run, kept up to date: the same
@@ -721,6 +760,7 @@ jobs:
           EXPECTED_SHARDS: '1,2,3,4,5,6'
           JOB_RESULTS: ${{ toJSON(needs) }}
           VSIX_PROFILE: ${{ needs.build.outputs.vsix_profile }}
+          ADT_LIFECYCLE: ${{ needs.build.outputs.adt_lifecycle }}
           CAN_COMMENT: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           script: |
@@ -735,13 +775,23 @@ jobs:
             const expected = process.env.EXPECTED_SHARDS.split(',');
             const actual = fs.readdirSync('suite-results').sort();
             const reports = [];
-            const lifecycleDirs = fs.readdirSync('adt-lifecycle-results')
-              .filter(dir => /^adt-lifecycle-attempt-\d+$/.test(dir) && Number(dir.split('-').at(-1)) <= attempt)
-              .sort((a,b) => Number(a.split('-').at(-1)) - Number(b.split('-').at(-1)));
-            const lifecycleDir = lifecycleDirs.at(-1);
-            if (!lifecycleDir || (jobs.some(j => j.name === 'adt-lifecycle') && lifecycleDir !== `adt-lifecycle-attempt-${attempt}`)) throw Error('Missing current lifecycle measurements');
-            const lifecycle = fs.readFileSync(path.join('adt-lifecycle-results', lifecycleDir, 'summary.md'), 'utf8').trim();
-            if (!lifecycle) throw Error('Missing lifecycle measurements');
+            // The ADT lifecycle gate decides whether this PR owes measurements:
+            // a skipped gate means no job, no artifact and no error here, and
+            // the job row below already shows the skip.
+            let lifecycle = '';
+            if (process.env.ADT_LIFECYCLE === 'run') {
+              const lifecycleDirs = fs.readdirSync('adt-lifecycle-results')
+                .filter(dir => /^adt-lifecycle-attempt-\d+$/.test(dir) && Number(dir.split('-').at(-1)) <= attempt)
+                .sort((a,b) => Number(a.split('-').at(-1)) - Number(b.split('-').at(-1)));
+              const lifecycleDir = lifecycleDirs.at(-1);
+              if (!lifecycleDir || (jobs.some(j => j.name === 'adt-lifecycle') && lifecycleDir !== `adt-lifecycle-attempt-${attempt}`)) throw Error('Missing current lifecycle measurements');
+              lifecycle = fs.readFileSync(path.join('adt-lifecycle-results', lifecycleDir, 'summary.md'), 'utf8').trim();
+              if (!lifecycle) throw Error('Missing lifecycle measurements');
+            } else if (process.env.ADT_LIFECYCLE === 'skip') {
+              lifecycle = '_ADT lifecycle skipped: no ADT-relevant paths in this change set._';
+            } else {
+              throw new Error(`Unexpected ADT lifecycle gate: ${process.env.ADT_LIFECYCLE}`);
+            }
             for (const shard of expected) {
               // Re-run failed jobs retains successful shards from older attempts.
               const retained = actual.map((dir) => {
@@ -759,13 +809,15 @@ jobs:
               }
             }
             const results = JSON.parse(process.env.JOB_RESULTS);
-            const required = ['build', 'suites', 'e2e', 'osgo-host', 'kernel-conformance', 'adt-lifecycle'];
-            for (const job of [...required, 'packaging']) {
+            const required = ['build', 'suites', 'e2e', 'osgo-host', 'kernel-conformance'];
+            for (const job of [...required, 'adt-lifecycle', 'packaging']) {
               if (!results[job]?.result) throw new Error(`Missing required job result: ${job}`);
             }
             const gatePassed = required.every((job) => results[job].result === 'success') &&
               (process.env.VSIX_PROFILE === 'full' ? results.packaging.result === 'success' :
-                process.env.VSIX_PROFILE === 'fast' && results.packaging.result === 'skipped');
+                process.env.VSIX_PROFILE === 'fast' && results.packaging.result === 'skipped') &&
+              (process.env.ADT_LIFECYCLE === 'run' ? results['adt-lifecycle'].result === 'success' :
+                process.env.ADT_LIFECYCLE === 'skip' && results['adt-lifecycle'].result === 'skipped');
             const marker = '<!-- osd-pr-test-report -->';
             const icon = (v) => v === 'success' ? '🟢 pass' : v === 'failure' ? '🔴 fail' : v === 'cancelled' ? '⚫ cancelled' : v === 'skipped' ? '⚪ skipped' : '⚪ ' + (v || 'not run');
             const attempts = new Map([[attempt, jobs]]);
