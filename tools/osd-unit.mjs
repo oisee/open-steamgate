@@ -19,7 +19,7 @@
 // parse, not from the generated index, so a test that was written and not
 // yet transpiled is reported as such instead of silently missing.
 import {fileURLToPath} from "node:url";
-import {existsSync, readFileSync, rmSync} from "node:fs";
+import {existsSync, readFileSync, realpathSync, rmSync} from "node:fs";
 import {unitCommand} from "./osd-host.mjs";
 // Detached unit/debug children can be launched from the serving runtime.
 import {spawn} from "./osd-child-process.mjs";
@@ -384,14 +384,17 @@ export class UnitRun {
   // the developer's, and a client would only have to scroll past them.
   #stack(error) {
     const out = [];
+    // Node resolves imported generation symlinks. Stack paths name the
+    // generation's output, so compare against that directory as well.
     const output = join(this.store.root, "output");
+    const resolvedOutput = realpathSync(output);
     for (const line of String(error?.stack ?? "").split("\n").slice(1, 20)) {
       const at = /\((?:file:\/\/)?([^()]+\.mjs):(\d+):(\d+)\)/.exec(line) ?? /at (?:async )?(?:file:\/\/)?([^ ()]+\.mjs):(\d+):(\d+)/.exec(line);
       if (at === null) {
         continue;
       }
       const [, file, row, column] = at;
-      if (decodeURIComponent(file).startsWith(output) === false) {
+      if ([output, resolvedOutput].some(path => decodeURIComponent(file).startsWith(path + "/")) === false) {
         continue;
       }
       const mapped = this.#map(file, Number(row), Number(column));

@@ -16,7 +16,7 @@ export async function checkRunReport(store, object, configured = process.env.STG
       ? portabilityWarnings(source, `${object.name.toLowerCase()}.clas.abap`, store, engine) : [];
     return {status: "processed", issues: [...result.issues, ...warnings].map((issue) => ({
       severity: issue.severity ?? "E", line: issue.line ?? 1, column: issue.column ?? 1, message: issue.message,
-      ...(result.warm === true && issue.type ? {uri: frameUri(issue.file, issue.line, issue.column)?.split("#start=")[0]
+      ...(result.warm === true && issue.type ? {uri: frameUri(issue.file, issue.line, issue.column, {sourceMain: true})?.split("#start=")[0]
         ?? `${uriOf(issue.type, issue.name)}/source/main`} : {}),
     }))};
   } catch (error) {

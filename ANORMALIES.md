@@ -29,6 +29,18 @@ Format adapted from `larshp/hithub` (MIT).
 - Upstream version containing a fix: `...` or `unknown`
 
 ## Open anomalies
+### ANOMALY-2026-10-06-adt-unit-result-uris - ABAP Unit results name invalid class source suffixes
+
+- Status: `fixed locally`
+- Discovery: user-supplied SAP protocol measurement, 2026-10-06; no SAP calls made for this fix.
+- Affected path: `tools/adt-documents.mjs` result and frame URI rendering (now extracted into `tools/adt-unit-result.mjs`), and both facade result callers.
+- Expected: class results use semantic class/method selectors, include navigation selectors, and include stack URIs with `#start=line,0`. Class include URIs have no `/source/main` suffix. Disabling navigation removes class/method types as well as navigation attributes. Assertion comparisons are nested under `Different values`.
+- Actual: class/method identities and stack frames used `/includes/testclasses/source/main#start=...`; Eclipse rejected the suffix after running the tests. Navigation options were ignored and comparison details were flat.
+- Resolution: render the measured CLAS shapes, preserve available failure text, and read the navigation option on run and evaluation. Program result shapes stay as before except for the navigation switch. Activation and check diagnostics retain their existing source suffix explicitly when calling the shared frame helper.
+- Regression: `test/adt-unit-result.mjs`, plus the existing development-loop and reference-package run assertions. The new contract suite fails against the old renderer. Include navigation GETs read a synthetic source file; no captures or measured object names are stored.
+- Execution seam: Node stack paths resolve the output generation symlink. The runner now compares frames with that resolved output directory so the test include reaches the renderer; previously only the assertion library's explicit frame survived. `test/osd-unit.mjs` checks the real failure line.
+- Upstream: none; the renderer is an open-steamgate implementation.
+
 ### ANOMALY-2026-10-04-sqlite-like-case -- sql.js Open SQL LIKE ignores ASCII case
 
 - Status: `workaround`

@@ -501,16 +501,17 @@ describe("tools/adt-facade: the development loop", () => {
       expect(xml).to.contain('adtcore:name="ZCL_STG_SEGW_TEST"');
       expect(xml).to.contain("<testClass ");
       expect(xml).to.contain("<testMethod ");
-      expect(xml).to.match(/executionTime="\d+\.\d+" unit="s"/);
+      expect(xml).to.match(/executionTime="\d+(?:\.\d+)?" unit="s"/);
     });
 
     it("a method that passed carries no alert, which is what passing means", async function () {
       this.timeout(180000);
       const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();
       const testClass = xml.match(/<testClass [^>]*>[\s\S]*?<testMethods>/)[0];
-      expect(testClass).to.contain("<alerts/>");
-      const method = xml.match(/<testMethod [^>]*>[\s\S]*?<\/testMethod>/)[0];
-      expect(method).to.contain("<alerts/>");
+      // an SAP system omits a class's empty <alerts> entirely (measured)
+      expect(testClass).to.not.contain("<alerts");
+      const method = xml.match(/<testMethod [^>]*\/>/)[0];
+      expect(method).to.not.contain("<alerts");
       expect(method).to.not.contain("<alert ");
     });
 
@@ -731,15 +732,21 @@ describe("tools/adt-facade: the development loop", () => {
       expect(await res.text()).to.contain("does not belong");
     });
 
-    it("every class and method points at the line it is written at", async function () {
+    it("every class and method navigates by its semantic source member selector", async function () {
       this.timeout(180000);
       const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();
-      // a client jumps to a failure instead of opening a file and searching
-      expect(xml).to.match(/navigationUri="[^"]*\/includes\/testclasses\/source\/main#start=\d+,\d+"/);
+      expect(xml).to.match(/navigationUri="[^"]*\/includes\/testclasses#type=CLAS%2FOCL;name=LTCL_[^"]+"/);
+      expect(xml).to.match(/navigationUri="[^"]*\/includes\/testclasses#type=CLAS%2FOLD;name=LTCL_[^" ]+(?:%20)+[A-Z_]+"/);
+      expect(xml).not.to.contain("/source/main");
+      const target = xml.match(/navigationUri="([^"]*\/includes\/testclasses#[^"]+)"/)[1];
+      const source = await call(target.replace("/sap/bc/adt", ""), {headers: {accept: "text/plain"}});
+      expect(source.status).to.equal(200);
+      expect(source.headers.get("content-type")).to.equal("text/plain; charset=utf-8");
+      expect(await source.text()).to.equal(store.read("CLAS", "ZCL_STG_SEGW_TEST", "testclasses").source);
     });
 
     it("answers the occurrence-marker follow-up without discarding the navigation URI", async () => {
-      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses/source/main#start=10,10";
+      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses#type=CLAS%2FOCL;name=LTCL_TREE";
       const res = await call(`/abapsource/occurencemarkers?uri=${encodeURIComponent(uri)}`, {
         method: "POST",
         headers: {"content-type": "text/plain", accept: "application/*"},
@@ -753,7 +760,7 @@ describe("tools/adt-facade: the development loop", () => {
     });
 
     it("maps a test include URI back through its packages to the owning class", async () => {
-      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses/source/main#start=10,10";
+      const uri = "/sap/bc/adt/oo/classes/zcl_stg_segw_test/includes/testclasses#start=10,0";
       const res = await call(`/repository/nodepath?uri=${encodeURIComponent(uri)}`, {method: "POST"});
       expect(res.status).to.equal(200);
       const xml = await res.text();

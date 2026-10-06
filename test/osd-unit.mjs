@@ -68,6 +68,15 @@ describe("tools/osd-unit: ABAP Unit for one object, shaped as ADT reports it", f
     expect(result.testClasses[0].testMethods[0].name).to.equal("PROPERTIES_IN_FILE_ORDER");
   });
 
+  it("a detached failure retains test include frames through the output generation symlink", async () => {
+    const result = await runner.runDetached("CLAS", "ZCL_ZOSD_TEST_DEMO", {method: "DELIBERATE_FAILURE"});
+    const alert = result.testClasses[0].testMethods[0].alerts[0];
+    expect(alert.kind).to.equal("failedAssertion");
+    const frame = alert.stack.find(e => e.uri === "zcl_zosd_test_demo.clas.testclasses.abap");
+    expect(frame, JSON.stringify(alert.stack)).not.to.equal(undefined);
+    expect(frame.line).to.equal(34);
+  });
+
   it("a test class that was never transpiled is an alert, not silence", async () => {
     // **The subject is planted, not borrowed.** This used to run against
     // `CL_ABAP_CHAR_UTILITIES`, on the note that "a library's own tests are
