@@ -32,6 +32,7 @@ import {copyFileSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {fileURLToPath} from "node:url";
 import {generatorIdentity, hashOf, inputsOf, layout, liveHash, lock, linkRoots, ownConfig, prepare, rootsWanted, switchTo} from "./osd-build.mjs";
+import {sourceBuildOverlay, sourceBuildStore} from "./osd-source-build-view.mjs";
 import {assertToolchain} from "./osd-transpiler.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {runsAs} from "./osd-main.mjs";
@@ -254,37 +255,15 @@ export class WarmCompiler {
     // registry is primed from the same view, and an activation of a set S is
     // a warm edit of it: S's saved sources replace their copies, every other
     // inactive object keeps serving its copy. `overlay(S)` is the store's
-    // (ObjectStore#overlay); without a store, the tree as it is.
+    // (ObjectStore#overlay); without a caller's store, load the persistent one.
     this.overlayOf = options.overlay ?? (() => undefined);
+    this.storeViewMissing = options.overlay === undefined;
     // the object a file belongs to, "TYPE NAME" (ObjectStore#objectKeyOf)
     this.keyOf = options.keyOf ?? (() => undefined);
     // the inactive objects and their copies (ObjectStore#inactiveSources)
     this.inactiveSources = options.inactiveSources ?? (() => []);
     // the view each generation this made was built from, for its comparison
     this.views = new Map();
-  }
-
-  // **The generators read the raw tree, not the build view** (#460's known
-  // limit): cds2ddic reads a saved DDLS, stg-compile a saved YAML, the
-  // registries a saved class's INTERFACES lines, whether or not the object
-  // is active. A warm build trusts gen/ as the last cold build left it, so
-  // an inactive object a generator would read differently than its active
-  // copy says makes every build cold -- a cold build is what runs the
-  // generators over it, and fails where they fail (critic on d75d8fdc: a
-  // DDLS inactive at the live build, saved again with an invalid source,
-  // and a class activation built warm over it). Any inactive object that is
-  // not a class or interface counts, and a class or interface whose saved
-  // source the warm rule would not take as an edit of its copy.
-  #generatorInput(activating = new Set()) {
-    for (const {key, type, files} of this.inactiveSources(activating)) {
-      if (!["CLAS", "INTF", "PROG", "INCL"].includes(type)) return `${key} is inactive, and the generators read its saved source`;
-      for (const {file, before, after} of files) {
-        if (before === after) continue;
-        const reason = warmRule({path: file, before, after, amdpText: this.amdpText ?? ""});
-        if (reason !== undefined) return `${key} is inactive, and the generators read its saved source (${reason})`;
-      }
-    }
-    return undefined;
   }
 
   // A file is known by where it lives in the tree, whichever copy the view
@@ -309,10 +288,21 @@ export class WarmCompiler {
     return this.reg !== undefined;
   }
 
+  async loadStoreView() {
+    if (this.storeViewMissing) {
+      const store = await sourceBuildStore(this.root);
+      this.overlayOf = activating => store.overlay(activating);
+      this.keyOf = file => store.objectKeyOf(file);
+      this.inactiveSources = activating => store.inactiveSources(activating);
+      this.storeViewMissing = false;
+    }
+  }
+
   // Load the live generation's inputs into a registry and transpile them
   // once, which is what makes the next save cheap. Refuses unless the tree
   // on disk is the live generation's and the result reproduces its files.
   async prime() {
+    await this.loadStoreView();
     const started = Date.now();
     this.reg = undefined;
     const root = this.root;
@@ -332,8 +322,6 @@ export class WarmCompiler {
     if (live === undefined) {
       throw new NotWarm("there is no live generation to start from");
     }
-    const input = this.#generatorInput();
-    if (input !== undefined) throw new NotWarm(input);
     const {config, stack} = prepare(root);
     // the libraries are pinned clones and most of the inputs; a watcher per
     // library lets a build reuse their walk until something moves in one
@@ -628,8 +616,6 @@ export class WarmCompiler {
     const transpiler = assertToolchain(root, this.loaded);
     // the view this build makes live: S promoted, every other inactive
     // object as its copy -- the overlay a cold build of S would read
-    const input = this.#generatorInput(activating);
-    if (input !== undefined) throw new NotWarm(input);
     const overlay = this.overlayOf(activating);
     checkView(root, this.compileView, overlay);
     const raw = new Map();
@@ -884,7 +870,8 @@ export class WarmCompiler {
       // compared with a cold transpile of the same view, not of the raw tree
       const view = this.views.get(hash);
       const child = spawn(cmd, args, {cwd: this.root, stdio: ["ignore", "pipe", "pipe"],
-        env: {...process.env, OSD_ROOT: this.root, OSD_VERIFY_OVERLAY: view === undefined ? "" : JSON.stringify({exclude: [...(view.exclude ?? [])], folder: view.folder})}});
+        env: {...process.env, OSD_ROOT: this.root, OSD_VERIFY_OVERLAY: view === undefined ? this.views.has(hash) ? "null" : ""
+          : JSON.stringify({exclude: [...(view.exclude ?? [])], folder: view.folder})}});
       this.verifying = child;
       child.osdHash = hash;
       let out = "";
@@ -918,7 +905,8 @@ async function verifyMain(hash) {
   const {compareGenerations} = await import("./osd-generation-diff.mjs");
   const {transpile} = await import("./osd-transpile.mjs");
   const {config, stack} = prepare(root);
-  const overlay = process.env.OSD_VERIFY_OVERLAY ? JSON.parse(process.env.OSD_VERIFY_OVERLAY) : undefined;
+  const overlay = await sourceBuildOverlay(root, process.env.OSD_VERIFY_OVERLAY
+    ? {overlay: JSON.parse(process.env.OSD_VERIFY_OVERLAY)} : {});
   if (hashOf(root, inputsOf(root, config), {overlay}) !== hash) {
     return {verdict: "inconclusive", why: "the tree is not that generation any more"};
   }

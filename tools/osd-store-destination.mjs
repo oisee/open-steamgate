@@ -553,7 +553,8 @@ export class StoreDestination {
       try {
       const before = snapshotOf(join(store.root, "gen"));
       const published = await store.publish({activate: [{type, name}]});
-      const committed = published?.ok !== false && await store.completeActivation(result, published?.transpile?.built);
+      const committed = published?.ok !== false && Boolean(published?.generation)
+        && await store.completeActivation(result, published?.transpile?.built);
       if (!committed) {
         const issues = published?.transpile?.issues ?? [];
         if (published?.ok === false && published?.transpile?.check === true && issues.length) {
@@ -575,7 +576,7 @@ export class StoreDestination {
           state: committed && published?.generation ? "published" : "failed",
           generation_id: committed && published?.generation ? published.generation : "",
           active: committed, live: committed && published?.recycled === true,
-          failure_stage: !committed ? (published?.ok === false ? "build" : "revision") : published?.generation ? "" : "promotion",
+          failure_stage: !committed ? (published?.ok === false ? "build" : !published?.generation ? "promotion" : "revision") : "",
           note: !committed ? "publication failed or checked source changed" : published?.generation ? "published" : "generation availability was not confirmed",
           issues: failureEntries?.flatMap(entry => (entry.issues ?? []).map(issue => issueRow(issue, entry))) ?? [],
         })),

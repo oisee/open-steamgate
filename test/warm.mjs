@@ -1187,10 +1187,9 @@ describe("tools/osd-warm: a renamed view is primed only on proof", function () {
 // critic on d75d8fdc: the generators read the raw tree, not the build view.
 // A DDLS inactive when live was built, saved again with a source cds2ddic
 // refuses, hashes as its unchanged active copy -- and a class activation
-// built warm over the gen/ of the last cold build, where a cold build runs
-// cds2ddic over the saved source and fails. Until the generators read the
-// build view, an inactive generator input forces cold.
-describe("tools/osd-warm: an inactive generator input forces cold", function () {
+// builds against the same active view as the cold generators. A broken
+// inactive generator input must no longer block prime or an unrelated edit.
+describe("tools/osd-warm: an inactive generator input keeps its active view", function () {
   this.timeout(180000);
   let root;
   let store;
@@ -1236,14 +1235,17 @@ describe("tools/osd-warm: an inactive generator input forces cold", function () 
     if (root !== undefined) rmSync(root, {recursive: true, force: true});
   });
 
-  it("the DDLS saved again with a source a generator refuses: the class activation is not warm", async () => {
+  it("a broken inactive DDLS does not block warm prime or class activation", async () => {
     store.warmState = {on: true, compiler: undefined, priming: undefined, reason: undefined, verifying: undefined, next: undefined, last: undefined, timer: undefined};
     await store.warmUp();
     store.write("DDLS", "ZWG_V", "define view ZWG_V as select from { this is not cds\n");
     store.write("CLAS", "ZCL_WG_A", src("ZCL_WG_A", 3));
     const r = await activate("ZCL_WG_A");
-    expect(r.transpile.warm, "built warm over an inactive generator input").to.not.equal(true);
-    expect(store.warmState.reason).to.match(/DDLS ZWG_V is inactive, and the generators read its saved source/);
+    expect(r.ok, JSON.stringify(r)).to.equal(true);
+    expect(r.transpile.warm).to.equal(true);
+    expect(store.stateOf(store.find("DDLS", "ZWG_V")).version).to.equal("inactive");
+    expect(store.read("DDLS", "ZWG_V", "main", "active").source).to.equal(view("mandt"));
+    expect(store.read("DDLS", "ZWG_V").source).to.include("this is not cds");
   });
 });
 

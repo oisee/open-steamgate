@@ -194,7 +194,7 @@ export class ObjectStore {
     // killed there would (#crash)
     this.crashAt = options.crashAt;
     this.#versions = new StoreVersions(this, () => this.#entries());
-    this.#versions.loadInactive();
+    if (process.env.OSD_GENERATOR_ACTIVE_VIEW !== "1") this.#versions.loadInactive();
   }
 
   #versions;

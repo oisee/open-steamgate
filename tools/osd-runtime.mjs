@@ -92,6 +92,7 @@ export class ServingRuntime {
     this.root = options.root ?? process.cwd();
     // the child by path under Node, `<binary> serve` when compiled
     this.command = options.command ?? serveCommand(CHILD);
+    this.sourceBuild = options.command === undefined;
     // a fixed port for an instance someone has to reach by name; the
     // default is whatever the system gives, because a supervised runtime is
     // reached through the supervisor
@@ -495,6 +496,11 @@ export class ServingRuntime {
     }
     const stops = this.stops;
     const starting = (async () => {
+      if (this.sourceBuild && options.announce === undefined && !(this.env.OSD_OUTPUT ?? process.env.OSD_OUTPUT)) {
+        const {ensureSourceBuild} = await import("./osd-source-build-view.mjs");
+        await ensureSourceBuild(this.root, {OSD_OUTPUT: undefined, OSD_GENERATION: undefined});
+      }
+      if (this.stops !== stops) throw new NotServing("stopped while building");
       let answer = await this.#spawnOne();
       // Spawn captures the inspector env, but requests can change it while
       // that child boots. Read the desired state again before announcing

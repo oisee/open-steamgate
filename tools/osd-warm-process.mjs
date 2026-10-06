@@ -95,6 +95,7 @@ export class WarmCompilerProcess extends WarmCompiler {
   }
 
   async #call(method, activating = new Set(), view = undefined, check = undefined) {
+    await this.loadStoreView();
     // A drop may still be reaping the old compiler. Never start its replacement
     // before it exits, or let its exit reject the replacement's requests.
     const epoch = this.#epoch;
@@ -121,7 +122,8 @@ export class WarmCompilerProcess extends WarmCompiler {
     return result;
   }
   async build(activating = new Set(), snapshot = undefined) {
-    const view = snapshot?.overlay ?? this.overlayOf(activating);
+    await this.loadStoreView();
+    const view = snapshot ? snapshot.overlay : this.overlayOf(activating);
     const result = await this.#call("build", activating, snapshot);
     this.views.set(result.hash, view);
     if (this.recycleDue) await this.drop();

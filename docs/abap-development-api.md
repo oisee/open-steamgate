@@ -132,6 +132,16 @@ class is the common operation layer for local callers and ADT adapters, rather t
 CREATE is limited to the six existing creatable types; FUGR/FUNC remain P6.
 
 Local P2a delivery: STORE CREATE/DELETE and their capabilities are implemented in this branch.
+
+Every cold build, CLI transpile, server start, runtime recovery and warm prime uses the persistent
+store view: an inactive object with a previous active version builds from its retained active
+source in `build/inactive/active`; an object never activated is excluded entirely. Generators
+read the same active view. Draft source remains in the working file and survives restart for
+inactive READ and a later ACTIVATE. Failed validation, build or publication leaves that draft
+inactive; a journal failure cannot make it executable on the next start. An activation build
+includes only the drafts explicitly named by that publication, and its serving child loads that
+generation while completion is pending.
+
 CHECK and ACTIVATE also return JSON `{active, live, note, issues}` alongside their existing
 scalar/table fields. The ABAP host wrapper imports JSON/SOURCE only; callers must inspect
 `active` and `issues`, since a syntax refusal does not raise a transport exception. `active: true`

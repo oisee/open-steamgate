@@ -113,6 +113,8 @@ const bootStep = (name) => {
 // from next to this file, which is what would otherwise pin an instance to
 // the checkout the script happens to live in.
 const root = process.env.OSD_ROOT ?? process.cwd();
+const {ensureSourceBuild} = await import("./osd-source-build-view.mjs");
+await ensureSourceBuild(root);
 // A reference run pins the module tree explicitly. It never changes build/live.
 const output = process.env.OSD_OUTPUT ?? join(root, "output");
 const from = (file) => import(pathToFileURL(join(output, file)).href);

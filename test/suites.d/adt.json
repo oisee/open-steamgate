@@ -48,6 +48,7 @@
     "test/osd-adt-fork.mjs",
     "test/osd-adt-one-runtime.mjs",
     "test/store-history.mjs",
+    "test/store-cold-build.mjs",
     "test/tmp-package.mjs",
     "test/adt-xref-warm.mjs",
     "test/unit-risk-calls.mjs",

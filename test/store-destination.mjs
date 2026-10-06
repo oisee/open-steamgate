@@ -286,7 +286,7 @@ ENDCLASS.
     // twelve seconds, and this test is about which OBJECT is named
     fresh.store = undefined;
     const store = new ObjectStore({root: process.cwd()});
-    store.publish = async () => ({ok: true, recycled: false});
+    store.publish = async () => ({ok: true, recycled: false, generation: "probe-generation"});
     fresh.opener = () => store;
     fresh.opened = false;
     const good = await call(fresh, {IV_COMMAND: "ACTIVATE", IV_NAME: NAME, IV_TYPE: "CLAS"});
@@ -318,7 +318,7 @@ ENDCLASS.
     // told which of them happened.
     const store = new ObjectStore({root: process.cwd()});
     let built = 0;
-    store.publish = async () => { built += 1; return {ok: true, recycled: false}; };
+    store.publish = async () => { built += 1; return {ok: true, recycled: false, generation: "probe-generation"}; };
     const destination2 = new StoreDestination({store: () => store});
     const answer = await call(destination2, {IV_COMMAND: "ACTIVATE", IV_NAME: NAME, IV_TYPE: "CLAS"});
     expect(answer.EV_ACTIVE).to.equal("X");
@@ -341,7 +341,7 @@ ENDCLASS.
     store.publish = async () => {
       mkdirSync(join(process.cwd(), "gen", "cds"), {recursive: true});
       writeFileSync(join(process.cwd(), written), "* written by a generator during publish\n");
-      return {ok: true, recycled: false};
+      return {ok: true, recycled: false, generation: "probe-generation"};
     };
     try {
       const answer = await call(new StoreDestination({store: () => store}),
@@ -465,7 +465,7 @@ describe("request-bound STORE commands", () => {
         check: () => { calls.push(["check", source]); return {issues: []}; },
         list: () => [entry], find: () => entry, stateOf: () => ({version: "inactive"}),
         activate: () => { calls.push(["activate", source]); return {active: true, issues: []}; },
-        publish: async () => { calls.push(["publish", source]); built = {[name]: "hash"}; return {ok: true, transpile: {built}}; },
+        publish: async () => { calls.push(["publish", source]); built = {[name]: "hash"}; return {ok: true, generation: "probe-generation", transpile: {built}}; },
         completeActivation: (result, hashes) => { expect(hashes).to.equal(built); calls.push(["complete", source]); return true; },
       };
       await withSystem(() => {}, async () => {
