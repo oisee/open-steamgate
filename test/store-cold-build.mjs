@@ -266,10 +266,11 @@ describe("cold source view in real server hosts", function () {
     await absent(await start([join(repo, "bin/osd.mjs"), "up"], {OSD_ADT_ONE_RUNTIME: "1"}));
   });
   it("lifecycle server start uses the same one-runtime warm source view", async () => {
+    // CI shards provide STG_PORT without the workstation heavy-slot marker.
     await absent(await start(["--input-type=module", "-e", `
       const {startLifecycleServer} = await import(${JSON.stringify(join(repo, "tools/adt-lifecycle-server.mjs"))});
       await startLifecycleServer({port: Number(process.env.STG_PORT)});
-    `]));
+    `], {OSD_HEAVY_SLOT: ""}));
     await waitFor(() => hostLog.includes("warm: primed"));
   });
   it("supervisor recovery builds active source and recycle keeps the published generation", async () => {

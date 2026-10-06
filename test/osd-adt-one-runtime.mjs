@@ -1,6 +1,6 @@
 import {expect} from "chai";
 import express from "express";
-import {mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync} from "node:fs";
+import {cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {EventEmitter, once} from "node:events";
@@ -17,6 +17,18 @@ import {ObjectStore} from "../tools/osd-store.mjs";
 import {Data} from "../tools/osd-data.mjs";
 
 const BASE = "/sap/bc/adt";
+// Runtime start/recycle prepares the active source view. Even a read-only
+// door test can switch build/live, so every real runtime owns its build root.
+let runtimeRoot;
+before(() => {
+  runtimeRoot = mkdtempSync(join(tmpdir(), "osd-one-runtime-host-"));
+  for (const dir of ["src", "gen", "packs", "data", "webapp", "test"]) cpSync(resolve(dir), join(runtimeRoot, dir), {recursive: true});
+  for (const file of ["package.json", "abap_transpile.json", "abaplint.jsonc", "libs.lock.json"]) cpSync(resolve(file), join(runtimeRoot, file));
+  for (const dir of ["node_modules", "tools", "bin"]) symlinkSync(resolve(dir), join(runtimeRoot, dir));
+  mkdirSync(join(runtimeRoot, ".local"));
+  symlinkSync(resolve(".local/lars"), join(runtimeRoot, ".local/lars"));
+});
+after(() => { if (runtimeRoot) rmSync(runtimeRoot, {recursive: true, force: true}); });
 const listen = (app) => new Promise(resolve => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
 const until = async (work) => {
   for (let i = 0; i < 200; i++) { if (await work()) return; await new Promise(r => setTimeout(r, 10)); }
@@ -34,7 +46,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({input_folder: ["src"]}));
     writeFileSync(join(root, "src", "zosd_remote.prog.abap"), "REPORT zosd_remote.\n");
     store = new ObjectStore({root, libs: [], build: {generators: false}});
-    runtime = new ServingRuntime({root: process.cwd(), env: {OSD_ADT_ONE_RUNTIME: "1", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
+    runtime = new ServingRuntime({root: runtimeRoot, env: {OSD_ADT_ONE_RUNTIME: "1", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
     runtime.storeDestination = new StoreDestination({store});
     await runtime.start();
     servers = [];
@@ -474,7 +486,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     const previous = runtime.storeDestination;
     runtime.storeDestination = new StoreDestination({store: {root,
       activate: () => ({active: true, issues: []}), completeActivation: () => true,
-      publish: async () => { publishes++; return {ok: true, recycled: true}; }}});
+      publish: async () => { publishes++; return {ok: true, generation: runtime.generation, recycled: true}; }}});
     runtime.systemAnswers = async kind => { if (kind === "BUILD") { entered(); await go; return {ok: true}; } };
     try {
       const pending = fetch(url + "/osd/classrun", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "ZCL_OSD_ADT_STORE_PROBE"})});
@@ -498,7 +510,7 @@ describe("ADT one runtime B1/B2: remote wire and STORE IPC", function () {
     let publishes = 0;
     store.activate = () => ({active: true, issues: []});
     store.completeActivation = () => true;
-    store.publish = async () => { publishes++; await runtime.recycle(); return {ok: true, recycled: true}; };
+    store.publish = async () => { publishes++; await runtime.recycle(); return {ok: true, generation: runtime.generation, recycled: true}; };
     try {
       const response = await fetch(url + "/sap/bc/osd/edit/", {method: "POST",
         headers: {"content-type": "application/x-www-form-urlencoded"},
@@ -721,7 +733,7 @@ describe("B4 switched-off door", function () {
     expect(headers).to.deep.equal([["x-owner", "fixture"]]);
   });
   it("refuses RESUME before JSON or key checks", async () => {
-    const runtime = new ServingRuntime({root: process.cwd(), env: {OSD_ADT_ONE_RUNTIME: "0", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
+    const runtime = new ServingRuntime({root: runtimeRoot, env: {OSD_ADT_ONE_RUNTIME: "0", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0"}});
     try {
       await runtime.start();
       const response = await fetch(runtime.url + "/osd/adt-resume", {method: "POST",
@@ -811,13 +823,14 @@ describe("remote activation publication", () => {
       child.connected = true;
       const context = 1;
       let release, started;
+      let promotions = 0;
       const entered = new Promise(r => { started = r; });
       const go = new Promise(r => { release = r; });
       const runtime = {child, url: "http://unused", ensure: async () => {}};
       runtime.storeDestination = new StoreDestination({store: {root: storeRoot(),
         activate: () => ({active: true, issues: []}),
-        publish: async () => { started(); await go; return {ok: failure !== "publish", transpile: {error: "build failed"}}; },
-        completeActivation: () => failure !== "promotion"}});
+        publish: async () => { started(); await go; return {ok: failure !== "publish", generation: "remote-publication", transpile: {error: "build failed"}}; },
+        completeActivation: () => { promotions++; return failure !== "promotion"; }}});
       attachStoreIPC(child, runtime);
       const original = globalThis.fetch;
       child.send = () => child.emit("message", {type: "store-step-ended", step: 1, ok: true});
@@ -848,6 +861,7 @@ describe("remote activation publication", () => {
         expect(record.status).to.equal(200);
         expect(record.body.toString()).to.contain('activationExecuted="false"');
         expect(record.body.toString()).to.contain(failure === "publish" ? "build failed" : "source changed during activation");
+        expect(promotions).to.equal(failure === "promotion" ? 1 : 0);
       } finally { release(); globalThis.fetch = original; child.emit("exit"); }
     });
   }
@@ -1002,7 +1016,7 @@ describe("remote ADT body transport", () => {
 describe("B3 switch off", function () {
   this.timeout(60000);
   it("all three internal doors remain disabled", async () => {
-    const runtime = new ServingRuntime({root: process.cwd(), env: {
+    const runtime = new ServingRuntime({root: runtimeRoot, env: {
       OSD_ADT_ONE_RUNTIME: "0", STG_DB: "sqlite", STG_DB_PATH: "", STG_TLS: "0",
     }});
     try {

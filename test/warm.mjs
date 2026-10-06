@@ -24,6 +24,20 @@ import {WarmCompilerProcess} from "../tools/osd-warm-process.mjs";
 const REPO = resolve(".");
 
 describe("tools/osd-warm: what a save may be built warm", () => {
+  it("compileError rejects an unresolved type after a runtimeError run", async () => {
+    const {modulesOf} = await import("../tools/osd-transpile.mjs");
+    const {Transpiler, core} = modulesOf(process.cwd());
+    const registry = () => {
+      const reg = new core.Registry();
+      reg.addFile(new core.MemoryFile("zcl_policy.clas.abap",
+        "CLASS zcl_policy DEFINITION PUBLIC. PUBLIC SECTION. DATA value TYPE zunknown_policy. ENDCLASS. CLASS zcl_policy IMPLEMENTATION. ENDCLASS."));
+      return reg;
+    };
+    await new Transpiler({unknownTypes: "runtimeError"}).run(registry());
+    let error;
+    try { await new Transpiler({unknownTypes: "compileError"}).run(registry()); } catch (e) { error = e; }
+    expect(error?.message).to.match(/unknown_types.*VALUE/i);
+  });
   const clas = "CLASS zcl_x DEFINITION PUBLIC.\n  PUBLIC SECTION.\n    INTERFACES zif_y.\nENDCLASS.\nCLASS zcl_x IMPLEMENTATION.\nENDCLASS.\n";
 
   it("was read against the generators the cold build runs", () => {
@@ -202,10 +216,11 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
     // Coordinator fixtures use symbolic generations; the activation publisher
     // still requires the build and acknowledged generation to name each other.
     publishResult = {...publishResult, generation: publishResult.generation ?? publishResult.transpile?.hash};
+    const root = mkdtempSync(join(tmpdir(), "warm-activation-stub-"));
     const express = (await import("express")).default;
     const {adtRouter} = await import("../tools/adt-facade.mjs");
     const store = {
-      roots: [], find: () => undefined, root: REPO,
+      roots: [], find: () => undefined, root,
       warm: () => ({on: true, compiler: {primed: true}}),
       warmActivation: (type, name) => ({type, name, active: true, revision: "r1"}),
       completeActivations: () => true,
@@ -228,6 +243,7 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
       return {build: res.headers.get("x-osd-build"), swap: res.headers.get("x-osd-swap-ms")};
     } finally {
       await new Promise((done) => server.close(done));
+      rmSync(root, {recursive: true, force: true});
     }
   };
 

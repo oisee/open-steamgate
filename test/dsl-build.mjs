@@ -4,15 +4,35 @@
 // to ZCL_OSD_TPL by rendering the same templates through the engine.
 import {expect} from "chai";
 import {spawnSync} from "node:child_process";
-import {cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, resolve} from "node:path";
 import {PROVIDERS, buildAll, buildRecipe, compileTemplate, format, recipeNames, renderWithEngine} from "../tools/dsl-build.mjs";
 
 describe("dsl build: recipes as build units", function () {
   this.timeout(120000);
   const scratch = [];
   after(() => scratch.forEach((dir) => rmSync(dir, {recursive: true, force: true})));
+
+  it("renders the built generation without a source-host build or generation switch", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dsl-built-render-"));
+    scratch.push(dir);
+    cpSync("tools", join(dir, "tools"), {recursive: true});
+    for (const folder of ["test", "output", "node_modules"]) symlinkSync(resolve(folder), join(dir, folder));
+    writeFileSync(join(dir, "package.json"), '{"type":"module"}');
+    writeFileSync(join(dir, "sample.tpl"), "hello {{name}}");
+    // No source/config is needed to render an already built generation.
+    // The old test/start import attempted a build here before rendering.
+    const run = spawnSync(process.execPath, ["--input-type=module", "-e", `
+      const {renderWithEngine} = await import('./tools/dsl-build.mjs');
+      console.log((await renderWithEngine('hello {{name}}', {name:'fleet'})).text);
+      const {renderRecipe} = await import('./tools/dsl-abap.mjs');
+      console.log((await renderRecipe({name:'fleet'}, 'sample.tpl')).text);
+    `], {cwd: dir, encoding: "utf8", env: {...process.env, OSD_ROOT: dir, STG_DB: "sqlite", STG_DB_PATH: ""}});
+    expect(run.status, run.stderr).to.equal(0);
+    expect(run.stdout.trim().split("\n")).to.deep.equal(["hello fleet", "hello fleet"]);
+    expect(existsSync(join(dir, "build/live")), "render must not publish another generation").to.equal(false);
+  });
 
   // A copy of a real recipe in a scratch folder with some files replaced.
   function copyOf(base, files = {}) {

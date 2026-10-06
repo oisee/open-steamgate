@@ -177,7 +177,8 @@ export function region(source, from) {
 let abap;
 async function runtime() {
   if (!abap) {
-    await import("../test/start.mjs");
+    const {builtEngine} = await import("./dsl-engine.mjs");
+    await builtEngine();
     await import("../output/zcl_osd_tpl.clas.mjs");
     await import("../output/zcl_ajson.clas.mjs");
     abap = globalThis.abap;

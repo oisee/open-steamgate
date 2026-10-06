@@ -53,6 +53,7 @@ export function modulesOf(root) {
   const identity = buildIdentity(root);
   const fromTranspiler = createRequire(join(where, "package.json"));
   const {Transpiler, Chunk} = fromTranspiler(where);
+  const {config: validationConfig} = fromTranspiler(join(where, "build/src/validation.js"));
   if (!LOADED_IDENTITIES.has(Transpiler)) LOADED_IDENTITIES.set(Transpiler, identity);
   const core = fromTranspiler("@abaplint/core");
   const {CallFunctionTranspiler} = fromTranspiler(join(where, 'build/src/statements/call_function.js'));
@@ -63,11 +64,22 @@ export function modulesOf(root) {
   } catch {
     plugin = undefined;
   }
-  return prepareModules({Transpiler, Chunk, core, CallFunctionTranspiler, plugin, where, identityRoot: root, identity: LOADED_IDENTITIES.get(Transpiler), version: JSON.parse(readFileSync(join(where, "package.json"), "utf8")).version});
+  return prepareModules({Transpiler, Chunk, core, CallFunctionTranspiler, validationConfig, plugin, where, identityRoot: root, identity: LOADED_IDENTITIES.get(Transpiler), version: JSON.parse(readFileSync(join(where, "package.json"), "utf8")).version});
 }
 
 // Install on the selected copy, including bundled hosts and explicit modules.
+const VALIDATION_NORMALIZED = new WeakSet();
 function prepareModules(modules) {
+  if (modules.validationConfig && !VALIDATION_NORMALIZED.has(modules.Transpiler)) {
+    const validate = modules.Transpiler.prototype.validate;
+    modules.Transpiler.prototype.validate = function (reg) {
+      // The pinned validator sets this for runtimeError but never resets it.
+      // Every registry must use this instance's policy, not the previous one's.
+      modules.validationConfig.syntax.errorNamespace = this.options?.unknownTypes === "runtimeError" ? "VOID_EVERYTHING" : ".";
+      return validate.call(this, reg);
+    };
+    VALIDATION_NORMALIZED.add(modules.Transpiler);
+  }
   installRfcMessage(modules.CallFunctionTranspiler, modules.Chunk, modules.core);
   return modules;
 }

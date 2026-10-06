@@ -1,7 +1,9 @@
 import {expect} from "chai";
 import {spawn} from "node:child_process";
-import {readFileSync} from "node:fs";
+import {cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync} from "node:fs";
 import {once} from "node:events";
+import {tmpdir} from "node:os";
+import {join, resolve} from "node:path";
 
 // A reparented child can remain a zombie until the host's init reaps it.
 // That process has exited and no longer holds memory or listening sockets.
@@ -23,6 +25,17 @@ async function waitFor(check, ms, message) {
 
 describe("serving child supervisor lifetime", function () {
   this.timeout(60000);
+  let root;
+  before(() => {
+    // Source hosts prepare build/live at startup, even in lifetime probes.
+    root = mkdtempSync(join(tmpdir(), "osd-parent-exit-"));
+    for (const dir of ["src", "gen", "packs", "data", "webapp", "test"]) cpSync(resolve(dir), join(root, dir), {recursive: true});
+    for (const file of ["package.json", "abap_transpile.json", "abaplint.jsonc", "libs.lock.json"]) cpSync(resolve(file), join(root, file));
+    for (const dir of ["node_modules", "tools", "bin"]) symlinkSync(resolve(dir), join(root, dir));
+    mkdirSync(join(root, ".local"));
+    symlinkSync(resolve(".local/lars"), join(root, ".local/lars"));
+  });
+  after(() => { if (root) rmSync(root, {recursive: true, force: true}); });
   it("exits within three seconds when its booted parent is SIGKILLed", async () => {
     // A real IPC parent and the real serving entry point, with its own rows.
     const parent = spawn(process.execPath, ["--input-type=module", "-e", `
@@ -34,7 +47,7 @@ describe("serving child supervisor lifetime", function () {
         if (message.type === "ready") console.log("CHILD_READY " + child.pid);
       });
       child.on("exit", (code) => process.exit(code ?? 1));
-    `], {env:{...process.env,STG_DB:"sqlite"},stdio:["ignore","pipe","pipe"]});
+    `], {cwd:root,env:{...process.env,OSD_ROOT:root,STG_DB:"sqlite"},stdio:["ignore","pipe","pipe"]});
     let log = "", pid;
     parent.stdout.on("data", (chunk) => {log += chunk;});
     parent.stderr.on("data", (chunk) => {log += chunk;});
@@ -57,7 +70,7 @@ describe("serving child supervisor lifetime", function () {
 
   for (const warm of ["1", "0"]) it(`measures first /osd/ready answer after listen (OSD_UNIT_WARM=${warm})`, async () => {
     const parent = spawn(process.execPath,["test/run.mjs"], {
-      env:{...process.env,STG_SERVE:"child",STG_TLS:"0",STG_PROTOCOLS:"0",STG_DB:"sqlite",OSD_UNIT_WARM:warm},
+      cwd:root,env:{...process.env,OSD_ROOT:root,STG_SERVE:"child",STG_TLS:"0",STG_PROTOCOLS:"0",STG_DB:"sqlite",OSD_UNIT_WARM:warm},
       stdio:["ignore","pipe","pipe"],
     });
     let log="", request;

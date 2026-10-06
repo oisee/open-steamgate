@@ -13,7 +13,8 @@ export async function renderProject(file, out, {project = `ZDSL${randomBytes(6).
   const persistentProject = /<PROJECT>([^<]+)<\/PROJECT>/.exec(inputXml)?.[1];
   const xml = inputXml.replace(/<PROJECT>[^<]+<\/PROJECT>/g, `<PROJECT>${project}</PROJECT>`);
   if (!xml.includes(`<PROJECT>${project}</PROJECT>`)) throw new Error("IWPR has no project rows");
-  await import("../test/start.mjs");
+  const {builtEngine} = await import("./dsl-engine.mjs");
+  await builtEngine();
   const abap = globalThis.abap;
   for (const name of ["zcl_osd_dsl_mpc", "zcl_osd_tpl", "zcl_osd_dsl_trace", "zcl_osd_dsl_profile", "zcl_stg_segw_gen", "zcl_stg_dispatcher"]) {
     await import(`../output/${name}.clas.mjs`);

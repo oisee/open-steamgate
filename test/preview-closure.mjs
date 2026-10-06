@@ -29,6 +29,9 @@ describe("what the preview bundle can reach", () => {
     const {modules} = previewClosure();
     expect(modules.some((m) => m.endsWith("hana-client.mjs")), "ignored by the config").to.equal(false);
     expect(modules.some((m) => m.endsWith("duckdb-client.mjs"))).to.equal(false);
+    for (const name of ["osd-publish-activation", "osd-activation-journal", "osd-store-tests", "osd-store-crud", "osd-build"]) {
+      expect(modules.some(m => m.endsWith(`${name}.mjs`)), `${name} requires a source host`).to.equal(false);
+    }
   });
 
   // The half that matters: the check has to be able to see the defect it was
