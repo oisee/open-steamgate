@@ -567,7 +567,9 @@ jobs:
   adt-lifecycle:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Measured 21-24 min on green main runs (2026-10-05/06), so 25 cancelled
+    # healthy runs on slower runners. 40 leaves headroom without hiding a hang.
+    timeout-minutes: 40
     permissions:
       contents: read
       actions: read
