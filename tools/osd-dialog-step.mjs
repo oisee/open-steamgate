@@ -173,6 +173,29 @@ export function onEveryStep(hooks) {
   return () => stepHooks.delete(hooks);
 }
 
+/** Work after this event's commit/rollback, cleanup and lock release.
+ * Awaited before dialogStep returns to an HTTP front or APC mailbox. */
+export function onAfterStep(callback) {
+  const token = steps === undefined ? holder : currentStepToken();
+  if (token?.afterStep === undefined) throw new Error("after-step work requires dialogStep");
+  token.afterStep.add(callback);
+  return () => token.afterStep.delete(callback);
+}
+
+async function afterStep(token) {
+  let failure;
+  const outcome = {dumped: token.dumped === true};
+  const callbacks = [...token.afterStep, ...[...stepHooks].map(hooks =>
+    hooks.afterStep && (() => hooks.afterStep(token, outcome))).filter(Boolean)];
+  token.afterStep.clear();
+  for (const callback of callbacks) {
+    try { await callback(outcome); }
+    catch (error) { failure ??= error; }
+  }
+  if (failure && !outcome.dumped) throw failure;
+  if (failure) console.warn(`after-step cleanup failed: ${failure.message ?? failure}`);
+}
+
 export function onStepLuwEnd(callback) {
   const token = currentStepToken();
   if (token === undefined) throw new Error("a dialog step is required");
@@ -227,7 +250,7 @@ setInterval?.(() => {
 
 /** the work process, without the commit bracket: for a read of the shared
  *  connection that is not a step of its own (the data preview's SQL door) */
-export async function exclusive(work, what, {dialog = false} = {}) {
+export async function exclusive(work, what, {dialog = false, completeStep = false} = {}) {
   installWait();
   // a step inside a step would wait for itself; said, not hung. A timer the
   // step left behind carries its context past its end, and is no nesting
@@ -235,7 +258,7 @@ export async function exclusive(work, what, {dialog = false} = {}) {
   if (outer !== undefined && outer.done !== true) {
     throw new Error(`a nested dialog step${what === undefined ? "" : ` (${what})`}: the step that would run it holds the work process`);
   }
-  const token = {what, dialog};
+  const token = {what, dialog, afterStep: completeStep ? new Set() : undefined};
   dialogObserver?.open(token);
   await acquire(token);
   try {
@@ -248,6 +271,9 @@ export async function exclusive(work, what, {dialog = false} = {}) {
       try { hooks.onEnd?.(token, {dumped: token.dumped === true}); } catch { /* a hook must not hold the work process */ }
     }
     release();
+    // Publication may acquire the work process for a warm swap. It must
+    // see no live caller context, and must finish before the next APC turn.
+    if (completeStep) await outsideStepContext(() => afterStep(token));
   }
 }
 
@@ -281,7 +307,7 @@ export async function dialogStep(work, what) {
       endLuw();
       throw e;
     }
-  }, what, {dialog: true});
+  }, what, {dialog: true, completeStep: true});
 }
 
 async function commitAll() {

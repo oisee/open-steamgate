@@ -847,14 +847,17 @@ works:
 
 Model (b) fits the worker: there are no `worker_threads` in a service
 worker, and none are needed; the daemon runs in the worker's one thread.
-But the preview is not ready for it as it stands. Today `openChannel`,
-`channelMessage` and `closeChannel` (`web/preview-backend.mjs`, lines
-201-240) bypass both `serialized( )` and `dialogStep`, and `serialized( )`
-is not released on `WAIT`. osg-i7's dialog-step lock PR (#75) changes that: APC callbacks go through
-`dialogStep`, the lock is released on `WAIT`, and a database reset runs
-under the lock exclusively. The daemon's callbacks in the preview are built
-on that PR, the same queue as on Node, and the class-data guard is the
-same transpiler check.
+`openChannel`, `channelMessage` and `closeChannel` in `web/preview-backend.mjs`
+already use `dialogStep`, as do the Node APC host and serving child. Every APC
+event commits or rolls back and releases the work process before its after-step
+work finishes. A deferred STORE activation publishes at the end of its event;
+the next queued socket message waits for that completion. A dump fails the pending
+activation without publishing. The preview has no source store or compiler, but
+uses the same step completion path for any installed after-step work. It still
+signals socket open before draining messages from `on_start`. The lock is released
+on `WAIT`, and a database reset runs under the lock exclusively. Planned daemon
+callbacks in the preview use the same queue as on Node and the same transpiler
+check for the class-data guard.
 
 The recommendation is to support it as that, say so on the page, and not
 chase more: nothing in the browser will keep a background object alive
