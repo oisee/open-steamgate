@@ -26,7 +26,7 @@ export function verifyNext(store) {
     w.next.delete(older);
     console.log(`warm: ${older} superseded, not verified (verification queue limit ${VERIFY_PENDING_LIMIT})`);
   }
-  if (w.verifying !== undefined || !w.next.size) return;
+  if (w.verifying !== undefined || w.priming !== undefined || !w.next.size) return;
   w.verifyingHash = hash;
   w.next.delete(hash);
   w.verifying = w.compiler.verify(hash).then(async (result) => {

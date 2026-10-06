@@ -1,5 +1,7 @@
 import {warnWarmPin} from "./osd-warm-capabilities.mjs";
 import {acceptView, captureView} from "./osd-store-compile-view.mjs";
+import {once} from "node:events";
+import {verifyNext} from "./osd-store-verify.mjs";
 // Background priming belongs to the compiler process, never the HTTP front.
 export function warmUp(store) {
   const w = store.warm();
@@ -19,6 +21,10 @@ export function warmUp(store) {
     w.compiler ??= new WarmCompilerProcess({root: store.root, log: (m) => console.log(m), overlay: (activating) => store.overlay(activating),
       keyOf: (file) => store.objectKeyOf(file), inactiveSources: (activating) => store.inactiveSources(activating)});
     try {
+      // Let an already running frozen comparison finish before the bounded
+      // full prime. New comparisons wait below; saves still take their turns.
+      const verifier = w.compiler.verifying;
+      if (verifier?.exitCode === null) await once(verifier, "exit").catch(() => undefined);
       for (;;) {
         const view = await captureView(store);
         try {
@@ -47,6 +53,7 @@ export function warmUp(store) {
       return undefined;
     } finally {
       w.priming = undefined;
+      verifyNext(store);
     }
   })();
   return w.priming;

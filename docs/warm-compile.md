@@ -165,6 +165,11 @@ cost. Config/layer/library/toolchain changes, generator inputs such as AMDP or
 `INTERFACES`, larger deltas, or a failed byte premise log `warm: re-prime: ...`
 and require a full prime.
 
+Background comparisons yield to a full registry prime: an already running
+frozen comparison finishes first, and queued comparisons resume once priming
+settles. Saves remain available during that wait. This prevents verification
+work from competing with the compiler's bounded prime after a cold publication.
+
 ## The checks, and why each exists
 
 - **The importer check.** A module a warm build does not replace keeps its

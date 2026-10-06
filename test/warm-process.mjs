@@ -9,6 +9,7 @@ import {WarmCompilerProcess} from "../tools/osd-warm-process.mjs";
 import {closeWarm, warmOperation} from "../tools/osd-store-warm.mjs";
 import {verifyNext} from "../tools/osd-store-verify.mjs";
 import {sendIPC} from "../tools/osd-ipc.mjs";
+import {EventEmitter} from "node:events";
 
 const source = (name, n) => `CLASS ${name} DEFINITION PUBLIC CREATE PUBLIC.
  PUBLIC SECTION.
@@ -168,6 +169,35 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     expect(next.ok, JSON.stringify(next)).to.equal(true);
     expect(next.transpile.warm).to.equal(true);
     expect((await compiler.verify(next.transpile.hash)).verdict).to.equal("same");
+  });
+
+  it("finishes a frozen comparison before bounded priming and resumes queued verification afterwards", async () => {
+    await compiler.drop();
+    const verifier = Object.assign(new EventEmitter(), {exitCode: null});
+    compiler.verifying = verifier;
+    let compares = 0;
+    compiler.verify = async () => { compares++; return {verdict: "same", files: 0, ms: 0}; };
+    const priming = store.warmUp();
+    const hash = store.served?.generation ?? compiler.hash;
+    store.warmState.next = new Set([hash]);
+    verifyNext(store);
+    await sleep(20);
+    expect(compiler.primed).to.equal(false);
+    expect(compares).to.equal(0);
+    expect(store.warmState.next.has(hash)).to.equal(true);
+    // A save can finish while the background work yields; prime then sees
+    // the active copy rather than certifying the newly saved draft.
+    await save("zcl_a", 12);
+    compiler.verifying = undefined;
+    verifier.exitCode = 0;
+    verifier.emit("exit", 0);
+    expect(await priming, store.warmState.reason).to.not.equal(undefined);
+    await store.warmState.verifying;
+    expect(compiler.primed).to.equal(true);
+    expect(compares).to.equal(1);
+    expect(store.warmState.last).to.include({hash, verdict: "same"});
+    expect((await activate()).transpile.warm).to.equal(true);
+    expect(out("zcl_a")).to.include("IntegerFactory.get(12)");
   });
 
   it("ignores a retired child's late IPC failure while its replacement is priming", async () => {
