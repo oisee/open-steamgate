@@ -11,6 +11,7 @@ export class ActivationJournal {
     this.now = now;
     this.directory = join(root, ".local", "activation", host);
     this.file = join(this.directory, "operations.json");
+    this.generationFile = join(this.directory, "published-generation.json");
     try { this.entries = JSON.parse(readFileSync(this.file, "utf8")); }
     catch (e) { if (e.code !== "ENOENT") throw e; this.entries = {}; }
     for (const entry of Object.values(this.entries)) {
@@ -22,6 +23,18 @@ export class ActivationJournal {
     this.save();
   }
   time() { return new Date(this.now()).toISOString(); }
+  // build/live can move before promotion finishes. Retain the last confirmed
+  // generation separately, including the baseline before the first activation.
+  currentGeneration(fallback) {
+    try { return JSON.parse(readFileSync(this.generationFile, "utf8")).generation_id; }
+    catch (error) { if (error.code !== "ENOENT") throw error; return fallback; }
+  }
+  recordGeneration(generation) {
+    mkdirSync(this.directory, {recursive: true});
+    const temporary = `${this.generationFile}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify({generation_id: generation ?? ""}));
+    renameSync(temporary, this.generationFile);
+  }
   save() {
     for (const [id, entry] of Object.entries(this.entries)) {
       if (entry.completed_at && this.now() - Date.parse(entry.completed_at) >= DAY) delete this.entries[id];
@@ -40,23 +53,26 @@ export class ActivationJournal {
     return {...entry};
   }
   update(id, fields) {
-    const entry = this.entries[id];
+    const entry = Object.hasOwn(this.entries, id) ? this.entries[id] : undefined;
     if (!entry) throw error("NOT_FOUND", "activation operation not found");
     if (entry.completed_at) return {...entry};
     Object.assign(entry, fields, {updated_at: this.time()});
     if (["published", "failed"].includes(entry.state)) entry.completed_at = entry.updated_at;
     this.save();
+    if (entry.state === "published") this.recordGeneration(entry.generation_id);
     return {...entry};
   }
   lookup(id) {
     if (typeof id !== "string" || !id.trim()) throw error("INVALID_NAME", "ACTIVATION_STATUS needs op_id");
     this.save();
-    const entry = this.entries[id];
+    const entry = Object.hasOwn(this.entries, id) ? this.entries[id] : undefined;
     if (!entry) throw error("NOT_FOUND", "activation operation not found or expired");
     return structuredClone(entry);
   }
 }
 export function activationJournal(store) {
+  // Embedded source hosts and fixtures can own the journal's lifetime.
+  if (store.activationJournal !== undefined) return store.activationJournal;
   if (!store.root) throw error("NOT_SUPPORTED", "activation tracking needs a source host");
   const root = resolve(store.root);
   const host = `http-${process.env.STG_PORT ?? `process-${process.pid}`}`;

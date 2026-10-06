@@ -269,6 +269,7 @@ export class UnitRun {
           stack: [],
         });
         testClasses.push(testClass);
+        options.onClassEnd?.(testClass);
         continue;
       }
       // The runtime guard (the first consumer of the database hooks,
@@ -296,11 +297,15 @@ export class UnitRun {
         } catch (error) {
           testClass.alerts.push(this.#alert(error, "class_setup"));
           testClasses.push(testClass);
+          options.onClassEnd?.(testClass);
           continue;
         }
 
         for (const method of declared.testMethods.filter(wantedMethod)) {
-          testClass.testMethods.push(await this.#method(local, method, options));
+          options.onMethodStart?.(declared.name, method.name);
+          const result = await this.#method(local, method, options);
+          testClass.testMethods.push(result);
+          options.onMethodEnd?.(result);
         }
 
         try {
@@ -311,6 +316,7 @@ export class UnitRun {
           testClass.alerts.push(this.#alert(error, "class_teardown"));
         }
         testClasses.push(testClass);
+        options.onClassEnd?.(testClass);
       } finally {
         unguard?.();
       }
@@ -340,6 +346,7 @@ export class UnitRun {
     const alerts = [];
     let test;
     try {
+      options.onStage?.("setup");
       test = await (new local()).constructor_();
       await call(test, "setup");
     } catch (error) {
@@ -347,12 +354,14 @@ export class UnitRun {
     }
     if (alerts.length === 0) {
       try {
+        options.onStage?.("execution");
         const run = test.FRIENDS_ACCESS_INSTANCE[declared.method]();
         await (options.timeout === 0 ? run : deadline(run, options.timeout ?? 60000, declared.name));
       } catch (error) {
         alerts.push(this.#alert(error, declared.method));
       }
       try {
+        options.onStage?.("teardown");
         await call(test, "teardown");
       } catch (error) {
         alerts.push(this.#alert(error, "teardown"));
@@ -374,7 +383,7 @@ export class UnitRun {
   // a thrown thing becomes an alert, with the stack read back through the
   // source maps first
   #alert(error, where) {
-    if (error instanceof HarmlessWrote) return guardAlert(error.testClass, error.table, this.#stack(error));
+    if (error instanceof HarmlessWrote) return {...guardAlert(error.testClass, error.table, this.#stack(error)), stage: where};
     return alertOf(error, where, this.#stack(error));
   }
 
@@ -421,6 +430,7 @@ export class UnitRun {
   // child boots its own runtime, about a second, against its own in-memory
   // database, and prints the same object as JSON.
   runDetached(type, name, options = {}) {
+    const started = Date.now();
     const plan = options.plan ?? this.classes(type, name);
     return new Promise((resolve, reject) => {
       if (options.signal?.aborted) {
@@ -428,6 +438,7 @@ export class UnitRun {
         return;
       }
       const args = [type, name, "--json", "--plan-stdin"];
+      if (options.timeout !== undefined) args.push("--timeout", String(options.timeout));
       if (options.testClass !== undefined) {
         args.push("--class", options.testClass);
       }
@@ -438,15 +449,37 @@ export class UnitRun {
       const [cmd, ...argv] = unitCommand(fileURLToPath(new URL(import.meta.url)), args);
       const child = spawn(cmd, argv, {
         cwd: this.store.root,
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe", "ipc"],
         env,
       });
-      let killTimer;
+      let killTimer, testTimer, timedOut, current, stage, methodStarted;
+      const completed = [], methods = [];
       const abort = () => {
         child.kill("SIGTERM");
         killTimer = setTimeout(() => child.kill("SIGKILL"), 1000);
         killTimer.unref();
       };
+      // A parent watchdog can interrupt a synchronous ABAP loop. The
+      // child's Promise deadline alone cannot run while its event loop is busy.
+      child.on("message", message => {
+        if (timedOut) return;
+        if (message.kind === "unit-method-start") {
+          current = message;
+          methodStarted = Date.now();
+          stage = "setup";
+          if (options.timeout > 0) testTimer = setTimeout(() => {
+            timedOut = {...current, stage, ms: Date.now() - methodStarted};
+            abort();
+          }, options.timeout);
+        } else if (message.kind === "unit-stage") stage = message.stage;
+        else if (message.kind === "unit-method-end") {
+          clearTimeout(testTimer);
+          methods.push(message.method);
+        } else if (message.kind === "unit-class-end") {
+          completed.push(message.testClass);
+          methods.length = 0;
+        }
+      });
       options.signal?.addEventListener("abort", abort, {once: true});
       if (options.signal?.aborted) abort();
       const tidy = () => {
@@ -472,9 +505,27 @@ export class UnitRun {
       child.on("close", (code) => {
         options.signal?.removeEventListener("abort", abort);
         clearTimeout(killTimer);
+        clearTimeout(testTimer);
         tidy();
         if (options.signal?.aborted) {
           reject(new Error("ABAP Unit run cancelled"));
+          return;
+        }
+        if (timedOut) {
+          const declared = plan.classes.find(c => c.name === timedOut.testClass);
+          const selected = declared.testMethods.filter(m => options.method === undefined || m.name === String(options.method).toUpperCase());
+          const at = selected.findIndex(m => m.name === timedOut.method);
+          const testMethods = [...methods, {name: timedOut.method, ms: timedOut.ms, alerts: [{
+            kind: "timeout", severity: "fatal", stage: timedOut.stage,
+            title: `${timedOut.method} did not finish within ${options.timeout} ms`, details: [], stack: [],
+          }]}, ...selected.slice(at + 1).map(m => ({name: m.name, ms: 0, skipped: true, alerts: []}))];
+          const testClasses = [...completed, {...declared, alerts: [], testMethods}];
+          const allMethods = testClasses.flatMap(c => c.testMethods);
+          resolve({program: {name, type: ADT_TYPE[type] ?? type, objectType: type}, testClasses, ok: false,
+            counts: {classes: testClasses.length, methods: allMethods.length,
+              passed: allMethods.filter(m => !m.skipped && !m.alerts.length).length,
+              failed: allMethods.filter(m => m.alerts.length).length,
+              classAlerts: testClasses.reduce((n, c) => n + c.alerts.length, 0)}, ms: Date.now() - started});
           return;
         }
         const start = out.indexOf("{");
@@ -487,6 +538,11 @@ export class UnitRun {
         } catch (error) {
           reject(new RunFailed(code, `${error.message}: ${`${out}${err}`.slice(-2000)}`));
         }
+      });
+      child.on("error", error => {
+        options.signal?.removeEventListener("abort", abort);
+        clearTimeout(killTimer); clearTimeout(testTimer);
+        tidy(); reject(error);
       });
     });
   }
@@ -521,7 +577,9 @@ export function alertOf(error, where, stack = []) {
       details.push(`Actual [${actual}]`);
     }
     details.push(`Raised in ${where}`);
-    return {kind: "failedAssertion", severity: "critical", title: text(error.msg) ?? "Unit test assertion failed", details, stack};
+    return {kind: "failedAssertion", severity: "critical", stage: where,
+      title: text(error.msg) ?? "Unit test assertion failed", details, stack,
+      ...(expected !== undefined ? {expected} : {}), ...(actual !== undefined ? {actual} : {})};
   }
 
   // an ABAP exception: the transpiled class is the name a developer knows
@@ -531,11 +589,12 @@ export function alertOf(error, where, stack = []) {
       details.push(message);
     }
     details.push(`Raised in ${where}`);
-    return {kind: "exception", severity: "critical", title: `Exception ${(className ?? "unknown").toUpperCase()} was not caught`, details, stack};
+    return {kind: "exception", severity: "critical", stage: where, title: `Exception ${(className ?? "unknown").toUpperCase()} was not caught`, details, stack};
   }
 
   details.push(`Raised in ${where}`);
-  return {kind: "shortDump", severity: "fatal", title: String(error?.message ?? error), details, stack};
+  return {kind: error?.code === "TEST_TIMEOUT" ? "timeout" : "shortDump", severity: "fatal", stage: where,
+    title: String(error?.message ?? error), details, stack};
 }
 
 // Where a failure really is.
@@ -564,7 +623,7 @@ function deadline(promise, ms, name) {
   return Promise.race([
     promise.finally(() => clearTimeout(timer)),
     new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`${name} did not finish within ${ms} ms`)), ms);
+      timer = setTimeout(() => reject(Object.assign(new Error(`${name} did not finish within ${ms} ms`), {code: "TEST_TIMEOUT"})), ms);
     }),
   ]);
 }
@@ -632,7 +691,13 @@ export async function main(args) {
     const i = args.indexOf(flag);
     return i < 0 ? undefined : args[i + 1];
   };
-  const options = {testClass: at("--class"), method: at("--method")};
+  const send = message => { if (process.connected) process.send?.(message); };
+  const options = {testClass: at("--class"), method: at("--method"),
+    ...(at("--timeout") !== undefined ? {timeout: Number(at("--timeout"))} : {}),
+    onMethodStart: (testClass, method) => send({kind: "unit-method-start", testClass, method}),
+    onMethodEnd: method => send({kind: "unit-method-end", method}),
+    onStage: stage => send({kind: "unit-stage", stage}),
+    onClassEnd: testClass => send({kind: "unit-class-end", testClass})};
   if (args.includes("--plan-stdin")) {
     options.plan = JSON.parse(await text(process.stdin));
   }

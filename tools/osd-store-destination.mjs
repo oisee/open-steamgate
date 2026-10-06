@@ -41,14 +41,14 @@ export async function segwRegistrationsOf(store) {
 // TOKENS was one more until 2026-09-25: the editor colours in ABAP now
 // (ZCL_OSD_ABAP_TOKENS, a word list), the same on every host, so the one
 // command that needed a parse per display is gone (host-tools review S1/C2)
-export const COMMANDS = ["LIST", "READ", "WRITE", "CREATE", "DELETE", "CHECK", "ACTIVATE", "ACTIVATION_STATUS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN", "PARSE", "PACKAGES", "SEARCH"];
+export const COMMANDS = ["LIST", "READ", "WRITE", "CREATE", "DELETE", "CHECK", "ACTIVATE", "ACTIVATION_STATUS", "RUN_TESTS", "CAPABILITIES", "HISTORY", "REVISION", "OBJECT", "COMMANDS", "SYSTEM", "PACKAGE", "CHECKRUN", "PARSE", "PACKAGES", "SEARCH"];
 
 /** What this host can do, as the screen asks it (CAPABILITIES, EV_NOTE):
  *  the editor draws a button only for a command named here. Node holds the
  *  compiler and the build, so it offers all five; a host that cannot check
  *  or activate (OSGo, a built binary) leaves them out and the screen shows
  *  no button that would only be refused (host-tools review 2026-09-25, D2). */
-export const CAPABILITIES = ["LIST", "READ", "WRITE", "CREATE", "DELETE", "CHECK", "ACTIVATE", "ACTIVATION_STATUS", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
+export const CAPABILITIES = ["LIST", "READ", "WRITE", "CREATE", "DELETE", "CHECK", "ACTIVATE", "ACTIVATION_STATUS", "RUN_TESTS", "HISTORY", "REVISION", "CHECKRUN", "PARSE"];
 
 const PARSE_KINDS = {
   CREATE_VALIDATION: async (store, input) => {
@@ -283,12 +283,21 @@ export class StoreDestination {
         case "READ": return this.#read(type, name, include, store, givenText(signature, "IV_REVISION"));
         case "WRITE": return this.#write(type, name, include, source, started, store);
         case "CHECK": return this.#check(type, name, include, source, started, store);
+        case "RUN_TESTS": {
+          const {runStoreTests} = await import("./osd-store-tests.mjs");
+          const result = await runStoreTests(store, givenText(signature, "IV_JSON"));
+          return {EV_JSON: JSON.stringify(result), EV_MS: String(result.ms)};
+        }
         case "ACTIVATION_STATUS": {
           let request;
           try { request = JSON.parse(givenText(signature, "IV_JSON")); }
           catch { return refusal("ACTIVATION_STATUS needs IV_JSON {op_id}", "INVALID_NAME"); }
           const {activationJournal} = await import("./osd-activation-journal.mjs");
-          return {EV_JSON: JSON.stringify(activationJournal(store).lookup(request?.op_id))};
+          try { return {EV_JSON: JSON.stringify(activationJournal(store).lookup(request?.op_id))}; }
+          catch (error) {
+            if (error.code !== "NOT_FOUND") throw error;
+            return {EV_JSON: JSON.stringify({state: "not_found", code: "NOT_FOUND", op_id: request.op_id})};
+          }
         }
         case "ACTIVATE": return await this.#activate(type, name, started, store);
         case "HISTORY": return await this.#history(type, name, include, signature, store);
@@ -492,6 +501,8 @@ export class StoreDestination {
   async #activate(type, name, started, store) {
     const {activationJournal} = await import("./osd-activation-journal.mjs");
     const journal = activationJournal(store);
+    const {liveHash} = await import("./osd-build.mjs");
+    journal.recordGeneration(journal.currentGeneration(store.served?.generation ?? liveHash(store.root)));
     const operation = journal.create(type, name);
     const failedAnswer = (error, stage) => {
       const rejected = refusal(error);

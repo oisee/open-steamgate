@@ -154,6 +154,10 @@ ENDCLASS.
     thrown.EXTRA_CX = {INTERNAL_FILENAME: "cl_abap_unit_assert.clas.abap", INTERNAL_LINE: 460};
 
     const alert = alertOf(thrown, "text_table_of_the_project");
+    expect(alert).to.include({expected: "b", actual: "a", stage: "text_table_of_the_project"});
+    thrown.expected = {get: () => ""};
+    thrown.actual = {get: () => ""};
+    expect(alertOf(thrown, "empty_string")).to.include({expected: "", actual: ""});
     expect(alert).to.include({kind: "failedAssertion", severity: "critical", title: "Expected 'b', got 'a'"});
     expect(alert.details).to.include.members(["Expected [b]", "Actual [a]", "Raised in text_table_of_the_project"]);
     expect(alert.stack[0]).to.include({uri: "cl_abap_unit_assert.clas.abap", line: 460});

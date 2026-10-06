@@ -58,7 +58,7 @@ export class StoreIPCClient {
     if (token !== undefined) token.storeIPC ??= ++this.steps;
     return new Promise((resolve, reject) => {
       const command = String(parameters.IV_COMMAND ?? "").toUpperCase();
-      const long = command === "CREATE" || command === "DELETE" || command === "ACTIVATE" || (command === "SYSTEM" && String(parameters.IV_TYPE).toUpperCase() === "BUILD");
+      const long = command === "CREATE" || command === "DELETE" || command === "ACTIVATE" || command === "RUN_TESTS" || (command === "SYSTEM" && String(parameters.IV_TYPE).toUpperCase() === "BUILD");
       const timer = long ? undefined : setTimeout(() => {
         this.pending.delete(id);
         if (name === "OSD_SESSION_CALLBACK" && this.channel.connected) {

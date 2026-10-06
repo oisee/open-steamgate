@@ -1,6 +1,6 @@
 # An ABAP development API inside OSG, and GENERATE SUBROUTINE POOL on top of it
 
-*Design note, 2026-10-02; PIA integration plan updated 2026-10-05. The public development API below is not implemented; existing STORE and ADT mechanisms are listed separately. Backlog: [adt.md](backlog/adt.md#an-abap-development-api-and-generate-subroutine-pool-2026-10-02), **should**, 0.7 or later.*
+*Design note, 2026-10-02; PIA integration plan updated 2026-10-05. The shared development class remains planned; P2a/P3a/P3b STORE commands described in section 2.1 are implemented on this branch. Backlog: [adt.md](backlog/adt.md#an-abap-development-api-and-generate-subroutine-pool-2026-10-02), **should**, 0.7 or later.*
 
 ## Why
 
@@ -145,7 +145,7 @@ generation while completion is pending.
 CHECK and ACTIVATE also return JSON `{active, live, note, issues}` alongside their existing
 scalar/table fields. The ABAP host wrapper imports JSON/SOURCE only; callers must inspect
 `active` and `issues`, since a syntax refusal does not raise a transport exception. `active: true`
-with `live: false` still does not confirm publication. P3a will add the durable operation state below.
+with `live: false` still does not confirm publication. P3a adds the durable operation state below.
 Use IV_TYPE and IV_NAME; CREATE accepts IV_JSON `{ "package": "$TMP", "description": "..." }`
 and optional IV_SOURCE. Omitted package defaults to $TMP. EV_JSON contains the ObjectStore result
 or the standard error envelope. Author comes from the live ENQ session. PROG/INCL locks are both
@@ -172,8 +172,8 @@ validation refusal, build failure and source revision conflict. Polling completi
 is sufficient for the first version; AMC notification may supplement it and is not the source of truth.
 ### P3a wire contract for implementation
 
-These additions are agreed implementation targets; they are not yet advertised by COMMANDS.
-ACTIVATE will return the operation document in EV_JSON. Keep `active`, `live`, `note` and `issues`
+These additions are implemented and advertised by COMMANDS/CAPABILITIES on this branch.
+ACTIVATE returns the operation document in EV_JSON. Keep `active`, `live`, `note` and `issues`
 for current callers, and add `state`, `op_id`, `generation_id`, `type`, `name`, `created_at`,
 `updated_at`, `completed_at`, and `failure_stage`. IDs and timestamps are strings; timestamps are UTC ISO 8601.
 `generation_id` and `failure_stage` are empty strings until applicable. `failure_stage` is one of
@@ -186,7 +186,9 @@ ZCL_OSD_ADT_HOST=>TY_ANSWER stays a JSON/SOURCE carrier.
 
 - **Lookup:** STORE `ACTIVATION_STATUS`, IV_JSON `{ "op_id": "..." }`. The result is the same
   operation document. It is read-only and never schedules publication. Missing/expired IDs return
-  the standard NOT_FOUND error envelope; malformed requests return INVALID_NAME.
+  `EV_JSON {"state":"not_found","code":"NOT_FOUND","op_id":"..."}` with EV_ERROR empty,
+  so ZCL_OSD_ADT_HOST=>STORE returns the refusal without raising. Malformed requests retain
+  the standard INVALID_NAME envelope and exception.
 - **Ownership:** the source-owning host creates and records the operation before returning pending.
   Its journal lives outside generated modules and outside the serving child. Serving-child recycle
   preserves the journal. Journals are scoped by source root and HTTP instance port, with a single
@@ -220,15 +222,103 @@ have changed. No serialization of PIA's call stack is promised by this API.
 
 ### P3b: local ABAP Unit (W3)
 
-Expose RUN_TESTS through the local development backend, without an HTTP request back into OSG.
-The call names the object and expected published generation, and uses an isolated test execution
-context so test changes do not share the agent's LUW. Reuse the existing Unit runner and report model.
-A generation mismatch must be reported explicitly; testing an older active revision is not success.
+Implemented on this branch: STORE `RUN_TESTS`, callable through
+`ZCL_OSD_ADT_HOST=>STORE( iv_command = \`RUN_TESTS\` iv_json = ... )` using the
+same ZOSD_STORE destination and parent IPC path as other commands. No HTTP loopback.
+COMMANDS and CAPABILITIES include RUN_TESTS. The response is synchronous EV_JSON,
+with EV_ERROR empty for the structured states below; there is no op_id.
 
-Return execution status separately from test verdict: a completed run can contain failed assertions;
-a runner failure is not an assertion failure. Structured results include test class/method, verdict,
-duration and diagnostics with source locations where available. Execution that needs the work-process
-lock must start after the caller releases it; "local" does not imply an unsafe nested dialog step.
+IV_JSON:
+
+```json
+{
+  "targets": [{"type": "CLAS", "name": "ZCL_X"}],
+  "expected_generation": "<id>"
+}
+```
+
+`targets` is a nonempty list of repository objects, deliberately named for a future
+where-used closure. This delivery supports CLAS with local test classes. PROG and other
+types return `not_run` with `error.code: NOT_SUPPORTED` and a precise explanation.
+Malformed requests return `not_run`/INVALID_NAME. Names and types are normalized to upper case.
+Omit expected_generation to use the current published generation; supplying null or an
+empty string is invalid. Classes without local tests produce an empty `ran` result.
+
+EV_JSON (optional diagnostic fields shown):
+
+```json
+{
+  "state": "ran",
+  "generation_id": "<generation the tests ran on>",
+  "expected_generation": "<echo or null>",
+  "ms": 120,
+  "failure_stage": "runner|timeout (only for failed)",
+  "error": {"code": "...", "text": "..."},
+  "counts": {"classes": 1, "methods": 1, "pass": 0, "fail": 1, "error": 0, "skipped": 0},
+  "classes": [{
+    "target": {"type": "CLAS", "name": "ZCL_X"},
+    "name": "LTCL_X",
+    "state": "ok",
+    "error": {"stage": "not_found|class_setup|setup|execution|...", "text": "..."},
+    "methods": [{
+      "name": "M", "verdict": "fail", "ms": 5,
+      "alerts": [{
+        "kind": "failedAssertion", "title": "Unit test assertion failed",
+        "details": ["Expected [43]", "Actual [42]"],
+        "expected": "43", "actual": "42",
+        "stack": [{"type": "CLAS", "name": "ZCL_X", "include": "testclasses", "line": 12}]
+      }]
+    }]
+  }]
+}
+```
+
+- **Run state vs verdict:** `ran` means the runner completed, including red assertions.
+  A red assertion is `verdict: fail`, with class state `ok`; it is never counted as an
+  execution error. Non-assertion execution failures give `verdict: error`. A missing
+  target or a broken class has class `state: error` and `error {stage,text}`, while the
+  run continues with the other classes and targets. A missing target is represented by
+  one class entry named after its target, stage `not_found`, with no methods.
+  Class setup/teardown failures have their corresponding stage; method setup/teardown
+  execution failures make both that method and class error; failed assertions always
+  keep method verdict `fail`, including in setup/teardown. Only a runner failure uses run-level
+  `failed`, with `failure_stage: runner|timeout` and `error {code,text}`.
+- **Assertions:** expected/actual are optional strings from the existing ADT Unit alert
+  data, including known empty strings. Stack entries use the existing source map
+  resolution; unavailable locations are omitted. Counts sum method verdicts;
+  class errors without methods increase `classes`, not method `error`.
+- **Generation guard:** a supplied expected_generation different from the generation
+  selected for a new context returns `state: not_run`, no tests execute, and
+  `error {code:"GENERATION_MISMATCH", text, expected_generation, current_generation}`.
+  The top-level generation_id identifies the current selection even on refusal; it is
+  empty if no generation is known. Omission echoes null and runs on the current selection.
+  There is no fallback to a historical requested generation.
+- **Published source only:** selection uses the source host's last confirmed publication
+  checkpoint, retained with the activation journal. Before the first tracked activation,
+  the baseline is the serving generation (or `build/live` on a source-only host). A source
+  host without a serving process can publish a complete generation for a fresh detached
+  context without recycling. An activation in `checked`/`pending`, or a runtime transition,
+  returns `not_run`/PUBLICATION_PENDING. A mismatch between the checkpoint, `build/live`
+  and the serving runtime, or missing snapshot/modules, returns
+  `not_run`/GENERATION_UNAVAILABLE. Thus an unpromoted build cannot masquerade as published,
+  including after a failed promotion or a restart. A short source-lock turn selects the
+  generation, reads only its digest-verified retained source for discovery, and copies its
+  complete modules to a disposable run directory. Inactive working source is never used.
+  Subsequent activations and generation GC cannot change the copied modules in a run.
+  ObjectStore promotion updates this same checkpoint for ADT activations as well as STORE.
+- **Isolation:** the existing `UnitRun.runDetached` runs each local test class in a fresh
+  child process and its own database/runtime, separate from the agent's LUW and static
+  state. It does not acquire or nest the caller's work-process lock; synchronous STORE
+  calls from ABAP dialog steps are safe. Each class continues past ordinary method errors.
+- **Timeouts:** `OSD_STORE_TEST_METHOD_MS` defaults to 60000 ms per method, including
+  constructor/setup/execution/teardown. The existing runner's child deadline and parent
+  watchdog produce `verdict: error`, alert `kind: timeout`. A synchronous loop is killed;
+  remaining methods of that child are marked skipped, and other classes continue.
+  `OSD_STORE_TEST_RUN_MS` defaults to 300000 ms total, including preparation and boot;
+  whole-run timeout kills the child and returns `failed`, `failure_stage: timeout`,
+  `error.code: RUN_TIMEOUT`. A stuck class_setup is covered by this whole-run deadline.
+  Completed class results may be retained on runner failure. Run directories and child
+  database files are removed on success, error and timeout.
 
 ### Joint acceptance and interim path
 
@@ -236,7 +326,8 @@ From ABAP: create a class, write an intentionally failing test, activate, checkp
 wait for `published`, resume and obtain the failing assertion. Fix the test, repeat activation and get
 a passing result. Delete the disposable object and confirm its absence. Exercise the same repository
 operations through ADT to check lock, revision and error compatibility. PIA adopts this as M2 acceptance;
-OSG adds focused coverage for each phase. Use an external ADT activator until P3a exists.
+OSG covers this sequence through the compiled ABAP host in test/store-destination.mjs,
+including a stale-generation refusal and deletion of both disposable classes.
 
 Existing content edits already have a measured warm path: PR #618's isolated lifecycle run measured
 median CLAS/INTF/INCL activation around 2.3–2.4 s, while REPORT/DDLS remained around 27 s locally.
