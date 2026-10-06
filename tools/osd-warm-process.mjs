@@ -62,8 +62,11 @@ export class WarmCompilerProcess extends WarmCompiler {
       if (this.#child === child) {
         this.#primed = false;
       }
-      for (const pending of this.#pending.values()) pending.reject(error);
-      this.#pending.clear();
+      for (const [id, pending] of this.#pending) {
+        if (pending.child !== child) continue;
+        pending.reject(error);
+        this.#pending.delete(id);
+      }
     };
     child.on("error", fail);
     child.on("disconnect", () => fail(new Error("warm compiler IPC disconnected")));
@@ -108,7 +111,7 @@ export class WarmCompilerProcess extends WarmCompiler {
     const inactive = view?.inactive ?? this.inactiveSources(new Set());
     const folder = view?.folder ?? this.overlayOf(new Set())?.folder ?? join("build", "inactive", "active");
     return new Promise((resolve, reject) => {
-      this.#pending.set(id, {resolve, reject});
+      this.#pending.set(id, {resolve, reject, child});
       child.send({id, method, activating: [...activating], inactive, folder, view, check}, error => {
         if (error) { this.#pending.delete(id); reject(Object.assign(error, {code: "WARM_UNAVAILABLE"})); }
       });
@@ -161,6 +164,15 @@ export class WarmCompilerProcess extends WarmCompiler {
     // Kill even during a CPU-bound prime; a polite IPC stop would wait for it.
     const child = this.#child;
     this.#child = undefined;
+    // Discarding a baseline during mismatch recovery is an ordinary cold
+    // fallback. Reject its requests before disconnect can label them as an
+    // unavailable compiler and permanently disable warm builds.
+    for (const [id, pending] of this.#pending) {
+      if (pending.child !== child) continue;
+      pending.reject(Object.assign(new Error("warm compiler baseline discarded"),
+        {code: this.#closing ? "CLOSED" : "NOT_WARM"}));
+      this.#pending.delete(id);
+    }
     child?.kill("SIGKILL");
     return this.#closed;
   }

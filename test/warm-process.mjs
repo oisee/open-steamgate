@@ -6,7 +6,8 @@ import {join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {WarmCompilerProcess} from "../tools/osd-warm-process.mjs";
-import {closeWarm} from "../tools/osd-store-warm.mjs";
+import {closeWarm, warmOperation} from "../tools/osd-store-warm.mjs";
+import {verifyNext} from "../tools/osd-store-verify.mjs";
 
 const source = (name, n) => `CLASS ${name} DEFINITION PUBLIC CREATE PUBLIC.
  PUBLIC SECTION.
@@ -145,6 +146,59 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     expect(next.ok).to.equal(true);
     expect(next.transpile.warm).to.equal(true);
     expect(logs.filter(line => line.includes("warm: primed"))).to.have.length(1);
+  });
+
+  it("finishes mismatch recovery with a ready compiler and warms the next activation", async () => {
+    await save("zcl_a", 2);
+    const activation = store.warmActivation("CLAS", "ZCL_A");
+    const warm = await activate();
+    expect(store.completeActivation(activation, warm.transpile.built)).to.equal(true);
+    const hash = warm.transpile.hash;
+    writeFileSync(join(root, "build", "by-input", hash, "output", "zcl_a.clas.mjs"), "// deliberate mismatch\n");
+    store.warmState.next = new Set([hash]);
+    verifyNext(store);
+    await store.warmState.verifying;
+    expect(store.warmState.last.verdict).to.equal("differs");
+    expect(out("zcl_a")).to.include("IntegerFactory.get(2)");
+    expect(compiler.primed, "recovery includes priming, without another activation or a timer").to.equal(true);
+    await save("zcl_a", 3);
+    const next = await activate();
+    expect(next.ok, JSON.stringify(next)).to.equal(true);
+    expect(next.transpile.warm).to.equal(true);
+    expect((await compiler.verify(next.transpile.hash)).verdict).to.equal("same");
+  });
+
+  it("ignores a retired child's late IPC failure while its replacement is priming", async () => {
+    const retired = child;
+    await compiler.drop();
+    paused = false;
+    mode("pause-finished-prime");
+    const priming = store.warmUp();
+    await waitPaused();
+    const replacement = child;
+    expect(replacement).to.not.equal(retired);
+    // Close and disconnect are separate events; either can be delivered
+    // after a drop and must reject only that child's requests.
+    retired.emit("disconnect");
+    mode("normal");
+    replacement.send({resume: true});
+    expect(await priming, store.warmState.reason).to.not.equal(undefined);
+    expect(compiler.primed).to.equal(true);
+    expect(store.warmState.disabled).to.not.equal(true);
+  });
+
+  it("discarding a busy baseline requests cold fallback without disabling its replacement", async () => {
+    mode("pause-build");
+    const building = warmOperation(store, () => compiler.build()).catch(error => error);
+    await waitPaused();
+    await compiler.drop();
+    expect((await building).code).to.equal("NOT_WARM");
+    expect(store.warmState.disabled).to.not.equal(true);
+    mode("normal");
+    expect(await store.warmUp(), store.warmState.reason).to.not.equal(undefined);
+    expect(compiler.primed).to.equal(true);
+    await save("zcl_a", 2);
+    expect((await activate()).transpile.warm).to.equal(true);
   });
 
   it("saves an unrelated object within 200 ms after dispatch, before hashing; B stays inactive", async () => {

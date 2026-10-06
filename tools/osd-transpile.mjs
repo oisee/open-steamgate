@@ -29,6 +29,7 @@ import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {installRfcMessage} from "./osd-rfc-message.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
+import {orderRegistry} from "./osd-warm-order.mjs";
 
 // the transpiler package in use by this tree, and the core it was built
 // against. A tree with the library installed resolves it directly; a tree
@@ -303,6 +304,7 @@ export async function transpile(options = {}) {
   for (const l of libs) {
     reg.addDependency(new core.MemoryFile(l.filename, l.contents));
   }
+  orderRegistry(reg, core, files, libs);
   const output = await phase("transpile", () => t.run(reg, options.progress ?? QUIET));
   const outputFolder = resolve(root, config.output_folder);
   mkdirSync(outputFolder, {recursive: true});

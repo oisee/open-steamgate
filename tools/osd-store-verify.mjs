@@ -47,11 +47,17 @@ export function verifyNext(store) {
       } catch {
         // no note: nothing a cold build would take as its own
       }
-      w.compiler.drop();
-      await store.publish({force: true, replace: true});
+      await w.compiler.drop();
+      const rebuilt = await store.publish({force: true, replace: true});
+      if (rebuilt.ok !== true) throw new Error(rebuilt.error ?? rebuilt.transpile?.error ?? "cold recovery failed");
+      // Recovery includes a ready baseline, after the serving recycle. An
+      // idle lifecycle client must not need another activation to prime it.
+      await store.warmUp();
     } else {
       console.log(`warm: ${hash} not verified: ${result.verdict} ${result.why ?? result.output ?? ""}`);
     }
+  }).catch(error => {
+    console.log(`warm: ${hash} verification recovery failed: ${error.message}`);
   }).finally(() => {
     w.verifying = undefined;
     w.verifyingHash = undefined;

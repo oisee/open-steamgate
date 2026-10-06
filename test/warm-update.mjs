@@ -5,6 +5,7 @@ import {join, resolve} from "node:path";
 import {build} from "../tools/osd-build.mjs";
 import {WarmCompiler} from "../tools/osd-warm.mjs";
 import {UPDATE_LIMIT} from "../tools/osd-warm-update.mjs";
+import {outputFiles} from "../tools/osd-transpile.mjs";
 
 const source = (name, body = "rv = 1.") => `CLASS ${name} DEFINITION PUBLIC CREATE PUBLIC.
  PUBLIC SECTION. CLASS-METHODS get RETURNING VALUE(rv) TYPE i. ENDCLASS.
@@ -90,6 +91,49 @@ describe("kept registry after a cold publication", function () {
     writeFileSync(file("zcl_new"), source("zcl_new", "rv = 2."));
     const warm = await compiler.build();
     expect((await compiler.verify(warm.hash)).verdict).to.equal("same");
+  });
+
+  it("ignores non-object files when ordering library schemas and constructors", async () => {
+    mkdirSync(join(root, "lib", "src"), {recursive: true});
+    const constructor = name => source(name).replace("PUBLIC SECTION.", "PUBLIC SECTION. CLASS-METHODS class_constructor.")
+      .replace(`CLASS ${name} IMPLEMENTATION.`, `CLASS ${name} IMPLEMENTATION. METHOD class_constructor. ENDMETHOD.`);
+    for (const name of ["zcl_early", "zcl_noise"]) {
+      writeFileSync(join(root, "lib", "src", `${name}.clas.abap`), constructor(name));
+    }
+    for (const name of ["zt_early", "zt_noise"]) {
+      writeFileSync(join(root, "lib", "src", `${name}.tabl.xml`), `<abapGit><asx:abap xmlns:asx="http://www.sap.com/abapxml"><asx:values>
+<DD02V><TABNAME>${name.toUpperCase()}</TABNAME><TABCLASS>TRANSP</TABCLASS></DD02V>
+<DD03P_TABLE><DD03P><FIELDNAME>ID</FIELDNAME><KEYFLAG>X</KEYFLAG><DATATYPE>INT4</DATATYPE><INTTYPE>I</INTTYPE><INTLEN>000004</INTLEN></DD03P></DD03P_TABLE>
+</asx:values></asx:abap></abapGit>`);
+    }
+    // Like local/tmp/tadir.json in the ADT lifecycle: only two filename
+    // components, so Registry.addFile ignores it before creating an object.
+    writeFileSync(join(root, "src", "zcl_noise.json"), "{}");
+    writeFileSync(join(root, "src", "zt_noise.json"), "{}");
+    const path = join(root, "abap_transpile.json"), config = JSON.parse(readFileSync(path, "utf8"));
+    config.libs = [{folder: "/lib"}];
+    writeFileSync(path, JSON.stringify(config));
+    await cold();
+    compiler.drop();
+    await compiler.prime();
+    writeFileSync(file("zcl_a"), source("zcl_a", "rv = 2."));
+    const warm = await compiler.build();
+    expect((await compiler.verify(warm.hash)).verdict).to.equal("same");
+    const scripts = ["init.mjs", "_init.mjs"].map(name => readFileSync(join(root, "output", name), "utf8"));
+    // An independent oracle: bypass orderRegistry and use exactly the native
+    // source-then-dependency admission that the cold transpiler originally used.
+    const native = new compiler.core.Registry();
+    for (const f of compiler.files.values()) native.addFile(new compiler.core.MemoryFile(f.filename, f.contents));
+    for (const f of compiler.libs) native.addDependency(new compiler.core.MemoryFile(f.filename, f.contents));
+    const keys = reg => [...reg.getObjects()].map(o => `${o.getType()} ${o.getName()}`);
+    expect(keys(compiler.reg)).to.deep.equal(keys(native));
+    const output = await new compiler.Transpiler(compiler.settings).run(native);
+    const nativeFiles = outputFiles(output, compiler.own, join(root, "output"), [...compiler.files.values()]);
+    for (const [i, name] of ["init.mjs", "_init.mjs"].entries()) {
+      expect(nativeFiles.find(f => f.path === join(root, "output", name)).contents).to.equal(scripts[i]);
+    }
+    await build({root, generators: false, force: true, replace: true});
+    for (const [i, name] of ["init.mjs", "_init.mjs"].entries()) expect(readFileSync(join(root, "output", name), "utf8")).to.equal(scripts[i]);
   });
 
   it("refuses a delta above the bounded threshold", async () => {

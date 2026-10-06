@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {execFileSync, spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
@@ -37,6 +37,19 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     const stale = verify();
     expect(stale.status, stale.stdout + stale.stderr).to.equal(1);
     expect(liveHash(root)).to.equal(built.hash);
+  });
+
+  it("freezes identical compiler metadata across build locations and processes", async () => {
+    write("src/zcl_frozen.clas.abap", "CLASS zcl_frozen DEFINITION PUBLIC. ENDCLASS. CLASS zcl_frozen IMPLEMENTATION. ENDCLASS.\n");
+    const first = await build({root, generators: false});
+    const frozen = readFileSync(join(root, "build", "by-input", first.hash, "compile-inputs.json"), "utf8");
+    rmSync(join(root, "build"), {recursive: true, force: true});
+    renameSync(root, `${root}-elsewhere`);
+    root = `${root}-elsewhere`;
+    const script = `import {build} from ${JSON.stringify(new URL("../tools/osd-build.mjs", import.meta.url).href)}; await build({root: process.cwd(), generators: false});`;
+    execFileSync(process.execPath, ["--input-type=module", "-e", script], {cwd: root});
+    expect(readFileSync(join(root, "build", "by-input", first.hash, "compile-inputs.json"), "utf8")).to.equal(frozen);
+    expect(JSON.parse(frozen).config.output_folder).to.equal("output");
   });
 
   // The builder starts a generator through tools/osd-host.mjs, which inside a

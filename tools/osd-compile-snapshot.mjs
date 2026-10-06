@@ -29,7 +29,10 @@ export function keepCompileInputs(root, generation, config, files, libs, overlay
     inputs[source] = digest;
     return {filename: file.filename, relative: file.relative, source, digest};
   };
-  const frozen = {version: 1, config, files: files.map(retain), libs: libs.map(retain)};
+  // The output location is already captured by each source-map relative path.
+  // Keep the config independent of a build's scratch path and process ID, as
+  // abap_transpile.json is, so two packages of identical inputs share a seed ID.
+  const frozen = {version: 1, config: {...config, output_folder: "output"}, files: files.map(retain), libs: libs.map(retain)};
   writeFileSync(record, JSON.stringify(Object.fromEntries(Object.entries(inputs).sort(([a], [b]) => a.localeCompare(b)))));
   writeFileSync(join(generation, "compile-inputs.json"), JSON.stringify(frozen));
 }

@@ -1,22 +1,16 @@
-// Match cold registry insertion order while retaining parsed objects and caches.
+// Native cold insertion order, without reparsing the kept objects.
 const key = o => `${o.getType()} ${o.getName()}`;
-export function orderRegistry(c, files) {
-  // A previous ordering override cannot supply native membership after updates.
-  delete c.reg.getObjects;
-  // Script order must match a cold registry even for a new object's tests
-  // and class constructor. Reorder iteration, retaining every object/cache.
-  const rank = new Map(), names = new Map();
-  for (const f of [...files.values(), ...c.libs]) {
-    const memory = new c.core.MemoryFile(f.filename, f.contents);
-    const id = `${memory.getObjectType()} ${memory.getObjectName().toUpperCase()}`;
-    const name = memory.getObjectName().toUpperCase();
-    if (!names.has(name)) names.set(name, names.size);
-    if (!rank.has(id)) rank.set(id, rank.size);
-  }
-  // Registry groups all types of a name at its first occurrence, including
-  // library objects that share a name with an earlier source object.
-  const ordered = [...c.reg.getObjects()].sort((a, b) =>
-    (names.get(a.getName()) ?? Infinity) - (names.get(b.getName()) ?? Infinity) ||
+export function orderRegistry(reg, core, files, libs = []) {
+  // Let the same Registry used by the cold transpiler admit and group files.
+  // In particular, tadir.json creates no object and must not move the library's
+  // TADIR table ahead of T000/T100. Filename-derived ranks missed that rule.
+  const cold = new core.Registry();
+  for (const f of files) cold.addFile(new core.MemoryFile(f.filename, f.contents));
+  for (const f of libs) cold.addDependency(new core.MemoryFile(f.filename, f.contents));
+  const rank = new Map([...cold.getObjects()].map((o, i) => [key(o), i]));
+  // Discard an earlier iterator's snapshot after membership has changed.
+  delete reg.getObjects;
+  const ordered = [...reg.getObjects()].sort((a, b) =>
     (rank.get(key(a)) ?? Infinity) - (rank.get(key(b)) ?? Infinity));
-  c.reg.getObjects = function* () { yield* ordered; };
+  reg.getObjects = function* () { yield* ordered; };
 }

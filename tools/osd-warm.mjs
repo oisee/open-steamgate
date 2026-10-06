@@ -395,6 +395,7 @@ export class WarmCompiler {
     const reg = new core.Registry();
     for (const f of this.files.values()) reg.addFile(new core.MemoryFile(f.filename, f.contents));
     for (const l of libs) reg.addDependency(new core.MemoryFile(l.filename, l.contents));
+    orderRegistry(reg, core, this.files.values(), libs);
     const settings = {...own.options};
     if (own.write_source_map !== true) settings.ignoreSourceMap = true;
     const output = await new Transpiler(settings).run(reg);
@@ -727,7 +728,7 @@ export class WarmCompiler {
           closure: [], xrefRows: {CROSS: [], WBCROSSGT: [], WBCROSSGTX: [], D010INC: []}};
       }
       const files = new Map([...actual.keys()].map(path => [path, this.files.get(path)]));
-      orderRegistry(this, files);
+      orderRegistry(this.reg, this.core, files.values(), this.libs);
       const sources = [...files].map(([path, f]) => {
         const edit = edits.find(e => e.path === path);
         return located(path, edit ? {...f, contents: edit.after, sourceDigest: digests.get(path)} : f);

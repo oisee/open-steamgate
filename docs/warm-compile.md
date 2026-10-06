@@ -174,12 +174,21 @@ and require a full prime.
   `<hash>.warm.json` beside it says so -- a process started later on it says
   so too, and a cold build never takes it as a cache hit: it builds it again
   and replaces it if the bytes differ. A difference found by the comparison
-  rebuilds cold and recycles. Measured: 2529 files, 0 differing, 8.5 s in
+  rebuilds cold, recycles and primes the replacement compiler. IPC failure
+  events reject only requests belonging to their child, so a retired child's
+  late disconnect cannot disable its replacement. Discarding a busy baseline
+  requests cold fallback before killing the child; its disconnect cannot mark
+  the compiler unavailable. Measured: 2529 files, 0 differing, 8.5 s in
   the background. `compile-inputs.json` retains the exact source/library order,
   config and source-map locations, with raw bytes addressed by `source-inputs.json`
-  in `build/source-by-digest`. Normal warm builds order the kept registry and
-  frozen inputs by the cold view's name groups, including active-copy overlays;
-  constructor script order therefore matches a real cold build. The verifier
+  in `build/source-by-digest`. Cold and warm builds, priming, updates and
+  verification share `orderRegistry`: an unparsed cold registry supplies its
+  native object order, including admission rules and name groups, while warm
+  retains its parsed objects and caches. A non-object file such as
+  `local/tmp/tadir.json` therefore cannot move the library's TADIR schema or
+  metadata rows ahead of T000/T100. Constructor script order follows the same
+  rule. The frozen config names `output`, without a scratch path or process ID,
+  so repeated packaging of identical inputs keeps the same seed ID. The verifier
   builds a fresh registry solely from
   these inputs. Live edits, cold publications and library/config changes cannot
   invalidate it. Missing frozen inputs or output, and zero compared files, are

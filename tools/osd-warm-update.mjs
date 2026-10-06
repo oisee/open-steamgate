@@ -72,7 +72,7 @@ export async function updateRegistry(c, activating, {viewOf, closure, index, rul
     const file = replacements.get(path) ?? c.files.get(path);
     return [path, {...file, path: actual, relative: relative(out, dirname(actual))}];
   }));
-  orderRegistry(c, files);
+  orderRegistry(c.reg, c.core, files.values(), c.libs);
   const affected = [...c.reg.getObjects()].filter(o => affectedKeys.has(key(o)));
   for (const o of affected) o.setDirty();
   // #1921: keep the registry's config and unrelated syntax results intact.

@@ -9,6 +9,7 @@ import {compareGenerations} from "./osd-generation-diff.mjs";
 import {assertToolchain} from "./osd-transpiler.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
+import {orderRegistry} from "./osd-warm-order.mjs";
 
 export async function verifyGeneration(hash, root = resolve(process.env.OSD_ROOT ?? process.cwd())) {
   const paths = layout(root), generation = join(paths.byInput, hash);
@@ -28,7 +29,9 @@ export async function verifyGeneration(hash, root = resolve(process.env.OSD_ROOT
     const sources = files.map(f => ({...f, contents: lowerNarrowSubmit(f.bytes.toString(isBinaryFilename(f.filename) ? "latin1" : "utf8"), f.filename, core)}));
     const reg = new core.Registry();
     for (const f of sources) reg.addFile(new core.MemoryFile(f.filename, f.contents));
-    for (const f of libs) reg.addDependency(new core.MemoryFile(f.filename, f.bytes.toString(isBinaryFilename(f.filename) ? "latin1" : "utf8")));
+    const libraries = libs.map(f => ({...f, contents: f.bytes.toString(isBinaryFilename(f.filename) ? "latin1" : "utf8")}));
+    for (const f of libraries) reg.addDependency(new core.MemoryFile(f.filename, f.contents));
+    orderRegistry(reg, core, sources, libraries);
     const settings = {...config.options};
     if (config.write_source_map !== true) settings.ignoreSourceMap = true;
     const output = await new Transpiler(settings, plugin).run(reg);
