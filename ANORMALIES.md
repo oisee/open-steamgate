@@ -3785,3 +3785,17 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Upstream version containing a fix: unknown.
 
 Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a deprecation that vsp deploy treats as an error. PIA moved to PCRE, which OSG supports.
+
+### ANOMALY-2026-10-06-uccp-lone-surrogate - uccp drops a surrogate code unit
+
+- Status: `open`
+- Discovery: PIA's test escape_emoji_pair passes 30/30 on A4H 7.58 and fails only in OSG. It was triggered by an emoji in a model answer and reported by the PIA session on 2026-10-06. dell confirmed the path in source.
+- Affected path: open-abap-core `src/conv/cl_abap_conv_in_ce.clas.abap`. `uccp` turns the hex into an integer and calls `uccpi`, which decodes the two bytes through a UTF-16LE (4103) converter. A lone surrogate does not survive that decode, and `uccp` swallows `cx_sy_conversion_codepage` (`* todo, hmm`), which leaves the result empty.
+- Reproducer: `cl_abap_conv_in_ce=>uccp( 'D83D' ) && cl_abap_conv_in_ce=>uccp( 'DE0A' )`.
+- Expected SAP behaviour: each call returns its UTF-16 code unit unchanged, so the concatenation is U+1F60A with strlen 2.
+- Actual local behaviour: both halves are lost, so PIA's `unescape(😊)` returns an empty string.
+- Related, milder: on SAP, `cl_abap_conv_codepage=>create_out( )->convert( )` of a lone surrogate raises `CX_SY_CONVERSION_CODEPAGE`, while OSG appears to produce `EF BF BD` silently. This is not measured in OSG yet.
+- Workaround: none in the tree. The same family as ANOMALY-2026-10-04-sxml-supplementary-ref and ANOMALY-2026-10-06-uccpi-high-byte.
+- Regression: none yet.
+- Upstream: needs an issue in open-abap-core (code-unit level `uccp`, without a decode round trip), after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
