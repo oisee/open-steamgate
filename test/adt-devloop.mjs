@@ -508,7 +508,8 @@ describe("tools/adt-facade: the development loop", () => {
       this.timeout(180000);
       const xml = await (await testRun("ZCL_STG_SEGW_TEST")).text();
       const testClass = xml.match(/<testClass [^>]*>[\s\S]*?<testMethods>/)[0];
-      expect(testClass).to.contain("<alerts/>");
+      // an SAP system omits a class's empty <alerts> entirely (measured)
+      expect(testClass).to.not.contain("<alerts");
       const method = xml.match(/<testMethod [^>]*\/>/)[0];
       expect(method).to.not.contain("<alerts");
       expect(method).to.not.contain("<alert ");

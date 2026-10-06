@@ -133,7 +133,7 @@ function classUnitResultDocument(run, base, withNavigationUri) {
       details.push(`            <detail text="Different values"><details><detail text="${xmlEscape(text)}"/></details></detail>`);
     }
     details.push(...items.filter(d => !(failedAssertion && comparison.includes(d)) &&
-      !(methodName && d === `Raised in ${methodName.toLowerCase()}`)).map(detail));
+      !(methodName && d.toLowerCase() === `raised in ${methodName.toLowerCase()}`)).map(detail));
     if (methodName) details.push(detail(`Test '${c.name}->${methodName}' in Main Program '${poolName(programName)}CP'`));
     return `        <alert kind="${xmlEscape(a.kind ?? "failedAssertion")}" severity="${xmlEscape(a.severity ?? "critical")}">
           <title>${xmlEscape(renderedTitle)}</title>
@@ -155,8 +155,7 @@ ${(a.stack ?? []).map(e => stackEntry(e, methodName)).join("\n")}
     return (m.alerts ?? []).length === 0 ? `${open}/>` : `${open}>\n${alerts(m.alerts, "        ", c, m)}\n      </testMethod>`;
   };
   const testClass = c => `    <testClass adtcore:name="${xmlEscape(c.name)}" adtcore:uri="${xmlEscape(`${base}#testclass=${encodeURIComponent(c.name)}`)}" durationCategory="${xmlEscape(c.durationCategory ?? "short")}" riskLevel="${xmlEscape(c.riskLevel ?? "harmless")}" uriType="semantic"${navigation("CLAS/OL", `${includeUri(c.include)}#type=CLAS%2FOCL;name=${encodeURIComponent(c.name)}`)}>
-${alerts(c.alerts, "      ", c)}
-      <testMethods>
+${(c.alerts ?? []).length === 0 ? "" : alerts(c.alerts, "      ", c) + "\n"}      <testMethods>
 ${[...(c.testMethods ?? [])].sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0).map(m => method(m, c)).join("\n")}
       </testMethods>
     </testClass>`;
