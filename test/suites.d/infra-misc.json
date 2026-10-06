@@ -28,6 +28,7 @@
     "test/osd-suites.mjs",
     "test/osd-test-isolation.mjs",
     "test/ci-wait-tests.mjs",
+    "test/ci-lifecycle-gate.mjs",
     "test/smoke-binary.mjs",
     "test/consumer-smoke.mjs",
     "test/preflight.mjs",
