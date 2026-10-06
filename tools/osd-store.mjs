@@ -1,6 +1,7 @@
 import {packageChildName} from "./osd-object-name.mjs";
 import {transpileStore} from "./osd-store-build.mjs";
 import {deferSourceMutation} from "./osd-store-source-lock.mjs";
+import {verifyNext} from "./osd-store-verify.mjs";
 import {warmUp} from "./osd-store-warm.mjs";
 import {recordBaselineGeneration, recordStoreGeneration} from "./osd-activation-journal.mjs";
 // The object store of OSD, the off-stack doppelgänger: what sits behind
@@ -1100,7 +1101,7 @@ export class ObjectStore {
   // cold build, and a save it may build (a content edit of a class or an
   // interface) becomes a build of the objects it reaches and a swap in the
   // serving process. Anything else is the cold build, and after it the
-  // registry is primed again.
+  // registry advances incrementally when its delta permits, otherwise primes again.
 
   warm() {
     if (this.warmState === undefined) {
@@ -1182,7 +1183,7 @@ export class ObjectStore {
     const grown = Math.max(0, ...heaps.map((heap, i) =>
       typeof heap === "number" && typeof w.heapBase[i] === "number" ? heap - w.heapBase[i] : 0));
     if (w.compiler?.unverified.has(hash)) {
-      w.next = hash;
+      (w.next ??= new Set()).add(hash);
       this.#verifyNext();
     }
     const runtime = this.served;
@@ -1209,11 +1210,10 @@ export class ObjectStore {
     const w = this.warm();
     clearTimeout(w.timer);
     w.timer = setTimeout(() => {
-      // the live generation is compared once the saves have stopped, if
-      // the comparison of it was cut short by the next save
+      // Retry genuinely missing frozen inputs after a quiet interval.
       const live = this.served?.generation;
       if (live !== undefined && w.compiler?.unverified.has(live)) {
-        w.next = live;
+        (w.next ??= new Set()).add(live);
         this.#verifyNext();
       }
       if (this.#channelsOpen("quiet")) this.#armQuiet();
@@ -1237,39 +1237,7 @@ export class ObjectStore {
   // how long a publish waits for a runtime changing hands (OSD_TRANSITION_MS)
   transitionMs = TRANSITION_MS;
 
-  #verifyNext() {
-    const w = this.warm();
-    if (w.verifying !== undefined || w.next === undefined) return;
-    const hash = w.next;
-    w.next = undefined;
-    w.verifying = w.compiler.verify(hash).then(async (result) => {
-      w.last = {hash, ...result, at: new Date().toISOString()};
-      if (result.verdict === "same") {
-        console.log(`warm: ${hash} verified against a cold transpile (${result.files} files, ${result.ms} ms)`);
-        this.served?.verified?.(hash);
-      } else if (result.verdict === "differs") {
-        // the warm build and the cold one disagree: the cold one is the
-        // truth, so it replaces the generation and the process, and the
-        // registry is primed again from it
-        console.log(`warm: ${hash} DIFFERS from a cold transpile in ${result.count} files (${result.differing.slice(0, 5).join(", ")}); rebuilding cold`);
-        // the note beside it keeps the generation from ever being a cache
-        // hit, whatever the tree is by the time the cold build runs
-        try {
-          const side = join(this.root, "build", "by-input", `${hash}.warm.json`);
-          writeFileSync(side, JSON.stringify({...JSON.parse(readFileSync(side, "utf8")), verified: false, differs: result.differing}, null, 2));
-        } catch {
-          // no note: nothing a cold build would take as its own
-        }
-        w.compiler.drop();
-        await this.publish({force: true, replace: true});
-      } else {
-        console.log(`warm: ${hash} not verified: ${result.verdict} ${result.why ?? result.output ?? ""}`);
-      }
-    }).finally(() => {
-      w.verifying = undefined;
-      this.#verifyNext();
-    });
-  }
+  #verifyNext() { verifyNext(this); }
 
   async #catchUp(why) {
     const runtime = this.served;

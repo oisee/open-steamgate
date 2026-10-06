@@ -1048,20 +1048,15 @@ describe("tools/osd-warm: an activation answers once its source is live", () => 
   });
 });
 
-describe("tools/osd-warm: a comparison the tree has left", () => {
-  // vsp's pattern: a warm edit starts a comparison (a cold transpile in a
-  // child), and the next create is a cold build beside it; the comparison
-  // can only end inconclusive, and the activation waiting on the build paid
-  // for both transpiles
-  it("is stopped by a cold build, and one of the tree as it is is kept", () => {
+describe("tools/osd-warm: frozen comparisons survive cold publications", () => {
+  it("is kept across cold builds and stopped explicitly on shutdown", () => {
     const kills = [];
-    const child = (hash) => ({osdHash: hash, exitCode: null, kill: (s) => kills.push(`${hash} ${s}`)});
-    const compiler = {verifying: child("g2")};
-    expect(WarmCompiler.prototype.cancelVerify.call(compiler, "g2"), "the tree is still g2").to.equal(false);
-    expect(WarmCompiler.prototype.cancelVerify.call(compiler, "g3")).to.equal(true);
-    expect(kills).to.deep.equal(["g2 SIGTERM"]);
-    expect(compiler.verifying.osdCancelled).to.match(/a cold build replaced the tree/);
-    expect(WarmCompiler.prototype.cancelVerify.call({verifying: undefined}, "g3")).to.equal(false);
+    const compiler = {verifying: {osdHash: "g2", exitCode: null, kill: signal => kills.push(signal)}};
+    expect(WarmCompiler.prototype.cancelVerify.call(compiler, "g3")).to.equal(false);
+    expect(WarmCompiler.prototype.cancelVerify.call(compiler, undefined, "the front is closing")).to.equal(true);
+    expect(kills).to.deep.equal(["SIGTERM"]);
+    expect(compiler.verifying.osdCancelled).to.equal("the front is closing");
+    expect(WarmCompiler.prototype.cancelVerify.call({verifying: undefined}, undefined, "closing")).to.equal(false);
   });
 });
 

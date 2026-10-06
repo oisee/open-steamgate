@@ -2,7 +2,8 @@ import {expect} from "chai";
 import {writeFileSync, readFileSync, readdirSync, rmSync, mkdirSync, mkdtempSync, cpSync, symlinkSync, utimesSync, realpathSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {execFileSync} from "node:child_process";
-import {join} from "node:path";
+import {dirname, join} from "node:path";
+import {createRequire} from "node:module";
 import {build, liveHash, hashOf, inputsOf, generatorClosure, genHash} from "../tools/osd-build.mjs";
 
 import {WarmCompiler} from "../tools/osd-warm.mjs";
@@ -177,7 +178,8 @@ describe("a generation identifies content regardless of location", () => {
     writeFileSync(join(pkg, "build", "src", "statements", "call_function.js"),
       `module.exports = require(${JSON.stringify(join(real, "build", "src", "statements", "call_function.js"))});\n`);
     mkdirSync(join(pkg, "node_modules", "@abaplint"), {recursive: true});
-    symlinkSync(join(process.cwd(), "node_modules", "@abaplint", "core"), join(pkg, "node_modules", "@abaplint", "core"));
+    const fromTranspiler = createRequire(join(real, "package.json"));
+    symlinkSync(dirname(fromTranspiler.resolve("@abaplint/core/package.json")), join(pkg, "node_modules", "@abaplint", "core"));
     const file = join(pkg, "build", "index.js");
     const compiler = name => `const real = require(${JSON.stringify(real)}); module.exports = {...real, Transpiler: class ${name} extends real.Transpiler {}};\n`;
     writeFileSync(file, compiler("Before"));

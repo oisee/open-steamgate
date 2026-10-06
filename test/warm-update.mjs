@@ -58,6 +58,40 @@ describe("kept registry after a cold publication", function () {
     expect(logs.filter(line => line.includes("warm: primed"))).to.have.length(1);
   });
 
+  it("retains cold iteration order when a new class constructor precedes existing objects", async () => {
+    const constructor = name => source(name).replace("PUBLIC SECTION.", "PUBLIC SECTION. CLASS-METHODS class_constructor.")
+      .replace(`CLASS ${name} IMPLEMENTATION.`, `CLASS ${name} IMPLEMENTATION. METHOD class_constructor. ENDMETHOD.`);
+    writeFileSync(file("zcl_a"), constructor("zcl_a"));
+    await cold();
+    compiler.drop();
+    await compiler.prime();
+    writeFileSync(file("zcl_0new"), constructor("zcl_0new"));
+    await cold();
+    const registry = compiler.reg;
+    await compiler.update();
+    expect(compiler.reg).to.equal(registry);
+    writeFileSync(file("zcl_0new"), constructor("zcl_0new").replace("rv = 1.", "rv = 2."));
+    const warm = await compiler.build();
+    expect((await compiler.verify(warm.hash)).verdict).to.equal("same");
+  });
+
+  it("keeps same-name source and library object types grouped in cold script order", async () => {
+    mkdirSync(join(root, "lib", "src"), {recursive: true});
+    writeFileSync(join(root, "lib", "src", "zcl_a.prog.abap"), "REPORT zcl_a. WRITE 'library'.");
+    const path = join(root, "abap_transpile.json"), config = JSON.parse(readFileSync(path, "utf8"));
+    config.libs = [{folder: "/lib"}];
+    writeFileSync(path, JSON.stringify(config));
+    await cold();
+    compiler.drop();
+    await compiler.prime();
+    writeFileSync(file("zcl_new"), source("zcl_new"));
+    await cold();
+    await compiler.update();
+    writeFileSync(file("zcl_new"), source("zcl_new", "rv = 2."));
+    const warm = await compiler.build();
+    expect((await compiler.verify(warm.hash)).verdict).to.equal("same");
+  });
+
   it("refuses a delta above the bounded threshold", async () => {
     for (let i = 0; i <= UPDATE_LIMIT; i++) writeFileSync(file(`zcl_more_${i}`), source(`zcl_more_${i}`));
     await cold();

@@ -1,5 +1,5 @@
 // Retain the registry off the HTTP front's event loop. Verification remains
-// a front-owned child, using WarmCompiler's existing comparison/cancellation.
+// a front-owned child, comparing each generation's frozen compiler inputs.
 import {WarmCompiler} from "./osd-warm.mjs";
 import {spawn} from "./osd-child-process.mjs";
 import {toolCommand} from "./osd-host.mjs";
@@ -128,9 +128,7 @@ export class WarmCompilerProcess extends WarmCompiler {
   }
   async build(activating = new Set(), snapshot = undefined) {
     await this.loadStoreView();
-    const view = snapshot ? snapshot.overlay : this.overlayOf(activating);
     const result = await this.#call("build", activating, snapshot);
-    this.views.set(result.hash, view);
     if (this.recycleDue) await this.drop();
     return result;
   }

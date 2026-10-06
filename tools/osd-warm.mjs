@@ -19,12 +19,14 @@
 // switched to the same way. Whether its bytes are a cold transpile's is not
 // assumed: verify() transpiles the same inputs cold in a child process and
 // compares, and until that has passed the generation is "warm-unverified".
-// verify() runs no generators, so it checks this build against today's
-// gen/, not the rule below against the generators.
+// verify() reads frozen source/gen/library inputs, without running generators,
+// so it checks this build, not the rule below against the generators.
 //
 // What is warm is decided file by file, and anything else is cold -- the
 // generators read the tree too, and a change they would see has to reach
 // them (see warmRule below).
+import {keepCompileInputs} from "./osd-compile-snapshot.mjs";
+import {verifyGeneration} from "./osd-warm-verify.mjs";
 import {keepSourceInputs, linkGeneratedSources, completeSourceSnapshot} from "./osd-source-snapshot.mjs";
 import {spawn} from "./osd-child-process.mjs";
 import {createHash} from "node:crypto";
@@ -242,8 +244,6 @@ export class WarmCompiler {
     this.keyOf = options.keyOf ?? (() => undefined);
     // the inactive objects and their copies (ObjectStore#inactiveSources)
     this.inactiveSources = options.inactiveSources ?? (() => []);
-    // the view each generation this made was built from, for its comparison
-    this.views = new Map();
   }
 
   // A file is known by where it lives in the tree, whichever copy the view
@@ -407,6 +407,7 @@ export class WarmCompiler {
       throw new NotWarm(`a full run of the kept registry differs from the live generation in ${differing.length} files (${differing.slice(0, 3).join(", ")})`);
     }
 
+    this.libs = libs;
     this.Transpiler = Transpiler;
     this.core = core;
     this.config = config;
@@ -705,10 +706,11 @@ export class WarmCompiler {
       // tree, an inactive one from its copy -- what its source map names,
       // as a cold build of the view would
       const out = resolve(root, this.own.output_folder);
-      const located = (path, f) => (actual.has(path) ? {...f, relative: relative(out, dirname(actual.get(path)))} : f);
+      const located = (path, f) => (actual.has(path) ? {...f, path: actual.get(path), relative: relative(out, dirname(actual.get(path)))} : f);
       const commit = () => {
         for (const {path, file, after} of edits) {
           file.contents = after;
+          file.sourceDigest = digests.get(path);
           file.relative = located(path, file).relative;
           this.held.delete(path);
         }
@@ -794,6 +796,10 @@ export class WarmCompiler {
           const sharedSources = keepSourceInputs(root, tmp, digests, actual, overlay,
             {generation: join(paths.byInput, from), digests: this.digests});
           if (!sharedSources) linkGeneratedSources(root, join(paths.byInput, from), tmp);
+          keepCompileInputs(root, tmp, this.own, [...this.files].map(([path, f]) => {
+            const edit = edits.find(e => e.path === path);
+            return located(path, edit ? {...f, contents: edit.after, sourceDigest: digests.get(path)} : f);
+          }), this.libs, overlay);
           completeSourceSnapshot(tmp);
           linkRoots(root, tmp, this.config, undefined, {wanted});
           mkdirSync(paths.byInput, {recursive: true});
@@ -808,7 +814,6 @@ export class WarmCompiler {
       }
       mark("generation");
       if (warmVerdict(target) === false) this.unverified.add(hash);
-      this.views.set(hash, overlay);
       if (this.switch !== false) switchTo(root, hash, undefined, {wanted});
       mark("switch");
       commit();
@@ -847,41 +852,35 @@ export class WarmCompiler {
     }
   }
 
-  // A comparison of a generation the tree has left is inconclusive by the
-  // time it ends (verifyMain checks the hash before and after), and a cold
-  // transpile of the whole tree meanwhile is a second one beside the cold
-  // build that replaced it: the two share the cores, and the activation
-  // waiting on the build pays for both. So the cold build stops it, unless
-  // the tree is still the generation it compares (`keep`).
-  cancelVerify(keep, why = "a cold build replaced the tree it compared") {
+  // Explicit shutdown only; cold publications cannot invalidate frozen inputs.
+  cancelVerify(keep, why) {
     const child = this.verifying;
-    if (child === undefined || child.osdHash === keep || child.exitCode !== null) return false;
+    if (!why || child === undefined || child.osdHash === keep || child.exitCode !== null) return false;
     child.osdCancelled = why;
     child.kill("SIGTERM");
     return true;
   }
 
-  // Compare a generation this made with a cold transpile of the same inputs,
-  // in a child process so nobody waits for it. Inconclusive when the tree
-  // changed while it ran.
+  // Compare the generation with a fresh cold registry of its frozen inputs.
   verify(hash) {
     return new Promise((done) => {
       const [cmd, ...args] = toolCommand(join(TOOLS, "osd-warm.mjs"), ["verify", hash]);
-      // compared with a cold transpile of the same view, not of the raw tree
-      const view = this.views.get(hash);
       const child = spawn(cmd, args, {cwd: this.root, stdio: ["ignore", "pipe", "pipe"],
-        env: {...process.env, OSD_ROOT: this.root, OSD_VERIFY_OVERLAY: view === undefined ? this.views.has(hash) ? "null" : ""
-          : JSON.stringify({exclude: [...(view.exclude ?? [])], folder: view.folder})}});
+        env: {...process.env, OSD_ROOT: this.root}});
       this.verifying = child;
       child.osdHash = hash;
       let out = "";
       child.stdout.on("data", (d) => { out += d; });
       child.stderr.on("data", (d) => { out += d; });
+      child.on("error", error => {
+        this.verifying = undefined;
+        done({verdict: "failed", output: error.message});
+      });
       child.on("exit", (code) => {
         this.verifying = undefined;
         let result;
         try {
-          result = child.osdCancelled !== undefined ? {verdict: "inconclusive", why: child.osdCancelled}
+          result = child.osdCancelled !== undefined ? {verdict: "cancelled", why: child.osdCancelled}
             : JSON.parse(out.trim().split("\n").pop());
         } catch {
           result = {verdict: "failed", code, output: out.slice(-2000)};
@@ -897,39 +896,8 @@ export class WarmCompiler {
   }
 }
 
-// the verify child: a cold transpile of the tree into a scratch folder,
-// compared with the generation of the same name
-async function verifyMain(hash) {
-  const root = resolve(process.env.OSD_ROOT ?? process.cwd());
-  const paths = layout(root);
-  const {compareGenerations} = await import("./osd-generation-diff.mjs");
-  const {transpile} = await import("./osd-transpile.mjs");
-  const {config, stack} = prepare(root);
-  const overlay = await sourceBuildOverlay(root, process.env.OSD_VERIFY_OVERLAY
-    ? {overlay: JSON.parse(process.env.OSD_VERIFY_OVERLAY)} : {});
-  if (hashOf(root, inputsOf(root, config), {overlay}) !== hash) {
-    return {verdict: "inconclusive", why: "the tree is not that generation any more"};
-  }
-  const tmp = join(paths.tmp, `${hash}.${process.pid}.verify`);
-  try {
-    rmSync(tmp, {recursive: true, force: true});
-    mkdirSync(join(tmp, "output"), {recursive: true});
-    const started = Date.now();
-    await transpile({root, config: ownConfig(root, config, stack, join(tmp, "output"), overlay)});
-    if (hashOf(root, inputsOf(root, config), {overlay}) !== hash) {
-      return {verdict: "inconclusive", why: "the tree changed while it was compared"};
-    }
-    const v = compareGenerations(join(paths.byInput, hash, "output"), join(tmp, "output"));
-    const differing = [...v.differing, ...v.onlyInA, ...v.onlyInB];
-    return {verdict: differing.length === 0 ? "same" : "differs", files: v.files, differing: differing.slice(0, 20),
-      count: differing.length, ms: Date.now() - started};
-  } finally {
-    rmSync(tmp, {recursive: true, force: true});
-  }
-}
-
 if (runsAs("osd-warm.mjs") && process.argv[2] === "verify") {
-  verifyMain(process.argv[3]).then((r) => {
+  verifyGeneration(process.argv[3]).then((r) => {
     console.log(JSON.stringify(r));
     process.exit(0);
   }, (error) => {

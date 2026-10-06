@@ -51,10 +51,6 @@ export async function transpileStore(store, options, activating, built) {
         }
       }
     }
-    // a comparison of a warm generation the tree has left would end
-    // inconclusive, and meanwhile it is a second cold transpile beside
-    // this one (WarmCompiler#cancelVerify)
-    if (w.compiler?.verifying !== undefined) w.compiler.cancelVerify(await store.sourceKey());
     try {
       const {build} = await import("./osd-build.mjs");
       const r = await build({...store.buildOptions, root: store.root, force: options.force === true, replace: options.replace === true, overlay, switch: false, expectedHash: view.hash});

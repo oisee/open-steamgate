@@ -56,23 +56,41 @@ export async function updateRegistry(c, activating, {viewOf, closure, index, rul
   }
   const old = [...edits, ...removed].map(e => e.before && c.owner.get(e.before.filename)).filter(Boolean);
   const affectedKeys = new Set([...closure([...old, ...c.pending])].map(key));
+  // Restore the native iterator while mutating object membership.
+  delete c.reg.getObjects;
   for (const {before} of removed) c.reg.removeFile(c.reg.getFileByName(before.filename));
   for (const {before, after} of edits) {
     const file = new c.core.MemoryFile(after.filename, after.contents);
     if (before) c.reg.updateFile(file); else c.reg.addFile(file);
     affectedKeys.add(`${file.getObjectType()} ${file.getObjectName().toUpperCase()}`);
   }
-  const affected = [...c.reg.getObjects()].filter(o => affectedKeys.has(key(o)));
-  for (const o of affected) o.setDirty();
-  // #1921: keep the registry's config and unrelated syntax results intact.
-  const output = await new c.Transpiler({...c.settings, only: o => affectedKeys.has(key(o))}).run(c.reg);
   const byActual = new Map([...view.actual].map(([logical, actual]) => [actual, logical]));
   const replacements = new Map(edits.map(e => [e.path, e.after]));
   const files = new Map(view.wanted.map(actual => {
     const path = byActual.get(actual);
     const file = replacements.get(path) ?? c.files.get(path);
-    return [path, {...file, relative: relative(out, dirname(actual))}];
+    return [path, {...file, path: actual, relative: relative(out, dirname(actual))}];
   }));
+  // Script order must match a cold registry even for a new object's tests
+  // and class constructor. Reorder iteration, retaining every object/cache.
+  const rank = new Map(), names = new Map();
+  for (const f of [...files.values(), ...c.libs]) {
+    const memory = new c.core.MemoryFile(f.filename, f.contents);
+    const id = `${memory.getObjectType()} ${memory.getObjectName().toUpperCase()}`;
+    const name = memory.getObjectName().toUpperCase();
+    if (!names.has(name)) names.set(name, names.size);
+    if (!rank.has(id)) rank.set(id, rank.size);
+  }
+  // Registry groups all types of a name at its first occurrence, including
+  // library objects that share a name with an earlier source object.
+  const ordered = [...c.reg.getObjects()].sort((a, b) =>
+    (names.get(a.getName()) ?? Infinity) - (names.get(b.getName()) ?? Infinity) ||
+    (rank.get(key(a)) ?? Infinity) - (rank.get(key(b)) ?? Infinity));
+  c.reg.getObjects = function* () { yield* ordered; };
+  const affected = [...c.reg.getObjects()].filter(o => affectedKeys.has(key(o)));
+  for (const o of affected) o.setDirty();
+  // #1921: keep the registry's config and unrelated syntax results intact.
+  const output = await new c.Transpiler({...c.settings, only: o => affectedKeys.has(key(o))}).run(c.reg);
   const liveOut = join(layout(root).byInput, hash, "output");
   const written = outputFiles(output, c.own, liveOut, [...files.values()]);
   const differing = written.filter(f => !existsSync(f.path) || readFileSync(f.path, isBinaryFilename(f.path) ? "latin1" : "utf8") !== f.contents);

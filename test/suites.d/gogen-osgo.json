@@ -51,6 +51,7 @@
     "test/warm-edit-loop.mjs",
     "test/warm-process.mjs",
     "test/warm-update.mjs",
+    "test/warm-snapshot.mjs",
     "test/kernel-conformance.mjs"
   ],
   "groups": {

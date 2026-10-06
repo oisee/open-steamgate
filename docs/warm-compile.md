@@ -119,8 +119,9 @@ promotion is a content edit and the warm rule applies to it as to any save
 the view reads from elsewhere with the same bytes is rebuilt for its source
 map, which names where it was read. A refused build leaves the registry on
 the old view (the edit held, reverted by the next build that does not
-activate it). The comparison runs a cold transpile of the same view
-(`OSD_VERIFY_OVERLAY`). A prime that is due after a cold build runs at the
+activate it). The comparison runs a cold transpile of that generation's frozen
+view, including the active-copy source-map locations. A prime that is due after
+a nonincremental cold build runs at the
 next activation if the five seconds have not passed, since an ADT client
 saves and activates at once. A prime whose view names the live generation
 differently (an object saved since, read from its copy) is accepted only on
@@ -174,8 +175,13 @@ and require a full prime.
   so too, and a cold build never takes it as a cache hit: it builds it again
   and replaces it if the bytes differ. A difference found by the comparison
   rebuilds cold and recycles. Measured: 2529 files, 0 differing, 8.5 s in
-  the background. A tree that changed while it ran is `inconclusive`, not a
-  pass. **It runs no generators**: it compares the transpile of today's
+  the background. `compile-inputs.json` retains the exact source/library order,
+  config and source-map locations, with raw bytes addressed by `source-inputs.json`
+  in `build/source-by-digest`. The verifier builds a fresh registry solely from
+  these inputs. Live edits, cold publications and library/config changes cannot
+  invalidate it. Only genuinely missing frozen inputs are `inconclusive`, with
+  the source and digest logged; corrupt provenance is a failure. **It runs no
+  generators**: it compares the transpile of the frozen
   `gen/`, so it checks the warm build and not the rule of what is warm; a
   generator reading something the rule lets through would go unseen by it
   until the next cold build.
@@ -240,9 +246,9 @@ and require a full prime.
   Measured on a create, two edits and a delete, twice
   (`OSD_WARM=1 STG_DEV=1`): 290 s and 10 recycles before, 83-90 s and 2
   recycles after, both edits warm (1.3-1.5 s).
-- **The prime waits for a runtime changing hands**, and a cold build stops
-  a comparison of a warm generation the tree has left (it could only end
-  inconclusive, and it was a second cold transpile beside the build). The
+- **The prime waits for a runtime changing hands**. Every warm generation is
+  queued for a frozen comparison; cold builds keep those comparisons running,
+  and front shutdown explicitly terminates the verification child. The
   prime formerly blocked the process that supervises the runtime; landing
   in the middle of a recycle made that recycle read 17-30 s slower. It now
   runs in its own compiler process. Closing the front kills and awaits that
@@ -370,6 +376,44 @@ Structural leak checks found zero matches; the private identifier list remains
 absent. Evidence is in `.local/warm-round4/`. Binary and bare VSIX smoke were
 not repeated in this round; their prior measurements above remain separate.
 
+Incremental/frozen-input probe (2026-10-06), on an isolated copy of this
+checkout, using the pinned compiler child and ObjectStore publication path:
+
+| Measurement | Result |
+| --- | ---: |
+| Baseline cold build, 2334 objects | 23.105 s |
+| Initial prime, 1877 source files | 16.779 s |
+| Create: expected cold publication including registry update | 27.935 s |
+| Incremental update, 2 files / 1 object | 5.182 s |
+| Next activation: edit the created class | 1.692 s warm |
+| Edit the existing demo DPC | 1.442 s warm |
+| Frozen comparisons, 3543 outputs each | 16.445 s / 16.588 s, zero differences |
+
+There was exactly one prime and zero superseded publication attempts. These
+are compiler/publication timings with no serving runtime attached; the
+runtime swap path is covered separately by the VS Code and ADT xref suites.
+The update pays for rebuilding the dependency index during the cold creation,
+so the following activation pays only for its warm delta. The first full-tree
+attempt exposed same-name objects of different types being ordered apart;
+iteration now preserves abaplint's name groups, file order within each group,
+and the kept objects/config/caches. Constructor and mixed source/library
+regressions cover both ordering cases. The edit-storm regression verifies two
+earlier generations despite 200 ms saves and a later cold publication; live
+config/gen/library changes cannot hide a deliberately mismatching output.
+Validation covers 253 distinct tests across 15 focused files, with isolation
+and no-retry hooks; the final seven-file core run passes 142/142 in 55 seconds. The requested runtime paths pass (VS Code swap 6 ms;
+startup serving/classrun 0.105 s / 0.129 s). Supplemental reruns correct six
+2-second default fixture timeouts, invoke the CLI through Node, and give the
+identity fixture the transpiler-owned core. The supplied CLI bundle contained
+two core copies and emitted scripts without objects: its oracle was rebuilt
+from the pinned source into workspace-local scratch with a core alias, selected
+through `OSD_TEST_TRANSPILE_CLI`; shared dependencies were not modified.
+A URL-cloned library regression also passes after retaining its bytes before
+clone cleanup. Suite registration and the changed-file size guard pass with
+four inherited Go breaches, no raised budgets and no new isolation allowances.
+The structural leak scan is clean; the private identifier list is absent.
+Evidence is under `.local/warm-task/`.
+
 Launcher shutdown uses `taskkill /T /F` on Windows and a dedicated process
 group on POSIX, with kill escalation. The platform strategies are unit tested
 (Windows mocked); they do not depend on the CPU-bound compiler processing
@@ -442,6 +486,6 @@ Doctor keeps this informational (exit 0): cold compilation remains available.
   to answer and saves no longer wait for that work.
 - **The init script's rows** (`reposrc`, `tadir`) stay at the text the
   process started with until the catch-up recycle.
-- **A cold build in the dev loop is not reproducible** on the pinned
-  transpiler (`ANOMALY-2026-09-25-in-process-numbering`), because it runs a
-  second transpile in one process; #1899 is the fix.
+The former in-process numbering defect is recorded as
+`ANOMALY-2026-09-25-in-process-numbering`; the current pin includes #1899,
+which gives each object stable temporary names across repeated runs.

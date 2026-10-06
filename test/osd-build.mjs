@@ -151,7 +151,8 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     const config = {input_folder: ["src", "local/used"], output_folder: "output-cli", write_unit_tests: true, write_source_map: true,
                     options: {addFilenames: true, addCommonJS: true, unknownTypes: "compileError"}};
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify(config));
-    execFileSync(join(root, "node_modules", ".bin", "abap_transpile"), [], {cwd: root, stdio: "pipe"});
+    const cli = process.env.OSD_TEST_TRANSPILE_CLI ? resolve(process.env.OSD_TEST_TRANSPILE_CLI) : join(root, "node_modules", ".bin", "abap_transpile");
+    execFileSync(process.execPath, [cli], {cwd: root, stdio: "pipe"});
     const made = await transpile({root, config: {...config, output_folder: "output-lib"}});
     expect(made.objects).to.equal(3);
     const list = (dir) => readdirSync(join(root, dir)).sort();

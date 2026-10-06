@@ -18,6 +18,7 @@
 //
 // Content hashing takes 105 ms here, 170 ms for the largest library;
 // generations are 44 MB. See docs/generations.md for the design.
+import {keepCompileInputs} from "./osd-compile-snapshot.mjs";
 import {keepSourceInputs, keepGeneratedSources, completeSourceSnapshot, materializeSourceSnapshot} from "./osd-source-snapshot.mjs";
 import {gc} from "./osd-build-gc.mjs";
 import {normalPath, stampOf, changedError} from "./osd-build-input-check.mjs";
@@ -828,6 +829,7 @@ export async function build(options = {}) {
     const changed = [];
     const generatedDigests = new Map();
     const made = await transpile({root, modules: loaded, config: own, log: (m) => { output += m + "\n"; },
+      onInputs: (files, libs) => keepCompileInputs(root, tmp, own, files, libs, options.overlay),
       onRead: (file, bytes) => {
         if (normalPath(file).startsWith(normalPath(join(root, "gen")) + "/")) {
           generatedDigests.set(normalPath(file), createHash("sha256").update(bytes).digest("hex"));
