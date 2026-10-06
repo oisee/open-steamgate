@@ -55,6 +55,7 @@
     "test/adt-request-xml.mjs",
     "test/adt-request-xml-corpus.mjs",
     "test/adt-request-xml-scaling.mjs",
-    "test/adt-unit-object-cold.mjs"
+    "test/adt-unit-object-cold.mjs",
+    "test/store-warm-activate.mjs"
   ]
 }

@@ -182,7 +182,37 @@ for current callers, and add `state`, `op_id`, `generation_id`, `type`, `name`, 
 `validation`, `step`, `build`, `promotion`, `revision`, or `recovery` for a failed operation.
 Issues retain the existing OBJ_TYPE/OBJ_NAME/LINE/COL/RULE/MESSAGE rows.
 
-The corresponding ABAP result type uses STRING for these fields, ABAP_BOOL for active/live,
+STORE ACTIVATE and ADT activation use `osd-publish-activation.mjs` for the same
+revision capture, publication and promotion. When the warm compiler is primed,
+its build validates the changed objects and their affected readers; STORE does
+not reparse the full registry before that validation. The compiler's existing
+eligibility rule decides whether publication builds warm or falls back cold.
+Every other inactive object still builds from its last active copy, or is
+excluded when it has never been active. A refused swap is followed by an awaited
+runtime recycle; failure to load or promote returns `failed` with an existing
+failure stage, never `published`.
+
+On the warm path, `published` means the exact checked revision's complete
+generation is available for a fresh execution context and, when a serving
+runtime exists, that runtime has acknowledged loading that generation. `live`
+is true for both a swap and a recycle. Existing objects and stack frames may
+retain their old class instances. Publication does **not** claim equivalence
+with a cold transpile before the asynchronous comparison has confirmed it.
+ACTIVATE and ACTIVATION_STATUS therefore include boolean `verified`: false
+for `warm-unverified`, true for a cold generation or a successful comparison.
+ACTIVATION_STATUS reads this observation from the generation sidecar; it can
+change without changing the historical operation state, generation ID or
+timestamps. An inconclusive comparison leaves it false. A differing comparison
+uses the existing forced cold rebuild/recycle recovery. The operation's other
+completed fields remain immutable.
+
+ACTIVATION_STATUS and RUN_TESTS use the same warm `generation_id`. Tests may
+run on a published generation while `verified` is false: they execute its
+retained modules in an isolated context, with the existing expected-generation
+guard. The ADT activation response also carries the newly published ID in
+`X-OSD-Generation`, suffixed with `warm-unverified` until confirmed.
+
+The corresponding ABAP result type uses STRING for these fields, ABAP_BOOL for active/live/verified,
 and ZOSD_ISSUE_T for issues. This type belongs to the planned development API; existing
 ZCL_OSD_ADT_HOST=>TY_ANSWER stays a JSON/SOURCE carrier.
 
@@ -210,7 +240,8 @@ PIA persists op_id before leaving its calling step and uses ACTIVATION_STATUS af
 ACTIVATE allocates an op_id even for a validation refusal: checked is its intermediate validated
 state, followed by pending and then published/failed. Refusal can go directly to failed.
 CHECK remains a validation-only response without a tracked operation. `completed_at` is empty
-until published/failed, then immutable; lookup does not change timestamps or extend retention.
+until published/failed, then immutable. The generation verification observation may change;
+lookup does not change timestamps or extend retention.
 Run-test readiness is determined by `state == published`, not the legacy active/live flags.
 Published is historical: a later activation may replace that generation. RUN_TESTS must still
 check expected_generation and refuse an unavailable generation explicitly; this contract does

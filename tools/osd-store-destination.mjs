@@ -1,3 +1,4 @@
+import {prepareActivation, publishActivation} from "./osd-publish-activation.mjs";
 // The object store, as a destination an ABAP screen can call (backlog G.8).
 //
 // **Why a destination and not a new door.** The editor screen is ABAP, and
@@ -513,7 +514,7 @@ export class StoreDestination {
       return {...rejected, EV_JSON: JSON.stringify(failed)};
     };
     let result;
-    try { result = store.activate(type, name); }
+    try { [result] = prepareActivation(store, [{type, name}]); }
     catch (error) {
       return failedAnswer(error, "validation");
     }
@@ -564,9 +565,8 @@ export class StoreDestination {
     const publish = async () => {
       try {
       const before = snapshotOf(join(store.root, "gen"));
-      const published = await store.publish({activate: [{type, name}]});
-      const committed = published?.ok !== false && Boolean(published?.generation)
-        && await store.completeActivation(result, published?.transpile?.built);
+      const published = await publishActivation(store, [result]);
+      const committed = published.committed;
       if (!committed) {
         const issues = published?.transpile?.issues ?? [];
         if (published?.ok === false && published?.transpile?.check === true && issues.length) {
@@ -587,17 +587,17 @@ export class StoreDestination {
         EV_JSON: JSON.stringify(journal.update(operation.op_id, {
           state: committed && published?.generation ? "published" : "failed",
           generation_id: committed && published?.generation ? published.generation : "",
-          active: committed, live: committed && published?.recycled === true,
-          failure_stage: !committed ? (published?.ok === false ? "build" : !published?.generation ? "promotion" : "revision") : "",
-          note: !committed ? "publication failed or checked source changed" : published?.generation ? "published" : "generation availability was not confirmed",
+          active: committed, live: published.live, verified: published.verified,
+          failure_stage: published.failureStage,
+          note: !committed ? "publication failed or checked source changed" : published.verified ? "published" : "published; warm-unverified",
           issues: failureEntries?.flatMap(entry => (entry.issues ?? []).map(issue => issueRow(issue, entry))) ?? [],
         })),
         EV_ACTIVE: committed ? "X" : "",
-        EV_LIVE: committed && published?.recycled === true ? "X" : "",
+        EV_LIVE: published.live ? "X" : "",
         EV_NOTE: published?.ok === false
           ? `the check held and the build did not: ${published?.error ?? published?.transpile?.error ?? "no reason given"}`
           : !committed ? "source changed during activation; check and activate again"
-          : `${published?.recycled === true
+          : `${published.live
             ? `built and live (generation ${published?.generation ?? "?"})`
             : "built, and the process serving this screen still runs the code it started with -- it is replaced when it is next restarted"}`
             + (objects.length === 0 ? "" : `; ${objects.length} generated object${objects.length === 1 ? "" : "s"} rewritten`),

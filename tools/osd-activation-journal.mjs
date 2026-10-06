@@ -1,7 +1,8 @@
 // Publication tickets belong to the source host, outside the serving child.
-import {mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, rmdirSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, rmdirSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {randomUUID} from "node:crypto";
+import {warmVerdict} from "./osd-hot.mjs";
 
 const journals = new Map();
 const DAY = 24 * 60 * 60 * 1000;
@@ -34,6 +35,7 @@ export function recordBaselineGeneration(store, fallback) {
 }
 export class ActivationJournal {
   constructor(root, {now = () => Date.now(), host = "test"} = {}) {
+    this.root = root;
     this.now = now;
     this.directory = join(root, ".local", "activation", host);
     this.file = join(this.directory, "operations.json");
@@ -99,7 +101,15 @@ export class ActivationJournal {
     this.save();
     const entry = Object.hasOwn(this.entries, id) ? this.entries[id] : undefined;
     if (!entry) throw error("NOT_FOUND", "activation operation not found or expired");
-    return structuredClone(entry);
+    const result = structuredClone(entry);
+    // Operation history is immutable. Verification is a current observation
+    // of the generation's cold-comparison sidecar, rather than a new state.
+    if (entry.state === "published") {
+      const generation = join(this.root, "build/by-input", entry.generation_id);
+      result.verified = existsSync(join(generation, "manifest.json"))
+        ? warmVerdict(generation) !== false : entry.verified ?? false;
+    }
+    return result;
   }
 }
 export function activationJournal(store) {

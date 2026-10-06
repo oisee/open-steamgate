@@ -199,6 +199,9 @@ describe("tools/osd-warm: a refused swap is not answered as warm", () => {
   });
 
   const activateWith = async (publishResult) => {
+    // Coordinator fixtures use symbolic generations; the activation publisher
+    // still requires the build and acknowledged generation to name each other.
+    publishResult = {...publishResult, generation: publishResult.generation ?? publishResult.transpile?.hash};
     const express = (await import("express")).default;
     const {adtRouter} = await import("../tools/adt-facade.mjs");
     const store = {
