@@ -224,6 +224,20 @@ describe("the store, as the destination an editor screen calls", function () {
     expect(written.EV_VERSION, "written and not yet checked is a state a system has").to.equal("inactive");
   });
 
+  it('WRITE returns the saved object revision in JSON and keeps scalar callers working', async () => {
+    const previous = readFileSync(FILE, 'utf8');
+    const edited = previous + '* saved revision\n';
+    try {
+      const written = await call(destination, {IV_COMMAND: 'WRITE', IV_TYPE: 'CLAS', IV_NAME: NAME, IV_SOURCE: edited});
+      const json = JSON.parse(written.EV_JSON);
+      expect(json).to.deep.equal({written: true, type: 'CLAS', name: NAME, revision: probeStore().activate('CLAS', NAME).revision});
+      expect(json.revision).to.match(/^[a-f0-9]{64}$/);
+      const repeated = await call(destination, {IV_COMMAND: 'WRITE', IV_TYPE: 'CLAS', IV_NAME: NAME, IV_SOURCE: edited});
+      expect(JSON.parse(repeated.EV_JSON).revision).to.equal(json.revision);
+      expect(written).to.include({EV_ERROR: '', EV_FILE: FILE, EV_WRITABLE: 'X', EV_VERSION: 'inactive'});
+    } finally {await probeStore().write('CLAS', NAME, previous);}
+  });
+
   it("a WRITE without a source writes NOTHING rather than emptying the object", async () => {
     // a screen that posts a form with no text area in it would otherwise
     // silently empty what it was showing
@@ -922,6 +936,7 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
     const built = await build({root, generators: false});
     generation = built.hash;
     store = new ObjectStore({root, build: {generators: false}});
+    activationJournal(store).recordGeneration(generation);
     destination = new StoreDestination({store});
   });
   after(() => {if (root) rmSync(root, {recursive: true, force: true});});
@@ -1000,6 +1015,145 @@ CLASS ltcl_loop IMPLEMENTATION. METHOD loop. DO. ENDDO. ENDMETHOD. METHOD later.
       {targets: [{type: 'CLAS', name: green}], expected_generation: null}]) {
       expect((await execute(input)).error.code).to.equal('INVALID_NAME');
     }
+  });
+  it('echoes the current and expected generations on every validation refusal', async () => {
+    for (const targets of [[], ['ZCL_X'], [{type: 'CLAS', name: '../BAD'}], [{type: 'PROG', name: 'ZREPORT'}]]) {
+      const result = await execute({targets, expected_generation: 'caller-generation'});
+      expect(result).to.include({state: 'not_run', generation_id: generation, expected_generation: 'caller-generation'});
+      expect(result.classes).to.deep.equal([]);
+    }
+    const malformed = await call(destination, {IV_COMMAND: 'RUN_TESTS', IV_JSON: '{'});
+    expect(JSON.parse(malformed.EV_JSON)).to.include({state: 'not_run', generation_id: generation});
+    const {runStoreTests} = await import('../tools/osd-store-tests.mjs');
+    const rootless = await runStoreTests({served: {running: true, generation}}, JSON.stringify({targets: [{type: 'CLAS', name: green}]}));
+    expect(rootless).to.include({state: 'not_run', generation_id: generation});
+    expect(rootless.error.code).to.equal('NOT_SUPPORTED');
+  });
+  it('caps requests at 50 targets with INVALID_INPUT before any execution', async () => {
+    const {UnitRun} = await import('../tools/osd-unit.mjs');
+    const previous = UnitRun.prototype.runDetached;
+    let executions = 0;
+    UnitRun.prototype.runDetached = async () => {executions++; throw new Error('target cap execution canary');};
+    try {
+      const result = await run(Array(51).fill('ZCL_STORE_UNIT_LOOP'), {expected_generation: generation});
+      expect(result).to.include({state: 'not_run', generation_id: generation, expected_generation: generation});
+      expect(result.error.code).to.equal('INVALID_INPUT');
+      expect(result.error.text).to.contain('50');
+      expect(result.classes).to.deep.equal([]);
+      expect(executions).to.equal(0);
+    } finally {UnitRun.prototype.runDetached = previous;}
+  });
+  it('de-duplicates identical targets after normalization', async () => {
+    const result = await execute({targets: [{type: 'clas', name: green.toLowerCase()}, {type: 'CLAS', name: green}]});
+    expect(result.state).to.equal('ran');
+    expect(result.counts).to.include({classes: 1, methods: 1, pass: 1});
+  });
+  it('uses INVALID_INPUT for invalid timeout values', async () => {
+    const previous = process.env.OSD_STORE_TEST_METHOD_MS;
+    try {
+      process.env.OSD_STORE_TEST_METHOD_MS = 'invalid';
+      const result = await run(['ZCL_STORE_UNIT_LOOP']);
+      expect(result).to.include({state: 'not_run', generation_id: generation});
+      expect(result.error.code).to.equal('INVALID_INPUT');
+      expect(result.classes).to.deep.equal([]);
+    } finally {
+      if (previous === undefined) delete process.env.OSD_STORE_TEST_METHOD_MS;
+      else process.env.OSD_STORE_TEST_METHOD_MS = previous;
+    }
+  });
+  it('refuses absent-checkpoint fallback after STORE WRITE and an external build', async () => {
+    const {UnitRun} = await import('../tools/osd-unit.mjs');
+    const {switchTo} = await import('../tools/osd-build.mjs');
+    const journal = activationJournal(store), previous = UnitRun.prototype.runDetached;
+    const file = join(root, `src/${green.toLowerCase()}.clas.testclasses.abap`), original = readFileSync(file, 'utf8');
+    let executions = 0;
+    UnitRun.prototype.runDetached = async () => {executions++; throw new Error('inactive execution canary');};
+    try {
+      rmSync(journal.generationFile, {force: true});
+      const written = await call(destination, {IV_COMMAND: 'WRITE', IV_TYPE: 'CLAS', IV_NAME: green,
+        IV_INCLUDE: 'testclasses', IV_SOURCE: tests(green, 99)});
+      expect(written.EV_ERROR).to.equal('');
+      const external = await build({root, generators: false});
+      expect(external.hash).not.to.equal(generation);
+      const result = await run([green]);
+      expect(result).to.include({state: 'not_run', generation_id: external.hash});
+      expect(result.error.code).to.equal('GENERATION_UNAVAILABLE');
+      expect(result.classes).to.deep.equal([]);
+      expect(executions).to.equal(0);
+      // A failed tracked build must not record this external generation as
+      // a trusted baseline while inactive source exists.
+      const transpile = store.transpile;
+      store.transpile = async () => ({ok: false});
+      try {expect((await store.publish({activate: [{type: 'CLAS', name: green}]})).ok).to.equal(false);}
+      finally {store.transpile = transpile;}
+      const afterFailedBuild = await run([green]);
+      expect(afterFailedBuild).to.include({state: 'not_run', generation_id: external.hash});
+      expect(afterFailedBuild.error.code).to.equal('GENERATION_UNAVAILABLE');
+      expect(executions).to.equal(0);
+    } finally {
+      UnitRun.prototype.runDetached = previous;
+      await store.write('CLAS', green, original, 'testclasses');
+      switchTo(root, generation); journal.recordGeneration(generation);
+    }
+  });
+  it('checkpoint recording failure never fails publish or promotion or leaves a ticket pending', async () => {
+    const {switchTo, liveHash} = await import('../tools/osd-build.mjs');
+    const journal = activationJournal(store), previous = journal.recordGeneration, warn = console.warn;
+    let attempts = 0;
+    const warnings = [];
+    journal.recordGeneration = () => {attempts++; throw Object.assign(new Error('injected checkpoint failure'), {code: 'ENOSPC'});};
+    console.warn = message => warnings.push(message);
+    try {
+      const published = await store.publish();
+      expect(published.ok).to.equal(true);
+      expect(published.generation).to.equal(liveHash(root));
+      const response = await call(destination, {IV_COMMAND: 'ACTIVATE', IV_TYPE: 'CLAS', IV_NAME: green});
+      expect(response).to.include({EV_ERROR: '', EV_ACTIVE: 'X'});
+      const ticket = JSON.parse(response.EV_JSON);
+      expect(ticket.state).to.equal('published');
+      expect(ticket.generation_id).to.equal(liveHash(root));
+      expect(journal.lookup(ticket.op_id).state).to.equal('published');
+      expect(attempts).to.be.at.least(5); // baseline, publish, activation baseline, promotion and ticket update
+      expect(warnings).to.have.length(1);
+      const result = await run(['ZCL_STORE_UNIT_LOOP']);
+      expect(result.state).to.equal('not_run');
+      expect(result.error.code).to.equal('GENERATION_UNAVAILABLE');
+      expect(result.classes).to.deep.equal([]);
+    } finally {
+      journal.recordGeneration = previous; console.warn = warn;
+      switchTo(root, generation);
+      journal.recordGenerationBestEffort(generation); store.generationRecordingFailed = false;
+    }
+  });
+  it('a per-target parse failure becomes a discovery error beside a runnable green target', async () => {
+    const {Registry} = await import('@abaplint/core');
+    const previous = Registry.prototype.parse;
+    Registry.prototype.parse = function (...args) {
+      if ([...this.getFiles()].some(f => f.getFilename().includes(red.toLowerCase()))) throw new Error('injected target parse failure');
+      return previous.apply(this, args);
+    };
+    try {
+      const result = await run([red, green]);
+      expect(result.state).to.equal('ran');
+      expect(result.classes[0]).to.include({state: 'error', name: red});
+      expect(result.classes[0].error).to.deep.equal({stage: 'discovery', text: 'injected target parse failure'});
+      expect(result.classes[1].methods[0].verdict).to.equal('pass');
+    } finally {Registry.prototype.parse = previous;}
+  });
+  it('a child that dies during boot without JSON is a class execution error and other targets continue', async () => {
+    const file = join(root, 'test/setup.mjs'), original = readFileSync(file, 'utf8');
+    // The plan is passed to the real child; fail only the red target's boot.
+    writeFileSync(file, original.replace('export async function setup(abap, schemas, insert) {',
+      `export async function setup(abap, schemas, insert) {\nif (process.argv[3] === '${red}') throw new Error('injected broken boot');`));
+    try {
+      const result = await run([red, green]);
+      expect(result.state).to.equal('ran');
+      expect(result.classes[0]).to.include({state: 'error', name: 'LTCL_PROBE'});
+      expect(result.classes[0].error.stage).to.equal('execution');
+      expect(result.classes[0].error.text).to.contain('injected broken boot');
+      expect(result.classes[0].methods).to.deep.equal([]);
+      expect(result.classes[1].methods[0].verdict).to.equal('pass');
+    } finally {writeFileSync(file, original);}
   });
   it('never starts tests while an activation is pending', async () => {
     const {activationJournal} = await import('../tools/osd-activation-journal.mjs');

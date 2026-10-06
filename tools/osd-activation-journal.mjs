@@ -6,6 +6,32 @@ import {randomUUID} from "node:crypto";
 const journals = new Map();
 const DAY = 24 * 60 * 60 * 1000;
 const error = (code, message) => Object.assign(new Error(message), {code});
+const warned = new WeakSet();
+function checkpointFailure(owner, error) {
+  owner.generationRecordingFailed = true;
+  if (!warned.has(owner)) {
+    warned.add(owner);
+    console.warn(`publication checkpoint unavailable (${error.code ?? "ERROR"}); RUN_TESTS will refuse`);
+  }
+}
+
+// Recording is diagnostic bookkeeping after publication, never a reason to
+// fail the publication or leave its ticket pending. Keep a failed write
+// visible to RUN_TESTS even if there was no older checkpoint on disk.
+export function recordStoreGeneration(store, select) {
+  try {
+    const journal = activationJournal(store);
+    journal.recordGenerationBestEffort(select(journal));
+    // The journal owns recording failures; a later successful ticket update
+    // clears them too. The store flag is only for failure to obtain a journal.
+    store.generationRecordingFailed = false;
+  } catch (error) { checkpointFailure(store, error); }
+}
+
+export function recordBaselineGeneration(store, fallback) {
+  recordStoreGeneration(store, journal => journal.currentGeneration()
+    ?? (store.inactive?.size ? "" : fallback()));
+}
 export class ActivationJournal {
   constructor(root, {now = () => Date.now(), host = "test"} = {}) {
     this.now = now;
@@ -35,6 +61,12 @@ export class ActivationJournal {
     writeFileSync(temporary, JSON.stringify({generation_id: generation ?? ""}));
     renameSync(temporary, this.generationFile);
   }
+  recordGenerationBestEffort(generation) {
+    try {
+      this.recordGeneration(generation);
+      this.generationRecordingFailed = false;
+    } catch (error) { checkpointFailure(this, error); }
+  }
   save() {
     for (const [id, entry] of Object.entries(this.entries)) {
       if (entry.completed_at && this.now() - Date.parse(entry.completed_at) >= DAY) delete this.entries[id];
@@ -59,7 +91,7 @@ export class ActivationJournal {
     Object.assign(entry, fields, {updated_at: this.time()});
     if (["published", "failed"].includes(entry.state)) entry.completed_at = entry.updated_at;
     this.save();
-    if (entry.state === "published") this.recordGeneration(entry.generation_id);
+    if (entry.state === "published") this.recordGenerationBestEffort(entry.generation_id);
     return {...entry};
   }
   lookup(id) {

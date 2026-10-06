@@ -2,7 +2,7 @@ import {packageChildName} from "./osd-object-name.mjs";
 import {transpileStore} from "./osd-store-build.mjs";
 import {deferSourceMutation} from "./osd-store-source-lock.mjs";
 import {warmUp} from "./osd-store-warm.mjs";
-import {activationJournal} from "./osd-activation-journal.mjs";
+import {recordBaselineGeneration, recordStoreGeneration} from "./osd-activation-journal.mjs";
 // The object store of OSD, the off-stack doppelgänger: what sits behind
 // the ADT façade. A client asks for an object by type and name; this finds
 // the file, reads it, writes it, checks it and activates it. The façade
@@ -490,7 +490,8 @@ export class ObjectStore {
     this.#versions.crash("write:before-source");
     writeFileSync(join(this.root, file), text);
     this.#forget();
-    return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8")};
+    return {...entry, ...this.stateOf(entry), include, file, bytes: Buffer.byteLength(source, "utf8"),
+      revision: this.#versions.sourceRevision(type, entry.name)};
   }
 
   // A new object, in the folder of the package it is asked for. The two
@@ -912,7 +913,7 @@ export class ObjectStore {
           this.#publishedBuilds.set(result.transpile.built, result.generation);
         }
         // Builds with no activating source already contain only active input.
-        if (activating.size === 0) activationJournal(this).recordGeneration(result.generation);
+        if (activating.size === 0) recordStoreGeneration(this, () => result.generation);
       }
       return result;
     }).finally(() => {
@@ -943,8 +944,7 @@ export class ObjectStore {
   }
 
   async #publish(options, entry = {}) {
-    const journal = activationJournal(this);
-    journal.recordGeneration(journal.currentGeneration(this.served?.generation ?? liveHash(this.root)));
+    recordBaselineGeneration(this, () => this.served?.generation ?? liveHash(this.root));
     let transpile;
     try {
       transpile = await this.transpile(options);
@@ -1451,7 +1451,7 @@ export class ObjectStore {
     // only for the exact successful build whose source revisions were promoted.
     const generation = built && this.#publishedBuilds.get(built);
     if (generation && liveHash(this.root) === generation) {
-      activationJournal(this).recordGeneration(generation);
+      recordStoreGeneration(this, () => generation);
     }
     return true;
   }

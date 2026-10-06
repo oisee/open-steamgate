@@ -1,8 +1,9 @@
 import {expect} from "chai";
 import {ObjectStore} from "../tools/osd-store.mjs";
 import {UnitRun, alertOf, statementAfter, unitChildEnv} from "../tools/osd-unit.mjs";
-import {writeFileSync, rmSync} from "node:fs";
-import {join} from "node:path";
+import {mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync} from "node:fs";
+import {join, resolve} from "node:path";
+import {tmpdir} from "node:os";
 
 // The test run of OSD. vsp reads a program, its test classes, their test
 // methods and the alerts under a method, and a method with no alert is a
@@ -66,6 +67,25 @@ describe("tools/osd-unit: ABAP Unit for one object, shaped as ADT reports it", f
     const result = await runner.runDetached("CLAS", "ZCL_STG_SEGW_TEST", {testClass: "LTCL_TREE", method: "PROPERTIES_IN_FILE_ORDER"});
     expect(result.counts).to.include({methods: 1, passed: 1});
     expect(result.testClasses[0].testMethods[0].name).to.equal("PROPERTIES_IN_FILE_ORDER");
+  });
+
+  it('a single-class child that dies without JSON returns an execution alert', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'unit-broken-boot-'));
+    try {
+      mkdirSync(join(root, 'output'));
+      symlinkSync(resolve('node_modules'), join(root, 'node_modules'), 'junction');
+      writeFileSync(join(root, 'abap_transpile.json'), JSON.stringify({input_folder: [], output_folder: 'output', libs: []}));
+      writeFileSync(join(root, 'output/init.mjs'), `export async function initializeABAP() {throw new Error('broken unit boot');}`);
+      const plan = runner.classes('CLAS', 'ZCL_STG_SEGW_TEST');
+      plan.classes = plan.classes.filter(c => c.name === 'LTCL_TREE');
+      const result = await new UnitRun({root}).runDetached('CLAS', 'ZCL_STG_SEGW_TEST', {plan});
+      expect(result.ok).to.equal(false);
+      expect(result.counts).to.include({classes: 1, methods: 0, classAlerts: 1});
+      expect(result.testClasses[0].name).to.equal('LTCL_TREE');
+      expect(result.testClasses[0].testMethods).to.deep.equal([]);
+      expect(result.testClasses[0].alerts[0]).to.include({stage: 'execution', kind: 'shortDump'});
+      expect(result.testClasses[0].alerts[0].title).to.contain('broken unit boot');
+    } finally {rmSync(root, {recursive: true, force: true});}
   });
 
   it("a test class that was never transpiled is an alert, not silence", async () => {

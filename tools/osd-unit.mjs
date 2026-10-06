@@ -530,7 +530,17 @@ export class UnitRun {
         }
         const start = out.indexOf("{");
         if (start < 0) {
-          reject(new RunFailed(code, `${out}${err}`.slice(-2000)));
+          const failure = new RunFailed(code, `${out}${err}`.slice(-2000));
+          const selected = plan.classes.filter(c => options.testClass === undefined || c.name === String(options.testClass).toUpperCase());
+          if (selected.length === 1) {
+            // A boot crash belongs to the sole class in this child. Other
+            // targets can still run in fresh children; malformed JSON and
+            // process/pipe failures remain runner/transport failures.
+            resolve({program: {name, type: ADT_TYPE[type] ?? type, objectType: type}, ok: false,
+              testClasses: [{...selected[0], testMethods: [], alerts: [{kind: "shortDump", severity: "fatal",
+                stage: "execution", title: failure.message, details: [], stack: []}]}],
+              counts: {classes: 1, methods: 0, passed: 0, failed: 0, classAlerts: 1}, ms: Date.now() - started});
+          } else reject(failure);
           return;
         }
         try {

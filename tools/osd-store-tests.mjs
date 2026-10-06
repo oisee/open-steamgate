@@ -14,6 +14,7 @@ import {UnitRun, unitClasses} from "./osd-unit.mjs";
 import {withoutHostPaths} from "./osd-build-issues.mjs";
 
 const refusal = (code, text) => Object.assign(new Error(text), {code});
+const MAX_TARGETS = 50;
 const countsOf = classes => {
   const methods = classes.flatMap(c => c.methods);
   return {classes: classes.length, methods: methods.length,
@@ -26,7 +27,7 @@ const countsOf = classes => {
 function plansOf(root, generation, targets) {
   const inputs = JSON.parse(readFileSync(join(generation, "source-inputs.json"), "utf8"));
   const wanted = new Set(targets.map(t => `${t.type} ${t.name}`));
-  const registry = new abaplint.Registry();
+  const sources = new Map(targets.map(t => [`${t.type} ${t.name}`, []]));
   for (const [file, digest] of Object.entries(inputs)) {
     if (!wanted.has(objectOf(basename(file)))) continue;
     const source = join(generation, "source", file);
@@ -34,16 +35,27 @@ function plansOf(root, generation, targets) {
     if (createHash("sha256").update(bytes).digest("hex") !== digest) {
       throw refusal("GENERATION_UNAVAILABLE", "published source snapshot does not match its recorded digest");
     }
-    registry.addFile(new abaplint.MemoryFile("/" + file, bytes.toString("utf8")));
+    sources.get(objectOf(basename(file))).push([file, bytes.toString("utf8")]);
   }
-  registry.parse();
-  const view = {registry: () => registry,
-    find: (type, name) => registry.getObject(type, name) ? {type, name} : undefined};
   return targets.map(target => {
-    try { return {target, plan: unitClasses(view, target.type, target.name)}; }
+    try {
+      const registry = new abaplint.Registry();
+      for (const [file, source] of sources.get(`${target.type} ${target.name}`)) {
+        registry.addFile(new abaplint.MemoryFile("/" + file, source));
+      }
+      registry.parse();
+      const object = registry.getObject(target.type, target.name);
+      if (object?.getABAPFiles().some(f => f.getRaw().trim() && !f.getStructure())) {
+        throw new Error(`cannot parse published source for ${target.type} ${target.name}`);
+      }
+      const view = {registry: () => registry,
+        find: (type, name) => registry.getObject(type, name) ? {type, name} : undefined};
+      return {target, plan: unitClasses(view, target.type, target.name)};
+    }
     catch (error) {
-      if (error.code !== "NOT_FOUND") throw error;
-      return {target, missing: true};
+      return {target, error: {stage: error.code === "NOT_FOUND" ? "not_found" : "discovery",
+        text: error.code === "NOT_FOUND" ? `${target.type} ${target.name} is not in the published generation`
+          : withoutHostPaths(String(error.message ?? error), root)}};
     }
   });
 }
@@ -81,19 +93,28 @@ export async function runStoreTests(store, json, options = {}) {
   const answer = (state, extra = {}) => ({state, generation_id: generation, expected_generation: expected,
     ms: Date.now() - started, ...extra, counts: countsOf(classes), classes});
   try {
+    // Every refusal reports the current selection when known. This read is
+    // diagnostic only; selection for execution is repeated under the lock.
+    generation = store.served?.generation ?? "";
+    if (store.root) {
+      generation = store.served?.running === true ? generation : liveHash(store.root) ?? generation;
+      try { generation = activationJournal(store).currentGeneration(generation) || generation; }
+      catch { /* Validation still has its precise refusal if tracking is unavailable. */ }
+    }
     let input;
     try { input = JSON.parse(json); }
     catch { throw refusal("INVALID_NAME", "RUN_TESTS needs IV_JSON {targets, expected_generation?}"); }
-    if (!input || Array.isArray(input) || !Array.isArray(input.targets) || !input.targets.length) {
-      throw refusal("INVALID_NAME", "RUN_TESTS targets must be a nonempty list of objects");
-    }
-    if (Object.hasOwn(input, "expected_generation")) {
+    if (input && Object.hasOwn(input, "expected_generation")) {
       if (typeof input.expected_generation !== "string" || !input.expected_generation) {
         throw refusal("INVALID_NAME", "expected_generation must be a nonempty string when supplied");
       }
       expected = input.expected_generation;
     }
-    const targets = input.targets.map(t => {
+    if (!input || Array.isArray(input) || !Array.isArray(input.targets) || !input.targets.length) {
+      throw refusal("INVALID_NAME", "RUN_TESTS targets must be a nonempty list of objects");
+    }
+    if (input.targets.length > MAX_TARGETS) throw refusal("INVALID_INPUT", `RUN_TESTS supports at most ${MAX_TARGETS} targets`);
+    const targets = [...new Map(input.targets.map(t => {
       if (!t || typeof t.type !== "string" || typeof t.name !== "string") {
         throw refusal("INVALID_NAME", "each target needs string type and name");
       }
@@ -101,13 +122,13 @@ export async function runStoreTests(store, json, options = {}) {
       if (target.type !== "CLAS") throw refusal("NOT_SUPPORTED", `RUN_TESTS supports CLAS with local tests; ${target.type} is not supported`);
       const problem = nameProblem(target.type, target.name);
       if (problem) throw refusal("INVALID_NAME", problem);
-      return target;
-    });
+      return [`${target.type} ${target.name}`, target];
+    })).values()];
     if (!store.root) throw refusal("NOT_SUPPORTED", "RUN_TESTS needs a source-owning host with published generations");
     const runTimeout = options.runTimeout ?? Number(process.env.OSD_STORE_TEST_RUN_MS ?? 300000);
     const testTimeout = options.testTimeout ?? Number(process.env.OSD_STORE_TEST_METHOD_MS ?? 60000);
     if (!(runTimeout > 0) || !(testTimeout > 0) || !Number.isFinite(runTimeout) || !Number.isFinite(testTimeout)) {
-      throw refusal("INVALID_NAME", "STORE test timeout limits must be positive finite milliseconds");
+      throw refusal("INVALID_INPUT", "STORE test timeout limits must be positive finite milliseconds");
     }
     signal = new AbortController();
     timer = setTimeout(() => signal.abort(), Math.max(1, runTimeout - (Date.now() - started)));
@@ -118,7 +139,8 @@ export async function runStoreTests(store, json, options = {}) {
       if (signal.signal.aborted) throw refusal("RUN_TIMEOUT", "ABAP Unit whole-run deadline exceeded");
       const live = liveHash(store.root);
       const journal = activationJournal(store);
-      generation = journal.currentGeneration(store.served?.running === true ? store.served.generation : live) ?? "";
+      const checkpoint = journal.currentGeneration();
+      generation = checkpoint || (store.served?.running === true ? store.served.generation : live) || "";
       if (expected !== null && expected !== generation) {
         return answer("not_run", {error: {code: "GENERATION_MISMATCH", text: "expected generation is not the current published generation",
           expected_generation: expected, current_generation: generation}});
@@ -127,7 +149,9 @@ export async function runStoreTests(store, json, options = {}) {
         || store.served?.starting || store.served?.recycling) {
         throw refusal("PUBLICATION_PENDING", "leave the activation step and wait for published before running tests");
       }
-      if (!generation || generation !== live || store.served?.running === true && store.served.generation !== generation) {
+      if (store.generationRecordingFailed || journal.generationRecordingFailed
+        || checkpoint === "" || checkpoint === undefined && store.inactive?.size
+        || !generation || generation !== live || store.served?.running === true && store.served.generation !== generation) {
         throw refusal("GENERATION_UNAVAILABLE", "no complete published generation is available for a new test context");
       }
       const directory = resolve(store.root, "build/by-input", generation);
@@ -149,11 +173,10 @@ export async function runStoreTests(store, json, options = {}) {
     const runner = new UnitRun({root: pinned});
     try {
       if (Date.now() - started >= runTimeout) signal.abort();
-      for (const {target, plan, missing} of selected.plans) {
+      for (const {target, plan, error} of selected.plans) {
         if (signal.signal.aborted) throw refusal("RUN_TIMEOUT", "ABAP Unit whole-run deadline exceeded");
-        if (missing) {
-          classes.push({target, name: target.name, state: "error",
-            error: {stage: "not_found", text: `${target.type} ${target.name} is not in the published generation`}, methods: []});
+        if (error) {
+          classes.push({target, name: target.name, state: "error", error, methods: []});
           continue;
         }
         // A separate child per class also contains broken class static state.

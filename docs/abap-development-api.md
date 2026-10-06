@@ -153,7 +153,9 @@ checked, and an IPC mutation keeps the caller's lock until the parent acknowledg
 is cancelled when the calling session ends. CREATE rejects any source containing @KERNEL in this
 local version. It cannot yet opt in. A source-owning ObjectStore is required; built-only hosts refuse.
 The shared ZCL_OSD_DEVELOPMENT class, its dev-system policy and migration of ADT WRITE logic are
-still planned. Existing WRITE behavior is unchanged by this local delivery.
+still planned. STORE WRITE now also returns EV_JSON `{written:true, type, name, revision}`:
+the revision is the store's digest of the saved inactive object, including its class includes.
+Existing scalar fields and EV_ERROR behavior are preserved; callers that omit EV_JSON keep working.
 
 ### P3a: activation completion (W6)
 
@@ -240,7 +242,9 @@ IV_JSON:
 `targets` is a nonempty list of repository objects, deliberately named for a future
 where-used closure. This delivery supports CLAS with local test classes. PROG and other
 types return `not_run` with `error.code: NOT_SUPPORTED` and a precise explanation.
-Malformed requests return `not_run`/INVALID_NAME. Names and types are normalized to upper case.
+Malformed requests return `not_run`/INVALID_NAME. Names and types are normalized to upper case,
+and identical normalized targets execute once. Requests are capped at 50 entries before
+de-duplication; exceeding the cap returns `not_run`/INVALID_INPUT with the cap in the explanation.
 Omit expected_generation to use the current published generation; supplying null or an
 empty string is invalid. Classes without local tests produce an empty `ran` result.
 
@@ -279,6 +283,8 @@ EV_JSON (optional diagnostic fields shown):
   target or a broken class has class `state: error` and `error {stage,text}`, while the
   run continues with the other classes and targets. A missing target is represented by
   one class entry named after its target, stage `not_found`, with no methods.
+  Per-target discovery/parse failures likewise produce one entry, stage `discovery`, with no methods.
+  A single-class child that dies during boot without JSON produces stage `execution` and other targets continue.
   Class setup/teardown failures have their corresponding stage; method setup/teardown
   execution failures make both that method and class error; failed assertions always
   keep method verdict `fail`, including in setup/teardown. Only a runner failure uses run-level
@@ -290,12 +296,14 @@ EV_JSON (optional diagnostic fields shown):
 - **Generation guard:** a supplied expected_generation different from the generation
   selected for a new context returns `state: not_run`, no tests execute, and
   `error {code:"GENERATION_MISMATCH", text, expected_generation, current_generation}`.
-  The top-level generation_id identifies the current selection even on refusal; it is
-  empty if no generation is known. Omission echoes null and runs on the current selection.
+  Every refusal, including NOT_SUPPORTED and invalid targets/timeouts, carries the current
+  selection in top-level generation_id when known; it is empty if no generation is known.
+  expected_generation is echoed even when target validation fails. Omission echoes null and runs on the current selection.
   There is no fallback to a historical requested generation.
 - **Published source only:** selection uses the source host's last confirmed publication
   checkpoint, retained with the activation journal. Before the first tracked activation,
-  the baseline is the serving generation (or `build/live` on a source-only host). A source
+  the baseline is the serving generation (or `build/live` on a source-only host) only when
+  the store has no inactive objects; otherwise it refuses GENERATION_UNAVAILABLE. A source
   host without a serving process can publish a complete generation for a fresh detached
   context without recycling. An activation in `checked`/`pending`, or a runtime transition,
   returns `not_run`/PUBLICATION_PENDING. A mismatch between the checkpoint, `build/live`
@@ -306,6 +314,8 @@ EV_JSON (optional diagnostic fields shown):
   complete modules to a disposable run directory. Inactive working source is never used.
   Subsequent activations and generation GC cannot change the copied modules in a run.
   ObjectStore promotion updates this same checkpoint for ADT activations as well as STORE.
+  Recording the checkpoint is best-effort: failures log once per owner, never fail publication
+  or leave a completed ticket pending, and make RUN_TESTS refuse GENERATION_UNAVAILABLE until recording succeeds.
 - **Isolation:** the existing `UnitRun.runDetached` runs each local test class in a fresh
   child process and its own database/runtime, separate from the agent's LUW and static
   state. It does not acquire or nest the caller's work-process lock; synchronous STORE
@@ -319,6 +329,13 @@ EV_JSON (optional diagnostic fields shown):
   `error.code: RUN_TIMEOUT`. A stuck class_setup is covered by this whole-run deadline.
   Completed class results may be retained on runner failure. Run directories and child
   database files are removed on success, error and timeout.
+  Invalid timeout values return `not_run`/INVALID_INPUT.
+
+Known limitations retained for this slice:
+
+- P3-2: STORE plans do not apply the ADT runner's HARMLESS-write risk guard.
+- P3-3: On Windows, early child rejection may leave its cwd busy and disposable-directory removal can fail.
+- P3-4: Source locks are per process; external build replacement or GC can race the module copy without a modules digest.
 
 ### Joint acceptance and interim path
 

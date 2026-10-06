@@ -479,6 +479,7 @@ export class StoreDestination {
     }
     const written = await store.write(type, name, String(source), include);
     return {
+      EV_JSON: JSON.stringify({written: true, type: written.type ?? type, name: written.name ?? name, revision: written.revision}),
       EV_FILE: String(written.file ?? ""),
       EV_PACKAGE: String(written.package ?? ""),
       EV_VERSION: written.version ?? "inactive",
@@ -499,10 +500,10 @@ export class StoreDestination {
   }
 
   async #activate(type, name, started, store) {
-    const {activationJournal} = await import("./osd-activation-journal.mjs");
+    const {activationJournal, recordBaselineGeneration} = await import("./osd-activation-journal.mjs");
     const journal = activationJournal(store);
     const {liveHash} = await import("./osd-build.mjs");
-    journal.recordGeneration(journal.currentGeneration(store.served?.generation ?? liveHash(store.root)));
+    recordBaselineGeneration(store, () => store.served?.generation ?? liveHash(store.root));
     const operation = journal.create(type, name);
     const failedAnswer = (error, stage) => {
       const rejected = refusal(error);
