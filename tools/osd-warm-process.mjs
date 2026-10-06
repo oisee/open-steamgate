@@ -115,6 +115,11 @@ export class WarmCompilerProcess extends WarmCompiler {
     });
   }
 
+  async update(activating = new Set(), view = undefined) {
+    const result = await this.#call("update", activating, view);
+    if (this.recycleDue) await this.drop();
+    return result;
+  }
   prime(view) { return this.#call("prime", new Set(), view); }
   async check(object, view) {
     const result = await this.#call("check", new Set(), view, object);

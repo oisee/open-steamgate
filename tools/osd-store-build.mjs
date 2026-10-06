@@ -46,7 +46,7 @@ export async function transpileStore(store, options, activating, built) {
               error: withoutHostPaths(error.message, store.root)};
           }
           w.reason = error.message;
-          await w.compiler.drop();
+          if (error.code !== "NOT_WARM") await w.compiler.drop();
           console.log(`warm: a cold build: ${error.message}`);
         }
       }
@@ -62,7 +62,18 @@ export async function transpileStore(store, options, activating, built) {
       // only a build that made a generation live is one to prime on: after
       // a failed one the tree is not the live generation, and a prime on
       // demand would parse it to be told so
-      w.primeDue = w.on === true && !w.disabled;
+      if (w.on === true && !w.disabled && w.compiler?.primed) {
+        try {
+          // Generators may have rewritten gen/ during cold compilation.
+          const updated = await captureView(store, activating);
+          if (updated.hash !== r.hash) throw new Error("inputs moved after cold publication");
+          await warmOperation(store, () => w.compiler.update(activating, updated));
+        } catch (error) {
+          if (error.code !== "NOT_WARM") console.log(`warm: re-prime: ${error.message}`);
+          await w.compiler.drop();
+        }
+      }
+      w.primeDue = w.on === true && !w.disabled && w.compiler?.primed !== true;
       return {ok: true, ms: Date.now() - started, objects: r.objects, hash: r.hash, cached: r.cached, built: built(r.digests), superseded};
     } catch (error) {
       try { await acceptView(store, view, activating); } catch (changed) { error = changed; }

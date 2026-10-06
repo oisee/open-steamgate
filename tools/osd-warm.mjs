@@ -39,6 +39,7 @@ import {runsAs} from "./osd-main.mjs";
 import {toolCommand} from "./osd-host.mjs";
 import {isBinaryFilename, listFiles, loadLibs, selectedModules, outputFiles, readAll} from "./osd-transpile.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
+import {updateRegistry} from "./osd-warm-update.mjs";
 import {warmVerdict} from "./osd-hot.mjs";
 
 import {checkView, checkRead} from "./osd-store-compile-view.mjs";
@@ -89,7 +90,7 @@ const SOURCE = /\.(clas(\.(locals_imp|locals_def|testclasses|macros))?\.abap|int
 const AMDP = /BY\s+DATABASE\s+(PROCEDURE|FUNCTION)/i;
 // every INTERFACES statement, the chained form (`INTERFACES: a, b.`) too,
 // as the words it names; a changed addition counts as a change
-const interfacesOf = (text) => [...text.matchAll(/^\s*INTERFACES\b\s*:?([^.]*)\./gim)]
+const interfacesOf = (text) => [...text.matchAll(/(?:^|\.)\s*INTERFACES\b\s*:?([^.]*)\./gim)]
   .flatMap((m) => m[1].split(/[\s,]+/).filter(Boolean).map((w) => w.toUpperCase())).sort().join(",");
 
 /** why a content edit may not be built warm, or undefined when it may */
@@ -412,7 +413,7 @@ export class WarmCompiler {
     this.own = own;
     this.settings = settings;
     this.hash = live;
-    this.identity = {config: readFileSync(layout(root).config, "utf8"), transpiler, generators: generatorIdentity(root)};
+    this.identity = {config: readFileSync(layout(root).config, "utf8"), transpiler, generators: generatorIdentity(root), layers: JSON.stringify(inputsOf(root, config))};
     this.amdpText = [...this.files.values()].filter((f) => AMDP.test(f.contents)).map((f) => f.contents).join("\n");
     this.pending = new Set();
     // a file's text in the registry, where it differs from the last
@@ -425,6 +426,20 @@ export class WarmCompiler {
     this.wanted = rootsWanted(join(paths.byInput, live), config);
     this.log(`warm: primed ${this.files.size} files in ${Date.now() - started} ms`);
     return {ms: Date.now() - started, files: this.files.size, objects: output.objects.length};
+  }
+
+  // Advance after a cold publication; a failed proof invalidates the registry.
+  async update(activating = new Set()) {
+    try {
+      return await updateRegistry(this, activating, {
+        viewOf: (...args) => this.#view(...args), closure: objects => this.#closure(objects),
+        index: () => this.#index(), rule: warmRule, importersOf, NotWarm,
+      });
+    } catch (error) {
+      this.log(`warm: re-prime: ${error.message}`);
+      this.drop();
+      throw error;
+    }
   }
 
   // A library folder's walk is kept for as long as its watcher has heard
@@ -607,7 +622,7 @@ export class WarmCompiler {
     for (const p of this.digests.keys()) {
       if (!digests.has(p)) throw new NotWarm(`${relative(root, p)} is gone`);
     }
-    const identity = {config: readFileSync(layout(root).config, "utf8"), transpiler, generators: generatorIdentity(root)};
+    const identity = {config: readFileSync(layout(root).config, "utf8"), transpiler, generators: generatorIdentity(root), layers: JSON.stringify(inputsOf(root, config))};
     for (const k of Object.keys(identity)) {
       if (identity[k] !== this.identity[k]) throw new NotWarm(`the ${k} changed`);
     }
@@ -665,6 +680,8 @@ export class WarmCompiler {
     // a cold build holding the lock is refused with BUSY and nothing changed
     const unlock = lock(paths);
     let settled = false;
+    let mutated = false;
+    let preserve = false;
     try {
       const from = liveHash(root);
       if (from !== this.hash) {
@@ -676,6 +693,7 @@ export class WarmCompiler {
       const {hash, edits, digests, transpiler, overlay, actual} = this.#changes(activating);
       mark("changes");
       const changed = [];
+      mutated = true;
       for (const {path, file, after, held} of edits) {
         if (after !== held) {
           this.reg.updateFile(new this.core.MemoryFile(file.filename, after));
@@ -816,11 +834,14 @@ export class WarmCompiler {
         // but let a fresh runtime load it instead of executing it in a swap.
         modules, hostHeld: modules.filter((m) => HOST_HELD.includes(m) || m.endsWith(".prog.mjs")), stale: stale.size, from, steps,
         closure, xrefRows};
+    } catch (error) {
+      preserve = !mutated && error.code === "NOT_WARM";
+      throw error;
     } finally {
       unlock();
       // anything that went wrong after the registry took the edit, other than
       // the transpiler's refusal, leaves nothing this can trust: prime again
-      if (!settled && this.reg !== undefined) {
+      if (!settled && !preserve && this.reg !== undefined) {
         this.drop();
       }
     }

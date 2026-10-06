@@ -150,8 +150,14 @@ outside `gen/`, **with no AMDP body** before or after (amdp-gen reads those),
 **the same `INTERFACES` lines** (osd-tran-registry reads them), and for an
 interface, **no AMDP class naming it** (amdp-gen reads interfaces as type
 sources). A new or removed file, DDIC, CDS, SICF, IWSV, a YAML, a library,
-the config, a page or a generator is the cold build, after which the
-registry is primed again.
+the config, a page or a generator is the cold build, after which a bounded delta advances the compiler child's kept registry. Up to
+100 added, changed or removed class/interface/include files (and their object
+XML) use abaplint add/update/remove, reparse their dependent closure, and prove
+the affected outputs and scripts against the cold publication. The kept config
+and unrelated syntax results survive (#1921). `warm: updated ...` reports its
+cost. Config/layer/library/toolchain changes, generator inputs such as AMDP or
+`INTERFACES`, larger deltas, or a failed byte premise log `warm: re-prime: ...`
+and require a full prime.
 
 ## The checks, and why each exists
 
@@ -430,9 +436,10 @@ Doctor keeps this informational (exit 0): cold compilation remains available.
   measurement) and runs every generator on every save. The warm path skips
   the parent check and generators and derives selected xref rows from the
   compiler registry; the cold path is unchanged.
-- **Priming after a cold build** still costs a full transpile in the compiler
-  process. Saves during it can require another prime to catch up; requests
-  continue to answer and saves no longer wait for that work.
+- **Priming after a nonincremental cold build** costs a full transpile in the
+  compiler process. Ordinary creates and removals instead update the registry.
+  Saves during a prime can require another prime to catch up; requests continue
+  to answer and saves no longer wait for that work.
 - **The init script's rows** (`reposrc`, `tadir`) stay at the text the
   process started with until the catch-up recycle.
 - **A cold build in the dev loop is not reproducible** on the pinned

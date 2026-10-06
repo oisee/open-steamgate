@@ -29,7 +29,7 @@ export function main({beforeCompile = () => {}, afterCompile = () => {}, heapLim
   });
   let queue = Promise.resolve();
   process.on("message", message => {
-    if (!["prime", "build", "check"].includes(message.method)) return;
+    if (!["prime", "build", "check", "update"].includes(message.method)) return;
     queue = queue.then(async () => {
       inactive = message.inactive;
       folder = message.folder;

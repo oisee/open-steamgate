@@ -36,7 +36,8 @@ describe("warm compiler process: source isolation and bounded cold fallback", fu
   };
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), "osd-warm-ipc-"));
-    mkdirSync(join(root, "src"));
+    mkdirSync(join(root, "src", "demo"), {recursive: true});
+    writeFileSync(join(root, "src", "demo", "package.devc.xml"), "<abapGit><asx:abap><asx:values><DEVC><CTEXT>demo</CTEXT></DEVC></asx:values></asx:abap></abapGit>");
     for (const name of ["zcl_a", "zcl_b"]) writeFileSync(join(root, "src", `${name}.clas.abap`), source(name, 1));
     writeFileSync(join(root, "abap_transpile.json"), JSON.stringify({
       input_folder: "src", input_filter: [], output_folder: "output", libs: [], write_unit_tests: true, write_source_map: true,
@@ -94,6 +95,56 @@ main({heapLimit: ${512 * 1048576}, beforeCompile: async ({method}) => {
     } finally {
       keys.forEach((key, i) => { if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i]; });
     }
+  });
+
+  it("keeps one prime through create, cold publication, and edits of new and existing classes", async () => {
+    const logs = [];
+    compiler.log = text => logs.push(text);
+    const coldStart = performance.now();
+    await store.create("CLAS", "ZCL_NEW", {package: "$STG_DEMO", source: source("zcl_new", 1)});
+    const created = store.warmActivation("CLAS", "ZCL_NEW");
+    const cold = await store.publish({activate: [{type: "CLAS", name: "ZCL_NEW"}]});
+    expect(store.completeActivation(created, cold.transpile.built)).to.equal(true);
+    expect(cold.ok, JSON.stringify(cold)).to.equal(true);
+    expect(cold.transpile.warm).to.not.equal(true);
+    expect(compiler.primed).to.equal(true);
+    expect(store.warmState.primeDue).to.equal(false);
+    expect(logs.some(line => line.includes("warm: updated")), logs.join("\n")).to.equal(true);
+    for (const name of ["zcl_new", "zcl_a"]) {
+      await save(name, 4);
+      const checked = store.warmActivation("CLAS", name.toUpperCase());
+      const next = await store.publish({activate: [{type: "CLAS", name: name.toUpperCase()}]});
+      expect(store.completeActivation(checked, next.transpile.built)).to.equal(true);
+      expect(next.ok, JSON.stringify(next)).to.equal(true);
+      expect(next.transpile.warm).to.equal(true);
+      expect(next.transpile.superseded).to.equal(0);
+      expect(out(name)).to.include("IntegerFactory.get(4)");
+      expect((await compiler.verify(next.transpile.hash)).verdict).to.equal("same");
+      console.log(`create/edit loop: ${name} warm ${next.transpile.ms} ms`);
+    }
+    expect(logs.filter(line => line.includes("warm: primed") || line.includes("warm: re-prime"))).to.deep.equal([]);
+    console.log(`create/edit loop including cold and two verifications: ${(performance.now() - coldStart).toFixed(0)} ms`);
+  });
+
+  it("logs a re-prime for a config/layer change and warms the next edit", async () => {
+    const logs = [];
+    compiler.log = text => logs.push(text);
+    mkdirSync(join(root, "layer"));
+    writeFileSync(join(root, "layer", "zcl_layer.clas.abap"), source("zcl_layer", 1));
+    const path = join(root, "abap_transpile.json");
+    const config = JSON.parse(readFileSync(path, "utf8"));
+    config.input_folder = ["src", "layer"];
+    writeFileSync(path, JSON.stringify(config));
+    const cold = await store.publish();
+    expect(cold.ok, JSON.stringify(cold)).to.equal(true);
+    expect(logs.join("\n")).to.include("warm: re-prime: the config changed");
+    expect(compiler.primed).to.equal(false);
+    expect(store.warmState.primeDue).to.equal(true);
+    await save("zcl_a", 5);
+    const next = await activate();
+    expect(next.ok).to.equal(true);
+    expect(next.transpile.warm).to.equal(true);
+    expect(logs.filter(line => line.includes("warm: primed"))).to.have.length(1);
   });
 
   it("saves an unrelated object within 200 ms after dispatch, before hashing; B stays inactive", async () => {

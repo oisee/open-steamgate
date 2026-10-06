@@ -1186,7 +1186,7 @@ describe("tools/osd-warm: the build view, with other objects inactive", function
   // an ADT client creates, saves and activates (cold: the object is new),
   // then saves and activates again at once -- before the reprime five
   // seconds later, so that one went cold as well (the stand-in, round 2)
-  it("the activation right after a cold one primes on demand and is warm", async () => {
+  it("the activation right after a cold create uses the updated registry and is warm", async () => {
     writeFileSync(join(root, "src", "zcl_wv_c.clas.abap"), src("ZCL_WV_C", 1));
     store.index = undefined;
     const made = await activate("ZCL_WV_C");
