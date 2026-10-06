@@ -2,6 +2,7 @@ import {cpSync, existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, symlin
 import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
+import {rm} from "node:fs/promises";
 
 const checkout = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -36,6 +37,12 @@ export function copyRuntimeRoot() {
 // Register cleanup while the file is being loaded; allocate only if used.
 export function runtimeRootFixture() {
   let root;
-  after(() => { if (root) rmSync(root, {recursive: true, force: true}); });
+  after(async function () {
+    // A cold activation can leave several complete generations (tens of
+    // thousands of files). Their removal is housekeeping, with its own
+    // budget, before the unchanged process/resource invariant is checked.
+    this.timeout(30000);
+    if (root) await rm(root, {recursive: true, force: true});
+  });
   return {get root() { return root ??= copyRuntimeRoot(); }};
 }

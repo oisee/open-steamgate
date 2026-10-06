@@ -21,6 +21,27 @@ const genAllowancePatch = `allowances['test/gen-allowance-fixture.mjs']=${JSON.s
     ],
   },
 })};`;
+// Exercise the removed warm allowance only in synthetic child processes.
+// Real host tests keep the strict generation invariant and private roots.
+const warmProofFile = 'test/warm-proof-fixture.mjs';
+const warmAllowancePatch = `allowances[${JSON.stringify(warmProofFile)}]=${JSON.stringify({
+  "generation": {
+    "reason": "Synthetic restored-inputs proof fixture; real warm hosts now use private roots.",
+    "owner": "test fixture",
+    "backlog": "test/osd-test-isolation.mjs",
+    "drift": {
+      "kind": "restored-inputs",
+      "paths": [
+        "src/demo/zcl_zstg_demo_dpc_ext.clas.abap"
+      ],
+      "maxCount": 1,
+      "restoreContent": {
+        "pattern": "\\* The hand-written part a developer owns on a real system \\(T7 warm test [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\)\\. Reads the",
+        "replacement": "* The hand-written part a developer owns on a real system. Reads the"
+      }
+    }
+  }
+})};`;
 function run(files, options = [], allowancePatch, preload, hook = true) {
   const root = mkdtempSync(join(tmpdir(), 'isolation-proof-'));
   try {
@@ -581,25 +602,35 @@ describe('per-file process isolation detector', function () {
   for (const hook of ['finally', 'after']) {
     it(`preserves a body failure before the intended edit in ${hook}`, () => {
       const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
-      // Exercise each caller's actual proof gate, so removing it makes this
-      // regression red without running a server or inducing a database flake.
-      const caller = hook === 'finally' ? 'vscode-job-worker-integration.mjs' : 'vscode-warm.mjs';
-      const source = readFileSync(new URL(caller, import.meta.url), 'utf8');
-      const proof = source.match(/(?:if \(intendedDrift\) )?await isolation\?\.observeGenerationDrift/)[0].replace('?.', '.') + '();';
+      const proof = 'if (intendedDrift) await isolation.observeGenerationDrift();';
       const body = `fs.unlinkSync('build/live');fs.symlinkSync('by-input/unexpected','build/live');
         throw Error('BODY failed before edit');`;
-      const result = run({'test/vscode-warm.mjs': `import fs from 'node:fs';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
+      const result = run({[warmProofFile]: `import fs from 'node:fs';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
         fs.mkdirSync('src/demo',{recursive:true});fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));
         const file='src/demo/zcl_zstg_demo_dpc_ext.clas.abap';const original='* The hand-written part a developer owns on a real system. Reads the\\n';
         fs.writeFileSync(file,original);fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
         let intendedDrift = false;
         ${hook === 'finally'
           ? `it('fails before edit',async()=>{try{${body}intendedDrift=true;}finally{try{${proof}}finally{fs.writeFileSync(file,original)}}});`
-          : `it('fails before edit',async()=>{${body}intendedDrift=true;});after(async()=>{try{${proof}}finally{fs.writeFileSync(file,original)}});`}`});
+          : `it('fails before edit',async()=>{${body}intendedDrift=true;});after(async()=>{try{${proof}}finally{fs.writeFileSync(file,original)}});`}`}, [], warmAllowancePatch);
       expect(result.status, result.output).to.be.greaterThan(0);
-      expect(result.output).to.include('BODY failed before edit').and.include('test/vscode-warm.mjs: generation');
+      expect(result.output).to.include('BODY failed before edit').and.include(`${warmProofFile}: generation`);
       expect(result.output).to.include('2 failing'); // Body and after-all invariant fail separately.
       expect(result.output).not.to.include('unrecognized originating generation drift').and.not.to.include('TEMPORARY ALLOW');
+    });
+  }
+  for (const file of ['test/vscode-warm.mjs', 'test/vscode-job-worker-integration.mjs']) {
+    it(`refuses the retired generation allowance for ${file}`, () => {
+      const builder = new URL('../tools/osd-build.mjs', import.meta.url).href;
+      const result = run({[file]: `import fs from 'node:fs';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
+        fs.mkdirSync('src');fs.mkdirSync('build');fs.writeFileSync('src/probe.abap','original');
+        fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
+        it('cannot excuse a checkout edit',async()=>{fs.writeFileSync('src/probe.abap','edited');
+          fs.unlinkSync('build/live');fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
+          try{await isolation.observeGenerationDrift()}finally{fs.writeFileSync('src/probe.abap','original')}});`});
+      expect(result.status, result.output).to.be.greaterThan(0);
+      expect(result.output).to.include('No restored-inputs exception for the running file').and.include(`${file}: generation`);
+      expect(result.output).not.to.include('TEMPORARY ALLOW');
     });
   }
   for (const mutation of ['fresh', 'delete', 'hash-error']) {
@@ -656,7 +687,7 @@ describe('per-file process isolation detector', function () {
       const viewOptions = inactive ? ",undefined,{overlay:{exclude:[process.cwd()+'/src/other.clas.abap'],folder:'build/inactive/active'}}" : '';
       // The proof loads real warm/store modules asynchronously. Give this
       // child its own timeout; the outer mocha timeout does not reach it.
-      const result = run({'test/vscode-warm.mjs': `import fs from 'node:fs';import assert from 'node:assert/strict';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
+      const result = run({[warmProofFile]: `import fs from 'node:fs';import assert from 'node:assert/strict';import {hashOf} from ${JSON.stringify(builder)};import isolation from ${JSON.stringify(plugin)};
         fs.mkdirSync('src/demo',{recursive:true});fs.mkdirSync('build');fs.writeFileSync('abap_transpile.json',JSON.stringify({input_folder:'src',libs:[]}));
         const file='src/demo/zcl_zstg_demo_dpc_ext.clas.abap';const original=${JSON.stringify(original)};fs.writeFileSync(file,original);${inactiveSetup}fs.symlinkSync('by-input/'+hashOf(process.cwd()),'build/live');
         it('activates',async()=>{const edited=${JSON.stringify(mutation === 'other-content' ? 'unrelated replacement' : edited)};fs.writeFileSync(file,edited);${extra}${beforeProof}
@@ -664,7 +695,7 @@ describe('per-file process isolation detector', function () {
           fs.unlinkSync('build/live');const activated='by-input/'+hashOf(process.cwd()${viewOptions});fs.symlinkSync(activated,'build/live');assert.equal(fs.readlinkSync('build/live'),activated);
           ${proofRejected ? checkMutation + reached : ''}
           try{await isolation.observeGenerationDrift()}finally{fs.writeFileSync(file,original)}
-          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`}, ['--timeout', '10000'], undefined, `const fs=require('node:fs');fs.mkdirSync('src/demo',{recursive:true});fs.writeFileSync('src/demo/zcl_zstg_demo_dpc_ext.clas.abap',${JSON.stringify(original)});${inactive ? "fs.writeFileSync('src/other.clas.abap','saved');" : ''}`);
+          assert.equal(fs.readFileSync(file,'utf8'),original);${afterProof}${proofRejected ? '' : checkMutation + reached}});`}, ['--timeout', '10000'], warmAllowancePatch, `const fs=require('node:fs');fs.mkdirSync('src/demo',{recursive:true});fs.writeFileSync('src/demo/zcl_zstg_demo_dpc_ext.clas.abap',${JSON.stringify(original)});${inactive ? "fs.writeFileSync('src/other.clas.abap','saved');" : ''}`);
       expect(result.output).to.include(`mutation reached: warm ${mutation}`);
       if (mutation === 'known' || mutation === 'inactive-view') {
         expect(result.status, result.output).to.equal(0);
@@ -673,7 +704,7 @@ describe('per-file process isolation detector', function () {
         expect(result.status, result.output).to.be.greaterThan(0);
         expect(result.output).not.to.include('TEMPORARY ALLOW');
         if (proofRejected) expect(result.output).to.include('unrecognized originating generation drift');
-        else expect(result.output).to.include('1 passing').and.include('test/vscode-warm.mjs: generation');
+        else expect(result.output).to.include('1 passing').and.include(`${warmProofFile}: generation`);
       }
     });
   }
