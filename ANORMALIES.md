@@ -40,6 +40,18 @@ Format adapted from `larshp/hithub` (MIT).
 - Regression: `test/warm.mjs`, runtimeError followed by compileError rejects an unresolved type.
 - Upstream: not filed; this task authorizes local CI repair only. No SAP calls were needed for this compiler-state defect.
 
+### ANOMALY-2026-10-06-adt-unit-result-uris - ABAP Unit results name invalid class source suffixes
+
+- Status: `fixed locally`
+- Discovery: user-supplied SAP protocol measurement, 2026-10-06; no SAP calls made for this fix.
+- Affected path: `tools/adt-documents.mjs` result and frame URI rendering (now extracted into `tools/adt-unit-result.mjs`), and both facade result callers.
+- Expected: class results use semantic class/method selectors, include navigation selectors, and include stack URIs with `#start=line,0`. Class include URIs have no `/source/main` suffix. Disabling navigation removes class/method types as well as navigation attributes. Assertion comparisons are nested under `Different values`.
+- Actual: class/method identities and stack frames used `/includes/testclasses/source/main#start=...`; Eclipse rejected the suffix after running the tests. Navigation options were ignored and comparison details were flat.
+- Resolution: render the measured CLAS shapes, preserve available failure text, and read the navigation option on run and evaluation. Program result shapes stay as before except for the navigation switch. Activation and check diagnostics retain their existing source suffix explicitly when calling the shared frame helper.
+- Regression: `test/adt-unit-result.mjs`, plus the existing development-loop and reference-package run assertions. The new contract suite fails against the old renderer. Include navigation GETs read a synthetic source file; no captures or measured object names are stored.
+- Execution seam: Node stack paths resolve the output generation symlink. The runner now compares frames with that resolved output directory so the test include reaches the renderer; previously only the assertion library's explicit frame survived. `test/osd-unit.mjs` checks the real failure line.
+- Upstream: none; the renderer is an open-steamgate implementation.
+
 ### ANOMALY-2026-10-04-sqlite-like-case -- sql.js Open SQL LIKE ignores ASCII case
 
 - Status: `workaround`
@@ -3745,3 +3757,31 @@ SNAPSHOT_MISMATCH and the doctor retry.
 - Regression: none yet.
 - Upstream: needs an issue in abaplint/transpiler (runtime), after our critic pass; no upstream filing requested.
 - Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-06-uccpi-high-byte - cl_abap_conv_out_ce=>uccpi multiplies the high byte by 255
+
+- Status: `open`
+- Discovery: PIA's first deployment to A4H 7.58 (zcl_pia_00_json_util, 29 tests, 29/29 on both systems after fixes), reported by the PIA session on 2026-10-06. dell confirmed the source.
+- Affected path: open-abap-core `src/conv/cl_abap_conv_out_ce.clas.abap`, method `uccpi`. It converts to encoding 4103 (UTF-16LE, low byte first), then computes `ret = lv_hex(1)` followed by `ret = ret + lv_hex+1(1) * 255`. The factor must be 256.
+- Reproducer: `cl_abap_conv_out_ce=>uccpi( 'Ж' )` and `cl_abap_conv_out_ce=>uccpi( '€' )`.
+- Expected SAP behaviour: 1046 (U+0416) and 8364 (U+20AC).
+- Actual local behaviour: 1042 and 8332, wrong by the high byte for every character above U+00FF. ASCII and Latin-1 are unaffected, because their high byte is 0.
+- Workaround: none in the tree; PIA does not use `uccpi`. ANOMALY-2026-10-04-sxml-supplementary-ref already avoids sXML numeric references, which convert through `cl_abap_conv_in_ce=>uccpi`.
+- Regression: none yet.
+- Upstream: needs an issue in open-abap-core, a one-character fix, after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+### ANOMALY-2026-10-06-data-value-variable - DATA ... VALUE accepts a variable
+
+- Status: `open`
+- Discovery: PIA's first A4H deployment. Code that compiled in OSG was refused on SAP.
+- Affected path: the syntax check that the transpiler runs (abaplint).
+- Reproducer: `DATA lv_start TYPE i.` followed by `DATA lv_pos TYPE i VALUE lv_start.`
+- Expected SAP behaviour: a syntax error, "LV_START" is not a constant. VALUE takes only a literal, a constant or IS INITIAL.
+- Actual local behaviour: it compiles and runs. Code built in OSG then fails to transport to SAP.
+- Workaround: none; authors must use a constant or a literal.
+- Regression: none yet.
+- Upstream: needs an issue in abaplint/abaplint (syntax check), after our critic pass; no upstream filing requested.
+- Upstream version containing a fix: unknown.
+
+Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a deprecation that vsp deploy treats as an error. PIA moved to PCRE, which OSG supports.

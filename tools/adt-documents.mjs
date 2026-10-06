@@ -8,6 +8,8 @@ import {requestElements, elementsNamed, descendantsOf, attributeValue, namespace
 // SHAPES PARTLY CONFIRMED. The data-preview document of wave 0 was verified
 // by vsp's own reader against a running OSD. These two have not been, and
 // the places where a guess is load-bearing are marked.
+import {frameUri} from "./adt-unit-result.mjs";
+export {frameUri, unitResultDocument} from "./adt-unit-result.mjs";
 import {Visibility} from "@abaplint/core";
 import {TYPES, NotFound} from "./osd-store.mjs";
 import {localView} from "./osd-tmp-view.mjs";
@@ -1280,7 +1282,7 @@ export function activationFailureDocument(objects, {checkExecuted = true} = {}) 
   const message = (o, issue) => {
     const word = ACTIVATION_TYPE_WORD[ADT_TYPE[o.type] ?? o.type];
     const description = word ? word + " " + o.name : o.name;
-    const href = (/\.clas\./i.test(issue.file ?? "") ? frameUri(issue.file, issue.line, issue.column) : undefined) ??
+    const href = (/\.clas\./i.test(issue.file ?? "") ? frameUri(issue.file, issue.line, issue.column, {sourceMain: true}) : undefined) ??
       ((uriOf(o.type, o.name) ?? "") + "/source/main#start=" + (issue.line ?? 1) + "," + (issue.column ?? 1));
     // Observed line="1" for a diagnostic at source line 3. Its meaning
     // beyond that case is unconfirmed; source position belongs in href.
@@ -1394,95 +1396,6 @@ export function transportCheckRequest(body) {
   const elements=requestElements(body);
   const field = local => elementsNamed(elements,"",local)[0]?.text;
   return {uri:field("URI"),devclass:field("DEVCLASS"),operation:field("OPERATION")};
-}
-
-// The result of a test run: a program, its test classes, their methods, and
-// the alerts on whichever of them failed. No alert on a method is what
-// "passed" means, so an empty alerts element is a pass and not an omission.
-//
-// Navigation is the part worth getting right. Every class and method knows
-// the line it is written at and which include it lives in, so a client can
-// jump straight to a failure instead of opening a file and searching.
-// the file a stack frame names, as an address in the façade. The suffix
-// says which include of a class it is; anything else we do not serve by
-// this route comes back undefined and the caller keeps the file name.
-const FRAME_INCLUDES = {
-  "locals_def": "definitions",
-  "locals_imp": "implementations",
-  "macros": "macros",
-  "testclasses": "testclasses",
-};
-
-export function frameUri(file, line, column) {
-  if (typeof file !== "string" || file === "") {
-    return undefined;
-  }
-  const name = file.split("/").pop();
-  const at = `#start=${line ?? 1},${column ?? 1}`;
-  const include = /^(.+)\.clas\.([a-z_]+)\.abap$/.exec(name);
-  if (include !== null && FRAME_INCLUDES[include[2]] !== undefined) {
-    return `${uriOf("CLAS", include[1])}/includes/${FRAME_INCLUDES[include[2]]}/source/main${at}`;
-  }
-  const clas = /^(.+)\.clas\.abap$/.exec(name);
-  if (clas !== null) {
-    return `${uriOf("CLAS", clas[1])}/source/main${at}`;
-  }
-  const prog = /^(.+)\.prog\.abap$/.exec(name);
-  if (prog !== null) {
-    return `${uriOf("PROG", prog[1])}/source/main${at}`;
-  }
-  return undefined;
-}
-
-export function unitResultDocument(run, options = {}) {
-  const base = options.base ?? uriOf(run.program?.typeName ?? "CLAS", run.program?.name ?? "") ?? "";
-  const at = (include, line, column) => `${base}/includes/${include ?? "testclasses"}/source/main#start=${line ?? 1},${column ?? 1}`;
-
-  // A frame arrives as the file the source map resolved to, which is a file
-  // name and not an address a client can follow. Turned into one here, so a
-  // failure is a place to jump to; a file whose shape we do not recognise
-  // keeps its name and gets no navigationUri, because a link that goes
-  // nowhere is worse than no link.
-  const stackEntry = (e) => {
-    const uri = frameUri(e.uri, e.line, e.column);
-    return `            <stackEntry adtcore:uri="${xmlEscape(uri ?? e.uri ?? "")}" adtcore:name="${xmlEscape(e.name ?? "")}" adtcore:description="${xmlEscape(e.line === undefined ? "" : "line " + e.line)}"${uri === undefined ? "" : ` navigationUri="${xmlEscape(uri)}"`}/>`;
-  };
-
-  const alert = (a) => `        <alert kind="${xmlEscape(a.kind ?? "failedAssertion")}" severity="${xmlEscape(a.severity ?? "critical")}">
-          <title>${xmlEscape(a.title ?? "")}</title>
-          <details>
-${(a.details ?? []).map((d) => `            <detail text="${xmlEscape(d)}"/>`).join("\n")}
-          </details>
-          <stack>
-${(a.stack ?? []).map(stackEntry).join("\n")}
-          </stack>
-        </alert>`;
-
-  const alerts = (items, indent) => {
-    if ((items ?? []).length === 0) return `${indent}<alerts/>`;
-    return `${indent}<alerts>\n${items.map(alert).join("\n")}\n${indent}</alerts>`;
-  };
-
-  const method = (m, include) => `      <testMethod adtcore:name="${xmlEscape(m.name)}" adtcore:uri="${xmlEscape(at(include, m.line, m.column))}" executionTime="${xmlEscape(m.executionTime ?? "0.000")}" unit="${xmlEscape(m.unit ?? "s")}" navigationUri="${xmlEscape(at(include, m.line, m.column))}">
-${alerts(m.alerts, "        ")}
-      </testMethod>`;
-
-  const testClass = (c) => `    <testClass adtcore:name="${xmlEscape(c.name)}" adtcore:uri="${xmlEscape(at(c.include, c.line, c.column))}" durationCategory="${xmlEscape(c.durationCategory ?? "short")}" riskLevel="${xmlEscape(c.riskLevel ?? "harmless")}" navigationUri="${xmlEscape(at(c.include, c.line, c.column))}">
-${alerts(c.alerts, "      ")}
-      <testMethods>
-${(c.testMethods ?? []).map((m) => method(m, c.include)).join("\n")}
-      </testMethods>
-    </testClass>`;
-
-  return `<?xml version="1.0" encoding="utf-8"?>
-<aunit:runResult xmlns:aunit="http://www.sap.com/adt/aunit" xmlns:adtcore="http://www.sap.com/adt/core">
-  <program adtcore:name="${xmlEscape(run.program?.name ?? "")}" adtcore:type="${xmlEscape(run.program?.type ?? "CLAS/OC")}" adtcore:uri="${xmlEscape(base)}">
-    <testClasses>
-${(run.testClasses ?? []).map(testClass).join("\n")}
-    </testClasses>
-  </program>
-</aunit:runResult>
-`;
 }
 
 // -------------------------------------------------------------- search
