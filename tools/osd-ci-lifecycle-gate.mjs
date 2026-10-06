@@ -4,27 +4,36 @@
 // skipped, and one that might runs it.
 import {execFileSync} from "node:child_process";
 
-// Any match runs the ADT lifecycle job. The rule is fail closed: when a path
-// is unsure, it belongs here -- a needlessly measured PR costs minutes, a
-// silently skipped measurement costs the regression the job exists to catch.
-const adtPaths = [
-  /^src\/(?:adt|classrun)\//,
-  /^tools\/adt-[^/]*\.mjs$/,
-  // The runtime pieces the lifecycle server and its clients execute:
-  // store, enqueue, build, warm/hot caches, transpile, dialog steps,
-  // serving, ABAP Unit, activation, build inputs, packs, libs and pins.
-  /^tools\/osd-(?:store|enq|build|warm|hot|transpile|dialog-step|serve|unit|activation|inputs|packs|libs|link|lock|fetch)[^/]*\.mjs$/,
-  /^tools\/osd-ci-lifecycle-gate\.mjs$/,
-  /^test\/adt-[^/]*\.mjs$/,
-  /^test\/suites\.d\/adt\.json$/,
-  /^bin\//,
-  /^scripts\/build-binary\.mjs$/,
-  /^(?:abap_transpile|libs\.lock|package(?:-lock)?)\.json$/,
-  /^\.github\/workflows\/tests\.yml$/,
+// The rule fails closed: needsLifecycle runs the measurements unless every
+// changed path is provably unrelated to the lifecycle job, meaning it
+// matches one exemption below. Anything else runs -- all of src/, tools/,
+// test/ outside e2e, scripts/, bin/, the in-tree packs/, data/, root
+// configuration and lock files, .github/ci/, tools/abapfs-conformance/ --
+// because the job executes the built server and both clients end to end,
+// a needlessly measured PR costs minutes, and a silently skipped
+// measurement costs the regression the job exists to catch.
+const unrelatedPaths = [
+  // Documentation, and markdown anywhere outside src/ (which covers the
+  // root AGENDA/README/ANORMALIES notes and editor CHANGELOGs).
+  /^docs\//,
+  /^(?!src\/).*\.md$/,
+  // The browser webapp: served pages, never part of the ABAP server the
+  // lifecycle job drives.
+  /^webapp\//,
+  // The VS Code editor, except the launcher entry point installs execute
+  // and the resources they ship.
+  /^editors\/(?!vscode\/launcher\.js$|vscode\/resources\/)/,
+  // Browser e2e specs, which run in their own job.
+  /^test\/e2e\//,
+  // Other workflows cannot redefine this job; this one (tests.yml) can.
+  /^\.github\/workflows\/(?!tests\.yml$)[^/]+$/,
+  // Issue templates are conversation, not code.
+  /^\.github\/ISSUE_TEMPLATE\//,
+  /^LICENSE$/,
 ];
 
 export function needsLifecycle(paths) {
-  return paths.some((path) => adtPaths.some((pattern) => pattern.test(path)));
+  return !paths.every((path) => unrelatedPaths.some((pattern) => pattern.test(path)));
 }
 
 function git(...args) { return execFileSync("git", args, {encoding: "utf8"}); }
@@ -35,7 +44,10 @@ if (process.argv[1]?.endsWith("osd-ci-lifecycle-gate.mjs")) {
     console.error("Usage: osd-ci-lifecycle-gate.mjs <base-sha> <head-sha>");
     process.exit(2);
   }
-  const paths = git("diff", "--name-only", base, head).trim().split("\n").filter(Boolean);
+  // --no-renames so both endpoints of a rename count: a file moved out of
+  // the ABAP sources into an exempt-looking directory still shows its
+  // deletion. -z splits on NUL so no path can be quoted or split.
+  const paths = git("diff", "--no-renames", "--name-only", "-z", base, head).split("\0").filter(Boolean);
   const run = needsLifecycle(paths);
   process.stdout.write(`OSD_CI_ADT_LIFECYCLE=${run ? "1" : "0"}\n`);
   console.error(`ADT lifecycle: ${run ? "run" : "skip"}; ${paths.length} changed path(s)`);
